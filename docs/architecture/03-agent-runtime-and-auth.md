@@ -405,7 +405,9 @@ in two layers:
       leaves it unchanged);
    2. an extension the adapter ships in ACP;
    3. the agent's own control channel, started with the account's home;
-   4. the provider's usage endpoint, under the usage read below.
+   4. the provider's usage endpoint, read with the account's token: not
+      built. Rule 3 bars it, and an exception waits until a spike has seen
+      a real endpoint ([#221](https://github.com/AltharIDE/althar/issues/221)).
 
    Today:
    - Claude Code: `claude-agent-acp` forwards one window per event in
@@ -417,51 +419,13 @@ in two layers:
      unverified. Step 4 is not used: Anthropic's terms bar it.
    - Codex: app-server's `account/rateLimits/read` and
      `account/rateLimits/updated` (`usage.ts`), started in the account's home.
-   - OpenCode: no channel. Its endpoint sources are one per provider,
-     under the usage read. On OpenCode 2.x none runs (see below).
+   - OpenCode: no channel. Plan or key is told per provider from its own
+     `opencode auth list --standalone --format json` (2.x; 1.x can't say).
+     No plan provider has a source yet, so a plan sign-in shows a fault
+     rather than windows ([#221](https://github.com/AltharIDE/althar/issues/221)).
 
    Errors (layer 1) stay under all of it: they say a limit was reached, not
    how much is left.
-
-### The usage read
-
-The narrow exception to rule 3
-([ADR-050](../decisions/050-a-usage-read-may-use-an-accounts-token-once.md)).
-The reader may read one account's access token into memory, make one `GET` to
-the provider's usage URL on a per-(agent, provider) allowlist (`https`, one
-host and path each), parse the windows, and drop the token. It may never
-write, refresh, copy, cache, persist, log or send the token elsewhere, call
-any other URL, follow a redirect to another host, or change anything in the
-agent's home. A caller names a registry source, never supplies one; the token
-is scanned out of its file without building the rest of it, from a file that
-is neither a symlink nor outside the home. No Anthropic host is on the allowlist. A contract test, against
-a fake home, token and server, enforces the allowlist, that exactly one
-request carries the token, that the home is byte-identical afterwards, that
-the token is nowhere in what comes out, and that only the reader's module
-imports the code that opens a credential store.
-
-Failures are shown as faults on the account, never as zeros or "no limits":
-
-| What happened | What the person sees |
-|---|---|
-| Token expired or refused (401, 403), no token, or a keychain that won't open | "Sign in again", with the agent's login flow. Althar does not refresh |
-| 429, a timeout or no network | The last windows, with their age |
-| An answer of another shape | "Usage source changed" |
-
-Where the agent's home is out on the device (a Flatpak's host,
-[ADR-027](../decisions/027-what-the-flatpak-reaches.md)), the read runs there
-in a small helper that prints only the windows. The connections store's
-sealing (GitHub, Linear) is not involved: a usage read stores nothing.
-
-**OpenCode.** Plan or key is told from `opencode auth list` output only. On
-2.x that output says "can't tell" for every account, goes through a
-user-wide background service unless `--standalone`, and 2.x keeps credentials
-in `opencode.db` instead of `auth.json`
-(`docs/plans/opencode-2.md`, branch
-`althar/research-opencode-2-in-althar-acp-and-defaults`, 15 October 2026, run
-on 2.0.29). So on 2.x an account has no usage source and shows a fault, until
-the registry reads `auth list --standalone --format json` and OpenCode
-documents a way to read one account's credential or usage.
 
 ```ts
 type AccountStatus = {
@@ -469,7 +433,7 @@ type AccountStatus = {
   state: "ok" | "warning" | "limited" | "fault"
   windows: Array<{ kind: "five_hour" | "weekly" | "monthly" | "other"; label?: string; usedPercent: number; resetsAt?: string }>
   source: "acp" | "acp_extension" | "agent" | "endpoint" | "error"
-  fault?: "sign_in_again" | "source_changed" | "unreachable"
+  fault?: "sign_in_again" | "source_changed" | "unreachable" | "no_source" | "no_data_yet" | "cannot_classify"
   observedAt: string
 }
 ```
@@ -598,10 +562,7 @@ Rules:
 2. Althar may invoke documented status/login commands or react to a
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
-   synchronizes the CLI's credential cache. The one exception is the **usage
-   read** ([ADR-050](../decisions/050-a-usage-read-may-use-an-accounts-token-once.md),
-   Usage limits below): an account's access token, in memory, for one call to
-   its provider's usage URL.
+   synchronizes the CLI's credential cache.
 4. It never asks for a provider password or browser session cookie.
 5. Subscription-backed execution runs on the user's device and only where the
    provider's current documentation and terms permit that use.

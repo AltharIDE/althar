@@ -1,28 +1,22 @@
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-
 import type { AccountUsage, PlanUsage as PlanUsageView, UsageFaultKind, UsageWarning } from '@althar/contracts'
 import {
   adapterNode,
   type AgentDefinition,
   agentVersion,
   type CredentialsRead,
-  type EndpointRead,
   majorOf,
   nextWarning,
   openCodeCannotList,
   readAgentUsage,
   readOpenCodeCredentials,
   resolveOpenCodeCredential,
-  type UsageAccount,
+  resetsLater,
   type UsageRead,
-  usageReader,
-  type UsagePair,
   type UsageSource,
   type UsageWindow,
   type WarningState,
 } from '@althar/provider-adapters'
-import { Context, Duration, Effect, Layer } from 'effect'
+import { Clock, Context, Duration, Effect, Layer } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -32,7 +26,7 @@ import { timestamp } from './records'
 import { SignIns } from './SignIns'
 
 /*
- * What each account's plan has left (docs/plans/plan-usage.md, ADR-050), for
+ * What each account's plan has left (docs/plans/plan-usage.md), for
  * the usage tab and the warnings. Where the numbers come from differs by
  * agent and moves to ACP as the adapters speak it:
  *
@@ -42,31 +36,35 @@ import { SignIns } from './SignIns'
  *   its age.
  * - Codex: its app-server, asked in the account's home.
  * - OpenCode: its own listing of the account's sign-ins tells plan from key
- *   per provider; a plan's provider is read from its endpoint under the usage
- *   read, which refuses every endpoint until a spike has confirmed it. An
- *   account that can't be read is a fault on the tab, never an empty row.
+ *   per provider. No plan's provider has a source Althar reads yet (a spike
+ *   each, #221), so a plan says so: an account that can't be read is a fault
+ *   on the tab, never an empty row.
  * - An API key has no plan window, and says so.
  *
  * A warning is told at 50, 25, 10 and 5 percent left, once per account,
  * window and reset (provider-adapters' `nextWarning`), kept in the store so a
  * restart does not tell it again, until the person has seen it.
+ *
+ * A window whose reset has passed is shown as reset, and its warning goes:
+ * Claude Code says nothing more until its limits change, which on a quiet
+ * account can be days.
  */
 
 /** The longest a reading is kept before another is taken: a window asking within a minute hears the one before. */
 const KEPT = Duration.minutes(1)
 /** The shortest time between two readings of an account, even when asked to read again. */
 const LEAST = Duration.seconds(5)
+/** How long a heard window waits before the view is told, so a turn's windows go out as one and the turn never waits on it. */
+const SETTLE = Duration.millis(250)
 
 /** What the service is built with in a test: how each source is read, and how often accounts are read on their own. */
 export interface PlanUsageOptions {
   /** How Codex's app-server is asked; as it is, unless a test says. */
   readonly readAgent?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<UsageRead>
-  /** An agent's version as its CLI says it; as it is, unless a test says. A source for one major version is read only for a version known to match. */
+  /** An agent's version as its CLI says it; as it is, unless a test says. OpenCode is listed only on a version known to list its sign-ins. */
   readonly readVersion?: (agent: AgentDefinition) => Promise<string | null>
   /** How an OpenCode account's sign-ins are listed. */
   readonly readCredentials?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<CredentialsRead>
-  /** How a plan provider's endpoint is read (the usage read); the reader of the package, unless a test says. */
-  readonly readEndpoint?: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>
   /** How often accounts are read on their own while the runtime runs: five minutes. Zero turns it off. */
   readonly every?: Duration.Duration
   /** How long a reading is kept before another is taken: a minute. */
@@ -92,11 +90,16 @@ const faultOfRead = (message: string): { kind: UsageFaultKind; message: string }
     ? { kind: 'sign_in_again', message }
     : { kind: 'unreachable', message }
 
-const shown = (window: UsageWindow) => ({
+/** Whether a reset time has passed: the window it belongs to has started again. */
+const past = (resetsAt: string | null | undefined, now: number) =>
+  resetsAt !== null && resetsAt !== undefined && Date.parse(resetsAt) <= now
+
+/** A window as the tab shows it: one whose reset has passed has all of its plan left, until it is heard again. */
+const shown = (window: UsageWindow, now: number) => ({
   kind: window.kind,
   label: window.label ?? null,
-  usedPercent: window.usedPercent,
-  resetsAt: window.resetsAt ?? null,
+  usedPercent: past(window.resetsAt, now) ? 0 : window.usedPercent,
+  resetsAt: past(window.resetsAt, now) ? null : (window.resetsAt ?? null),
 })
 
 type Failure = SqlError.SqlError
@@ -123,6 +126,7 @@ export class PlanUsage extends Context.Service<
         const accounts = yield* Accounts
         const signIns = yield* SignIns
         const live = yield* Live
+        const scope = yield* Effect.scope
         const options = (yield* RuntimeConfig).usage ?? {}
         const readAgent =
           options.readAgent ??
@@ -133,7 +137,7 @@ export class PlanUsage extends Context.Service<
             readOpenCodeCredentials(agent, { node: adapterNode(), home }))
         const readVersion = options.readVersion ?? ((agent: AgentDefinition) => Effect.runPromise(agentVersion(agent, adapterNode())))
         const majors = new Map<string, number | undefined>()
-        /* The agent's major version, asked once a launch; unknown stays unknown, which the usage read refuses. */
+        /* The agent's major version, asked once a launch; unknown stays unknown. */
         const agentMajorOf = (definition: AgentDefinition) =>
           Effect.gen(function* () {
             if (majors.has(definition.id)) return majors.get(definition.id)
@@ -142,7 +146,6 @@ export class PlanUsage extends Context.Service<
             majors.set(definition.id, known)
             return known
           })
-        const readEndpoint = options.readEndpoint ?? ((sourceId: string, account: UsageAccount) => usageReader.read(sourceId, account))
 
         const held = new Map<string, Held>()
         const asked = new Map<string, number>()
@@ -151,7 +154,6 @@ export class PlanUsage extends Context.Service<
         /* What the store kept of the accounts' last readings, once. */
         const hydrate = Effect.gen(function* () {
           if (hydrated) return
-          hydrated = true
           const rows = yield* sql<{
             accountId: string
             agentId: string
@@ -172,6 +174,8 @@ export class PlanUsage extends Context.Service<
               fault: null,
             })
           }
+          // Only once they are in: a read that failed is tried again by the next one to ask.
+          hydrated = true
         })
 
         const keep = (accountId: string, next: Held) =>
@@ -204,18 +208,18 @@ export class PlanUsage extends Context.Service<
               if (step.warn !== undefined) {
                 const raisedAt = yield* timestamp
                 yield* sql`
-                INSERT INTO plan_usage_warnings ${sql.insert({ accountId, windowKey, threshold: step.warn, resetsAt: window.resetsAt ?? null, raisedAt, acknowledgedAt: null })}
+                INSERT INTO plan_usage_warnings ${sql.insert({ accountId, windowKey, threshold: step.warn, resetsAt: step.state.resetsAt ?? null, raisedAt, acknowledgedAt: null })}
                 ON CONFLICT (account_id, window_key) DO UPDATE SET threshold = excluded.threshold, resets_at = excluded.resets_at,
                   raised_at = excluded.raised_at, acknowledged_at = NULL`
-              } else if (row !== undefined && (row.resetsAt ?? undefined) !== window.resetsAt) {
-                // A new reset period without a threshold crossed: armed again.
+              } else if (row !== undefined && resetsLater(row.resetsAt ?? undefined, window.resetsAt)) {
+                // A new reset period without a threshold crossed: armed again. A reading that leaves the reset out is the same period.
                 yield* sql`DELETE FROM plan_usage_warnings WHERE account_id = ${accountId} AND window_key = ${windowKey}`
+              } else if (row !== undefined && row.resetsAt === null && window.resetsAt !== undefined) {
+                // The same period, whose reset is now known: kept, so the warning goes once it has passed.
+                yield* sql`UPDATE plan_usage_warnings SET resets_at = ${window.resetsAt} WHERE account_id = ${accountId} AND window_key = ${windowKey}`
               }
             }
           })
-
-        const homeDirOf = (definition: AgentDefinition, account: Account) =>
-          definition.home.usual({ ...process.env, ...accounts.env(account) }, homedir())
 
         /* Reads one account from its agent's source and keeps what it said. */
         const readAccount = (account: Account) =>
@@ -268,80 +272,32 @@ export class PlanUsage extends Context.Service<
               return
             }
             if (definition.id === 'opencode') {
-              // The usage read opens the agent's credential file in this process. Where the agent lives out on the device (a Flatpak's host) the helper ADR-050 asks for is not built, so a plan's endpoint is refused there rather than read from the wrong place.
-              const onDevice =
-                definition.signIn.credentials?.(adapterNode()).onDevice !== undefined ||
-                definition.launch(adapterNode()).onDevice !== undefined
               // Its listing is OpenCode 2's: on 1.x the command fails with its help, and what it can list says no plan from a key.
-              const agentMajor = yield* agentMajorOf(definition)
-              const cannotList = openCodeCannotList(definition.name, agentMajor)
+              const cannotList = openCodeCannotList(definition.name, yield* agentMajorOf(definition))
               if (cannotList !== null) return yield* keep(account.id, fault('cannot_classify', cannotList))
               const listed = yield* Effect.promise(() => readCredentials(definition, home))
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
-              // Each plan sign-in with the pair that covers it, or none where it is not declared; a key needs nothing.
-              const plans: Array<{ credential: (typeof listed.credentials)[number]; pair: UsagePair | null }> = []
-              for (const credential of listed.credentials) {
+              // A key needs nothing. A plan says why it has no windows: its sign-in isn't one Althar knows, or its provider has no source yet.
+              const plans = listed.credentials.flatMap((credential): Array<{ kind: UsageFaultKind; message: string }> => {
                 const resolved = resolveOpenCodeCredential(credential)
-                if (resolved.kind !== 'covered') plans.push({ credential, pair: null })
-                else if (credential.pays === 'plan') plans.push({ credential, pair: resolved.pair })
-              }
-              if (plans.length === 0)
-                return yield* keep(account.id, {
-                  agentId: definition.id,
-                  source: null,
-                  plan: null,
-                  windows: [],
-                  observedAt: null,
-                  fault: null,
-                  paidBy: 'key',
-                })
-              const windows: UsageWindow[] = []
-              let observed: string | null = null
-              let failed: { kind: UsageFaultKind; message: string } | null = null
-              for (const { credential, pair } of plans) {
-                if (pair === null) {
-                  failed ??= {
-                    kind: 'cannot_classify',
-                    message: `OpenCode has a ${credential.provider} sign-in whose usage Althar cannot read yet.`,
-                  }
-                  continue
-                }
-                const source = pair.sources.find((each) => each.kind === 'endpoint')
-                if (source === undefined || source.kind !== 'endpoint') {
-                  failed ??= { kind: 'no_source', message: `OpenCode's ${credential.provider} sign-in has no usage source yet.` }
-                  continue
-                }
-                if (onDevice) {
-                  failed ??= {
-                    kind: 'no_source',
-                    message: `${definition.name}'s ${credential.provider} usage cannot be read yet where it runs on the device (a Flatpak): the on-device read is not built.`,
-                  }
-                  continue
-                }
-                const read = yield* Effect.promise(() =>
-                  readEndpoint(source.id, {
-                    agent: 'opencode',
-                    provider: credential.provider,
-                    home: join(homeDirOf(definition, account), 'opencode'),
-                    ...(agentMajor === undefined ? {} : { agentMajor }),
-                  }),
-                )
-                if (read.kind === 'usage') {
-                  windows.push(...read.usage.windows.map((window) => ({ ...window, label: window.label ?? credential.provider })))
-                  // As old as the reader says: a reading it kept is not newly fetched.
-                  if (observed === null || read.usage.observedAt < observed) observed = read.usage.observedAt
-                } else failed ??= { kind: read.fault, message: read.message }
-              }
-              yield* keep(account.id, {
-                agentId: definition.id,
-                source: windows.length > 0 ? 'endpoint' : null,
-                plan: null,
-                windows: windows.length > 0 ? windows : (before?.windows ?? []),
-                observedAt: windows.length > 0 ? observed : (before?.observedAt ?? null),
-                fault: failed,
-                paidBy: 'plan',
+                return resolved.kind !== 'covered'
+                  ? [
+                      {
+                        kind: 'cannot_classify' as const,
+                        message: `OpenCode has a ${credential.provider} sign-in whose usage Althar cannot read yet.`,
+                      },
+                    ]
+                  : credential.pays === 'plan'
+                    ? [{ kind: 'no_source', message: `OpenCode’s ${credential.provider} sign-in has no usage source yet.` }]
+                    : []
               })
-              if (windows.length > 0) yield* warn(account.id, windows)
+              const [first] = plans
+              yield* keep(
+                account.id,
+                first === undefined
+                  ? { agentId: definition.id, source: null, plan: null, windows: [], observedAt: null, fault: null, paidBy: 'key' }
+                  : { ...fault(first.kind, first.message), paidBy: 'plan' },
+              )
             }
           })
 
@@ -349,19 +305,29 @@ export class PlanUsage extends Context.Service<
           Effect.gen(function* () {
             yield* hydrate
             const now = Date.now()
+            let read = 0
             for (const entry of agents.list) {
               if (entry.definition.id === 'claude-code') continue
-              for (const account of yield* accounts.of(entry.definition.id)) {
+              // Each account at once: one agent slow to answer (up to its timeout) holds up none of the others.
+              const due = (yield* accounts.of(entry.definition.id)).filter((account) => {
                 const last = asked.get(account.id)
-                if (last !== undefined && now - last < Duration.toMillis(options.kept ?? (force ? LEAST : KEPT))) continue
+                if (last !== undefined && now - last < Duration.toMillis(options.kept ?? (force ? LEAST : KEPT))) return false
                 asked.set(account.id, now)
-                yield* readAccount(account).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause)))
-              }
+                return true
+              })
+              yield* Effect.forEach(
+                due,
+                (account) => readAccount(account).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause))),
+                { concurrency: 'unbounded', discard: true },
+              )
+              read += due.length
             }
+            return read
           })
 
         const view = Effect.gen(function* () {
           yield* hydrate
+          const now = yield* Clock.currentTimeMillis
           const list: AccountUsage[] = []
           for (const entry of agents.list) {
             for (const account of yield* accounts.of(entry.definition.id)) {
@@ -389,7 +355,7 @@ export class PlanUsage extends Context.Service<
                 source: mine?.source ?? null,
                 observedAt: mine?.observedAt ?? null,
                 plan: mine?.plan ?? null,
-                windows: (key ? [] : (mine?.windows ?? [])).map(shown),
+                windows: (key ? [] : (mine?.windows ?? [])).map((window) => shown(window, now)),
                 fault,
               })
             }
@@ -399,7 +365,8 @@ export class PlanUsage extends Context.Service<
           const warnings: UsageWarning[] = []
           for (const row of rows) {
             const account = list.find((each) => each.accountId === row.accountId)
-            if (account === undefined) continue
+            // A warning for a period that has reset is over: its window is shown with all of its plan left.
+            if (account === undefined || past(row.resetsAt, now)) continue
             const [kind, ...rest] = row.windowKey.split(':')
             warnings.push({
               accountId: row.accountId,
@@ -422,6 +389,16 @@ export class PlanUsage extends Context.Service<
           Effect.catchCause((cause) => Effect.logWarning('Could not tell plan usage', cause)),
         )
 
+        /* Tells the view a moment from now, in a fiber of its own: windows heard meanwhile go out with it, and what heard them goes on at once. */
+        let telling = false
+        const tellSoon = Effect.suspend(() => {
+          if (telling) return Effect.void
+          telling = true
+          return Effect.asVoid(
+            Effect.forkIn(Effect.sleep(SETTLE).pipe(Effect.andThen(Effect.sync(() => (telling = false))), Effect.andThen(told)), scope),
+          )
+        })
+
         const every = options.every ?? Duration.minutes(5)
         // Not at launch: the window reads when it opens the tab, and accounts are read on their own after each wait.
         if (Duration.toMillis(every) > 0)
@@ -434,7 +411,17 @@ export class PlanUsage extends Context.Service<
           )
 
         return PlanUsage.of({
-          now: (refresh = false) => Effect.andThen(readAll(refresh), view),
+          // Asked again, it waits for the reading; opened, it answers with what it has, and tells the view again once the accounts are read.
+          now: (refresh = false) =>
+            refresh
+              ? Effect.andThen(readAll(true), view)
+              : Effect.andThen(
+                  Effect.forkIn(
+                    Effect.flatMap(readAll(false), (read) => (read > 0 ? told : Effect.void)),
+                    scope,
+                  ),
+                  view,
+                ),
           heard: (accountId, agentId, window) =>
             Effect.gen(function* () {
               yield* hydrate
@@ -444,7 +431,7 @@ export class PlanUsage extends Context.Service<
               const windows = [...(before?.windows ?? []).filter((each) => keyOf(each) !== keyOf(window)), window]
               yield* keep(accountId, { agentId, source: 'acp_extension', plan: before?.plan ?? null, windows, observedAt: at, fault: null })
               yield* warn(accountId, [window])
-              yield* told
+              yield* tellSoon
             }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not keep a plan window', cause))),
           acknowledge: (warnings) =>
             Effect.gen(function* () {

@@ -159,6 +159,24 @@ describe('warning as a plan runs out', () => {
     expect(later.warn).toBe(5)
   })
 
+  it('does not arm again when a reading leaves the reset out, nor when it gives an earlier one', () => {
+    const first = step(96)
+    expect(first.warn).toBe(5)
+    const missing = step(96, first.state, undefined)
+    expect(missing.warn).toBeUndefined()
+    expect(missing.state.resetsAt).toBe(RESET)
+    expect(step(96, missing.state).warn).toBeUndefined()
+    expect(step(96, first.state, '2026-10-15T16:59:00.000Z').warn).toBeUndefined()
+  })
+
+  it('takes the reset a later reading gives, once it knows none', () => {
+    const first = nextWarning(80, undefined, undefined)
+    const known = step(80, first.state)
+    expect(known.warn).toBeUndefined()
+    expect(known.state.resetsAt).toBe(RESET)
+    expect(step(80, known.state, '2026-10-15T22:00:00.000Z').warn).toBe(25)
+  })
+
   it('warns once for a window that gives no reset time', () => {
     const first = nextWarning(80, undefined, undefined)
     expect(first.warn).toBe(25)
@@ -363,6 +381,12 @@ describe('Claude Code’s rate-limit event', () => {
       used: 10,
       size: 100,
     })
+  })
+
+  it('comes alone, with no context figure, where the adapter has none yet and says 0', () => {
+    const update = { sessionUpdate: 'usage_update', used: 0, size: 200_000, _meta: { '_claude/rateLimit': info({}) } } as never
+    expect(normalize(update)).toEqual({ _tag: 'PlanWindow', window: claudeRateLimitWindow(info({})) })
+    expect(normalize({ sessionUpdate: 'usage_update', used: 0, size: 100 } as never)).toMatchObject({ _tag: 'ContextUsage', used: 0 })
   })
 })
 

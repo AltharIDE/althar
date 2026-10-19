@@ -134,6 +134,8 @@ export type SessionEvent =
       /** Claude Code's adapter sends a plan window with the usage it streams (`usage.ts`): one per event. */
       readonly planWindow?: UsageWindow
     }
+  /** A plan window with no context figure to go with it (`usage_update` below): the context is as it was. */
+  | { readonly _tag: 'PlanWindow'; readonly window: UsageWindow }
   | { readonly _tag: 'OptionsChanged'; readonly options: ReadonlyArray<ConfigOption> }
   /** The mode changed. `byAgent` when Althar didn't ask for it, such as a plan session leaving plan mode. */
   | { readonly _tag: 'ModeChanged'; readonly modeId: string; readonly byAgent: boolean }
@@ -362,7 +364,10 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
-    case 'usage_update':
+    case 'usage_update': {
+      const planWindow = claudeRateLimitWindow(record(update._meta)?.['_claude/rateLimit']) ?? undefined
+      // Althar's patch of Claude Code's adapter sends a rate limit before the session has a context figure, with 0 for it: a context is never empty once the agent has asked its model, so that 0 is no figure, and the meter and the handover check keep theirs.
+      if (planWindow !== undefined && update.used === 0) return { _tag: 'PlanWindow', window: planWindow }
       return {
         _tag: 'ContextUsage',
         used: update.used,
@@ -371,8 +376,9 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
           'cost',
           update.cost === null || update.cost === undefined ? undefined : { amount: update.cost.amount, currency: update.cost.currency },
         ),
-        ...defined('planWindow', claudeRateLimitWindow(record(update._meta)?.['_claude/rateLimit']) ?? undefined),
+        ...defined('planWindow', planWindow),
       }
+    }
     case 'config_option_update':
       return { _tag: 'OptionsChanged', options: normalizeOptions(update.configOptions) }
     case 'current_mode_update':

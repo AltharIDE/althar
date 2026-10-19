@@ -1633,22 +1633,32 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           return ended()
         }
-        case scenarios.planUsage:
+        case scenarios.planUsage: {
+          // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
+          const inSeconds = (seconds: number) => Math.floor(Date.now() / 1000) + seconds
           await update({
             sessionUpdate: 'usage_update',
             used: 10,
             size: 100,
             _meta: {
-              '_claude/rateLimit': { status: 'allowed_warning', rateLimitType: 'five_hour', utilization: 0.82, resetsAt: 1_760_540_400 },
+              '_claude/rateLimit': {
+                status: 'allowed_warning',
+                rateLimitType: 'five_hour',
+                utilization: 0.82,
+                resetsAt: inSeconds(3 * 3600),
+              },
             },
           })
           await update({
             sessionUpdate: 'usage_update',
             used: 20,
             size: 100,
-            _meta: { '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: 1_761_000_000 } },
+            _meta: {
+              '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: inSeconds(5 * 86_400) },
+            },
           })
           return ended()
+        }
         case scenarios.updates:
           await update({ sessionUpdate: 'plan', entries: [{ content: 'Write the test', priority: 'high', status: 'in_progress' }] })
           await update({ sessionUpdate: 'usage_update', used: 1200, size: 200_000, cost: { amount: 0.02, currency: 'USD' } })

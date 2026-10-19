@@ -439,12 +439,13 @@ never under running work.
   architecture 03 rule 3), errors only as the floor. Claude is the exception
   to the endpoint step (Anthropic's terms). Don't write our own ACP proposal
   unless #2316 is declined. Open until #2316 is accepted or declined.
-- [x] **Amend rule 3 for a usage read.** Settled on 15 October 2026 with the
-  person: a narrow exception, an account's token in memory for one call to a
-  per-provider allowlisted usage URL, never written, refreshed, logged or
-  sent elsewhere, no Claude endpoint
-  ([ADR-050](decisions/050-a-usage-read-may-use-an-accounts-token-once.md),
-  [architecture 03](architecture/03-agent-runtime-and-auth.md#the-usage-read)).
+- [ ] **Amend rule 3 for a usage read.** Agreed in outline on 15 October
+  2026 with the person: a narrow exception, an account's token in memory for
+  one call to a per-provider allowlisted usage URL, never written,
+  refreshed, logged or sent elsewhere, no Claude endpoint. Taken out of
+  #218 on review, since no source could run it yet; open until a spike shows
+  a real one ([#221](https://github.com/AltharIDE/althar/issues/221); the
+  draft is in [the plan](plans/plan-usage.md#the-exception-to-rule-3)).
 - [ ] **OpenCode 2.x usage.** Its credentials moved into `opencode.db` and
   `auth list` says "can't tell", so an OpenCode 2.x account has no usage
   source and shows a fault until OpenCode documents a way to read one

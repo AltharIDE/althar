@@ -1,14 +1,14 @@
 import { assert, describe, it } from '@effect/vitest'
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
-import type { CredentialsRead, EndpointRead, UsageRead, UsageWindow } from '@althar/provider-adapters'
+import type { CredentialsRead, UsageRead, UsageWindow } from '@althar/provider-adapters'
 import { Duration, Effect, Layer, Stream } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
 import { Live } from '../src/Live'
 import { PlanUsage } from '../src/PlanUsage'
-import { type AgentEntry, Agents } from '../src/Config'
-import { fakeAgents, runtime } from './support'
+import { runtime } from './support'
 
 /*
  * Plan usage (docs/plans/plan-usage.md): where each account's windows come
@@ -39,7 +39,6 @@ const withUsage = (
   usage: {
     readonly readAgent?: () => Promise<UsageRead>
     readonly readCredentials?: () => Promise<CredentialsRead>
-    readonly readEndpoint?: (sourceId: string, provider: string, agentMajor: number | undefined) => Promise<EndpointRead>
     readonly readVersion?: () => Promise<string | null>
   },
   more: { readonly perUse?: ReadonlyArray<string>; readonly signedOut?: ReadonlyArray<string>; readonly database?: string } = {},
@@ -55,47 +54,18 @@ const withUsage = (
         kept: Duration.zero,
         ...(usage.readAgent === undefined ? {} : { readAgent: usage.readAgent }),
         ...(usage.readCredentials === undefined ? {} : { readCredentials: usage.readCredentials }),
-        ...(usage.readEndpoint === undefined
-          ? {}
-          : { readEndpoint: (id, account) => usage.readEndpoint!(id, account.provider, account.agentMajor) }),
         // OpenCode 2, whose listing tells plans from keys, unless the test says another.
         readVersion: usage.readVersion ?? (async () => '2.0.29'),
       },
     },
   )
 
-/** The fake agents, with OpenCode's commands run out on the device, as in a Flatpak. */
-const onDeviceOpenCode = Layer.effect(
-  Agents,
-  Effect.gen(function* () {
-    const inner = yield* Agents
-    const patch = (entry: AgentEntry): AgentEntry =>
-      entry.definition.id !== 'opencode'
-        ? entry
-        : {
-            ...entry,
-            definition: {
-              ...entry.definition,
-              signIn: {
-                ...entry.definition.signIn,
-                credentials: () => ({
-                  command: 'opencode',
-                  args: ['auth', 'list'],
-                  onDevice: () => ({ command: 'flatpak-spawn', args: [] }),
-                }),
-              },
-            },
-          }
-    return Agents.of({ list: inner.list.map(patch), get: (agentId) => Effect.map(inner.get(agentId), patch) })
-  }),
-).pipe(Layer.provide(fakeAgents()))
-
 const accountOf = (view: PlanUsageView, agentId: string) => view.accounts.find((account) => account.agentId === agentId)!
 
 describe('Codex’s plan, asked of its app-server', () => {
   it.effect('shows the windows it reports, by length, with where they came from', () =>
     Effect.gen(function* () {
-      const view = yield* (yield* PlanUsage).now()
+      const view = yield* (yield* PlanUsage).now(true)
       assert.deepStrictEqual(accountOf(view, 'codex').windows, [
         { kind: 'five_hour', label: null, usedPercent: 40, resetsAt: RESET },
         { kind: 'weekly', label: null, usedPercent: 12, resetsAt: null },
@@ -104,6 +74,53 @@ describe('Codex’s plan, asked of its app-server', () => {
       assert.strictEqual(accountOf(view, 'codex').plan, 'plus')
       assert.isNull(accountOf(view, 'codex').fault)
     }).pipe(Effect.provide(withUsage({ readAgent: async () => read(used(40), { kind: 'weekly', usedPercent: 12 }) }))),
+  )
+
+  it.effect('answers an open at once with what it has, and tells the view again once the accounts are read', () =>
+    Effect.gen(function* () {
+      let answer!: () => void
+      const answered = new Promise<void>((resolve) => (answer = resolve))
+      const layer = withUsage({ readAgent: async () => (await answered, read(used(40))) })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const events = yield* (yield* Live).subscribe
+        // Codex has not answered, and the view does not wait for it.
+        const opened = accountOf(yield* usage.now(), 'codex')
+        assert.strictEqual(opened.fault?.kind, 'no_data_yet')
+        assert.deepStrictEqual(opened.windows, [])
+        answer()
+        const [told] = (yield* events.pipe(
+          Stream.filter((event) => event._tag === 'PlanUsage'),
+          Stream.take(1),
+          Stream.runCollect,
+        )) as ReadonlyArray<{ _tag: 'PlanUsage'; usage: PlanUsageView }>
+        assert.deepStrictEqual(
+          accountOf(told!.usage, 'codex').windows.map((window) => window.usedPercent),
+          [40],
+        )
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('reads its accounts at once, so one slow to answer holds up none of the others', () =>
+    Effect.gen(function* () {
+      let open = 0
+      let most = 0
+      const layer = withUsage({
+        readAgent: async () => {
+          most = Math.max(most, ++open)
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          open--
+          return read(used(10))
+        },
+      })
+      yield* Effect.gen(function* () {
+        const accounts = yield* Accounts
+        yield* accounts.add({ agentId: 'codex', name: 'Work' })
+        yield* (yield* PlanUsage).now(true)
+        assert.strictEqual(most, 2)
+      }).pipe(Effect.provide(layer))
+    }),
   )
 
   it.effect('is asked again only after a reading has been kept for its time', () =>
@@ -118,8 +135,8 @@ describe('Codex’s plan, asked of its app-server', () => {
       )
       yield* Effect.gen(function* () {
         const usage = yield* PlanUsage
-        yield* usage.now()
-        yield* usage.now()
+        yield* usage.now(true)
+        yield* usage.now(true)
         assert.strictEqual(asked, 1)
       }).pipe(Effect.provide(layer))
     }),
@@ -131,20 +148,20 @@ describe('Codex’s plan, asked of its app-server', () => {
       const layer = withUsage({ readAgent: async () => answer })
       yield* Effect.gen(function* () {
         const usage = yield* PlanUsage
-        assert.strictEqual(accountOf(yield* usage.now(), 'codex').windows.length, 1)
+        assert.strictEqual(accountOf(yield* usage.now(true), 'codex').windows.length, 1)
         answer = { kind: 'failed', message: 'Not signed in with ChatGPT.' }
-        const view = accountOf(yield* usage.now(), 'codex')
+        const view = accountOf(yield* usage.now(true), 'codex')
         assert.deepStrictEqual(view.fault, { kind: 'sign_in_again', message: 'Not signed in with ChatGPT.' })
         assert.strictEqual(view.windows.length, 1)
         answer = { kind: 'failed', message: 'Codex stopped before it answered.' }
-        assert.strictEqual(accountOf(yield* usage.now(), 'codex').fault?.kind, 'unreachable')
+        assert.strictEqual(accountOf(yield* usage.now(true), 'codex').fault?.kind, 'unreachable')
       }).pipe(Effect.provide(layer))
     }),
   )
 
   it.effect('is a fault, not an empty row, when Codex reports no window for a plan', () =>
     Effect.gen(function* () {
-      const view = accountOf(yield* (yield* PlanUsage).now(), 'codex')
+      const view = accountOf(yield* (yield* PlanUsage).now(true), 'codex')
       assert.strictEqual(view.fault?.kind, 'no_data_yet')
       assert.deepStrictEqual(view.windows, [])
     }).pipe(Effect.provide(withUsage({ readAgent: async () => ({ kind: 'none' }) }))),
@@ -152,7 +169,7 @@ describe('Codex’s plan, asked of its app-server', () => {
 
   it.effect('is no fault for an account on an API key, which has no plan window', () =>
     Effect.gen(function* () {
-      const view = accountOf(yield* (yield* PlanUsage).now(), 'codex')
+      const view = accountOf(yield* (yield* PlanUsage).now(true), 'codex')
       assert.strictEqual(view.paidBy, 'key')
       assert.isNull(view.fault)
       assert.deepStrictEqual(view.windows, [])
@@ -161,7 +178,7 @@ describe('Codex’s plan, asked of its app-server', () => {
 
   it.effect('is a fault, with nothing asked, when the account is signed out', () =>
     Effect.gen(function* () {
-      const view = accountOf(yield* (yield* PlanUsage).now(), 'codex')
+      const view = accountOf(yield* (yield* PlanUsage).now(true), 'codex')
       assert.strictEqual(view.fault?.kind, 'sign_in_again')
     }).pipe(Effect.provide(withUsage({ readAgent: async () => assert.fail('signed out is never asked') }, { signedOut: ['codex'] }))),
   )
@@ -173,11 +190,11 @@ describe('Claude Code’s plan, heard from its sessions', () => {
       const usage = yield* PlanUsage
       const accounts = yield* Accounts
       const [account] = yield* accounts.of('claude-code')
-      assert.strictEqual(accountOf(yield* usage.now(), 'claude-code').fault?.kind, 'no_data_yet')
+      assert.strictEqual(accountOf(yield* usage.now(true), 'claude-code').fault?.kind, 'no_data_yet')
       yield* usage.heard(account!.id, 'claude-code', used(20))
       yield* usage.heard(account!.id, 'claude-code', { kind: 'weekly', usedPercent: 5, resetsAt: '2026-10-20T00:00:00.000Z' })
       yield* usage.heard(account!.id, 'claude-code', used(25))
-      const view = accountOf(yield* usage.now(), 'claude-code')
+      const view = accountOf(yield* usage.now(true), 'claude-code')
       assert.isNull(view.fault)
       assert.strictEqual(view.source, 'acp_extension')
       assert.deepStrictEqual(
@@ -196,7 +213,7 @@ describe('Claude Code’s plan, heard from its sessions', () => {
       const [account] = yield* (yield* Accounts).of('claude-code')
       yield* usage.heard(account!.id, 'claude-code', { kind: 'weekly', usedPercent: 10 })
       yield* usage.heard(account!.id, 'claude-code', { kind: 'weekly', label: 'Opus', usedPercent: 60 })
-      const windows = accountOf(yield* usage.now(), 'claude-code').windows
+      const windows = accountOf(yield* usage.now(true), 'claude-code').windows
       assert.deepStrictEqual(
         windows.map((window) => window.label),
         [null, 'Opus'],
@@ -219,7 +236,7 @@ describe('warnings as a plan runs down', () => {
       const told: number[] = []
       for (const percent of [30, 55, 60, 76, 77, 93, 99]) {
         const { usage } = yield* heard(percent)
-        const view = yield* usage.now()
+        const view = yield* usage.now(true)
         const latest = view.warnings.at(-1)
         if (latest !== undefined && !told.includes(latest.remainingPercent)) told.push(latest.remainingPercent)
       }
@@ -230,18 +247,18 @@ describe('warnings as a plan runs down', () => {
   it.effect('holds one warning per window until the person has seen it, and no more for the same one', () =>
     Effect.gen(function* () {
       const { usage, account } = yield* heard(80)
-      const first = (yield* usage.now()).warnings
+      const first = (yield* usage.now(true)).warnings
       assert.deepStrictEqual(
         first.map((warning) => [warning.accountId, warning.windowKey, warning.remainingPercent, warning.agentId]),
         [[account.id, 'five_hour', 25, 'claude-code']],
       )
       yield* usage.acknowledge([{ accountId: account.id, windowKey: 'five_hour' }])
-      assert.deepStrictEqual((yield* usage.now()).warnings, [])
+      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
       yield* heard(82)
-      assert.deepStrictEqual((yield* usage.now()).warnings, [])
+      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
       yield* heard(91)
       assert.deepStrictEqual(
-        (yield* usage.now()).warnings.map((warning) => warning.remainingPercent),
+        (yield* usage.now(true)).warnings.map((warning) => warning.remainingPercent),
         [10],
       )
     }).pipe(Effect.provide(withUsage({}))),
@@ -253,18 +270,42 @@ describe('warnings as a plan runs down', () => {
       yield* usage.acknowledge([{ accountId: account.id, windowKey: 'five_hour' }])
       yield* heard(40)
       yield* heard(80)
-      assert.deepStrictEqual((yield* usage.now()).warnings, [])
+      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
       yield* usage.heard(account.id, 'claude-code', used(80, { resetsAt: '2026-10-15T22:00:00.000Z' }))
       assert.deepStrictEqual(
-        (yield* usage.now()).warnings.map((warning) => warning.remainingPercent),
+        (yield* usage.now(true)).warnings.map((warning) => warning.remainingPercent),
         [25],
       )
     }).pipe(Effect.provide(withUsage({}))),
   )
 
+  it.effect('does not arm again when a reading leaves the reset out', () =>
+    Effect.gen(function* () {
+      const { usage, account } = yield* heard(96)
+      yield* usage.acknowledge([{ accountId: account.id, windowKey: 'five_hour' }])
+      yield* usage.heard(account.id, 'claude-code', { kind: 'five_hour', usedPercent: 96 })
+      yield* heard(96)
+      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
+    }).pipe(Effect.provide(withUsage({}))),
+  )
+
+  it.effect('shows a window whose reset has passed with all of its plan left, and drops its warning', () =>
+    Effect.gen(function* () {
+      const usage = yield* PlanUsage
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      // The test clock starts at 0: this window resets a second in.
+      yield* usage.heard(account!.id, 'claude-code', used(95, { resetsAt: new Date(1000).toISOString() }))
+      assert.strictEqual((yield* usage.now(true)).warnings.length, 1)
+      yield* TestClock.adjust(Duration.seconds(2))
+      const view = yield* usage.now(true)
+      assert.deepStrictEqual(accountOf(view, 'claude-code').windows, [{ kind: 'five_hour', label: null, usedPercent: 0, resetsAt: null }])
+      assert.deepStrictEqual(view.warnings, [])
+    }).pipe(Effect.provide(withUsage({}))),
+  )
+
   it.effect('tells Codex’s windows too, with the agent’s name', () =>
     Effect.gen(function* () {
-      const view = yield* (yield* PlanUsage).now()
+      const view = yield* (yield* PlanUsage).now(true)
       assert.deepStrictEqual(
         view.warnings.map((warning) => [warning.agentId, warning.kind, warning.remainingPercent]),
         [['codex', 'weekly', 5]],
@@ -292,7 +333,7 @@ describe('warnings as a plan runs down', () => {
       assert.isString(seen?.acknowledgedAt)
       // What was told is read back from the store each time, so a reading that follows a restart tells nothing twice.
       yield* heard(82)
-      assert.deepStrictEqual((yield* usage.now()).warnings, [])
+      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
     }).pipe(Effect.provide(withUsage({}))),
   )
 })
@@ -302,7 +343,7 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
 
   it.effect('are keys, with no fault, when every sign-in is a key', () =>
     Effect.gen(function* () {
-      const view = openCode(yield* (yield* PlanUsage).now())
+      const view = openCode(yield* (yield* PlanUsage).now(true))
       assert.strictEqual(view.paidBy, 'key')
       assert.isNull(view.fault)
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['openai', 'key'], ['openrouter', 'key']) }))),
@@ -310,7 +351,7 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
 
   it.effect('are a fault, not a key, when the listing fails', () =>
     Effect.gen(function* () {
-      const view = openCode(yield* (yield* PlanUsage).now())
+      const view = openCode(yield* (yield* PlanUsage).now(true))
       assert.strictEqual(view.fault?.kind, 'cannot_classify')
     }).pipe(
       Effect.provide(withUsage({ readCredentials: async () => ({ kind: 'failed', message: 'OpenCode would not list its sign-ins.' }) })),
@@ -319,50 +360,13 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
 
   it.effect('are a fault for a sign-in whose method it cannot classify', () =>
     Effect.gen(function* () {
-      assert.strictEqual(openCode(yield* (yield* PlanUsage).now()).fault?.kind, 'cannot_classify')
+      assert.strictEqual(openCode(yield* (yield* PlanUsage).now(true)).fault?.kind, 'cannot_classify')
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['openai', 'unknown']) }))),
-  )
-
-  it.effect('read a ChatGPT sign-in from its endpoint, naming the windows by the provider', () =>
-    Effect.gen(function* () {
-      const view = openCode(yield* (yield* PlanUsage).now())
-      assert.deepStrictEqual(
-        view.windows.map((window) => [window.kind, window.label, window.usedPercent]),
-        [['five_hour', 'openai', 33]],
-      )
-      assert.strictEqual(view.source, 'endpoint')
-      assert.isNull(view.fault)
-    }).pipe(
-      Effect.provide(
-        withUsage({
-          readCredentials: async () => credentials(['openai', 'plan']),
-          readEndpoint: async (id, provider, major) => {
-            assert.deepStrictEqual([id, provider, major], ['opencode-chatgpt', 'openai', 2])
-            return { kind: 'usage', stale: false, usage: { windows: [used(33)], source: 'endpoint', observedAt: NOW } }
-          },
-        }),
-      ),
-    ),
-  )
-
-  it.effect('show the reader’s fault when the endpoint is not confirmed or the sign-in is refused', () =>
-    Effect.gen(function* () {
-      const view = openCode(yield* (yield* PlanUsage).now())
-      assert.deepStrictEqual(view.fault, { kind: 'sign_in_again', message: 'The provider refused this sign-in.' })
-      assert.deepStrictEqual(view.windows, [])
-    }).pipe(
-      Effect.provide(
-        withUsage({
-          readCredentials: async () => credentials(['openai', 'plan']),
-          readEndpoint: async () => ({ kind: 'fault', fault: 'sign_in_again', message: 'The provider refused this sign-in.' }),
-        }),
-      ),
-    ),
   )
 
   it.effect('are not listed on OpenCode 1, whose `auth list` has no such flags, and say it can’t tell plans from keys', () =>
     Effect.gen(function* () {
-      const view = openCode(yield* (yield* PlanUsage).now())
+      const view = openCode(yield* (yield* PlanUsage).now(true))
       assert.strictEqual(view.fault?.kind, 'cannot_classify')
       assert.include(view.fault?.message ?? '', ' 1 can’t tell plans from API keys')
     }).pipe(
@@ -377,7 +381,7 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
 
   it.effect('are not listed where the agent’s version is not known, and say so', () =>
     Effect.gen(function* () {
-      const view = openCode(yield* (yield* PlanUsage).now())
+      const view = openCode(yield* (yield* PlanUsage).now(true))
       assert.strictEqual(view.fault?.kind, 'cannot_classify')
       assert.include(view.fault?.message ?? '', 'couldn’t tell which version')
     }).pipe(
@@ -390,87 +394,51 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
     ),
   )
 
-  it.effect('show a reading the reader kept as old as it is, and say unreachable for what cannot be reached', () =>
+  it.effect('are a plan with no source yet for a ChatGPT sign-in, whose endpoint waits for its spike (#221)', () =>
     Effect.gen(function* () {
-      const usage = yield* PlanUsage
-      const first = openCode(yield* usage.now())
-      assert.strictEqual(first.observedAt, '2026-10-15T10:00:00.000Z')
-      assert.isNull(first.fault)
-      const second = openCode(yield* usage.now())
-      assert.strictEqual(second.fault?.kind, 'unreachable')
-      assert.strictEqual(second.observedAt, '2026-10-15T10:00:00.000Z')
-      assert.strictEqual(second.windows.length, 1)
-    }).pipe(
-      Effect.provide(
-        (() => {
-          let calls = 0
-          return withUsage({
-            readCredentials: async () => credentials(['openai', 'plan']),
-            readEndpoint: async () =>
-              ++calls === 1
-                ? { kind: 'usage', stale: true, usage: { windows: [used(33)], source: 'endpoint', observedAt: '2026-10-15T10:00:00.000Z' } }
-                : { kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' },
-          })
-        })(),
-      ),
-    ),
-  )
-
-  it.effect('are not read from where the agent runs on the device, for the helper that would read there is not built', () =>
-    Effect.gen(function* () {
-      const view = openCode(yield* (yield* PlanUsage).now())
-      assert.strictEqual(view.fault?.kind, 'no_source')
-      assert.include(view.fault?.message ?? '', 'on the device')
-    }).pipe(
-      Effect.provide(
-        runtime(
-          ':memory:',
-          {},
-          {
-            agents: onDeviceOpenCode,
-            usage: {
-              every: Duration.zero,
-              kept: Duration.zero,
-              readCredentials: async () => credentials(['openai', 'plan']),
-              readVersion: async () => '2.0.29',
-              readEndpoint: async () => assert.fail('an agent on the device is never read in this process'),
-            },
-          },
-        ),
-      ),
-    ),
+      const view = openCode(yield* (yield* PlanUsage).now(true))
+      assert.strictEqual(view.paidBy, 'plan')
+      assert.deepStrictEqual(view.fault, { kind: 'no_source', message: 'OpenCode’s openai sign-in has no usage source yet.' })
+      assert.deepStrictEqual(view.windows, [])
+    }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['openai', 'plan']) }))),
   )
 
   it.effect('are a fault for a plan provider that waits for its spike, and one with no pair at all', () =>
     Effect.gen(function* () {
-      assert.strictEqual(openCode(yield* (yield* PlanUsage).now()).fault?.kind, 'no_source')
+      assert.strictEqual(openCode(yield* (yield* PlanUsage).now(true)).fault?.kind, 'no_source')
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['github-copilot', 'plan']) }))),
   )
 
   it.effect('are a fault for a plan provider that has no pair at all', () =>
     Effect.gen(function* () {
-      assert.strictEqual(openCode(yield* (yield* PlanUsage).now()).fault?.kind, 'cannot_classify')
+      assert.strictEqual(openCode(yield* (yield* PlanUsage).now(true)).fault?.kind, 'cannot_classify')
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['brand-new-plan', 'plan']) }))),
   )
 })
 
 describe('telling the window', () => {
-  it.effect('publishes the usage whole when a window is heard and when a warning is seen', () =>
+  const plans = (events: Stream.Stream<{ readonly _tag: string }>) =>
+    events.pipe(
+      Stream.filter((event) => event._tag === 'PlanUsage'),
+      Stream.take(1),
+      Stream.runCollect,
+      Effect.map((told) => (told as unknown as ReadonlyArray<{ _tag: 'PlanUsage'; usage: PlanUsageView }>)[0]!.usage),
+    )
+
+  it.effect('publishes the usage whole a moment after windows are heard, once for them all, and when a warning is seen', () =>
     Effect.gen(function* () {
-      const live = yield* Live
       const usage = yield* PlanUsage
       const [account] = yield* (yield* Accounts).of('claude-code')
-      const events = yield* live.subscribe
+      const events = yield* (yield* Live).subscribe
+      // What heard them goes on at once: the clock has not moved, so nothing waited for the telling.
       yield* usage.heard(account!.id, 'claude-code', used(80))
+      yield* usage.heard(account!.id, 'claude-code', { kind: 'weekly', usedPercent: 30 })
+      yield* TestClock.adjust(Duration.millis(250))
+      const heard = yield* plans(events)
+      assert.strictEqual(accountOf(heard, 'claude-code').windows.length, 2)
+      assert.strictEqual(heard.warnings.length, 1)
       yield* usage.acknowledge([{ accountId: account!.id, windowKey: 'five_hour' }])
-      const told = yield* events.pipe(
-        Stream.filter((event) => event._tag === 'PlanUsage'),
-        Stream.take(2),
-        Stream.runCollect,
-      )
-      const [heard, seen] = told as ReadonlyArray<{ _tag: 'PlanUsage'; usage: PlanUsageView }>
-      assert.strictEqual(heard!.usage.warnings.length, 1)
-      assert.strictEqual(seen!.usage.warnings.length, 0)
+      assert.strictEqual((yield* plans(events)).warnings.length, 0)
     }).pipe(Effect.provide(Layer.fresh(withUsage({})))),
   )
 })

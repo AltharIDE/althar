@@ -7,10 +7,12 @@
 > Delete this file when the last step ships, and move anything that lasted
 > into the architecture docs.
 
-Researched on 15 October 2026 against upstream `main` (`af3023a`). Decided
-(ADR-050) and partly built: the Codex source, the usage-source registry, the
-allowlisted reader and its contract test are in `provider-adapters` (see
-Stages). Not built: the Claude source, the notices and the usage tab.
+Researched on 15 October 2026 against upstream `main` (`af3023a`). Built
+(see Stages): the Codex and Claude sources, the usage-source registry, the
+warnings, the notices and the usage tab. Not built: step (4), a provider's
+usage endpoint, and the exception to rule 3 it needs; they come with
+[#221](https://github.com/AltharIDE/althar/issues/221) once a spike has seen a
+real source (below).
 
 ## Goal
 
@@ -39,7 +41,7 @@ not in errors, and ACP stays the preferred source.
 > agent's own documented control channel, which Althar starts with the
 > account's home (Codex's app-server; Claude's Agent SDK); (4) **the
 > provider's usage endpoint**, read-only, called by Althar with the account's
-> sign-in under the narrow exception below. Errors (`failures.ts`) are the
+> sign-in under the narrow exception below, once it is decided (#221). Errors (`failures.ts`) are the
 > floor under all four: they say a limit was *reached*, never how much is
 > left, so they are never a substitute for a source.
 
@@ -56,10 +58,21 @@ Per agent and provider, today:
 
 ### The exception to rule 3
 
-Decided: [ADR-050](../decisions/050-a-usage-read-may-use-an-accounts-token-once.md).
-An OpenCode 2.x account has no endpoint source (its credentials moved into
-`opencode.db`, and `auth list` says "can't tell"), so it shows a fault, not
-quiet "no data".
+**Not decided; with [#221](https://github.com/AltharIDE/althar/issues/221).**
+A first draft (an ADR, an allowlisted reader, the one credential-store
+module and their contract test) was built, then taken out of #218 on review:
+no source could run it. Its only consumer, OpenCode's ChatGPT sign-in, was
+for OpenCode 1, which can't list plans apart from keys, and OpenCode 2 keeps
+its credentials in `opencode.db`; Codex is read through its app-server. So
+the exception waits for a spike that shows a real source, and is decided
+with that source in view. The draft is kept in commit `59955fe` of [#218](https://github.com/AltharIDE/althar/pull/218):
+`docs/decisions/050-a-usage-read-may-use-an-accounts-token-once.md`,
+`packages/provider-adapters/src/usageRead.ts` and `credentialStore.ts`, the
+endpoint parts of `usageSources.ts`, and their tests in
+`tests/usageSources.test.ts`. Until then an OpenCode plan sign-in shows a
+fault, not quiet "no data".
+
+What the draft set out:
 
 Architecture 03 rule 3 says Althar never reads an agent's credential cache,
 and the provider endpoints need that token. Required coverage cannot be met
@@ -298,24 +311,26 @@ before building on it):
   reader (`usage.ts`); Claude Code's window from the usage update's `_meta`
   (`ContextUsage.planWindow`); the per-(agent, provider) registry with its
   classification and allowlist, OpenCode's sign-in listing (`usageSources.ts`);
-  the allowlisted usage reader (`usageRead.ts`) and the only credential-store
-  module (`credentialStore.ts`), with the contract test
-  (`tests/usageSources.test.ts`) that enforces ADR-050.
+  with the contract test (`tests/usageSources.test.ts`) that every
+  subscription has a source and a way to be told from a key.
 - `packages/persistence-sqlite`: migration 0036, `plan_usage_readings` and
   `plan_usage_warnings`.
 - `packages/runtime`: `PlanUsage.ts` keeps each account's windows (Codex read
   through its app-server, Claude heard from its sessions, OpenCode by its own
-  listing then the provider's endpoint), raises the 50/25/10/5 warnings once
+  listing), raises the 50/25/10/5 warnings once
   per reset, and tells the window; the API has `GetPlanUsage`,
   `AcknowledgeUsageWarnings` and a `PlanUsage` watch event.
-- **No endpoint source is confirmed**, so the reader refuses all of them: each
-  is enabled by its own spike and a read of the provider's terms. Until then
-  an OpenCode account on a plan shows a fault, not a number.
+- **No OpenCode plan provider has a source yet**: each needs a spike, and
+  the endpoint ones the exception to rule 3 (#221). Until then an OpenCode
+  account on a plan shows a fault, not a number.
 - **Claude Code's adapter drops a window that arrives before a turn's first
   usage figure** (#1127): Althar carries a patch for it (`patches/`, applied
   by bun to the pinned 0.93.0; a test fails if it is not applied, and a bump
-  of the adapter needs the patch made again). Accounts with no session show a
-  fault.
+  of the adapter needs the patch made again). The patched event carries the
+  context as last known (`session.contextUsedTokens`, set by 0.93.0 on each
+  usage figure and after a compaction), or 0 where the session has none yet;
+  `events.ts` makes such a 0 a `PlanWindow` alone, so the context meter and
+  the handover check keep theirs. Accounts with no session show a fault.
 
 The app side (usage overlay on Cmd/Ctrl+U, the bar badge, the Talk-room
 notice) is built in `apps/desktop` and `packages/ui`.
@@ -323,11 +338,9 @@ notice) is built in `apps/desktop` and `packages/ui`.
 One pull request each. Stages 0 to 5 are Althar's; 6 to 8 are upstream and
 run in parallel.
 
-0. **Amend rule 3** (done, docs only, 15 October): the narrow usage read is
-   in architecture 03 and
-   [ADR-050](../decisions/050-a-usage-read-may-use-an-accounts-token-once.md),
-   approved by the person. Its reader, allowlist and contract test are still
-   to build, in the stages below.
+0. **Amend rule 3** (with #221): the narrow usage read, decided once a spike
+   has shown a real source. Its draft ADR, reader, allowlist and contract
+   test are in commit `59955fe` of [#218](https://github.com/AltharIDE/althar/pull/218).
 1. **Model and Codex source.** `AccountStatus` with its `windows`
    (`provider-adapters`), a Codex source (app-server with the account's
    home), the threshold rule above as a pure function with tests (each
@@ -347,7 +360,7 @@ run in parallel.
    `paidBy: () => 'key'`, with its contract test. Then one spike, then one
    source per provider the person
    can sign in with (ChatGPT first, then Go or Zen, Copilot, Gemini), each
-   behind the usage-read rules; faults visible; accounts with no source
+   behind the usage-read rules of stage 0; faults visible; accounts with no source
    refused.
 6. **Upstream: Claude adapter.** Offer the #1127 fix again; ask for all
    windows to be forwarded.
@@ -368,7 +381,7 @@ run in parallel.
   endpoint is barred by Anthropic's terms: idle Claude accounts may stay
   uncovered until Anthropic clears a read. The requirement is not met for
   them until then.
-- The endpoint exception reads agents' tokens. It is the largest security
+- The endpoint exception (#221) reads agents' tokens. It is the largest security
   change in this plan: keep it in one module, with tests that nothing is
   written, logged or sent elsewhere.
 - OpenCode's stored token for a provider may differ from the agent-native
