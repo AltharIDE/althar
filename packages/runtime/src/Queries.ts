@@ -15,7 +15,9 @@ import {
   IssueDraftCard,
   ReviewDraftCard,
   type IssueSummary,
+  type HeldForLimit,
   LimitCall,
+  LimitChoice,
   PAGE,
   Unfurl,
   type TaskPhase,
@@ -45,7 +47,7 @@ import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
-import { handedOf, kindOf, quickIn } from './kinds'
+import { handedOf, issueDraftsWaiting, kindOf, quickIn } from './kinds'
 import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
@@ -193,6 +195,9 @@ const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; re
 
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeLimit = Schema.decodeUnknownOption(LimitCall)
+const decodeChoice = Schema.decodeUnknownOption(LimitChoice)
+/** One who could take a held step over, as its hold kept it; one that doesn't read is left out. */
+const choiceOf = (value: unknown) => Option.toArray(decodeChoice(value))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
 
 /** The first of the allow rules a decision keeps, or none where it keeps none. */
@@ -678,7 +683,8 @@ export class Queries extends Context.Service<
               WHERE b.project_id = p.id AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid)) AS repositories,
             (SELECT count(*) FROM tasks t WHERE t.project_id = p.id) AS tasks,
             (SELECT count(*) FROM provider_sessions s WHERE s.project_id = p.id AND s.state IN (${sql.unsafe(live)})) AS running,
-            (SELECT count(*) FROM attention_requests a WHERE a.project_id = p.id AND a.state = 'open') AS waiting,
+            (SELECT count(*) FROM attention_requests a WHERE a.project_id = p.id AND a.state = 'open')
+              + (SELECT coalesce(sum(${sql.unsafe(issueDraftsWaiting('wk'))}), 0) FROM tasks wk WHERE wk.project_id = p.id AND wk.state = 'open') AS waiting,
             -- Its tasks under way and ready, as their cards would say, worked out from the store alone (Nudges reads ready the same way).
             (SELECT count(*) FROM tasks k JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
               WHERE k.project_id = p.id AND k.state NOT IN ('done', 'abandoned') AND r.state = 'running'
@@ -689,12 +695,14 @@ export class Queries extends Context.Service<
                 AND coalesce((SELECT state FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
                   ORDER BY proposed_at DESC LIMIT 1), '') <> 'proposed'
                 AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+                AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0
                 AND NOT EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                   WHERE e.run_id = r.id AND a.state = 'admitted')) AS ready,
             -- A review has no run: drafted, it is the person's to post, as its card says, unless a call on it waits on them first.
             (SELECT json_group_array(k.id) FROM tasks k WHERE k.project_id = p.id AND k.state = 'open'
                 AND EXISTS (SELECT 1 FROM review_drafts d WHERE d.task_id = k.id AND d.state IN ('pending', 'failed', 'uncertain'))
-                AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')) AS drafted,
+                AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+                AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0) AS drafted,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
             coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
             (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
@@ -727,7 +735,7 @@ export class Queries extends Context.Service<
             SELECT k.id, k.project_id, k.title, k.slug, t.id AS thread_id, k.state, ${sql.unsafe(SHOWN_BRANCH)},
               (SELECT s.agent_id FROM provider_sessions s WHERE s.thread_id = t.id AND s.state IN (${sql.unsafe(live)})
                 ORDER BY s.started_at DESC LIMIT 1) AS agent_id,
-              (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open') AS waiting,
+              (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open') + ${sql.unsafe(issueDraftsWaiting('k'))} AS waiting,
               k.created_at
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
@@ -1485,7 +1493,7 @@ export class Queries extends Context.Service<
                 AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL) AS answers_wait,
               -- A turn of its lead or reviewer that waits for a place.
               (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL) AS turn_waits,
-              (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
+              (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueDraftsWaiting('k'))} AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
@@ -1652,12 +1660,22 @@ export class Queries extends Context.Service<
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
-      /** What a held step waits for: the agent out of usage, and when it is back. */
-      const waitsOf = (held: string | null) => {
+      /** What a held step waits for: the agent and account out of usage, when it is back, why it waits, and who could take it over now. */
+      const waitsOf = (held: string | null): HeldForLimit | null => {
         const output = held === null ? undefined : parse(held)
         const agentId = text(output, 'heldFor')
         const until = text(output, 'until')
-        return agentId === '' || until === '' ? null : { agentId, until }
+        if (agentId === '' || until === '') return null
+        const account = field(output, 'account')
+        const why = field(output, 'why')
+        const choices = field(output, 'choices')
+        return {
+          agentId,
+          until,
+          ...(typeof account === 'string' ? { accountId: account } : {}),
+          ...(why === 'waits' || why === 'nothing_free' || why === 'asked' ? { why } : {}),
+          ...(Array.isArray(choices) ? { choices: choices.flatMap(choiceOf) } : {}),
+        }
       }
 
       /** How many settled tasks the board shows: the most recent. */

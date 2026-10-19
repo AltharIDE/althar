@@ -200,7 +200,9 @@ const draftNews = (projectId: string, since: number) =>
           (SELECT json_extract(payload, '$.title') FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.drafted') AS drafted,
           -- Whether a try to file it ever ended unsure: that issue may be on the tracker, whatever became of the draft since.
           EXISTS (SELECT 1 FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.uncertain') AS doubted
-        FROM issue_drafts d WHERE d.id = ${draftId}`
+        FROM issue_drafts d WHERE d.id = ${draftId}
+          -- A lead's drafts are its own: it hears of them, and the coordinator didn't draft them.
+          AND d.thread_id IN (SELECT id FROM threads WHERE kind = 'coordinator')`
       if (draft === undefined) continue
       const tracker = draft.trackerName
       // Changed by the person, it is told by what it says now, and what it said when drafted.

@@ -132,6 +132,8 @@ export interface TaskModel {
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   /** Answers a step that needs the person. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
+  /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
+  readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
@@ -177,6 +179,13 @@ export interface TaskModel {
   /** Posts that review, as it stands; or again, after it wasn't posted. */
   readonly postReview: (draftId: string) => Promise<void>
   readonly discardReview: (draftId: string) => Promise<void>
+  /** Files an issue the lead drafted, as the person says; changes it before; or throws it away. */
+  readonly fileIssueDraft: (draftId: string) => Promise<void>
+  readonly changeIssueDraft: (
+    draftId: string,
+    edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+  ) => Promise<void>
+  readonly discardIssueDraft: (draftId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
@@ -563,6 +572,7 @@ export const useTask = (threadId: string): TaskModel => {
       return through
     },
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
+    handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(
         () => null,
@@ -639,6 +649,9 @@ export const useTask = (threadId: string): TaskModel => {
     changeReview: (draftId, edit) => act(() => client.changeReviewDraft(draftId, edit)),
     postReview: (draftId) => act(() => client.postReviewDraft(draftId)),
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
+    fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
+    changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
+    discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),

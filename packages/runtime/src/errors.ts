@@ -107,6 +107,11 @@ export class NothingToWaitFor extends Schema.TaggedError<NothingToWaitFor>()('No
   attentionId: Schema.String,
 }) {}
 
+/** Handing over a step held for a usage limit, for a task with none: it carried on at the reset, or was stopped, meanwhile. */
+export class NotHeld extends Schema.TaggedError<NotHeld>()('NotHeld', {
+  taskId: Schema.String,
+}) {}
+
 /** The message went to the agent before it could be taken back, or was taken back already. */
 export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
   itemId: Schema.String,
@@ -175,7 +180,7 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
 }) {}
 
 /**
- * A pull request can't be attached to the task (ADR-050), in words for the
+ * A pull request can't be attached to the task (ADR-051), in words for the
  * person or the coordinator: it isn't one, it's closed, its branch is
  * somewhere the task doesn't push to, another task follows it, or its
  * branch couldn't start from its head.

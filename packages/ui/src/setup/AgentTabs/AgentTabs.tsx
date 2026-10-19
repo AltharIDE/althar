@@ -1,5 +1,5 @@
 import { Tabs } from 'radix-ui'
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
 import type { Brand } from '../../foundations/brands/brands'
 import { BrandChip } from '../../foundations/Marks/Marks'
@@ -16,7 +16,9 @@ import s from './AgentTabs.module.css'
  * settings, which the consumer composes: its Accounts, and beside them, in
  * a narrower column, what its new work starts on. AgentTabs holds which one
  * is chosen, around both; arrows move between the tabs, as Radix's Tabs do.
- * Nothing here says what runs on an agent: settings is calm.
+ * Nothing here says what runs on an agent: settings is calm. The agents
+ * not on this machine come after a thin rule, their tabs quieter, so those
+ * that work now stand first however many more there are.
  */
 
 export interface AgentTab {
@@ -27,6 +29,8 @@ export interface AgentTab {
   line?: string
   /** Only the person can fix something on it: a dot on its tab. */
   yours?: boolean
+  /** It isn't on this machine: its tab quieter, after those that are. */
+  away?: boolean
 }
 
 export interface AgentTabsProps {
@@ -49,9 +53,11 @@ export function AgentTabs({ value, onValueChange, children, className }: AgentTa
 
 export interface AgentTabListText {
   yours: string
+  /** Said after an agent's name where it isn't on this machine. */
+  away: string
 }
 
-export const agentTabListText: AgentTabListText = { yours: 'needs you' }
+export const agentTabListText: AgentTabListText = { yours: 'needs you', away: 'not on this Mac' }
 
 export interface AgentTabListProps {
   /** What the tabs are, for a screen reader: Agents. */
@@ -66,17 +72,22 @@ export function AgentTabList({ label, agents, className, text }: AgentTabListPro
   const t = { ...agentTabListText, ...text }
   return (
     <Tabs.List aria-label={label} className={cx(s.list, className)}>
-      {agents.map((agent) => (
-        <Tabs.Trigger key={agent.id} value={agent.id} className={s.tab}>
-          <BrandChip brand={agent.brand} size={18} className={s.chip} />
-          <span>{agent.name}</span>
-          {agent.yours && (
-            <>
-              <span className={s.dot} aria-hidden="true" />
-              <VisuallyHidden>, {t.yours}</VisuallyHidden>
-            </>
-          )}
-        </Tabs.Trigger>
+      {agents.map((agent, at) => (
+        <Fragment key={agent.id}>
+          {/* A thin rule between those on this machine and the rest. */}
+          {agent.away && at > 0 && !agents[at - 1]?.away && <span className={s.split} aria-hidden="true" />}
+          <Tabs.Trigger value={agent.id} className={cx(s.tab, agent.away && s.away)}>
+            <BrandChip brand={agent.brand} size={18} className={s.chip} />
+            <span>{agent.name}</span>
+            {agent.away && <VisuallyHidden>, {t.away}</VisuallyHidden>}
+            {agent.yours && (
+              <>
+                <span className={s.dot} aria-hidden="true" />
+                <VisuallyHidden>, {t.yours}</VisuallyHidden>
+              </>
+            )}
+          </Tabs.Trigger>
+        </Fragment>
       ))}
     </Tabs.List>
   )

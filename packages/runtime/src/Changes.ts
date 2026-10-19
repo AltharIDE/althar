@@ -172,7 +172,7 @@ const Snapshot = Schema.Struct({
   /** The branch it is from, on the repository its commits go to; absent from one kept before this was, which is the task's own branch's name. */
   source: Schema.optional(Schema.String),
   /**
-   * Attached to the task rather than opened for it (ADR-050): publishing
+   * Attached to the task rather than opened for it (ADR-051): publishing
    * pushes to its branch, whatever the task's own is called, and never
    * opens another.
    */
@@ -204,7 +204,7 @@ export interface Host {
  * which weren't.
  */
 export type PublishedOne =
-  /** `attached`: pushed to the pull request the task was attached to, which it didn't open (ADR-050). */
+  /** `attached`: pushed to the pull request the task was attached to, which it didn't open (ADR-051). */
   (
     | { readonly kind: 'opened'; readonly change: ChangeSummary; readonly attached?: boolean }
     | { readonly kind: 'pushed'; readonly branch: string }
@@ -216,7 +216,7 @@ export type PublishedOne =
 /** What publishing did in each of the task's repositories, the project's first first. */
 export type Published = ReadonlyArray<PublishedOne>
 
-/** What attaching a pull request to a task is asked to do (ADR-050): by its link or number; `start`, the person's word to start the task's branch from its head. */
+/** What attaching a pull request to a task is asked to do (ADR-051): by its link or number; `start`, the person's word to start the task's branch from its head. */
 export interface AttachInput {
   readonly taskId: string
   readonly pullRequest: string
@@ -587,7 +587,7 @@ export class Changes extends Context.Service<
     ofTask(taskId: string): Effect.Effect<ReadonlyArray<ChangeSummary>, unknown>
     /**
      * Attaches the task to an open pull request it didn't open, by its link
-     * or number, and follows it from then on (ADR-050); or says what starting
+     * or number, and follows it from then on (ADR-051); or says what starting
      * its branch from that pull request's head would keep, where it isn't
      * based on it and the person hasn't said to.
      */
@@ -758,7 +758,7 @@ export class Changes extends Context.Service<
           )
           const links = url === undefined ? all : all.filter((candidate) => candidate.seen?.url === url)
           const reachable = links.filter((candidate) => candidate.link.connectionId !== null)
-          // The one it follows first: one attached since takes over from one still open before it (ADR-050).
+          // The one it follows first: one attached since takes over from one still open before it (ADR-051).
           const link = (
             reachable.find((candidate) => candidate.seen?.state === 'open' && candidate.link.listening === 1) ??
             reachable.find((candidate) => candidate.seen?.state === 'open') ??
@@ -1058,7 +1058,7 @@ export class Changes extends Context.Service<
               : task.baseRef?.startsWith('upstream/') === true
                 ? task.baseRef.slice('upstream/'.length)
                 : repository.defaultBranch
-          // Attached to an open pull request it didn't open, its branch goes there, and nothing else opens (ADR-050).
+          // Attached to an open pull request it didn't open, its branch goes there, and nothing else opens (ADR-051).
           const attached = next === undefined ? yield* attachedOf(input.taskId, task.workspaceId) : undefined
           if (attached !== undefined) return yield* publishAttached(input, task, attached, pushTarget)
           // Its next pull request goes on a branch of its own, the merged or closed one left as it is: from the default branch of the
@@ -1271,7 +1271,7 @@ export class Changes extends Context.Service<
 
       /**
        * Publishes a repository of the task to the open pull request it was
-       * attached to (ADR-050): its branch goes onto that pull request's own
+       * attached to (ADR-051): its branch goes onto that pull request's own
        * branch, whatever each is called, as a plain push, so only where it
        * adds to what is there; where it wouldn't, it says so, and nothing is
        * forced. That pull request is read again, and is what the task shows.
@@ -1319,7 +1319,7 @@ export class Changes extends Context.Service<
 
       /**
        * Attaches one of the task's repositories to an open pull request it
-       * didn't open, by its link or its number (ADR-050): one opened by hand,
+       * didn't open, by its link or its number (ADR-051): one opened by hand,
        * or from a fork into the repository it came from, whose branch is on
        * the fork this clone pushes to. Its branch must be one the task pushes
        * to; another task following it keeps it. The task's branch, where it
@@ -1911,7 +1911,7 @@ export class Changes extends Context.Service<
       const push = (taskId: string, seen: string, url?: string) =>
         Effect.gen(function* () {
           const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
-          // Onto the pull request's own branch, which for one attached to the task may be called otherwise (ADR-050).
+          // Onto the pull request's own branch, which for one attached to the task may be called otherwise (ADR-051).
           const onto = sourceOf(snapshot, workspace.branch)
           const tip = yield* remoteTip(workspace.path, pushTarget, onto)
           const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
@@ -2987,7 +2987,7 @@ export class Changes extends Context.Service<
             if (voice === 'person' || voice === 'member') forLead.push(commentForLead(comment, name))
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
-          // Attached to the task, it stays so (ADR-050).
+          // Attached to the task, it stays so (ADR-051).
           const after = {
             ...snapshotOf(now, before.repository, before.words, checks),
             ...(before.attached === true ? { attached: true } : {}),

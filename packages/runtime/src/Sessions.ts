@@ -391,6 +391,28 @@ const STANDING_DICTATED =
 /** What the person asks an agent's context be compacted with: the agent's own command, sent bare as a turn of its own. */
 export const COMPACT = '/compact'
 
+/**
+ * The options a session holds at a value for its life (the registry's
+ * `options.held`), and for a role that only reads, its mode option at the
+ * reader's mode, so an agent that moves itself out of it is put back.
+ */
+export const heldFor = (definition: AgentDefinition, reads: boolean): { readonly held?: Readonly<Record<string, string>> } => {
+  const reader = reads ? definition.modes.reader : null
+  const held = { ...definition.options.held, ...(reader === null ? {} : { [definition.options.mode]: reader }) }
+  return Object.keys(held).length === 0 ? {} : { held }
+}
+
+/**
+ * What the agent is told for a turn, where a message that starts with `/`
+ * would run one of its own commands and Althar sends it only its own
+ * (the registry's `commands`): the person's, said as words, so it reads
+ * them rather than running them. Althar's own (`COMPACT`) goes bare.
+ */
+export const asTold = (definition: AgentDefinition, prompt: string): string =>
+  definition.commands === 'althar' && prompt !== COMPACT && prompt.trimStart().startsWith('/')
+    ? `The person wrote this, which Althar passes on as words, not as one of your commands:\n\n${prompt}`
+    : prompt
+
 /** Tokens in a line: 412k, 1.2M. */
 const tokensWord = (tokens: number) => (tokens >= 1_000_000 ? `${Math.round(tokens / 100_000) / 10}M` : `${Math.round(tokens / 1000)}k`)
 
@@ -1084,7 +1106,7 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          let prompt = compacting ? COMPACT : promptFor(inputs, briefed)
+          let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed))
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -1107,7 +1129,7 @@ export class Sessions extends Context.Service<
                       Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
                     ),
                   )
-                  prompt = promptFor(inputs, briefed, news)
+                  prompt = asTold(running.entry.definition, promptFor(inputs, briefed, news))
                 }
                 const at = yield* timestamp
                 yield* sql`INSERT INTO turn_deliveries ${sql.insert({
@@ -1740,6 +1762,8 @@ export class Sessions extends Context.Service<
                 // Althar's tools, offline where the agent lets Althar take its network away (the registry says what each is held to).
                 mode: reads ? definition.modes.reader : definition.modes.ask,
                 modeOptionId: definition.options.mode,
+                // What would approve without asking stays off; and a role that only reads stays in its mode, whatever the agent does.
+                ...heldFor(definition, reads),
                 mcpServers: [tools.server],
                 ...(definition.sessionMeta === undefined
                   ? {}
@@ -2407,6 +2431,8 @@ export class Sessions extends Context.Service<
             "Where the task ends in a pull request, write its description as you finish, in finish_step's `descriptions`, in the repository's pull request template where it has one. Your summary and `built` are for the person in Althar; the description is for whoever reviews the pull request on the code host, who hasn't seen your work: why the change exists, what it does, how you went about it and how it was checked, in plain prose, with nothing of the review, your evidence or Althar's workings. finish_step's `descriptions` says more.",
             // Althar reaches the code host for the task (ADR-011).
             `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
+            // A lead tracks what is not its task's on the person's trackers, and the person files it (Coordinator.ts, IssueDrafts.ts).
+            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
             [
               ...published.filter((said) => said !== ''),

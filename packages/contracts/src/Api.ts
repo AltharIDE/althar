@@ -75,12 +75,19 @@ export const AgentStatus = Schema.Struct({
   ways: Schema.Array(Schema.Literals(['browser', 'device'])),
   /** Its accounts, in the person's order. */
   accounts: Schema.Array(AccountStatus),
+  /** More accounts can be added: its sign-in is kept in each account's own folder (ADR-012). */
+  addsAccounts: Schema.Boolean,
   /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
   installed: Schema.Boolean,
   /** It runs from the copy Althar downloaded, as the person has none of their own. */
   kept: Schema.Boolean,
-  /** Althar can download it for the person, about this big; null where it can't. `installing` while it does. */
-  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean })),
+  /**
+   * Althar can download it for the person, about this big; null where it can't. `installing` while it does.
+   * `pinned`, the one version it fetches from its maker (Antigravity's server); null for its latest release on GitHub.
+   */
+  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean, pinned: Schema.NullOr(Schema.String) })),
+  /** Its maker's page on installing it, for a person who installs it themselves; null where Althar names none. */
+  guide: Schema.NullOr(Schema.String),
   /** Why Althar couldn't check it, in words for the person; null where it could. The other agents are checked all the same. */
   problem: Schema.NullOr(Schema.String),
 })
@@ -394,6 +401,9 @@ export const ProjectNote = Schema.Struct({
   keptBy: Schema.Literals(['coordinator', 'person']),
 })
 export type ProjectNote = typeof ProjectNote.Type
+
+/** How long a note may be: a decision, in a sentence or two. */
+export const NOTE_LENGTH = 300
 export type ProjectList = typeof ProjectList.Type
 
 export const TaskSummary = Schema.Struct({
@@ -693,7 +703,7 @@ export const ChangeSummary = Schema.Struct({
 export type ChangeSummary = typeof ChangeSummary.Type
 
 /**
- * What attaching a pull request to a task did (ADR-050): `attached`, the
+ * What attaching a pull request to a task did (ADR-051): `attached`, the
  * task follows it now, its branch `started` from its head or not, `kept` of
  * its own commits on top; or `start`, where its branch isn't based on that
  * head, what starting from it would keep (`own`), for the person to say.
@@ -1184,6 +1194,33 @@ export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'leaveOut'
 export type TaskAction = typeof TaskAction.Type
 
 /**
+ * An account that could take over a step a usage limit stopped: the agent,
+ * the account, and the model it would run, by the agent's id for it (null
+ * for the agent's own). Each of the project's accounts but the one out,
+ * whether out of usage or signed in, as they stood: the window reads which
+ * are free now.
+ */
+export const LimitChoice = Schema.Struct({ agentId: Schema.String, accountId: Schema.String, model: Schema.NullOr(Schema.String) })
+export type LimitChoice = typeof LimitChoice.Type
+
+/**
+ * A step held until an agent's usage limit resets: which agent and account
+ * ran out, and when it is back; why it waits rather than moving on (the
+ * project waits for resets, it moves on but no other model was free, or the
+ * person said to wait); and who could take it over now, as they stood when it
+ * was held: the window reads which are free. Held before Althar kept those,
+ * it says only who and until when.
+ */
+export const HeldForLimit = Schema.Struct({
+  agentId: Schema.String,
+  until: Schema.String,
+  accountId: Schema.optional(Schema.NullOr(Schema.String)),
+  why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
+  choices: Schema.optional(Schema.Array(LimitChoice)),
+})
+export type HeldForLimit = typeof HeldForLimit.Type
+
+/**
  * A task as its card shows it, in the coordinator's thread and on the board:
  * where it stands, its plan, the issue it came from, its pull request, the
  * step it is on, what its lead last reported, who leads it.
@@ -1243,7 +1280,7 @@ export const TaskCard = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
-  waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+  waits: Schema.NullOr(HeldForLimit),
   /**
    * Ready, but its lead couldn't resolve the conflict its branch has with its
    * default branch, or fix the checks that failed on the merge Althar pushed,
@@ -1594,16 +1631,6 @@ export const SessionSummary = Schema.Struct({
 })
 export type SessionSummary = typeof SessionSummary.Type
 
-/**
- * An account that could take over a step a usage limit stopped: the agent,
- * the account, and the model it would run, by the agent's id for it (null
- * for the agent's own). Each of the project's accounts but the one out,
- * whether out of usage or signed in, as they stood: the window reads which
- * are free now.
- */
-export const LimitChoice = Schema.Struct({ agentId: Schema.String, accountId: Schema.String, model: Schema.NullOr(Schema.String) })
-export type LimitChoice = typeof LimitChoice.Type
-
 /** What a step a usage limit stopped asks with: whose account, when it resets (null where it didn't say), and who could take it over. */
 export const LimitCall = Schema.Struct({
   accountId: Schema.NullOr(Schema.String),
@@ -1804,7 +1831,7 @@ export const ThreadSnapshot = Schema.Struct({
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
-    waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+    waits: Schema.NullOr(HeldForLimit),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
     /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
@@ -2485,6 +2512,16 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Hands a step held for a usage limit to another agent, on the account and
+   * model the person picked, rather than waiting for the reset: as answering
+   * its call would. A lead's step without a free place waits its turn in Up next.
+   */
+  command(
+    'HandOverHeld',
+    { taskId: Schema.String, agentId: Schema.String, accountId: Schema.optional(Schema.String), model: Schema.optional(Schema.String) },
+    Schema.Void,
+  ),
   /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
   command('AnswerQuestion', { attentionId: Schema.String, answers: Schema.Record(Schema.String, FieldAnswer) }, Schema.Void),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
@@ -2574,6 +2611,8 @@ export const Api = RpcGroup.make(
   call('GetProjectNotes', { projectId: Schema.String }, Schema.Array(ProjectNote)),
   /** Drops one of a project's notes: it no longer holds, and no coordinator session starts with it. */
   command('DropProjectNote', { projectId: Schema.String, noteId: Schema.String }, Schema.Void),
+  /** Says one of a project's notes in other words, the person's: a sentence or two, as the coordinator keeps one. */
+  command('EditProjectNote', { projectId: Schema.String, noteId: Schema.String, body: Schema.String }, Schema.Void),
   /**
    * The names a project's code uses that have parts (`RefundLedger`,
    * `useEffect`, `charges-api.ts`), most used first, so dictation can write
@@ -2704,7 +2743,7 @@ export const Api = RpcGroup.make(
   command('StopListening', { taskId: Schema.String, url: Schema.String }, Schema.Void),
   /**
    * Attaches the task to an open pull request it didn't open, by its link or
-   * number, and follows it from then on (ADR-050). Where the task's branch
+   * number, and follows it from then on (ADR-051). Where the task's branch
    * isn't based on its head, nothing changes, and it answers `start`, with
    * how many commits of its own starting from the head keeps; `start` says
    * to start it there.

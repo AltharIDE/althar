@@ -323,8 +323,14 @@ describe('nudges', () => {
     )
     const stuck = (payload: object) => callWords({ kind: 'stuck', payload }, named)
     assert.strictEqual(stuck({ step: 'publish', why: 'failed_to_start' }), 'Needs you: Opening the pull request is stuck')
-    assert.strictEqual(stuck({ step: 'review', why: 'usage_limit', agentId: 'codex' }), 'Needs you: Codex reached its usage limit')
-    assert.strictEqual(stuck({ step: 'review', why: 'usage_limit', agentId: 'aider' }), 'Needs you: aider reached its usage limit')
+    assert.strictEqual(
+      stuck({ step: 'review', why: 'usage_limit', agentId: 'codex' }),
+      'Needs you: Codex ran out of usage during the review',
+    )
+    assert.strictEqual(
+      stuck({ step: 'review', why: 'usage_limit', agentId: 'aider' }),
+      'Needs you: aider ran out of usage during the review',
+    )
     assert.strictEqual(readyWords(''), 'Ready to look at')
     assert.strictEqual(readyWords('Did it.\nAnd more.'), 'Ready: Did it.')
   })

@@ -26,13 +26,15 @@ export type AskCardProps = RootProps<
     who?: ReactNode
     /** What it asks for, in a sentence. Left out where what follows says it, as several questions do. */
     what?: ReactNode
+    /** It offers a way on, but nothing waits on the person: work that goes on by itself if they do nothing. Drawn in ink, not violet. */
+    quiet?: boolean
     children?: ReactNode
   }
 >
 
-export function AskCard({ icon, kicker, kickerId, who, what, children, className, ...rest }: AskCardProps) {
+export function AskCard({ icon, kicker, kickerId, who, what, quiet = false, children, className, ...rest }: AskCardProps) {
   return (
-    <div className={cx(s.card, className)} {...rest}>
+    <div className={cx(s.card, quiet && s.quiet, className)} {...rest}>
       <div className={s.head}>
         <Icon name={icon} size={12} />
         <span className={s.kicker} id={kickerId}>

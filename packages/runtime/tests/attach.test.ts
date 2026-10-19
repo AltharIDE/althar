@@ -20,7 +20,7 @@ import * as Runtime from '../src/Runtime'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
- * A task attached to a pull request it didn't open (ADR-050): here, as in
+ * A task attached to a pull request it didn't open (ADR-051): here, as in
  * Althar's own repository, a fork (you/api) whose pull requests open on the
  * repository it came from (meridian/api), and one open there from the fork's
  * branch `fix-send-back`, which no task's branch is called. Attached, the task

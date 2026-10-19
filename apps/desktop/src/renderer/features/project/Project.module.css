@@ -46,7 +46,7 @@
 .board > .failure {
   padding: 16px 16px 0 0;
 }
-/* Beside the conversation, the lanes narrow before the board scrolls. */
+/* Beside the conversation, the lanes narrow, then collapse to rails, before the board scrolls. */
 .both .board {
   --lane-min: 186px;
 }
@@ -73,6 +73,7 @@
 
 .composer {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
