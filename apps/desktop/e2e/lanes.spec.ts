@@ -63,7 +63,7 @@ test('collapses the lanes that don’t fit, and opens Needs you when something a
     await page.screenshot({ path: 'test-results/lanes-needs-you-arrived.png', scale: 'css' })
 
     // Beside the conversation, at the window's narrowest: Running and Needs you keep the room.
-    await page.getByRole('radio', { name: /^Both/ }).click()
+    await page.getByRole('radio', { name: 'Home' }).click()
     const beside = page.getByRole('region', { name: 'The project’s work' })
     await expect(beside.getByRole('button', { name: 'Expand Settled, 0' })).toBeVisible()
     await expect(beside.getByRole('button', { name: /^Expand Up next/ })).toBeVisible()

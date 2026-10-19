@@ -60,7 +60,7 @@ export const boardText: BoardText = {
   empty: {
     [BoardLane.Next]: 'Nothing is waiting to start.',
     [BoardLane.Running]: 'Nothing is running.',
-    [BoardLane.Yours]: 'Nothing is waiting on you.',
+    [BoardLane.Yours]: 'Nothing needs you.',
     [BoardLane.Settled]: 'Nothing has settled yet.',
   },
   collapse: (lane) => `Collapse ${lane}`,
@@ -279,7 +279,7 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
         <span className={s.railGlyph}>
           <Glyph lane={lane} />
         </span>
-        <span className={s.count}>{count}</span>
+        <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
         <Heading level={headingLevel} id={id} className={cx(s.title, s.railName)}>
           {name}
         </Heading>
@@ -301,7 +301,7 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
         <Heading level={headingLevel} id={id} className={s.title}>
           {name}
         </Heading>
-        <span className={s.count}>{count}</span>
+        <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
         {folding !== null && (
           <IconButton
             icon="chevronL"
@@ -336,7 +336,12 @@ export function BoardList({ children }: { children: ReactNode }) {
   )
 }
 
-/** A quiet line between groups in a lane, naming the group under it: what starts when an agent is free. */
-export function BoardDivider({ children }: { children: ReactNode }) {
-  return <p className={s.divider}>{children}</p>
+/** A quiet line between groups in a lane, naming the group under it: what starts when an agent is free; at its end, what to do with the group. */
+export function BoardDivider({ children, end }: { children: ReactNode; end?: ReactNode }) {
+  return (
+    <p className={s.divider}>
+      {children}
+      {end !== undefined && end !== null && <span className={s.dividerEnd}>{end}</span>}
+    </p>
+  )
 }

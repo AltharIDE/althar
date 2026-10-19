@@ -49,6 +49,19 @@ export const FromOutside: Story = {
 export const ChecksPassed: Story = {
   args: { mark: Brand.GitHubActions, from: undefined, verb: 'All 41 checks passed on', children: undefined, at: 'just now' },
 }
+/** Children that all came to nothing, as a caller's `{body && …}{logs && …}` does: still only its line, no empty box. */
+export const EmptyChildren: Story = {
+  args: { mark: Brand.GitHubActions, from: undefined, verb: 'Checks passed on', where: 'PR #273', at: '22m ago' },
+  render: (args) => (
+    <Arrived {...args}>
+      {false}
+      {null}
+    </Arrived>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('blockquote')).toBeNull()
+  },
+}
 export const IssueChanged: Story = {
   args: { mark: Brand.Linear, from: 'priya', verb: 'moved to In review', where: 'MER-431', children: undefined },
 }

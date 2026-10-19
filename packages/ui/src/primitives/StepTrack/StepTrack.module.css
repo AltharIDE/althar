@@ -24,6 +24,7 @@
     box-shadow 400ms var(--ease);
 }
 .name {
+  padding-inline-end: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

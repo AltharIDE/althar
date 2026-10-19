@@ -23,7 +23,7 @@
   margin-left: -7px;
   color: var(--t-2);
 }
-.quiet:hover,
+.quiet:hover:not([data-disabled]),
 .quiet[data-state='open'] {
   background: var(--paper);
   box-shadow: inset 0 0 0 1px var(--line-2);
@@ -34,11 +34,11 @@
   box-shadow: inset 0 0 0 1px var(--line-2);
   font-weight: 500;
 }
-.filled:hover,
+.filled:hover:not([data-disabled]),
 .filled[data-state='open'] {
   background: var(--n-3);
 }
-.trigger:active {
+.trigger:active:not([data-disabled]) {
   background: var(--n-4);
 }
 .trigger[data-disabled] {
@@ -90,6 +90,9 @@
 }
 .item[data-highlighted] {
   background: var(--n-2);
+}
+.item:active:not([data-disabled]) {
+  background: var(--n-4);
 }
 .item[data-state='checked'] {
   font-weight: 550;

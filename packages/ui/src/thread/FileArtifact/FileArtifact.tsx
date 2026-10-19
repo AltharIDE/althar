@@ -20,7 +20,7 @@ export interface FileArtifactText {
 }
 
 export const fileArtifactText: FileArtifactText = {
-  lines: (n) => `${n} lines`,
+  lines: (n) => (n === 1 ? '1 line' : `${n.toLocaleString('en')} lines`),
   open: 'Open in editor',
   readMore: 'Read in the panel',
   empty: 'Empty file',

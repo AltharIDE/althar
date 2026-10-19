@@ -158,6 +158,8 @@ interface ItemRow {
   readonly agentId: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
+  /** For a message the person said: some of it was dictated. */
+  readonly dictated?: number | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
@@ -359,7 +361,14 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
           pictures: picturesOf(field(content, 'pictures')),
         },
-        input: row.inputState === null ? null : { state: row.inputState, interrupting: row.disposition === 'interrupt_and_continue' },
+        input:
+          row.inputState === null
+            ? null
+            : {
+                state: row.inputState,
+                interrupting: row.disposition === 'interrupt_and_continue',
+                ...(row.dictated === 1 ? { dictated: true } : {}),
+              },
       }
     case 'agent_message':
     case 'agent_thought':
@@ -741,7 +750,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
-            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, i.created_at,
+            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, u.dictated, i.created_at,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
@@ -1349,11 +1358,18 @@ export class Queries extends Context.Service<
         }
       })
 
-      /** A waiting task's place in the order what waits starts, among everything that waits: 1 starts first. */
+      /**
+       * A waiting task's place in its project's line, the tasks that wait for a place before any agent has worked on them, in
+       * the order they start (1 first), and whether the line is in the person's order; null where it isn't in the line.
+       */
       const placeOf = (taskId: string) =>
         Effect.gen(function* () {
-          const order = yield* (yield* Busy).order
-          return Math.max(1, order.findIndex((waiter) => waiter.taskId === taskId && waiter.review !== true) + 1)
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+          if (task === undefined) return null
+          const line = yield* (yield* Busy).line(task.projectId)
+          const at = line.tasks.indexOf(taskId)
+          return at < 0 ? null : { place: at + 1, reordered: line.reordered }
         })
 
       /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
@@ -1507,6 +1523,8 @@ export class Queries extends Context.Service<
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
+          // Waiting so before any agent has worked on it, whatever its kind: in its project's line, up next.
+          const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
           const unshipped =
             after.length === 0
               ? null
@@ -1628,7 +1646,8 @@ export class Queries extends Context.Service<
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
-            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true, place: yield* placeOf(taskId) } : {}),
+            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
@@ -2046,6 +2065,7 @@ export class Queries extends Context.Service<
               handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,
+              ...(card?.inLine === true && card.place !== undefined ? { place: card.place } : {}),
               steps: card?.plan?.steps ?? [],
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,

@@ -39,11 +39,14 @@
   border-radius: 99px;
   background: var(--sunk);
 }
-.back svg {
-  transform: rotate(180deg);
+.back:hover:not(:disabled) {
+  background: var(--n-4);
 }
 .title {
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 13px;
   font-weight: 600;
   color: var(--t-1);

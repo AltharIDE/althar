@@ -67,7 +67,6 @@
   --signal-bright: var(--signal-on-ink-hover);
   --signal-pressed: var(--signal-on-ink-pressed);
   --on-signal: #141417;
-  --edge-hover: rgba(255, 255, 255, 0.05);
   --danger: var(--term-danger);
   color-scheme: dark;
 }

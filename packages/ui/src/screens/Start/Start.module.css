@@ -369,8 +369,8 @@
 }
 .repo:focus-visible,
 .repo:has(:focus-visible) {
-  outline: 2px solid var(--live);
-  outline-offset: -2px;
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
 }
 .tick:focus-visible {
   outline: none;
@@ -385,7 +385,8 @@
   width: 16px;
   height: 16px;
   border-radius: 5px;
-  box-shadow: inset 0 0 0 1.5px var(--line-2);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
   color: var(--on-ink);
   transition:
     background var(--fast) var(--ease),
