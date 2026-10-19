@@ -240,6 +240,8 @@ export interface FakeAgentOptions {
   readonly allowAllSticks?: boolean
   /** It says yes to setting `allow_all`, and leaves it where it was. */
   readonly allowAllStays?: boolean
+  /** Once it leaves its mode by itself (`leaveMode`), it refuses to be put back in one. */
+  readonly leavesForGood?: boolean
 }
 
 interface SessionState {
@@ -273,6 +275,8 @@ interface SessionState {
   allowAll: string | undefined
   /** It turned `allow_all` on itself, and, with `allowAllSticks`, keeps it so. */
   allowAllStuck: boolean
+  /** It left its mode by itself, and, with `leavesForGood`, won't be put back. */
+  leftForGood: boolean
   /** How large it last said its context is, in tokens. */
   contextSize: number
 }
@@ -1147,6 +1151,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         served: 0,
         allowAll: options.allowAll,
         allowAllStuck: false,
+        leftForGood: false,
       }
       sessions.set(sessionId, session)
       return {
@@ -1158,6 +1163,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.setMode, ({ params }) => {
       const session = sessionOf(params.sessionId)
       if (!MODES.includes(params.modeId)) throw acp.RequestError.invalidParams(params, `No mode ${params.modeId}`)
+      if (session.leftForGood) throw acp.RequestError.internalError({ details: 'It stays where it went' })
       session.mode = params.modeId
       return {}
     })
@@ -1594,7 +1600,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.leaveMode:
           session.mode = 'ask'
-          await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
+          session.leftForGood = options.leavesForGood === true
+          // As its kind says it: a mode option moved, or, with legacy modes alone, the session's current mode.
+          await update(
+            modes === 'legacy'
+              ? { sessionUpdate: 'current_mode_update', currentModeId: session.mode }
+              : { sessionUpdate: 'config_option_update', configOptions: configOptions(session) },
+          )
           await say('Left plan mode')
           return ended()
         case scenarios.background:

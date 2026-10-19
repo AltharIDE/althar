@@ -782,6 +782,19 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         let unheld: { readonly configId: string; readonly value: string } | undefined
         const unheldWords = (moved: { readonly configId: string; readonly value: string }) =>
           `The agent's ${moved.configId} moved, and Althar couldn't set it back to ${moved.value}, so it stopped the session.`
+        /** Leaves the session unheld: its turn fails and stops, and it takes no more prompts. */
+        const letGo = (configId: string, value: string) =>
+          Effect.gen(function* () {
+            unheld ??= { configId, value }
+            const turn = Option.getOrUndefined(yield* Ref.get(state.current))
+            if (turn !== undefined) turn.failure = { failure: 'unknown', message: unheldWords(unheld) }
+            yield* Effect.ignore(cancel)
+            const said: SessionEvent = { _tag: 'Notice', severity: 'error', title: unheldWords(unheld) }
+            return said
+          })
+        /** A mode held where the agent offers only its legacy modes, no option to hold it by: set back by `session/set_mode`. */
+        const modeKey = sessionOptions.modeOptionId ?? 'mode'
+        const heldMode = modeOption === undefined && legacyIds.length > 0 ? sessionOptions.held?.[modeKey] : undefined
 
         /** What an update means here: the mode it changes, and a failure the agent reported in structured form. */
         const interpret = (update: acp.SessionUpdate) =>
@@ -800,11 +813,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                   continue
                 }
                 // Left where it approves without asking, it goes no further: the turn fails, and nothing more is sent.
-                unheld ??= { configId, value }
-                const turn = Option.getOrUndefined(yield* Ref.get(state.current))
-                if (turn !== undefined) turn.failure = { failure: 'unknown', message: unheldWords(unheld) }
-                yield* Effect.ignore(cancel)
-                events.push({ _tag: 'Notice', severity: 'error', title: unheldWords(unheld) })
+                events.push(yield* letGo(configId, value))
               }
               const changed = modeOptionOf(yield* Ref.get(current))
               if (changed !== undefined && String(changed.currentValue) !== (yield* Ref.get(mode))) {
@@ -813,6 +822,24 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               }
             } else if (event._tag === 'ModeChanged') {
               if (event.modeId === (yield* Ref.get(mode))) return []
+              if (heldMode !== undefined && event.modeId !== heldMode) {
+                const restored = yield* Effect.exit(
+                  call('session/set_mode', () =>
+                    connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId: heldMode }),
+                  ).pipe(Effect.timeout(Duration.seconds(10))),
+                )
+                if (Exit.isSuccess(restored)) {
+                  yield* Ref.set(mode, heldMode)
+                  const back: SessionEvent = {
+                    _tag: 'Notice',
+                    severity: 'info',
+                    title: `Althar set the agent's ${modeKey} back to ${heldMode}.`,
+                  }
+                  return [back]
+                }
+                yield* Ref.set(mode, event.modeId)
+                return [event, yield* letGo(modeKey, heldMode)]
+              }
               yield* Ref.set(mode, event.modeId)
             } else if (update.sessionUpdate === 'session_info_update') {
               const reported = structuredFailure(update._meta, yield* DateTime.nowAsDate)

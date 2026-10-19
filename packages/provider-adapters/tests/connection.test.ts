@@ -943,6 +943,31 @@ describe('AgentConnection', () => {
       ),
     )
 
+    it.live('puts a reader back in its mode where the agent has legacy modes alone, and stops the session where it can’t', () =>
+      Effect.gen(function* () {
+        yield* withConnection(variant({ modes: 'legacy' }), (connection) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'read-only', held: { mode: 'read-only' } })
+            const events = yield* Stream.runCollect(session.prompt(scenarios.leaveMode))
+            assert.deepInclude(events, { _tag: 'Notice', severity: 'info', title: "Althar set the agent's mode back to read-only." })
+            assert.strictEqual(yield* session.mode, 'read-only')
+            assert.match(text(yield* Stream.runCollect(session.prompt(scenarios.settings))), /^mode=read-only /)
+          }),
+        )
+        yield* withConnection(variant({ modes: 'legacy', leavesForGood: true }), (connection) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'read-only', held: { mode: 'read-only' } })
+            const events = yield* Stream.runCollect(session.prompt(scenarios.leaveMode))
+            const said = "The agent's mode moved, and Althar couldn't set it back to read-only, so it stopped the session."
+            assert.deepInclude(events, { _tag: 'Notice', severity: 'error', title: said })
+            const ended = events.at(-1)
+            assert.deepStrictEqual(ended?._tag === 'TurnEnded' ? ended.failure : undefined, { failure: 'unknown', message: said })
+            assert.instanceOf(yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello))), AgentRequestFailed)
+          }),
+        )
+      }),
+    )
+
     it.live('refuses a session whose mode did not change when set, and closes it at once', () =>
       Effect.gen(function* () {
         const closed: Array<string> = []
