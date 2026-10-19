@@ -133,6 +133,48 @@ span.you {
   box-shadow: inset 0 0 0 1.5px var(--signal);
 }
 
+/* A lane holding two things, one at a time: both named in its head, the one showing in ink. */
+.shelves {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.shelf {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--t-3);
+  cursor: pointer;
+  outline: 0;
+  transition: color var(--fast) var(--ease);
+}
+.shelf[aria-pressed='true'],
+.shelf:hover {
+  color: var(--t-1);
+}
+.shelf:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--signal);
+}
+.shelfCount {
+  font: 500 11.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+
 .body {
   flex: 1;
   min-height: 0;

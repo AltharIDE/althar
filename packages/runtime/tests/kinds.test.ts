@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -25,8 +25,9 @@ import { callTool, repository, runtime, until } from './support'
  * plan stays on this Mac and ends in nothing, with no pull request, whatever
  * its lead wrote; a review reads someone else's pull request; everything else
  * is a change, every planned task among them. A plain task that finished
- * waits on its board as Finished, and nothing else counts it; seeing it
- * settles it as done, and writing to its lead opens it again.
+ * waits in Needs you as Finished, counted as any task ready, until the
+ * person marks it done or keeps it for later; seeing it moves nothing, and
+ * writing to its lead opens it again.
  */
 
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
@@ -76,7 +77,10 @@ const plain = (projectId: string, title: string, description: string) =>
   })
 
 /** The task's card once it stands where `check` wants it. */
-const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean) =>
+const cardOnce = (
+  taskId: string,
+  check: (card: { readonly phase: string; readonly kind: string; readonly keptAt?: string | null | undefined }) => boolean,
+) =>
   Effect.gen(function* () {
     const queries = yield* Queries
     const [card] = yield* until(
@@ -93,6 +97,16 @@ const row = (taskId: string) =>
     const [task] = yield* sql<{ state: string; settledAt: string | null; seenAt: string | null }>`
       SELECT state, settled_at, seen_at FROM tasks WHERE id = ${taskId}`
     return task ?? assert.fail('no task')
+  })
+
+/** The person presses Done on the task, or Keep for later. Whether it moved. */
+const markDone = (taskId: string) =>
+  Effect.gen(function* () {
+    return yield* (yield* Tasks).markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId }), taskId })
+  })
+const keep = (taskId: string) =>
+  Effect.gen(function* () {
+    return yield* (yield* Tasks).keep({ envelope: yield* Runtime.envelope('task.keep', { taskId }), taskId })
   })
 
 const picture = (digest: string, name: string) => ({ sha256: digest, mediaType: 'image/png', bytes: 120, width: 8, height: 6, name })
@@ -179,7 +193,7 @@ describe("a task's kind", () => {
       // Its plan ends in a pull request, and it has its branch: a change before it has done anything.
       assert.deepInclude(yield* queries.card(later.taskId), { phase: 'planned', kind: 'change' })
 
-      // Finished, it waits on its board, and nothing else counts it as waiting on the person.
+      // Finished, a plain task waits in Needs you as a change does: the board, the home and the project's count all say it.
       const board = yield* queries.board(project.projectId)
       assert.sameDeepMembers(
         board.tasks.filter((task) => task.phase === 'ready').map((task) => [task.title, task.kind]),
@@ -193,11 +207,21 @@ describe("a task's kind", () => {
       const home = yield* queries.home()
       assert.sameMembers(
         home.tasks.map((task) => task.title),
-        ['Retry the checkout', 'Keep the old checkout'],
+        ['Which partners still call v1?', 'Sketch the settings', 'Retry the checkout', 'Keep the old checkout'],
       )
-      const summary = (yield* queries.projects).projects.find((one) => one.id === project.projectId)
-      assert.strictEqual(summary?.ready, 2)
-      assert.sameMembers([...(yield* queries.finished)], [question.taskId, sketch.taskId])
+      const readyIn = Effect.map(queries.projects, (all) => all.projects.find((one) => one.id === project.projectId)?.ready)
+      assert.strictEqual(yield* readyIn, 4)
+      assert.lengthOf([...(yield* queries.kept)], 0)
+      // Kept for later, it is out of Needs you: kept on its board, and nothing else counts it.
+      assert.isTrue(yield* keep(question.taskId))
+      const shelved = yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
+      assert.isNotNull(shelved.keptAt)
+      assert.notInclude(
+        (yield* queries.home()).tasks.map((task) => task.title),
+        'Which partners still call v1?',
+      )
+      assert.strictEqual(yield* readyIn, 3)
+      assert.sameMembers([...(yield* queries.kept)], [question.taskId])
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -298,8 +322,8 @@ describe("a task's kind", () => {
   )
 })
 
-describe('seeing a task', () => {
-  it.live('settles a plain task that finished as done, and only that; writing to its lead opens it again', () =>
+describe('settling a task that isn’t a change', () => {
+  it.live('moves nothing when seen: a finished plain task waits in Needs you until the person marks it done', () =>
     Effect.gen(function* () {
       const queries = yield* Queries
       const tasks = yield* Tasks
@@ -311,61 +335,148 @@ describe('seeing a task', () => {
       yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
       yield* cardOnce(change.taskId, (card) => card.phase === 'ready')
       yield* cardOnce(working.taskId, (card) => card.phase === 'running')
-      // What the window does as a task's screen opens.
-      const see = (taskId: string) =>
-        Effect.gen(function* () {
-          const card = yield* queries.card(taskId)
-          yield* tasks.see({ taskId, finished: card.kind === 'plain' && card.phase === 'ready' })
-        })
 
-      // A change ready to accept, and a task at work, are only marked seen.
-      yield* see(change.taskId)
-      yield* see(working.taskId)
-      for (const taskId of [change.taskId, working.taskId]) {
+      // Opened, each is only marked seen: the finished plain task too, which stays in Needs you.
+      for (const taskId of [question.taskId, change.taskId, working.taskId]) {
+        yield* tasks.see({ taskId })
         const seen = yield* row(taskId)
         assert.deepInclude(seen, { state: 'open', settledAt: null })
         assert.isNotNull(seen.seenAt)
       }
-      // Told it finished while it hadn't, nothing settles: what is written is read again.
-      yield* tasks.see({ taskId: working.taskId, finished: true })
-      assert.strictEqual((yield* row(working.taskId)).state, 'open')
-      // Nor a change, its run passed and its branch made, told it is a plain task that finished, as a screen read before it was.
-      yield* tasks.see({ taskId: change.taskId, finished: true })
-      assert.strictEqual((yield* row(change.taskId)).state, 'open')
+      assert.strictEqual((yield* queries.card(question.taskId)).phase, 'ready')
 
-      // The plain task that finished is done once seen, recorded as any task done is.
-      yield* see(question.taskId)
+      // Done settles nothing that is a change, or at work; nor does Keep for later a change.
+      assert.isFalse(yield* markDone(working.taskId))
+      assert.isFalse(yield* markDone(change.taskId))
+      assert.isFalse(yield* keep(change.taskId))
+      assert.strictEqual((yield* row(change.taskId)).state, 'open')
+      assert.strictEqual((yield* row(working.taskId)).state, 'open')
+
+      // The person marks the plain task done: settled, recorded as theirs.
+      assert.isTrue(yield* markDone(question.taskId))
       const done = yield* row(question.taskId)
       assert.strictEqual(done.state, 'done')
-      assert.strictEqual(done.settledAt, done.seenAt)
+      assert.isNotNull(done.settledAt)
       assert.deepInclude(yield* queries.card(question.taskId), { phase: 'settled', kind: 'plain' })
       const [recorded] = yield* sql<{ payload: string }>`
         SELECT payload FROM record_events WHERE aggregate_id = ${question.taskId} AND type = 'task.done'`
-      assert.deepStrictEqual(JSON.parse(recorded?.payload ?? '{}'), { seen: true })
-      // Seen again, nothing more happens.
-      yield* see(question.taskId)
-      assert.strictEqual((yield* row(question.taskId)).settledAt, done.settledAt)
+      assert.deepStrictEqual(JSON.parse(recorded?.payload ?? '{}'), { marked: true })
+      // Pressed again, nothing more happens.
+      assert.isFalse(yield* markDone(question.taskId))
+      yield* (yield* Sessions).stop(working.threadId)
+    }).pipe(Effect.provide(withQueries())),
+  )
 
-      // The person writes to its lead: it goes back to work as a follow-up, and, having made nothing, is done again.
+  it.live('stops what a finished task left running as it is done, and isn’t done while that won’t stop', () => {
+    const stopped: Array<string> = []
+    let refusing = true
+    const agent = { stoppedBackground: (id: string) => void stopped.push(id), refusesStop: () => refusing }
+    return Effect.gen(function* () {
       const sessions = yield* Sessions
-      const body = 'And the v2 ones? [lead:slowly]'
-      yield* sessions.send({
-        envelope: yield* Runtime.envelope('thread.send', { threadId: question.threadId, body }),
-        threadId: question.threadId,
-        body,
-      })
+      const project = yield* open
+      const served = yield* plain(project.projectId, 'Sketch the settings page', 'Serve it. [lead:serve] [lead:finish]')
+      yield* cardOnce(served.taskId, (card) => card.phase === 'ready')
+      const running = () =>
+        Effect.map(sessions.running(served.threadId), (session) =>
+          Option.match(session, { onNone: () => [], onSome: (one) => one.background.filter((left) => left.ended === null) }),
+        )
+      yield* until(running(), (left) => left.length === 1, Duration.seconds(20))
+
+      // Its agent won't stop the page: it isn't done, said so, still in Needs you with its page up, to try again.
+      const refused = yield* Effect.flip(markDone(served.taskId))
+      assert.deepInclude(refused, { _tag: 'TaskRefused', why: 'left_running' })
+      assert.strictEqual((yield* row(served.taskId)).state, 'open')
+      assert.strictEqual((yield* cardOnce(served.taskId, () => true)).phase, 'ready')
+      assert.lengthOf(yield* running(), 1)
+
+      // Tried again once it would, the page stops and the task is done.
+      refusing = false
+      assert.isTrue(yield* markDone(served.taskId))
+      assert.lengthOf(stopped, 1)
+      assert.lengthOf(yield* running(), 0)
+      assert.strictEqual((yield* row(served.taskId)).state, 'done')
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', agent)))))
+  })
+
+  it.live('is its lead’s to do when the person says so: done, kept for later or discarded, never a change', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const sessions = yield* Sessions
+      const project = yield* open
+      const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
+      const sketch = yield* plain(project.projectId, 'Sketch the settings', '[lead:finish]')
+      const change = yield* planned(project.projectId, 'Retry the checkout', '[lead:finish] [lead:edit]')
+      for (const task of [question, sketch, change]) yield* cardOnce(task.taskId, (card) => card.phase === 'ready')
+      const write = (task: { readonly taskId: string; readonly threadId: string }, body: string) =>
+        Effect.gen(function* () {
+          yield* tasks.bringBack(task.taskId)
+          yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+            threadId: task.threadId,
+            body,
+          })
+        })
+
+      // Told to keep it, its lead keeps it for later; told it is done, settles it, in the round the person's words opened.
+      yield* write(question, 'Keep this for later. [lead:task-keep]')
+      yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
+      yield* write(question, 'Mark this as done. [lead:task-done]')
+      yield* cardOnce(question.taskId, (card) => card.phase === 'settled')
+      assert.strictEqual((yield* row(question.taskId)).state, 'done')
+      // Told to discard it, it is abandoned as the lead's turn ends.
+      yield* write(sketch, 'Drop it. [lead:task-discard]')
       yield* until(
-        Effect.map(row(question.taskId), (task) => [task]),
-        ([task]) => task?.state === 'open',
+        Effect.map(row(sketch.taskId), (task) => [task]),
+        ([task]) => task?.state === 'abandoned',
         Duration.seconds(20),
       )
-      yield* until(
-        Effect.map(row(question.taskId), (task) => [task]),
-        ([task]) => task?.state === 'done',
-        Duration.seconds(30),
-      )
-      assert.strictEqual((yield* row(question.taskId)).settledAt, done.settledAt)
-      yield* sessions.stop(working.threadId)
+      // A change isn't its lead's to settle: it stays, ready to accept.
+      yield* write(change, 'Mark this as done. [lead:task-done]')
+      yield* cardOnce(change.taskId, (card) => card.phase === 'ready')
+      assert.strictEqual((yield* row(change.taskId)).state, 'open')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('ends a round after Done, or after Keep for later, in Needs you, never straight back in Settled', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* open
+      const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
+      yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+      // What the window does as the person writes to it.
+      const write = (body: string) =>
+        Effect.gen(function* () {
+          yield* tasks.bringBack(question.taskId)
+          yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', { threadId: question.threadId, body }),
+            threadId: question.threadId,
+            body,
+          })
+        })
+      const roundsEnded = (n: number) =>
+        until(
+          sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${question.taskId} AND plan_id IS NULL AND state <> 'running'`,
+          (rows) => (rows[0]?.n ?? 0) === n,
+          Duration.seconds(30),
+        )
+
+      // Done, then written to: it goes back to work as a round, which makes nothing, and it waits in Needs you.
+      assert.isTrue(yield* markDone(question.taskId))
+      yield* write('And the v2 ones? [lead:slowly]')
+      yield* roundsEnded(1)
+      yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+      assert.deepInclude(yield* row(question.taskId), { state: 'open', settledAt: null })
+
+      // Kept for later, then written to: it is back, and its round ends in Needs you too.
+      assert.isTrue(yield* keep(question.taskId))
+      yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
+      yield* write('And the v3 ones? [lead:slowly]')
+      yield* roundsEnded(2)
+      const back = yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+      assert.isUndefined(back.keptAt)
+      assert.strictEqual((yield* row(question.taskId)).state, 'open')
     }).pipe(Effect.provide(withQueries())),
   )
 })

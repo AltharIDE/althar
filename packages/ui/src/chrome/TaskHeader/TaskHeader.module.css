@@ -39,8 +39,16 @@
   align-items: center;
   gap: 4px;
 }
+/* what the person does to it next, right beside where it stands */
+.beside {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .header > .actions:only-of-type,
 .track + .actions,
+.beside + .actions,
 .state + .actions {
   margin-left: auto;
 }

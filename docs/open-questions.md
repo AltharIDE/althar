@@ -44,6 +44,25 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   handled failure when its session is lost: its id and how its process
   ended, never what it wrote (ADR-047).
 
+## The Flatpak's sign-in key, 15 October
+
+- [x] **Keep a sign-in key across restarts on GNOME and KDE.** Every Linux
+  Flatpak prefers Chromium's app-specific Secret portal seal (`v12`), KDE
+  included; direct KWallet access is removed from this branch so browser apps
+  do not share the normal key. If the portal is missing, Althar keeps the
+  former synchronous safeStorage behavior only when the selected backend passes
+  `keyringIsSafe`, encryption is available, and the backend is the private
+  sandbox-local `gnome_libsecret` file. This fallback can be session only and
+  may prompt again after restart. The runtime still carries opaque
+  sealed values and never receives the key. See
+  [ADR-028](decisions/028-linux-windows-packages-and-the-keyring.md).
+- [ ] **Run the real GNOME restart test.** It has not been run in this task's
+  KDE-only sandbox. Follow the exact GNOME session or VM steps in ADR-028;
+  verify GitHub stays connected after `flatpak kill dev.althar.app` and the
+  second launch has no `OSCrypt generated a new password` message. #207
+  replaces the closed #201's KDE-specific path with the app-specific portal
+  path on both desktops.
+
 ## Usage data, 12 October
 
 - [x] **Where usage data goes from, and what can.** The main process, with

@@ -12,13 +12,14 @@ import {
   useState,
 } from 'react'
 
-import { Icon } from '../../foundations/Icon/Icon'
+import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BoardLane, unreachable } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './Board.module.css'
 
 /*
@@ -90,7 +91,12 @@ const FIRST: Record<BoardLane, number> = { [BoardLane.Settled]: 0, [BoardLane.Ne
 export interface LaneCount {
   readonly lane: BoardLane
   readonly count: number
+  /** Whether it has anything to show, where that is more than its count says (Settled, with what was kept for later). */
+  readonly filled?: boolean
 }
+
+/** A lane with nothing to show: the first to collapse. */
+const emptyOf = ({ count, filled = count > 0 }: LaneCount) => !filled
 
 /** Needs you, while something waits in it: it can't be collapsed, and opens by itself when something arrives. */
 const heldOf = ({ lane, count }: LaneCount) => lane === BoardLane.Yours && count > 0
@@ -108,7 +114,7 @@ export function railsOf(lanes: ReadonlyArray<LaneCount>, folds: BoardFolds, widt
   const fits = () => (lanes.length - rails.size) * narrowest + rails.size * RAIL <= width
   const candidates = lanes
     .filter((one) => !rails.has(one.lane) && !heldOf(one) && !folds.opened.includes(one.lane))
-    .toSorted((a, b) => Number(b.count === 0) - Number(a.count === 0) || FIRST[a.lane] - FIRST[b.lane])
+    .toSorted((a, b) => Number(emptyOf(b)) - Number(emptyOf(a)) || FIRST[a.lane] - FIRST[b.lane])
   for (const one of candidates) {
     if (fits()) break
     rails.add(one.lane)
@@ -169,7 +175,9 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
   const ref = useRef<HTMLElement>(null)
   const room = useRoom(ref)
   const lanes: ReadonlyArray<LaneCount> = Children.toArray(children).flatMap((child) =>
-    isValidElement<BoardColumnProps>(child) && child.type === BoardColumn ? [{ lane: child.props.lane, count: child.props.count }] : [],
+    isValidElement<BoardColumnProps>(child) && child.type === BoardColumn
+      ? [{ lane: child.props.lane, count: child.props.count, ...(child.props.filled === undefined ? {} : { filled: child.props.filled }) }]
+      : [],
   )
   const rails = railsOf(lanes, chosen, room.width, room.narrowest)
   const style: CSSProperties | undefined =
@@ -206,10 +214,33 @@ function Glyph({ lane }: { lane: BoardLane }) {
   }
 }
 
+/** One of two things a lane holds and shows one at a time, as its head names it: Settled, or what was kept for later. */
+export interface LaneShelf {
+  readonly value: string
+  readonly label: string
+  readonly count: number
+  /** Its glyph in the lane's head while it shows, in place of the lane's own. */
+  readonly icon?: IconName
+}
+
 export interface BoardColumnProps {
   lane: BoardLane
   /** How many it holds. */
   count: number
+  /** Whether it has anything to show, where that is more than its count says (Settled, with what was kept for later beside it). */
+  filled?: boolean
+  /**
+   * What it holds, where it holds two things and shows one: each named in
+   * its head with its count, in place of the lane's own name and count, the
+   * one showing in ink. Pressing the other shows it instead.
+   */
+  shelves?: {
+    /** What choosing between them is: Settled or kept for later. */
+    readonly label: string
+    readonly options: ReadonlyArray<LaneShelf>
+    readonly value: string
+    readonly onChange: (value: string) => void
+  }
   children?: ReactNode
   /** The lane's name's rank in the page's outline. */
   headingLevel?: HeadingLevel
@@ -223,7 +254,7 @@ export interface BoardColumnProps {
  * button that opens it again. The focus goes with it either way, and where
  * the board collapses or opens it by itself from under the focus, too.
  */
-export function BoardColumn({ lane, count, children, headingLevel = 2, text }: BoardColumnProps) {
+export function BoardColumn({ lane, count, filled = count > 0, shelves, children, headingLevel = 2, text }: BoardColumnProps) {
   const t = { ...boardText, ...text }
   const id = useId()
   const bodyId = useId()
@@ -272,6 +303,7 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
     folding.fold(lane, collapse)
   }
   const name = t.lane[lane]
+  const shown = shelves?.options.find((one) => one.value === shelves.value)
 
   if (rail)
     return (
@@ -297,11 +329,38 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
   return (
     <section ref={self} aria-labelledby={id} className={cx(s.column, s[lane])}>
       <header className={s.head}>
-        <Glyph lane={lane} />
-        <Heading level={headingLevel} id={id} className={s.title}>
-          {name}
-        </Heading>
-        <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
+        {shown?.icon === undefined ? <Glyph lane={lane} /> : <Icon name={shown.icon} size={11} className={s.settledGlyph} />}
+        {shelves === undefined ? (
+          <>
+            <Heading level={headingLevel} id={id} className={s.title}>
+              {name}
+            </Heading>
+            <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
+          </>
+        ) : (
+          <>
+            {/* The lane keeps its name in the page's outline; what shows are the two it holds. */}
+            <VisuallyHidden>
+              <Heading level={headingLevel} id={id}>
+                {name}
+              </Heading>
+            </VisuallyHidden>
+            <fieldset className={s.shelves}>
+              <VisuallyHidden as="legend">{shelves.label}</VisuallyHidden>
+              {shelves.options.map((one) => (
+                <button
+                  key={one.value}
+                  type="button"
+                  className={s.shelf}
+                  aria-pressed={one.value === shelves.value}
+                  onClick={() => shelves.onChange(one.value)}
+                >
+                  {one.label} <span className={cx(s.shelfCount, one.count === 0 && s.none)}>{one.count}</span>
+                </button>
+              ))}
+            </fieldset>
+          </>
+        )}
         {folding !== null && (
           <IconButton
             icon="chevronL"
@@ -319,7 +378,7 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
         )}
       </header>
       <div className={s.body} id={bodyId}>
-        {count > 0 ? children : <p className={s.empty}>{t.empty[lane]}</p>}
+        {filled ? children : <p className={s.empty}>{t.empty[lane]}</p>}
       </div>
     </section>
   )
