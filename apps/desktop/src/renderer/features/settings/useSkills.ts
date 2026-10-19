@@ -70,6 +70,7 @@ export const rowOf = (skill: InstalledSkill): SkillRowModel => ({
   needsSubagents: skill.needs.includes('subagents'),
   canRollBack: skill.canRollBack,
   removable: skill.source !== 'althar-default',
+  problem: skill.problem,
 })
 
 /**

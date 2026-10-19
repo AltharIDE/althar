@@ -2504,6 +2504,18 @@ describe('the skills page', () => {
     await writeCatalog(catalog, { alpha: { 'SKILL.md': skill('alpha', 'Default.\n') } }, { alpha: ['subagents'] })
     return { root: mkdtempSync(join(tmpdir(), 'althar-skills-store-')), catalog }
   }
+  /** What the record keeps of the person's changes to skills, in order: each skill's revision, the act, its payload and command. */
+  const skillActs = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ id: string; revision: number; type: string; payload: string; command: string | null }>`
+      SELECT aggregate_id AS id, aggregate_revision AS revision, type, payload, command_id AS command
+      FROM record_events WHERE aggregate_type = 'skill' ORDER BY sequence`
+    return rows.map(({ payload, command, ...row }) => ({
+      ...row,
+      payload: JSON.parse(payload) as Record<string, unknown>,
+      commandId: command,
+    }))
+  })
 
   it.live('says skills are off where the runtime has no store', () =>
     Effect.scoped(
@@ -2518,18 +2530,32 @@ describe('the skills page', () => {
   it.live('lists the catalog’s skills off, turns one on and off, and keeps one Althar ships from being removed', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client } = yield* connected({ skills: yield* Effect.promise(store) })
+        const { client, store: record } = yield* connected({ skills: yield* Effect.promise(store) })
         const listed = yield* client.ListSkills({})
         assert.deepStrictEqual(
           [listed.enabled, listed.catalogRevision, listed.skills.map((one) => [one.id, one.source, one.active, one.needs, one.license])],
           [true, 'fixture-1', [['alpha', 'althar-default', false, ['subagents'], 'MIT']]],
         )
         assert.strictEqual(listed.skills[0]?.description, 'Use when testing alpha.')
-        assert.isTrue((yield* client.SetSkillActive({ commandId: commandId(), id: 'alpha', active: true })).active)
+        const on = commandId()
+        const alpha = yield* client.SetSkillActive({ commandId: on, id: 'alpha', active: true })
+        assert.isTrue(alpha.active)
         const off = yield* client.SetSkillActive({ commandId: commandId(), id: 'alpha', active: false })
         assert.isFalse(off.active)
+        // Each switch is the person's act, recorded under the window's command with the version it was at.
+        const acts = yield* record(skillActs)
+        assert.deepStrictEqual(
+          acts.map(({ id, revision, type, payload }) => [id, revision, type, payload]),
+          [
+            ['alpha', 1, 'skill.turned_on', { treeHash: alpha.treeHash }],
+            ['alpha', 2, 'skill.turned_off', { treeHash: alpha.treeHash }],
+          ],
+        )
+        assert.strictEqual(acts[0]?.commandId, on)
         const refused = yield* Effect.flip(client.UninstallSkill({ commandId: commandId(), id: 'alpha' }))
         assert.deepStrictEqual([refused.reason, refused.message], ['SkillRefused', 'alpha comes with Althar; turn it off instead.'])
+        // A refused change records nothing.
+        assert.lengthOf(yield* record(skillActs), 2)
       }),
     ),
   )
@@ -2547,7 +2573,7 @@ describe('the skills page', () => {
           },
         }
         const { access } = fakeGitHub(repos)
-        const { client } = yield* connected({
+        const { client, store: record } = yield* connected({
           skills: yield* Effect.promise(store),
           ...(access.fetch === undefined ? {} : { fetch: access.fetch }),
         })
@@ -2583,6 +2609,18 @@ describe('the skills page', () => {
         yield* client.ApproveSkill({ commandId: commandId(), id: 'beta', ...update.card.source, treeHash: update.card.treeHash })
         const back = yield* client.RollBackSkill({ commandId: commandId(), id: 'beta' })
         assert.deepStrictEqual([back.sha, back.canRollBack], [A, false])
+        yield* client.UninstallSkill({ commandId: commandId(), id: 'beta' })
+        // What the person approved, rolled back and removed, each with the version it concerned.
+        const from = { source: 'github', repo: 'o/r', subpath: 'skills/beta', ref: 'main' }
+        assert.deepStrictEqual(
+          (yield* record(skillActs)).map(({ id, revision, type, payload }) => [id, revision, type, payload]),
+          [
+            ['beta', 1, 'skill.approved', { ...from, sha: A, treeHash: card.treeHash, active: true }],
+            ['beta', 2, 'skill.approved', { ...from, sha: B, treeHash: update.card.treeHash, active: true }],
+            ['beta', 3, 'skill.rolled_back', { ...from, sha: A, treeHash: card.treeHash }],
+            ['beta', 4, 'skill.removed', { ...from, sha: A, treeHash: card.treeHash }],
+          ],
+        )
         assert.strictEqual(
           (yield* Effect.flip(client.FindSkills({ source: 'https://gitlab.com/o/r' }))).message,
           "https://gitlab.com/o/r isn't a GitHub repository; paste its address or owner/name.",

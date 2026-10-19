@@ -120,6 +120,28 @@ export const List: Story = {
   },
 }
 
+/** One whose stored files Althar can't read: off, given to no run, and what to do about it. */
+export const Broken: Story = {
+  args: {
+    skills: [
+      {
+        id: 'release-notes',
+        description: 'Use when writing the notes for a release from the merged pull requests.',
+        from: 'acme/agent-skills',
+        on: false,
+        needsSubagents: false,
+        canRollBack: false,
+        removable: true,
+        problem: "Althar can't read this skill's stored files, so runs aren't given it. Install it again to put it right.",
+      },
+      ...SKILLS.slice(0, 1),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText(/Install it again to put it right/)).toBeVisible()
+  },
+}
+
 /** A repository looked in, its skill folders to choose from. */
 export const Install: Story = {
   render: () => (

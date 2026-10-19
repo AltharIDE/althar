@@ -29,6 +29,8 @@ export interface SkillRowModel {
   canRollBack: boolean
   /** One the person installed, which can go; one Althar ships can only be off. */
   removable: boolean
+  /** Why it is broken and how to put it right, where Althar can't read what it keeps of it; no run is given it. */
+  problem?: string | undefined
 }
 
 export interface SkillListText {
@@ -93,6 +95,7 @@ export function SkillList({ skills, onToggle, onRollBack, onRemove, text, classN
                 {skill.id}
               </span>
               {skill.description !== null && <span className={s.description}>{skill.description}</span>}
+              {skill.problem !== undefined && <span className={s.problem}>{skill.problem}</span>}
               <span className={s.meta}>
                 <span>{skill.from}</span>
                 {skill.needsSubagents && <span>{t.needsSubagents}</span>}

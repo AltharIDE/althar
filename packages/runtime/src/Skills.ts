@@ -1,6 +1,7 @@
 import type { AgentDefinition } from '@althar/provider-adapters'
 import {
   activeSelection,
+  catalogEntries,
   type Install,
   installLocalCatalog,
   listInstalls,
@@ -55,7 +56,15 @@ export const runSkills = (
   Effect.gen(function* () {
     const { skills } = definition
     if (skills === undefined) return undefined
-    const catalog = yield* installLocalCatalog(config.root, config.catalog)
+    // A catalog that can't be installed, as when one record in installs.json doesn't read and the store is not written
+    // over it, costs the run no skill the person already has: it is only read, for what each skill needs.
+    const catalog = yield* installLocalCatalog(config.root, config.catalog).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning('The skills catalog was not installed; the run gets what is installed', error).pipe(
+          Effect.andThen(catalogEntries(config.catalog)),
+        ),
+      ),
+    )
     const needs = new Map(catalog.entries.map((entry) => [entry.id, entry.needs]))
     const selected = yield* activeSelection(config.root, needs)
     const projected = yield* projectRun({

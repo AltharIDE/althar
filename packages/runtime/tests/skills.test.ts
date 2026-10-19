@@ -151,6 +151,26 @@ describe('skills for a task’s lead', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('gives the lead the skills that read when one install in the store does not', () =>
+    withStore({ alpha: skill('alpha'), beta: skill('beta') }, {}, (skills) =>
+      Effect.gen(function* () {
+        const path = join(skills.root, 'installs.json')
+        const file = JSON.parse(readFileSync(path, 'utf8')) as { installs: Array<unknown> }
+        writeFileSync(path, JSON.stringify({ ...file, installs: [...file.installs, { id: 'gamma', active: 'yes' }] }))
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
+        assert.deepStrictEqual(
+          (yield* givenTo(created.threadId)).map(({ id }) => id),
+          ['alpha', 'beta'],
+        )
+        // The store is not written over a record it couldn't read.
+        assert.include(readFileSync(path, 'utf8'), '"gamma"')
+        yield* sessions.stop(created.threadId)
+      }),
+    ),
+  )
+
   it.live('still starts the session, without skills, when the catalog is damaged, and the thread and a report say so', () =>
     withStore({ alpha: skill('alpha') }, {}, (skills) =>
       Effect.gen(function* () {

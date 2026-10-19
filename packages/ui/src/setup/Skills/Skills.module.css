@@ -63,6 +63,11 @@
 .action {
   font-size: inherit;
 }
+.problem {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+}
 .quiet {
   margin: 0;
   font-size: 12px;

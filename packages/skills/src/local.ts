@@ -5,7 +5,7 @@ import { parseCatalog, type CatalogEntry } from './catalog'
 import { SkillStoreFailed } from './errors'
 import { io, readTree } from './files'
 import { type Files, sha256, treeHash } from './hash'
-import { putObject, readInstalls, serialized, withInstall, writeInstalls } from './store'
+import { listInstalls, putObject, readInstalls, serialized, withInstall, writeInstalls } from './store'
 import { validateSkill } from './validate'
 
 /**
@@ -28,6 +28,10 @@ const readCatalogText = (directory: string) => io('reading catalog.json', () => 
 
 const parsed = (text: string) =>
   parseCatalog(text).pipe(Effect.mapError((error) => new SkillStoreFailed({ message: `catalog.json: ${error.message}` })))
+
+/** What a local catalog says of its skills, read without installing anything: for a run whose install of it failed. */
+export const catalogEntries = (directory: string): Effect.Effect<Omit<InstalledCatalog, 'removed'>, SkillStoreFailed> =>
+  Effect.map(Effect.flatMap(readCatalogText(directory), parsed), ({ revision, entries }) => ({ revision, entries }))
 
 const checkCatalog = (directory: string, text: string): Effect.Effect<LocalCatalog, SkillStoreFailed> =>
   Effect.gen(function* () {
@@ -113,11 +117,16 @@ export interface Chosen {
   readonly needs: ReadonlyArray<string>
 }
 
-/** The skills a run uses by default: the active installs, with what each needs, from the catalog they came with. */
+/**
+ * The skills a run uses by default: the active installs, with what each needs, from the catalog they came with. An
+ * install whose record doesn't read is given to no run, and costs the others nothing.
+ */
 export const activeSelection = (
   root: string,
   needs: ReadonlyMap<string, ReadonlyArray<string>>,
 ): Effect.Effect<ReadonlyArray<Chosen>, SkillStoreFailed> =>
-  Effect.map(readInstalls(root), ({ installs }) =>
-    installs.filter(({ active }) => active).map(({ id, treeHash }) => ({ id, treeHash, needs: needs.get(id) ?? [] })),
+  Effect.map(listInstalls(root), (listed) =>
+    listed.flatMap((one) =>
+      one.ok && one.install.active ? [{ id: one.install.id, treeHash: one.install.treeHash, needs: needs.get(one.install.id) ?? [] }] : [],
+    ),
   )
