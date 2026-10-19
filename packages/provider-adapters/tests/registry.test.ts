@@ -120,10 +120,14 @@ describe('the agent registry', () => {
   })
 
   it('says how each agent is given the run’s skills: Claude Code in its session, Codex as an added directory, OpenCode in its config', () => {
-    assert.deepStrictEqual(
-      Object.fromEntries(Object.values(agents).map((agent) => [agent.id, [agent.skills?.layout, agent.skills?.via.kind]])),
-      { 'claude-code': ['claude-plugin', 'meta'], codex: ['agents', 'directory'], opencode: ['plain', 'env'] },
-    )
+    const given = Object.values(agents).filter((agent) => agent.skills !== undefined)
+    assert.deepStrictEqual(Object.fromEntries(given.map((agent) => [agent.id, [agent.skills?.layout, agent.skills?.via.kind]])), {
+      'claude-code': ['claude-plugin', 'meta'],
+      codex: ['agents', 'directory'],
+      opencode: ['plain', 'env'],
+    })
+    // The rest are given none until each has a way in.
+    assert.isAbove(Object.values(agents).length, given.length)
     const via = agents.opencode.skills?.via
     assert.strictEqual(via?.kind, 'env')
     if (via?.kind !== 'env') return
