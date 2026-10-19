@@ -276,7 +276,8 @@ export const FromATasksLead: Story = {
   ),
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getAllByRole('article')).toHaveLength(2)
+    // The lead's turn is an article too, beside the two cards.
+    await expect(c.getAllByRole('article')).toHaveLength(3)
     await expect(c.getByRole('button', { name: 'File all 2' })).toBeInTheDocument()
   },
 }
