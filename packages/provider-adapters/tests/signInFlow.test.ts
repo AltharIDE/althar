@@ -61,18 +61,35 @@ process.stdin.once('data', (data) => {
 /**
  * Antigravity's ACP server: answers initialize; on authenticate prints the
  * page to open, as it does, on stdout or stderr, then answers as the browser
- * would have it. Its temporary folder is where it says.
+ * would have it: yes, or turned down with the error it gives (`{}` for one
+ * with no words). It may turn down initialize itself, and tells of its
+ * session as it goes, as a notification. Its temporary folder is where it says.
  */
-const ACP_SERVER = (ending: 'success' | 'subscription', stream: 'stdout' | 'stderr' | 'split') => `
+type AcpEnding =
+  | 'success'
+  | 'subscription'
+  | { readonly error: { readonly code: number; readonly message?: string }; readonly at?: 'initialize' }
+
+const ACP_SERVER = (ending: AcpEnding, stream: 'stdout' | 'stderr' | 'split') => {
+  const error =
+    ending === 'success'
+      ? null
+      : ending === 'subscription'
+        ? { code: -32603, message: 'Internal error: SUBSCRIPTION_REQUIRED' }
+        : ending.error
+  const atInitialize = typeof ending === 'object' && ending.at === 'initialize'
+  return `
 let buffer = ''
 const say = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
 process.stderr.write('temp ' + process.env.TMPDIR + '\\n')
+say({ jsonrpc: '2.0', method: 'session/update', params: { update: { sessionUpdate: 'available_commands_update' } } })
 process.stdin.on('data', (data) => {
   buffer += data
   for (let at = buffer.indexOf('\\n'); at >= 0; at = buffer.indexOf('\\n')) {
     const message = JSON.parse(buffer.slice(0, at))
     buffer = buffer.slice(at + 1)
-    if (message.method === 'initialize') say({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1, authMethods: [{ id: message.params.clientInfo.name === 'althar' ? 'oauth-personal' : 'x', name: 'Log in with Google' }] } })
+    if (message.method === 'initialize' && ${atInitialize}) say({ jsonrpc: '2.0', id: message.id, error: ${JSON.stringify(error)} })
+    else if (message.method === 'initialize') say({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1, authMethods: [{ id: message.params.clientInfo.name === 'althar' ? 'oauth-personal' : 'x', name: 'Log in with Google' }] } })
     if (message.method === 'authenticate') {
       if (message.params.methodId !== 'oauth-personal') return say({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'no such method' } })
       ${
@@ -81,16 +98,14 @@ process.stdin.on('data', (data) => {
             "process.stderr.write('Open the following link to authenticate the ACP server: https://accounts.google.com/o/oau'); setTimeout(() => process.stderr.write('th2/v2/auth?state=s1\\n'), 20)"
           : `process.${stream}.write('Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/v2/auth?state=s1\\n')`
       }
-      setTimeout(() => say(${ending === 'success' ? "{ jsonrpc: '2.0', id: message.id, result: {} }" : "{ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Internal error: SUBSCRIPTION_REQUIRED' } }"}), 30)
+      setTimeout(() => say(${error === null ? "{ jsonrpc: '2.0', id: message.id, result: {} }" : `{ jsonrpc: '2.0', id: message.id, error: ${JSON.stringify(error)} }`}), 30)
     }
   }
 })
 setInterval(() => {}, 1000)`
+}
 
-const antigravity = (
-  ending: 'success' | 'subscription' = 'success',
-  stream: 'stdout' | 'stderr' | 'split' = 'stderr',
-): AgentDefinition => ({
+const antigravity = (ending: AcpEnding = 'success', stream: 'stdout' | 'stderr' | 'split' = 'stderr'): AgentDefinition => ({
   ...agents.antigravity,
   signIn: {
     ...agents.antigravity.signIn,
@@ -218,6 +233,29 @@ describe('signing in inside Althar', () => {
     expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
     await new Promise((resolve) => setTimeout(resolve, 200))
     expect(readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length).toBeLessThanOrEqual(before)
+  })
+
+  it('says each other way Antigravity turns a sign-in down in the person’s words, and its own where it has none for it', async () => {
+    const refused = async (error: { readonly code: number; readonly message?: string }, at?: 'initialize') =>
+      (await run(antigravity(at === undefined ? { error } : { error, at }), { way: 'browser' })).at(-1)
+    expect(await refused({ code: -32603, message: 'Internal error: account ineligible for Antigravity' })).toEqual({
+      kind: 'failed',
+      message: "This account can't use Google Antigravity. Sign in with another.",
+    })
+    expect(await refused({ code: -32603, message: 'OAuth error: access_denied' })).toEqual({
+      kind: 'failed',
+      message: 'The sign-in wasn’t approved.',
+    })
+    expect(await refused({ code: -32603, message: 'Internal error\nThe listener on port 8085 closed' })).toEqual({
+      kind: 'failed',
+      message: 'The listener on port 8085 closed',
+    })
+    // An error with no words of its own, and one at the very start, before any page.
+    expect(await refused({ code: -32603 })).toEqual({ kind: 'failed', message: 'It refused.' })
+    expect(await refused({ code: -32600, message: 'Unsupported protocol version' }, 'initialize')).toEqual({
+      kind: 'failed',
+      message: 'Unsupported protocol version',
+    })
   })
 
   it('has Antigravity sign in only inside Althar, as it has no command of its own', () => {
