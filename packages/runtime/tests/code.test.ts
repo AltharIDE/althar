@@ -161,9 +161,10 @@ describe('finding what a message names', () => {
       const [ten, fifteen, model, waits, run, mark, decision] = found
       // Line 10 then is line 13 now; line 15 was rewritten since, so it is to be read as it was.
       assert.deepInclude(ten, { path: 'packages/runtime/src/Runs.ts', line: 10, byName: false, lines: 23, content: 'text', changed: null })
-      assert.deepStrictEqual(ten?.kind === 'file' ? ten.since : undefined, { commit: first, now: { line: 13 } })
+      const said = '2026-10-01T12:00:00.000Z'
+      assert.deepStrictEqual(ten?.kind === 'file' ? ten.since : undefined, { commit: first, said, now: { line: 13 } })
       assert.deepInclude(fifteen, { path: 'packages/runtime/src/Runs.ts', line: 15, byName: true })
-      assert.deepStrictEqual(fifteen?.kind === 'file' ? fifteen.since : undefined, { commit: first, now: null })
+      assert.deepStrictEqual(fifteen?.kind === 'file' ? fifteen.since : undefined, { commit: first, said, now: null })
       assert.deepStrictEqual(model?.kind === 'several' ? model.paths : [], ['apps/desktop/src/model.ts', 'packages/ui/src/model.ts'])
       // A name in code: the one file that declares it, a test's own declaration aside, at its line as it is.
       assert.deepInclude(waits, { path: 'packages/runtime/src/Runs.ts', line: 11, symbol: 'planWaits', since: null })

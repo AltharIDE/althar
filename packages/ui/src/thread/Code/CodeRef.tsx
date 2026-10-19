@@ -48,6 +48,8 @@ export function CodeRef({ found, plain = false, text }: CodeRefProps) {
   const t = { ...codeRefText, ...text }
   const code = useThreadShell().code
   const [peek, setPeek] = useState(false)
+  // The chip, for the peek to open beside from: kept as it mounts, not read from a ref while drawing.
+  const [button, setButton] = useState<HTMLButtonElement | null>(null)
   if (code === undefined) return plain ? found.name : <Code>{found.name}</Code>
   const open = code.opened === found.name
   const onClick = (event: MouseEvent<HTMLButtonElement>) => {
@@ -61,6 +63,7 @@ export function CodeRef({ found, plain = false, text }: CodeRefProps) {
   const where = found.kind === 'several' ? found.name : `${found.path}${found.kind === 'file' ? linesOf(found.line, found.end) : ''}`
   const chip = (
     <button
+      ref={setButton}
       type="button"
       className={
         plain ? s.plain : cx(s.ref, found.kind === 'missing' && s.missing, found.kind === 'file' && found.symbol !== undefined && s.symbol)
@@ -87,7 +90,7 @@ export function CodeRef({ found, plain = false, text }: CodeRefProps) {
       width={620}
       className={s.peek}
     >
-      {peek && !open && code.peek(found)}
+      {peek && !open && code.peek(found, button)}
     </Popover>
   )
 }

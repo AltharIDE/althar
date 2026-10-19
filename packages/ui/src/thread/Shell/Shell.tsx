@@ -67,10 +67,10 @@ export interface CodeShell {
    * has any such names, with the same names until its text changes.
    */
   useFound: (names: readonly string[]) => ReadonlyMap<string, FoundCode> | undefined
-  /** What the peek over a name holds, as the host fills a CodePeek. */
-  peek: (found: FoundCode) => ReactNode
+  /** What the peek over a name holds, as the host fills a CodePeek; `from` is the name it is over. */
+  peek: (found: FoundCode, from: HTMLElement | null) => ReactNode
   /** Opens it beside the thread; `from` is the name pressed, which stepping through the thread's names goes on from. */
-  open: (found: FoundCode, from: HTMLElement) => void
+  open: (found: FoundCode, from: HTMLElement | null) => void
   /** Opens it in the person's editor, as ⌘-click on its name does. */
   openInEditor?: (found: FoundCode) => void
   /** The name open beside the thread, as written: its chip shows it open, and pressing it again closes it. */

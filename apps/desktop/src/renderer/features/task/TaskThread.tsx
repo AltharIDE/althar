@@ -26,6 +26,7 @@ import { useModelNames } from '../../shared/modelNames'
 import { type Round as RoundModel, type RoundBlock, type Said, type WorkStep, withoutShotList } from '../../shared/rounds'
 import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
+import { SaidIn } from '../../shared/code/CodeHost'
 import { productBrand, productName } from '../../shared/products'
 import { PartView, text as threadText, ThreadBlocks } from '../../shared/ThreadBlocks'
 import s from './TaskThread.module.css'
@@ -95,7 +96,9 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
   // What it says, then what it shows and hands back, each a part of the round, spaced as the round spaces them: its own pictures large.
   const said = (one: Said, children?: ReactNode) => (
     <Fragment key={one.id}>
-      <Markdown source={one.text} />
+      <SaidIn.Provider value={one.id}>
+        <Markdown source={one.text} />
+      </SaidIn.Provider>
       <Gallery shots={one.handed.pictures.map((picture) => ({ ...picture, caption: picture.label ?? picture.name }))} />
       {children}
       <HandedBack

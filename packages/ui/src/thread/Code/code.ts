@@ -24,7 +24,12 @@ export type FoundCode =
       /** What its task changed in it. */
       readonly changed: { readonly add: number; readonly del: number } | null
       /** How it was when the message was said, where it changed since: where the lines named are now, null where rewritten. */
-      readonly since: { readonly commit: string; readonly now?: { readonly line: number; readonly end?: number } | null } | null
+      readonly since: {
+        readonly commit: string
+        /** When the message was said. */
+        readonly said: string
+        readonly now?: { readonly line: number; readonly end?: number } | null
+      } | null
     }
   | { readonly kind: 'missing'; readonly name: string; readonly path: string; readonly near: readonly string[] }
   | { readonly kind: 'several'; readonly name: string; readonly line?: number; readonly end?: number; readonly paths: readonly string[] }

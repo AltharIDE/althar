@@ -237,6 +237,9 @@ describe('the client', () => {
           GetThreadItem: () => Effect.die('unused'),
           ReadOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
+          FindCode: () => Effect.die('unused'),
+          ReadCode: () => Effect.die('unused'),
+          OpenCode: () => Effect.die('unused'),
           // The first try gets no answer the client can read; the second works.
           StartSession: ({ commandId }) => {
             commands.push(commandId)

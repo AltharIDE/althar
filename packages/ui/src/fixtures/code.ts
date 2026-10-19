@@ -72,7 +72,7 @@ export const limitsMoved = limits({
   name: 'src/refunds/limits.ts:13',
   line: 13,
   changed: null,
-  since: { commit: '8c1f2ad', now: { line: 17 } },
+  since: { commit: '8c1f2ad', said: '2026-10-18T16:40:00.000Z', now: { line: 17 } },
 })
 
 /** It named lines that were rewritten since: they show as they were. */
@@ -80,7 +80,7 @@ export const limitsRewritten = limits({
   name: 'src/refunds/limits.ts:30',
   line: 30,
   changed: null,
-  since: { commit: '8c1f2ad', now: null },
+  since: { commit: '8c1f2ad', said: '2026-10-18T16:40:00.000Z', now: null },
 })
 
 /** A name in code, at the line that declares it. */

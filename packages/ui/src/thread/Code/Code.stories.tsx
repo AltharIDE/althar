@@ -187,6 +187,8 @@ export const PanelMoved: Story = {
     await expect(c.getByText('Line 13 then is line 17 now: the file changed above it since.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('radio', { name: 'When said' }))
     await expect(c.queryByText(/then is line/)).not.toBeInTheDocument()
+    await userEvent.click(c.getByRole('radio', { name: 'Now' }))
+    await expect(c.getByText(/then is line 17 now/)).toBeInTheDocument()
   },
 }
 

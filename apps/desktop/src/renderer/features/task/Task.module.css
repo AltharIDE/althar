@@ -94,7 +94,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(420px, 38vw, 600px);
+  grid-template-columns: minmax(0, 1fr) var(--panel-width, clamp(420px, 38vw, 600px));
 }
 .withPanel > .outputs {
   height: 100%;

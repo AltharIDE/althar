@@ -169,7 +169,8 @@ export function ProjectView({
   const [section, setSection] = useState<ProjectSection>(settings.section ?? FIRST_PROJECT_SECTION)
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
-  const shown = useThreadHost(false)
+  // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread.
+  const shown = useThreadHost(false, { threadId: model.coordinator?.threadId ?? null, taskId: null })
   const both = useBothWidth()
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
@@ -453,7 +454,12 @@ export function ProjectView({
                   </div>
                 )
               ) : (
-                <TaskFace className={s.face} composer={composer}>
+                <TaskFace
+                  className={s.face}
+                  composer={composer}
+                  // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
+                  {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
+                >
                   <Thread label={text.conversation} busy={busy}>
                     {coordinator.earlier && (
                       <ThreadDivider
@@ -516,6 +522,14 @@ export function ProjectView({
               )}
             </div>
           )}
+          {/* Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far edge. */}
+          {room === Room.Both &&
+            talking &&
+            shown.workbench(null, {
+              max: Math.max(360, window.innerWidth - both.width - 48),
+              className: s.over,
+              style: { left: both.width },
+            })}
           {boarding && (
             <div className={s.board}>
               {lanes !== null ? (

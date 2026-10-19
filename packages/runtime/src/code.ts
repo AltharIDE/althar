@@ -275,6 +275,8 @@ export interface Asked {
  */
 export const findCode = (place: CodeRoots, messages: ReadonlyArray<Asked>): Effect.Effect<ReadonlyArray<ReadonlyArray<CodeFound>>> =>
   Effect.gen(function* () {
+    // Asked only where the place is, nothing is listed.
+    if (messages.length === 0) return []
     const several = place.roots.length > 1
     const prefixOf = (root: CodeRoot) => (several ? `${root.slug}/` : '')
     const listed = yield* Effect.forEach(place.roots, listedIn, { concurrency: 'unbounded' })
@@ -327,10 +329,10 @@ export const findCode = (place: CodeRoots, messages: ReadonlyArray<Asked>): Effe
           Effect.orElseSucceed(() => ''),
         )
         if (diff.trim() === '') return null
-        if (named.line === undefined) return { commit: then }
+        if (named.line === undefined) return { commit: then, said: at }
         const line = followLine(diff, named.line)
         const end = named.end === undefined ? undefined : followLine(diff, named.end)
-        return { commit: then, now: line === null || end === null ? null : { line, ...(end === undefined ? {} : { end }) } }
+        return { commit: then, said: at, now: line === null || end === null ? null : { line, ...(end === undefined ? {} : { end }) } }
       })
 
     const fileAt = (

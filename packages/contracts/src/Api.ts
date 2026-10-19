@@ -2078,6 +2078,8 @@ export const CodeFile = Schema.Struct({
     Schema.Struct({
       /** The commit it was read at when said. */
       commit: Schema.String,
+      /** When the message was said. */
+      said: Schema.String,
       /** Where the lines named are now; null where they were rewritten since; absent where it named none. */
       now: Schema.optional(Schema.NullOr(Schema.Struct({ line: CodeLine, end: Schema.optional(CodeLine) }))),
     }),
