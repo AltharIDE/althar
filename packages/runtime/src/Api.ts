@@ -647,7 +647,7 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, dictated }) =>
         once(
           commandId,
           api(
@@ -662,11 +662,12 @@ export const handlers = Api.toLayer(
                       // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
                       envelope: yield* envelope(
                         'thread.send',
-                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept) },
+                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
                       ...(kept.length === 0 ? {} : { images: kept }),
+                      ...(dictated === true ? { dictated: true } : {}),
                     }
               const sessionId = yield* sessions.switchAgent({
                 threadId,
@@ -788,18 +789,23 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images }) =>
+      Send: ({ commandId, threadId, body, disposition, images, dictated }) =>
         api(
           Effect.gen(function* () {
             // Its images are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
             const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
             const message = {
               // The command says its images by their digests, never their bytes.
-              envelope: yield* envelope('thread.send', { threadId, body, disposition, ...imagesSaid(kept) }, commandId),
+              envelope: yield* envelope(
+                'thread.send',
+                { threadId, body, disposition, ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
+                commandId,
+              ),
               threadId,
               body,
               disposition,
               ...(kept.length === 0 ? {} : { images: kept }),
+              ...(dictated === true ? { dictated } : {}),
             }
             // What the person says to the coordinator starts it, if it isn't running.
             const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`

@@ -402,7 +402,7 @@ CREATE TABLE user_inputs (
   state TEXT NOT NULL REFERENCES vocab_user_input_state (word),
   superseded_by_input_id TEXT,
   accepted_at TEXT NOT NULL CHECK (accepted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), dictated INTEGER NOT NULL DEFAULT 0 CHECK (dictated IN (0, 1)),
   UNIQUE (thread_id, sequence),
   CHECK ((state = 'superseded') = (superseded_by_input_id IS NOT NULL)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
