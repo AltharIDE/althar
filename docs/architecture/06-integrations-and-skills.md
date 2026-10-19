@@ -471,9 +471,10 @@ for the person, as above.
   call for the person. Trello's lists are mapped by the person, once per
   board. Althar moves an issue to In Progress as its task's first step
   starts (Linear: the team's first `started` state; Jira: the first
-  transition offered into the In Progress category), once, and leaves one
-  already started, done or cancelled as it is. GitHub's, GitLab's and
-  Trello's issues have no standard In Progress and are left alone. A
+  transition offered into the In Progress category; Trello: the top of the
+  board's first open list named Doing or In progress), once, and leaves one
+  already started, done or cancelled as it is. GitHub's and GitLab's issues
+  have no standard In Progress and are left alone. A
   project's rules can turn it off. Who moves an issue to in review or done,
   and when, is an open question.
 - **The key goes in the branch and the PR's title,** so the trackers' own
@@ -830,9 +831,9 @@ external observation, not Althar's run authority.
 
 What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
-for its session ([ADR-048](../decisions/048-skills-one-store-a-curated-catalog.md)),
+for its session ([ADR-050](../decisions/050-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-049](../decisions/049-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-051](../decisions/051-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

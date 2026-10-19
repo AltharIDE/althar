@@ -356,6 +356,8 @@ export type ProjectRulesProps = RootProps<
     project: string
     /** The title's rank; each sentence's margin word is one below. */
     headingLevel?: HeadingLevel
+    /** Whether it heads itself with its title and lede; not where the page around it already names it. The key stays either way. */
+    titled?: boolean
     /** What happens to what no rule keeps, while everything isn't allowed. */
     mode: RestMode
     onModeChange: (mode: RestMode) => void
@@ -473,6 +475,7 @@ const nameShown = (rule: Omit<NamingRuleProps, 'text'>) => {
 export function ProjectRules({
   project,
   headingLevel = 1,
+  titled = true,
   mode,
   onModeChange,
   allowAll,
@@ -673,13 +676,15 @@ export function ProjectRules({
 
   return (
     <div className={cx(s.rules, className)} {...rest}>
-      <header className={s.head}>
-        <div className={s.headText}>
-          <Heading level={headingLevel} className={s.title}>
-            {t.title}
-          </Heading>
-          <p className={s.lede}>{t.lede(project)}</p>
-        </div>
+      <header className={cx(s.head, !titled && s.keyOnly)}>
+        {titled && (
+          <div className={s.headText}>
+            <Heading level={headingLevel} className={s.title}>
+              {t.title}
+            </Heading>
+            <p className={s.lede}>{t.lede(project)}</p>
+          </div>
+        )}
         <CharterKey text={t.key} className={s.key} />
       </header>
 

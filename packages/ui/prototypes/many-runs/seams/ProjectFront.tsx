@@ -8,19 +8,11 @@ const PROJECT = { place: 'main', task: null } as const
 export function ProjectFront(props: ProjectFrontProps) {
   const { direction } = useProto()
   if (direction === 'Today') return <RealProjectFront {...props} />
-  const { run: _today, settings, ...rest } = props
+  const { run: _today, ...rest } = props
   const Control = CONTROLS[direction]
   return (
     <ScreenContext.Provider value={PROJECT}>
-      <RealProjectFront
-        {...rest}
-        settings={
-          <>
-            <Control />
-            {settings}
-          </>
-        }
-      />
+      <RealProjectFront {...rest} run={<Control />} />
     </ScreenContext.Provider>
   )
 }

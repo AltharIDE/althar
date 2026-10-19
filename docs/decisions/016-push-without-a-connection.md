@@ -5,7 +5,7 @@
 - **Amended:** 2026-10-18: before any push Althar makes for a task, it
   holds back skill and OpenSpec files the task's commits changed unless the
   project allows them
-  ([ADR-049](049-skill-and-openspec-files-stay-off-the-repository.md)).
+  ([ADR-051](051-skill-and-openspec-files-stay-off-the-repository.md)).
 - **Owner:** Repository maintainers
 - **Context:** A task without a pull request ended on its branch. The
   person could merge it into the default branch on this Mac and push that,

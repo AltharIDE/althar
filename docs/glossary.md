@@ -12,7 +12,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Repository | `RepositoryBinding` | A repository that the project's tasks may change, with its role. It is shared by everyone on the project. |
 | On this Mac, Map it later | `RepositoryLocation`, or none | Where this device keeps that repository. "Map it later" is a binding with no location here. On the Sources view that state is "needs mapping". |
 | Reading it | read-only inspection | What Althar does to a folder before a project exists. It changes nothing. |
-| Role | `RepositoryBinding.role` | What a repository is to its project: Service, Frontend, Infrastructure, Library, Docs or Other. Suggested from its name, changed on the Repositories screen; tasks and the coordinator are told it. |
+| Role | `RepositoryBinding.role` | What a repository is to its project: Service, Frontend, Infrastructure, Library, Docs or Other. Suggested from its name, changed in the project's settings; tasks and the coordinator are told it. |
 | Leave out | `RepositoryBinding.detached_at` | Taking a repository out of a project: new tasks can't change it and the coordinator stops reading it. Tasks made with it keep it. Nothing in its folder changes. Not "remove" or "detach". |
 | Where tasks open pull requests | `RepositoryBinding.change_target` | For a fork (an `upstream` remote beside `origin`): on the repository it was forked from, or on the fork. The branch is pushed to the fork either way. |
 | Colour | `Project.ink` | The ink a project's mark is drawn in: one of eight, picked for it when it is made, changed under "Name and colour" in its settings. Never "ink" on screen. |
@@ -130,10 +130,10 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | The rest | the mode, `permissions` | What happens to what no rule keeps: allowed, the coordinator decides, ask me, or allow everything. A kind of request on no list is with the rest. |
 | Allow always, Never allow | an answer that keeps a rule, by its scope | An answer that is also kept in the project's rules: for this exact command, commands starting the same way, or the kind of request. Offered only where the rule would hold. |
 | Allowed by the project's rules | a decision a rule made | The quiet line under a turn for what an allow rule let through, opening to each command and its rule. |
-| Skills | Agent Skills, `@althar/skills`'s store (ADR-048) | Folders of instructions, each with a `SKILL.md`, that a task's lead is given for its session, the same for every agent. Kept on this device, outside every repository. Set up in Settings, under Skills. |
+| Skills | Agent Skills, `@althar/skills`'s store (ADR-050) | Folders of instructions, each with a `SKILL.md`, that a task's lead is given for its session, the same for every agent. Kept on this device, outside every repository. Set up in Settings, under Skills. |
 | Althar's catalog | the default catalog, `packages/skills/catalog` | The skills Althar ships, chosen and adjusted from two open-source sets; each says where it came from and its licence. All are on unless the person turns one off. |
 | Review, Install | a review card, an approved install | What a skill from GitHub shows before it is added: where it came from, at which commit, its licence, what stands out in it and its files. Only Install adds it. |
-| Repository files | `ProjectRules.repositoryFiles` (ADR-049) | Whether skill and OpenSpec files may be in the project's repository and be pushed: Write Althar-managed skills, Write OpenSpec artifacts, Push skill/OpenSpec files, each off until turned on. With them off, a push holding such files is held back. |
+| Repository files | `ProjectRules.repositoryFiles` (ADR-051) | Whether skill and OpenSpec files may be in the project's repository and be pushed: Write Althar-managed skills, Write OpenSpec artifacts, Push skill/OpenSpec files, each off until turned on. With them off, a push holding such files is held back. |
 | Settled | terminal states | Calls answered, changes accepted, tasks abandoned, plain tasks seen (Done). |
 
 ## Althar itself

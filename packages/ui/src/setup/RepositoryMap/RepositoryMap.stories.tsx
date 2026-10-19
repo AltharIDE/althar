@@ -32,7 +32,7 @@ type Story = StoryObj<typeof meta>
 export const Meridian: Story = {
   play: async ({ canvasElement }) => {
     const map = within(canvasElement)
-    await expect(map.getByRole('list', { name: 'On this Mac' }).querySelectorAll('li')).toHaveLength(3)
+    await expect(map.getByRole('list', { name: 'On this computer' }).querySelectorAll('li')).toHaveLength(3)
     await expect(map.getByRole('region', { name: 'GitHub' })).toHaveTextContent('Connected as balazs')
     await expect(map.getByRole('region', { name: 'GitLab' })).toHaveTextContent('Not connected')
     // Each card says where its work goes, as the wires draw it.
@@ -148,9 +148,9 @@ export const Elsewhere: Story = {
   },
   play: async ({ canvasElement }) => {
     const map = within(canvasElement)
-    await expect(map.getByText('Not on this Mac')).toBeVisible()
-    await expect(map.getByText('Stays on this Mac')).toBeVisible()
-    await expect(map.getByText('Its work stays on this Mac.')).toBeInTheDocument()
+    await expect(map.getByText('Not on this computer')).toBeVisible()
+    await expect(map.getByText('Stays on this computer')).toBeVisible()
+    await expect(map.getByText('Its work stays on this computer.')).toBeInTheDocument()
     await expect(map.getByRole('region', { name: 'git.meridian.dev' })).toHaveTextContent('Not a host Althar connects to')
     // Althar can't connect a host it doesn't know.
     await expect(map.queryByRole('button', { name: /Connect/ })).toBeNull()

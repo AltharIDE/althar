@@ -24,6 +24,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
 import { NotConnected } from './Connections'
 import { AttentionClosed, NoChangeToOpen, NotFound, NothingToWaitFor } from './errors'
+import { backoff, contained, keptGoing } from './Failures'
 import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
@@ -154,6 +155,19 @@ const Reviewed = Schema.Struct({
   summary: Schema.String,
   findings: Schema.optional(Schema.Array(Finding)),
 })
+
+/**
+ * What a step held for a usage limit keeps (`node_attempts.output`): the
+ * agent out, until when, and the account and model it carries on with;
+ * held before Althar kept those, it carries on as the agent picks.
+ */
+const Hold = Schema.Struct({
+  heldFor: Schema.String,
+  until: Schema.String,
+  account: Schema.optional(Schema.NullOr(Schema.String)),
+  model: Schema.optional(Schema.NullOr(Schema.String)),
+})
+const decodeHold = Schema.decodeUnknownEffect(Schema.fromJsonString(Hold))
 
 /** Reads a tool's input, or refuses it with what was wrong, for the agent to try again. */
 const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
@@ -2357,7 +2371,7 @@ export class Runs extends Context.Service<
           const reply = (said: string) =>
             branched.length === 0
               ? said
-              : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on this Mac: commit there.`
+              : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on this computer: commit there.`
           const itemId = yield* newId(Ids.threadItem)
           const shows = Effect.gen(function* () {
             const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, evidence)
@@ -3472,11 +3486,15 @@ export class Runs extends Context.Service<
       /* The turns whose waiting message was given back this launch, so one that fails again waits for its own reset. */
       const given = new Set<string>()
 
+      /* What waited for a usage limit and couldn't go on at its reset, each waiting a while before it is tried again. */
+      const tries = backoff()
+
       /*
        * What waits for a usage limit to reset runs again then, the soonest
        * first, or sooner if something new waits; after a restart too. A step
        * held for it, and what the person said to the coordinator or a lead
-       * outside a step.
+       * outside a step. Each is its own: one whose hold can't be read is left
+       * out, and one that can't go on waits a while, as the rest go on.
        */
       const holds = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -3496,23 +3514,25 @@ export class Runs extends Context.Service<
               AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.id = t.task_id AND k.state IN ('done', 'abandoned'))
               AND EXISTS (SELECT 1 FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
                 WHERE i.thread_id = t.id AND i.state = 'queued' AND a.kind = 'person')`
-          const due: Array<{ readonly at: number; readonly run: Effect.Effect<void, unknown, Store> }> = held.map((step) => {
-            // Held before Althar kept the account and model, it carries on as the agent picks.
-            const { heldFor, until, account, model } = JSON.parse(step.output) as {
-              heldFor: string
-              until: string
-              account?: string | null
-              model?: string | null
-            }
-            return {
-              at: Date.parse(until),
-              run: resumeHeld({ ...step, agentId: heldFor, accountId: account ?? null, model: model ?? null }),
-            }
-          })
+          const due: Array<{ readonly key: string; readonly at: number; readonly run: Effect.Effect<void, unknown, Store> }> = []
+          for (const step of held) {
+            const hold = yield* decodeHold(step.output).pipe(contained('Runs.held', () => undefined))
+            if (hold === undefined) continue
+            due.push({
+              key: step.attemptId,
+              at: Date.parse(hold.until),
+              run: resumeHeld({ ...step, agentId: hold.heldFor, accountId: hold.account ?? null, model: hold.model ?? null }),
+            })
+          }
           for (const message of messages) {
             if (given.has(message.turnId)) continue
-            const out = yield* message.accountId === null ? limits.out(message.agentId) : limits.outAccount(message.accountId)
+            // One whose agent's limit can't be read waits, left out until it can be.
+            const out = yield* (message.accountId === null ? limits.out(message.agentId) : limits.outAccount(message.accountId)).pipe(
+              contained('Runs.held', () => undefined),
+            )
+            if (out === undefined) continue
             due.push({
+              key: message.turnId,
               at: Option.isSome(out) ? Date.parse(out.value.until) : 0,
               run: Effect.andThen(
                 Effect.sync(() => given.add(message.turnId)),
@@ -3520,7 +3540,7 @@ export class Runs extends Context.Service<
               ),
             })
           }
-          const next = due.toSorted((a, b) => a.at - b.at)[0]
+          const next = due.map((one) => ({ ...one, at: Math.max(one.at, tries.until(one.key)) })).toSorted((a, b) => a.at - b.at)[0]
           if (next === undefined) {
             yield* Queue.take(holdsChanged)
             continue
@@ -3530,10 +3550,10 @@ export class Runs extends Context.Service<
             yield* Effect.raceFirst(Queue.take(holdsChanged), Effect.sleep(Duration.millis(wait)))
             continue
           }
-          yield* next.run.pipe(Effect.catchCause((cause) => Effect.logWarning('What waited for a usage limit could not go on', cause)))
+          yield* tries.attempt(next.key, 'Runs.resume', next.run)
         }
       })
-      yield* Effect.forkScoped(provide(holds))
+      yield* Effect.forkScoped(provide(keptGoing('Runs.holds', holds)))
 
       // What the person says to a task's lead after its plan opens a round of work, as the turn begins (ADR-034); Althar's own words don't.
       yield* sessions.onPersonsTurn((lead) =>

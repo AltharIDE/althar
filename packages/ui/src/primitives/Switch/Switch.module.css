@@ -6,12 +6,12 @@
   padding: 0;
   border: 0;
   border-radius: 99px;
-  background: var(--frost-well-hover);
+  background: var(--line-2);
   cursor: pointer;
   transition: background var(--base) var(--ease);
 }
 .switch:hover:not(:disabled) {
-  background: var(--line-2);
+  background: var(--line-3);
 }
 .switch[aria-checked='true'] {
   background: var(--t-1);

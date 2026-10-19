@@ -160,8 +160,8 @@ export const branchOnFirstWrite = (
     const distinct = [...new Set(branched.map((worktree) => worktree.name))]
     const own =
       distinct.length === 1
-        ? `on a branch of its own now, ${distinct[0] ?? ''}, which stays on this Mac`
-        : `on branches of its own now, ${distinct.join(', ')}, which stay on this Mac`
+        ? `on a branch of its own now, ${distinct[0] ?? ''}, which stays on this computer`
+        : `on branches of its own now, ${distinct.join(', ')}, which stay on this computer`
     const title = made
       ? null
       : already

@@ -16,6 +16,8 @@ import {
   FactLine,
   FileChips,
   Findings,
+  LinkButton,
+  NextLine,
   NextRow,
   NextStep,
   Outcome,
@@ -31,7 +33,7 @@ import {
 import type { ReactNode } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
-import { busyWords, queuedWords, waitsWords } from '../../shared/agents'
+import { busyWords, inLineWords, waitsWords } from '../../shared/agents'
 import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
@@ -41,6 +43,7 @@ import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Board.module.css'
 import { type Lanes, type Waiting } from './lanes'
+import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
 /*
@@ -58,8 +61,11 @@ export const text = {
   label: 'The project’s work',
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
-  /** The quiet divider over the tasks started whose first step waits for a free agent, and, under them, the plans. */
+  /** The quiet divider over the tasks that wait for a free agent before any has worked on them, and, under them, the plans. */
   startsWhenFree: 'Starts when an agent is free',
+  /** At the divider's end, while the line is the oldest first; once the person changed it, the way back. */
+  reorder: 'Drag to change the order',
+  oldestFirst: 'Back to oldest first',
   planned: 'Planned',
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
@@ -237,7 +243,7 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
         : work.phase === 'stopped'
           ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped], why: text.stopped }
           : null
-  const beforeWork = work.queued !== null && work.planWaits === true
+  const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
     title: work.title,
@@ -459,6 +465,7 @@ export function BoardView({
   onShowOlder,
   closing,
   actions,
+  line,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -472,6 +479,8 @@ export function BoardView({
   closing?: ClosingPullRequests
   /** What a ready card does without opening its task, pushing and merging; without it, its next step is words and the card opens the task. */
   actions?: CardActions
+  /** Putting the line of tasks waiting for a free agent in the person's order; without it, the line stays as it is. */
+  line?: LineActions
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
@@ -493,8 +502,8 @@ export function BoardView({
         title={work.title}
         wait={free || startsAt !== null ? Wait.Workers : Wait.You}
         reason={
-          free && work.queued !== null
-            ? queuedWords(work.queued)
+          free
+            ? inLineWords(index + 1)
             : startsAt === null
               ? text.held
               : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
@@ -508,8 +517,35 @@ export function BoardView({
   return (
     <Board label={text.label}>
       <BoardColumn lane={BoardLane.Next} count={lanes.next.length}>
-        {lanes.free > 0 && <BoardDivider>{text.startsWhenFree}</BoardDivider>}
-        {lanes.free > 0 && <BoardList>{lanes.next.slice(0, lanes.free).map((work, index) => nextRow(work, index))}</BoardList>}
+        {lanes.free > 0 && (
+          <BoardDivider
+            end={
+              line === undefined || lanes.free < 2 ? undefined : lanes.reordered ? (
+                <LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>
+              ) : (
+                text.reorder
+              )
+            }
+          >
+            {text.startsWhenFree}
+          </BoardDivider>
+        )}
+        {line?.failed != null && (
+          <p className={s.failure} role="alert">
+            {line.failed}
+          </p>
+        )}
+        {lanes.free > 0 && (
+          <NextLine
+            rows={lanes.next.slice(0, lanes.free).map((work) => ({ id: work.taskId, title: work.title }))}
+            // While a row is dragged, each says the place it would take.
+            render={(id, place) => {
+              const work = lanes.next.find((one) => one.taskId === id)
+              return work === undefined ? null : nextRow(work, place - 1)
+            }}
+            {...(line === undefined ? {} : { onMove: line.move })}
+          />
+        )}
         {lanes.free > 0 && lanes.free < lanes.next.length && <BoardDivider>{text.planned}</BoardDivider>}
         {lanes.free < lanes.next.length && (
           <BoardList>{lanes.next.slice(lanes.free).map((work, index) => nextRow(work, lanes.free + index))}</BoardList>

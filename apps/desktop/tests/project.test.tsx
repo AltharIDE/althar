@@ -7,12 +7,11 @@ import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, project, status, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 function Project({
   onTask = vi.fn(),
@@ -30,6 +29,7 @@ function Project({
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
+      settings={useSettingsOf('p1')}
       onTask={onTask}
       {...(room === undefined ? {} : { room })}
       {...(newTask === undefined ? {} : { newTask })}
@@ -77,7 +77,7 @@ function WithSettings() {
       board={useBoard('p1')}
       connections={useConnections()}
       onTask={vi.fn()}
-      settings={{ model: useProjectSettings('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
+      settings={useSettingsOf('p1')}
     />
   )
 }
@@ -167,7 +167,7 @@ describe('the project’s bar', () => {
     await userEvent.keyboard('b')
     expect(checked()).toMatch(/^Board/)
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Both/)
+    expect(checked()).toMatch(/^Home/)
     await userEvent.keyboard('b')
     expect(checked()).toMatch(/^Conversation/)
     await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
@@ -177,7 +177,7 @@ describe('the project’s bar', () => {
     view.unmount()
   })
 
-  it('says which view it is on, to open on it again, and has only its views to choose from', async () => {
+  it('says which view it is on, to open on it again, and has only its views and its settings to choose from', async () => {
     const onRoomChange = vi.fn()
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     withServices(<Project room={Room.Both} onRoomChange={onRoomChange} />, client)
@@ -187,9 +187,13 @@ describe('the project’s bar', () => {
       within(views)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Conversation', 'Board', 'Both'])
+    ).toEqual(['Home', 'Conversation', 'Board', 'Settings'])
     await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
     expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
+    // Its settings are a view too, kept like the others to open on again.
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
+    expect(onRoomChange).toHaveBeenLastCalledWith(Room.Settings)
+    expect(screen.getByRole('navigation', { name: 'Project settings' })).toBeTruthy()
   })
 })
 

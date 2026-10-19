@@ -10,7 +10,8 @@ import type { Frame, Record } from '../src/renderer/shared/dictation/recorder'
 import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
 import { together, useDictation } from '../src/renderer/shared/dictation/useDictation'
-import { setDraftText, useDraft } from '../src/renderer/shared/drafts'
+import { draftOf, forgetDrafts, setDraftDictated, setDraftText, useDraft } from '../src/renderer/shared/drafts'
+import { sentWith } from '../src/renderer/shared/useImages'
 import { fakeClient, fakeHost } from './fixtures'
 import { withServices } from './render'
 
@@ -229,6 +230,38 @@ describe('dictating with the model here', () => {
     expect(screen.getByPlaceholderText('Listening…')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /^Stop dictating/ }))
     await waitFor(() => expect(box.value).toBe('Before the PR, check the retry path run it again.'))
+  })
+
+  it('marks the draft as dictated, keeps the mark through the person’s edits, and forgets it with the words', async () => {
+    const host = ready()
+    show(host.dictation, fakeRecord().record, { initial: 'Typed first. ' })
+    expect(draftOf('thread:th1').dictated).toBe(false)
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
+    await waitFor(() => expect(field()).toHaveProperty('value', expect.stringContaining('check the retry path')))
+    expect(draftOf('thread:th1').dictated).toBe(true)
+    // Typing more, and cutting some of it away, leaves it dictated: some of its words came from the voice.
+    await userEvent.type(field(), ' and the docs')
+    expect(draftOf('thread:th1')).toMatchObject({ dictated: true })
+    // What goes with it when it is sent says so; a typed one carries nothing.
+    expect(sentWith({ sent: [], pictures: [], dictated: true })).toEqual({ dictated: true })
+    expect(sentWith({ sent: [], pictures: [] })).toEqual({})
+    // Sent, the composer is empty again, and the next message starts typed.
+    setDraftText('thread:th1', '')
+    expect(draftOf('thread:th1').dictated).toBe(false)
+    setDraftDictated('thread:th1', true)
+    expect(draftOf('thread:th1').dictated).toBe(false)
+  })
+
+  it('keeps the mark of dictated words that were kept, as the draft is read again', () => {
+    forgetDrafts()
+    setDraftText('thread:kept', 'Ask Alpha')
+    setDraftDictated('thread:kept', true)
+    setDraftText('thread:typed', 'Ask Althar')
+    // A window that starts again reads them from its storage.
+    forgetDrafts()
+    expect(draftOf('thread:kept')).toMatchObject({ text: 'Ask Alpha', dictated: true })
+    expect(draftOf('thread:typed')).toMatchObject({ text: 'Ask Althar', dictated: false })
   })
 
   it('loads the model once, however often it listens', async () => {

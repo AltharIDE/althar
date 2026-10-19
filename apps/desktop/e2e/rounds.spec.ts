@@ -3,10 +3,10 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, say, toConversation } from './support'
 
 /*
  * A task goes back to work, and ships again (ADR-034), in a real window
@@ -27,26 +27,6 @@ const squashMerge = (remote: string, branch: string) => {
   git(clone, 'merge', '-q', '--squash', `origin/${branch}`)
   git(clone, 'commit', '-q', '-m', `Merge ${branch}`)
   git(clone, 'push', '-q', 'origin', 'main')
-}
-
-/** Connects the fake GitHub from the project's settings, with a token pasted in. */
-const connectGitHub = async (page: Page, project = 'meridian') => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await page
-    .getByRole('dialog', { name: `${project}’s settings` })
-    .getByRole('button', { name: /^GitHub/ })
-    .click()
-  const connecting = page.getByRole('dialog', { name: 'GitHub' })
-  await connecting
-    .getByRole('group', { name: 'Ways to connect GitHub' })
-    .getByRole('button', { name: /Make a token/ })
-    .click()
-  await connecting.getByRole('button', { name: 'Paste it myself' }).click()
-  await connecting.getByLabel('Paste it').fill('github_pat_e2e')
-  await connecting.getByRole('button', { name: 'Check' }).click()
-  await expect(connecting.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
-  await connecting.getByRole('button', { name: 'Done' }).click()
-  await expect(connecting).toHaveCount(0)
 }
 
 test('a merged task goes back to work when the person writes to its lead, and ships it as a second pull request', async () => {
@@ -168,7 +148,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await openFirstProject(electronApp, page, folder)
     // A project of the two, named for the first.
     await expect(page.getByRole('heading', { name: 'api', level: 1 })).toBeVisible()
-    await connectGitHub(page, 'api')
+    await connectGitHub(page)
 
     // Its plan changes api alone: api's pull request opens, and web has none. Accepted, it merges, squashed.
     await say(page, 'Share the retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish]')

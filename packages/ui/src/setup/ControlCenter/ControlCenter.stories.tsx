@@ -18,6 +18,7 @@ import {
   SERVICES,
 } from '../../fixtures/setup'
 import { Choices, type ChoiceOption } from '../../primitives/Choices/Choices'
+import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Switch } from '../../primitives/Switch/Switch'
@@ -37,6 +38,7 @@ import {
   type ControlCenterProps,
   ControlDetail,
   ControlFoot,
+  ControlFootStart,
   ControlGrid,
   ControlLine,
   ControlLink,
@@ -572,6 +574,30 @@ export const Holding: Story = {
 const frame = (node: ReactNode, width = 440) => (
   <div style={{ width, padding: 12, borderRadius: 20, background: 'var(--frost)' }}>{node}</div>
 )
+
+/** The quick settings' foot as the app composes it: the version, Report a problem and All settings, across the panel's widths. */
+export const QuickFoot: Story = {
+  render: () => (
+    <States
+      size="wide"
+      cells={[440, 360, 300].map((width) => ({
+        state: `${width}px`,
+        node: frame(
+          <ControlFoot>
+            <ControlFootStart>
+              <AppVersion version="0.4.1" notes="https://github.com/AltharIDE/althar/releases/tag/v0.4.1" />
+              <LinkButton onClick={fn()}>Report a problem</LinkButton>
+            </ControlFootStart>
+            <Button size="small" icon="gear" kbd="⌘⇧," onClick={fn()}>
+              All settings
+            </Button>
+          </ControlFoot>,
+          width,
+        ),
+      }))}
+    />
+  ),
+}
 
 /** Open at rest, and the parts on their own: modules placed and not, the lines, a link on and off, a long foot wrapping, and the Dock the icon shows in. */
 export const AllStates: Story = {

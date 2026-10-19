@@ -82,6 +82,13 @@ function Window({
           setOpen(rest)
           if (id === current) setCurrent(rest[Math.min(at, rest.length - 1)]?.id ?? null)
         }}
+        onReorder={(id, beforeId) => {
+          const moved = open.find((tab) => tab.id === id)
+          if (moved === undefined) return
+          const rest = open.filter((tab) => tab.id !== id)
+          const at = rest.findIndex((tab) => tab.id === beforeId)
+          setOpen(at < 0 ? [...rest, moved] : [...rest.slice(0, at), moved, ...rest.slice(at)])
+        }}
         onOpen={(id) => {
           setOpen([...open, byId(id)])
           setCurrent(id)
@@ -144,6 +151,59 @@ export const SwitchingOpeningAndClosing: Story = {
     await expect(nav.getByRole('button', { name: /^Halyard/ })).toHaveAttribute('aria-current', 'page')
     await userEvent.click(nav.getByRole('button', { name: /^Home, 3 calls wait on you/ }))
     await expect(nav.getByRole('button', { name: /^Home/ })).toHaveAttribute('aria-current', 'page')
+  },
+}
+
+/* The projects' tabs in order, by name. */
+const order = (nav: ReturnType<typeof within>) =>
+  nav
+    .getAllByRole('button')
+    .flatMap((button: HTMLElement) =>
+      (/^(Meridian|Halyard|Tessera|Ferrous)/.exec(button.getAttribute('aria-label') ?? button.textContent ?? '') ?? []).slice(1),
+    )
+
+/** A project's tab is dragged along the bar and the others give way; let go, it lands there. A press that doesn't move still switches to it, and the home's tab stays first. */
+export const Reordering: Story = {
+  args: { initial: ALL.slice(0, 4), current: 'meridian' },
+  play: async ({ canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    const tab = (name: string) => nav.getByRole('button', { name: new RegExp(`^${name}`) })
+    await expect(order(nav)).toEqual(['Meridian', 'Halyard', 'Tessera', 'Ferrous'])
+    const from = tab('Meridian').getBoundingClientRect()
+    const to = tab('Ferrous').getBoundingClientRect()
+    const y = from.top + 10
+    await userEvent.pointer([
+      { keys: '[MouseLeft>]', target: tab('Meridian'), coords: { clientX: from.left + 20, clientY: y } },
+      { coords: { clientX: from.left + 60, clientY: y } },
+      { coords: { clientX: to.right - 10, clientY: y } },
+      { keys: '[/MouseLeft]' },
+    ])
+    await expect(order(nav)).toEqual(['Halyard', 'Tessera', 'Ferrous', 'Meridian'])
+    // The home's tab is still first.
+    await expect(nav.getAllByRole('button')[0]).toHaveAccessibleName(/^Home/)
+    // By key: ⌥⇧← moves the focused tab one place back.
+    tab('Meridian').focus()
+    await userEvent.keyboard('{Alt>}{Shift>}{ArrowLeft}{/Shift}{/Alt}')
+    await expect(order(nav)).toEqual(['Halyard', 'Tessera', 'Meridian', 'Ferrous'])
+  },
+}
+
+/** A press whose release went elsewhere (off the tab, over the page) leaves nothing behind: hovering the tabs after it moves none. */
+export const MissedRelease: Story = {
+  args: { initial: ALL.slice(0, 4), current: 'meridian' },
+  play: async ({ canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    const tab = (name: string) => nav.getByRole('button', { name: new RegExp(`^${name}`) })
+    const at = tab('Meridian').getBoundingClientRect()
+    const event = (type: string, buttons: number, clientX: number) =>
+      new PointerEvent(type, { bubbles: true, pointerId: 7, isPrimary: true, button: 0, buttons, clientX, clientY: at.top + 10 })
+    tab('Meridian').dispatchEvent(event('pointerdown', 1, at.left + 20))
+    // The release never arrives; the pointer comes back over a tab further along with no button down.
+    const far = tab('Ferrous').getBoundingClientRect()
+    tab('Meridian').dispatchEvent(event('pointermove', 0, far.right - 10))
+    tab('Meridian').dispatchEvent(event('pointermove', 0, far.right - 5))
+    await expect(order(nav)).toEqual(['Meridian', 'Halyard', 'Tessera', 'Ferrous'])
+    await expect(canvasElement.querySelectorAll('li[style*="transform"]')).toHaveLength(0)
   },
 }
 

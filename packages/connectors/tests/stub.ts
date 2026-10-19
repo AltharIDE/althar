@@ -11,6 +11,8 @@ export interface Sent {
   readonly url: string
   readonly headers: Readonly<Record<string, string>>
   readonly body: unknown
+  /** How `fetch` was asked to take a redirect, where it was told. */
+  readonly redirect?: NonNullable<RequestInit['redirect']>
 }
 
 export interface Answer {
@@ -39,7 +41,7 @@ export const stubFetch = (routes: ReadonlyArray<Route>) => {
         body = Object.fromEntries(new URLSearchParams(raw))
       }
     }
-    const request: Sent = { method, url: input, headers, body }
+    const request: Sent = { method, url: input, headers, body, ...(init.redirect === undefined ? {} : { redirect: init.redirect }) }
     sent.push(request)
     const route = routes.find(([m, url]) => m === method && (typeof url === 'string' ? url === input : url.test(input)))
     if (route === undefined) return new Response(JSON.stringify({ message: `No route for ${method} ${input}` }), { status: 404 })

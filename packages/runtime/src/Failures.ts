@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer, PubSub, Stream } from 'effect'
+import { Cause, Clock, Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
 
 /*
  * What failed that Althar didn't expect (ADR-047). Each failure is kept to
@@ -85,3 +85,44 @@ export const contained =
             return fallback(cause)
           }),
     )
+
+/**
+ * A loop kept going: a round of it that fails is kept to that round, as
+ * `contained` keeps it, and the loop starts again `pause` after, so a
+ * failure that comes back each time isn't met again at once.
+ */
+export const keptGoing = <E, R>(where: string, loop: Effect.Effect<never, E, R>, pause: Duration.Input = Duration.seconds(10)) =>
+  Effect.forever(
+    loop.pipe(
+      contained(where, () => undefined),
+      Effect.andThen(Effect.sleep(pause)),
+    ),
+  )
+
+/**
+ * A loop's items that failed, each kept apart for a while (ADR-047): one
+ * that failed is tried again `first` after, twice as long after each time it
+ * fails again, at most `most`, so the loop doesn't pick it again at once
+ * and goes on with the rest meanwhile. One that goes through is forgotten.
+ */
+export const backoff = (first: Duration.Input = Duration.seconds(10), most: Duration.Input = Duration.minutes(10)) => {
+  const failed = new Map<string, { readonly times: number; readonly until: number }>()
+  return {
+    /** When the item may be tried again, in milliseconds since the epoch: 0 for one that hasn't failed. */
+    until: (key: string) => failed.get(key)?.until ?? 0,
+    /** Runs `effect` for the item, kept to it as `contained` keeps it: where it fails, the item waits before it is tried again. */
+    attempt: <A, E, R>(key: string, where: string, effect: Effect.Effect<A, E, R>, agent?: string): Effect.Effect<void, never, R> =>
+      effect.pipe(
+        Effect.as(true),
+        contained(where, () => false, agent),
+        Effect.flatMap((passed) =>
+          Effect.map(Clock.currentTimeMillis, (now) => {
+            if (passed) return void failed.delete(key)
+            const times = (failed.get(key)?.times ?? 0) + 1
+            const wait = Math.min(Duration.toMillis(first) * 2 ** (times - 1), Duration.toMillis(most))
+            failed.set(key, { times, until: now + wait })
+          }),
+        ),
+      ),
+  }
+}

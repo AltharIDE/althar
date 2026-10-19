@@ -4,36 +4,49 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type ProjectSummary, type Service } from '@althar/contracts'
+import { ApiError, type BoardTask, type ConnectionSummary, type ProjectSummary, type Service } from '@althar/contracts'
 
-import { ServicesProvider } from '../src/renderer/data/services'
+import { type Host, ServicesProvider } from '../src/renderer/data/services'
 import { projectRoute } from '../src/renderer/features/project/route'
-import { useConnections } from '../src/renderer/features/connections/useConnections'
-import { RepositoriesView } from '../src/renderer/features/repositories/RepositoriesView'
-import { repositoriesRoute } from '../src/renderer/features/repositories/route'
-import { useRepositories } from '../src/renderer/features/repositories/useRepositories'
-import { rulesRoute } from '../src/renderer/features/rules/route'
-import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
+import { useProjectSettings } from '../src/renderer/features/projectSettings/useProjectSettings'
 import { taskRoute } from '../src/renderer/features/task/route'
 import { rootRoute } from '../src/renderer/root'
-import { changed, connectionList, fakeClient, fakeHost, project, projectRules, repositories } from './fixtures'
-import { servicesFor, withServices } from './render'
+import {
+  card,
+  changed,
+  connectionList,
+  coordinatorSnapshot,
+  fakeClient,
+  fakeHost,
+  githubConnection,
+  project,
+  projectRules,
+  repositories,
+  runnables,
+} from './fixtures'
+import { servicesFor } from './render'
 
 /*
- * A project's settings, from the Settings button on its front page: its
- * name and colour changed in place, its repositories and its rules opened,
- * connecting its code host, and removing it from Althar, through the app's
- * own routes, under its tabs.
+ * A project's settings, a view of the project from Settings in the window's
+ * bar, under its front page, through the app's own routes and tabs: its name
+ * and colour changed in place, the switches every task follows, its
+ * repositories and the trackers its tasks' issues are on, its rules, what it
+ * runs, the notes its coordinator keeps, and removing it from Althar.
  */
 
 beforeEach(() => window.localStorage.clear())
 
 const homeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: () => <p>The home</p> })
+const appSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings/$section',
+  component: () => <p>Althar’s settings</p>,
+})
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'Halyard', slug: 'halyard', ink: 'clay' }
 
 /** The window at a place, with a client whose project list follows what was renamed, inked and removed. */
-const windowAt = (path: string, overrides: Parameters<typeof fakeClient>[0] = {}) => {
+const windowAt = (path: string, overrides: Parameters<typeof fakeClient>[0] = {}, host: Host = fakeHost()) => {
   let now: ReadonlyArray<ProjectSummary> = [project, halyard]
   const fake = fakeClient({
     listProjects: vi.fn(async () => ({ cursor: 3, projects: now })),
@@ -48,9 +61,9 @@ const windowAt = (path: string, overrides: Parameters<typeof fakeClient>[0] = {}
     }),
     ...overrides,
   })
-  const services = servicesFor(fake.client)
+  const services = servicesFor(fake.client, host)
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute, repositoriesRoute, rulesRoute, taskRoute]),
+    routeTree: rootRoute.addChildren([homeRoute, projectRoute, taskRoute, appSettingsRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
     context: { client: fake.client, cache: services.cache },
   })
@@ -66,46 +79,115 @@ const windowAt = (path: string, overrides: Parameters<typeof fakeClient>[0] = {}
 const tabNamed = (name: string) =>
   within(screen.getByRole('navigation', { name: 'Projects' })).queryByRole('button', { name: new RegExp(`^${name}`) })
 
-/** The project's settings, opened from its front page. */
-const openSettings = async (project = 'meridian') => {
-  await userEvent.click(await screen.findByRole('button', { name: 'Settings' }))
-  return within(await screen.findByRole('dialog', { name: `${project}’s settings` }))
+/** The project's views, in the window's bar. */
+const views = async () => within(await screen.findByRole('radiogroup', { name: 'View' }))
+
+/** The project's settings, opened from the bar, at a section where one is named. */
+const openSettings = async (section?: string) => {
+  await userEvent.click((await views()).getByRole('radio', { name: /^Settings/ }))
+  const side = within(await screen.findByRole('navigation', { name: 'Project settings' }))
+  if (section !== undefined) await userEvent.click(side.getByRole('button', { name: new RegExp(`^${section}`) }))
+  return side
 }
 
-/** Its name and colour, opened out in its settings. */
-const openIdentity = async () => {
-  const panel = await openSettings()
-  await userEvent.click(panel.getByRole('button', { name: /^Name and colour/ }))
-  return panel
-}
+/** The section open: its sheet, by its title. */
+const sheet = (title: string) => within(screen.getByRole('region', { name: title }))
+
+/** What a control's description says: a switch's note, under its name. */
+const descriptionOf = (control: HTMLElement) =>
+  (control.getAttribute('aria-describedby') ?? '')
+    .split(' ')
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .join(' ')
 
 /** The ink the front page's wash is drawn in. */
 const washOf = (name: string) => screen.getByRole('heading', { level: 1, name }).closest('header')?.getAttribute('style')
 
+/** A task on the board, from an issue on Linear, read through a connection where it names one. */
+const taskFrom = (key: string, connectionId?: string): BoardTask => ({
+  ...card(),
+  taskId: `t_${key}`,
+  threadId: `th_${key}`,
+  state: 'done',
+  phase: 'settled',
+  createdAt: '2026-10-01T09:00:00.000Z',
+  settledAt: '2026-10-01T09:00:00.000Z',
+  changed: null,
+  here: [],
+  issue: {
+    product: 'linear',
+    key,
+    title: key,
+    url: `https://linear.app/northwind/issue/${key}/refunds`,
+    ...(connectionId === undefined ? {} : { connectionId }),
+  },
+})
+
+/** The board with tasks from MER issues on Linear, which Althar is connected to as these say. */
+const onLinear = (...connections: ReadonlyArray<ConnectionSummary>): Parameters<typeof fakeClient>[0] => ({
+  getBoard: vi.fn(async () => ({ cursor: 1, tasks: [taskFrom('MER-12'), taskFrom('MER-14')], calls: [], settledTotal: 2 })),
+  listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, ...connections] })),
+})
+
+const linear = (state: ConnectionSummary['state'], id = 'conn_linear', login = 'balazs'): ConnectionSummary => ({
+  id,
+  product: 'linear',
+  name: 'Linear',
+  webUrl: 'https://linear.app',
+  account: { login, name: 'Balázs' },
+  auth: 'token',
+  state,
+})
+
 describe('a project’s settings', () => {
+  it('open in place of its work, under its front page, on General, with every section down the side', async () => {
+    windowAt('/projects/p1')
+    const side = await openSettings()
+    expect(screen.getByRole('heading', { level: 1, name: 'meridian' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeTruthy()
+    expect(side.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'General',
+      'Code and issues',
+      'Rules',
+      'Running',
+      'Notes',
+      'Remove from Althar…',
+    ])
+    expect(side.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('page')
+    // Back to its work, the conversation is where it was.
+    await userEvent.click((await views()).getByRole('radio', { name: 'Conversation' }))
+    expect(screen.queryByRole('navigation', { name: 'Project settings' })).toBeNull()
+  })
+
+  it('open at a section an address names, as a task’s way to its rules does', async () => {
+    windowAt('/projects/p1?room=settings&section=rules')
+    expect(await screen.findByRole('heading', { level: 2, name: 'Rules' })).toBeTruthy()
+    expect((await views()).getByRole('radio', { name: 'Settings' })).toHaveProperty('ariaChecked', 'true')
+    // The rules are named by the section: only their key is above the sentences.
+    expect(await screen.findByRole('heading', { level: 3, name: 'Always' })).toBeTruthy()
+  })
+
   it('renames the project in place: its front page and its tab take the new name, without a restart', async () => {
     const { client } = windowAt('/projects/p1')
-    const panel = await openIdentity()
-    const field = panel.getByRole('textbox', { name: 'Name' })
+    await openSettings()
+    const field = sheet('General').getByRole('textbox', { name: 'Name' })
     await userEvent.type(field, ' v2{Enter}')
     // It shows at once, before the runtime has said so.
     expect(screen.getByRole('heading', { level: 1, name: 'meridian v2' })).toBeTruthy()
     await waitFor(() => expect(client.renameProject).toHaveBeenCalledWith('p1', 'meridian v2'))
     await waitFor(() => expect(tabNamed('meridian v2')).toBeTruthy())
     expect(field).toHaveProperty('value', 'meridian v2')
-    // Back to all of them, the module says the new name.
-    await userEvent.click(panel.getByRole('button', { name: 'Back to all settings' }))
-    expect(panel.getByRole('button', { name: /^Name and colour/ }).textContent).toContain('meridian v2')
   })
 
   it('draws the project in another ink, at once and everywhere; another project’s ink says whose it is', async () => {
     const { client } = windowAt('/projects/p1')
     await screen.findByRole('heading', { level: 1, name: 'meridian' })
     expect(washOf('meridian')).toContain('--project-teal')
-    const panel = await openIdentity()
-    expect(panel.getByRole('radio', { name: 'Teal' })).toHaveProperty('ariaChecked', 'true')
-    expect(panel.getByRole('radio', { name: 'Clay, Halyard’s' })).toBeTruthy()
-    await userEvent.click(panel.getByRole('radio', { name: 'Rose' }))
+    await openSettings()
+    const general = sheet('General')
+    expect(general.getByRole('radio', { name: 'Teal' })).toHaveProperty('ariaChecked', 'true')
+    expect(general.getByRole('radio', { name: 'Clay, Halyard’s' })).toBeTruthy()
+    await userEvent.click(general.getByRole('radio', { name: 'Rose' }))
     expect(washOf('meridian')).toContain('--project-rose')
     await waitFor(() => expect(client.setProjectInk).toHaveBeenCalledWith('p1', 'rose'))
     // The projects are read again, so the tabs and the home draw it in its new ink too.
@@ -119,163 +201,75 @@ describe('a project’s settings', () => {
         throw new ApiError({ reason: 'ProjectRefused', message: 'Give the project a name.' })
       }),
     })
-    const panel = await openIdentity()
-    await userEvent.type(panel.getByRole('textbox', { name: 'Name' }), ' 2{Enter}')
-    expect(await panel.findByRole('alert')).toHaveProperty('textContent', 'Give the project a name.')
+    await openSettings()
+    const general = sheet('General')
+    await userEvent.type(general.getByRole('textbox', { name: 'Name' }), ' 2{Enter}')
+    expect(await general.findByRole('alert')).toHaveProperty('textContent', 'Give the project a name.')
     expect(client.renameProject).toHaveBeenCalledOnce()
     expect(screen.getByRole('heading', { level: 1, name: 'meridian' })).toBeTruthy()
-    expect(panel.getByRole('textbox', { name: 'Name' })).toHaveProperty('value', 'meridian')
+    expect(general.getByRole('textbox', { name: 'Name' })).toHaveProperty('value', 'meridian')
   })
 
-  it('shows the notes its coordinator keeps, and drops one that no longer holds', async () => {
-    const notes = [
-      {
-        id: 'note_1',
-        body: 'Issue drafts need an approval card, on every tracker.',
-        createdAt: '2026-10-01T09:00:00.000Z',
-        keptBy: 'coordinator' as const,
-      },
-      {
-        id: 'note_2',
-        body: 'Dependency setup runs outside the sandbox.',
-        createdAt: '2026-10-02T09:00:00.000Z',
-        keptBy: 'coordinator' as const,
-      },
-    ]
-    let kept = notes
-    const { client } = windowAt('/projects/p1', {
-      getProjectNotes: vi.fn(async () => kept),
-      dropProjectNote: vi.fn(async (_projectId: string, noteId: string) => {
-        kept = kept.filter((note) => note.id !== noteId)
-      }),
-    })
-    const panel = await openSettings()
-    // At a glance: how many, and the latest.
-    const module = await panel.findByRole('button', { name: /^Notes/ })
-    expect(module.textContent).toContain('2')
-    expect(module.textContent).toContain('Dependency setup runs outside the sandbox.')
-    await userEvent.click(module)
-    expect(panel.getByRole('heading', { name: 'Notes', level: 2 })).toBeTruthy()
-    await userEvent.click(panel.getByRole('button', { name: 'Remove “Issue drafts need an approval card, on every tracker.”' }))
-    await waitFor(() => expect(client.dropProjectNote).toHaveBeenCalledWith('p1', 'note_1'))
-    await waitFor(() => expect(panel.getAllByRole('listitem')).toHaveLength(1))
-    expect(panel.getByRole('button', { name: 'Remove “Dependency setup runs outside the sandbox.”' })).toBe(document.activeElement)
-  })
-
-  it('puts a note back and says why when dropping it doesn’t hold', async () => {
-    const note = {
-      id: 'note_1',
-      body: 'Issue drafts need an approval card.',
-      createdAt: '2026-10-01T09:00:00.000Z',
-      keptBy: 'coordinator' as const,
-    }
-    windowAt('/projects/p1', {
-      getProjectNotes: vi.fn(async () => [note]),
-      dropProjectNote: vi.fn(async () => {
-        throw new ApiError({ reason: 'NotFound', message: 'That project isn’t there any more.' })
-      }),
-    })
-    const panel = await openSettings()
-    await userEvent.click(await panel.findByRole('button', { name: /^Notes/ }))
-    await userEvent.click(panel.getByRole('button', { name: 'Remove “Issue drafts need an approval card.”' }))
-    expect(await panel.findByRole('alert')).toHaveProperty('textContent', 'That project isn’t there any more.')
-    await waitFor(() => expect(panel.getAllByRole('listitem')).toHaveLength(1))
-  })
-
-  it('says where each thing stands, and opens its repositories and its rules', async () => {
-    const { router } = windowAt('/projects/p1')
-    let panel = await openSettings()
-    // Its three repositories, by their hosts' marks.
-    const repositoriesModule = panel.getByRole('button', { name: /^Repositories/ })
-    expect(repositoriesModule.textContent).toContain('3')
-    expect(within(repositoriesModule).getByText('GitHub')).toBeTruthy()
-    expect(within(repositoriesModule).getByText('GitLab')).toBeTruthy()
-    const rules = panel.getByRole('button', { name: /^Rules/ })
-    expect(rules.textContent).toContain('Allow, except what you keep')
-    expect(rules.textContent).toContain('Always asks you:')
-    await userEvent.click(repositoriesModule)
-    await waitFor(() => expect(router.state.location.pathname).toBe('/projects/p1/repositories'))
-    expect(await screen.findByRole('list', { name: 'On this Mac' })).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Back to meridian' }))
-    panel = await openSettings()
-    await userEvent.click(panel.getByRole('button', { name: /^Rules/ }))
-    await waitFor(() => expect(router.state.location.pathname).toBe('/projects/p1/rules'))
-  })
-
-  it('has its leads resolve conflicts unasked from a switch beside its rules, off until turned on', async () => {
+  it('says what each switch does on and off, and has its leads resolve conflicts unasked once turned on', async () => {
     const { client } = windowAt('/projects/p1')
-    const panel = await openSettings()
-    const conflicts = panel.getByRole('switch', { name: 'Resolve conflicts automatically' })
+    await openSettings()
+    const tasks = within(screen.getByRole('region', { name: 'How its tasks work' }))
+    const conflicts = tasks.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
-    expect(panel.getByText('Off: you ask the lead to fix them')).toBeTruthy()
+    expect(descriptionOf(conflicts)).toMatch(/its lead brings the default branch into the task’s branch.*Off: the task says it conflicts/)
     await userEvent.click(conflicts)
     // On at once, and kept as a revision of the rules, with nothing else in it.
     expect(conflicts.getAttribute('aria-checked')).toBe('true')
-    expect(panel.getByText('On: the lead fixes merge conflicts itself')).toBeTruthy()
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', resolveConflicts: true }))
     await userEvent.click(conflicts)
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', resolveConflicts: false }))
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
   })
 
-  it('puts the switch back and says why when the rules don’t take it', async () => {
-    const { client } = windowAt('/projects/p1', {
-      setProjectRules: vi.fn(async () => {
-        throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
-      }),
-    })
-    const panel = await openSettings()
-    const conflicts = panel.getByRole('switch', { name: 'Resolve conflicts automatically' })
-    await userEvent.click(conflicts)
-    expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
-    expect(client.setProjectRules).toHaveBeenCalledOnce()
-    await waitFor(() => expect(conflicts.getAttribute('aria-checked')).toBe('false'))
-  })
-
-  it('moves a task’s issue to In Progress as it starts unless switched off, a rule kept at once', async () => {
+  it('moves a task’s issue to In Progress as it starts, on every tracker that has one, unless switched off', async () => {
     const { client } = windowAt('/projects/p1')
-    const panel = await openSettings()
-    const move = await panel.findByRole('switch', { name: 'Move issues to In Progress when their task starts' })
+    await openSettings()
+    const move = within(screen.getByRole('region', { name: 'How its tasks work' })).getByRole('switch', {
+      name: 'Move issues to In Progress',
+    })
     expect(move.getAttribute('aria-checked')).toBe('true')
-    expect(panel.getByText('On: Althar moves the issue as its task starts')).toBeTruthy()
+    expect(descriptionOf(move)).toMatch(/a Linear, Jira or Trello issue.*GitHub and GitLab issues have no In Progress/)
     await userEvent.click(move)
     // Off at once, before the runtime has said so.
     expect(move.getAttribute('aria-checked')).toBe('false')
-    expect(panel.getByText('Off: you move issues yourself')).toBeTruthy()
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', moveIssues: false }))
     expect(move.getAttribute('aria-checked')).toBe('false')
   })
 
-  it('switches issues back, saying why, where the rule didn’t hold, and the other switch says nothing of it', async () => {
+  it('switches back, saying why under the one that didn’t hold, and the other says nothing of it', async () => {
     windowAt('/projects/p1', {
       setProjectRules: vi.fn(async () => {
         throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
       }),
     })
-    const panel = await openSettings()
-    const move = panel.getByRole('switch', { name: 'Move issues to In Progress when their task starts' })
+    await openSettings()
+    const tasks = within(screen.getByRole('region', { name: 'How its tasks work' }))
+    const move = tasks.getByRole('switch', { name: 'Move issues to In Progress' })
     await userEvent.click(move)
-    expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
+    expect(await tasks.findByRole('alert')).toHaveProperty('textContent', 'The rules changed meanwhile.')
     await waitFor(() => expect(move.getAttribute('aria-checked')).toBe('true'))
-    expect(panel.getByText('Off: you ask the lead to fix them')).toBeTruthy()
+    expect(descriptionOf(move)).toMatch(/The rules changed meanwhile\.$/)
+    expect(descriptionOf(tasks.getByRole('switch', { name: 'Resolve merge conflicts automatically' }))).not.toMatch(/changed meanwhile/)
   })
 
   it('keeps skill and OpenSpec files a task commits on this Mac until each is allowed, each switch a revision of its rules', async () => {
     const { client } = windowAt('/projects/p1')
-    const panel = await openSettings()
-    const files = panel.getByRole('button', { name: /^Repository files/ })
-    expect(files.textContent).toContain('Kept on this Mac')
-    await userEvent.click(files)
+    await openSettings()
+    const files = within(screen.getByRole('region', { name: 'Repository files' }))
     // The device by the name the rest of the window gives it; and Althar never says it writes skills into the repository.
-    expect(panel.getByText(/stay on this Mac unless you allow them here/)).toBeTruthy()
-    expect(panel.queryByText(/this computer|runtime/)).toBeNull()
-    expect(panel.getByText(/Althar never puts them there itself/)).toBeTruthy()
-    expect(panel.queryByText(/written into/)).toBeNull()
-    const skills = panel.getByRole('switch', { name: 'Write Althar-managed skills' })
-    const openSpec = panel.getByRole('switch', { name: 'Write OpenSpec artifacts' })
-    const push = panel.getByRole('switch', { name: 'Push skill/OpenSpec files' })
+    expect(files.getByText(/stay on this Mac unless you allow them here/)).toBeTruthy()
+    expect(files.queryByText(/this computer|runtime/)).toBeNull()
+    expect(files.getByText(/Althar never puts them there itself/)).toBeTruthy()
+    const skills = files.getByRole('switch', { name: 'Write Althar-managed skills' })
+    const openSpec = files.getByRole('switch', { name: 'Write OpenSpec artifacts' })
+    const push = files.getByRole('switch', { name: 'Push skill/OpenSpec files' })
     for (const each of [skills, openSpec, push]) expect(each.getAttribute('aria-checked')).toBe('false')
-    expect(panel.getByText('Blocked')).toBeTruthy()
+    expect(files.getByText('Blocked')).toBeTruthy()
     // Writing them never allows pushing them.
     await userEvent.click(openSpec)
     expect(openSpec.getAttribute('aria-checked')).toBe('true')
@@ -293,9 +287,7 @@ describe('a project’s settings', () => {
         repositoryFiles: { writeSkills: false, writeOpenSpec: true, pushProtected: true },
       }),
     )
-    expect(panel.getByText('Allowed')).toBeTruthy()
-    await userEvent.click(panel.getByRole('button', { name: 'Back to all settings' }))
-    expect(panel.getByRole('button', { name: /^Repository files/ }).textContent).toContain('OpenSpec in commits, pushed')
+    expect(files.getByText('Allowed')).toBeTruthy()
   })
 
   it('shows the repository files the rules allow, as kept', async () => {
@@ -306,12 +298,11 @@ describe('a project’s settings', () => {
         repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: true },
       })),
     })
-    const panel = await openSettings()
-    expect(panel.getByRole('button', { name: /^Repository files/ }).textContent).toContain('Skills in commits, pushed')
-    await userEvent.click(panel.getByRole('button', { name: /^Repository files/ }))
-    expect(panel.getByRole('switch', { name: 'Write Althar-managed skills' }).getAttribute('aria-checked')).toBe('true')
-    expect(panel.getByRole('switch', { name: 'Write OpenSpec artifacts' }).getAttribute('aria-checked')).toBe('false')
-    expect(panel.getByRole('switch', { name: 'Push skill/OpenSpec files' }).getAttribute('aria-checked')).toBe('true')
+    await openSettings()
+    const files = within(await screen.findByRole('region', { name: 'Repository files' }))
+    expect(files.getByRole('switch', { name: 'Write Althar-managed skills' }).getAttribute('aria-checked')).toBe('true')
+    expect(files.getByRole('switch', { name: 'Write OpenSpec artifacts' }).getAttribute('aria-checked')).toBe('false')
+    expect(files.getByRole('switch', { name: 'Push skill/OpenSpec files' }).getAttribute('aria-checked')).toBe('true')
   })
 
   it('puts a repository files switch back and says why when the rules don’t take it', async () => {
@@ -320,20 +311,73 @@ describe('a project’s settings', () => {
         throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
       }),
     })
-    const panel = await openSettings()
-    await userEvent.click(panel.getByRole('button', { name: /^Repository files/ }))
-    const push = panel.getByRole('switch', { name: 'Push skill/OpenSpec files' })
+    await openSettings()
+    const files = within(screen.getByRole('region', { name: 'Repository files' }))
+    const push = files.getByRole('switch', { name: 'Push skill/OpenSpec files' })
     await userEvent.click(push)
-    expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
+    expect(await files.findByText('The rules changed meanwhile.')).toBeTruthy()
     await waitFor(() => expect(push.getAttribute('aria-checked')).toBe('false'))
+    // The task switches say nothing of it.
+    expect(within(screen.getByRole('region', { name: 'How its tasks work' })).queryByText(/changed meanwhile/)).toBeNull()
   })
 
-  it('removes the project after saying what happens, and goes home; its tab goes', async () => {
+  it('shows the notes its coordinator keeps, newest first, who kept each, and drops one that no longer holds', async () => {
+    const notes = [
+      {
+        id: 'note_1',
+        body: 'Issue drafts need an approval card, on every tracker.',
+        createdAt: '2026-10-01T09:00:00.000Z',
+        keptBy: 'coordinator' as const,
+      },
+      {
+        id: 'note_2',
+        body: 'Dependency setup runs outside the sandbox.',
+        createdAt: '2026-10-02T09:00:00.000Z',
+        keptBy: 'person' as const,
+      },
+    ]
+    let kept = notes
+    const { client } = windowAt('/projects/p1', {
+      getProjectNotes: vi.fn(async () => kept),
+      dropProjectNote: vi.fn(async (_projectId: string, noteId: string) => {
+        kept = kept.filter((note) => note.id !== noteId)
+      }),
+    })
+    await openSettings('Notes')
+    const cards = await sheet('Notes').findAllByRole('listitem')
+    expect(cards.map((one) => one.textContent)).toEqual([
+      expect.stringMatching(/^Dependency setup runs outside the sandbox\.Kept by you · /),
+      expect.stringMatching(/^Issue drafts need an approval card, on every tracker\.Kept by the coordinator · /),
+    ])
+    await userEvent.click(sheet('Notes').getByRole('button', { name: 'Remove “Dependency setup runs outside the sandbox.”' }))
+    await waitFor(() => expect(client.dropProjectNote).toHaveBeenCalledWith('p1', 'note_2'))
+    await waitFor(() => expect(sheet('Notes').getAllByRole('listitem')).toHaveLength(1))
+    expect(sheet('Notes').getByRole('button', { name: /^Remove “Issue drafts/ })).toBe(document.activeElement)
+  })
+
+  it('puts a note back and says why when dropping it doesn’t hold', async () => {
+    const note = {
+      id: 'note_1',
+      body: 'Issue drafts need an approval card.',
+      createdAt: '2026-10-01T09:00:00.000Z',
+      keptBy: 'coordinator' as const,
+    }
+    windowAt('/projects/p1', {
+      getProjectNotes: vi.fn(async () => [note]),
+      dropProjectNote: vi.fn(async () => {
+        throw new ApiError({ reason: 'NotFound', message: 'That project isn’t there any more.' })
+      }),
+    })
+    await openSettings('Notes')
+    await userEvent.click(await sheet('Notes').findByRole('button', { name: 'Remove “Issue drafts need an approval card.”' }))
+    expect(await sheet('Notes').findByRole('alert')).toHaveProperty('textContent', 'That project isn’t there any more.')
+    await waitFor(() => expect(sheet('Notes').getAllByRole('listitem')).toHaveLength(1))
+  })
+
+  it('removes the project from the foot of the side, after saying what happens, and goes home; its tab goes', async () => {
     const { client, router } = windowAt('/projects/p1')
     await waitFor(() => expect(tabNamed('meridian')).toBeTruthy())
-    await userEvent.click((await openSettings()).getByRole('button', { name: 'Remove from Althar' }))
-    // The settings close as the question opens.
-    expect(screen.queryByRole('dialog', { name: 'meridian’s settings' })).toBeNull()
+    await userEvent.click((await openSettings()).getByRole('button', { name: 'Remove from Althar…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Remove meridian from Althar?' }))
     expect(dialog.getByText(/Its task under way stops/)).toBeTruthy()
     expect(dialog.getByText(/stay in ~\/Althar\/meridian/)).toBeTruthy()
@@ -351,7 +395,7 @@ describe('a project’s settings', () => {
         throw new ApiError({ reason: 'NotFound', message: "That project isn't there any more." })
       }),
     })
-    await userEvent.click((await openSettings()).getByRole('button', { name: 'Remove from Althar' }))
+    await userEvent.click((await openSettings()).getByRole('button', { name: 'Remove from Althar…' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Remove meridian from Althar?' }))
     await userEvent.click(dialog.getByRole('button', { name: 'Remove project' }))
     expect(await dialog.findByRole('alert')).toHaveProperty('textContent', "That project isn't there any more.")
@@ -367,6 +411,221 @@ describe('a project’s settings', () => {
     listed = []
     emit(changed('project', 'p1', null, 'p1'))
     await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+  })
+})
+
+describe('a project’s trackers, in its settings', () => {
+  it('says in violet that Althar isn’t connected to the tracker its tasks use, with a dot on Settings, and connects it over the page', async () => {
+    windowAt('/projects/p1', onLinear())
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    const side = await openSettings()
+    await userEvent.click(side.getByRole('button', { name: 'Code and issues, needs you' }))
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText('Linear · MER issues')).toBeTruthy()
+    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    await userEvent.click(trackers.getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Linear' })).toBeTruthy()
+  })
+
+  it('says to sign in again where the sign-in stopped working', async () => {
+    windowAt('/projects/p1', onLinear(linear('reauth_required')))
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText(/^Signed out as balazs: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+  })
+
+  it('says to sign in again to the account its issues go through, though another is signed in there', async () => {
+    // Work's sign-in stopped working; a personal account is signed in on the same Linear.
+    const work = linear('reauth_required', 'conn_work', 'balazs-work')
+    const personal = linear('ready', 'conn_personal', 'balazs')
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({
+        cursor: 1,
+        tasks: [taskFrom('MER-12', 'conn_work'), taskFrom('MER-14', 'conn_work')],
+        calls: [],
+        settledTotal: 2,
+      })),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, personal, work] })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    const side = await openSettings()
+    await userEvent.click(side.getByRole('button', { name: 'Code and issues, needs you' }))
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText(/^Signed out as balazs-work: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.queryByText('Connected as balazs')).toBeNull()
+    // Signing in again opens that account's own sign-in, named for Linear, not the list of every connection.
+    await userEvent.click(trackers.getByRole('button', { name: 'Sign in again' }))
+    expect(await screen.findByRole('dialog', { name: 'Linear' })).toBeTruthy()
+  })
+
+  it('says who Althar is there by the account its issues go through, though another there is signed out', async () => {
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [taskFrom('MER-12', 'conn_personal')], calls: [], settledTotal: 1 })),
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        connections: [githubConnection, linear('reauth_required', 'conn_work', 'balazs-work'), linear('ready', 'conn_personal', 'balazs')],
+      })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings' })).toBeTruthy()
+    await openSettings('Code and issues')
+    expect(within(screen.getByRole('region', { name: 'Trackers' })).getByText('Connected as balazs')).toBeTruthy()
+  })
+
+  it('says a tracker isn’t connected once the account its issues go through is removed, though another is signed in there', async () => {
+    // Work's account was removed, so listing connections leaves it out; a personal one is signed in on the same Linear.
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [taskFrom('MER-12', 'conn_work')], calls: [], settledTotal: 1 })),
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        connections: [githubConnection, linear('ready', 'conn_personal', 'balazs')],
+      })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    const side = await openSettings()
+    await userEvent.click(side.getByRole('button', { name: 'Code and issues, needs you' }))
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.queryByText('Connected as balazs')).toBeNull()
+  })
+
+  it('says a tracker isn’t connected once one of the accounts its issues go through is removed, though the other is signed in', async () => {
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({
+        cursor: 1,
+        tasks: [taskFrom('MER-12', 'conn_personal'), taskFrom('MER-14', 'conn_personal'), taskFrom('MER-15', 'conn_work')],
+        calls: [],
+        settledTotal: 3,
+      })),
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        connections: [githubConnection, linear('ready', 'conn_personal', 'balazs')],
+      })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.queryByText('Connected as balazs')).toBeNull()
+  })
+
+  it('names a tracker whose issues share no key by its name: a project’s Trello cards', async () => {
+    const trello = {
+      ...connectionList.products[1]!,
+      product: 'trello',
+      service: 'trello',
+      name: 'Trello',
+      hostedUrl: 'https://trello.com',
+      tokenPrefixes: [],
+    } as const
+    const card = (key: string): BoardTask => ({
+      ...taskFrom(key),
+      issue: {
+        product: 'trello',
+        key,
+        title: 'Refund keys',
+        url: `https://trello.com/c/${key}/12-refund-keys`,
+        connectionId: 'conn_trello',
+      },
+    })
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [card('aBcD1234'), card('xYz98765')], calls: [], settledTotal: 2 })),
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        products: [...connectionList.products, trello],
+        connections: [githubConnection],
+      })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText('Trello cards')).toBeTruthy()
+    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.queryByText('No tracker yet')).toBeNull()
+  })
+
+  it('says who Althar is there once connected, with no dot, and opens the team on Linear', async () => {
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+    windowAt('/projects/p1', onLinear(linear('ready')))
+    expect((await views()).getByRole('radio', { name: 'Settings' })).toBeTruthy()
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText('Connected as balazs')).toBeTruthy()
+    await userEvent.click(trackers.getByRole('button', { name: 'Open on Linear' }))
+    expect(opened).toHaveBeenCalledWith('https://linear.app/northwind/team/MER', '_blank')
+    opened.mockRestore()
+  })
+
+  it('says none has been named yet, offers to connect one, and leads to Althar’s own connections', async () => {
+    const { router } = windowAt('/projects/p1')
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText('No tracker yet')).toBeTruthy()
+    await userEvent.click(trackers.getByRole('button', { name: 'Connect a tracker' }))
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: 'Manage connections' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/settings/code-hosts'))
+  })
+})
+
+describe('what a project runs, in its settings', () => {
+  const running = { getCoordinator: vi.fn(async () => coordinatorSnapshot({ runnables })) }
+
+  it('lists what it runs in its order, the default first, and puts them in another order in place', async () => {
+    const { client } = windowAt('/projects/p1', running)
+    await openSettings('Running')
+    const list = within(screen.getByRole('region', { name: 'What it runs' }))
+    expect(list.getAllByRole('listitem').map((one) => one.textContent)).toEqual([
+      expect.stringMatching(/^bun run dev.*Default$/),
+      expect.stringMatching(/^Storybook/),
+    ])
+    list.getByRole('button', { name: 'Drag to move bun run dev' }).focus()
+    await userEvent.keyboard('{ArrowDown}')
+    await waitFor(() => expect(client.orderRunnables).toHaveBeenCalledWith('p1', ['rnbl_storybook', 'rnbl_dev']))
+  })
+
+  it('adds and changes one in the dialogs Run has, and comes back to the page', async () => {
+    windowAt('/projects/p1', running)
+    await openSettings('Running')
+    const list = within(screen.getByRole('region', { name: 'What it runs' }))
+    await userEvent.click(list.getByRole('button', { name: 'Add something to run' }))
+    const add = await screen.findByRole('dialog', { name: 'Add something to run' })
+    await userEvent.click(within(add).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await userEvent.click(list.getByRole('button', { name: 'Edit Storybook' }))
+    const edit = await screen.findByRole('dialog', { name: 'Edit Storybook' })
+    await userEvent.click(within(edit).getByRole('button', { name: 'Cancel' }))
+    // Not to Run's list: the list is on the page.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('says where its tasks’ work goes, and leads to the rules to change how', async () => {
+    windowAt('/projects/p1', running)
+    await openSettings('Running')
+    const where = within(screen.getByRole('region', { name: 'Where its work goes' }))
+    expect(where.getByText('~/Althar/meridian')).toBeTruthy()
+    expect(where.getByText('Open a draft pull request. Checks run on it; you mark it ready.')).toBeTruthy()
+    await userEvent.click(where.getAllByRole('button', { name: 'Change in Rules' })[0]!)
+    expect(await screen.findByRole('heading', { level: 2, name: 'Rules' })).toBeTruthy()
+  })
+
+  it('says a task stays on its branch while its host isn’t connected, as the runtime does, and leads to connecting it', async () => {
+    const unconnected = repositories.map((repository) =>
+      repository.host === null ? repository : { ...repository, host: { ...repository.host, account: null } },
+    )
+    windowAt('/projects/p1', { ...running, getRepositories: vi.fn(async () => unconnected) })
+    await openSettings('Running')
+    const where = within(screen.getByRole('region', { name: 'Where its work goes' }))
+    expect(
+      await where.findByText(
+        'Leave it on its branch. Nothing goes to GitHub until Althar is connected there. Then it opens a draft pull request.',
+      ),
+    ).toBeTruthy()
+    expect(where.queryByText(/^Open a draft pull request/)).toBeNull()
+    await userEvent.click(where.getByRole('button', { name: 'Connect GitHub' }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Code and issues' })).toBeTruthy()
   })
 })
 
@@ -458,17 +717,24 @@ const gitlabToo: Parameters<typeof fakeClient>[0] = {
   })),
 }
 
-function Repositories({ onBack = vi.fn() }: { onBack?: () => void }) {
-  return <RepositoriesView model={useRepositories('p1')} connections={useConnections()} onBack={onBack} />
+/** Its repositories, in Code and issues: where they are, which takes a folder dropped on it. */
+const openRepositories = async () => {
+  await openSettings('Code and issues')
+  const region = await screen.findByRole('region', { name: 'Repositories' })
+  return { region, here: within(await within(region).findByRole('list', { name: 'On this Mac' })) }
 }
 
-describe('a project’s repositories', () => {
+/** Folders dropped on the repositories. */
+const dropOn = (region: HTMLElement, ...files: ReadonlyArray<File>) => {
+  const dataTransfer = { types: ['Files'], files }
+  fireEvent.dragEnter(region, { dataTransfer })
+  fireEvent.drop(region, { dataTransfer })
+}
+
+describe('a project’s repositories, in its settings', () => {
   it('shows where each one is on this Mac and where its work goes, and keeps each change at once', async () => {
-    const onBack = vi.fn()
-    const { client } = fakeClient()
-    const host = fakeHost({ pickFolder: vi.fn(async () => 'grant_lib') })
-    withServices(<Repositories onBack={onBack} />, client, host)
-    const here = within(await screen.findByRole('list', { name: 'On this Mac' }))
+    const { client } = windowAt('/projects/p1')
+    const { here } = await openRepositories()
     expect(here.getByText('~/code/meridian-api')).toBeTruthy()
     expect(here.getByText('trunk')).toBeTruthy()
     // On GitHub as you, the fork with the repository it forks; GitLab not connected.
@@ -481,6 +747,8 @@ describe('a project’s repositories', () => {
     expect(gitlab.getByText('Not connected')).toBeTruthy()
     expect(gitlab.getByText('meridian-ops/infra')).toBeTruthy()
     expect(screen.getByText('Tasks work in their own worktrees, in')).toBeTruthy()
+    // A code host never connected is the person's choice: Settings has no dot for it.
+    expect((await views()).getByRole('radio', { name: 'Settings' })).toBeTruthy()
 
     await userEvent.click(here.getByRole('combobox', { name: 'Role of meridian-api' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Library' }))
@@ -495,25 +763,25 @@ describe('a project’s repositories', () => {
     await userEvent.click(here.getByRole('button', { name: 'More for meridian-web' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Leave out of meridian/ }))
     await waitFor(() => expect(client.leaveOutRepository).toHaveBeenCalledWith('p1', 'repo_web'))
-
-    await userEvent.click(screen.getByRole('button', { name: 'Back to meridian' }))
-    expect(onBack).toHaveBeenCalledOnce()
   })
 
   it('shows a folder being added while it is read, and adds a dropped one too', async () => {
     let added = (): void => undefined
-    const { client } = fakeClient({
-      readFolder: vi.fn(async () => ({
-        kind: 'repository' as const,
-        name: 'meridian-docs',
-        repositories: [{ path: '/Users/me/code/meridian-docs', folder: null, name: 'meridian-docs', branch: 'main', remote: null }],
-        project: null,
-      })),
-      addRepositories: vi.fn(() => new Promise<void>((resolve) => (added = resolve))),
-    })
     const host = fakeHost({ pickFolder: vi.fn(async () => 'grant_docs') })
-    withServices(<Repositories />, client, host)
-    await screen.findByRole('list', { name: 'On this Mac' })
+    const { client } = windowAt(
+      '/projects/p1',
+      {
+        readFolder: vi.fn(async () => ({
+          kind: 'repository' as const,
+          name: 'meridian-docs',
+          repositories: [{ path: '/Users/me/code/meridian-docs', folder: null, name: 'meridian-docs', branch: 'main', remote: null }],
+          project: null,
+        })),
+        addRepositories: vi.fn(() => new Promise<void>((resolve) => (added = resolve))),
+      },
+      host,
+    )
+    const { region } = await openRepositories()
     await userEvent.click(screen.getByRole('button', { name: 'Add a folder' }))
     expect(host.pickFolder).toHaveBeenCalledWith('project')
     expect(await screen.findByText('Reading it. Nothing in it changes')).toBeTruthy()
@@ -523,12 +791,9 @@ describe('a project’s repositories', () => {
     added()
     await waitFor(() => expect(screen.queryByText('Reading it. Nothing in it changes')).toBeNull())
 
-    // Dropped on the page, each folder is granted and added the same way.
-    const page = screen.getByRole('heading', { level: 1, name: 'Repositories' }).closest('header')?.parentElement ?? document.body
+    // Dropped on them, each folder is granted and added the same way.
     const folder = new File([], 'meridian-docs')
-    const dataTransfer = { types: ['Files'], files: [folder] }
-    fireEvent.dragEnter(page, { dataTransfer })
-    fireEvent.drop(page, { dataTransfer })
+    dropOn(region, folder)
     await waitFor(() => expect(host.grantDropped).toHaveBeenCalledWith(folder))
     await waitFor(() => expect(client.addRepositories).toHaveBeenLastCalledWith('p1', 'grant_dropped'))
     added()
@@ -536,9 +801,9 @@ describe('a project’s repositories', () => {
 
   it('opens a repository on its host, and walks in to one that isn’t connected, over the page', async () => {
     const opened = vi.spyOn(window, 'open').mockReturnValue(null)
-    const { client } = fakeClient(gitlabToo)
-    withServices(<Repositories />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'More for meridian-api' }))
+    const { client } = windowAt('/projects/p1', gitlabToo)
+    const { here } = await openRepositories()
+    await userEvent.click(here.getByRole('button', { name: 'More for meridian-api' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Open on GitHub' }))
     expect(opened).toHaveBeenCalledWith('https://github.com/meridian/api', '_blank')
     opened.mockRestore()
@@ -550,7 +815,6 @@ describe('a project’s repositories', () => {
     expect(client.getConnectGuide).toHaveBeenCalledWith('gitlab')
     const ways = await dialog.findByRole('group', { name: 'Ways to connect GitLab' })
     expect(within(ways).getByRole('button', { name: /Use glab’s sign-in/ })).toBeTruthy()
-    expect(dialog.queryByRole('button', { name: 'Done' })).toBeNull()
     // A step in and back, then Escape at its ways closes it.
     await userEvent.click(within(ways).getByRole('button', { name: /Make a token/ }))
     expect(dialog.getByRole('heading', { name: 'Make a token on gitlab.com' })).toBeTruthy()
@@ -564,27 +828,24 @@ describe('a project’s repositories', () => {
 
   it('adds folders dropped while one is being added after it, and stays busy until the last', async () => {
     const pending: Array<() => void> = []
-    const { client } = fakeClient({
-      readFolder: vi.fn(async (grant: string) => ({
-        kind: 'repository' as const,
-        name: grant,
-        repositories: [{ path: `/Users/me/code/${grant}`, folder: null, name: grant, branch: 'main', remote: null }],
-        project: null,
-      })),
-      addRepositories: vi.fn(() => new Promise<void>((resolve) => pending.push(resolve))),
-    })
     const grantDropped = vi.fn(async (file: File) => file.name)
-    withServices(<Repositories />, client, fakeHost({ grantDropped }))
-    await screen.findByRole('list', { name: 'On this Mac' })
-    const page = screen.getByRole('heading', { level: 1, name: 'Repositories' }).closest('header')?.parentElement ?? document.body
-    const drop = (name: string) => {
-      const dataTransfer = { types: ['Files'], files: [new File([], name)] }
-      fireEvent.dragEnter(page, { dataTransfer })
-      fireEvent.drop(page, { dataTransfer })
-    }
-    drop('meridian-docs')
+    const { client } = windowAt(
+      '/projects/p1',
+      {
+        readFolder: vi.fn(async (grant: string) => ({
+          kind: 'repository' as const,
+          name: grant,
+          repositories: [{ path: `/Users/me/code/${grant}`, folder: null, name: grant, branch: 'main', remote: null }],
+          project: null,
+        })),
+        addRepositories: vi.fn(() => new Promise<void>((resolve) => pending.push(resolve))),
+      },
+      fakeHost({ grantDropped }),
+    )
+    const { region } = await openRepositories()
+    dropOn(region, new File([], 'meridian-docs'))
     expect(await screen.findByText('~/code/meridian-docs')).toBeTruthy()
-    drop('meridian-sdk')
+    dropOn(region, new File([], 'meridian-sdk'))
     await waitFor(() => expect(grantDropped).toHaveBeenCalledTimes(2))
     // The second waits for the first.
     expect(client.addRepositories).toHaveBeenCalledOnce()
@@ -598,87 +859,63 @@ describe('a project’s repositories', () => {
     expect(screen.getByRole('button', { name: 'Add a folder' }).getAttribute('aria-busy')).toBeNull()
   })
 
-  it('goes back on Escape, but not while something else has it', async () => {
-    const onBack = vi.fn()
-    const { client } = fakeClient()
-    withServices(<Repositories onBack={onBack} />, client)
-    const here = within(await screen.findByRole('list', { name: 'On this Mac' }))
-    // Escape closes a choice first.
-    await userEvent.click(here.getByRole('combobox', { name: 'Role of meridian-api' }))
-    await screen.findByRole('option', { name: 'Library' })
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('option', { name: 'Library' })).toBeNull())
-    expect(onBack).not.toHaveBeenCalled()
-    // And connecting, over the page.
-    await userEvent.click(screen.getByRole('button', { name: 'Connect GitLab' }))
-    await screen.findByRole('dialog', { name: 'GitLab' })
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(onBack).not.toHaveBeenCalled()
-    await userEvent.keyboard('{Escape}')
-    expect(onBack).toHaveBeenCalledOnce()
-  })
-
   it('reads them again when a code host is connected, as the window hears it', async () => {
-    const { client, emit } = fakeClient()
-    withServices(<Repositories />, client)
-    await screen.findByRole('list', { name: 'On this Mac' })
-    expect(client.getRepositories).toHaveBeenCalledOnce()
+    const { client, emit } = windowAt('/projects/p1')
+    await openRepositories()
+    const before = vi.mocked(client.getRepositories).mock.calls.length
     emit(changed('connection', 'c1', null, null))
-    await waitFor(() => expect(client.getRepositories).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(vi.mocked(client.getRepositories).mock.calls.length).toBeGreaterThan(before))
   })
 
   it('says what went wrong, and puts a change the runtime refused back', async () => {
-    const { client } = fakeClient({
-      setRepository: vi.fn(async () => {
-        throw new ApiError({ reason: 'ProjectRefused', message: "That repository isn't a fork, so its pull requests open on it." })
-      }),
-      getRepositories: vi.fn(async () => repositories.slice(0, 1)),
-      readFolder: vi.fn(async () => {
-        throw new ApiError({ reason: 'NotARepository', message: 'There’s no git repository in Downloads.' })
-      }),
-    })
     // The first thing dropped isn't a folder here; the next is Downloads, with no repository in it.
     const grantDropped = vi
       .fn<(file: File) => Promise<string | null>>()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce('grant_downloads')
-    const host = fakeHost({ pickFolder: vi.fn(async () => null), grantDropped })
-    withServices(<Repositories />, client, host)
-    const here = within(await screen.findByRole('list', { name: 'On this Mac' }))
+    const { client } = windowAt(
+      '/projects/p1',
+      {
+        setRepository: vi.fn(async () => {
+          throw new ApiError({ reason: 'ProjectRefused', message: "That repository isn't a fork, so its pull requests open on it." })
+        }),
+        getRepositories: vi.fn(async () => repositories.slice(0, 1)),
+        readFolder: vi.fn(async () => {
+          throw new ApiError({ reason: 'NotARepository', message: 'There’s no git repository in Downloads.' })
+        }),
+      },
+      fakeHost({ pickFolder: vi.fn(async () => null), grantDropped }),
+    )
+    const { region, here } = await openRepositories()
     // The last one has no way to be left out: its menu only opens it on GitHub.
     await userEvent.click(here.getByRole('button', { name: 'More for meridian-api' }))
     expect(screen.queryByRole('menuitem', { name: /Leave out/ })).toBeNull()
     await userEvent.keyboard('{Escape}')
     await userEvent.click(here.getByRole('combobox', { name: 'Role of meridian-api' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Docs' }))
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', "That repository isn't a fork, so its pull requests open on it.")
+    expect(await within(region).findByRole('alert')).toHaveProperty(
+      'textContent',
+      "That repository isn't a fork, so its pull requests open on it.",
+    )
     await waitFor(() => expect(here.getByRole('combobox', { name: 'Role of meridian-api' }).textContent).toContain('Service'))
     // Cancelling the picker adds nothing.
     await userEvent.click(screen.getByRole('button', { name: 'Add a folder' }))
     expect(client.addRepositories).not.toHaveBeenCalled()
     // Something dropped that isn't a folder here says so; a folder with no repository, too.
-    const page = screen.getByRole('heading', { level: 1, name: 'Repositories' }).closest('header')?.parentElement ?? document.body
-    const dataTransfer = { types: ['Files'], files: [new File([], 'notes.txt')] }
-    fireEvent.dragEnter(page, { dataTransfer })
-    fireEvent.drop(page, { dataTransfer })
+    dropOn(region, new File([], 'notes.txt'))
     expect(await screen.findByText('notes.txt isn’t a folder on this Mac.')).toBeTruthy()
-    fireEvent.dragEnter(page, { dataTransfer })
-    fireEvent.drop(page, { dataTransfer })
+    dropOn(region, new File([], 'notes.txt'))
     expect(await screen.findByText('There’s no git repository in Downloads.')).toBeTruthy()
     expect(client.addRepositories).not.toHaveBeenCalled()
   })
 
-  it('says so when they can’t be read, with the way back', async () => {
-    const onBack = vi.fn()
-    const { client } = fakeClient({
+  it('says so when they can’t be read', async () => {
+    windowAt('/projects/p1', {
       getRepositories: vi.fn(async () => {
         throw new ApiError({ reason: 'NotFound', message: "That project isn't there any more." })
       }),
     })
-    withServices(<Repositories onBack={onBack} />, client)
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', "That project isn't there any more.")
-    await userEvent.click(screen.getByRole('button', { name: 'Back to meridian' }))
-    expect(onBack).toHaveBeenCalledOnce()
+    await openSettings('Code and issues')
+    expect(await sheet('Code and issues').findByRole('alert')).toHaveProperty('textContent', "That project isn't there any more.")
   })
 })

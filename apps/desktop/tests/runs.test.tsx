@@ -10,7 +10,7 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { STARTING_FOR, targetsOf } from '../src/renderer/features/runs/Runs'
 import { askText, nameOf } from '../src/renderer/features/runs/useRuns'
 import { coordinatorSnapshot, fakeClient, repositories, runnables, scripts } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 /*
  * What a project runs, from its front (ADR-044): the default one press away,
@@ -19,7 +19,15 @@ import { withServices } from './render'
  */
 
 function Project() {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={vi.fn()} />
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      settings={useSettingsOf('p1')}
+      onTask={vi.fn()}
+    />
+  )
 }
 
 const launch = (overrides: Partial<Launch>): Launch => ({
