@@ -1,9 +1,9 @@
 name: post-merge
 
 # The heavy part of desktop, harness and ui, after merge: their checks again (two pull requests can each pass and still
-# clash), the coverage gates, the Storybook build, the desktop app's end-to-end run and its packages. On a pull request
-# those workflows run only checks and unit tests, so a change to main doesn't hold every open pull request up for the
-# long runs. site and brand are quick, and still run in full on their own. Main may go red for a while; a
+# clash), the coverage gates, the Storybook build, the desktop app's end-to-end run and its packages, Windows' too. On a
+# pull request those workflows run only checks and unit tests, so a change to main doesn't hold every open pull request
+# up for the long runs. site and brand are quick, and still run in full on their own. Main may go red for a while; a
 # release can't: release.yml cuts only a commit this workflow passed on.
 #
 # Merges in quick succession share a run: one runs, the newest waits, and those between are skipped. When main goes
@@ -138,11 +138,16 @@ jobs:
             apps/desktop/out/dist/althar-*.rpm
           if-no-files-found: error
 
+  # The Windows installer as a build test, installed and uninstalled on windows-2025: the same job a pull request that
+  # changes packaging runs.
+  package-windows:
+    uses: ./.github/workflows/windows-installer.yml
+
   # Main's state, as one open issue: opened (or added to) when a run on main fails, closed when one passes. Only a run
   # on main's newest commit speaks for main: a re-run of an older commit, or one a newer push is already waiting
   # behind, leaves the issue to that newer run.
   report:
-    needs: [harness, ui, desktop, package]
+    needs: [harness, ui, desktop, package, package-windows]
     if: ${{ always() && github.ref == 'refs/heads/main' && !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

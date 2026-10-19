@@ -2,7 +2,7 @@ import type { ThreadItem } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
-import { type Block, blocksOf, type Part, relayed, type StepResult, type Streamed } from './thread'
+import { type Block, blocksOf, carriedOn, type Part, relayed, type StepResult, type Streamed } from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
 
@@ -208,8 +208,16 @@ export const roundsOf = (
       now,
     )
   })
+  /** What a line of Althar's says, as the notice it was. */
+  const noticeOf = (block: Extract<Block, { kind: 'divider' }>): NoticeContent => {
+    const item = items.find((one) => one.id === block.id)
+    return item?.kind === 'notice' ? item.content : { source: 'runtime', severity: 'info', title: block.text, description: null }
+  }
   // The lead's turn runs in its last round, unless its reply to what it was last asked is still waited for.
   const lastTurn = blocks.some((block) => block.kind === 'waiting') ? -1 : blocks.findLastIndex((block) => block.kind === 'turn')
+  // Nor where Althar carried the step on after it, after a restart: then the turn running is a later one that has said nothing
+  // yet, and the round before it is over.
+  const running = turnRunning && !blocks.slice(lastTurn + 1).some((block) => block.kind === 'divider' && carriedOn(noticeOf(block)))
   const out: Array<RoundBlock> = []
   let open: Gathering | null = null
   // What Althar did between rounds goes in the next one's work.
@@ -227,7 +235,7 @@ export const roundsOf = (
           pending = []
         }
         open.steps.push(...block.parts)
-        if (turnRunning && index === lastTurn) close(true)
+        if (running && index === lastTurn) close(true)
         return
       }
       case 'step': {
@@ -274,9 +282,7 @@ export const roundsOf = (
         return
       }
       case 'divider': {
-        const item = items.find((one) => one.id === block.id)
-        const content: NoticeContent =
-          item?.kind === 'notice' ? item.content : { source: 'runtime', severity: 'info', title: block.text, description: null }
+        const content = noticeOf(block)
         const role = roleOf(content)
         if (role === 'relayed') {
           close(false)

@@ -76,7 +76,8 @@
     ends or as it calls `finish_step`, with that work on it, so nothing is
     lost on a detached head: the same folder, the same lead and session.
     That keeps the work safe, and nothing more. The branch stays on this
-    Mac, the task stays plain (Finished, then Done once seen), and its
+    Mac, the task stays plain (Finished, then Done once the person settles
+    it, [ADR-051](051-a-finished-task-waits-for-the-person-to-settle-it.md)), and its
     thread says so ("This task's work is on a branch of its own now, …,
     which stays on this Mac"). When the person asks to turn it into a real
     change, its lead calls `make_it_a_change`: the task is renamed, its plan

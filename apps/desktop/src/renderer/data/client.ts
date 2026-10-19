@@ -192,6 +192,10 @@ export interface Client {
   readonly abandonTask: (taskId: string) => Promise<void>
   /** Opens an abandoned task again, on its worktree and branch. */
   readonly reopenTask: (taskId: string) => Promise<void>
+  /** Settles a finished task that isn't a change as Done, stopping what it left running, such as a page. */
+  readonly markTaskDone: (taskId: string) => Promise<void>
+  /** Takes a finished task that isn't a change out of Needs you as it is, kept for later. */
+  readonly keepTaskForLater: (taskId: string) => Promise<void>
   /** Gives the task another title, in any state; its slug, branch and folder stay. */
   readonly renameTask: (taskId: string, title: string) => Promise<void>
   readonly send: (input: {
@@ -546,6 +550,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
+    markTaskDone: (taskId) => command((commandId) => api.MarkTaskDone({ commandId, taskId })),
+    keepTaskForLater: (taskId) => command((commandId) => api.KeepTaskForLater({ commandId, taskId })),
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),

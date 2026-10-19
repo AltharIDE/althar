@@ -6,9 +6,10 @@ import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
 
 import { loadLocalCatalog } from '../../../packages/skills/src/local'
+import { binariesFor, speechPackage } from '../scripts/binaries'
 import { stageSkillsCatalog } from '../scripts/catalog'
 import { entitlementsFor } from '../scripts/entitlements'
-import { fetchNode, NODE_ARCHIVES, NODE_VERSION, nodeArchive } from '../scripts/node'
+import { fetchNode, NODE_ARCHIVES, NODE_VERSION, nodeArchive, nodeProgram } from '../scripts/node'
 
 const JIT = 'com.apple.security.cs.allow-jit'
 const UNSIGNED_MEMORY = 'com.apple.security.cs.allow-unsigned-executable-memory'
@@ -71,8 +72,35 @@ describe('the packaged app', () => {
   })
 
   it('ships a Node for every platform it is packaged on, from nodejs.org', () => {
-    for (const platform of ['darwin-arm64', 'linux-x64']) expect(NODE_ARCHIVES[platform]).toMatch(/^[0-9a-f]{64}$/)
+    for (const platform of ['darwin-arm64', 'linux-x64', 'win32-x64']) expect(NODE_ARCHIVES[platform]).toMatch(/^[0-9a-f]{64}$/)
     expect(nodeArchive('darwin', 'arm64').url).toBe(`https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz`)
+    expect(nodeArchive('darwin', 'arm64').program).toBe(`node-v${NODE_VERSION}-darwin-arm64/bin/node`)
+    expect(nodeProgram('darwin')).toBe('node')
+  })
+
+  it('takes Windows’ Node from its zip, where it is node.exe at the top, named win', () => {
+    expect(nodeArchive('win32', 'x64')).toEqual({
+      name: `node-v${NODE_VERSION}-win-x64`,
+      file: `node-v${NODE_VERSION}-win-x64.zip`,
+      program: `node-v${NODE_VERSION}-win-x64/node.exe`,
+      url: `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip`,
+    })
+    expect(nodeProgram('win32')).toBe('node.exe')
+  })
+
+  it('looks for Codex, Claude Code and the speech engine where the runtime finds them, as .exe on Windows', () => {
+    expect(binariesFor('win32', 'x64')).toEqual([
+      { parent: '@openai/codex', name: '@openai/codex-win32-x64', file: 'vendor/x86_64-pc-windows-msvc/bin/codex.exe' },
+      { parent: '@anthropic-ai/claude-agent-sdk', name: '@anthropic-ai/claude-agent-sdk-win32-x64', file: 'claude.exe' },
+      { parent: 'sherpa-onnx-node', name: 'sherpa-onnx-win-x64', file: 'sherpa-onnx.node' },
+    ])
+    expect(binariesFor('darwin', 'arm64').map(({ name, file }) => `${name}/${file}`)).toEqual([
+      '@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex',
+      '@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
+      'sherpa-onnx-darwin-arm64/sherpa-onnx.node',
+    ])
+    expect(speechPackage('linux', 'x64')).toBe('sherpa-onnx-linux-x64')
+    expect(() => binariesFor('win32', 'ia32')).toThrow(/no build for win32-ia32/)
   })
 
   it('refuses a platform it has no Node for, before fetching anything', async () => {
