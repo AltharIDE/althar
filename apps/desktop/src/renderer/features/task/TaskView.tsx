@@ -68,7 +68,7 @@ import { serviceOfProduct } from '../connections/ways'
 import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
 import { NoOutputsView } from './NoOutputsView'
-import { conflictsOf, hasOutputs, Outputs } from './Outputs'
+import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
@@ -745,7 +745,7 @@ export function TaskView({
       {snapshot.task.review != null && (
         <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
       )}
-      {shown === 'out' && !hasOutputs(snapshot) ? (
+      {shown === 'out' && !hasOutputsToShow(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
         <div className={connecting ? s.withPanel : s.outputsFace}>
@@ -753,7 +753,6 @@ export function TaskView({
           <ThreadShellProvider value={host.shell}>
             <Outputs
               snapshot={snapshot}
-              lead={lead}
               pending={model.pending}
               doing={model.doing}
               error={model.error}
@@ -770,8 +769,6 @@ export function TaskView({
                 })
               }
               onMarkReady={(url) => void model.markReady(url)}
-              // Sending it back is a note to its lead, which starts it again if it stopped.
-              onSendBack={(note) => send(note, false)}
               onOpenFile={changes.show}
               conflict={model.conflict}
               onPushHere={() => void model.pushHere()}

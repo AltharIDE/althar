@@ -70,7 +70,6 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
       .click()
     const push = page.getByRole('button', { name: 'Push 10 commits' })
     await expect(push).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('10 commits aren’t on the pull request yet.')).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/push-before.png', animations: 'disabled' })
 
@@ -78,7 +77,6 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
     // As the press ends, nothing is left: no count, and no Push to press again.
     await expect(push).toHaveCount(0)
     await expect(page.getByRole('button', { name: /^Push \d+ commits?$/ })).toHaveCount(0)
-    await expect(page.getByText(/commits? aren’t on the pull request yet|One commit isn’t on the pull request yet/)).toHaveCount(0)
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree }).toString().trim()).toBe(
       execFileSync(
         'git',

@@ -27,11 +27,11 @@ test('shows what the task built and what the lead showed of it: atop its outputs
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
 
-    // A ready task opens on what it made: what it built at the top, then the evidence.
-    await expect(page.getByRole('heading', { name: 'What it built', level: 2 })).toBeVisible()
+    // A ready task opens on what it made: what it is at the top, then how it looks, then what it checked.
+    await expect(page.getByRole('heading', { name: 'What changed', level: 2 })).toBeVisible()
     await expect(page.getByText('Checkout retries once when the payment call fails')).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Evidence', level: 2 })).toBeVisible()
-    const shot = page.getByRole('list', { name: 'Screenshots' }).getByRole('img')
+    await expect(page.getByRole('heading', { name: /^What it looks like/, level: 2 })).toBeVisible()
+    const shot = page.getByRole('button', { name: /View The retry button after a failed checkout full size/ }).getByRole('img')
     await expect.poll(() => shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
     expect(await shot.getAttribute('src')).toMatch(/^althar-picture:\/\/shot\/[0-9a-f]{64}\?w=1120$/)
     await page.getByRole('button', { name: 'What it printed: The checkout tests' }).click()

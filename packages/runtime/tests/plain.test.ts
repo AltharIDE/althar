@@ -673,6 +673,13 @@ describe('making a quick task a change', () => {
       yield* say(task.threadId, 'I really like it: can we make it a real thing? [lead:make-change] [lead:finish]')
       const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'implement', 'review', 'publish'])
+      // Its thread says when it became a change, between what the quick task showed and what the change did, and the
+      // description its lead wrote for the pull request, which its Outputs says it is with.
+      const read = yield* (yield* Queries).thread(task.threadId)
+      const [quick, made] = read.items.flatMap((item) => (item.kind === 'step_result' && item.content.step === 'implement' ? [item] : []))
+      const at = read.task.madeChangeAt ?? ''
+      assert.isTrue(quick !== undefined && made !== undefined && quick.createdAt <= at && at <= made.createdAt, at)
+      assert.isAbove(Object.values(made?.content.descriptions ?? {}).join('').length, 0)
       // Renamed for what it does, with its review and its ending in its plan, and nothing of staying here.
       assert.strictEqual(card.title, 'Make the sketch real')
       assert.deepStrictEqual(

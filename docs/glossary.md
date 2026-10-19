@@ -111,7 +111,8 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 
 | On screen | In the model | What it is |
 |---|---|---|
-| Change | `ChangeSet` | A task's pull requests across its repositories, with files and checks. |
+| Change | `ChangeSet` | A task's pull requests across its repositories, in a card on its Outputs held in view beside what it made: each pull request's number, the one link to its host; its checks and its review, a line each; the one button to press now (Accept and merge, Push, Mark ready for review, Open a pull request); its files by folder, the most first, with Review the diff. Asking for changes is said to the lead in the conversation. |
+| What changed, What it looks like, What it made | `WhatItMade`, from the lead's reports | The rest of a task's Outputs, as wide as the window: what it is, as its pull request's description says it, else as its lead last said what it built, the rest a press away; its pictures as it is now, each view once, as last taken (a change's since it became one); then Not checked before What it checked. What it made, for work that changed nothing in git but showed pictures, as a prototype. |
 | Accept | approve, merge | Takes the change. Merging stays yours unless the rules say otherwise. |
 | Ask for changes | request changes | Writes the lead a note about what should change; sent, the lead takes the work up again with it. |
 | Findings | review findings | What a review step found. By default the lead settles them. |

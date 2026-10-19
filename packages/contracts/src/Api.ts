@@ -982,6 +982,8 @@ export const StepResultItem = Schema.Struct({
     evidence: Schema.Array(Evidence),
     /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
+    /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
+    descriptions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
   }),
@@ -1753,6 +1755,8 @@ export const ThreadSnapshot = Schema.Struct({
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+    /** When its lead made it a change, where it began as a quick task: what it showed before was a prototype's, not the change's. */
+    madeChangeAt: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
     waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */

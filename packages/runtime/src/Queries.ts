@@ -42,7 +42,7 @@ import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
+import { builtIn, descriptionsIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { handedOf, kindOf, quickIn } from './kinds'
 import { documentText, outputText } from './reading'
@@ -450,6 +450,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           built: builtIn(field(content, 'built')),
           evidence: evidenceOf(field(content, 'evidence')),
           unverified: unverifiedIn(field(content, 'unverified')),
+          ...descriptionsIn(field(content, 'descriptions')),
           agentId: agentId === '' ? null : agentId,
         },
       }
@@ -1948,9 +1949,12 @@ export class Queries extends Context.Service<
             projectResolves: number | null
             allowEverything: number
             projectAllows: number | null
+            madeChangeAt: string | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
               k.settled_at, ${sql.unsafe(SHOWN_BRANCH)}, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
+              (SELECT e.occurred_at FROM record_events e WHERE e.aggregate_type = 'task' AND e.aggregate_id = k.id AND e.type = 'task.made_change'
+                ORDER BY e.sequence DESC LIMIT 1) AS made_change_at,
               (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves,
               k.allow_everything, ${sql.unsafe(PROJECT_ALLOWS('p.id'))} AS project_allows
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
@@ -2020,6 +2024,7 @@ export class Queries extends Context.Service<
               phase: card?.phase ?? null,
               kind: card?.kind,
               handedBack: card?.handedBack ?? null,
+              madeChangeAt: head.madeChangeAt,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,
               steps: card?.plan?.steps ?? [],
