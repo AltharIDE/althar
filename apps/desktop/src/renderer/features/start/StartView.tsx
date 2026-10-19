@@ -1,12 +1,14 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import { Button, type RuntimeEntry, RuntimeState } from '@althar/ui'
+import { Button, CrashReportsLine, type RuntimeEntry, RuntimeState } from '@althar/ui'
 import { Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
+import { useServices } from '../../data/services'
 import { device, platform } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
+import { usePreferences } from '../../shared/usePreferences'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { BareBar } from '../tabs/TabsFrame'
@@ -17,12 +19,16 @@ import type { StartModel } from './useStart'
 /*
  * Where the window starts. With no project yet, the kit's Start screen: the
  * agents answering round the mark, and the repositories found where people
- * keep code, ticked into the first project (useFirstProject). Once there are
- * projects, the home, where a new project starts in a tab of its own.
+ * keep code, ticked into the first project (useFirstProject), and at the
+ * sheet's foot crash reports, asked once as a quiet line with their switch
+ * (DEV-66), which Settings keeps too. Once there are projects, the home,
+ * where a new project starts in a tab of its own.
  */
 
 export const text = {
   removeAnyway: 'Remove anyway',
+  /** Asks every agent again, after one couldn't be checked. */
+  checkAgain: 'Check again',
   /** The kit's first screen, in this computer's words, with the keys this system has. */
   first: () => {
     const key = platform === 'darwin' ? '⌘' : 'Ctrl+'
@@ -30,7 +36,7 @@ export const text = {
       looking: `Looking around ${device.this}…`,
       agentsLabel: `Agents on ${device.this}`,
       add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: `${key}N` },
-      createKbd: platform === 'darwin' ? '⌘⏎' : 'Ctrl+Enter',
+      createKbd: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter',
     }
   },
 }
@@ -39,6 +45,9 @@ export const text = {
 export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail'], failed?: string): RuntimeEntry => {
   const brand = brandOf(agent.id)
   const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }), ...(detail === undefined ? {} : { detail }) }
+  // Couldn't be checked this time: it says so on its own row, and the others stand as they are.
+  if (agent.problem !== null)
+    return { id: base.id, name: base.name, ...(brand === undefined ? {} : { brand }), state: RuntimeState.Unchecked, why: agent.problem }
   // Not on this Mac: downloading, or the way to have it, where Althar can fetch it.
   if (agent.download?.installing === true)
     return {
@@ -76,6 +85,20 @@ export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): Reado
       model.installFailed[agent.id],
     ),
   ) ?? []
+
+/** Why one agent couldn't be checked, with a way to check every agent again. */
+export function AgentProblem({ why, model }: { why: string; model: StartModel }) {
+  return (
+    <div className={s.failure}>
+      <p className={s.error} role="alert">
+        {why}
+      </p>
+      <Button size="small" onClick={() => void model.recheck()}>
+        {text.checkAgain}
+      </Button>
+    </div>
+  )
+}
 
 /** What went wrong, with a way past an account whose sign-out didn't work. */
 export function StartError({ model }: { model: StartModel }) {
@@ -137,7 +160,7 @@ function First({
       if (made !== null) onProject(made.id)
     })
 
-  // ⌘N adds a folder, ⌘⏎ makes the project, as the screen says; Ctrl off a Mac. Keys typed into an account's form, or into
+  // ⌘N adds a folder, ⌘↵ makes the project, as the screen says; Ctrl off a Mac. Keys typed into an account's form, or into
   // what is open over the screen, are theirs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -157,6 +180,8 @@ function First({
   })
 
   const error = project.error ?? model.error
+  const { preferences, set } = usePreferences()
+  const { host } = useServices()
   return (
     <div className={`${s.window} ${s.bare}`}>
       <BareBar className={s.over} />
@@ -177,6 +202,13 @@ function First({
         {...(error === null ? {} : { error })}
         text={text.first()}
         runtimesText={{ missing: `Not installed on ${device.this}` }}
+        foot={
+          <CrashReportsLine
+            on={preferences.crashReports}
+            onChange={(on) => set('crashReports', on)}
+            doNotTrack={host.doNotTrack === true}
+          />
+        }
       />
       {model.unremoved !== null && <StartError model={model} />}
     </div>

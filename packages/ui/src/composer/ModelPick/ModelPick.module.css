@@ -191,3 +191,10 @@
 .button > :is(.effort, .chev) {
   flex: none;
 }
+
+/* narrowest, the picker is its mark and effort */
+@container foot (max-width: 380px) {
+  .name > span {
+    display: none;
+  }
+}

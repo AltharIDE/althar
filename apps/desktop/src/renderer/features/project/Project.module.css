@@ -11,6 +11,12 @@
   min-height: 0;
 }
 
+/* its settings, in the views' place: their page scrolls under the front page */
+.settings {
+  flex: 1;
+  min-height: 0;
+}
+
 .talk {
   display: flex;
   flex: 1;
@@ -34,7 +40,11 @@
   flex-direction: column;
   min-width: 0;
   overflow: clip;
-  padding: 16px 0 0 16px;
+  padding: 0 0 0 16px;
+}
+/* The lanes meet the header's line; what stands above them (or instead) keeps its own room. */
+.board > .failure {
+  padding: 16px 16px 0 0;
 }
 /* Beside the conversation, the lanes narrow before the board scrolls. */
 .both .board {
@@ -63,6 +73,7 @@
 
 .composer {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -83,31 +94,4 @@
   margin: 0;
   color: var(--t-3);
   font-size: 13px;
-}
-
-.form {
-  display: grid;
-  gap: 8px;
-}
-
-.form label,
-.form > span {
-  color: var(--t-2);
-  font-size: 12px;
-}
-
-.description {
-  min-height: 80px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--paper);
-  color: var(--t-1);
-  font: inherit;
-  resize: vertical;
-}
-
-.description:focus-visible {
-  outline: 2px solid var(--signal);
-  outline-offset: 1px;
 }

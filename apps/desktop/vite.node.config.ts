@@ -23,6 +23,9 @@ export default defineConfig(({ mode }) => ({
     __ALTHAR_TEST_HOOKS__: JSON.stringify(mode !== 'package'),
     // Only a packaged build is given PostHog's key, from the environment or apps/desktop/.env, so no other build sends usage data.
     __ALTHAR_USAGE__: JSON.stringify(usageFor(mode)),
+    // Where reports go (src/main/report): the Worker's address and the mail's, as the build is given them; the environment can say otherwise at run time.
+    __ALTHAR_REPORT_URL__: JSON.stringify(process.env.ALTHAR_REPORT_URL ?? ''),
+    __ALTHAR_REPORT_EMAIL__: JSON.stringify(process.env.ALTHAR_REPORT_EMAIL ?? 'reports@althar.ai'),
   },
   build: {
     ssr: true,
@@ -33,7 +36,13 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       input: { 'main/main': 'src/main/main.ts', 'runtime/runtime': 'src/runtime/runtime.ts', 'speech/speech': 'src/speech/speech.ts' },
       external: ['electron', 'sherpa-onnx-node', 'electron-updater', ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
-      output: { format: 'es', entryFileNames: '[name].js' },
+      output: {
+        format: 'es',
+        entryFileNames: '[name].js',
+        // What the processes share of the packages and their dependencies goes in one chunk. Left to itself, Rolldown can split
+        // it into chunks that import each other, and one then runs before what it needs from the other is defined.
+        codeSplitting: { groups: [{ name: 'shared', test: /node_modules|[\\/]packages[\\/]/, minShareCount: 2 }] },
+      },
     },
   },
   ssr: { noExternal: true, target: 'node' },

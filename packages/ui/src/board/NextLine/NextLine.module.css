@@ -1,0 +1,52 @@
+/* A row in line, with its grip in the lane's margin: shown on hover, on focus, with its menu open and while it is moved. */
+.item {
+  position: relative;
+}
+.grip {
+  position: absolute;
+  top: 12px;
+  left: -15px;
+  width: 12px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: radial-gradient(circle, var(--t-3) 1.15px, transparent 1.5px) 0 1px / 6px 6px;
+  cursor: grab;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity var(--fast) var(--ease);
+}
+.item:hover .grip,
+.grip:focus-visible,
+.grip[data-state='open'],
+.lifted .grip {
+  opacity: 1;
+}
+.grip:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 1px;
+}
+
+/* The row being moved: lifted off the lane, on paper, as it goes between the others. */
+.lifted {
+  z-index: 1;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-2);
+}
+.lifted,
+.lifted .grip {
+  cursor: grabbing;
+}
+.lifted + li {
+  border-top-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grip {
+    transition: none;
+  }
+}

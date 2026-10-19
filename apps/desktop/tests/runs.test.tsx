@@ -10,7 +10,7 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { STARTING_FOR, targetsOf } from '../src/renderer/features/runs/Runs'
 import { askText, nameOf } from '../src/renderer/features/runs/useRuns'
 import { coordinatorSnapshot, fakeClient, repositories, runnables, scripts } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 /*
  * What a project runs, from its front (ADR-044): the default one press away,
@@ -19,7 +19,15 @@ import { withServices } from './render'
  */
 
 function Project() {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={vi.fn()} />
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      settings={useSettingsOf('p1')}
+      onTask={vi.fn()}
+    />
+  )
 }
 
 const launch = (overrides: Partial<Launch>): Launch => ({
@@ -54,7 +62,7 @@ const listed = async () => {
 describe('what the project runs, from its front', () => {
   it('runs the default at a press, and starts and stops the rest from the list, several at once', async () => {
     const { client, emit } = await shown()
-    await userEvent.click(screen.getByRole('button', { name: 'Run bun run dev' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
     // Up, it says where it answers; Storybook starts beside it.
     act(() =>
@@ -128,7 +136,7 @@ describe('what the project runs, from its front', () => {
     vi.mocked(client.runProject).mockRejectedValueOnce(
       new ApiError({ reason: 'LaunchRefused', message: 'Could not fetch main from origin.' }),
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Run bun run dev' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Run$/ }))
     expect((await screen.findByRole('alert')).textContent).toContain('Could not fetch main from origin.')
   })
 

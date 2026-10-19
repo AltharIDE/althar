@@ -129,7 +129,9 @@ export interface Client {
   readonly seeTask: (taskId: string) => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
-  readonly switchAgent: (input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage> }) => Promise<string>
+  readonly switchAgent: (
+    input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage>; readonly dictated?: boolean },
+  ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
   readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
@@ -145,6 +147,10 @@ export interface Client {
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
+  /** Puts a task waiting for a free agent at a place in its project's line, from 0 the front; the line starts in that order. */
+  readonly moveInLine: (taskId: string, to: number) => Promise<void>
+  /** Puts a project's line back in the order its tasks began waiting. */
+  readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
@@ -163,6 +169,8 @@ export interface Client {
     readonly model?: string | null
     readonly effort?: string | null
   }) => Promise<void>
+  /** Leaves out the commits after a task's last pull request that are in none yet: it settles without them, and they stay on its branch. */
+  readonly leaveOutCommits: (taskId: string) => Promise<void>
   /** Settles a task without its change; its worktree and branch stay. */
   readonly abandonTask: (taskId: string) => Promise<void>
   /** Opens an abandoned task again, on its worktree and branch. */
@@ -175,6 +183,8 @@ export interface Client {
     readonly disposition: 'after_current' | 'interrupt_and_continue'
     /** Images sent with it, in order. */
     readonly images?: ReadonlyArray<SentImage>
+    /** Any of its words came from dictation, even if edited after. */
+    readonly dictated?: boolean
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
@@ -334,6 +344,13 @@ export interface Client {
   readonly refreshTask: (taskId: string) => Promise<void>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (taskId: string, url: string) => Promise<void>
+  /**
+   * Closes the task's pull request at this address on its host, unmerged; its branch there too, with `deleteBranch`. What the
+   * host said to deleting the branch, where it didn't.
+   */
+  readonly closePullRequest: (input: { readonly taskId: string; readonly url: string; readonly deleteBranch: boolean }) => Promise<{
+    readonly branch: string | null
+  }>
   /** Stops a command the session on a thread left running. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
@@ -480,12 +497,15 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
+    moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
+    lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
     setTaskAllowEverything: (input) => command((commandId) => api.SetTaskAllowEverything({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
+    leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
@@ -566,6 +586,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.MergeNote({ commandId, taskId, ...(url === undefined ? {} : { url }) })).then(({ note }) => note),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
+    closePullRequest: (input) => command((commandId) => api.ClosePullRequest({ commandId, ...input })),
     stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
     clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),
     runProject: (projectId, taskId, threadId, runnableId) =>

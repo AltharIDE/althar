@@ -18,7 +18,9 @@ import {
   SERVICES,
 } from '../../fixtures/setup'
 import { Choices, type ChoiceOption } from '../../primitives/Choices/Choices'
+import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Switch } from '../../primitives/Switch/Switch'
 import { States } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
@@ -36,6 +38,7 @@ import {
   type ControlCenterProps,
   ControlDetail,
   ControlFoot,
+  ControlFootStart,
   ControlGrid,
   ControlLine,
   ControlLink,
@@ -249,6 +252,7 @@ function Settings({
           </ControlGrid>
           <ControlFoot>
             <AppVersion version="0.1.0" notes="https://github.com/AltharIDE/althar/releases/tag/v0.1.0" />
+            <LinkButton onClick={fn()}>Report a problem</LinkButton>
             <ControlLink title="Usage data" picture={<Icon name="load" size={13} />} onClick={fn()} />
             <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} off={!credit} onClick={() => setOpen('coauthor')} />
           </ControlFoot>
@@ -393,7 +397,7 @@ type Story = StoryObj<typeof meta>
 const panelOf = async (canvasElement: HTMLElement) =>
   within(await within(canvasElement.ownerDocument.body).findByRole('dialog', { name: 'Settings' }))
 
-/** At rest: round switches across the top; Agents large, the code hosts tall and two small squares beside them; co-author a quiet link in the foot. */
+/** At rest: round switches across the top; Agents large, the code hosts tall and two small squares beside them; the version and Report a problem in the foot, co-author a quiet link at its end. */
 export const AtRest: Story = {
   play: async ({ canvasElement }) => {
     const p = await panelOf(canvasElement)
@@ -402,6 +406,7 @@ export const AtRest: Story = {
     await expect(p.getByRole('button', { name: /^Code hosts and trackers\s*.*Linear signed out, needs you/ })).toBeInTheDocument()
     await expect(p.getByRole('button', { name: /^In other apps\s*Round the notch/ })).toBeInTheDocument()
     await expect(p.getByRole('button', { name: /^App icon\s*Cobalt/ })).toBeInTheDocument()
+    await expect(p.getByRole('button', { name: 'Report a problem' })).toBeInTheDocument()
     await expect(p.getByRole('button', { name: 'Co-author' })).toBeInTheDocument()
     const awake = p.getByRole('switch', { name: 'Keep awake' })
     await expect(awake).toHaveAttribute('aria-checked', 'true')
@@ -570,7 +575,31 @@ const frame = (node: ReactNode, width = 440) => (
   <div style={{ width, padding: 12, borderRadius: 20, background: 'var(--frost)' }}>{node}</div>
 )
 
-/** Open at rest, and the parts on their own: modules placed and not, the lines, a link on and off, and the Dock the icon shows in. */
+/** The quick settings' foot as the app composes it: the version, Report a problem and All settings, across the panel's widths. */
+export const QuickFoot: Story = {
+  render: () => (
+    <States
+      size="wide"
+      cells={[440, 360, 300].map((width) => ({
+        state: `${width}px`,
+        node: frame(
+          <ControlFoot>
+            <ControlFootStart>
+              <AppVersion version="0.4.1" notes="https://github.com/AltharIDE/althar/releases/tag/v0.4.1" />
+              <LinkButton onClick={fn()}>Report a problem</LinkButton>
+            </ControlFootStart>
+            <Button size="small" icon="gear" kbd="⌘⇧," onClick={fn()}>
+              All settings
+            </Button>
+          </ControlFoot>,
+          width,
+        ),
+      }))}
+    />
+  ),
+}
+
+/** Open at rest, and the parts on their own: modules placed and not, the lines, a link on and off, a long foot wrapping, and the Dock the icon shows in. */
 export const AllStates: Story = {
   render: () => (
     <States
@@ -623,6 +652,17 @@ export const AllStates: Story = {
                 <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} off onClick={fn()} />
               </ControlFoot>
             </>,
+          ),
+        },
+        {
+          state: 'the foot, long: it wraps, the link still at its end',
+          node: frame(
+            <ControlFoot>
+              <AppVersion version="0.1.0" notes="https://github.com/AltharIDE/althar/releases/tag/v0.1.0" />
+              <LinkButton onClick={fn()}>Report a problem</LinkButton>
+              <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} onClick={fn()} />
+            </ControlFoot>,
+            300,
           ),
         },
         {

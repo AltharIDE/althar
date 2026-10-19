@@ -1,24 +1,23 @@
-import { useEffect } from 'react'
-
 import { type AgentStatus, type CommandRule, fillPattern, type ProjectRulesView } from '@althar/contracts'
-import { BackCrumb, CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd, unreachable } from '@althar/ui'
+import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd, unreachable } from '@althar/ui'
 import { type CommandPlace, ProjectRules, type RestMode, type RuleCommand } from '@althar/ui/screens'
 
 import { PartPending, pendingText } from '../../shared/Pending'
+import { HEADING } from '../projectSettings/sections'
 import s from './Rules.module.css'
 import type { RulesModel } from './useRules'
 
 /*
- * A project's rules (ADR-013), as the kit's charter: what agents are never
- * allowed, what always asks, what goes ahead (ADR-018) and what happens to
- * the rest, in the order a request meets them; how a task ends and is
- * named; and what a usage limit does, with the accounts work runs on. A
- * kind of request sits in one sentence: moving it writes it on one list
- * and takes it off the others. Escape goes back to the project.
+ * A project's rules (ADR-013), a section of its settings, as the kit's
+ * charter: what agents are never allowed, what always asks, what goes ahead
+ * (ADR-018) and what happens to the rest, in the order a request meets
+ * them; how a task ends and is named; and what a usage limit does, with the
+ * accounts work runs on. A kind of request sits in one sentence: moving it
+ * writes it on one list and takes it off the others. The section names
+ * them, so the charter has only its key above it.
  */
 
 export const text = {
-  back: 'Back to the project',
   /** Why a command can't go ahead: a sentence that comes first has it. */
   onOtherList: (pattern: string, list: 'ask' | 'never') => {
     const named = list === 'never' ? 'Never' : 'Ask me'
@@ -109,7 +108,7 @@ const usageLimitOf = (limit: LimitPolicy): ProjectRulesView['usageLimit'] => {
 }
 
 /** How a task ends: a draft where the project hasn't said, as the runtime does where the host is connected. */
-const endOf = (end: ProjectRulesView['end']): TaskEnd => {
+export const endOf = (end: ProjectRulesView['end']): TaskEnd => {
   switch (end) {
     case null:
     case 'draft':
@@ -216,7 +215,7 @@ export const withCommand = (
 }
 
 /** Althar's own patterns, where a repository's docs say nothing and the person set none. */
-const OWN = { branch: 'althar/{key}-{slug}', title: '{title}' } as const
+export const OWN = { branch: 'althar/{key}-{slug}', title: '{title}' } as const
 
 /** What each repository's docs say of a kind of name. */
 const namingOf = (rules: ProjectRulesView, kind: 'branch' | 'title') =>
@@ -232,111 +231,82 @@ export const agentAccountsOf = (agents: ReadonlyArray<AgentStatus>) =>
       accounts: agent.accounts.map((account) => ({ id: account.id, label: account.name })),
     }))
 
-/** Whether a key is meant for something on the page rather than the page: typed in a field, with a modifier, or in a menu or a list. */
-const forSomethingElse = (event: KeyboardEvent) => {
-  const target = event.target
-  return (
-    event.defaultPrevented ||
-    event.metaKey ||
-    event.ctrlKey ||
-    event.altKey ||
-    (target instanceof HTMLElement &&
-      (target.isContentEditable ||
-        target.closest('input, textarea, select, [role="textbox"], [role="menu"], [role="listbox"], [role="dialog"]') !== null))
-  )
-}
-
-export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => void }) {
+export function RulesSection({ model }: { model: RulesModel }) {
   const { rules } = model
-  // Escape goes back to the project, unless it is closing something on the page first.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || forSomethingElse(event)) return
-      event.preventDefault()
-      onBack()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onBack])
   const project = model.project ?? ''
   const example = text.example(project)
   return (
-    <div className={s.window}>
-      <main className={s.scroll}>
-        <div className={s.page}>
-          <div className={s.back}>
-            <BackCrumb to={model.project ?? text.back} kbd="esc" onBack={onBack} />
-          </div>
-          {model.error !== null && (
-            <p className={s.error} role="alert">
-              {model.error}
-            </p>
-          )}
-          {rules === null ? (
-            <PartPending label={pendingText.page} />
-          ) : (
-            <ProjectRules
-              project={project}
-              mode={modeOf(rules.permissions)}
-              onModeChange={(mode) => model.change({ permissions: permissionsOf(mode) })}
-              allowAll={rules.allowEverything}
-              onAllowAllChange={(allowEverything) => model.change({ allowEverything })}
-              kinds={Object.fromEntries(KINDS.map((kind) => [kind, placeOf(rules, kind)])) as Record<RuleKind, RulePlace>}
-              onKindChange={(kind, place) => model.change((now) => listsWith(now, kind, place))}
-              commands={commandsOf(rules)}
-              onRemoveCommand={(id) => model.change((now) => ({ commands: now.commands.filter((rule) => commandId(rule) !== id) }))}
-              onAddCommand={(place, pattern, match) => {
-                // Said at once against the rules shown; kept against the rules as they are when it is saved.
-                const added = withCommand(rules, place, pattern, match)
-                if (added === null) return undefined
-                if ('problem' in added) return added.problem
-                model.change((now) => {
-                  const again = withCommand(now, place, pattern, match)
-                  return again === null || 'problem' in again ? null : { commands: again.commands }
-                })
-                return undefined
-              }}
-              end={endOf(rules.end)}
-              onEndChange={(end) => model.change({ end: endsAs(end) })}
-              branches={{
-                value: rules.branchPattern,
-                onChange: (pattern) => model.setPattern('branch', pattern),
-                error: model.patternErrors.branch,
-                exampleOf: (pattern) => fillPattern(pattern, example),
-                fallback: OWN.branch,
-                repositories: namingOf(rules, 'branch'),
-              }}
-              titles={{
-                value: rules.titlePattern,
-                onChange: (pattern) => model.setPattern('title', pattern),
-                error: model.patternErrors.title,
-                exampleOf: (pattern) => fillPattern(pattern, example),
-                fallback: OWN.title,
-                repositories: namingOf(rules, 'title'),
-              }}
-              templates={rules.conventions.map((repository) => ({
-                id: repository.repository,
-                name: repository.repository,
-                path: repository.template,
-              }))}
-              limit={limitOf(rules.usageLimit)}
-              onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
-              agentAccounts={agentAccountsOf(model.agents)}
-              rotate={rules.rotateAccounts}
-              onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
-              allowed={rules.onlyAccounts ?? {}}
-              onAllowedChange={(agentId, ids) => {
-                const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
-                model.change((now) => {
-                  const { [agentId]: _, ...others } = now.onlyAccounts ?? {}
-                  const only = ids.length === every ? others : { ...others, [agentId]: ids }
-                  return { onlyAccounts: Object.keys(only).length === 0 ? null : only }
-                })
-              }}
-            />
-          )}
-        </div>
-      </main>
-    </div>
+    <>
+      {model.error !== null && (
+        <p className={s.error} role="alert">
+          {model.error}
+        </p>
+      )}
+      {rules === null ? (
+        <PartPending label={pendingText.page} />
+      ) : (
+        <ProjectRules
+          project={project}
+          titled={false}
+          headingLevel={HEADING.title}
+          mode={modeOf(rules.permissions)}
+          onModeChange={(mode) => model.change({ permissions: permissionsOf(mode) })}
+          allowAll={rules.allowEverything}
+          onAllowAllChange={(allowEverything) => model.change({ allowEverything })}
+          kinds={Object.fromEntries(KINDS.map((kind) => [kind, placeOf(rules, kind)])) as Record<RuleKind, RulePlace>}
+          onKindChange={(kind, place) => model.change((now) => listsWith(now, kind, place))}
+          commands={commandsOf(rules)}
+          onRemoveCommand={(id) => model.change((now) => ({ commands: now.commands.filter((rule) => commandId(rule) !== id) }))}
+          onAddCommand={(place, pattern, match) => {
+            // Said at once against the rules shown; kept against the rules as they are when it is saved.
+            const added = withCommand(rules, place, pattern, match)
+            if (added === null) return undefined
+            if ('problem' in added) return added.problem
+            model.change((now) => {
+              const again = withCommand(now, place, pattern, match)
+              return again === null || 'problem' in again ? null : { commands: again.commands }
+            })
+            return undefined
+          }}
+          end={endOf(rules.end)}
+          onEndChange={(end) => model.change({ end: endsAs(end) })}
+          branches={{
+            value: rules.branchPattern,
+            onChange: (pattern) => model.setPattern('branch', pattern),
+            error: model.patternErrors.branch,
+            exampleOf: (pattern) => fillPattern(pattern, example),
+            fallback: OWN.branch,
+            repositories: namingOf(rules, 'branch'),
+          }}
+          titles={{
+            value: rules.titlePattern,
+            onChange: (pattern) => model.setPattern('title', pattern),
+            error: model.patternErrors.title,
+            exampleOf: (pattern) => fillPattern(pattern, example),
+            fallback: OWN.title,
+            repositories: namingOf(rules, 'title'),
+          }}
+          templates={rules.conventions.map((repository) => ({
+            id: repository.repository,
+            name: repository.repository,
+            path: repository.template,
+          }))}
+          limit={limitOf(rules.usageLimit)}
+          onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
+          agentAccounts={agentAccountsOf(model.agents)}
+          rotate={rules.rotateAccounts}
+          onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
+          allowed={rules.onlyAccounts ?? {}}
+          onAllowedChange={(agentId, ids) => {
+            const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
+            model.change((now) => {
+              const { [agentId]: _, ...others } = now.onlyAccounts ?? {}
+              const only = ids.length === every ? others : { ...others, [agentId]: ids }
+              return { onlyAccounts: Object.keys(only).length === 0 ? null : only }
+            })
+          }}
+        />
+      )}
+    </>
   )
 }

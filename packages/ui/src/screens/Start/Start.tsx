@@ -1,5 +1,5 @@
 import { Checkbox } from 'radix-ui'
-import { useEffect, useId, useRef } from 'react'
+import { type ReactNode, useEffect, useId, useRef } from 'react'
 
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -29,7 +29,9 @@ import s from './Start.module.css'
  * each one ticked joins the project taking shape under the mark, named after
  * the first until the person names it. More come from Add a folder, or
  * dropped on the window. Nothing here is a step to finish: a project can be
- * made with no agent ready, and its tasks start once one is.
+ * made with no agent ready, and its tasks start once one is. At the
+ * sheet's foot, a quiet line may ask once what may be sent, such as crash
+ * reports, with its switch: never a step to finish either.
  */
 
 /** A repository that could be in the first project, as the screen lists it. */
@@ -96,7 +98,7 @@ export const startText: StartText = {
   more: 'Tick more, or drop folders on the window.',
   leaveOut: (name) => `Leave ${name} out`,
   create: 'Make the project',
-  createKbd: '⌘⏎',
+  createKbd: '⌘↵',
 }
 
 export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 'text' | 'runtimes'> {
@@ -125,6 +127,8 @@ export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 
   text?: Partial<StartText>
   /** The agents' rows' own words, such as what this computer is called. */
   runtimesText?: Partial<RuntimesText>
+  /** One quiet line at the sheet's foot, such as crash reports with their switch (CrashReportsLine). */
+  foot?: ReactNode
 }
 
 /** How far round the ring the agents sit: under the mark, at most from 200° to 340°, as a share of the stage. */
@@ -155,6 +159,7 @@ export function Start({
   className,
   text,
   runtimesText,
+  foot,
   ...rows
 }: StartProps) {
   const t = { ...startText, ...text }
@@ -343,6 +348,11 @@ export function Start({
               </ul>
             )}
           </div>
+          {foot !== undefined && (
+            <div className={s.foot}>
+              <div className={s.footLine}>{foot}</div>
+            </div>
+          )}
         </div>
       </section>
     </div>

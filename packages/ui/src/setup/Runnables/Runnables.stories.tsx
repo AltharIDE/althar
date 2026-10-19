@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { AddRunnable, EditRunnable, type ListedRunnable, type PickableScript, Runnables } from './Runnables'
+import { AddRunnable, EditRunnable, type ListedRunnable, type PickableScript, RunnableList, Runnables } from './Runnables'
 
 /* This repository's own scripts, as its package.json files say them. */
 const SCRIPTS: PickableScript[] = [
@@ -63,6 +63,23 @@ export const Empty: Story = { args: { runnables: [] } }
 
 /** The runtime said no to removing or ordering one. */
 export const ListFailed: Story = { args: { error: 'Storybook is running; stop it first.' } }
+
+/** The same list on a page of its own, as the project's settings have it: no dialog, the same rows. */
+export const ListOnAPage: StoryObj<typeof RunnableList> = {
+  render: (args) => (
+    <div style={{ width: 720, padding: 24 }}>
+      <RunnableList {...args} />
+    </div>
+  ),
+  args: { runnables: LISTED, onOrder: fn(), onDefault: fn(), onEdit: fn(), onRemove: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByRole('dialog')).toBeNull()
+    await expect(c.getAllByRole('listitem')[0]).toHaveTextContent(/^Public site.*Default$/)
+    await userEvent.click(c.getByRole('button', { name: 'Edit Storybook' }))
+    await expect(args.onEdit).toHaveBeenCalledWith('storybook')
+  },
+}
 
 /** Adding one by typing its command and a name for it. */
 export const AddTyped: StoryObj<typeof AddRunnable> = {

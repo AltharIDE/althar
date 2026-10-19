@@ -73,12 +73,16 @@ describe('the names Althar gives', () => {
 
 describe('a description in the repository’s template', () => {
   const template = '## Summary\n\n<!-- What and why. -->\n\n## How to test\n\n## Checklist\n\n- [ ] Tests pass\n'
-  const nothingElse = { review: null, findings: [], issue: null } as const
+  const nothingElse = { issue: null } as const
 
-  it('with no template, is what it always was', () => {
+  it('with no template, is the lead’s own, else what it did', () => {
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: null, written: null }),
       'Did it.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+    )
+    assert.strictEqual(
+      bodyOf({ built: 'Built it.', lead: 'Did it.', ...nothingElse, template: null, written: 'Why, and what.' }),
+      'Why, and what.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
     )
   })
 
@@ -90,10 +94,10 @@ describe('a description in the repository’s template', () => {
     )
   })
 
-  it('takes the lead’s, unticked, where it keeps the template', () => {
+  it('takes the lead’s, unticked, where it keeps the template, with nothing of what the task built above it', () => {
     const written = '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [x] Tests pass\n'
     assert.strictEqual(
-      bodyOf({ lead: 'Did it.', ...nothingElse, template, written }),
+      bodyOf({ built: 'Built it. Try it at localhost.', lead: 'Did it.', ...nothingElse, template, written }),
       '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
     )
   })

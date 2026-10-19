@@ -5,12 +5,13 @@ import { type IconName, PermissionAnswers, type ProjectRef, TaskStatus } from '@
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { queuedOfWords } from '../../shared/agents'
-import { isFinished } from '../../shared/calls'
+import { platform } from '../../shared/device'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import type { DoneHere } from '../../shared/standing'
 import { ago, clock, useNow } from '../../shared/time'
 import { useNewTab } from '../tabs/TabsFrame'
 import type { StartModel } from '../start/useStart'
+import { readyOf } from '../../shared/calls'
 import { homeGlanceOf, refOf } from './glance'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
@@ -93,7 +94,10 @@ export const lineOf = (
     case 'settle':
       return said('check', t.settled)
     case 'review':
-      return said('check', result.verdict === 'pass' ? t.passed : result.findings.length > 0 ? t.found(result.findings.length) : t.asked)
+      // A tick only for a review that passed; one that found something, or asked for changes, says so.
+      return result.verdict === 'pass'
+        ? said('check', t.passed)
+        : said('quote', result.findings.length > 0 ? t.found(result.findings.length) : t.asked)
   }
 }
 
@@ -122,7 +126,7 @@ export function HomeView({
   const projects = home?.projects ?? []
   const tasks = home?.tasks ?? []
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
-  // Only tasks with an agent on them, or held for a reset, are running; a plain task that finished waits on its board.
+  // Only tasks with an agent on them, or held for a reset, are running; a plain task that finished waits on its board (`needsYou`).
   const { calls, working, waiting, needs } = homeGlanceOf(home, {
     answered,
     agentName: name,
@@ -182,11 +186,12 @@ export function HomeView({
   })
 
   const list: ReadonlyArray<HomeProject> = projects.map((project) => {
-    const ready = tasks.filter((task) => task.projectId === project.id && task.phase === 'ready' && !isFinished(task)).length
     return {
       id: project.id,
       project: refOf(project),
-      yours: calls.filter((call) => call.projectId === project.id).length + ready,
+      yours:
+        calls.filter((call) => call.projectId === project.id).length +
+        readyOf(tasks).filter((task) => task.projectId === project.id).length,
       note: project.lastWorkAt === null ? text.noWork : text.lastWork(ago(project.lastWorkAt, new Date(now))),
       fresh: project.lastWorkAt === null,
     }
@@ -219,7 +224,13 @@ export function HomeView({
             since={lines}
             looked={home === null ? '' : home.looked === null ? text.firstLook : ago(home.looked, new Date(now))}
             projects={list}
-            {...(queued === null ? {} : { text: { projects: { queued: (n: number) => queuedOfWords(n, queued) } } })}
+            text={{
+              projects: {
+                // The shortcut as this system writes it.
+                newProjectKbd: platform === 'darwin' ? '⌘N' : 'Ctrl+N',
+                ...(queued === null ? {} : { queued: (n: number) => queuedOfWords(n, queued) }),
+              },
+            }}
             onOpenEvent={(id) => {
               const event = home?.events.find((one) => one.id === id)
               if (event === undefined || event.kind === 'answered') return

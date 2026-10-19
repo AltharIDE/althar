@@ -22,5 +22,5 @@ A thin client over `@althar/runtime`. The repository's [ARCHITECTURE.md](../../A
 
 ## Gaps
 
-- The runtime runs inside the CLI's process. docs/architecture/02 has a CLI connect to a running runtime over a local socket; that comes with the desktop app.
+- The runtime runs inside the CLI's process, so it can't run while the app has the profile open. It will attach to a running runtime over the local socket instead (DEV-128), and there it can't answer permissions or questions ([ADR-048](../../docs/decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)).
 - It starts a new task each run. Listing and resuming tasks come later.

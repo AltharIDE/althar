@@ -320,9 +320,18 @@ describe('Agents at once', () => {
       const third = yield* started(projectId, 'Third', 'Work on it. [lead:wait]')
       yield* waiting(second.taskId)
       yield* waiting(third.taskId)
+      // Their cards say in what order they will start, the oldest first, for the board to list them so: in the line, up next.
+      assert.isTrue((yield* cardOf(projectId, second.taskId))?.inLine)
+      assert.isUndefined((yield* cardOf(projectId, second.taskId))?.reordered)
+      assert.strictEqual((yield* cardOf(projectId, second.taskId))?.place, 1)
+      assert.strictEqual((yield* cardOf(projectId, third.taskId))?.place, 2)
+      assert.isUndefined((yield* cardOf(projectId, first.taskId))?.place)
       const tasks = yield* Tasks
       yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
       yield* working(second.taskId)
+      // The second started, so the third is first in line, and no card of a task at work has a place.
+      assert.isUndefined((yield* cardOf(projectId, second.taskId))?.place)
+      assert.strictEqual((yield* cardOf(projectId, third.taskId))?.place, 1)
       // One place: the third waits on behind the second.
       assert.deepStrictEqual((yield* attempts(third.taskId)).at(-1), { step: 'implement', state: 'held', holdReason: 'machine_busy' })
       assert.deepStrictEqual(countsOf((yield* cardOf(projectId, third.taskId))?.queued), { busy: 1, atOnce: 1 })
@@ -346,6 +355,9 @@ describe('Agents at once', () => {
       const taskId = quick?.id ?? ''
       yield* waiting(taskId)
       assert.deepStrictEqual(countsOf((yield* cardOf(projectId, taskId))?.queued), { busy: 1, atOnce: 1 })
+      // Nothing of it has had an agent: it is in the line, up next, as a plan's task is.
+      assert.isTrue((yield* cardOf(projectId, taskId))?.inLine)
+      assert.strictEqual((yield* cardOf(projectId, taskId))?.place, 1)
       // A place frees when the first is stopped: the quick task starts, and finishes.
       const tasks = yield* Tasks
       yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
@@ -517,6 +529,10 @@ describe('Agents at once', () => {
       yield* tell(first.threadId, 'The checks failed.')
       yield* queuedOn(projectId, first.taskId)
       assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
+      // Its lead has worked on it: a turn that waits leaves it under way, not in the line.
+      assert.isUndefined((yield* cardOf(projectId, first.taskId))?.inLine)
+      assert.isUndefined((yield* cardOf(projectId, first.taskId))?.place)
+      assert.isFalse(yield* (yield* Busy).move(first.taskId, 0))
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* turnsOn(first.threadId), turns)
       // Once the second stops, it is delivered.
@@ -1216,6 +1232,69 @@ describe('Agents at once, across a restart', () => {
         yield* waiting(second.taskId)
         assert.deepStrictEqual(countsOf((yield* cardOf(projectId, second.taskId))?.queued), { busy: 1, atOnce: 1 })
       }).pipe(Effect.provide(machine(2, file)))
+    }),
+  )
+})
+
+/** The project's line as the cards say it, in order: each task's title, starred while the line is in the person's order. */
+const lineOn = (projectId: string) =>
+  Effect.gen(function* () {
+    const queries = yield* Queries
+    const board = yield* Effect.orDie(queries.board(projectId))
+    return board.tasks
+      .filter((task) => task.inLine === true)
+      .toSorted((a, b) => (a.place ?? 0) - (b.place ?? 0))
+      .map((task) => `${task.title}${task.reordered === true ? '*' : ''}`)
+  })
+
+describe('The line', () => {
+  it.live('start it in the order the person puts it, with a task that joins later at its end, after a restart too', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const before = yield* Effect.gen(function* () {
+        const busy = yield* Busy
+        const { projectId } = yield* opened
+        const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
+        yield* working(first.taskId)
+        const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
+        const third = yield* started(projectId, 'Third', 'Work on it. [lead:wait]')
+        const fourth = yield* started(projectId, 'Fourth', 'Work on it. [lead:wait]')
+        for (const one of [second, third, fourth]) yield* waiting(one.taskId)
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Second', 'Third', 'Fourth'])
+        // The person puts the fourth first: it says so, and the rest keep their order.
+        assert.isTrue(yield* busy.move(fourth.taskId, 0))
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Fourth*', 'Second*', 'Third*'])
+        // Moved back where it was, the line is the oldest first again.
+        yield* busy.move(fourth.taskId, 9)
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Second', 'Third', 'Fourth'])
+        yield* busy.move(third.taskId, 0)
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Third*', 'Second*', 'Fourth*'])
+        // One that joins later goes to the end.
+        const fifth = yield* started(projectId, 'Fifth', 'Work on it. [lead:wait]')
+        yield* waiting(fifth.taskId)
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Third*', 'Second*', 'Fourth*', 'Fifth*'])
+        return { projectId, first, second, third }
+      }).pipe(Effect.provide(machine(1, file)))
+
+      yield* Effect.gen(function* () {
+        const { projectId, first, second, third } = before
+        yield* until(sessionsOn(first.threadId), (rows) => rows.length === 2)
+        yield* working(first.taskId)
+        // The order is kept across the restart.
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Third*', 'Second*', 'Fourth*', 'Fifth*'])
+        // A place frees: the one the person put first starts, not the one that waited longest; the rest are oldest first again.
+        const tasks = yield* Tasks
+        yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+        yield* working(third.taskId)
+        assert.strictEqual((yield* attempts(second.taskId)).at(-1)?.state, 'held')
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Second', 'Fourth', 'Fifth'])
+        const busy = yield* Busy
+        yield* busy.move(second.taskId, 2)
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Fourth*', 'Fifth*', 'Second*'])
+        // Put back oldest first, the line is no longer the person's.
+        yield* busy.oldestFirst(projectId)
+        assert.deepStrictEqual(yield* lineOn(projectId), ['Second', 'Fourth', 'Fifth'])
+      }).pipe(Effect.provide(machine(1, file)))
     }),
   )
 })

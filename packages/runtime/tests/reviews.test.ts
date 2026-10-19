@@ -10,6 +10,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Busy } from '../src/Busy'
 import { readingUntrusted, withoutSignIns } from '../src/Config'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
@@ -234,6 +235,43 @@ describe('reviewing someone else’s pull request', () => {
       // Asked again, it is the same task.
       const again = yield* callTool(coordinator, 'review_pull_request', { pull_request: '#1', lead: { agent: 'claude-code' } })
       assert.match(again, /already reviews ninemate's pull request #1/)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('waits in the line, up next, while every place is taken, until its lead has a place to read it', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      // One agent at a time, at work on a quick task.
+      yield* (yield* Busy).set(1)
+      yield* callTool(coordinator, 'start_task', { title: 'Busy', description: 'Work on it. [lead:wait]', lead: { agent: 'codex' } })
+      const [busy] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE slug = 'busy'`
+      yield* until(
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${busy?.id ?? ''}`,
+        (rows) => rows[0]?.state === 'running',
+      )
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const cardOf = Effect.map(Effect.orDie((yield* Queries).board(projectId)), (board) =>
+        board.tasks.filter((one) => one.taskId === task?.id),
+      )
+      // Its lead's first turn waits for a place: nothing of it has had an agent, so it is in the line, not at work.
+      const [waiting] = yield* until(cardOf, (cards) => cards[0]?.inLine === true)
+      assert.strictEqual(waiting?.kind, 'review')
+      assert.strictEqual(waiting?.phase, 'running')
+      assert.strictEqual(waiting?.place, 1)
+      assert.isNotNull(waiting?.queued)
+      // A place frees: its lead reads it, and it leaves the line.
+      yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy?.id ?? '' })
+      const [reading] = yield* until(cardOf, (cards) => cards[0]?.queued === null)
+      assert.isUndefined(reading?.inLine)
+      assert.isUndefined(reading?.place)
     }).pipe(Effect.provide(withQueries(github)))
   })
 

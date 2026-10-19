@@ -20,7 +20,7 @@ test('opens a change on its outputs and a quick task on its conversation', async
   const { electronApp, page } = await launch(home)
   try {
     await openFirstProject(electronApp, page, repository(projects))
-    await page.getByRole('radio', { name: 'Both' }).click()
+    await page.getByRole('radio', { name: 'Home' }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
 
     await planTask(page, 'Retry webhook deliveries with backoff', '[lead:finish] [lead:edit]')

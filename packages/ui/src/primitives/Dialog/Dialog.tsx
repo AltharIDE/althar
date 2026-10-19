@@ -38,6 +38,8 @@ export interface DialogProps {
   /** Makes it a form, submitted by Enter in a field or a submit button. */
   onSubmit?: () => void
   width?: number
+  /** A form longer than a question, such as Report a problem: it sits higher, and may take more of the window. */
+  tall?: boolean
   className?: string
   text?: Partial<DialogText>
 }
@@ -52,6 +54,7 @@ export function Dialog({
   holding = false,
   onSubmit,
   width = 420,
+  tall = false,
   className,
   text,
 }: DialogProps) {
@@ -65,7 +68,7 @@ export function Dialog({
         heading
       ) : (
         <div className={s.head}>
-          <IconButton icon="chevron" label={t.back} size="small" className={s.back} onClick={onBack} />
+          <IconButton icon="chevronL" label={t.back} size="small" className={s.back} onClick={onBack} />
           {heading}
         </div>
       )}
@@ -84,7 +87,7 @@ export function Dialog({
       <D.Portal>
         <D.Overlay className={s.overlay} />
         <D.Content
-          className={cx('ch-root', s.dialog, className)}
+          className={cx('ch-root', s.dialog, tall && s.tall, className)}
           style={{ width: `min(${width}px, calc(100vw - 32px))` }}
           {...(description == null ? { 'aria-describedby': undefined } : {})}
           onEscapeKeyDown={(event) => {

@@ -8,17 +8,26 @@ import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
-import { inYoursOf, lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
+import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { useBoard } from '../src/renderer/features/board/useBoard'
+import { useClosePullRequests } from '../src/renderer/features/board/useClosePullRequests'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={onTask} />
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      settings={useSettingsOf('p1')}
+      onTask={onTask}
+    />
+  )
 }
 
 /** The dock on its own, as the home opens it: the board's tasks and calls, answered or accepted there. */
@@ -154,6 +163,127 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  describe('a task started that waits for a free agent, by lane', () => {
+    const NOW = '2026-10-01T10:00:00.000Z'
+    const queued = { busy: 4, atOnce: 4 }
+    const waiting = (taskId: string, place: number, overrides: Partial<BoardTask> = {}) =>
+      task({ taskId, threadId: `th-${taskId}`, title: `Waiting ${taskId}`, phase: 'running', queued, inLine: true, place, ...overrides })
+    const planned = task({
+      taskId: 'p',
+      title: 'Add a retry',
+      phase: 'planned',
+      plan: { ...card().plan!, startsAt: '2026-10-01T10:00:20.000Z' },
+    })
+    const held = task({ taskId: 'h', title: 'Hold off', phase: 'held', plan: { ...card().plan!, startsAt: null } })
+
+    it('goes up next when no agent has worked on it, in the order its line starts, above planned and held plans', () => {
+      const lanes = lanesOf(board({ tasks: [held, planned, waiting('b', 2), waiting('a', 1), waiting('c', 3)], calls: [] }))
+      expect(lanes.next.map((work) => work.taskId)).toEqual(['a', 'b', 'c', 'p', 'h'])
+      expect(lanes.free).toBe(3)
+      expect(lanes.running).toEqual([])
+    })
+
+    // Whatever its kind: a change with a plan, a quick task, a review of someone else's pull request, a prototype.
+    it.each([
+      ['a change with a plan', { kind: 'change', planWaits: true }],
+      ['a quick task', { kind: 'plain', planWaits: true }],
+      ['a review of a pull request', { kind: 'review', plan: null, step: null }],
+      ['a prototype', { kind: 'plain', title: 'Prototype the board', planWaits: true }],
+    ] as const)('goes up next when it is %s that no agent has worked on yet', (_, kind) => {
+      const lanes = lanesOf(board({ tasks: [waiting('a', 1, kind)], calls: [] }))
+      expect(lanes.next.map((work) => work.taskId)).toEqual(['a'])
+      expect(lanes.free).toBe(1)
+      expect(lanes.running).toEqual([])
+    })
+
+    it('stays running when it is mid-work and a later turn waits for a place', () => {
+      const midWork = task({ taskId: 'm', phase: 'running', step: 'implement', queued })
+      const lanes = lanesOf(board({ tasks: [midWork, waiting('a', 1)], calls: [] }))
+      expect(lanes.next.map((work) => work.taskId)).toEqual(['a'])
+      expect(lanes.running.map((work) => work.taskId)).toEqual(['m'])
+    })
+
+    it('moves to running by itself once an agent frees and it starts', () => {
+      const lanes = lanesOf(board({ tasks: [waiting('a', 1, { inLine: undefined, queued: null, step: 'implement' })], calls: [] }))
+      expect(lanes.next).toEqual([])
+      expect(lanes.running.map((work) => work.taskId)).toEqual(['a'])
+    })
+
+    it('draws a divider over the line, each row saying its place in it; one alone has nothing to reorder', () => {
+      const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
+      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null }
+      withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />, fakeClient().client)
+      expect(screen.getByText('Starts when an agent is free')).toBeTruthy()
+      expect(screen.getByText('Next in line')).toBeTruthy()
+      expect(screen.getByText('Planned')).toBeTruthy()
+      expect(screen.queryByText('Drag to change the order')).toBeNull()
+      expect(screen.queryByRole('button', { name: /in the line$/ })).toBeNull()
+    })
+
+    describe('in the person’s order', () => {
+      const three = [waiting('a', 1), waiting('b', 2), waiting('c', 3), planned, held]
+      const drawn = (tasks: ReadonlyArray<BoardTask>) => {
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null as string | null }
+        withServices(
+          <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
+          fakeClient().client,
+        )
+        return line
+      }
+      const titles = () =>
+        within(screen.getByRole('region', { name: 'Up next' }))
+          .getAllByRole('button', { name: /^Waiting / })
+          .map((row) => row.textContent)
+
+      it('says the line can be dragged, and gives a grip to each row in it, none to the plans under it', () => {
+        drawn(three)
+        expect(screen.getByText('Drag to change the order')).toBeTruthy()
+        expect(screen.getByText('Next in line')).toBeTruthy()
+        expect(screen.getByText('2nd in line')).toBeTruthy()
+        expect(screen.getByText('3rd in line')).toBeTruthy()
+        expect(screen.getAllByRole('button', { name: /in the line$/ }).map((grip) => grip.getAttribute('aria-label'))).toEqual([
+          'Move Waiting a in the line',
+          'Move Waiting b in the line',
+          'Move Waiting c in the line',
+        ])
+      })
+
+      it('moves a row from its grip’s menu, at once, and asks the runtime to start the line so', async () => {
+        const line = drawn(three)
+        screen.getByRole('button', { name: 'Move Waiting c in the line' }).focus()
+        await userEvent.keyboard('{Enter}')
+        const menu = within(await screen.findByRole('menu', { name: 'Move in the line' }))
+        expect(menu.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+          'Move to the front of the line',
+          'Move up',
+          'Move down',
+          'Move to the back of the line',
+        ])
+        await userEvent.click(menu.getByRole('menuitem', { name: 'Move up' }))
+        expect(line.move).toHaveBeenCalledWith('c', 1)
+        expect(titles()).toEqual(['Waiting a', 'Waiting c', 'Waiting b'])
+        // Each row says its new place.
+        expect(
+          within(screen.getByRole('region', { name: 'Up next' }))
+            .getAllByText(/in line$/)
+            .map((one) => one.textContent),
+        ).toEqual(['Next in line', '2nd in line', '3rd in line'])
+      })
+
+      it('offers the oldest first again once the line is in the person’s order', async () => {
+        const line = drawn([
+          waiting('c', 1, { reordered: true }),
+          waiting('a', 2, { reordered: true }),
+          waiting('b', 3, { reordered: true }),
+        ])
+        expect(titles()).toEqual(['Waiting c', 'Waiting a', 'Waiting b'])
+        expect(screen.queryByText('Drag to change the order')).toBeNull()
+        await userEvent.click(screen.getByRole('button', { name: 'Back to oldest first' }))
+        expect(line.oldestFirst).toHaveBeenCalledOnce()
+      })
+    })
+  })
+
   it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet', () => {
     const question: BoardCall = { ...permission, id: 'q1', kind: 'question', taskId: null, taskTitle: null, threadId: 'thc' }
     const held: BoardCall = { ...permission, id: 'a2', taskId: 't1', threadId: 'th1' }
@@ -176,7 +306,7 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
-  it('shows a plain task that finished in Needs you, but counts it nowhere and opens it from nothing else', () => {
+  it('keeps a plain task that finished out of Needs you, since it asks nothing, and waits for it above what settled', () => {
     const lanes = lanesOf(
       board({
         tasks: [
@@ -186,11 +316,34 @@ describe('the board’s lanes', () => {
         calls: [],
       }),
     )
-    expect(lanes.ready.map((work) => work.taskId)).toEqual(['p1', 't4'])
-    expect(inYoursOf(lanes)).toBe(2)
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4'])
+    expect(lanes.finished.map((work) => work.taskId)).toEqual(['p1'])
     expect(yoursOf(lanes)).toBe(1)
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => need.title)).toEqual(['Rate-limit refunds'])
     expect(firstNeedOf(lanes)).toBe('th4')
+  })
+
+  it('keeps a merged task with commits after its pull request in Needs you, and settles it once they are left out', () => {
+    const merged = change({ state: 'merged' })
+    const after = task({
+      taskId: 't8',
+      threadId: 'th8',
+      title: 'Cap parallel agents per machine',
+      state: 'done',
+      phase: 'ready',
+      change: merged,
+      unshipped: { commits: 1, add: 300, del: 304 },
+      settledAt: '2026-10-01T09:30:00.000Z',
+    })
+    const before = lanesOf(board({ tasks: [after], calls: [] }))
+    expect(before.ready.map((work) => work.taskId)).toEqual(['t8'])
+    expect(yoursOf(before)).toBe(1)
+    expect(needsOf(before, () => '', vi.fn()).map((need) => need.title)).toEqual(['Cap parallel agents per machine'])
+    // Left out, the runtime reads it as settled, with nothing in none: it goes among the settled, at the time it first settled.
+    const left = lanesOf(board({ tasks: [{ ...after, phase: 'settled', unshipped: null }], calls: [], settledTotal: 1 }))
+    expect(left.ready).toEqual([])
+    expect(left.settled.map((work) => [work.taskId, work.settledAt])).toEqual([['t8', '2026-10-01T09:30:00.000Z']])
+    expect(yoursOf(left)).toBe(0)
   })
 
   it('lists a drafted review as one to post, by its pull request and whose it is', () => {
@@ -754,6 +907,71 @@ describe('every state the board shows', () => {
     return userEvent.click(screen.getByRole('button', { name: 'Held plan' })).then(() => expect(onOpen).toHaveBeenCalledWith('th1'))
   })
 
+  it('says a settled task’s pull request is open where its host says so, and closes it from its row', async () => {
+    const pr = change({ state: 'open' })
+    const settled = lanesOf(
+      board({
+        tasks: [
+          task({
+            taskId: 'x',
+            title: 'Left open',
+            phase: 'settled',
+            state: 'abandoned',
+            settledAt: '2026-10-01T09:00:00.000Z',
+            change: pr,
+          }),
+        ],
+      }),
+    )
+    const { client } = fakeClient()
+    vi.mocked(client.closePullRequest).mockRejectedValueOnce(
+      new ApiError({ reason: 'ConnectorFailed', message: 'GitHub won’t let this account do that.' }),
+    )
+    const Board = () => <BoardView lanes={settled} agents={agents} now={NOW} onOpen={vi.fn()} closing={useClosePullRequests()} />
+    withServices(<Board />, client)
+    // Abandoned, its pull request isn't said to be closed: GitHub last said it is open.
+    expect(screen.getByText('PR #12 still open')).toBeTruthy()
+    expect(screen.queryByText('PR #12 closed')).toBeNull()
+    // Refused, the row says why, and still says it is open.
+    await userEvent.click(screen.getByRole('button', { name: 'Close PR #12' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('GitHub won’t let this account do that.')
+    expect(screen.getByText('PR #12 still open')).toBeTruthy()
+    // Closed on the person's second press: only the pull request, its branch left as it is.
+    await userEvent.click(screen.getByRole('button', { name: 'Close PR #12' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenLastCalledWith({ taskId: 'x', url: pr.url, deleteBranch: false })
+  })
+
+  it('offers no Close on a settled task’s row whose pull request is closed or merged', () => {
+    const settled = lanesOf(
+      board({
+        tasks: [
+          task({
+            taskId: 'y',
+            title: 'Closed',
+            phase: 'settled',
+            state: 'abandoned',
+            settledAt: '2026-10-01T09:00:00.000Z',
+            change: change({ state: 'closed' }),
+          }),
+          task({
+            taskId: 'z',
+            title: 'Merged',
+            phase: 'settled',
+            state: 'done',
+            settledAt: '2026-10-01T09:10:00.000Z',
+            change: change({ state: 'merged' }),
+          }),
+        ],
+      }),
+    )
+    const closing = { busy: null, failed: null, close: vi.fn() }
+    withServices(<BoardView lanes={settled} agents={agents} now={NOW} onOpen={vi.fn()} closing={closing} />, fakeClient().client)
+    expect(screen.getByText('PR #12 closed')).toBeTruthy()
+    expect(screen.getByText('PR #12 merged')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Close PR/ })).toBeNull()
+  })
+
   describe('a task waiting for a free agent', () => {
     const waiting = { phase: 'running' as const, step: 'implement', queued: { busy: 4, atOnce: 4 }, startedAt: '2026-10-01T10:00:00.000Z' }
     const draw = (...tasks: BoardTask[]) =>
@@ -762,10 +980,11 @@ describe('every state the board shows', () => {
         fakeClient().client,
       )
 
-    it('shows nothing of progress before its first step has had an agent: no steps, branch or clock', () => {
-      draw(task({ ...waiting, title: 'Not yet', branch: 'althar/not-yet', changed: { files: 0, add: 0, del: 0 }, planWaits: true }))
-      expect(screen.getByText('Waiting')).toBeTruthy()
-      expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+    it('shows nothing of progress before its first step has had an agent, in Up next: no steps, branch or clock', () => {
+      draw(task({ ...waiting, title: 'Not yet', branch: 'althar/not-yet', changed: { files: 0, add: 0, del: 0 }, inLine: true, place: 1 }))
+      const next = screen.getByRole('region', { name: 'Up next' })
+      expect(within(next).getByText('Not yet')).toBeTruthy()
+      expect(within(next).getByText('Next in line')).toBeTruthy()
       expect(screen.queryByRole('list', { name: 'Steps' })).toBeNull()
       expect(screen.queryByText('althar/not-yet')).toBeNull()
       expect(screen.queryByText('0s')).toBeNull()

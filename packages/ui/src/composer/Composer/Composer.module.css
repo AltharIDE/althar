@@ -100,6 +100,7 @@
 }
 
 .queueList {
+  min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -110,7 +111,7 @@
   align-items: center;
   gap: 6px;
   min-height: 28px;
-  padding: 0 2px 0 6px;
+  padding: 2px 2px 2px 6px;
   border-radius: 7px;
   font-size: 12.5px;
   color: var(--t-2);
@@ -123,9 +124,14 @@
 .queuedText {
   flex: 1;
   min-width: 0;
+  /* up to three lines, then an ellipsis; a long URL or path breaks instead of running out */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .queuedEdit {
@@ -269,29 +275,34 @@
   align-items: center;
   gap: 4px;
   margin-left: -6px;
-  /* when even the fixed controls don't fit, whole controls wrap to a row below, the actions staying at the right */
+  /* only when even the picker's mark and effort don't fit beside the actions does the picker take a row of its own */
   flex-wrap: wrap;
   row-gap: 4px;
-  container-type: inline-size;
+  container: foot / inline-size;
 }
 
-/* the picker, which can shrink, takes what the buttons leave; the buttons never give way */
-.bar > * {
-  flex: none;
+/* the picker takes what the actions leave and shrinks first; the actions stay together on the right and never wrap on their own */
+.left {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 64px;
 }
-.bar > :first-child:not(.space) {
-  flex: 0 1 auto;
+.left > * {
   min-width: 0;
   max-width: 100%;
 }
-
-.space {
-  flex: 1 1 0;
-  min-width: 0;
+.right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.right > * {
+  flex: none;
 }
 
 /* one line, cut with an ellipsis rather than wrapped; it gives way before anything else */
-.note {
+.right > .note {
   flex: 0 1 auto;
   min-width: 0;
   margin-right: 6px;
@@ -302,8 +313,9 @@
   white-space: nowrap;
 }
 
+/* the hint holds the send button's place, so nothing beside it moves when the first letter is typed */
 .kbd {
-  margin: 0 6px 0 2px;
+  margin: 0 6px;
 }
 
 /* the other way to send while the agent works: quieter than the button, beside the note that explains it */
@@ -374,6 +386,13 @@
   background: currentColor;
   opacity: calc(0.35 + var(--l, 0) * 0.65);
   transition: height 90ms linear;
+}
+
+/* narrow, dictating gets compact: the waveform goes, the time and the stop stay */
+@container foot (max-width: 480px) {
+  .wave {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

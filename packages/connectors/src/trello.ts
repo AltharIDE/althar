@@ -4,7 +4,7 @@ import { type Access, type AccessLine, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
-import { type Account, type Container, type Issue, leftAsItIs, type Person, type StatusCategory, type Tracker } from './model'
+import { type Account, type Container, type Issue, leftAsItIs, type Person, type StatusCategory, type Tracker, unstarted } from './model'
 import { answered, failedOf, probe, readAs, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
@@ -63,6 +63,14 @@ export const categoryOf = (list: string): StatusCategory => {
   if (/\b(backlog|icebox)\b/.test(name)) return 'backlog'
   return 'todo'
 }
+
+/**
+ * A list a card moves to as its work starts: one named for work under way
+ * now, not one for review, testing or what is blocked, which also read as
+ * started.
+ */
+const underWay = (list: List): boolean =>
+  list.closed !== true && categoryOf(list.name) === 'started' && /\b(doing|in[ -]progress)\b/i.test(list.name)
 
 /**
  * Trello says why it refused in plain words, and its statuses don't always
@@ -171,7 +179,7 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
 
   return {
     product,
-    capabilities: { links: true, starts: false },
+    capabilities: { links: true, starts: true },
     account,
     issue,
     // The cards the account is on, not archived, on an open board; those done or cancelled left out, as other trackers' are.
@@ -212,8 +220,21 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
         if (attached.some((attachment) => attachment.url === link.url)) return
         yield* call(Schema.Unknown, 'POST', `${api}/cards/${issue.id}/attachments`, { url: link.url, name: link.title })
       }),
-    // A card's status is its list, named as each board likes: which list is "in progress" would be a guess, so a card stays where it is.
-    start: (issue) => Effect.succeed(leftAsItIs(issue)),
+    // A card's status is its list: one still to do goes to the top of its board's first open list named for work under way, as a person would drag it.
+    start: (issue) =>
+      Effect.gen(function* () {
+        if (!unstarted(issue.status.category)) return leftAsItIs(issue)
+        const card = yield* named(issue.id, 'card')
+        const { idBoard } = yield* call(Schema.Struct({ idBoard: Schema.String }), 'GET', `${api}/cards/${card}?fields=idBoard`)
+        const board = yield* named(idBoard, 'board')
+        // Trello lists a board's lists in their order on it, left to right.
+        const lists = yield* call(Schema.Array(List), 'GET', `${api}/boards/${board}/lists?filter=open&fields=name,closed`)
+        const into = lists.find(underWay)
+        if (into === undefined)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Its board has no list named Doing or In progress' })
+        yield* call(Schema.Unknown, 'PUT', `${api}/cards/${card}`, { idList: into.id, pos: 'top' })
+        return { moved: true, status: { name: into.name, category: 'started' } }
+      }),
     // A list is where a card is filed: every open list on the account's open boards, named with its board. Trello lists every board in one answer, unpaged.
     containers: () =>
       Effect.map(

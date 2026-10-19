@@ -7,6 +7,7 @@ import {
   AttentionRequest,
   type BoardSnapshot,
   type ChangeSummary,
+  CheckLogShown,
   ChecksSummary,
   type CoordinatorSnapshot,
   type HomeEvent,
@@ -157,6 +158,8 @@ interface ItemRow {
   readonly agentId: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
+  /** For a message the person said: some of it was dictated. */
+  readonly dictated?: number | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
@@ -241,6 +244,10 @@ const number = (value: unknown, key: string): number | null => {
   const found = field(value, key)
   return typeof found === 'number' ? found : null
 }
+
+/** Failed checks' logs as an arrival kept them; one not of that shape, or from before they were kept, is left out. */
+const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
+  Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
 
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
@@ -354,7 +361,14 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
           pictures: picturesOf(field(content, 'pictures')),
         },
-        input: row.inputState === null ? null : { state: row.inputState, interrupting: row.disposition === 'interrupt_and_continue' },
+        input:
+          row.inputState === null
+            ? null
+            : {
+                state: row.inputState,
+                interrupting: row.disposition === 'interrupt_and_continue',
+                ...(row.dictated === 1 ? { dictated: true } : {}),
+              },
       }
     case 'agent_message':
     case 'agent_thought':
@@ -495,6 +509,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           passed: number(content, 'passed'),
           failed: number(content, 'failed'),
           failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
+          logs: logsShown(field(content, 'logs')),
           url: text(content, 'url') || null,
           outsider: field(content, 'outsider') === true,
         },
@@ -735,7 +750,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
-            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, i.created_at,
+            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, u.dictated, i.created_at,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
@@ -801,6 +816,14 @@ export class Queries extends Context.Service<
             effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
+            turnStartedAt:
+              Option.isSome(running) && running.value.sessionId === session.id && running.value.turnStartedAt !== null
+                ? new Date(running.value.turnStartedAt).toISOString()
+                : null,
+            turnEndedAt:
+              Option.isSome(running) && running.value.sessionId === session.id && running.value.turnEndedAt !== null
+                ? new Date(running.value.turnEndedAt).toISOString()
+                : null,
             // Whether the runtime holds a session on this thread, which takes a note and makes a start refuse. The summary describes that held
             // session, not a newer row a switch is still starting, so a model or effort pick is compared with what the runtime runs.
             held: Option.isSome(running),
@@ -1161,7 +1184,7 @@ export class Queries extends Context.Service<
             : diff
         })
 
-      /** A task's issue and pull requests, as their external links last saw them. */
+      /** A task's issue and pull requests, as their external links last saw them, and the connection its issue is read through. */
       const linksOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1173,8 +1196,10 @@ export class Queries extends Context.Service<
             url: string
             snapshot: string
             listening: number
+            connectionId: string | null
           }>`
-            SELECT kind, product, ref, key, url, snapshot, listening FROM external_links WHERE task_id = ${taskId} ORDER BY created_at`
+            SELECT kind, product, ref, key, url, snapshot, listening, connection_id FROM external_links WHERE task_id = ${taskId}
+            ORDER BY created_at`
           const issueRow = links.find((link) => link.kind === 'issue')
           const issue = ((): IssueSummary | null => {
             if (issueRow === undefined) return null
@@ -1246,7 +1271,7 @@ export class Queries extends Context.Service<
               ),
             { concurrency: 'unbounded' },
           )
-          return { issue, changes }
+          return { issue, issueConnection: issueRow?.connectionId ?? null, changes }
         })
 
       /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */
@@ -1333,6 +1358,20 @@ export class Queries extends Context.Service<
         }
       })
 
+      /**
+       * A waiting task's place in its project's line, the tasks that wait for a place before any agent has worked on them, in
+       * the order they start (1 first), and whether the line is in the person's order; null where it isn't in the line.
+       */
+      const placeOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+          if (task === undefined) return null
+          const line = yield* (yield* Busy).line(task.projectId)
+          const at = line.tasks.indexOf(taskId)
+          return at < 0 ? null : { place: at + 1, reordered: line.reordered }
+        })
+
       /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
       const settledKinds = new Map<string, TaskCard['kind']>()
 
@@ -1379,7 +1418,14 @@ export class Queries extends Context.Service<
         })
 
       /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. Its links, where they are read already. */
-      const cardFor = (taskId: string, links?: { readonly issue: IssueSummary | null; readonly changes: ReadonlyArray<ChangeSummary> }) =>
+      const cardFor = (
+        taskId: string,
+        links?: {
+          readonly issue: IssueSummary | null
+          readonly issueConnection: string | null
+          readonly changes: ReadonlyArray<ChangeSummary>
+        },
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
@@ -1477,6 +1523,8 @@ export class Queries extends Context.Service<
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
+          // Waiting so before any agent has worked on it, whatever its kind: in its project's line, up next.
+          const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
           const unshipped =
             after.length === 0
               ? null
@@ -1527,7 +1575,7 @@ export class Queries extends Context.Service<
           const implement = planned.find((step) => step.key === 'implement')
           const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
-          const { issue, changes } = links ?? (yield* linksOf(taskId))
+          const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // What it makes: its plan and its pull requests say so, whatever it wrote (a quick task stays plain until it is made a
           // change); for a review, git does too, by what is on its branch; for a task that settled, once, as nothing changes it
@@ -1559,7 +1607,16 @@ export class Queries extends Context.Service<
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                   },
-            issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
+            issue:
+              issue === null
+                ? null
+                : {
+                    product: issue.product,
+                    key: issue.key,
+                    title: issue.title,
+                    url: issue.url,
+                    ...(issueConnection === null ? {} : { connectionId: issueConnection }),
+                  },
             // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
             change: shown,
             earlier: changes.filter((candidate) => candidate !== shown).toReversed(),
@@ -1590,6 +1647,7 @@ export class Queries extends Context.Service<
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
@@ -1608,8 +1666,11 @@ export class Queries extends Context.Service<
       const FIRST_LOOK = 24 * 60 * 60 * 1000
       /** The most of what the loop did the home reads. */
       const EVENTS = 50
-      /* Settled work doesn't change, so its card is worked out once, by when it settled. */
-      const settledCards = new Map<string, BoardSnapshot['tasks'][number]>()
+      /*
+       * Settled work doesn't change, so its card is worked out once, by when it settled: but for its pull requests, which its host
+       * may close or merge after (an abandoned task's left open), so it is worked out again once what was seen of them moves on.
+       */
+      const settledCards = new Map<string, { readonly seen: string; readonly card: BoardSnapshot['tasks'][number] }>()
 
       /** A task as the board shows it: its card, and, ready, what it changed and what of it merges here. None where it has no card. */
       const onBoard = (row: {
@@ -1621,8 +1682,11 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           // A settled task whose lead works on it again isn't as it settled (ADR-034).
           const working = (yield* (yield* Sessions).onTasks).some((session) => session.taskId === row.id)
+          const [links] = yield* (yield* SqlClient.SqlClient)<{ seen: string | null }>`
+            SELECT max(updated_at) AS seen FROM external_links WHERE task_id = ${row.id} AND kind = 'change'`
+          const seen = links?.seen ?? ''
           const settled = row.settledAt === null || working ? undefined : settledCards.get(`${row.id}:${row.settledAt}`)
-          if (settled !== undefined) return [settled]
+          if (settled !== undefined && settled.seen === seen) return [settled.card]
           const card = yield* cardFor(row.id)
           if (card === undefined) return []
           // Ready, what merges here is read from git; without a pull request, so is its size: its branch's. A change at work
@@ -1649,7 +1713,7 @@ export class Queries extends Context.Service<
             changed,
             here: said?.here ?? [],
           }
-          if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
+          if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, { seen, card: read })
           // Back at work, what was kept of it as it settled goes: settled again, at the same time, it may say more.
           else for (const key of settledCards.keys()) if (key.startsWith(`${row.id}:`)) settledCards.delete(key)
           return [read]
@@ -1775,7 +1839,13 @@ export class Queries extends Context.Service<
           const from = since ?? looked ?? new Date(Date.now() - FIRST_LOOK).toISOString()
           const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
             SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
-            WHERE p.archived_at IS NULL AND k.state = 'open' ORDER BY k.created_at, k.id`
+            WHERE p.archived_at IS NULL AND (k.state = 'open' OR k.id IN (
+              -- A merged task the board still shows can be ready again, with commits after its pull request in none yet.
+              SELECT id FROM (
+                SELECT id, state, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY settled_at DESC, id DESC) AS place
+                FROM tasks WHERE state IN ('done', 'abandoned'))
+              WHERE state = 'done' AND place <= ${SETTLED_SHOWN}))
+            ORDER BY k.created_at, k.id`
           const tasks = yield* Effect.forEach(
             rows,
             (row) =>
@@ -1995,6 +2065,7 @@ export class Queries extends Context.Service<
               handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,
+              ...(card?.inLine === true && card.place !== undefined ? { place: card.place } : {}),
               steps: card?.plan?.steps ?? [],
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,
@@ -2009,7 +2080,18 @@ export class Queries extends Context.Service<
               commits: said.commits,
               here: said.here,
               merged: said.merged,
-              actions: [...actionsOf(standing)],
+              // With commits after its last pull request in none yet, a merged task abandons them, leaving them out, and stays merged:
+              // an open one only where every repository of it is merged, as settling it asks, else leaving out wouldn't settle it.
+              actions: [
+                ...actionsOf({
+                  ...standing,
+                  unshipped: card?.unshipped != null,
+                  merged:
+                    head.state === 'open' &&
+                    card?.unshipped != null &&
+                    (yield* (yield* Changes).merged(head.taskId).pipe(Effect.orElseSucceed(() => false))),
+                }),
+              ],
               planId: standing.planId,
               runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),

@@ -81,6 +81,8 @@ export const AgentStatus = Schema.Struct({
   kept: Schema.Boolean,
   /** Althar can download it for the person, about this big; null where it can't. `installing` while it does. */
   download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean })),
+  /** Why Althar couldn't check it, in words for the person; null where it could. The other agents are checked all the same. */
+  problem: Schema.NullOr(Schema.String),
 })
 export type AgentStatus = typeof AgentStatus.Type
 
@@ -779,7 +781,12 @@ export const UserMessageItem = Schema.Struct({
   /** What they said, the links in it Althar could unfurl, and the images they sent with it. */
   content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl), pictures: Schema.Array(Picture) }),
   input: Schema.NullOr(
-    Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']), interrupting: Schema.Boolean }),
+    Schema.Struct({
+      state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']),
+      interrupting: Schema.Boolean,
+      /** Some of its words came from dictation: the agent was told it may have been misheard. Taken back, it goes back to the composer so. */
+      dictated: Schema.optional(Schema.Boolean),
+    }),
   ),
 })
 
@@ -985,6 +992,15 @@ export const StepResultItem = Schema.Struct({
   }),
 })
 
+/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
+export const CheckLogShown = Schema.Struct({
+  name: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  log: Schema.NullOr(Schema.String),
+  missing: Schema.NullOr(Schema.String),
+})
+export type CheckLogShown = typeof CheckLogShown.Type
+
 /**
  * Something heard from outside, written by someone else: a comment or a
  * review on the task's pull request, its checks finishing, its being merged,
@@ -1008,6 +1024,8 @@ export const ArrivalItem = Schema.Struct({
     passed: Schema.NullOr(Schema.Number),
     failed: Schema.NullOr(Schema.Number),
     failing: Schema.Array(Schema.String),
+    /** Failed checks' logs: the end of each, or why Althar couldn't read it, with the check's page. None from before it read them here. */
+    logs: Schema.Array(CheckLogShown),
     url: Schema.NullOr(Schema.String),
     /** Said by someone who can't write to the repository, as anyone can on a public one: not passed to the lead, for the person to pass on. */
     outsider: Schema.Boolean,
@@ -1140,10 +1158,11 @@ export type ReviewBrief = typeof ReviewBrief.Type
 /**
  * What the person can do to a task as a whole, where it stands now, as its
  * menu offers it (docs/architecture/05, "Task and run lifecycle"): start its
- * plan now, stop it, resume what stopping cut short, abandon it, or reopen
- * it once abandoned. A merged task has none.
+ * plan now, stop it, resume what stopping cut short, leave out the commits
+ * after its last pull request that are in none yet (ADR-034), abandon it, or
+ * reopen it once abandoned. A merged task has none, but leaving those out.
  */
-export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'abandon', 'reopen'])
+export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'leaveOut', 'abandon', 'reopen'])
 export type TaskAction = typeof TaskAction.Type
 
 /**
@@ -1175,8 +1194,16 @@ export const TaskCard = Schema.Struct({
       end: Schema.NullOr(TaskEnd),
     }),
   ),
-  /** The issue it came from. */
-  issue: Schema.NullOr(Schema.Struct({ product: Product, key: Schema.String, title: Schema.String, url: Schema.String })),
+  /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
+  issue: Schema.NullOr(
+    Schema.Struct({
+      product: Product,
+      key: Schema.String,
+      title: Schema.String,
+      url: Schema.String,
+      connectionId: Schema.optional(Schema.String),
+    }),
+  ),
   /** Its pull request, once opened: the open one, else its latest. */
   change: Schema.NullOr(ChangeSummary),
   /** Its other pull requests, newest first: those of earlier rounds of its work, merged or closed (ADR-034). */
@@ -1209,6 +1236,16 @@ export const TaskCard = Schema.Struct({
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
+  /**
+   * It waits for a place before any agent has worked on it, whatever its
+   * kind (a plan's first step, a review's or a quick task's lead's first
+   * turn): it is in its project's line, up next.
+   */
+  inLine: Schema.optional(Schema.Boolean),
+  /** With `inLine`: its place in its project's line, in the order the line starts; 1 starts first. */
+  place: Schema.optional(Schema.Int),
+  /** With `inLine`: the line is in an order the person gave it, not the oldest first. */
+  reordered: Schema.optional(Schema.Boolean),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1515,6 +1552,14 @@ export const SessionSummary = Schema.Struct({
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
+  /** When the turn running started, by the runtime's clock; null between turns. What the wait for its first word is counted from. */
+  turnStartedAt: Schema.NullOr(Schema.String),
+  /**
+   * When its last turn ended, by the runtime's clock; null before its first,
+   * or where the runtime no longer holds it. A message delivered before it
+   * was answered, if with nothing: no reply is waited for on it any more.
+   */
+  turnEndedAt: Schema.NullOr(Schema.String),
   /**
    * Whether the runtime still holds a session on this thread: the one that
    * takes a note, and that makes starting another refuse. A recorded session
@@ -1744,6 +1789,8 @@ export const ThreadSnapshot = Schema.Struct({
     waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
+    /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
+    place: Schema.optional(Schema.Int),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
     /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */
@@ -2299,6 +2346,8 @@ export const Api = RpcGroup.make(
       body: Schema.optional(Schema.String),
       /** Images sent with what the person said. */
       images: Schema.optional(SentImages),
+      /** Any of what the person said came from dictation. */
+      dictated: Schema.optional(Schema.Boolean),
     },
     Schema.String,
   ),
@@ -2322,6 +2371,16 @@ export const Api = RpcGroup.make(
    * there is room now.
    */
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
+  /**
+   * Puts a task waiting for a free agent before any has worked on it at a
+   * place in its project's line, from 0 the front, the rest keeping their
+   * order; past the end is its end. The line starts in that order, and keeps
+   * it after a restart; a task that joins later goes to its end. Nothing
+   * moves for a task that isn't in the line.
+   */
+  command('MoveInLine', { taskId: Schema.String, to: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }, Schema.Void),
+  /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
+  command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   /**
    * Asks the thread's agent to compact its context, as a turn of its own after
@@ -2356,6 +2415,13 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Leaves out the commits after a task's last pull request that are in none
+   * yet (ADR-034): it settles without them, done where every pull request of
+   * it merged; they stay on its branch, in its worktree. Nothing, where it
+   * has none, or its lead is at work.
+   */
+  command('LeaveOutCommits', { taskId: Schema.String }, Schema.Void),
   /** Settles a task without its change: its agents stop and its plan doesn't start; its worktree and branch stay as they are. */
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
   /** Gives a task another title, in any state. Its slug, branch, worktree folder, and the title of a pull request or issue already opened, stay as they are. */
@@ -2365,7 +2431,14 @@ export const Api = RpcGroup.make(
   /** Says something to a thread's agent, with any images: empty words with images are a message too. */
   command(
     'Send',
-    { threadId: Schema.String, body: Schema.String, disposition: Disposition, images: Schema.optional(SentImages) },
+    {
+      threadId: Schema.String,
+      body: Schema.String,
+      disposition: Disposition,
+      images: Schema.optional(SentImages),
+      /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
+      dictated: Schema.optional(Schema.Boolean),
+    },
     Schema.Void,
   ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
@@ -2595,6 +2668,18 @@ export const Api = RpcGroup.make(
    * fetched to the task's worktree first.
    */
   command('MergeNote', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Struct({ note: Schema.String })),
+  /**
+   * Closes the task's pull request at this address without merging it,
+   * because the person said to; with `deleteBranch`, its branch on the host
+   * goes too, once it is closed. What the host refused to close fails, and
+   * it stays open. `branch` is what the host said to deleting the branch,
+   * null where it went or wasn't asked to.
+   */
+  command(
+    'ClosePullRequest',
+    { taskId: Schema.String, url: Schema.String, deleteBranch: Schema.Boolean },
+    Schema.Struct({ branch: Schema.NullOr(Schema.String) }),
+  ),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */

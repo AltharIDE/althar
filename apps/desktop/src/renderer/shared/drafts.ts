@@ -9,17 +9,25 @@ import { type Dispatch, type SetStateAction, useCallback, useSyncExternalStore }
  * restart; the images only as long as the window, since their bytes can be
  * megabytes. Sending clears it; a message Althar didn't take comes back to
  * it.
+ *
+ * A draft also remembers whether any of its words were dictated, even if
+ * the person edited them after: the message is sent marked, so the agent
+ * knows to read past what was misheard. Emptying the words forgets it.
  */
 
 /** Where the words are kept across launches, by thread. */
 const STORED = 'althar.drafts'
+/** Where the threads whose draft holds dictated words are kept, as a list. */
+const STORED_DICTATED = 'althar.drafts.dictated'
 
 export interface Draft<Image> {
   readonly text: string
   readonly images: ReadonlyArray<Image>
+  /** Some of the words were dictated. */
+  readonly dictated: boolean
 }
 
-const EMPTY: Draft<never> = { text: '', images: [] }
+const EMPTY: Draft<never> = { text: '', images: [], dictated: false }
 
 const drafts = new Map<string, Draft<unknown>>()
 const listeners = new Map<string, Set<() => void>>()
@@ -62,17 +70,42 @@ export const draftOf = <Image>(key: string): Draft<Image> => {
   if (draft !== undefined) return draft as Draft<Image>
   const text = readStored()[key] ?? ''
   if (text === '') return EMPTY
-  const read = { text, images: [] }
+  const read = { text, images: [], dictated: readDictated().includes(key) }
   drafts.set(key, read)
   return read
 }
 
+/** The threads whose kept words hold dictated ones. */
+const readDictated = (): ReadonlyArray<string> => {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(STORED_DICTATED) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** Keeps whether a thread's words hold dictated ones, over what another window kept for other threads. */
+const keepDictated = (key: string, dictated: boolean) => {
+  try {
+    const others = readDictated().filter((one) => one !== key)
+    const all = dictated ? [...others, key] : others
+    if (all.length === 0) window.localStorage.removeItem(STORED_DICTATED)
+    else window.localStorage.setItem(STORED_DICTATED, JSON.stringify(all))
+  } catch {
+    // Kept for this window only.
+  }
+}
+
 const put = (key: string, next: Draft<unknown>) => {
   const was = draftOf(key)
-  if (next.text === was.text && next.images === was.images) return
-  if (next.text === '' && next.images.length === 0) drafts.delete(key)
-  else drafts.set(key, next)
-  if (next.text !== was.text) keep(key, next.text)
+  // No words, nothing dictated.
+  const now = next.text === '' && next.dictated ? { ...next, dictated: false } : next
+  if (now.text === was.text && now.images === was.images && now.dictated === was.dictated) return
+  if (now.text === '' && now.images.length === 0) drafts.delete(key)
+  else drafts.set(key, now)
+  if (now.text !== was.text) keep(key, now.text)
+  if (now.dictated !== was.dictated) keepDictated(key, now.dictated)
   listeners.get(key)?.forEach((listener) => listener())
 }
 
@@ -80,6 +113,12 @@ const put = (key: string, next: Draft<unknown>) => {
 export const setDraftText = (key: string, change: SetStateAction<string>) => {
   const was = draftOf(key)
   put(key, { ...was, text: typeof change === 'function' ? change(was.text) : change })
+}
+
+/** Notes that some of a thread's words were dictated (or, with false, that none are), on screen or not. */
+export const setDraftDictated = (key: string, dictated: boolean) => {
+  const was = draftOf(key)
+  put(key, { ...was, dictated })
 }
 
 /** Changes a thread's images, on screen or not. */

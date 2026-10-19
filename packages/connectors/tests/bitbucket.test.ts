@@ -409,6 +409,33 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('declines a pull request to close it, and deletes its branch once declined', () =>
+    Effect.gen(function* () {
+      let state = 'OPEN'
+      const { host, sent } = cloud([
+        ['GET', PR, () => ({ json: pull({ state }) })],
+        [
+          'POST',
+          `${PR}/decline`,
+          () => {
+            state = 'DECLINED'
+            return { json: pull({ state }) }
+          },
+        ],
+        ['DELETE', `${ACE}/refs/branches/ONECLOUD-13657/add-on-settings`, { status: 204 }],
+      ])
+      const seen = yield* host.change(ace, 552)
+      assert.deepInclude(yield* Effect.flip(host.deleteBranch(ace, seen)), { reason: 'rejected' })
+      const closed = yield* host.closeChange(ace, seen)
+      assert.strictEqual(closed.state, 'closed')
+      yield* host.deleteBranch(ace, closed)
+      assert.deepStrictEqual(
+        sent.filter((one) => one.method !== 'GET').map((one) => `${one.method} ${one.url}`),
+        [`POST ${PR}/decline`, `DELETE ${ACE}/refs/branches/ONECLOUD-13657/add-on-settings`],
+      )
+    }),
+  )
+
   it.effect('merges the head it saw, in the first way the target branch allows', () =>
     Effect.gen(function* () {
       let merged = false
@@ -560,7 +587,7 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
-  it.effect('reads the end of a failed Pipelines step’s log, and nothing for other checks', () =>
+  it.effect('reads the end of a failed Pipelines step’s log from its storage, says why where it can’t, and nothing for other checks', () =>
     Effect.gen(function* () {
       const long = Array.from({ length: 300 }, (_, n) => `line ${n}`).join('\n')
       const step = (uuid: string, result: string | null) => ({
@@ -572,7 +599,20 @@ describe('Bitbucket Cloud as a code host', () => {
       const run = `${ACE}/pipelines`
       const { host, sent } = cloud([
         ['GET', `${run}/3025/steps?pagelen=100`, { json: { values: [step('{a}', 'SUCCESSFUL'), step('{b}', 'FAILED')], pagelen: 2 } }],
-        ['GET', `${run}/3025/steps/%7Bb%7D/log`, { text: long }],
+        // As Bitbucket answers a finished step's log: a redirect to storage, signed in its URL, which refuses a token beside it.
+        [
+          'GET',
+          `${run}/3025/steps/%7Bb%7D/log`,
+          { status: 307, headers: { location: 'https://logs.s3.amazonaws.com/b?X-Amz-Signature=x' } },
+        ],
+        [
+          'GET',
+          'https://logs.s3.amazonaws.com/b?X-Amz-Signature=x',
+          (request) =>
+            request.headers.authorization === undefined
+              ? { text: long }
+              : { status: 400, text: '<Error><Code>InvalidArgument</Code><Message>Only one auth mechanism allowed</Message></Error>' },
+        ],
         ['GET', `${run}/3024/steps?pagelen=100`, { json: { values: [step('{c}', 'SUCCESSFUL'), { uuid: '{d}', state: null }] } }],
         ['GET', `${run}/3023/steps?pagelen=100`, { json: { values: [step('{e}', 'ERROR')] } }],
         [
@@ -587,8 +627,11 @@ describe('Bitbucket Cloud as a code host', () => {
       assert.strictEqual(log?.split('\n').length, 150)
       assert.isTrue(log?.endsWith('line 299'))
       assert.strictEqual(sent[1]?.headers.accept, '*/*')
+      assert.isUndefined(sent[2]?.headers.authorization)
       assert.isNull(yield* host.checkLog(ace, { ...check, id: 'pipeline:3024' }))
-      assert.isNull(yield* host.checkLog(ace, { ...check, id: 'pipeline:3023' }))
+      const gone = yield* Effect.flip(host.checkLog(ace, { ...check, id: 'pipeline:3023' }))
+      assert.strictEqual(gone.reason, 'not_found')
+      assert.strictEqual(gone.message, 'Not Found: Log in step {e} does not exist.')
       assert.isNull(yield* host.checkLog(ace, { ...check, id: 'status:jenkins' }))
       assert.strictEqual((yield* Effect.flip(host.checkLog(ace, { ...check, id: 'pipeline:3022' }))).reason, 'unreachable')
     }),
@@ -1248,6 +1291,33 @@ describe('Bitbucket Data Center as a code host', () => {
       },
     },
   })
+
+  it.effect('declines a pull request at the version it read, and deletes its branch with the branch utilities', () =>
+    Effect.gen(function* () {
+      let state = 'OPEN'
+      const { host, sent } = center([
+        ['GET', PULL, () => ({ json: pr({ state }) })],
+        [
+          'POST',
+          `${PULL}/decline?version=3`,
+          () => {
+            state = 'DECLINED'
+            return { json: pr({ state, version: 4 }) }
+          },
+        ],
+        ['DELETE', `${SERVER}/rest/branch-utils/latest/projects/PRJ/repos/my-repo/branches`, { status: 204 }],
+      ])
+      const seen = yield* host.change(prj, 101)
+      const closed = yield* host.closeChange(prj, seen)
+      assert.strictEqual(closed.state, 'closed')
+      yield* host.deleteBranch(prj, closed)
+      assert.deepStrictEqual(sent.find((one) => one.method === 'DELETE')?.body, { name: 'refs/heads/feature-ABC-123', dryRun: false })
+      // Declined already, it is left as it is.
+      assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
+      yield* host.closeChange(prj, closed)
+      assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
+    }),
+  )
 
   it.effect('merges the head it saw, at the version it read, in the first way the repository allows', () =>
     Effect.gen(function* () {

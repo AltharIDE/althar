@@ -18,8 +18,8 @@ import s from './ProjectFront.module.css'
  * (a way into the first of it, and pointed at, what each is), how much is in
  * progress, and what settled last; what it is made of is its repositories,
  * each with its host's mark, and the tracker its tasks name. Only what there
- * is to say shows. What it runs (a RunButton) and its settings are at the
- * end.
+ * is to say shows. What it runs (a RunButton) is at the end; its settings
+ * are a view of the project, in the window's bar.
  */
 
 export interface ProjectFrontText {
@@ -64,10 +64,8 @@ export type ProjectFrontProps = RootProps<
     last?: string
     /** What the project is made of, its repositories first. */
     parts?: ReadonlyArray<ProjectPart>
-    /** What it runs, with no agent, at the end before its settings: a RunButton. */
+    /** What it runs, with no agent, at the end: a RunButton. */
     run?: ReactNode
-    /** The way to the project's settings, at the end: a ControlCenter with its button. */
-    settings?: ReactNode
     headingLevel?: HeadingLevel
     text?: Partial<ProjectFrontText>
   }
@@ -84,7 +82,6 @@ export function ProjectFront({
   last,
   parts = [],
   run,
-  settings,
   headingLevel = 1,
   className,
   style,
@@ -148,12 +145,7 @@ export function ProjectFront({
           </ul>
         )}
       </div>
-      {(run != null || settings != null) && (
-        <div className={s.end}>
-          {run}
-          {settings}
-        </div>
-      )}
+      {run != null && <div className={s.end}>{run}</div>}
     </header>
   )
 }

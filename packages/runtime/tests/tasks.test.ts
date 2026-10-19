@@ -194,7 +194,7 @@ const standsAt = (threadId: string, check: (task: Effect.Success<ReturnType<type
 
 describe('a task’s course', () => {
   it('offers what applies where a task stands, and nothing for a merged one', () => {
-    const open = { state: 'open', planId: null, runState: null, working: false } as const
+    const open = { state: 'open', planId: null, runState: null, working: false, busy: false } as const
     assert.deepStrictEqual(actionsOf({ ...open, state: 'done' }), [])
     assert.deepStrictEqual(actionsOf({ ...open, state: 'abandoned', runState: 'suspended' }), ['reopen'])
     assert.deepStrictEqual(actionsOf({ ...open, state: 'draft', planId: 'plan_1' }), ['start', 'abandon'])
@@ -203,6 +203,23 @@ describe('a task’s course', () => {
     // Ready, with the lead talking: stopping stops the agent, and nothing is resumed.
     assert.deepStrictEqual(actionsOf({ ...open, runState: 'succeeded', working: true }), ['stop', 'abandon'])
     assert.deepStrictEqual(actionsOf({ ...open, runState: 'succeeded' }), ['abandon'])
+  })
+
+  it('offers leaving out commits after its last pull request, as abandoning a merged task, once nothing may add to them', () => {
+    const merged = { state: 'done', planId: null, runState: 'succeeded', working: false, busy: false } as const
+    // Merged with commits after it in none yet, it shows in Needs you: it can leave them out, and settle.
+    assert.deepStrictEqual(actionsOf({ ...merged, unshipped: true }), ['leaveOut'])
+    assert.deepStrictEqual(actionsOf({ ...merged, unshipped: false }), [])
+    // Its lead in a turn, it waits: the agent may still add to them. Its lead there between turns doesn't.
+    assert.deepStrictEqual(actionsOf({ ...merged, unshipped: true, working: true, busy: true }), [])
+    assert.deepStrictEqual(actionsOf({ ...merged, unshipped: true, working: true }), ['leaveOut'])
+    // Open, as a task merged with work after it is, in place of abandoning, which would say it never merged; not while a round runs.
+    assert.deepStrictEqual(actionsOf({ ...merged, state: 'open', unshipped: true, merged: true }), ['leaveOut'])
+    assert.deepStrictEqual(actionsOf({ ...merged, state: 'open', runState: 'running', unshipped: true, merged: true }), ['stop', 'abandon'])
+    // Open with a pull request still open, or closed, it isn't merged: abandoning it is abandoning.
+    assert.deepStrictEqual(actionsOf({ ...merged, state: 'open', unshipped: true, merged: false }), ['abandon'])
+    assert.deepStrictEqual(actionsOf({ ...merged, state: 'open', unshipped: true }), ['abandon'])
+    assert.deepStrictEqual(actionsOf({ ...merged, state: 'abandoned', unshipped: true }), ['reopen'])
   })
 
   it.live('stops a task in the middle of its step, with nothing to answer, and resumes it from there', () =>

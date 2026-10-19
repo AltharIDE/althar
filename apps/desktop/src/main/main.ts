@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
 import { locations as locationsOf } from './locations'
@@ -9,20 +9,26 @@ import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } 
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
 import { keepingAwake } from './awake'
 import { tokenIn } from './clipboard'
+import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
+import { startLogs } from './logs'
 import { setAppMenu } from './menu'
 import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
+import { storeFacts } from './report/mainFacts'
+import { factsIn, type RuntimeFacts } from './report/facts'
+import { factsAsker, startReports } from './report/reports'
 import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
 import { alertSounds, playSound } from './sounds'
 import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
 import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
 import { installOf, usageData } from './usageData'
+import { masker } from '../logs/mask'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
@@ -30,6 +36,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  crashReporter,
   dialog,
   ipcMain,
   Menu,
@@ -72,7 +79,9 @@ import { keyringIsSafe, keyringUnavailable, passwordStore, sealWithPortal, seals
  * update while work runs, and only when the person asks, or as they quit.
  * Anonymous usage data goes from here alone (usageData.ts): what the runtime
  * says happened, Althar opening and an update installed, each only while
- * the person's switch is on.
+ * the person's switch is on. So do crash reports (crashReports.ts), behind a
+ * switch of their own: what main, the window and the runtime couldn't
+ * handle, a process that stopped, and a native crash, masked.
  */
 
 const here = import.meta.dirname
@@ -147,6 +156,24 @@ app.setPath(
 )
 
 /*
+ * Native crashes, in any of Althar's processes, as Crashpad's minidumps,
+ * kept in the profile's window folder and never uploaded: the next launch
+ * says only that one happened, where crash reports are on (crashReports.ts).
+ */
+crashReporter.start({ uploadToServer: false })
+
+/*
+ * The app's logs (logs.ts, DEV-61): where the system keeps an app's logs, or
+ * in a profile of its own where one was given, so a test's stay with it.
+ */
+const logs = startLogs({
+  dir: ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'logs') : app.getPath('logs'),
+  passOn: !app.isPackaged,
+})
+/* What reports ask the runtime (report/reports.ts). */
+const facts = factsAsker()
+
+/*
  * Pictures agents hand back reach the window at an address of Althar's own,
  * answered from the artifact store (pictures.ts): a standard, secure scheme,
  * registered before the app is ready, as Electron asks.
@@ -171,6 +198,8 @@ interface RuntimeMessage {
   readonly value?: unknown
   /** A usage event, as the runtime says it; usageData.ts keeps only what it names. */
   readonly usage?: unknown
+  /** What the runtime couldn't handle (runtime/crashes.ts); crashReports.ts reads it. */
+  readonly crash?: unknown
   readonly event?: {
     readonly _tag?: string
     readonly kind?: unknown
@@ -218,21 +247,100 @@ const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
  * on and DO_NOT_TRACK isn't set. Its first events: Althar opened,
  * and an update installed when it opens on another version than last time.
  */
-const usage = Promise.all([preferencesRead.then(() => installOf(locations().profile, app.getVersion())), app.whenReady()]).then(
-  ([install]) => {
-    const sender = usageData({
-      ...usageTarget,
-      installId: install.id,
-      app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
-      allowed: () => preferences.usageData && !doNotTrack(process.env),
-      fetch: (url, options) => net.fetch(url, options),
-    })
-    sender.record({ name: 'app_opened' })
-    if (install.updatedFrom !== null) sender.record({ name: 'update_installed', properties: { from: install.updatedFrom } })
-    return sender
-  },
-)
+const install = preferencesRead.then(() => installOf(locations().profile, app.getVersion()))
+const usage = Promise.all([install, app.whenReady()]).then(([install]) => {
+  const sender = usageData({
+    ...usageTarget,
+    installId: install.id,
+    app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
+    allowed: () => preferences.usageData && !doNotTrack(process.env),
+    fetch: (url, options) => net.fetch(url, options),
+  })
+  sender.record({ name: 'app_opened' })
+  if (install.updatedFrom !== null) sender.record({ name: 'update_installed', properties: { from: install.updatedFrom } })
+  return sender
+})
 const recordUsage = (said: unknown) => void usage.then((sender) => sender.record(said))
+
+/* The projects' and repositories' names to hide, all those learned this launch: the runtime holds the store while it runs, so it is asked; without one, main reads it. */
+const names = factsAsker('names')
+let namesKnown: HiddenNames = { projects: [], repositories: [] }
+const namesNow = async () => {
+  let read: Pick<RuntimeFacts, 'projects' | 'repositories'> | null = null
+  try {
+    read =
+      runtime === undefined
+        ? storeFacts(locations().profile)
+        : factsIn(await Promise.race([names.ask(runtime, null), new Promise((resolve) => setTimeout(() => resolve(null), 2_000))]))
+  } catch {
+    read = null
+  }
+  // Added to what was learned, never in its place: a name renamed or removed is hidden still. A store that couldn't be read, or a runtime that couldn't say, adds none.
+  namesKnown = namesLearned(namesKnown, read)
+  return namesKnown
+}
+
+/** What hides the person in a crash report, as Report a problem does: their home, who they are, this computer, and every project's and repository's name learned this launch. */
+const maskHere = async () => {
+  const known = await namesNow()
+  let user: string | undefined
+  try {
+    user = userInfo().username
+  } catch {
+    user = undefined
+  }
+  return masker({
+    // The end-to-end tests give a home of their own, as the repositories found do; packaged builds leave this out.
+    home: (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_CODE_HOME) || homedir(),
+    ...(user === undefined ? {} : { user }),
+    device: hostname(),
+    names: { project: known.projects, repository: known.repositories },
+  })
+}
+
+/*
+ * Crash reports, as usage data: once the preferences and the install are
+ * read and the app is ready, from a release build, while their own switch
+ * is on and DO_NOT_TRACK isn't set. What fails before then waits for it.
+ * Their first: a native crash since the last launch, once each.
+ */
+const crashes = Promise.all([install, app.whenReady()]).then(([install]) => {
+  const sender = crashReports({
+    ...usageTarget,
+    installId: install.id,
+    app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
+    allowed: () => preferences.crashReports && !doNotTrack(process.env),
+    fetch: (url, options) => net.fetch(url, options),
+    mask: maskHere,
+  })
+  void newDumps(app.getPath('crashDumps'), locations().profile)
+    .then((dumps) => {
+      for (const dump of dumps) sender.native(dump)
+    })
+    .catch(() => undefined)
+  return sender
+})
+/** Reports a crash once the sender is there; reporting never fails into what failed. */
+const reportCrash = (report: (sender: CrashReports) => void) => void crashes.then(report).catch(() => undefined)
+/** Lets crash reports and usage data on their way go, a few seconds at most. */
+const sendersStopped = () =>
+  Promise.race([
+    Promise.all([usage.then((sender) => sender.stop()), crashes.then((sender) => sender.stop())]),
+    new Promise((resolve) => setTimeout(resolve, 4_000)),
+  ]).catch(() => undefined)
+
+// Watched, not handled, as the log does (logs.ts): what Electron does with them stays as it was.
+process.on('uncaughtExceptionMonitor', (thrown) => reportCrash((sender) => sender.thrown(thrown, 'main', 'uncaught')))
+process.on('unhandledRejection', (reason) => reportCrash((sender) => sender.thrown(reason, 'main', 'rejection')))
+// The window's own, as it sends them for the log (renderer/shared/windowErrors.ts).
+ipcMain.on('althar:window-error', (_event, report: unknown) => reportCrash((sender) => sender.fromWindow(report)))
+// A window's page, or a process of Althar's, that crashed or failed; nothing Althar stopped itself, nor anything as it quits.
+app.on('render-process-gone', (_event, _contents, details) => {
+  if (goneBadly(details.reason) && !quitting) reportCrash((sender) => sender.gone('window', details))
+})
+app.on('child-process-gone', (_event, details) => {
+  if (goneBadly(details.reason) && !quitting) reportCrash((sender) => sender.gone(childKind(details), details))
+})
 
 /* Althar's own windows, apart from the edge's pages. */
 const windows = new Set<BrowserWindow>()
@@ -325,22 +433,32 @@ const startRuntime = () => {
   const { profile, worktrees } = locations()
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
     serviceName: 'Althar runtime',
-    stdio: 'inherit',
+    // What it writes goes to runtime.log, and in development on to the terminal too.
+    stdio: 'pipe',
     env: {
       ...process.env,
       ALTHAR_PROFILE: profile,
       ALTHAR_WORKTREES: worktrees,
       ALTHAR_APP_VERSION: app.getVersion(),
+      ALTHAR_LOGS: logs.dir,
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
       ...(app.isPackaged ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', 'node') } : {}),
     },
   })
+  logs.keepOutput(child)
+  child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
+    if (message.type === 'facts') return facts.answer(message)
+    if (message.type === 'names') return names.answer(message)
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
     if (message.type === 'usage') return recordUsage(message.usage)
+    if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
     if (message.type === 'store-failed') {
       storeFailure = storeFailureOf(message)
+      // What stopped it goes in main's log too, so a report of it carries it.
+      if (storeFailure !== undefined)
+        logs.error('Update couldn’t move the store', { stopped: storeFailure.stopped, reason: storeFailure.reason })
       for (const window of BrowserWindow.getAllWindows()) connect(window)
       return
     }
@@ -350,8 +468,12 @@ const startRuntime = () => {
   })
   child.once('exit', (code) => {
     runtime = undefined
+    if (quitting) logs.info('Runtime exited', { code })
+    else logs.error('Runtime exited', { code })
     // Nothing runs without the runtime; a new one says again.
     awake.working(false)
+    facts.gone()
+    names.gone()
     updates?.working(false)
     for (const [requestId, settle] of granting) {
       settle(null)
@@ -367,8 +489,11 @@ const startRuntime = () => {
       for (const window of BrowserWindow.getAllWindows()) window.webContents.reload()
       return
     }
+    logs.error('Runtime keeps stopping; quitting', { restarts: restarts.length })
+    reportCrash((sender) => sender.keepsStopping(restarts.length, code))
     dialog.showErrorBox('Althar stopped', `Althar's runtime keeps stopping (code ${code}). Open Althar again to carry on.`)
-    app.quit()
+    // Its report gets a moment to go.
+    void sendersStopped().finally(() => app.quit())
   })
   runtime = child
 }
@@ -641,18 +766,35 @@ void app.whenReady().then(() => {
     updates = startUpdates((glance: UpdateGlance) => {
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
     })
-  // macOS keeps its system menu with the updater command; elsewhere the hidden app menu keeps zoom, full screen, quit and dev tools' accelerators.
+  // macOS keeps its system menu with the updater command, and Help → Report a Problem…, which opens the dialog in Althar's window, brought forward (report/reports.ts).
+  // Elsewhere the hidden app menu keeps zoom, full screen, quit and dev tools' accelerators; Report a problem is at the quick settings' foot and in Settings' About there.
   if (process.platform === 'darwin') {
     const checking = updates
-    setAppMenu({ name: app.name, ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }) })
+    setAppMenu({
+      name: app.name,
+      ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }),
+      report: () => bringForward().window.webContents.send('althar:report'),
+    })
   } else {
     const menu = appMenu(process.platform, !app.isPackaged)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
   openWindow()
+  startReports({
+    profile: () => locations().profile,
+    // The install's one id, the one usage data keeps (usageData.ts), whether or not its switch is on.
+    installId: () => install.then((kept) => kept.id),
+    logs: logs.dir,
+    askRuntime: (threadId) => facts.ask(runtime, threadId),
+    mine: (contents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents),
+    address: process.env.ALTHAR_REPORT_URL ?? __ALTHAR_REPORT_URL__,
+    email: process.env.ALTHAR_REPORT_EMAIL ?? __ALTHAR_REPORT_EMAIL__,
+  })
   edge = startEdge({
     profile: () => locations().profile,
     connect,
+    open: () => void bringForward(),
+    quit: () => app.quit(),
     preload: join(here, '../preload/preload.cjs'),
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
@@ -694,8 +836,8 @@ app.on('before-quit', (event) => {
   }, SHUTDOWN_GRACE)
   child.once('exit', () => {
     clearTimeout(timer)
-    // Usage data on its way gets a moment to go.
-    void usage.then((sender) => sender.stop()).finally(() => app.exit(0))
+    // Usage data and crash reports on their way get a moment to go.
+    void sendersStopped().finally(() => app.exit(0))
   })
   child.postMessage({ type: 'shutdown' })
 })

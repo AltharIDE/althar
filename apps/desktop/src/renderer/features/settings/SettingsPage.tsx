@@ -12,6 +12,7 @@ import {
   Choices,
   CoAuthor,
   CoAuthorFace,
+  CrashReports,
   DockPreview,
   EdgeHere,
   EdgeMini,
@@ -19,13 +20,14 @@ import {
   EdgeSpot,
   Icon,
   KeepAwake,
+  LinkButton,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
-  Panel,
   SettingList,
   SettingRow,
+  SettingsLayout,
   SettingsNav,
   SettingSwitch,
   UpdateReady,
@@ -48,7 +50,7 @@ import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
-import { StartError } from '../start/StartView'
+import { AgentProblem, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
@@ -98,9 +100,12 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
   }
   const open = sectionText[section]
   return (
-    <div className={s.page}>
-      <div className={s.columns}>
-        <aside className={s.side}>
+    <SettingsLayout
+      section={section}
+      title={open.title}
+      lede={open.lede}
+      side={
+        <>
           <QuickCards side preferences={preferences} sounds={sounds.list} onSection={onSection} />
           <Failed when={preferences.failed} />
           <SettingsNav
@@ -116,17 +121,11 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
             value={section}
             onChange={onSection}
           />
-        </aside>
-        <main className={s.main}>
-          {/* Another section is a sheet of its own: nothing half done in one carries over to the next. */}
-          <Panel key={section} title={open.title} lede={open.lede} headingLevel={1}>
-            <div className={s.body}>
-              <SectionBody section={section} start={start} accounts={accounts} connections={connections} looks={looks} />
-            </div>
-          </Panel>
-        </main>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <SectionBody section={section} start={start} accounts={accounts} connections={connections} looks={looks} />
+    </SettingsLayout>
   )
 }
 
@@ -217,7 +216,9 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
       <AgentTabList label={text.agents} agents={agents.map(tabOf)} />
       <StartError model={start} />
       <AgentTabPanel agent={tabOf(chosen)} headingLevel={2} aside={<ModelsView key={chosen.id} agent={chosen} />}>
-        {chosen.installed && chosen.download?.installing !== true ? (
+        {chosen.problem !== null ? (
+          <AgentProblem why={chosen.problem} model={start} />
+        ) : chosen.installed && chosen.download?.installing !== true ? (
           <AgentAccounts agent={chosen} start={start} signIn={accounts} />
         ) : (
           <AgentInstall
@@ -467,8 +468,10 @@ function EditorSection() {
 
 /**
  * Which Althar this is, with its release's notes; a newer one, once it is
- * ready to install; and whether it sends anonymous usage data, which is
- * off, and stays off here, while DO_NOT_TRACK is set where it started.
+ * ready to install; Report a problem (DEV-61), where the app can report;
+ * and whether it sends anonymous usage data, and crash reports (DEV-66),
+ * each with a switch of its own, both off, and staying off here, while
+ * DO_NOT_TRACK is set where it started.
  */
 function AboutSection({ start }: { start: StartModel }) {
   const update = useUpdate()
@@ -480,9 +483,13 @@ function AboutSection({ start }: { start: StartModel }) {
       <div className={s.about}>
         {version !== undefined && <AppVersion version={version} notes={notesOf(version)} text={{ name: text.version }} />}
         {update.ready !== null && <UpdateReady {...update.ready} />}
+        {host.reportProblem !== undefined && (
+          <LinkButton onClick={() => host.reportProblem?.({ kind: 'asked', from: 'settings' })}>{text.report}</LinkButton>
+        )}
       </div>
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
+        <CrashReports on={preferences.crashReports} onChange={(on) => set('crashReports', on)} doNotTrack={host.doNotTrack === true} />
       </SettingList>
       <Failed when={failed} />
     </>

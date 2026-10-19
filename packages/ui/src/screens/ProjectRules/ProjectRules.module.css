@@ -14,6 +14,11 @@
 .headText {
   min-width: 0;
 }
+/* named by the page around it: only the key, at the start, closer to the sentences */
+.keyOnly {
+  justify-content: flex-start;
+  margin-bottom: 28px;
+}
 .title {
   margin: 0;
   font: 640 27px/1.1 var(--font-display);

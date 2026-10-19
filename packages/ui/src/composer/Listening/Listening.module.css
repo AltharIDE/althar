@@ -26,7 +26,7 @@
   color: var(--t-1);
 }
 .pill:active {
-  background: var(--n-3);
+  background: var(--n-2);
 }
 .pill:focus-visible {
   outline-offset: 2px;
@@ -38,7 +38,7 @@
   gap: 5px;
   min-width: 0;
   overflow: hidden;
-  animation: in 260ms var(--ease) both;
+  animation: in var(--slow) var(--ease) both;
 }
 @keyframes in {
   from {
@@ -139,6 +139,9 @@
   color: var(--t-3);
 }
 .rowMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11.5px;
   line-height: 1.4;
   color: var(--t-3);
