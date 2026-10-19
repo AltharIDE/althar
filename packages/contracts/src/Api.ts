@@ -394,6 +394,9 @@ export const ProjectNote = Schema.Struct({
   keptBy: Schema.Literals(['coordinator', 'person']),
 })
 export type ProjectNote = typeof ProjectNote.Type
+
+/** How long a note may be: a decision, in a sentence or two. */
+export const NOTE_LENGTH = 300
 export type ProjectList = typeof ProjectList.Type
 
 export const TaskSummary = Schema.Struct({
@@ -2556,6 +2559,8 @@ export const Api = RpcGroup.make(
   call('GetProjectNotes', { projectId: Schema.String }, Schema.Array(ProjectNote)),
   /** Drops one of a project's notes: it no longer holds, and no coordinator session starts with it. */
   command('DropProjectNote', { projectId: Schema.String, noteId: Schema.String }, Schema.Void),
+  /** Says one of a project's notes in other words, the person's: a sentence or two, as the coordinator keeps one. */
+  command('EditProjectNote', { projectId: Schema.String, noteId: Schema.String, body: Schema.String }, Schema.Void),
   /**
    * The names a project's code uses that have parts (`RefundLedger`,
    * `useEffect`, `charges-api.ts`), most used first, so dictation can write

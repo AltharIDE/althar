@@ -305,6 +305,7 @@ describe('the client', () => {
           GetProjectRules: () => Effect.die('unused'),
           GetProjectNotes: () => Effect.die('unused'),
           DropProjectNote: () => Effect.die('unused'),
+          EditProjectNote: () => Effect.die('unused'),
           GetVocabulary: () => Effect.die('unused'),
           RenameProject: () => Effect.die('unused'),
           SetProjectInk: () => Effect.die('unused'),
