@@ -1,0 +1,6 @@
+/* On a card, in its corner; in the task's header, beside where it stands. */
+.ways {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
