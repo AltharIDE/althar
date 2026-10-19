@@ -267,6 +267,8 @@ export interface AgentCli {
   readonly bundled?: () => string | null
   /** Where Althar can download it. */
   readonly download?: AgentDownload
+  /** Its maker's page on installing it, for a person who installs it themselves: https only. */
+  readonly guide?: string
 }
 
 export type AgentDownload = GitHubDownload | PinnedDownload
@@ -754,6 +756,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
     cli: {
       name: 'opencode',
+      guide: 'https://github.com/anomalyco/opencode',
       download: {
         repository: 'anomalyco/opencode',
         assets: {
@@ -835,6 +838,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     cli: {
       name: 'copilot',
       node: true,
+      guide: 'https://gh.io/copilot-install',
       download: {
         repository: 'github/copilot-cli',
         assets: {
@@ -903,7 +907,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     permissions: { rejectAndContinue: ['No'], rejectAndStop: ['stop'], allowScopes: { Yes: 'once', continue: 'once' } },
     version: () => ({ command: 'junie', args: ['--version'] }),
     /* Its installer's `junie` is a bash script in ~/.local/bin; on Windows a `.bat`, which Althar can't start. */
-    cli: { name: 'junie' },
+    cli: { name: 'junie', guide: 'https://junie.jetbrains.com/' },
     commands: 'althar',
     knownGaps: [
       "Ordinary edits inside the project don't ask; edits to build, config and secret files, and outside it, do.",
@@ -965,7 +969,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     sessionMeta: () => ({ yoloMode: false, autoMode: false }),
     version: () => ({ command: 'grok', args: ['--version'] }),
     /* Its installers put it in ~/.grok/bin, a native program everywhere; its npm `grok` is one on a Mac and Linux too. */
-    cli: { name: 'grok' },
+    cli: { name: 'grok', guide: 'https://www.npmjs.com/package/@xai-official/grok' },
     commands: 'althar',
     knownGaps: [
       "The allow rules in the person's `~/.claude/settings.json` approve its commands before Althar sees them.",
@@ -1013,7 +1017,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * Node script, on Windows a `.cmd`. MIT, but its releases are bare
      * zstd-compressed programs, which Althar's downloads don't unpack yet.
      */
-    cli: { name: 'kimi', node: true },
+    cli: { name: 'kimi', node: true, guide: 'https://www.kimi.com/code/docs/en/' },
     commands: 'althar',
     knownGaps: [
       "Edits inside a git repository don't ask; commands do.",
@@ -1065,7 +1069,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     permissions: { rejectAndContinue: ['reject_once'], rejectAndStop: [], allowScopes: { allow_once: 'once' } },
     version: () => ({ command: 'vibe-acp', args: ['--version'] }),
     /* `uv tool install mistral-vibe` puts it in ~/.local/bin. Its releases need their whole folder, which Althar's downloads don't keep. */
-    cli: { name: 'vibe-acp' },
+    cli: { name: 'vibe-acp', guide: 'https://github.com/mistralai/mistral-vibe' },
     commands: 'althar',
     knownGaps: [
       'No read-only mode over ACP: a reader asks, and Althar’s rules deny it every write.',
@@ -1105,7 +1109,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     permissions: { rejectAndContinue: [], rejectAndStop: ['cancel'], allowScopes: { proceed_once: 'once' } },
     version: () => ({ command: 'qwen', args: ['--version'] }),
     /* An npm install is a Node script, on Windows a `.cmd`; the standalone one starts its own Node from a shell script. */
-    cli: { name: 'qwen', node: true },
+    cli: { name: 'qwen', node: true, guide: 'https://github.com/QwenLM/qwen-code' },
     commands: 'althar',
     knownGaps: [
       "A repository's `.qwen/settings.json` can add allow rules, hooks and MCP servers, and it trusts every folder.",

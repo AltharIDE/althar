@@ -31,6 +31,7 @@ import {
   NavArrowLeft,
   NavArrowRight,
   OpenNewWindow,
+  Download,
   Page,
   Play,
   PageMinus,
@@ -145,6 +146,8 @@ export const ICONS = {
   /** Waits for something else to merge first. */
   after: GitMerge,
   external: OpenNewWindow,
+  /** Fetches something to this computer: an agent Althar can download. */
+  download: Download,
   pr: GitPullRequest,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 

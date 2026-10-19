@@ -512,14 +512,16 @@ describe('the start', () => {
       }),
     })
     withServices(<Start onProject={vi.fn()} />, client, fakeHost())
-    expect(await screen.findByText('Not installed on this Mac')).toBeTruthy()
-    expect(screen.getByText(/latest release from GitHub, about 45 MB/)).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Download' }))
+    // Under those on this Mac, a tile of its own: its size on its button, and no long note.
+    const away = await screen.findByRole('list', { name: 'Agents not on this Mac' })
+    expect(within(away).getByText('OpenCode')).toBeTruthy()
+    expect(screen.queryByText(/latest release from GitHub/)).toBeNull()
+    await userEvent.click(within(away).getByRole('button', { name: 'Download OpenCode, 45 MB' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
-    expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it')).toBeTruthy()
+    expect(await screen.findByText('Downloading, 45 MB…')).toBeTruthy()
     finish()
     expect((await screen.findByRole('alert')).textContent).toBe('GitHub couldn’t be reached to find OpenCode.')
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again to download OpenCode, 45 MB' })).toBeTruthy()
   })
 
   it('offers the repositories found where people keep code, and makes the first project of those ticked', async () => {

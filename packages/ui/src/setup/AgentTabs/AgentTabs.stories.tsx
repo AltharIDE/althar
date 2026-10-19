@@ -6,6 +6,7 @@ import { ACCOUNTS, AGENT_TABS, CODEX_MODELS } from '../../fixtures/setup'
 import { Brand } from '../../foundations/brands/brands'
 import { States, statesOn } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
+import { AgentInstall } from '../AgentInstall/AgentInstall'
 import { ControlDetail } from '../ControlCenter/ControlCenter'
 import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
 import { type AgentTab, AgentTabList, AgentTabPanel, AgentTabs, type AgentTabsProps } from './AgentTabs'
@@ -48,7 +49,17 @@ function Agents({
                 ? { aside: <ModelSwitches agent={chosen.name} models={CODEX_MODELS} off={['gpt-5-mini']} onChange={fn()} /> }
                 : {})}
             >
-              <Accounts agent={chosen.name} accounts={ACCOUNTS} onSignIn={fn()} onAdd={fn()} />
+              {chosen.away ? (
+                <AgentInstall
+                  name={chosen.name}
+                  {...(chosen.brand === undefined ? {} : { brand: chosen.brand })}
+                  size="115 MB"
+                  pinned={{ from: 'Google', version: '1.3.0' }}
+                  onInstall={fn()}
+                />
+              ) : (
+                <Accounts agent={chosen.name} accounts={ACCOUNTS} onSignIn={fn()} onAdd={fn()} />
+              )}
             </AgentTabPanel>
           )}
         </ControlDetail>
@@ -96,7 +107,7 @@ export const AccountsAlone: Story = {
   },
 }
 
-/** Every agent Althar runs, those on this computer first: each tab its mark, and its name once chosen. */
+/** Every agent Althar runs: those on this computer first; after a thin rule, quieter, the rest. */
 export const ManyAgents: Story = {
   render: () => (
     <Agents
@@ -104,19 +115,22 @@ export const ManyAgents: Story = {
       models={false}
       agents={[
         ...AGENT_TABS,
-        { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, line: '1.0.98' },
-        { id: 'antigravity', name: 'Google Antigravity', brand: Brand.Antigravity, line: 'Google' },
-        { id: 'junie', name: 'Junie', brand: Brand.Junie },
-        { id: 'grok', name: 'Grok Build', brand: Brand.XAI, line: 'xAI' },
-        { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, line: 'Moonshot AI' },
-        { id: 'mistral-vibe', name: 'Mistral Vibe', brand: Brand.Mistral, line: 'Mistral AI' },
-        { id: 'qwen-code', name: 'Qwen Code', brand: Brand.Alibaba },
+        { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, line: '1.0.98', away: true },
+        { id: 'antigravity', name: 'Google Antigravity', brand: Brand.Antigravity, line: 'Google', away: true },
+        { id: 'junie', name: 'Junie', brand: Brand.Junie, away: true },
+        { id: 'grok', name: 'Grok Build', brand: Brand.XAI, line: 'xAI', away: true },
+        { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, line: 'Moonshot AI', away: true },
+        { id: 'mistral-vibe', name: 'Mistral Vibe', brand: Brand.Mistral, line: 'Mistral AI', away: true },
+        { id: 'qwen-code', name: 'Qwen Code', brand: Brand.Alibaba, away: true },
       ]}
     />
   ),
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getAllByRole('tab')).toHaveLength(10)
+    // Those not on this Mac come after the rest, and say so to a screen reader.
+    await expect(c.getByRole('tab', { name: 'Junie, not on this Mac' })).toBeInTheDocument()
+    await expect(c.getByRole('tab', { name: 'OpenCode' })).toBeInTheDocument()
     await expect(c.getByRole('heading', { name: 'Google Antigravity', level: 3 })).toBeInTheDocument()
     await expect(c.getByText('Google')).toBeInTheDocument()
   },

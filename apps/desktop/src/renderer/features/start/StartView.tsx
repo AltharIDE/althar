@@ -35,8 +35,9 @@ export const text = {
     return {
       looking: `Looking around ${device.this}…`,
       agentsLabel: `Agents on ${device.this}`,
-      elsewhere: (names: readonly string[]) =>
-        `Althar also runs ${new Intl.ListFormat('en-GB', { type: 'conjunction' }).format(names)}, once ${names.length === 1 ? 'it’s' : 'they’re'} installed on ${device.this}.`,
+      noneHere: `None is on ${device.this} yet. Download one below, or install one yourself.`,
+      away: `Not on ${device.this}`,
+      awayLabel: `Agents not on ${device.this}`,
       add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: `${key}N` },
       createKbd: platform === 'darwin' ? '⌘⏎' : 'Ctrl+Enter',
     }
@@ -46,7 +47,13 @@ export const text = {
 /** An agent's sign-in, as a row of the kit's list of agents, with what goes under it: its accounts. */
 export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail'], failed?: string): RuntimeEntry => {
   const brand = brandOf(agent.id)
-  const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }), ...(detail === undefined ? {} : { detail }) }
+  const base = {
+    id: agent.id,
+    name: agent.name,
+    ...(brand === undefined ? {} : { brand }),
+    ...(detail === undefined ? {} : { detail }),
+    ...(agent.guide === null ? { guide: false } : {}),
+  }
   // Couldn't be checked this time: it says so on its own row, and the others stand as they are.
   if (agent.problem !== null)
     return { id: base.id, name: base.name, ...(brand === undefined ? {} : { brand }), state: RuntimeState.Unchecked, why: agent.problem }
@@ -64,6 +71,7 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
       id: base.id,
       name: base.name,
       ...(brand === undefined ? {} : { brand }),
+      ...(agent.guide === null ? { guide: false } : {}),
       state: RuntimeState.Missing,
       ...(agent.download === null ? {} : { download: agent.download.size }),
       ...(pinnedOf(agent) === undefined ? {} : { pinned: pinnedOf(agent) }),
@@ -77,6 +85,12 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
     case 'unknown':
       return { ...base, state: RuntimeState.Ready, account: 'Signed in, as far as it says' }
   }
+}
+
+/** Opens an agent's own page on installing it, in the browser. */
+export const openGuide = (model: StartModel, agentId: string) => {
+  const guide = model.status?.agents.find((agent) => agent.id === agentId)?.guide
+  if (guide != null) window.open(guide, '_blank')
 }
 
 /** The agents on this computer, each with its accounts to add, sign in, rename, order and remove. */
@@ -192,6 +206,7 @@ function First({
         // Still asking until the runtime answers, or says it can't.
         runtimes={model.status === null && model.error === null ? null : runtimesOf(model, accounts)}
         onInstall={(id) => void model.install(id)}
+        onHelp={(id) => openGuide(model, id)}
         repositories={project.candidates}
         {...(project.lookedIn === null || project.lookedIn.length === 0 ? {} : { lookedIn: project.lookedIn.join(', ') })}
         picked={project.picked}

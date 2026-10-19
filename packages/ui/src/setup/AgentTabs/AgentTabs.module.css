@@ -36,6 +36,24 @@
 .chip {
   box-shadow: inset 0 0 0 1px var(--line);
 }
+/* not on this machine: after a thin rule, quieter until chosen */
+.split {
+  align-self: center;
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--line-2);
+}
+.away {
+  color: var(--t-3);
+}
+.away .chip {
+  opacity: 0.55;
+}
+.away[data-state='active'] .chip,
+.away:hover .chip {
+  opacity: 1;
+}
 .dot {
   width: 6px;
   height: 6px;

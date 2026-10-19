@@ -86,6 +86,8 @@ export const AgentStatus = Schema.Struct({
    * `pinned`, the one version it fetches from its maker (Antigravity's server); null for its latest release on GitHub.
    */
   download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean, pinned: Schema.NullOr(Schema.String) })),
+  /** Its maker's page on installing it, for a person who installs it themselves; null where Althar names none. */
+  guide: Schema.NullOr(Schema.String),
   /** Why Althar couldn't check it, in words for the person; null where it could. The other agents are checked all the same. */
   problem: Schema.NullOr(Schema.String),
 })

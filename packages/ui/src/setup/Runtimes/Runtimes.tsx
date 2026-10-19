@@ -32,6 +32,8 @@ interface RuntimeBase {
   version?: string
   /** What goes under its row: its accounts, where it has them. */
   detail?: ReactNode
+  /** False where it has no instructions of its own to open (`onHelp`), as for an agent Althar only downloads. */
+  guide?: boolean
 }
 
 /** A runtime on this machine, and where it stands. What a row can say depends on its state, so each state carries only what it needs. */
@@ -197,7 +199,8 @@ type Handlers = Pick<RuntimesProps, 'onSignIn' | 'onCancel' | 'onCheck' | 'onHel
 /* What a row says and offers, by state. `calls` when something waits on you. */
 function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
   const help = (words: string) =>
-    h.onHelp && (
+    h.onHelp &&
+    r.guide !== false && (
       <ActionButton icon="external" onClick={() => h.onHelp?.(r.id)}>
         {words}
       </ActionButton>

@@ -50,7 +50,7 @@ import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
-import { AgentProblem, StartError } from '../start/StartView'
+import { AgentProblem, openGuide, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
@@ -190,6 +190,8 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     ...(brand === undefined ? {} : { brand }),
     ...(line === undefined ? {} : { line }),
     ...(agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
+    // Not on this computer: its tab quieter, after those that are.
+    ...(agent.installed ? {} : { away: true }),
   }
 }
 
@@ -215,9 +217,14 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
   const brand = brandOf(chosen.id)
   return (
     <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
-      <AgentTabList label={text.agents} agents={agents.map(tabOf)} />
+      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
       <StartError model={start} />
-      <AgentTabPanel agent={tabOf(chosen)} headingLevel={2} aside={<ModelsView key={chosen.id} agent={chosen} />}>
+      {/* What its work may use, beside its accounts, once it is on this computer and can say. */}
+      <AgentTabPanel
+        agent={tabOf(chosen)}
+        headingLevel={2}
+        {...(chosen.installed ? { aside: <ModelsView key={chosen.id} agent={chosen} /> } : {})}
+      >
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
         ) : chosen.installed && chosen.download?.installing !== true ? (
@@ -237,6 +244,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
                   : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
             }
             onInstall={() => void start.install(chosen.id)}
+            {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
           />
         )}
       </AgentTabPanel>
