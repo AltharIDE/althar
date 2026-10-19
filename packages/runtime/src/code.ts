@@ -238,9 +238,10 @@ const declaredIn = (root: CodeRoot, names: ReadonlyArray<string>) =>
     if (names.length === 0) return found
     const alternatives = names.map((name) => name.replaceAll('$', '[$]')).join('|')
     const pattern = `(^|[^[:alnum:]_$])(${DECLARING})[[:space:]]+(${alternatives})([^[:alnum:]_$]|$)`
-    // In a worktree, the files a task added too, which git doesn't track yet.
+    // In a worktree, the files a task added too, which git doesn't track yet. Every declaring line of a file, as a cap would
+    // count all the names together and lose those declared below it; of each, only the words that declare, however long the line.
     const where = root.commit === null ? ['--untracked'] : [root.commit]
-    const output = yield* git(root.path, 'grep', '-z', '-n', '-I', '--max-count=3', '-E', '-e', pattern, ...where).pipe(
+    const output = yield* git(root.path, 'grep', '-z', '-n', '-o', '-I', '-E', '-e', pattern, ...where).pipe(
       // No line matches: git says so by failing.
       Effect.orElseSucceed(() => ''),
     )

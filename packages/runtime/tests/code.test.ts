@@ -217,6 +217,27 @@ describe('finding what a message names', () => {
     }),
   )
 
+  it.effect('finds each name in code however many one file declares, and a name two files declare as neither', () =>
+    Effect.gen(function* () {
+      const { root, write } = repository()
+      const declared = ['parseName', 'looksLikePath', 'looksLikeSymbol', 'followLine', 'readName']
+      write('src/names.ts', `${declared.map((name) => `export function ${name}() {}`).join('\n')}\n`)
+      // The last is declared in another file too, and below where the file declares three of the others.
+      write('src/other.ts', 'export const readName = 1\n')
+      const asked = [{ at: null, names: declared }]
+      const [inTask = []] = yield* findCode({ kind: 'task', roots: [rootOf(root)] }, asked)
+      execFileSync('git', ['add', '.'], { cwd: root })
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Names'], { cwd: root })
+      const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim()
+      const [onDefault = []] = yield* findCode(onMain(root, commit), asked)
+      for (const found of [inTask, onDefault])
+        assert.deepStrictEqual(
+          found.map((one) => (one.kind === 'file' ? `${one.name} ${one.path}:${one.line}` : one.kind)),
+          ['parseName src/names.ts:1', 'looksLikePath src/names.ts:2', 'looksLikeSymbol src/names.ts:3', 'followLine src/names.ts:4'],
+        )
+    }),
+  )
+
   it.effect('names a file under its repository where a place has several, and finds the same path in both as several', () =>
     Effect.gen(function* () {
       const one = repository()
