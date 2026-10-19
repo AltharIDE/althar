@@ -27,7 +27,7 @@ const GATHER = Duration.millis(500)
 const OUT = Duration.hours(1)
 
 /** How a task settled. */
-export type Settled = 'merged_here' | 'pull_request' | 'abandoned' | 'reviewed' | 'seen'
+export type Settled = 'merged_here' | 'pull_request' | 'abandoned' | 'reviewed' | 'seen' | 'marked'
 
 /** How long a task took, as a bucket. */
 export type Took = 'under_10m' | '10m_to_1h' | '1h_to_1d' | 'over_1d'
@@ -151,7 +151,8 @@ export class UsageData extends Context.Service<
                   AND o.aggregate_id = k.id AND o.type = 'task.reopened' AND o.sequence < ${heard.sequence}), 0)
                 AND ((e.aggregate_type = 'task' AND e.aggregate_id = k.id
                     AND (e.type = 'task.abandoned' OR (e.type = 'task.done' AND (json_type(e.payload, '$.here') = 'array'
-                      OR json_type(e.payload, '$.reviewed') = 'text' OR json_extract(e.payload, '$.seen') = 1))))
+                      OR json_type(e.payload, '$.reviewed') = 'text' OR json_extract(e.payload, '$.seen') = 1
+                      OR json_extract(e.payload, '$.marked') = 1))))
                   OR (e.type = 'external_link.change_opened' AND x.task_id = k.id)))`,
           (tasks) =>
             tasks.map(
@@ -243,7 +244,8 @@ export class UsageData extends Context.Service<
               )
             }
             case 'task.done':
-              // Merged here, its review posted, or done on sight; one whose pull request merged on its host settled as that pull
+              // Merged here, its review posted, done on sight (as Althar once settled a plain task), or marked done by the person
+              // or its lead; one whose pull request merged on its host settled as that pull
               // request when it opened, and one a round left as it was (`back`) had settled already.
               return Array.isArray(payload.here)
                 ? yield* settled('merged_here', heard.aggregateId, heard)
@@ -251,7 +253,9 @@ export class UsageData extends Context.Service<
                   ? yield* settled('reviewed', heard.aggregateId, heard)
                   : payload.seen === true
                     ? yield* settled('seen', heard.aggregateId, heard)
-                    : []
+                    : payload.marked === true
+                      ? yield* settled('marked', heard.aggregateId, heard)
+                      : []
             case 'task.abandoned':
               return yield* settled('abandoned', heard.aggregateId, heard)
             case 'external_link.change_opened': {

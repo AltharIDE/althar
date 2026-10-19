@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { type CommandEnvelope, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { knownModelName } from '@althar/contracts'
-import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
+import { Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
@@ -14,13 +14,13 @@ import { modelNamer } from './coordinatorNews'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { Agents } from './Config'
-import { NotFound, TaskRefused } from './errors'
+import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchedWords, branchOnFirstWrite } from './firstWrite'
 import { Instance } from './Instance'
 import { IssueDrafts, leadsNeedTheCard, refusedDraft } from './IssueDrafts'
 import { Issues } from './Issues'
-import { quickIn } from './kinds'
+import { answeredIn, quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -102,6 +102,14 @@ const Drafted = Schema.Struct({
   issue: Schema.optional(Schema.String),
   repositories: Schema.optional(Schema.Array(Schema.String)),
 })
+/* A task drafted to work on an open pull request, such as to answer its review: it starts on that pull request's head (ADR-052). */
+const DraftedTask = Schema.Struct({ ...Drafted.fields, pull_request: Schema.optional(Schema.Union([Schema.String, Schema.Number])) })
+/* A task attached to an open pull request, by its link or number; `start_from_head`, the person's word to start its branch there. */
+const Attaching = Schema.Struct({
+  task: Schema.String,
+  pull_request: Schema.Union([Schema.String, Schema.Number]),
+  start_from_head: Schema.optional(Schema.Boolean),
+})
 const Asked = Schema.Struct({ issue: Schema.String })
 const DraftedIssue = Schema.Struct({
   title: Schema.String,
@@ -145,6 +153,8 @@ const MadeChange = Schema.Struct({
   review: Schema.NullOr(StepPick),
   output: Schema.Literals(['draft', 'ready']),
 })
+/* A task that isn't a change, moved on by its lead as the person said: done, kept for later, or discarded. */
+const Settling = Schema.Struct({ how: Schema.Literals(['done', 'keep', 'discard']) })
 const Sought = Schema.Struct({ text: Schema.String })
 /* Pull requests to find: open unless said, narrowed by author, words in the title, a review asked of the person, or drafts. */
 const SoughtPullRequests = Schema.Struct({
@@ -539,8 +549,49 @@ export class Coordinator extends Context.Service<
 
       const draft = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const { created, issue } = yield* drafting(access, yield* read(Drafted, input))
-          return `Drafted ${created.slug}${issue === undefined ? '' : `, from ${issue.key}`}. Now propose its plan with propose_plan.`
+          const { pull_request: pullRequest, ...drafted } = yield* read(DraftedTask, input)
+          const { created, issue } = yield* drafting(access, drafted)
+          const from = issue === undefined ? '' : `, from ${issue.key}`
+          if (pullRequest === undefined) return `Drafted ${created.slug}${from}. Now propose its plan with propose_plan.`
+          // A new task has nothing of its own to lose: it starts on the pull request's head.
+          const attached = yield* changes
+            .attach({ taskId: created.taskId, pullRequest: String(pullRequest), start: true, actorId: instance.coordinatorId })
+            .pipe(
+              Effect.map((done) => (done.kind === 'attached' ? null : 'its branch could not start from its head')),
+              Effect.catch((error) => (error instanceof AttachRefused ? Effect.succeed(error.message) : Effect.fail(error))),
+            )
+          if (attached !== null)
+            return `Drafted ${created.slug}${from}, but it doesn't follow that pull request: ${attached} Fix that with attach_pull_request, or propose its plan with propose_plan as it is.`
+          return `Drafted ${created.slug}${from}, on that pull request's head: it follows it, and its work goes there when it publishes, with no new pull request. Now propose its plan with propose_plan.`
+        })
+
+      /**
+       * Attaches a task to an open pull request it didn't open (ADR-052), as
+       * the person can from the task: then it follows it. Where its branch
+       * isn't based on that pull request's head, nothing changes until the
+       * person says to start it from there.
+       */
+      const attachTool = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(Attaching, input)
+          const task = yield* taskOf(access, asked.task)
+          const done = yield* changes
+            .attach({
+              taskId: task.id,
+              pullRequest: String(asked.pull_request),
+              start: asked.start_from_head === true,
+              actorId: instance.coordinatorId,
+            })
+            .pipe(
+              Effect.catch((error) => Effect.fail(error instanceof AttachRefused ? new ToolRefused({ message: error.message }) : error)),
+            )
+          if (done.kind === 'start')
+            return `Nothing changed yet: ${task.slug}'s branch isn't based on ${done.name}'s head. Starting it from there ${done.own === 0 ? 'loses nothing: it has no commits of its own' : `keeps its ${done.own === 1 ? 'one commit' : `${done.own} commits`} of its own, on top of the head`}. Ask the person; once they agree, call attach_pull_request again with start_from_head: true.`
+          const name = `${done.change.words.short} ${done.change.words.prefix}${done.change.number}`
+          const started = done.started
+            ? `, its branch started from its head${done.kept > 0 ? ` with ${done.kept === 1 ? 'its one commit' : `its ${done.kept} commits`} on top` : ''}`
+            : ''
+          return `${task.slug} follows ${name} now${started}: its reviews, comments, checks and conflicts are heard, its lead's pull request tools act on it, and its work goes to that pull request's branch, with no new pull request. The person sees it on the task.`
         })
 
       /**
@@ -793,6 +844,80 @@ export class Coordinator extends Context.Service<
           return opened
             ? `The task is a change now, called “${title}”. Commit your work, and call finish_step when it's ready, with what it built, your evidence and its pull request's description. ${next}`
             : `The task is a change now, called “${title}”, but Althar couldn't open a round of work for it: tell the person, who can write to you to carry on.`
+        })
+
+      /*
+       * A task that isn't a change, moved on by its lead as the person said in their own words (the person's decision of 19
+       * October): Done settles it and stops what it left running, Keep for later takes it out of Needs you as it is, and
+       * discarding abandons it once the lead's turn ends, as its agents stop then. A change waits on the person in its own way,
+       * and a review settles as its draft is posted, so neither is the lead's to settle.
+       */
+      const settleTask = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const tasks = yield* Tasks
+          const { how } = yield* read(Settling, input)
+          const [task] = yield* sql<{
+            id: string
+            threadId: string
+            state: string
+            keptAt: string | null
+            quick: number
+            reviews: number
+            answered: number
+          }>`
+            SELECT k.id, t.id AS thread_id, k.state, k.kept_at, ${sql.unsafe(quickIn('k'))} AS quick,
+              EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
+              ${sql.unsafe(answeredIn('k'))} AS answered
+            FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${access.taskId ?? ''}`
+          if (task === undefined)
+            return yield* new ToolRefused({ message: 'Only the lead of one of the project’s tasks settles its task.' })
+          if (task.quick !== 1 && task.reviews !== 1)
+            return yield* new ToolRefused({
+              message:
+                'This task is a change: the person accepts it from its card, or abandons it from its menu. Carry on with what they asked.',
+            })
+          if (task.state === 'abandoned') return 'It is discarded already.'
+          const said = (type: string) => envelope(type, { taskId: task.id }, undefined, instance.systemId)
+          switch (how) {
+            case 'done':
+              // A review posted and answered since is finished as a quick task is; one with a draft settles as it is posted.
+              if (task.reviews === 1 && (task.answered !== 1 || task.state !== 'open'))
+                return yield* new ToolRefused({
+                  message:
+                    'A review settles once its draft is posted: the person posts it, or discards it, on its draft. If they asked to set it aside, keep it for later instead.',
+                })
+              if (task.state === 'done') return 'It is done already: it is in Settled.'
+              {
+                // A page it left running that wouldn't stop keeps it from being done: said so, for the person to try again.
+                const marked = yield* tasks
+                  .markDone({ envelope: yield* said('task.mark_done'), taskId: task.id })
+                  .pipe(Effect.catch((error) => (error instanceof TaskRefused ? Effect.succeed('left' as const) : Effect.fail(error))))
+                if (marked === 'left')
+                  return 'Althar couldn’t stop what it left running, such as a page, so it isn’t done: it still waits in Needs you. Tell the person, so they can try Done again or keep it for later.'
+                return marked
+                  ? 'Marked it done: it is in Settled, and what it left running, such as a page, stopped. Say so in a sentence; writing to you again picks it up.'
+                  : 'Althar couldn’t mark it done: something on it waits on the person first. Tell them.'
+              }
+            case 'keep':
+              if (task.state === 'done') return 'It is done already: it is in Settled, so there is nothing to keep.'
+              if (task.keptAt !== null) return 'It is kept for later already.'
+              return (yield* tasks.keep({ envelope: yield* said('task.keep'), taskId: task.id }))
+                ? 'Kept it for later: it is out of Needs you as it is, with what it left running still up, under Kept for later beside Settled. Say so in a sentence; writing to you again brings it back.'
+                : 'Althar couldn’t keep it for later. Tell the person.'
+            case 'discard': {
+              if (task.state === 'done') return 'It is done already: it is in Settled, so there is nothing to discard.'
+              const discard = said('task.abandon')
+              // Its agents stop as it is abandoned, this lead too: once its turn ends, so its word on it reaches the person.
+              yield* Effect.forkDetach(
+                Effect.gen(function* () {
+                  yield* sessions.untilIdle(task.threadId, Duration.minutes(2))
+                  yield* tasks.abandon({ envelope: yield* discard, taskId: task.id })
+                }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not discard a task its lead was told to', cause))),
+              )
+              return 'It is discarded as your turn ends: it moves to Settled, its agents stop, and its work stays on this Mac. End your turn with a sentence saying so.'
+            }
+          }
         })
 
       /** The models the coordinator can give work to in the project, as it reads them. */
@@ -1087,13 +1212,17 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'draft_task',
-          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue. Then propose its plan.`,
+          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. Then propose its plan.`,
           {
             type: 'object',
             properties: {
               title: { type: 'string', maxLength: TITLE_LENGTH },
               description: { type: 'string' },
               issue: { type: 'string', description: 'The issue it comes from: its link, or its key (MER-231, #12).' },
+              pull_request: {
+                type: 'string',
+                description: 'An open pull request it works on: its link, or its number where the repository’s pull requests open (#123).',
+              },
               repositories: {
                 type: 'array',
                 items: { type: 'string' },
@@ -1104,6 +1233,23 @@ export class Coordinator extends Context.Service<
             required: ['title'],
           },
           draft,
+        ),
+        tool(
+          'attach_pull_request',
+          "Attaches a task to an open pull request it didn't open, by its link or number: one opened by hand, or upstream from the fork the project pushes to. From then on the task follows it as one Althar opened: its reviews, comments, checks and conflicts are heard, its lead's pull request tools act on it, and publishing pushes to its branch, never opening another. For a task that follows the wrong pull request, or none. Where the task's branch isn't based on that pull request's head, nothing changes: it says what starting from the head keeps, and you call it again with start_from_head once the person agrees.",
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: "The task's slug, as list_tasks shows it." },
+              pull_request: { type: 'string', description: 'Its link, or its number where the repository’s pull requests open (#123).' },
+              start_from_head: {
+                type: 'boolean',
+                description: "Start the task's branch from the pull request's head, its own commits on top: only once the person agreed.",
+              },
+            },
+            required: ['task', 'pull_request'],
+          },
+          attachTool,
         ),
         tool(
           'read_issue',
@@ -1271,6 +1417,20 @@ export class Coordinator extends Context.Service<
           },
           makeChange,
         ),
+        {
+          ...tool(
+            'settle_task',
+            'Moves this task on as the person tells you, only when they do, never on your own: done (it is settled, and what it left running, such as a page, stops), keep (kept for later: out of their Needs you as it is, with its page still up), or discard (abandoned as your turn ends; its work stays on this computer). For a task that isn’t a change: a quick task, or a review, which only keeps or discards while a draft waits (it settles as its draft is posted), and is done once its review was posted. Writing to you again later picks it up.',
+            {
+              type: 'object',
+              properties: { how: { type: 'string', enum: ['done', 'keep', 'discard'] } },
+              required: ['how'],
+            },
+            settleTask,
+          ),
+          // A review's lead keeps or discards its review as the person says, as any task's that isn't a change.
+          inReview: true,
+        },
       ])
       yield* toolServer.guard('lead', (tool, access) =>
         tool.name !== 'make_it_a_change'

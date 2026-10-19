@@ -6,6 +6,7 @@ import {
   ApiError,
   type AgentStatus,
   type AlwaysScope,
+  type Attachment,
   type FieldAnswer,
   PAGE,
   type ReviewVerdict,
@@ -117,8 +118,18 @@ export interface TaskModel {
   readonly abandon: (close?: ReadonlyArray<ToClose>) => Promise<{ readonly abandoned: boolean; readonly open: ReadonlyArray<string> }>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
+  /** Settles it as Done, where it finished and isn't a change: what it left running, such as a page, stops. */
+  readonly markDone: () => Promise<void>
+  /** Takes it out of Needs you as it is, kept for later, where it finished and isn't a change. */
+  readonly keep: () => Promise<void>
   /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
   readonly rename: (title: string) => Promise<void>
+  /**
+   * Attaches it to an open pull request it didn't open, by its link or
+   * number; `start` starts its branch from that one's head. What happened,
+   * or null where it didn't go through and the error says why.
+   */
+  readonly attach: (pullRequest: string, start: boolean) => Promise<Attachment | null>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
@@ -230,12 +241,12 @@ export const useTask = (threadId: string): TaskModel => {
     if (taskId !== null && hasChange) client.refreshTask(taskId).catch(() => undefined)
   }, [client, taskId, hasChange])
 
-  // Its screen open, the task is seen, once: a plain task that finished is done then (DEV-96). Seeing it again does nothing more.
+  // Its screen open, the task is seen: when, kept. It moves nothing: a task that finished waits for the person to settle it.
   useEffect(() => {
     if (taskId !== null) client.seeTask(taskId).catch(() => undefined)
   }, [client, taskId])
 
-  // And as it becomes ready in front of the person, however quickly it got there: one that finished there has been seen finishing.
+  // And as it becomes ready in front of the person, however quickly it got there: it has been seen finishing.
   const phase = snapshot?.task.phase ?? null
   useEffect(() => {
     if (phase === 'ready' && taskId !== null && document.visibilityState === 'visible') client.seeTask(taskId).catch(() => undefined)
@@ -538,6 +549,13 @@ export const useTask = (threadId: string): TaskModel => {
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
     rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
+    attach: async (pullRequest, start) => {
+      let done = null as Attachment | null
+      await onTask(async (taskId) => {
+        done = await client.attachPullRequest(taskId, pullRequest, start)
+      })
+      return done
+    },
     startPlan: (planId) => act(() => client.startPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
@@ -571,6 +589,8 @@ export const useTask = (threadId: string): TaskModel => {
         for (const url of urls) await client.markReady(taskId, url)
       }),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
+    markDone: () => act(async () => (snapshot === null ? undefined : client.markTaskDone(snapshot.task.id)), doing.markDone),
+    keep: () => act(async () => (snapshot === null ? undefined : client.keepTaskForLater(snapshot.task.id)), doing.keep),
     mergeHere: () =>
       act(async () => {
         setConflict(null)

@@ -23,6 +23,11 @@ finish-args:
   # X11 clients need shared memory; without it fallback-x11 is slow and some drawing breaks (Flathub's Electron sample keeps it too).
   - --share=ipc
   - --device=dri
+  # Flatpak's default xdg-desktop-portal proxy exposes org.freedesktop.portal.Secret
+  # without a talk-name grant; Althar uses its per-app key on every desktop.
+  # This permission is only for the safe synchronous keyring fallback when the
+  # portal is absent: it seals with the keyring's own key (Chromium's v11) and
+  # refuses the fixed-key v10; that seal may need replacing at the next restart.
   - --talk-name=org.freedesktop.secrets
   # The edge's tray icon: Electron asks the desktop's StatusNotifierWatcher to
   # show it, and without this talk permission the sandbox cannot see the

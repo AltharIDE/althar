@@ -433,6 +433,18 @@ every running turn instead, every 30 seconds.
 - **The agent's own limits.** A turn cut off at the agent's output or step
   limit carries on where it was, a few times, before the step is reminded to
   report. A refusal goes to the person at once.
+- **A turn that did nothing.** A turn that ended having used no tokens and
+  said nothing never reached the agent's model: Claude Code's turns end so
+  while another of its processes renews the sign-in they share, as an agent
+  started when Althar starts, after a gap longer than the sign-in lasts, may
+  find. That is no step left unreported: a minute later, unless another turn
+  came or waits meanwhile, the agent is told to carry on, up to three such
+  turns in a row, before it counts as stalled and the person is asked. A
+  quick task's round, which may only have been asked something, is told to
+  carry on with what it was last asked, and no report is asked for (ADR-034).
+  Carrying on assumes the agent keeps what it was given in the turns that did
+  nothing, as Claude Code keeps them in its transcript, and reads them with
+  the next; it isn't given them again.
 
 On a step, asking the person is a call with what Althar tried; elsewhere, such
 as the coordinator's thread, the thread says why. An agent that stalled even

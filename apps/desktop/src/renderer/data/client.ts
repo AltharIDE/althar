@@ -4,6 +4,7 @@ import {
   type AgentModels,
   type AlwaysScope,
   type AppSettings,
+  type Attachment,
   type BoardTask,
   type FieldAnswer,
   type FoundAccount,
@@ -175,6 +176,10 @@ export interface Client {
   readonly abandonTask: (taskId: string) => Promise<void>
   /** Opens an abandoned task again, on its worktree and branch. */
   readonly reopenTask: (taskId: string) => Promise<void>
+  /** Settles a finished task that isn't a change as Done, stopping what it left running, such as a page. */
+  readonly markTaskDone: (taskId: string) => Promise<void>
+  /** Takes a finished task that isn't a change out of Needs you as it is, kept for later. */
+  readonly keepTaskForLater: (taskId: string) => Promise<void>
   /** Gives the task another title, in any state; its slug, branch and folder stay. */
   readonly renameTask: (taskId: string, title: string) => Promise<void>
   readonly send: (input: {
@@ -346,6 +351,8 @@ export interface Client {
   readonly refreshTask: (taskId: string) => Promise<void>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (taskId: string, url: string) => Promise<void>
+  /** Attaches the task to an open pull request it didn't open, by its link or number; `start` starts its branch from that one's head. */
+  readonly attachPullRequest: (taskId: string, pullRequest: string, start: boolean) => Promise<Attachment>
   /**
    * Closes the task's pull request at this address on its host, unmerged; its branch there too, with `deleteBranch`. What the
    * host said to deleting the branch, where it didn't.
@@ -517,6 +524,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
+    markTaskDone: (taskId) => command((commandId) => api.MarkTaskDone({ commandId, taskId })),
+    keepTaskForLater: (taskId) => command((commandId) => api.KeepTaskForLater({ commandId, taskId })),
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
@@ -596,6 +605,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.MergeNote({ commandId, taskId, ...(url === undefined ? {} : { url }) })).then(({ note }) => note),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
+    attachPullRequest: (taskId, pullRequest, start) =>
+      command((commandId) => api.AttachPullRequest({ commandId, taskId, pullRequest, start })),
     closePullRequest: (input) => command((commandId) => api.ClosePullRequest({ commandId, ...input })),
     stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
     clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),

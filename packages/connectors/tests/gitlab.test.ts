@@ -335,6 +335,26 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('says the project a merge request’s branch is on: its own, a fork’s, one that is gone, or nothing it wasn’t told', () =>
+    Effect.gen(function* () {
+      const answers = [
+        request({ source_project_id: 34675721, target_project_id: 34675721 }),
+        request({ source_project_id: 99, target_project_id: 34675721 }),
+        request({ source_project_id: 98, target_project_id: 34675721 }),
+        request(),
+      ]
+      const { host } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, () => ({ json: answers.shift() })],
+        ['GET', `${API}/projects/99`, { json: { id: 99, path_with_namespace: 'dana/cli', web_url: 'https://gitlab.com/dana/cli' } }],
+        ['GET', `${API}/projects/98`, { status: 404, json: { message: '404 Project Not Found' } }],
+      ])
+      assert.isNull((yield* host.change(repository, 12)).headRepository)
+      assert.deepStrictEqual((yield* host.change(repository, 12)).headRepository, ['dana', 'cli'])
+      assert.deepStrictEqual((yield* host.change(repository, 12)).headRepository, [])
+      assert.notProperty(yield* host.change(repository, 12), 'headRepository')
+    }),
+  )
+
   it.effect('marks a draft ready by taking the prefix off its title as it is now', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([
