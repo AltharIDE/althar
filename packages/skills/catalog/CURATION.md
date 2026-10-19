@@ -6,7 +6,8 @@ The default catalog carries the skills of two MIT-licensed repositories,
 [obra/superpowers](https://github.com/obra/superpowers) at
 `bb92a77741419a4ab5f06e711a283343f1ada0c3` (15 skills), read in full on
 2026-10-18. The rule: every skill is carried, unless two skills do the same
-job, in which case the better one is kept. 33 are carried.
+job, in which case the better one is kept, or it only does what Althar
+already does. 32 are carried.
 [`scripts/curation.ts`](../scripts/curation.ts) is the source of truth for
 what is carried and how it is patched; `scripts/vendor.ts` builds this
 folder from it, and the package's tests load the result as the app does.
@@ -55,13 +56,18 @@ Pairs that looked alike but do different jobs, so both are carried:
 feedback); `executing-plans` (running a plan) with `writing-plans`;
 `idea-refine` (ideation the person asks for) with `brainstorming`;
 `shipping-and-launch` (a production rollout) with
-`finishing-a-development-branch` (handing a branch off);
-`git-workflow-and-versioning` (commit discipline) with `using-git-worktrees`.
+`finishing-a-development-branch` (handing a branch off).
 
 Where a carried skill named one left out, the name was changed to the one
 carried for the same job.
 
 ## Left out though nothing does its job
+
+- **`using-git-worktrees`**: Althar gives every task its own worktree and
+  branch, and cleans them up. A lead making more leaves state Althar
+  neither sees nor removes, and where the lead is in the person's own
+  checkout it would make `.worktrees/` there. The skills that sent a lead to
+  it now say the work happens in the worktree Althar made.
 
 - **`diagnosing-superpowers`**: it only analyses sessions of the
   superpowers plugin, which Althar does not run, and files issues on that
@@ -83,15 +89,18 @@ into a few kinds:
 - **Planning files stay out of commits.** `brainstorming` and
   `writing-plans` keep their documents under `.superpowers/`, which they
   ignore with a `.gitignore` of `*`, instead of committing them under
-  `docs/superpowers/`; `using-git-worktrees` ignores its folder in
-  `.git/info/exclude` instead of committing a `.gitignore` change;
+  `docs/superpowers/`;
   `idea-refine` and `performance-optimization` keep their notes outside the
   repository unless the person asks. `idea-refine`'s script, which made a
   folder in the repository, is left out.
-- **Althar's worktrees are not the skill's to remove.**
-  `finishing-a-development-branch` read any path under `worktrees/` as its
-  own to clean up, and Althar's worktrees live under such a path; it now
-  removes only one it created itself.
+- **Althar's worktrees and branches are not the skill's.**
+  `finishing-a-development-branch` merged by going to the person's own
+  checkout, switching it to the base branch and pulling, then removed the
+  worktree and deleted the branch, and on a discard force-deleted them. Its
+  merge and its discard are now hand-offs, as its pull request is: the lead
+  commits, reports and stops, and Althar merges, abandons and cleans up. It
+  removes only a worktree it made itself. `git-workflow-and-versioning` no
+  longer adds worktrees beside the repository nor resets hard.
 - **Every harness.** References to one harness's tools (`AskUserQuestion`,
   `Glob`/`Grep`/`Read`, `$ARGUMENTS`, Claude Code-only MCP settings), the
   authors' own slash commands and personas, and the superpowers plugin's
@@ -114,7 +123,8 @@ cannot be followed without dispatching subagents. They are marked
 
 ## Still to watch
 
-- The 33 skills' names and descriptions come to about 9,400 characters.
+- The 32 skills' names and descriptions come to about 9,200 characters, all
+  of them turned on.
   Codex lists skills within a budget of about 2% of its context, or 8,000
   characters when it does not know the context size, so it may shorten or
   drop entries there. A live session shows whether it does.

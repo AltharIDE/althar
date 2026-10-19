@@ -40,12 +40,17 @@
     repositories at pinned commits, each with its source, commit, upstream
     hashes, licence and copyright line, and the patch Althar applied. Every
     skill of both is carried unless two do the same job, when the better one
-    is (`catalog/CURATION.md`): 33. Patches take out push and pull request
-    steps (Althar pushes), keep planning files out of commits and make the
-    text agent-neutral. `scripts/vendor.ts` rebuilds the catalog from
+    is (`catalog/CURATION.md`): 32. Patches take out push and pull request
+    steps (Althar pushes), hand merging and worktree cleanup to Althar, keep
+    planning files out of commits and make the text agent-neutral; a skill
+    that only makes worktrees Althar already gives (`using-git-worktrees`)
+    is left out. `scripts/vendor.ts` rebuilds the catalog from
     `scripts/curation.ts`, and stops where upstream changed under a patch.
-  - **All 33 are on by default**, for every lead in every project, until
-    per-project selection exists.
+  - **All are off until the person turns them on**, in Settings, under
+    Skills. They change how every lead works, and there is no per-project
+    selection yet, so none is given to a lead unasked. The catalog is
+    installed once per revision (by its catalog.json's hash), not on every
+    session start.
   - **Installs from GitHub are reviewed.** A ref is resolved once to a
     commit; only the skill's own folder is fetched, each file checked
     against the commit's tree. The review card shows source, commit,
@@ -69,10 +74,14 @@
     doesn't know the context size). Read in full, the two sets did few jobs
     twice, and leaving a skill out loses what only it does.
 - **Trade-off:**
-  - **33 on for everyone is more than Codex may list.** Their names and
+  - **All of them on is more than Codex may list.** Their names and
     descriptions come to more than its fallback budget, so Codex can shorten
     or drop some; nothing checks or reports that yet. The person can't
-    choose a smaller set for a project yet either.
+    choose a set for one project yet either: what they turn on is on for
+    every lead.
+  - **Off by default means nobody gets them unasked.** Someone who never
+    opens Settings never has them; the catalog is a choice to make, not a
+    default behaviour change.
   - **Skill text is not a boundary.** The catalog's patches keep its skills
     from telling an agent to push, but a person's own install may; the push
     guard ([ADR-049](049-skill-and-openspec-files-stay-off-the-repository.md))

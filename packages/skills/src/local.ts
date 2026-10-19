@@ -4,7 +4,7 @@ import { Effect } from 'effect'
 import { parseCatalog, type CatalogEntry } from './catalog'
 import { SkillStoreFailed } from './errors'
 import { io, readTree } from './files'
-import { type Files, treeHash } from './hash'
+import { type Files, sha256, treeHash } from './hash'
 import { putObject, readInstalls, serialized, withInstall, writeInstalls } from './store'
 import { validateSkill } from './validate'
 
@@ -22,11 +22,16 @@ export interface LocalCatalog {
  * hash its entry pins. Any failure refuses the whole catalog, so a default set is never half-trusted.
  */
 export const loadLocalCatalog = (directory: string): Effect.Effect<LocalCatalog, SkillStoreFailed> =>
+  Effect.flatMap(readCatalogText(directory), (text) => checkCatalog(directory, text))
+
+const readCatalogText = (directory: string) => io('reading catalog.json', () => readFile(join(directory, 'catalog.json'), 'utf8'))
+
+const parsed = (text: string) =>
+  parseCatalog(text).pipe(Effect.mapError((error) => new SkillStoreFailed({ message: `catalog.json: ${error.message}` })))
+
+const checkCatalog = (directory: string, text: string): Effect.Effect<LocalCatalog, SkillStoreFailed> =>
   Effect.gen(function* () {
-    const text = yield* io('reading catalog.json', () => readFile(join(directory, 'catalog.json'), 'utf8'))
-    const catalog = yield* parseCatalog(text).pipe(
-      Effect.mapError((error) => new SkillStoreFailed({ message: `catalog.json: ${error.message}` })),
-    )
+    const catalog = yield* parsed(text)
     const skills = []
     for (const entry of catalog.entries) {
       const files = yield* readTree(join(directory, 'skills', entry.id), entry.id)
@@ -45,19 +50,31 @@ export const loadLocalCatalog = (directory: string): Effect.Effect<LocalCatalog,
     return { revision: catalog.revision, skills }
   })
 
+/** What installing a catalog says: its revision, what its entries say of each default, and the defaults it dropped. */
+export interface InstalledCatalog {
+  readonly revision: string
+  readonly entries: ReadonlyArray<CatalogEntry>
+  readonly removed: ReadonlyArray<string>
+}
+
 /**
- * Puts a local catalog's skills in the store and records them as installed defaults, active. Defaults the person
- * deactivated stay deactivated: an existing install keeps its `active` choice and only its version moves.
+ * Puts a local catalog's skills in the store and records them as installed defaults, off: they change how every lead
+ * works, so none is given to one until the person turns it on. An existing install keeps its `active` choice and only
+ * its version moves. A catalog installed before, by the hash of its catalog.json, which pins every skill's files, is
+ * only read: its skills are not hashed nor the store written again.
  */
-export const installLocalCatalog = (
-  root: string,
-  directory: string,
-): Effect.Effect<LocalCatalog & { readonly removed: ReadonlyArray<string> }, SkillStoreFailed> =>
+export const installLocalCatalog = (root: string, directory: string): Effect.Effect<InstalledCatalog, SkillStoreFailed> =>
   serialized(
     root,
     Effect.gen(function* () {
-      const catalog = yield* loadLocalCatalog(directory)
+      const text = yield* readCatalogText(directory)
+      const key = sha256(new TextEncoder().encode(text))
       let installs = yield* readInstalls(root)
+      if (installs.catalog === key) {
+        const { revision, entries } = yield* parsed(text)
+        return { revision, entries, removed: [] }
+      }
+      const catalog = yield* checkCatalog(directory, text)
       for (const { entry, files } of catalog.skills) {
         const hash = yield* putObject(root, files)
         const was = installs.installs.find(({ id }) => id === entry.id)
@@ -68,15 +85,15 @@ export const installLocalCatalog = (
           source: 'althar-default',
           treeHash: hash,
           review: 'default',
-          active: was?.active ?? true,
+          active: was?.active ?? false,
         })
       }
       // A default the catalog no longer lists is dropped, and said: it must not stay active in every run. Its stored version is kept.
       const listed = new Set(catalog.skills.map(({ entry }) => entry.id))
       const removed = installs.installs.filter(({ id, source }) => source === 'althar-default' && !listed.has(id)).map(({ id }) => id)
-      installs = { version: 1, installs: installs.installs.filter(({ id }) => !removed.includes(id)) }
+      installs = { version: 1, catalog: key, installs: installs.installs.filter(({ id }) => !removed.includes(id)) }
       yield* writeInstalls(root, installs)
-      return { ...catalog, removed }
+      return { revision: catalog.revision, entries: catalog.skills.map(({ entry }) => entry), removed }
     }),
   )
 

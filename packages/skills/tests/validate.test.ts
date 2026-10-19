@@ -102,17 +102,22 @@ describe('validateSkill', () => {
 })
 
 describe('lintPushes', () => {
-  it('finds push and pull-request instructions in Markdown only, at the level asked', () => {
-    const files = tree({
-      'SKILL.md': 'Run `git push -u origin x` then `gh pr create`.',
-      'references/a.md': 'glab mr create',
-      'scripts/x.sh': 'git push',
-      'clean.md': 'git pushover is a word',
-    })
+  it('finds push and pull-request instructions in every text file, a script too, at the level asked', () => {
+    const files = new Map([
+      ...tree({
+        'SKILL.md': 'Run `git push -u origin x` then `gh pr create`.',
+        'references/a.md': 'glab mr create',
+        'scripts/x.sh': 'git push',
+        'clean.md': 'git pushover is a word',
+      }),
+      // Not text: no instruction, whatever its bytes spell.
+      ['assets/x.bin', new Uint8Array([0, ...new TextEncoder().encode('git push')])],
+    ])
     expect(lintPushes(files, 'reject').map((finding) => `${finding.level} ${finding.path}`)).toEqual([
       'reject SKILL.md',
       'reject SKILL.md',
       'reject references/a.md',
+      'reject scripts/x.sh',
     ])
     expect(lintPushes(files, 'flag')[0]?.level).toBe('flag')
   })

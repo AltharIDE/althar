@@ -2515,16 +2515,17 @@ describe('the skills page', () => {
     ),
   )
 
-  it.live('lists the catalog’s skills, turns one off, and keeps one Althar ships from being removed', () =>
+  it.live('lists the catalog’s skills off, turns one on and off, and keeps one Althar ships from being removed', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client } = yield* connected({ skills: yield* Effect.promise(store) })
         const listed = yield* client.ListSkills({})
         assert.deepStrictEqual(
           [listed.enabled, listed.catalogRevision, listed.skills.map((one) => [one.id, one.source, one.active, one.needs, one.license])],
-          [true, 'fixture-1', [['alpha', 'althar-default', true, ['subagents'], 'MIT']]],
+          [true, 'fixture-1', [['alpha', 'althar-default', false, ['subagents'], 'MIT']]],
         )
         assert.strictEqual(listed.skills[0]?.description, 'Use when testing alpha.')
+        assert.isTrue((yield* client.SetSkillActive({ commandId: commandId(), id: 'alpha', active: true })).active)
         const off = yield* client.SetSkillActive({ commandId: commandId(), id: 'alpha', active: false })
         assert.isFalse(off.active)
         const refused = yield* Effect.flip(client.UninstallSkill({ commandId: commandId(), id: 'alpha' }))

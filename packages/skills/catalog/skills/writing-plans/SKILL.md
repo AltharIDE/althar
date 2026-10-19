@@ -11,7 +11,7 @@ Write implementation plans for an engineer who has not seen this codebase or thi
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
-**Context:** If working in an isolated worktree, it should have been created via the `using-git-worktrees` skill at execution time.
+**Context:** The work happens in the worktree Althar made for the task.
 
 **Save plans to:** `.superpowers/plans/YYYY-MM-DD-<feature-name>.md`, never committed (create `.superpowers/.gitignore` containing `*` first if it is missing)
 - (User preferences for plan location override this default)

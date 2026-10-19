@@ -834,7 +834,8 @@ for its session ([ADR-048](../decisions/048-skills-one-store-a-curated-catalog.m
 and skill and OpenSpec files held off the repository unless the project says
 so ([ADR-049](../decisions/049-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
-the same active set. [The plan](../plans/skills-across-harnesses.md#implementation-status)
+the same active set, and the catalog's skills are off until the person turns
+them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)
 keeps what is done and what is not.
 
 Althar should adopt the open Agent Skills package shape:

@@ -11,7 +11,7 @@ import { Changes } from '../src/Changes'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
-import { pathsPushed } from '../src/repositoryGuard'
+import { guardPush, pathsPushed } from '../src/repositoryGuard'
 import * as Runtime from '../src/Runtime'
 import { words } from '../src/words'
 import { repository, runtime } from './support'
@@ -200,6 +200,26 @@ describe('pushing a task’s branch', () => {
       const head = commitFiles(worktree?.path ?? '', { 'src/new.ts': 'new' })
       const pushed = yield* (yield* Changes).pushBranch(task.taskId, [{ repository: worktree?.slug ?? '', head }])
       assert.strictEqual(pushed.length, 1)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('lets a repository keep versioning the skills and specs it already tracked, and holds only a directory the task brought in', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      const base = commitFiles(root, { '.claude/skills/team/SKILL.md': 'the team’s own', 'web/openspec/specs/a.md': 'spec' })
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+      const head = commitFiles(root, {
+        '.claude/skills/team/SKILL.md': 'edited',
+        '.claude/skills/added/SKILL.md': 'another of the team’s',
+        'web/openspec/specs/a.md': 'edited spec',
+        '.opencode/skills/x/SKILL.md': 'brought in',
+        'openspec/changes/b/proposal.md': 'brought in',
+      })
+      const refused = refusal(
+        yield* Effect.flip(guardPush({ projectId: project.projectId, taskId: 't', remote: 'origin/main', cwd: root, base, head })),
+      )
+      assert.strictEqual(refused.why, 'protected')
+      assert.strictEqual(refused.said, '.opencode/skills/x/SKILL.md, openspec/changes/b/proposal.md')
     }).pipe(Effect.provide(runtime())),
   )
 })

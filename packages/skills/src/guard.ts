@@ -29,12 +29,19 @@ const segmentsOf = (path: string): string[] =>
  * is a false positive that a one-time grant clears). Callers pass plain, unquoted paths, one per entry, such as
  * from `git status --porcelain -z`; a rename is two paths, old and new, both to be checked.
  */
-export const protectedKind = (path: string): ProtectedKind | null => {
+export const protectedKind = (path: string): ProtectedKind | null => protectedRoot(path)?.kind ?? null
+
+/**
+ * The protected directory a path is below, as the repository spells it: `.claude/skills`, `packages/web/openspec`.
+ * A repository that already tracks that directory keeps its own skills or specs there, and they are its to push.
+ */
+export const protectedRoot = (path: string): { readonly kind: ProtectedKind; readonly directory: string } | null => {
   const parts = segmentsOf(path)
   for (const [at, segment] of parts.slice(0, -1).entries()) {
     const part = segment.toLowerCase()
-    if (part === 'openspec') return 'openspec'
-    if (at + 2 < parts.length && SKILL_ROOTS.has(part) && parts[at + 1]?.toLowerCase() === 'skills') return 'skills'
+    if (part === 'openspec') return { kind: 'openspec', directory: parts.slice(0, at + 1).join('/') }
+    if (at + 2 < parts.length && SKILL_ROOTS.has(part) && parts[at + 1]?.toLowerCase() === 'skills')
+      return { kind: 'skills', directory: parts.slice(0, at + 2).join('/') }
   }
   return null
 }

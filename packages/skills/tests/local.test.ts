@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseNulPaths } from '../src/guard'
 import { activeSelection, installLocalCatalog, loadLocalCatalog, removedByCatalog } from '../src/local'
 import { projectRun } from '../src/projection'
+import { setActive } from '../src/review'
 import { readInstalls, withInstall, writeInstalls } from '../src/store'
 import { clean, good, skillMd, writeCatalog, run } from './support'
 
@@ -44,17 +45,16 @@ describe('a local catalog', () => {
     await Promise.all([bad, pushing].map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
-  it('installs as active defaults, and keeps a default the person turned off', async () => {
+  it('installs defaults off, gives a run only those the person turned on, and keeps that choice', async () => {
     await writeCatalog(catalog, { alpha: good('alpha'), beta: good('beta') }, { beta: ['subagents'] })
     await run(installLocalCatalog(root, catalog))
     const first = await run(readInstalls(root))
     expect(first.installs.map(({ id, active, source, review }) => `${id} ${active} ${source} ${review}`)).toEqual([
-      'alpha true althar-default default',
-      'beta true althar-default default',
+      'alpha false althar-default default',
+      'beta false althar-default default',
     ])
-    const [alpha] = first.installs
-    if (alpha === undefined) throw new Error('no install')
-    await run(writeInstalls(root, withInstall(first, { ...alpha, active: false })))
+    expect(await run(activeSelection(root, new Map()))).toEqual([])
+    await run(setActive(root, 'beta', true))
     await run(installLocalCatalog(root, catalog))
     const selection = await run(activeSelection(root, new Map([['beta', ['subagents']]])))
     expect(selection.map(({ id, needs }) => `${id} ${needs.join()}`)).toEqual(['beta subagents'])
@@ -63,6 +63,7 @@ describe('a local catalog', () => {
   it('drops a default the catalog no longer lists, after saying so, and keeps the person’s own installs', async () => {
     await writeCatalog(catalog, { alpha: good('alpha'), beta: good('beta') })
     await run(installLocalCatalog(root, catalog))
+    await run(setActive(root, 'alpha', true))
     const read = await run(readInstalls(root))
     const own = { id: 'mine', source: 'local' as const, treeHash: 'c'.repeat(64), review: 'reviewed' as const, active: true }
     await run(writeInstalls(root, withInstall(read, own)))
@@ -73,6 +74,21 @@ describe('a local catalog', () => {
     expect(result.removed).toEqual(['beta'])
     expect((await run(activeSelection(root, new Map()))).map(({ id }) => id)).toEqual(['alpha', 'mine'])
     await rm(next, { recursive: true, force: true })
+  })
+
+  it('installs a catalog once: an unchanged one is only read, a changed one installed again', async () => {
+    await writeCatalog(catalog, { alpha: good('alpha') })
+    await run(installLocalCatalog(root, catalog))
+    const written = await readFile(join(root, 'installs.json'), 'utf8')
+    // Taken away by hand: an unchanged catalog does not put it back, nor write the store.
+    await run(writeInstalls(root, { ...(await run(readInstalls(root))), installs: [] }))
+    const again = await run(installLocalCatalog(root, catalog))
+    expect(again.entries.map(({ id }) => id)).toEqual(['alpha'])
+    expect((await run(readInstalls(root))).installs).toEqual([])
+    await writeCatalog(catalog, { alpha: good('alpha'), beta: good('beta') })
+    await run(installLocalCatalog(root, catalog))
+    expect((await run(readInstalls(root))).installs.map(({ id }) => id)).toEqual(['alpha', 'beta'])
+    expect(written).toContain('"catalog"')
   })
 
   it('stays consistent when installs happen at once', async () => {
@@ -94,6 +110,7 @@ describe('the Claude Code plugin layout', () => {
   it('puts skills and a bare manifest under the run, and nothing outside it', async () => {
     await writeCatalog(catalog, { alpha: good('alpha') })
     const loaded = await run(installLocalCatalog(root, catalog))
+    await run(setActive(root, 'alpha', true))
     const selected = await run(activeSelection(root, new Map()))
     const result = await run(
       projectRun({
@@ -111,7 +128,7 @@ describe('the Claude Code plugin layout', () => {
     const manifest = JSON.parse(await readFile(join(result.directory, '.claude-plugin', 'plugin.json'), 'utf8'))
     expect(manifest).toEqual({ name: 'althar', description: 'Skills Althar selected for this run', version: '0.0.0' })
     expect(existsSync(join(result.directory, 'hooks'))).toBe(false)
-    expect(loaded.skills).toHaveLength(1)
+    expect(loaded.entries).toHaveLength(1)
   })
 })
 
@@ -119,6 +136,7 @@ describe('the Agent Skills layout', () => {
   it('puts skills under the run folder’s .agents/skills, which a session is given as an added directory', async () => {
     await writeCatalog(catalog, { alpha: good('alpha') })
     await run(installLocalCatalog(root, catalog))
+    await run(setActive(root, 'alpha', true))
     const result = await run(
       projectRun({
         root,

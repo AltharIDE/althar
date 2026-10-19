@@ -82,6 +82,6 @@ export const text = {
   skillsUpdate: (id: string) => `Review the update to ${id}`,
   skillsUnchecked: (id: string, why: string) => `${id} couldn’t be checked: ${why}`,
   skillsCatalog: (revision: string) =>
-    `Althar’s skills come from agent-skills (Addy Osmani) and superpowers (Jesse Vincent), both MIT, catalog ${revision}. A change reaches each lead the next time it starts, in a task under way too.`,
+    `Althar’s skills come from agent-skills (Addy Osmani) and superpowers (Jesse Vincent), both MIT, catalog ${revision}. They’re off until you turn them on, and one you turn on is given to every task’s lead. A change reaches each lead the next time it starts, in a task under way too.`,
   iconFailed: 'That icon couldn’t be kept. Try again.',
 }

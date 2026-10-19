@@ -10,6 +10,7 @@ import { failure, fakeGitHub, skillMd, writeCatalog, run } from './support'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)
+const C = 'c'.repeat(40)
 const skill = (name: string, body = 'Do it.\n') => skillMd(`name: ${name}\ndescription: Use when testing ${name}.\nlicense: MIT`, body)
 
 let root: string
@@ -192,6 +193,11 @@ describe('installing a skill from GitHub as a person reviews it', () => {
     const first = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
     await run(approve(root, { id: 'alpha', ...first.source, treeHash: first.treeHash }))
     expect(await run(checkUpdates(root, access))).toEqual([{ id: 'alpha', state: 'current', sha: A }])
+
+    // A newer commit that changed something else in the repository is no update to review.
+    repos['o/r'].commits[C] = { 'skills/alpha/SKILL.md': skill('alpha', 'One.\n'), 'README.md': 'Elsewhere.\n' }
+    repos['o/r'].refs.main = C
+    expect(await run(checkUpdates(root, access))).toEqual([{ id: 'alpha', state: 'current', sha: C }])
 
     repos['o/r'].commits[B] = { 'skills/alpha/SKILL.md': skill('alpha', 'Two.\n') }
     repos['o/r'].refs.main = B

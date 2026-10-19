@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
+import { installLocalCatalog, setActive } from '@althar/skills'
 import { writeCatalog } from '../../skills/tests/support'
 import { Effect, Layer, Stream } from 'effect'
 import type { RuntimeOptions } from '../src/Config'
@@ -26,6 +27,9 @@ const makeStore = async (skills: Record<string, Record<string, string>>, needs: 
   const root = mkdtempSync(join(tmpdir(), 'althar-skills-store-'))
   const catalog = mkdtempSync(join(tmpdir(), 'althar-skills-catalog-'))
   await writeCatalog(catalog, skills, needs)
+  // The catalog's skills are off until the person turns them on: here, all of them.
+  await Effect.runPromise(installLocalCatalog(root, catalog))
+  for (const id of Object.keys(skills)) await Effect.runPromise(setActive(root, id, true))
   return { root, catalog }
 }
 

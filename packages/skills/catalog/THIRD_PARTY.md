@@ -20,7 +20,7 @@ A skill with a patch is a modified copy: `scripts/curation.ts` has the patch, `C
 - `documentation-and-adrs`: As upstream.
 - `doubt-driven-development` (modified): Needs a fresh-context subagent. The references to the author’s own personas and orchestration notes are left out.
 - `frontend-ui-engineering` (modified): Its accessibility checklist is carried in.
-- `git-workflow-and-versioning` (modified): Tags locally and leaves pushing to Althar; cleans up only worktrees it created.
+- `git-workflow-and-versioning` (modified): Tags locally and leaves pushing to Althar; leaves worktrees, branches and merging to Althar, and never resets hard.
 - `idea-refine` (modified): Asks with whatever the harness offers, names no harness’s tools, and keeps its one-pager out of the repository unless asked. Its script, which made a folder in the repository, is left out.
 - `incremental-implementation` (modified): Its Definition of Done is carried in.
 - `observability-and-instrumentation` (modified): Its checklist is carried in.
@@ -39,13 +39,12 @@ A skill with a patch is a modified copy: `scripts/curation.ts` has the patch, `C
 - `brainstorming` (modified): Kept over spec-driven-development and interview-me. Its trigger no longer fires on every task, its design document is not committed, its visual companion keeps its files ignored and makes no request to the author’s site.
 - `dispatching-parallel-agents`: Needs subagents.
 - `executing-plans` (modified): Carries the scripts and reviewer prompt it borrowed from sibling skills, so it works where subagent-driven-development is not given.
-- `finishing-a-development-branch` (modified): Ends in a hand-off: Althar pushes and opens the pull request. It never removes a worktree it did not create, such as Althar’s.
+- `finishing-a-development-branch` (modified): Ends in a hand-off: Althar merges, pushes, opens the pull request and cleans up. It never leaves the task’s worktree, switches or deletes its branch, or touches the person’s own checkout.
 - `receiving-code-review` (modified): Replies through the pull request tool the harness gives it, not `gh`.
 - `requesting-code-review` (modified): Kept beside code-review-and-quality: it dispatches a fresh reviewer, which needs subagents.
-- `subagent-driven-development` (modified): Needs subagents.
+- `subagent-driven-development` (modified): Needs subagents. Works in the worktree Althar made for the task.
 - `systematic-debugging` (modified): Kept over debugging-and-error-recovery. The notes from writing it, which nothing links, are left out.
 - `test-driven-development` (modified): Kept over agent-skills’ skill of the same name.
-- `using-git-worktrees` (modified): Ignores its folder in `.git/info/exclude` instead of committing a `.gitignore` change.
 - `verification-before-completion`: As upstream.
 - `writing-plans` (modified): Kept over planning-and-task-breakdown. Its plans are not committed.
 - `writing-skills` (modified): Its testing method needs fresh subagents. Anthropic’s authoring guide, which the upstream licence does not cover, is left out, and it ends with a hand-off instead of a push.

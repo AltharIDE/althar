@@ -146,29 +146,9 @@ refactor/<short-description>  → refactor/auth-module
 
 ## Working with Worktrees
 
-For parallel AI agent work, use git worktrees to run multiple branches simultaneously:
-
-```bash
-# Create a worktree for a feature branch
-git worktree add ../project-feature-a feature/task-creation
-git worktree add ../project-feature-b feature/user-settings
-
-# Each worktree is a separate directory with its own branch
-# Agents can work in parallel without interfering
-ls ../
-  project/              ← main branch
-  project-feature-a/    ← task-creation branch
-  project-feature-b/    ← user-settings branch
-
-# When done, clean up worktrees you created (never one Althar manages)
-git worktree remove ../project-feature-a
-```
-
-Benefits:
-- Multiple agents can work on different features simultaneously
-- No branch switching needed (each directory has its own branch)
-- If one experiment fails, delete the worktree — nothing is lost
-- Changes are isolated until explicitly merged
+Althar gives each task its own worktree and branch, so agents already work
+in parallel without interfering. Do not add worktrees, or switch this one's
+branch: Althar merges the work and cleans up.
 
 ## The Save Point Pattern
 
@@ -186,7 +166,7 @@ Agent starts work
     └── Feature complete → All commits form a clean history
 ```
 
-This pattern means you never lose more than one increment of work. If an agent goes off the rails, `git reset --hard HEAD` takes you back to the last successful state.
+This pattern means you never lose more than one increment of work. If an agent goes off the rails, `git restore` on the files it changed takes you back to the last successful commit; never `git reset --hard`, which also throws away work you meant to keep.
 
 ## Change Summaries
 

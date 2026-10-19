@@ -30,8 +30,6 @@ Tests failing (<N> failures). Must fix before completing:
 ```bash
 GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
 GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
-# Capture now, while still inside the workspace — Step 5 changes directory
-# before cleanup (Step 6) needs this value
 WORKTREE_PATH=$(git rev-parse --show-toplevel)
 ```
 
@@ -57,7 +55,7 @@ Confirm before merging: merging into the wrong base is expensive to undo.
 ```
 Implementation complete. What would you like to do?
 
-1. Merge back to <base-branch> locally
+1. Hand off to merge into <base-branch> (Althar merges it and cleans up)
 2. Hand off for a pull request (Althar pushes and opens it)
 3. Keep the branch as-is (I'll handle it later)
 
@@ -83,32 +81,13 @@ is theirs.
 
 ## Step 5: Execute Choice
 
-### Option 1: Merge Locally
+### Option 1: Hand off to merge
 
-```bash
-# Get main repo root for CWD safety
-MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
-cd "$MAIN_ROOT"
-
-# Merge first — verify success before removing anything
-git checkout <base-branch>
-git pull
-git merge <feature-branch>
-
-# Verify tests on merged result
-<test command>
-```
-
-If tests fail on the merged result: stop, leave the worktree and branch in
-place, and investigate — nothing has been pushed, so the merge is local
-and recoverable.
-
-Once the merged result is green: clean up the worktree (Step 6), then
-delete the branch:
-
-```bash
-git branch -d <feature-branch>
-```
+Do not merge, switch branches or leave this worktree yourself, and never
+`cd` into the main checkout: Althar owns the task's worktree and branch,
+merges the work into <base-branch> and cleans up after. Make sure all work
+is committed, then stop and report the branch, its commits and the test
+result, saying your human partner chose to merge it.
 
 ### Option 2: Hand off for a pull request
 
@@ -136,71 +115,30 @@ This will permanently delete:
 Type 'discard' to confirm.
 ```
 
-Wait for that exact confirmation. When it arrives:
-
-```bash
-MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
-cd "$MAIN_ROOT"
-```
-
-Then clean up the worktree (Step 6) and force-delete the branch:
-
-```bash
-git branch -D <feature-branch>
-```
+Wait for that exact confirmation. When it arrives, delete nothing
+yourself: report that your human partner chose to discard the work. Althar
+removes the task's worktree and branch when they abandon the task.
 
 ## Step 6: Cleanup Workspace
 
-**Runs for Option 1 and confirmed discards.** Options 2 and 3 always
-preserve the worktree. Both callers have already changed directory to the
-main repo root — worktree removal must run from outside the worktree —
-and use the `GIT_DIR`/`GIT_COMMON`/`WORKTREE_PATH` values captured in
-Step 2, from before that directory change.
+Never remove the worktree you are working in, or switch or delete its
+branch: Althar made them, and cleans them up once the work is merged or
+discarded.
 
-**If `GIT_DIR == GIT_COMMON`:** Normal repo, no worktree to clean up. Done.
-
-**If you created this worktree yourself, under `<main repo root>/.worktrees/` or
-`<main repo root>/worktrees/` (never one Althar created):** you own cleanup:
-
-```bash
-git worktree remove "$WORKTREE_PATH"
-git worktree prune  # Self-healing: clean up any stale registrations
-```
-
-**If removal is refused** (`contains modified or untracked files`): the
-worktree holds files that exist nowhere else — uncommitted plans, notes,
-or scratch work. Never `--force` on your own initiative. Show your human
-partner what is at stake and ask:
-
-```bash
-git -C "$WORKTREE_PATH" status --porcelain -uall
-```
-
-```
-Worktree removal refused — these files were never committed:
-
-<file list>
-
-1. Commit them to <branch> before cleanup
-2. Move them into <main repo root>
-3. Delete them (unrecoverable)
-
-Which?
-```
-
-Carry out the choice, then remove the worktree.
-
-**Otherwise:** The host environment owns this workspace — leave it in
-place. If your platform provides a workspace-exit tool, use it.
+If you created another worktree yourself for this work, remove it once its
+work is committed here: `git worktree remove <path>`. If removal is refused
+(`contains modified or untracked files`), those files exist nowhere else:
+never `--force` on your own initiative. Show your human partner
+`git -C <path> status --porcelain -uall` and ask.
 
 ## Quick Reference
 
 | Option | Merge | Push | Keep Worktree | Cleanup Branch |
 |--------|-------|------|---------------|----------------|
-| 1. Merge locally | yes | - | - | yes |
+| 1. Hand off to merge | - | - | yes | - |
 | 2. Hand off for PR | - | - | yes | - |
 | 3. Keep as-is | - | - | yes | - |
-| Discard (explicit request only) | - | - | - | yes (force) |
+| Discard (explicit request only) | - | - | yes | - |
 
 ## Common Rationalizations
 
@@ -211,7 +149,7 @@ place. If your platform provides a workspace-exit tool, use it.
 | "They seem done with this feature — I'll offer to discard it" | The menu is complete as written. Discard happens only when your human partner asks for it in so many words. |
 | "'Yeah, get rid of it' counts as confirmation" | Only the typed word `discard` authorizes deletion. |
 | "The PR is up, so the worktree is clutter now" | PR feedback gets fixed in that worktree. It stays until the work lands. |
-| "This other worktree looks stale — I'll clean it too" | Clean up only worktrees you created under the main repository root. Everything else belongs to the host. |
+| "This other worktree looks stale — I'll clean it too" | Clean up only worktrees you created yourself. Althar's belong to Althar. |
+| "Merging it myself is quicker" | Althar owns the task's worktree and branch. Merging or switching branches yourself fights it, and the main checkout is your human partner's own. |
 | "Removal refused — `--force` is just finishing the cleanup" | The refusal means files exist only in that worktree. `--force` destroys them permanently. Show your human partner and ask. |
-| "The merged-result failure is probably flaky" | A failing merged result stops everything. Branch and worktree stay put while you investigate. |
 | "The base branch is obviously main" | Confirm the fork point or ask. Merging into the wrong base is expensive to undo. |

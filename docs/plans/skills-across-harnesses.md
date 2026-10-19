@@ -475,7 +475,7 @@ the two sets overlap enough that we must choose rather than merge.
    for user installs the subtree-only fetch in section 3 enforces it.
 3. Curate, don't union: one skill per job from the 6.2 table. As a starting
    point to confirm in stage 1, not a decision (since settled otherwise:
-   every skill of both is carried unless two do the same job, 33 in all, in
+   every skill of both is carried unless two do the same job, 32 in all, in
    `packages/skills/catalog/CURATION.md` and ADR-048): agent-skills for the
    lifecycle and engineering skills it alone has (API design, CI/CD,
    security, performance, documentation, source-driven development, code
@@ -686,9 +686,10 @@ checks and the harness permission rules remain the enforcement.
 ## Open decisions and risks
 
 - **Settled:** the skills carried. Every skill of both was read in full on
-  2026-10-18 and 33 are carried (`packages/skills/catalog/CURATION.md`), more
+  2026-10-18 and 33 were carried (`packages/skills/catalog/CURATION.md`), more
   than the ~15 section 6 aimed at for Codex's budget; ADR-048 records why and
-  what it costs.
+  what it costs. After review, `using-git-worktrees` was left out (Althar makes
+  the worktrees), leaving 32, and all ship off until the person turns them on.
 - Where skill-written planning files (`SPEC.md`, `docs/superpowers/...`) sit
   in the repository settings: a fourth setting, or part of the OpenSpec one.
 - **Settled:** third-party text. The per-file read found Anthropic's

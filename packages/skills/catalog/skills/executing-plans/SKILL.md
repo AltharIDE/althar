@@ -106,8 +106,8 @@ digraph process {
 
 ## Setup
 
-Ensure the work happens in an isolated workspace: use
-using-git-worktrees to create one or verify the existing one.
+The work happens in the worktree Althar made for the task: never create
+another, nor switch its branch.
 Never start implementation on a main/master branch without your human
 partner's explicit consent.
 

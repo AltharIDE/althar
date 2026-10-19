@@ -1959,7 +1959,10 @@ export class Changes extends Context.Service<
             const remote = followed.stdout
             const at = remote.indexOf('/')
             // What is sent is the branch's tip, which may be ahead of the task's head: guard that, not the head.
-            const tip = (yield* commitsOf(repository.root, [`refs/heads/${repository.base}`]))[0] ?? head
+            // One it can't read is not pushed at all: the task's head in its place would send what the branch never held.
+            const [tip] = yield* commitsOf(repository.root, [`refs/heads/${repository.base}`])
+            if (tip === undefined || tip === null)
+              return yield* Effect.die(new Error(`${repository.base} could not be read once the task merged into it`))
             yield* guardPush({
               projectId: task.projectId,
               taskId,

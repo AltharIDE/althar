@@ -185,13 +185,13 @@
         "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
         "subpath": "skills/git-workflow-and-versioning"
       },
-      "treeHash": "9c0bc3eb1fd05fd2b5da7b3cecb0c22484dfbf17cbd8436a8866367dd103f3a5",
+      "treeHash": "d1846593bec1a6756d361e77c604733f1fa8bfa09f2fdb48d828819f633f4720",
       "upstreamTreeHash": "91c8c72654ee6ef163e49df26d1810cb7a6a91a4d8dee5b9f1bc03fd1fb8ec3a",
       "license": "MIT",
       "copyright": "Copyright (c) 2025 Addy Osmani",
       "needs": [],
       "patch": "althar/git-workflow-and-versioning",
-      "note": "Tags locally and leaves pushing to Althar; cleans up only worktrees it created."
+      "note": "Tags locally and leaves pushing to Althar; leaves worktrees, branches and merging to Althar, and never resets hard."
     },
     {
       "id": "idea-refine",
@@ -312,7 +312,7 @@
         "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
         "subpath": "skills/using-agent-skills"
       },
-      "treeHash": "c6780a6e5586b4dc9eaea3939b80975418ed9c49a3a7c220aa0a9f2ca3304efe",
+      "treeHash": "8e524bbe894bc26c8b2459cbd04ada1bfdf38e6b5c81d8eecc11a7fcea2c5e3f",
       "upstreamTreeHash": "41927b79f274a2a4eac841895bb1c75f7a1c37af2748a6a89e13bce13ff79bbd",
       "license": "MIT",
       "copyright": "Copyright (c) 2025 Addy Osmani",
@@ -361,7 +361,7 @@
         "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
         "subpath": "skills/executing-plans"
       },
-      "treeHash": "9c6fc06a65e59a4646f3f8de9b2ff981eadca1f922158edde730e39346bc693a",
+      "treeHash": "503f320af1bde24b16f256a9841d49c5e2169ed0c0ebdbb5341a6e975224c454",
       "upstreamTreeHash": "92a56b68b632cc174cfe2fb42cd3344864e3a860d016df57b2010c6c81ca5816",
       "license": "MIT",
       "copyright": "Copyright (c) 2025 Jesse Vincent",
@@ -377,13 +377,13 @@
         "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
         "subpath": "skills/finishing-a-development-branch"
       },
-      "treeHash": "c0a919a6f38d2556fb5528966bd93fb95781d1074eee7186cf326d9d9382c351",
+      "treeHash": "cdb96911e45fb27d2a1fed2a64f8a89bce833a540be0b2504d9d1127889209b3",
       "upstreamTreeHash": "02db5c2ad9d5c3c3345dfbf04dc85b256fca6aa67a5af1dcd615483888cd2ab1",
       "license": "MIT",
       "copyright": "Copyright (c) 2025 Jesse Vincent",
       "needs": [],
       "patch": "althar/finishing-a-development-branch",
-      "note": "Ends in a hand-off: Althar pushes and opens the pull request. It never removes a worktree it did not create, such as Althar’s."
+      "note": "Ends in a hand-off: Althar merges, pushes, opens the pull request and cleans up. It never leaves the task’s worktree, switches or deletes its branch, or touches the person’s own checkout."
     },
     {
       "id": "receiving-code-review",
@@ -427,7 +427,7 @@
         "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
         "subpath": "skills/subagent-driven-development"
       },
-      "treeHash": "aa530b538962578bf42722978b61348e6952b5e0ed38a51479ab04d37bc83566",
+      "treeHash": "4cb745730f88a9645c37fb0e14767dfe912f59eb12d840600e5f1dd9f92bc585",
       "upstreamTreeHash": "c985e5fbf287de92660b825116caa7106a6d598a10138348eec922264e128845",
       "license": "MIT",
       "copyright": "Copyright (c) 2025 Jesse Vincent",
@@ -435,7 +435,7 @@
         "subagents"
       ],
       "patch": "althar/subagent-driven-development",
-      "note": "Needs subagents."
+      "note": "Needs subagents. Works in the worktree Althar made for the task."
     },
     {
       "id": "systematic-debugging",
@@ -470,22 +470,6 @@
       "note": "Kept over agent-skills’ skill of the same name."
     },
     {
-      "id": "using-git-worktrees",
-      "source": {
-        "kind": "github",
-        "repo": "obra/superpowers",
-        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
-        "subpath": "skills/using-git-worktrees"
-      },
-      "treeHash": "bccfda6b6705e7953cad0b52118e2a2c100089984a94dd07ddfabf1dcbed257e",
-      "upstreamTreeHash": "97b924d20b46b90bb1bd3735c405f9228390553693f112caf3cfa055a5bb334b",
-      "license": "MIT",
-      "copyright": "Copyright (c) 2025 Jesse Vincent",
-      "needs": [],
-      "patch": "althar/using-git-worktrees",
-      "note": "Ignores its folder in `.git/info/exclude` instead of committing a `.gitignore` change."
-    },
-    {
       "id": "verification-before-completion",
       "source": {
         "kind": "github",
@@ -508,7 +492,7 @@
         "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
         "subpath": "skills/writing-plans"
       },
-      "treeHash": "c6331c97395c140ea349f545ea42d4005596f32054e7c01b61054c133e706ebc",
+      "treeHash": "7c2407034b3bbf155f7760453bb94db0856afe8dd7d2da4e468b4b337f1c53c6",
       "upstreamTreeHash": "70aa13d73e96a9d810a3ef1c52f820686dfadd7755c9b9c57d6ef3e983328cb6",
       "license": "MIT",
       "copyright": "Copyright (c) 2025 Jesse Vincent",

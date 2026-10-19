@@ -57,7 +57,12 @@ const Install = Schema.Struct({
   ),
 )
 
-const Installs = Schema.Struct({ version: Schema.Literal(1), installs: Schema.Array(Install) })
+const Installs = Schema.Struct({
+  version: Schema.Literal(1),
+  /** The hash of the default catalog's catalog.json last installed, so an unchanged catalog is not installed again. */
+  catalog: Schema.optionalKey(Schema.String),
+  installs: Schema.Array(Install),
+})
 
 export type Install = typeof Install.Type
 export type Installs = typeof Installs.Type
@@ -67,7 +72,10 @@ export const EMPTY_INSTALLS: Installs = { version: 1, installs: [] }
 const STRICT = { onExcessProperty: 'error' } as const
 const decodeInstalls = Schema.decodeUnknownEffect(Installs, STRICT)
 const decodeInstall = Schema.decodeUnknownResult(Install, STRICT)
-const decodeFile = Schema.decodeUnknownEffect(Schema.Struct({ version: Schema.Literal(1), installs: Schema.Array(Schema.Unknown) }), STRICT)
+const decodeFile = Schema.decodeUnknownEffect(
+  Schema.Struct({ version: Schema.Literal(1), catalog: Schema.optionalKey(Schema.String), installs: Schema.Array(Schema.Unknown) }),
+  STRICT,
+)
 
 const HASHED = /^[0-9a-f]{64}$/
 
@@ -197,6 +205,6 @@ export const writeInstalls = (root: string, installs: Installs): Effect.Effect<v
 
 /** Adds or replaces an install by id. A replaced version's object stays until nothing references it. */
 export const withInstall = (installs: Installs, install: Install): Installs => ({
-  version: 1,
+  ...installs,
   installs: [...installs.installs.filter(({ id }) => id !== install.id), install].toSorted((a, b) => a.id.localeCompare(b.id)),
 })

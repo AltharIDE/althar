@@ -56,7 +56,7 @@ export const runSkills = (
     const { skills } = definition
     if (skills === undefined) return undefined
     const catalog = yield* installLocalCatalog(config.root, config.catalog)
-    const needs = new Map(catalog.skills.map(({ entry }) => [entry.id, entry.needs]))
+    const needs = new Map(catalog.entries.map((entry) => [entry.id, entry.needs]))
     const selected = yield* activeSelection(config.root, needs)
     const projected = yield* projectRun({
       root: config.root,
@@ -87,7 +87,7 @@ type Known = ReadonlyMap<string, { readonly license: string; readonly needs: Rea
 export const listSkills = (config: SkillsConfig) =>
   Effect.gen(function* () {
     const catalog = yield* installLocalCatalog(config.root, config.catalog).pipe(contained('ListSkills.catalog', () => null))
-    const known: Known = new Map(catalog?.skills.map(({ entry }) => [entry.id, entry]) ?? [])
+    const known: Known = new Map(catalog?.entries.map((entry) => [entry.id, entry]) ?? [])
     const listed = yield* listInstalls(config.root)
     const skills = []
     for (const one of listed) {

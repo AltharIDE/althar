@@ -28,7 +28,12 @@
     pushing the branch or to a pull request, replacing after a rewrite,
     pushing after a local merge). A protected path the task's own commits
     changed is held back unless both its class's write switch and
-    `pushProtected` are on; one doesn't follow from the other. The push is
+    `pushProtected` are on; one doesn't follow from the other. A protected
+    directory the repository already tracked where the task started, or on
+    its default branch (`.claude/skills`, `web/openspec`), is the
+    repository's own: what the task changes in it goes, so a repository
+    that versions its skills or specs is not held back, and only a protected
+    directory the task brought in is. The push is
     refused whole (`PushRefused`, `protected`), naming the files and the
     switches that would let them go.
   - **The task's own commits** are the ones no remote, no default branch

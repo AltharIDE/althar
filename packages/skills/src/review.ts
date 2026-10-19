@@ -293,7 +293,7 @@ const failedCheck = (id: string, cause: Cause.Cause<SkillError>): UpdateCheck =>
 
 /**
  * Checks each skill installed from GitHub for a newer commit on the ref it was installed from, only when the person
- * asks. A newer one is staged and returned as a card to review; the installed version stays active until approved.
+ * asks, that changed the skill's files. A newer one is staged and returned as a card to review; the installed version stays active until approved.
  * One that can't be checked says so on its own, and the rest are checked.
  */
 export const checkUpdates = (root: string, access: GitHubAccess): Effect.Effect<ReadonlyArray<UpdateCheck>, SkillStoreFailed> =>
@@ -307,7 +307,10 @@ export const checkUpdates = (root: string, access: GitHubAccess): Effect.Effect<
       const check = Effect.gen(function* () {
         const sha = yield* resolveRef(access, repo, ref)
         if (sha === install.sha) return { id: install.id, state: 'current', sha } as const
-        return { id: install.id, state: 'available', card: yield* stageFromGitHub(root, access, { repo, subpath, ref }) } as const
+        // A newer commit that left the skill's own files as they were is no update: there is nothing to review.
+        const card = yield* stageFromGitHub(root, access, { repo, subpath, ref })
+        if (card.treeHash === install.treeHash) return { id: install.id, state: 'current', sha } as const
+        return { id: install.id, state: 'available', card } as const
       })
       checks.push(
         yield* check.pipe(
@@ -375,7 +378,7 @@ export const uninstall = (root: string, id: string): Effect.Effect<Install | und
       const { all, was } = yield* installOf(root, id)
       if (was === undefined) return undefined
       if (was.source === 'althar-default') return yield* refused(`${id} comes with Althar; turn it off instead`)
-      yield* writeInstalls(root, { version: 1, installs: all.installs.filter((install) => install.id !== id) })
+      yield* writeInstalls(root, { ...all, installs: all.installs.filter((install) => install.id !== id) })
       return was
     }),
   )

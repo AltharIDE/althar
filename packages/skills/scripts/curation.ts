@@ -62,6 +62,10 @@ export const LEFT_OUT: Readonly<Record<string, { readonly from: UpstreamName; re
   'spec-driven-development': { from: 'agent-skills', why: 'same job as superpowers’ brainstorming, kept instead' },
   'interview-me': { from: 'agent-skills', why: 'same job as superpowers’ brainstorming, kept instead' },
   'using-superpowers': { from: 'superpowers', why: 'a second always-on router beside agent-skills’ using-agent-skills, kept instead' },
+  'using-git-worktrees': {
+    from: 'superpowers',
+    why: 'Althar gives every task its own worktree and branch; a lead making more leaves state Althar neither sees nor cleans up',
+  },
   'diagnosing-superpowers': {
     from: 'superpowers',
     why: 'only diagnoses sessions of the superpowers plugin, which Althar does not run, and files issues on its tracker',
@@ -187,7 +191,7 @@ export const CURATED: ReadonlyArray<Curated> = [
   {
     id: 'git-workflow-and-versioning',
     from: 'agent-skills',
-    note: 'Tags locally and leaves pushing to Althar; cleans up only worktrees it created.',
+    note: 'Tags locally and leaves pushing to Althar; leaves worktrees, branches and merging to Althar, and never resets hard.',
     edits: [
       {
         file: 'SKILL.md',
@@ -202,8 +206,15 @@ export const CURATED: ReadonlyArray<Curated> = [
       },
       {
         file: 'SKILL.md',
-        find: '# When done, merge and clean up',
-        replace: '# When done, clean up worktrees you created (never one Althar manages)',
+        find: '## Working with Worktrees\n\nFor parallel AI agent work, use git worktrees to run multiple branches simultaneously:\n\n```bash\n# Create a worktree for a feature branch\ngit worktree add ../project-feature-a feature/task-creation\ngit worktree add ../project-feature-b feature/user-settings\n\n# Each worktree is a separate directory with its own branch\n# Agents can work in parallel without interfering\nls ../\n  project/              \u2190 main branch\n  project-feature-a/    \u2190 task-creation branch\n  project-feature-b/    \u2190 user-settings branch\n\n# When done, merge and clean up\ngit worktree remove ../project-feature-a\n```\n\nBenefits:\n- Multiple agents can work on different features simultaneously\n- No branch switching needed (each directory has its own branch)\n- If one experiment fails, delete the worktree \u2014 nothing is lost\n- Changes are isolated until explicitly merged\n\n',
+        replace:
+          "## Working with Worktrees\n\nAlthar gives each task its own worktree and branch, so agents already work\nin parallel without interfering. Do not add worktrees, or switch this one's\nbranch: Althar merges the work and cleans up.\n\n",
+      },
+      {
+        file: 'SKILL.md',
+        find: 'If an agent goes off the rails, `git reset --hard HEAD` takes you back to the last successful state.',
+        replace:
+          'If an agent goes off the rails, `git restore` on the files it changed takes you back to the last successful commit; never `git reset --hard`, which also throws away work you meant to keep.',
       },
     ],
   },
@@ -297,7 +308,7 @@ export const CURATED: ReadonlyArray<Curated> = [
         file: 'SKILL.md',
         find: '    ├── Committing/branching? ─────────→ git-workflow-and-versioning\n',
         replace:
-          '    ├── Committing/branching? ─────────→ git-workflow-and-versioning\n    │   ├── Need an isolated workspace? → using-git-worktrees\n    │   └── Branch finished? ──────────→ finishing-a-development-branch\n',
+          '    ├── Committing/branching? ─────────→ git-workflow-and-versioning\n    │   └── Branch finished? ──────────→ finishing-a-development-branch\n',
       },
       {
         file: 'SKILL.md',
@@ -348,7 +359,7 @@ export const CURATED: ReadonlyArray<Curated> = [
         file: 'SKILL.md',
         find: '| Ship | git-workflow-and-versioning | Atomic commits, clean history |\n',
         replace:
-          '| Ship | git-workflow-and-versioning | Atomic commits, clean history |\n| Ship | using-git-worktrees | An isolated workspace for the work |\n| Ship | finishing-a-development-branch | Verify, then hand the branch off |\n',
+          '| Ship | git-workflow-and-versioning | Atomic commits, clean history |\n| Ship | finishing-a-development-branch | Verify, then hand the branch off |\n',
       },
     ],
   },
@@ -402,6 +413,11 @@ export const CURATED: ReadonlyArray<Curated> = [
     edits: [
       {
         file: 'SKILL.md',
+        find: 'Ensure the work happens in an isolated workspace: use\nsuperpowers:using-git-worktrees to create one or verify the existing one.\n',
+        replace: 'The work happens in the worktree Althar made for the task: never create\nanother, nor switch its branch.\n',
+      },
+      {
+        file: 'SKILL.md',
         find: '- Your harness has no subagent tool (see the per-platform references in\n  `../using-superpowers/references/`). Never fabricate a dispatch; run\n',
         replace: '- Your harness has no subagent tool. Never fabricate a dispatch; run\n',
       },
@@ -414,7 +430,7 @@ export const CURATED: ReadonlyArray<Curated> = [
   {
     id: 'finishing-a-development-branch',
     from: 'superpowers',
-    note: 'Ends in a hand-off: Althar pushes and opens the pull request. It never removes a worktree it did not create, such as Althar’s.',
+    note: 'Ends in a hand-off: Althar merges, pushes, opens the pull request and cleans up. It never leaves the task’s worktree, switches or deletes its branch, or touches the person’s own checkout.',
     edits: [
       {
         file: 'SKILL.md',
@@ -428,26 +444,58 @@ export const CURATED: ReadonlyArray<Curated> = [
       },
       {
         file: 'SKILL.md',
-        find: "### Option 2: Push and Create PR\n\n```bash\ngit push -u origin <feature-branch>\n# From a detached HEAD, name the new branch on the remote:\n# git push origin HEAD:refs/heads/<new-branch>\n```\n\nThen create the pull/merge request against <base-branch> with the forge's\ntooling — its CLI if one is available, or the creation URL most forges\nprint when you push — following the repo's PR template and conventions if\npresent, and report the URL to your human partner.\n",
-        replace:
-          '### Option 2: Hand off for a pull request\n\nDo not push or open the pull request yourself. Make sure all work is\ncommitted, then stop and report the branch, its commits and the test\nresult. Althar pushes and opens the pull request.\n',
+        find: '1. Merge back to <base-branch> locally',
+        replace: '1. Hand off to merge into <base-branch> (Althar merges it and cleans up)',
       },
       {
         file: 'SKILL.md',
-        find: '**If `WORKTREE_PATH` is under `.worktrees/` or `worktrees/`:** Superpowers\ncreated this worktree — we own cleanup:',
-        replace:
-          '**If you created this worktree yourself, under `<main repo root>/.worktrees/` or\n`<main repo root>/worktrees/` (never one Althar created):** you own cleanup:',
-      },
-      { file: 'SKILL.md', find: '| 2. Create PR | - | yes | yes | - |', replace: '| 2. Hand off for PR | - | - | yes | - |' },
-      {
-        file: 'SKILL.md',
-        find: '| "This other worktree looks stale — I\'ll clean it too" | Clean up only worktrees under `.worktrees/` or `worktrees/`. Everything else belongs to the host. |',
-        replace:
-          '| "This other worktree looks stale — I\'ll clean it too" | Clean up only worktrees you created under the main repository root. Everything else belongs to the host. |',
+        find: '# Capture now, while still inside the workspace \u2014 Step 5 changes directory\n# before cleanup (Step 6) needs this value\n',
+        replace: '',
       },
       {
         file: 'SKILL.md',
-        find: '| "The push was rejected — force-push will fix it" | A rejected push means the remote moved. Investigate; force-push only on your human partner\'s explicit request. |\n',
+        find: '### Option 1: Merge Locally\n\n```bash\n# Get main repo root for CWD safety\nMAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)\ncd "$MAIN_ROOT"\n\n# Merge first \u2014 verify success before removing anything\ngit checkout <base-branch>\ngit pull\ngit merge <feature-branch>\n\n# Verify tests on merged result\n<test command>\n```\n\nIf tests fail on the merged result: stop, leave the worktree and branch in\nplace, and investigate \u2014 nothing has been pushed, so the merge is local\nand recoverable.\n\nOnce the merged result is green: clean up the worktree (Step 6), then\ndelete the branch:\n\n```bash\ngit branch -d <feature-branch>\n```\n\n',
+        replace:
+          "### Option 1: Hand off to merge\n\nDo not merge, switch branches or leave this worktree yourself, and never\n`cd` into the main checkout: Althar owns the task's worktree and branch,\nmerges the work into <base-branch> and cleans up after. Make sure all work\nis committed, then stop and report the branch, its commits and the test\nresult, saying your human partner chose to merge it.\n\n",
+      },
+      {
+        file: 'SKILL.md',
+        find: "### Option 2: Push and Create PR\n\n```bash\ngit push -u origin <feature-branch>\n# From a detached HEAD, name the new branch on the remote:\n# git push origin HEAD:refs/heads/<new-branch>\n```\n\nThen create the pull/merge request against <base-branch> with the forge's\ntooling \u2014 its CLI if one is available, or the creation URL most forges\nprint when you push \u2014 following the repo's PR template and conventions if\npresent, and report the URL to your human partner.\n\nKeep the worktree \u2014 your human partner iterates on PR feedback there.\n\n",
+        replace:
+          '### Option 2: Hand off for a pull request\n\nDo not push or open the pull request yourself. Make sure all work is\ncommitted, then stop and report the branch, its commits and the test\nresult. Althar pushes and opens the pull request.\n\nKeep the worktree \u2014 your human partner iterates on PR feedback there.\n\n',
+      },
+      {
+        file: 'SKILL.md',
+        find: 'Wait for that exact confirmation. When it arrives:\n\n```bash\nMAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)\ncd "$MAIN_ROOT"\n```\n\nThen clean up the worktree (Step 6) and force-delete the branch:\n\n```bash\ngit branch -D <feature-branch>\n```\n\n',
+        replace:
+          "Wait for that exact confirmation. When it arrives, delete nothing\nyourself: report that your human partner chose to discard the work. Althar\nremoves the task's worktree and branch when they abandon the task.\n\n",
+      },
+      {
+        file: 'SKILL.md',
+        find: '## Step 6: Cleanup Workspace\n\n**Runs for Option 1 and confirmed discards.** Options 2 and 3 always\npreserve the worktree. Both callers have already changed directory to the\nmain repo root \u2014 worktree removal must run from outside the worktree \u2014\nand use the `GIT_DIR`/`GIT_COMMON`/`WORKTREE_PATH` values captured in\nStep 2, from before that directory change.\n\n**If `GIT_DIR == GIT_COMMON`:** Normal repo, no worktree to clean up. Done.\n\n**If `WORKTREE_PATH` is under `.worktrees/` or `worktrees/`:** Superpowers\ncreated this worktree \u2014 we own cleanup:\n\n```bash\ngit worktree remove "$WORKTREE_PATH"\ngit worktree prune  # Self-healing: clean up any stale registrations\n```\n\n**If removal is refused** (`contains modified or untracked files`): the\nworktree holds files that exist nowhere else \u2014 uncommitted plans, notes,\nor scratch work. Never `--force` on your own initiative. Show your human\npartner what is at stake and ask:\n\n```bash\ngit -C "$WORKTREE_PATH" status --porcelain -uall\n```\n\n```\nWorktree removal refused \u2014 these files were never committed:\n\n<file list>\n\n1. Commit them to <branch> before cleanup\n2. Move them into <main repo root>\n3. Delete them (unrecoverable)\n\nWhich?\n```\n\nCarry out the choice, then remove the worktree.\n\n**Otherwise:** The host environment owns this workspace \u2014 leave it in\nplace. If your platform provides a workspace-exit tool, use it.\n\n',
+        replace:
+          '## Step 6: Cleanup Workspace\n\nNever remove the worktree you are working in, or switch or delete its\nbranch: Althar made them, and cleans them up once the work is merged or\ndiscarded.\n\nIf you created another worktree yourself for this work, remove it once its\nwork is committed here: `git worktree remove <path>`. If removal is refused\n(`contains modified or untracked files`), those files exist nowhere else:\nnever `--force` on your own initiative. Show your human partner\n`git -C <path> status --porcelain -uall` and ask.\n\n',
+      },
+      {
+        file: 'SKILL.md',
+        find: '| 1. Merge locally | yes | - | - | yes |\n| 2. Create PR | - | yes | yes | - |\n| 3. Keep as-is | - | - | yes | - |\n| Discard (explicit request only) | - | - | - | yes (force) |',
+        replace:
+          '| 1. Hand off to merge | - | - | yes | - |\n| 2. Hand off for PR | - | - | yes | - |\n| 3. Keep as-is | - | - | yes | - |\n| Discard (explicit request only) | - | - | yes | - |',
+      },
+      {
+        file: 'SKILL.md',
+        find: '| "This other worktree looks stale \u2014 I\'ll clean it too" | Clean up only worktrees under `.worktrees/` or `worktrees/`. Everything else belongs to the host. |',
+        replace:
+          '| "This other worktree looks stale \u2014 I\'ll clean it too" | Clean up only worktrees you created yourself. Althar\'s belong to Althar. |\n| "Merging it myself is quicker" | Althar owns the task\'s worktree and branch. Merging or switching branches yourself fights it, and the main checkout is your human partner\'s own. |',
+      },
+      {
+        file: 'SKILL.md',
+        find: '| "The merged-result failure is probably flaky" | A failing merged result stops everything. Branch and worktree stay put while you investigate. |\n',
+        replace: '',
+      },
+      {
+        file: 'SKILL.md',
+        find: '| "The push was rejected \u2014 force-push will fix it" | A rejected push means the remote moved. Investigate; force-push only on your human partner\'s explicit request. |\n',
         replace: '',
       },
     ],
@@ -470,7 +518,19 @@ export const CURATED: ReadonlyArray<Curated> = [
     needs: ['subagents'],
     note: 'Kept beside code-review-and-quality: it dispatches a fresh reviewer, which needs subagents.',
   },
-  { id: 'subagent-driven-development', from: 'superpowers', needs: ['subagents'], note: 'Needs subagents.' },
+  {
+    id: 'subagent-driven-development',
+    from: 'superpowers',
+    needs: ['subagents'],
+    note: 'Needs subagents. Works in the worktree Althar made for the task.',
+    edits: [
+      {
+        file: 'SKILL.md',
+        find: 'Ensure the work happens in an isolated workspace: use\nsuperpowers:using-git-worktrees to create one or verify the existing one.\n',
+        replace: 'The work happens in the worktree Althar made for the task: never create\nanother, nor switch its branch.\n',
+      },
+    ],
+  },
   {
     id: 'systematic-debugging',
     from: 'superpowers',
@@ -478,29 +538,17 @@ export const CURATED: ReadonlyArray<Curated> = [
     drop: ['CREATION-LOG.md', 'test-academic.md', 'test-pressure-1.md', 'test-pressure-2.md', 'test-pressure-3.md'],
   },
   { id: 'test-driven-development', from: 'superpowers', note: 'Kept over agent-skills’ skill of the same name.' },
-  {
-    id: 'using-git-worktrees',
-    from: 'superpowers',
-    note: 'Ignores its folder in `.git/info/exclude` instead of committing a `.gitignore` change.',
-    edits: [
-      {
-        file: 'SKILL.md',
-        find: '**If NOT ignored:** Add to .gitignore, commit the change, then proceed.',
-        replace: '**If NOT ignored:** Add it to `.git/info/exclude` (commit nothing), then proceed.',
-      },
-      {
-        file: 'SKILL.md',
-        find: '| Directory not ignored | Add to .gitignore + commit |',
-        replace: '| Directory not ignored | Add to .git/info/exclude |',
-      },
-    ],
-  },
   { id: 'verification-before-completion', from: 'superpowers', note: 'As upstream.' },
   {
     id: 'writing-plans',
     from: 'superpowers',
     note: 'Kept over planning-and-task-breakdown. Its plans are not committed.',
     edits: [
+      {
+        file: 'SKILL.md',
+        find: '**Context:** If working in an isolated worktree, it should have been created via the `superpowers:using-git-worktrees` skill at execution time.',
+        replace: '**Context:** The work happens in the worktree Althar made for the task.',
+      },
       {
         file: 'SKILL.md',
         find: '**Save plans to:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`',
