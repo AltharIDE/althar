@@ -875,6 +875,25 @@ describe('what keeps the places a task waits for', () => {
   })
 })
 
+describe('a task waiting in its project’s line', () => {
+  it('can go to the front of the line from its own view, when it is 2nd or later', async () => {
+    const thread = snapshot()
+    const holders = [{ taskId: 't3', title: 'Fix the login', threadId: 'th3', kept: false, running: [] }]
+    let place = 2
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, place, queued: { busy: 1, atOnce: 1, holders } } })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Move to the front of the line' }))
+    expect(client.moveInLine).toHaveBeenCalledWith(thread.task.id, 0)
+    // First in line, it has nowhere further to go.
+    place = 1
+    act(() => emit(changed('task', 't1')))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Move to the front of the line' })).toBeNull())
+    expect(screen.getByText('Held by Fix the login')).toBeTruthy()
+  })
+})
+
 describe('a waiting task’s open view', () => {
   it('reads who holds the places again when its task changes: a server that went idle leaves the list, a task that took its place joins it', async () => {
     const server = { id: 'bg-1', command: 'bun dev', url: null, startedAt: '2026-10-10T09:00:00.000Z', ended: null }

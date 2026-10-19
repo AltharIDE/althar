@@ -32,7 +32,7 @@ import { timestamp } from './records'
 import { SignIns } from './SignIns'
 
 /*
- * What each account's plan has left (docs/plans/plan-usage.md, ADR-049), for
+ * What each account's plan has left (docs/plans/plan-usage.md, ADR-050), for
  * the usage tab and the warnings. Where the numbers come from differs by
  * agent and moves to ACP as the adapters speak it:
  *
@@ -268,7 +268,7 @@ export class PlanUsage extends Context.Service<
               return
             }
             if (definition.id === 'opencode') {
-              // The usage read opens the agent's credential file in this process. Where the agent lives out on the device (a Flatpak's host) the helper ADR-049 asks for is not built, so a plan's endpoint is refused there rather than read from the wrong place.
+              // The usage read opens the agent's credential file in this process. Where the agent lives out on the device (a Flatpak's host) the helper ADR-050 asks for is not built, so a plan's endpoint is refused there rather than read from the wrong place.
               const onDevice =
                 definition.signIn.credentials?.(adapterNode()).onDevice !== undefined ||
                 definition.launch(adapterNode()).onDevice !== undefined
