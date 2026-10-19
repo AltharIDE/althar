@@ -33,7 +33,7 @@ export function ReportView({ model }: { readonly model: ReportModel }) {
       {...(state.error === null ? {} : { error: state.error })}
       {...(done === null ? {} : { done: done.kind === 'sent' ? text.sent : text.saved(done.file) })}
       // The shortcut as this system writes it.
-      text={{ sendKbd: platform === 'darwin' ? '⌘↩' : 'Ctrl+↩' }}
+      text={{ sendKbd: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
       onSend={(draft) => void model.send(draft)}
       onClose={model.close}
     />

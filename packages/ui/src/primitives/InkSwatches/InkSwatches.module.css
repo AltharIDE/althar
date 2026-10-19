@@ -28,6 +28,10 @@
     0 0 0 2px var(--n-1),
     0 0 0 3.5px var(--t-1);
 }
+/* the ring goes round the chosen ink's own, never through it */
+.swatch:focus-visible {
+  outline-offset: 4px;
+}
 @media (prefers-reduced-motion: reduce) {
   .swatch {
     transition: none;

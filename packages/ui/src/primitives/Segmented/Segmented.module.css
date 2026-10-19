@@ -37,7 +37,6 @@
 }
 .option:disabled {
   color: var(--t-4);
-  opacity: 0.6;
   cursor: default;
 }
 /* something new there, or something there waits on you */

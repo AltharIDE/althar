@@ -13,7 +13,7 @@ export interface SnippetText {
   copy: Partial<CopyButtonText>
 }
 
-export const snippetText: SnippetText = { showAll: 'Show all', less: 'Less', copy: { copy: 'Copy command' } }
+export const snippetText: SnippetText = { showAll: 'Show all', less: 'Show less', copy: { copy: 'Copy command' } }
 
 export type SnippetProps = RootProps<
   'div',

@@ -137,7 +137,7 @@ export function TaskCard({
             <span className={s.sep} />
             <span className={s.branch}>
               <Icon name="branch" size={10} />
-              {branch}
+              <span className={s.branchName}>{branch}</span>
             </span>
           </>
         )}
