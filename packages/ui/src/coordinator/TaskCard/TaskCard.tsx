@@ -123,15 +123,16 @@ export function TaskCard({
         <StepTrack steps={trackOf(steps, at, seen, status === TaskStatus.Done)} status={status} labels fresh={fresh} className={s.track} />
       )}
       <div className={s.foot}>
-        <div className={s.facts}>
+        <div className={s.facts} data-crowd={(from ? 1 : 0) + (pr || meta ? 1 : 0)}>
           <span className={s.lead}>
-            {question ? t.answeredBy : t.lead} <Model model={lead} short className={s.leadModel} />
+            <span className={s.leadLabel}>{question ? t.answeredBy : t.lead}</span>
+            <Model model={lead} short className={s.leadModel} />
             {effort !== undefined && <span className={s.effort}>{effort}</span>}
           </span>
           {meta && <span className={s.pr}>{meta}</span>}
           {from && <IssueRef {...from} />}
           {pr && (
-            <span className={s.pr}>
+            <span className={s.pr} title={pr}>
               <Icon name="pr" size={11} />
               <span className={s.prName}>{pr}</span>
             </span>

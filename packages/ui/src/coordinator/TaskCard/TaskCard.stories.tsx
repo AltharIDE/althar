@@ -183,6 +183,21 @@ export const Widths: Story = {
   },
 }
 
+/** The fullest foot (lead and effort, issue, pull request) from the narrowest chat to the widest: one row at each, the lead giving way first. */
+export const FootAtWidths: Story = {
+  parameters: { layout: 'padded' },
+  decorators: [],
+  render: (args) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {[320, 360, 420, 480, 560, 720].map((w) => (
+        <div key={w} style={{ width: w }}>
+          <TaskCard {...args} effort="High" from={T432.from} pr="Draft PR 1187" />
+        </div>
+      ))}
+    </div>
+  ),
+}
+
 export const TaskOverTime: Story = { render: () => <OverTime /> }
 
 export const AllStates: Story = {
