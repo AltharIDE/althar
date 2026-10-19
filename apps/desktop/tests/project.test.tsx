@@ -258,7 +258,9 @@ describe('the Talk room', () => {
     expect(screen.getByText('Implementing')).toBeTruthy()
     expect(screen.getByText('Stopped')).toBeTruthy()
     expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
-    expect(screen.getByText(new RegExp(`waits: Claude Code is out of usage until ${clock('2026-10-03T15:40:00.000Z')}$`))).toBeTruthy()
+    expect(screen.getByText(`Claude Code is out of usage until ${clock('2026-10-03T15:40:00.000Z')}`)).toBeTruthy()
+    // Held for the reset, it is paused, as on the board, not running.
+    expect(screen.getByText('Paused')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
     expect(client.startPlan).toHaveBeenCalledWith('pln5')
   })

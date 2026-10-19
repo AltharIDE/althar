@@ -179,7 +179,15 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Ready, but its lead couldn't resolve a conflict: it needs the person, and says why.
   const handedBack = card.phase === 'ready' ? (card.handedBack ?? null) : null
   // Waiting for a free agent, it says so, rather than that it runs.
-  const status = card.queued !== null ? TaskStatus.Queued : handedBack === null ? STATUS[card.phase] : TaskStatus.Yours
+  // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
+  const status =
+    card.queued !== null
+      ? TaskStatus.Queued
+      : handedBack !== null
+        ? TaskStatus.Yours
+        : card.waits !== null && card.phase === 'running'
+          ? TaskStatus.Paused
+          : STATUS[card.phase]
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
   const now =
     handedBack !== null
@@ -189,7 +197,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
         : card.queued !== null
           ? queuedWords(card.queued)
           : card.waits !== null
-            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), card.step)
+            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
             : card.step === null
               ? undefined
               : text.now[card.step]

@@ -238,7 +238,7 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
         ? {
             status: TaskStatus.Paused,
             word: text.status[TaskStatus.Paused],
-            why: waitsWords(name(work.waits.agentId), clock(work.waits.until), work.step),
+            why: waitsWords(name(work.waits.agentId), clock(work.waits.until)),
           }
         : work.phase === 'stopped'
           ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped], why: text.stopped }
