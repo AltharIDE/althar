@@ -377,6 +377,13 @@ export interface Client {
   readonly getRepositoryScripts: (projectId: string) => Promise<ReadonlyArray<RepositoryScript>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
+  /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
+  readonly handOverHeld: (input: {
+    readonly taskId: string
+    readonly agentId: string
+    readonly accountId?: string
+    readonly model?: string
+  }) => Promise<void>
   /**
    * Calls `listener` with each change after `since` (or from now) until the
    * returned function is called; and `onWatching` each time it starts
@@ -603,6 +610,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
+    handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.

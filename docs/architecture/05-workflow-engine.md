@@ -621,7 +621,13 @@ Under the default project rule, the paused work moves on, in this order:
 
 Either way the new session takes the work over from a brief in the same
 workspace (03, Switching model or agent), and the thread shows one line per
-move. Under the wait rule the work is held until the reset. Under the ask
+move. Under the wait rule, or where nothing else was free to move it to, the
+work is held until the reset, and the thread says which it was. A held step
+keeps who could take it over, so the task offers them while it waits, without
+asking: the person can move it to one (as answering the call below would; a
+lead's step waits its turn for a place among the agents at work, as work
+under way), keep waiting, or skip a review. Moving it ends the hold, so the
+reset brings nothing back. Under the ask
 rule, or when the agent didn't say when it resets, the work needs the person:
 an attention request names whose limit it is, when it resets, and each
 account that could take the work over, with the model it would run. The

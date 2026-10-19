@@ -1169,6 +1169,33 @@ export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'leaveOut'
 export type TaskAction = typeof TaskAction.Type
 
 /**
+ * An account that could take over a step a usage limit stopped: the agent,
+ * the account, and the model it would run, by the agent's id for it (null
+ * for the agent's own). Each of the project's accounts but the one out,
+ * whether out of usage or signed in, as they stood: the window reads which
+ * are free now.
+ */
+export const LimitChoice = Schema.Struct({ agentId: Schema.String, accountId: Schema.String, model: Schema.NullOr(Schema.String) })
+export type LimitChoice = typeof LimitChoice.Type
+
+/**
+ * A step held until an agent's usage limit resets: which agent and account
+ * ran out, and when it is back; why it waits rather than moving on (the
+ * project waits for resets, it moves on but no other model was free, or the
+ * person said to wait); and who could take it over now, as they stood when it
+ * was held: the window reads which are free. Held before Althar kept those,
+ * it says only who and until when.
+ */
+export const HeldForLimit = Schema.Struct({
+  agentId: Schema.String,
+  until: Schema.String,
+  accountId: Schema.optional(Schema.NullOr(Schema.String)),
+  why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
+  choices: Schema.optional(Schema.Array(LimitChoice)),
+})
+export type HeldForLimit = typeof HeldForLimit.Type
+
+/**
  * A task as its card shows it, in the coordinator's thread and on the board:
  * where it stands, its plan, the issue it came from, its pull request, the
  * step it is on, what its lead last reported, who leads it.
@@ -1228,7 +1255,7 @@ export const TaskCard = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
-  waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+  waits: Schema.NullOr(HeldForLimit),
   /**
    * Ready, but its lead couldn't resolve the conflict its branch has with its
    * default branch, or fix the checks that failed on the merge Althar pushed,
@@ -1579,16 +1606,6 @@ export const SessionSummary = Schema.Struct({
 })
 export type SessionSummary = typeof SessionSummary.Type
 
-/**
- * An account that could take over a step a usage limit stopped: the agent,
- * the account, and the model it would run, by the agent's id for it (null
- * for the agent's own). Each of the project's accounts but the one out,
- * whether out of usage or signed in, as they stood: the window reads which
- * are free now.
- */
-export const LimitChoice = Schema.Struct({ agentId: Schema.String, accountId: Schema.String, model: Schema.NullOr(Schema.String) })
-export type LimitChoice = typeof LimitChoice.Type
-
 /** What a step a usage limit stopped asks with: whose account, when it resets (null where it didn't say), and who could take it over. */
 export const LimitCall = Schema.Struct({
   accountId: Schema.NullOr(Schema.String),
@@ -1789,7 +1806,7 @@ export const ThreadSnapshot = Schema.Struct({
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
-    waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+    waits: Schema.NullOr(HeldForLimit),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
     /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
@@ -2468,6 +2485,16 @@ export const Api = RpcGroup.make(
         Schema.Struct({ kind: Schema.Literal('abandon') }),
       ]),
     },
+    Schema.Void,
+  ),
+  /**
+   * Hands a step held for a usage limit to another agent, on the account and
+   * model the person picked, rather than waiting for the reset: as answering
+   * its call would. A lead's step without a free place waits its turn in Up next.
+   */
+  command(
+    'HandOverHeld',
+    { taskId: Schema.String, agentId: Schema.String, accountId: Schema.optional(Schema.String), model: Schema.optional(Schema.String) },
     Schema.Void,
   ),
   /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
