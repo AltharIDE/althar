@@ -127,6 +127,9 @@ Zen sign-in under the API-key row and skip its source. So:
 
 - The registry declares a usage source per (agent, provider) pair, and a
   contract test fails for a subscription pair with none.
+- An agent that does not say how it is paid (most of those that joined over
+  ACP, ADR-050) still declares its plan pair, classified `none`, with a spike
+  for its source, so the test lists the gap rather than skipping the agent.
 - Adding an account whose pair has no source is refused with the reason, and
   an account whose source fails shows a fault on the usage tab and in the
   badge, not an empty row.

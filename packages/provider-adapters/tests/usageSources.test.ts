@@ -49,6 +49,8 @@ describe('every pair has a source', () => {
   it('classifies a pair by something the agent has: a sign-in status, or OpenCode’s auth list', () => {
     for (const pair of usagePairs) {
       if (pair.classification === 'status') expect(agents[pair.agent].signIn.paidBy, `${pair.agent} reports how it is paid`).toBeDefined()
+      if (pair.classification === 'none')
+        expect(agents[pair.agent].signIn.paidBy, `${pair.agent} does not say how it is paid`).toBeUndefined()
     }
     // OpenCode’s status is its auth list, read per provider, not the whole account as a key.
     expect(usagePairs.filter((p) => p.agent === 'opencode').every((p) => p.classification === 'auth_list')).toBe(true)
@@ -58,7 +60,18 @@ describe('every pair has a source', () => {
     const spikes = usagePairs
       .filter((pair) => pair.pays === 'plan' && pair.sources.every((source) => source.kind === 'spike'))
       .map((pair) => `${pair.agent}/${pair.provider}`)
-    expect(spikes.sort()).toEqual(['opencode/github-copilot', 'opencode/google', 'opencode/opencode'])
+    expect(spikes.sort()).toEqual([
+      'antigravity/google',
+      'copilot/github',
+      'grok/xai',
+      'junie/jetbrains',
+      'kimi/moonshot',
+      'mistral-vibe/mistral',
+      'opencode/github-copilot',
+      'opencode/google',
+      'opencode/opencode',
+      'qwen-code/qwen',
+    ])
   })
 
   it('has no Claude endpoint', () => {

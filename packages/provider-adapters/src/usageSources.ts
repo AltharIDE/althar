@@ -54,6 +54,8 @@ export type Classification =
   | 'status'
   /** `opencode auth list`'s output, one entry per provider (`openCodeCredentials`). */
   | 'auth_list'
+  /** Nothing: the agent does not say how it is paid, so Althar cannot tell a plan from a key. */
+  | 'none'
 
 export interface UsagePair {
   readonly agent: AgentId
@@ -158,6 +160,56 @@ export const usagePairs: ReadonlyArray<UsagePair> = deepFreeze([
     sources: [{ kind: 'spike', note: 'Gemini: retrieveUserQuota; Google no longer serves individual OAuth to Gemini CLI since June 2026' }],
   },
   { agent: 'opencode', provider: 'api-key', pays: 'key', classification: 'auth_list', sources: [] },
+  // The agents that joined over ACP (ADR-050): each one's plan is a gap until a spike finds its source.
+  {
+    agent: 'copilot',
+    provider: 'github',
+    pays: 'plan',
+    classification: 'none',
+    sources: [{ kind: 'spike', note: 'GitHub Copilot CLI: no usage source looked for yet' }],
+  },
+  {
+    agent: 'junie',
+    provider: 'jetbrains',
+    pays: 'plan',
+    classification: 'none',
+    sources: [{ kind: 'spike', note: 'Junie: no usage source looked for yet' }],
+  },
+  {
+    agent: 'grok',
+    provider: 'xai',
+    pays: 'plan',
+    classification: 'status',
+    sources: [{ kind: 'spike', note: 'Grok Build: no usage source looked for yet' }],
+  },
+  {
+    agent: 'kimi',
+    provider: 'moonshot',
+    pays: 'plan',
+    classification: 'none',
+    sources: [{ kind: 'spike', note: 'Kimi Code: no usage source looked for yet' }],
+  },
+  {
+    agent: 'mistral-vibe',
+    provider: 'mistral',
+    pays: 'plan',
+    classification: 'none',
+    sources: [{ kind: 'spike', note: 'Mistral Vibe: no usage source looked for yet' }],
+  },
+  {
+    agent: 'qwen-code',
+    provider: 'qwen',
+    pays: 'plan',
+    classification: 'none',
+    sources: [{ kind: 'spike', note: 'Qwen Code: no usage source looked for yet' }],
+  },
+  {
+    agent: 'antigravity',
+    provider: 'google',
+    pays: 'plan',
+    classification: 'none',
+    sources: [{ kind: 'spike', note: 'Google Antigravity: no usage source looked for yet' }],
+  },
 ])
 
 export const endpointSources = (): ReadonlyArray<EndpointSource> =>
