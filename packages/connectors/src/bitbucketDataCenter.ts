@@ -347,6 +347,8 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     changedFiles: null,
     updatedAt: iso(answer.updatedDate),
     ...conflictsOf(answer.properties?.mergeResult),
+    // Where its branch is: the repository's own, or a fork's, by its project and slug.
+    headRepository: within(repository, answer.fromRef) ? null : [answer.fromRef.repository.project.key, answer.fromRef.repository.slug],
   })
 
   /** A pull request as a list gives it: where its reviewers left it, and no word of its checks, which a list doesn't say. */

@@ -702,6 +702,24 @@ export const ChangeSummary = Schema.Struct({
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
+/**
+ * What attaching a pull request to a task did (ADR-052): `attached`, the
+ * task follows it now, its branch `started` from its head or not, `kept` of
+ * its own commits on top; or `start`, where its branch isn't based on that
+ * head, what starting from it would keep (`own`), for the person to say.
+ */
+export const Attachment = Schema.Struct({
+  kind: Schema.Literals(['attached', 'start']),
+  /** As the host says it: PR #185. */
+  name: Schema.String,
+  /** Its branch on its host, which the task's work goes to. */
+  source: Schema.String,
+  started: Schema.Boolean,
+  kept: Schema.Number,
+  own: Schema.Number,
+})
+export type Attachment = typeof Attachment.Type
+
 /** What a task does when its steps are done: open a draft pull request, open one for review, or push its branch only. */
 export const TaskEnd = Schema.Literals(['draft', 'ready', 'none'])
 export type TaskEnd = typeof TaskEnd.Type
@@ -2745,6 +2763,14 @@ export const Api = RpcGroup.make(
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */
   command('StopListening', { taskId: Schema.String, url: Schema.String }, Schema.Void),
+  /**
+   * Attaches the task to an open pull request it didn't open, by its link or
+   * number, and follows it from then on (ADR-052). Where the task's branch
+   * isn't based on its head, nothing changes, and it answers `start`, with
+   * how many commits of its own starting from the head keeps; `start` says
+   * to start it there.
+   */
+  command('AttachPullRequest', { taskId: Schema.String, pullRequest: Schema.String, start: Schema.optional(Schema.Boolean) }, Attachment),
   /** Stops a command the session on a thread left running; it goes from the list. */
   command('StopBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
   /** Clears one that ended by itself from the list. */

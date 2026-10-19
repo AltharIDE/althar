@@ -254,6 +254,17 @@ const changeOf = (repository: Repository, pull: PullAnswer, size: Size | null = 
   deletions: size?.deletions ?? null,
   changedFiles: size?.changedFiles ?? null,
   updatedAt: iso(pull.updated_on),
+  // Where its branch is: the repository's own, a fork's, or a fork that is gone.
+  ...(pull.source.repository === undefined
+    ? {}
+    : {
+        headRepository:
+          pull.source.repository === null
+            ? []
+            : pull.source.repository.full_name.toLowerCase() === repository.path.join('/').toLowerCase()
+              ? null
+              : pull.source.repository.full_name.split('/'),
+      }),
 })
 
 /** Bitbucket's states for each a list can ask for: a declined pull request, or one superseded by another, is closed. */

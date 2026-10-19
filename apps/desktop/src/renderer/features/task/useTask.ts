@@ -6,6 +6,7 @@ import {
   ApiError,
   type AgentStatus,
   type AlwaysScope,
+  type Attachment,
   type FieldAnswer,
   PAGE,
   type ReviewVerdict,
@@ -123,6 +124,12 @@ export interface TaskModel {
   readonly keep: () => Promise<void>
   /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
   readonly rename: (title: string) => Promise<void>
+  /**
+   * Attaches it to an open pull request it didn't open, by its link or
+   * number; `start` starts its branch from that one's head. What happened,
+   * or null where it didn't go through and the error says why.
+   */
+  readonly attach: (pullRequest: string, start: boolean) => Promise<Attachment | null>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
@@ -542,6 +549,13 @@ export const useTask = (threadId: string): TaskModel => {
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
     rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
+    attach: async (pullRequest, start) => {
+      let done = null as Attachment | null
+      await onTask(async (taskId) => {
+        done = await client.attachPullRequest(taskId, pullRequest, start)
+      })
+      return done
+    },
     startPlan: (planId) => act(() => client.startPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
