@@ -173,7 +173,7 @@ const fail = (agentId: string, summary: string, reason: unknown = summary) =>
 
 const run = (command: string, args: ReadonlyArray<string>, timeout = 60_000) =>
   Effect.callback<string, Error>((resume) => {
-    execFile(command, [...args], { timeout }, (error, stdout, stderr) =>
+    execFile(command, [...args], { timeout, windowsHide: true }, (error, stdout, stderr) =>
       resume(error === null ? Effect.succeed(stdout) : Effect.fail(new Error(`${error.message}\n${stderr}`))),
     )
   })

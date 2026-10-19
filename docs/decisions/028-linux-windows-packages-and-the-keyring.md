@@ -28,6 +28,11 @@
     runs from a version tag: the tag must be `v<apps/desktop's version>`. The
     release workflow builds its Linux artifacts once and adds them to the
     shared draft release; the pull-request workflow checks package creation.
+  - **Windows gets the same chrome and an NSIS installer** (DEV-78). The
+    frameless window, its buttons and the trimmed menu are the same off any
+    Mac. `bun run package` on Windows makes a per-user installer for x64,
+    with latest.yml for its updates, unsigned for now (ADR-024); its keyring
+    is Windows' own (DPAPI), which Electron always finds.
   - **The keyring, refused loudly, and asked for where it is hidden.**
     `basic_text` — Electron's plain-text fallback — is refused with an
     allow-list of real backends (`gnome_libsecret`, `kwallet*`), so anything

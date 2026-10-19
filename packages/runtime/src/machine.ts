@@ -156,7 +156,7 @@ export const usedBy = (
 const output = (command: string, args: ReadonlyArray<string>): Effect.Effect<string | null> =>
   Effect.callback<string | null>((resume) => {
     try {
-      execFile(command, [...args], { timeout: 5_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+      execFile(command, [...args], { timeout: 5_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
         resume(Effect.succeed(error === null ? stdout : null))
       })
     } catch {
