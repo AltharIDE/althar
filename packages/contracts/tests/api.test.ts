@@ -467,6 +467,8 @@ describe('the API', () => {
               ResumeTask: () => Effect.void,
               LeaveOutCommits: () => Effect.void,
               AbandonTask: () => Effect.void,
+              MarkTaskDone: () => Effect.void,
+              KeepTaskForLater: () => Effect.void,
               RenameTask: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.

@@ -18,8 +18,10 @@ import { States, statesOn } from '../../storybook/States'
 import { AcceptCard } from '../AcceptCard/AcceptCard'
 import { BoardCard } from '../BoardCard/BoardCard'
 import { CallCard } from '../CallCard/CallCard'
+import { KeptRow } from '../KeptRow/KeptRow'
 import { NextRow } from '../NextRow/NextRow'
 import { SettledRow } from '../SettledRow/SettledRow'
+import { SettleWays } from '../SettleWays/SettleWays'
 import { WorkCard } from '../WorkCard/WorkCard'
 import { Board, BoardColumn, type BoardFolds, BoardList, boardText } from './Board'
 
@@ -135,6 +137,77 @@ function Kinds() {
   )
 }
 
+/*
+ * Finished tasks that aren't changes, waiting on the person: Done and Keep for later in each card's corner, shown on
+ * hover; what was kept named beside Settled in its head, and shown in its place once pressed.
+ */
+function Finishing() {
+  const [shelf, setShelf] = useState('settled')
+  return (
+    <Board label="Meridian’s work">
+      <BoardColumn lane={BoardLane.Next} count={0} />
+      <BoardColumn lane={BoardLane.Running} count={1}>
+        <BoardCard {...PLAIN_WORKING} onOpen={() => undefined} />
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Yours} count={2}>
+        <BoardCard {...PLAIN_PICTURES} corner={<SettleWays onDone={() => undefined} onKeep={() => undefined} />} onOpen={() => undefined} />
+        <BoardCard {...REVIEW_DRAFTED} corner={<SettleWays onKeep={() => undefined} />} onOpen={() => undefined} />
+      </BoardColumn>
+      <BoardColumn
+        lane={BoardLane.Settled}
+        count={2}
+        shelves={{
+          label: 'Settled or kept for later',
+          value: shelf,
+          onChange: setShelf,
+          options: [
+            { value: 'settled', label: 'Settled', count: 2 },
+            { value: 'kept', label: 'Kept', count: 2, icon: 'pin' },
+          ],
+        }}
+      >
+        {shelf === 'kept' ? (
+          <BoardList>
+            <KeptRow
+              title="Prototype: link cards that belong to their messages"
+              at="kept 2d ago"
+              onDone={() => undefined}
+              onOpen={() => undefined}
+            />
+            <KeptRow
+              title="Spike: can Althar read Codex’s rate limits"
+              at="kept 5h ago"
+              onDone={() => undefined}
+              onOpen={() => undefined}
+            />
+          </BoardList>
+        ) : (
+          <BoardList>
+            <SettledRow
+              outcome={Outcome.Done}
+              task=""
+              text={UNNAMED}
+              title="Release 0.3 from this Mac"
+              at="2d ago"
+              onOpen={() => undefined}
+            />
+            <SettledRow
+              outcome={Outcome.Merged}
+              task=""
+              text={UNNAMED}
+              kind="Change"
+              title="Let a long dictation scroll in the composer"
+              meta="PR #1184 merged"
+              at="2h ago"
+              onOpen={() => undefined}
+            />
+          </BoardList>
+        )}
+      </BoardColumn>
+    </Board>
+  )
+}
+
 const meta = {
   title: 'Board/Board',
   component: Meridian,
@@ -170,6 +243,17 @@ export const OpeningACard: Story = {
 }
 
 /** Up next and Settled collapsed by the person: rails with their glyph, count and name, each the button that opens it. */
+/** Finished work that isn't a change: Done and Keep for later on hover, and what was kept beside Settled in its head. */
+export const Finished: Story = {
+  render: () => <Finishing />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Kept 2' }))
+    await expect(c.getByText('kept 2d ago')).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Kept 2', pressed: true })).toBeInTheDocument()
+  },
+}
+
 export const Collapsed: Story = { args: { defaultFolds: { collapsed: [BoardLane.Next, BoardLane.Settled], opened: [] } } }
 
 /** The chevron a lane's head shows on hover collapses it, and its rail opens it again; the focus goes with it each way. */

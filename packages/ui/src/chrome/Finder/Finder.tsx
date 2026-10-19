@@ -75,6 +75,7 @@ export const finderText: FinderText = {
     [FoundState.Running]: 'Running',
     [FoundState.Yours]: 'Needs you',
     [FoundState.Ready]: 'Ready',
+    [FoundState.Kept]: 'Kept for later',
     [FoundState.Stopped]: 'Stopped',
     [FoundState.Merged]: 'Merged',
     [FoundState.Done]: 'Done',
@@ -111,6 +112,7 @@ const toneOf = (state: FoundState) => {
     case FoundState.Ready:
       return s.signal
     case FoundState.Planned:
+    case FoundState.Kept:
     case FoundState.Stopped:
     case FoundState.Merged:
     case FoundState.Done:

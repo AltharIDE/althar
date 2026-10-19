@@ -15,7 +15,9 @@ import { withServices } from './render'
  * What needs the person is one rule (`needsYou`, shared/calls.ts), and the
  * board's Needs you lane, the home's list, its count and its project's line
  * all take it. The same tasks and calls go to both here, each case the
- * person can meet, and the two must agree on which wait on them.
+ * person can meet, and the two must agree on which wait on them: a task
+ * that finished and isn't a change does, until the person keeps it for
+ * later.
  */
 
 const NOW = '2026-10-14T12:00:00.000Z'
@@ -80,13 +82,33 @@ const cases: ReadonlyArray<{ readonly why: string; readonly needs: boolean; read
   },
   {
     why: 'a quick task that finished with an answer, no pull request coming',
-    needs: false,
-    task: task({ taskId: 'g', threadId: 'thg', title: 'Which partners call v1?', phase: 'ready', kind: 'plain', branch: null }),
+    needs: true,
+    task: task({
+      taskId: 'g',
+      threadId: 'thg',
+      title: 'Which partners call v1?',
+      phase: 'ready',
+      kind: 'plain',
+      branch: null,
+      summary: 'Two partners still call v1.',
+    }),
   },
   {
     why: 'a prototype that finished on its branch, with nothing to accept',
-    needs: false,
+    needs: true,
     task: task({ taskId: 'h', threadId: 'thh', title: 'Prototype the usage limits', phase: 'ready', kind: 'plain' }),
+  },
+  {
+    why: 'a prototype the person kept for later',
+    needs: false,
+    task: task({
+      taskId: 'k',
+      threadId: 'thk',
+      title: 'Prototype the tabs',
+      phase: 'kept',
+      kind: 'plain',
+      keptAt: '2026-10-14T10:00:00.000Z',
+    }),
   },
   {
     why: 'a task at work',
@@ -140,12 +162,12 @@ describe('what needs the person', () => {
     const lanes = lanesOf({ cursor: 1, tasks: tasks as ReadonlyArray<BoardTask>, calls, settledTotal: 0 })
 
     withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
-    // The board: what needs them, and a call once, as its task's card is; a task that finished is not in it.
+    // The board: what needs them, and a call once, as its task's card is; a task that finished and isn't a change among it.
     const board = onBoard('Needs you').map((title) => (title === 'Waits on a call' ? 'Run npm publish' : title))
     expect(board).toEqual(wanted)
     expect(yoursOf(lanes)).toBe(wanted.length)
-    // It waits above what settled instead, and counts there.
-    expect(onBoard('Settled')).toEqual(['Prototype the usage limits', 'Which partners call v1?'])
+    // What was kept for later is out of it, behind Settled's tab.
+    expect(lanes.kept.map((one) => one.title)).toEqual(['Prototype the tabs'])
     cleanup()
 
     const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [...tasks], calls: [...calls], projects: [project] })) })
@@ -173,6 +195,9 @@ describe('what needs the person', () => {
     expect(line('Conflict handed back').getByText('Stuck')).toBeTruthy()
     expect(line('Conflict handed back').getByText('It conflicts in README.md.')).toBeTruthy()
     expect(line('Review #1199').getByRole('button', { name: 'Review' })).toBeTruthy()
+    // A task that finished and isn't a change says so, and what its lead said.
+    expect(line('Which partners call v1?').getByText('Finished')).toBeTruthy()
+    expect(line('Which partners call v1?').getByText('Two partners still call v1.')).toBeTruthy()
   })
 
   for (const one of cases)

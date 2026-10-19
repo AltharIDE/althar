@@ -1,0 +1,58 @@
+name: windows-installer
+
+# The Windows installer (DEV-78), made on windows-2025 as release.yml makes it, installed, checked and uninstalled by
+# scripts/windows-smoke.sh, and uploaded as the artifact desktop-windows-installer, to install on a Windows machine.
+# Unsigned, as releases are for now, so SmartScreen warns: More info, then Run anyway.
+#
+# On a pull request that changes how Althar is packaged or what it ships; after merge, from post-merge.yml; and by hand
+# on any branch (`gh workflow run windows-installer.yml --ref <branch>`). It packages only: Windows' checks and tests
+# are another job's.
+on:
+  pull_request:
+    paths:
+      [
+        'apps/desktop/scripts/**',
+        'apps/desktop/package.json',
+        'apps/desktop/src/main/**',
+        'bun.lock',
+        '.github/workflows/windows-installer.yml',
+      ]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    # A newer push to a pull request replaces its run; on main, post-merge's own concurrency holds.
+    concurrency:
+      group: windows-installer-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run package
+      - name: Install, check and uninstall
+        run: bash scripts/windows-smoke.sh
+      - uses: actions/upload-artifact@v6
+        with:
+          name: desktop-windows-installer
+          path: |
+            apps/desktop/out/dist/Althar-*-x64-setup.exe
+            apps/desktop/out/dist/latest.yml
+          if-no-files-found: error
+          retention-days: 14

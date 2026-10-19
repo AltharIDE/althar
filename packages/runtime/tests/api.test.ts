@@ -1631,7 +1631,7 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
-  it.live('settles a plain task that finished once the person opens it, and leaves a change ready', () =>
+  it.live('leaves a plain task that finished in Needs you once the person opens it, until they mark it done or keep it for later', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
@@ -1667,14 +1667,26 @@ describe('the coordinator, through the API', () => {
         assert.isNotNull(question?.branch)
         yield* client.SeeTask({ commandId: commandId(), taskId: question?.taskId ?? '' })
         yield* client.SeeTask({ commandId: commandId(), taskId: change.id })
-        const board = yield* client.GetBoard({ projectId: project.id })
-        assert.sameDeepMembers(
-          board.tasks.map((one) => [one.title, one.phase]),
-          [
-            ['Which partners still call v1', 'settled'],
-            ['Retry', 'ready'],
-          ],
-        )
+        const phases = Effect.map(client.GetBoard({ projectId: project.id }), (board) => board.tasks.map((one) => [one.title, one.phase]))
+        // Opened, both still wait on the person.
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'ready'],
+          ['Retry', 'ready'],
+        ])
+        // Kept for later, the plain task is out of Needs you; a change can't be kept, nor marked done.
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'kept'],
+          ['Retry', 'ready'],
+        ])
+        // Marked done, it settles.
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'settled'],
+          ['Retry', 'ready'],
+        ])
         const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
         assert.strictEqual(unknown.reason, 'NotFound')
       }),

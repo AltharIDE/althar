@@ -313,7 +313,7 @@ before building on it):
   classification and allowlist, OpenCode's sign-in listing (`usageSources.ts`);
   with the contract test (`tests/usageSources.test.ts`) that every
   subscription has a source and a way to be told from a key.
-- `packages/persistence-sqlite`: migration 0036, `plan_usage_readings` and
+- `packages/persistence-sqlite`: migration 0037, `plan_usage_readings` and
   `plan_usage_warnings`.
 - `packages/runtime`: `PlanUsage.ts` keeps each account's windows (Codex read
   through its app-server, Claude heard from its sessions, OpenCode by its own
