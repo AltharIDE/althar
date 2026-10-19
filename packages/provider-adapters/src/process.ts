@@ -11,13 +11,13 @@ import { AgentStartFailed } from './errors'
 import { platformTrees, type ProcessTrees, type StopReport, stopTree } from './processTrees'
 import type { LaunchSpec } from './registry'
 
-export type { StopReport } from './processTrees'
+export { platformTrees, type ProcessTrees, type StopReport } from './processTrees'
 
 /*
  * An agent process Althar owns (docs/architecture/02). Stopping it reaches
  * every process it started (processTrees.ts): on Unix its process group, even
- * after the agent itself has exited; on Windows the tree of processes it
- * started. Stopping is staged: TERM to the group where the platform can ask,
+ * after the agent itself has exited; on Windows the Job Object its keeper
+ * holds it in. Stopping is staged: TERM to the group where the platform can ask,
  * a grace period, then KILL, and anything still alive after that is reported.
  * No console window opens for it or anything it starts on Windows. It is
  * never found by name or by a pid that may have been reused; the handle is the
@@ -160,11 +160,17 @@ export const spawnOwned = (
       // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled; what it runs may inherit more of Althar's environment, as reaching the device needs.
       const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
       const env = launched === spec ? inherited : childEnvironment(launched)
+      const launch = yield* trees.launch(launched.command, launched.args).pipe(
+        Effect.mapError((reason) => {
+          removeTemp(temp?.folder)
+          return new AgentStartFailed({ command: launched.command, reason })
+        }),
+      )
       const child = yield* Effect.try({
         try: () =>
-          spawn(launched.command, [...launched.args], {
+          spawn(launch.command, [...launch.args], {
             cwd,
-            detached: trees.spawn.detached,
+            detached: launch.detached,
             windowsHide: true,
             stdio: ['pipe', 'pipe', 'pipe'],
             env,
@@ -209,7 +215,7 @@ export const spawnOwned = (
     }),
     (owned) =>
       Effect.gen(function* () {
-        const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2), owned.osStartedAt, options.trees)
+        const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2), options.trees)
         // The report waits until the OS has reaped the agent itself, so its pid is free when the report says so.
         yield* Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2)))
         // Its own temporary folder goes once nothing of it is left to use it.
@@ -222,12 +228,8 @@ export const spawnOwned = (
  * Stops a process tree Althar owns (processTrees.ts): TERM where the platform
  * can ask, a grace period, then KILL, and says whether anything outlived it.
  * A tree that has already gone is left alone. The runtime also uses it for a
- * tree an earlier launch left behind, once it has checked the tree's root is
- * the process it recorded; `startedAt` is when that process started.
+ * tree an earlier launch left behind, once it has checked the tree is the one
+ * it recorded.
  */
-export const stopProcessGroup = (
-  pid: number,
-  grace: Duration.Input,
-  startedAt?: string,
-  trees: ProcessTrees = platformTrees(),
-): Effect.Effect<StopReport> => stopTree(trees, pid, grace, startedAt)
+export const stopProcessGroup = (pid: number, grace: Duration.Input, trees: ProcessTrees = platformTrees()): Effect.Effect<StopReport> =>
+  stopTree(trees, pid, grace)
