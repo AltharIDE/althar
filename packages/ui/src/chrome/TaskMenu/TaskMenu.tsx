@@ -39,6 +39,8 @@ export interface TaskMenuText {
   startNowAbout: string
   markReady: string
   markReadyAbout: string
+  attach: string
+  attachAbout: string
   skipReview: string
   skipReviewAbout: string
   stop: string
@@ -78,6 +80,8 @@ export const taskMenuText: TaskMenuText = {
   startNowAbout: 'Its plan starts now, without waiting.',
   markReady: 'Mark ready for review',
   markReadyAbout: 'Its draft pull request is no longer a draft.',
+  attach: 'Attach a pull request…',
+  attachAbout: 'Follow an open pull request it didn’t open. Its work goes there, with no new one.',
   skipReview: 'Skip the review',
   skipReviewAbout: 'Its work is ready once its lead is done, unreviewed this time. A review under way stops.',
   stop: 'Stop the task',
@@ -113,6 +117,8 @@ export interface TaskMenuProps {
   onStartNow?: () => void
   /** Marks its draft pull request ready for review. */
   onMarkReady?: () => void
+  /** Attaches it to an open pull request it didn't open; the consumer asks which. */
+  onAttach?: () => void
   /** Skips the review of the work under way, while it still has one to come or under way. */
   onSkipReview?: () => void
   onStop?: () => void
@@ -145,6 +151,7 @@ export function TaskMenu({
   editor,
   onStartNow,
   onMarkReady,
+  onAttach,
   onSkipReview,
   onStop,
   onResume,
@@ -174,6 +181,11 @@ export function TaskMenu({
     onMarkReady && (
       <MenuItem key="ready" icon="pr" description={t.markReadyAbout} onSelect={onMarkReady}>
         {t.markReady}
+      </MenuItem>
+    ),
+    onAttach && (
+      <MenuItem key="attach" icon="pr" description={t.attachAbout} onSelect={onAttach}>
+        {t.attach}
       </MenuItem>
     ),
     onSkipReview && (

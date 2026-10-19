@@ -60,7 +60,7 @@ import {
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
-import { CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, PushRefused } from './errors'
+import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
 import {
@@ -170,8 +170,19 @@ const Snapshot = Schema.Struct({
   target: Schema.optional(Schema.String),
   /** Whether the host says it conflicts with that branch; null where it hasn't said, absent from one kept before this was. */
   conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  /** The branch it is from, on the repository its commits go to; absent from one kept before this was, which is the task's own branch's name. */
+  source: Schema.optional(Schema.String),
+  /**
+   * Attached to the task rather than opened for it (ADR-052): publishing
+   * pushes to its branch, whatever the task's own is called, and never
+   * opens another.
+   */
+  attached: Schema.optional(Schema.Boolean),
 })
 type Snapshot = typeof Snapshot.Type
+
+/** The branch a pull request's commits go to on its host: its own, as last seen, else the task's, as one Althar opened has. */
+const sourceOf = (snapshot: Snapshot, branch: string) => snapshot.source ?? branch
 
 /** A task's change, as the card, the header and the accept view show it. */
 export interface ChangeSummary extends Snapshot {
@@ -193,16 +204,36 @@ export interface Host {
  * only, or found nothing to propose; and the files the lead left uncommitted,
  * which weren't.
  */
-export type PublishedOne = (
-  | { readonly kind: 'opened'; readonly change: ChangeSummary }
-  | { readonly kind: 'pushed'; readonly branch: string }
-  | { readonly kind: 'nothing' }
-  /** Left on its branch: in a task of several repositories, one on no code host Althar knows. */
-  | { readonly kind: 'branch' }
-) & { readonly left: ReadonlyArray<string>; readonly repository: string }
+export type PublishedOne =
+  /** `attached`: pushed to the pull request the task was attached to, which it didn't open (ADR-052). */
+  (
+    | { readonly kind: 'opened'; readonly change: ChangeSummary; readonly attached?: boolean }
+    | { readonly kind: 'pushed'; readonly branch: string }
+    | { readonly kind: 'nothing' }
+    /** Left on its branch: in a task of several repositories, one on no code host Althar knows. */
+    | { readonly kind: 'branch' }
+  ) & { readonly left: ReadonlyArray<string>; readonly repository: string }
 
 /** What publishing did in each of the task's repositories, the project's first first. */
 export type Published = ReadonlyArray<PublishedOne>
+
+/** What attaching a pull request to a task is asked to do (ADR-052): by its link or number; `start`, the person's word to start the task's branch from its head. */
+export interface AttachInput {
+  readonly taskId: string
+  readonly pullRequest: string
+  readonly start?: boolean | undefined
+  readonly actorId: ActorId
+}
+
+/**
+ * What attaching did: the task follows it now, its branch started from its
+ * head or not, with how many of its own commits are on that head; or, where
+ * the task's branch isn't based on its head, what starting from it would
+ * keep, for the person to say.
+ */
+export type Attached =
+  | { readonly kind: 'attached'; readonly change: ChangeSummary; readonly started: boolean; readonly kept: number }
+  | { readonly kind: 'start'; readonly name: string; readonly source: string; readonly head: string; readonly own: number }
 
 /** What publishing is asked to do: the task's ending, in its run; `again`, its next pull request, after its last merged or closed (ADR-034). */
 interface PublishInput {
@@ -366,6 +397,7 @@ const snapshotOf = (
   checks,
   target: change.target,
   conflicts: change.conflicts ?? null,
+  source: change.source,
 })
 
 type Store =
@@ -555,6 +587,13 @@ export class Changes extends Context.Service<
     /** The task's changes, as last seen. */
     ofTask(taskId: string): Effect.Effect<ReadonlyArray<ChangeSummary>, unknown>
     /**
+     * Attaches the task to an open pull request it didn't open, by its link
+     * or number, and follows it from then on (ADR-052); or says what starting
+     * its branch from that pull request's head would keep, where it isn't
+     * based on it and the person hasn't said to.
+     */
+    attach(input: AttachInput): Effect.Effect<Attached, unknown>
+    /**
      * Reads each settled task's pull request that was left open and isn't
      * listened to, once, so its card says how it stands on its host now: at
      * launch, by itself.
@@ -656,6 +695,12 @@ export class Changes extends Context.Service<
        * merge of several repositories moved and is about to put back.
        */
       const branches = Semaphore.makeUnsafe(1)
+      /*
+       * Pull requests are attached one at a time across every task: whether
+       * another task follows one, or sends its work there, is read and the
+       * attachment written with no other attaching in between.
+       */
+      const attaching = Semaphore.makeUnsafe(1)
       /* What Althar made again of agents' commits, kept in the profile (credit.ts). */
       const memory: Memory = {
         recall: (commits) => recallMade(commits).pipe(Effect.provideContext(context)),
@@ -714,7 +759,9 @@ export class Changes extends Context.Service<
           )
           const links = url === undefined ? all : all.filter((candidate) => candidate.seen?.url === url)
           const reachable = links.filter((candidate) => candidate.link.connectionId !== null)
+          // The one it follows first: one attached since takes over from one still open before it (ADR-052).
           const link = (
+            reachable.find((candidate) => candidate.seen?.state === 'open' && candidate.link.listening === 1) ??
             reachable.find((candidate) => candidate.seen?.state === 'open') ??
             reachable.at(-1) ??
             links.find((candidate) => candidate.seen?.state === 'open') ??
@@ -1012,6 +1059,9 @@ export class Changes extends Context.Service<
               : task.baseRef?.startsWith('upstream/') === true
                 ? task.baseRef.slice('upstream/'.length)
                 : repository.defaultBranch
+          // Attached to an open pull request it didn't open, its branch goes there, and nothing else opens (ADR-052).
+          const attached = next === undefined ? yield* attachedOf(input.taskId, task.workspaceId) : undefined
+          if (attached !== undefined) return yield* publishAttached(input, task, attached, pushTarget)
           // Its next pull request goes on a branch of its own, the merged or closed one left as it is: from the default branch of the
           // repository it opens on, which for one from a fork into the repository it came from isn't the fork's, behind what merged.
           if (next?.change != null)
@@ -1210,6 +1260,391 @@ export class Changes extends Context.Service<
             change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 },
             left,
           } as const
+        })
+
+      /** The open pull request a repository of the task was attached to, as its record and link keep it: the one its work goes to now. */
+      const attachedOf = (taskId: string, workspaceId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [latest] = yield* sql<{ id: string; head: string | null; link: string }>`
+            SELECT c.id, c.head_commit AS head, l.id AS link FROM repository_changes c
+            JOIN external_links l ON l.task_id = ${taskId} AND l.kind = 'change' AND l.url = c.pull_request_url
+            WHERE c.workspace_id = ${workspaceId} ORDER BY c.created_at DESC, c.rowid DESC LIMIT 1`
+          if (latest === undefined) return undefined
+          const [link] = (yield* linksOf(taskId)).filter((one) => one.id === latest.link)
+          if (link === undefined) return undefined
+          const snapshot = yield* decodeSnapshot(link.snapshot)
+          return snapshot.attached === true && snapshot.state === 'open'
+            ? { record: latest.id, sent: latest.head, link, snapshot }
+            : undefined
+        })
+
+      /**
+       * Publishes a repository of the task to the open pull request it was
+       * attached to (ADR-052): its branch goes onto that pull request's own
+       * branch, whatever each is called, as a plain push, so only where it
+       * adds to what is there; where it wouldn't, it says so, and nothing is
+       * forced. That pull request is read again, and is what the task shows.
+       */
+      const publishAttached = (
+        input: PublishInput,
+        task: PublishRow,
+        attached: { readonly record: string; readonly sent: string | null; readonly link: LinkRow; readonly snapshot: Snapshot },
+        pushTarget: { readonly url: string; readonly header: string | null },
+      ) =>
+        Effect.gen(function* () {
+          const { link, snapshot } = attached
+          const pictures = yield* evidencePaths(input.taskId)
+          const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures(task.path, file))
+          const onto = sourceOf(snapshot, task.branch)
+          const tip = yield* remoteTip(task.path, pushTarget, onto)
+          const { head, settle } = yield* credited(task.path, task.branch, yield* commitOf(task.path, 'HEAD'), [
+            task.baseCommit,
+            attached.sent,
+            snapshot.headSha,
+            tip,
+          ])
+          // Already there, nothing goes up; else only as a fast-forward, in a sentence where it isn't one.
+          if (tip !== head)
+            yield* pushTo(task.path, pushTarget, task.branch, head, undefined, onto).pipe(
+              Effect.catchTag('GitFailed', (failed) => refusal(input.taskId, nameOf(snapshot), failed)),
+            )
+          yield* settle
+          const { host, repository } = yield* current(input.taskId, snapshot.url)
+          const read = yield* host.change(repository, snapshot.number)
+          const seen: Snapshot = {
+            ...snapshotOf(read, snapshot.repository, snapshot.words, snapshot.checks),
+            headSha: head,
+            attached: true,
+          }
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
+            WHERE id = ${attached.record}`
+          yield* saveSnapshot(link, seen, { listening: read.state === 'open' ? 1 : 0 })
+          yield* news(input.taskId)
+          wakeNow(input.taskId)
+          const change = { ...seen, linkId: link.id, product: link.product, listening: read.state === 'open' }
+          return { kind: 'opened', change, attached: true, left } as const
+        })
+
+      /**
+       * Attaches one of the task's repositories to an open pull request it
+       * didn't open, by its link or its number (ADR-052): one opened by hand,
+       * or from a fork into the repository it came from, whose branch is on
+       * the fork this clone pushes to. Its branch must be one the task pushes
+       * to; another task following it keeps it. The task's branch, where it
+       * isn't based on that pull request's head, starts from it only with
+       * `start`, the person's word: its own commits that aren't in the head
+       * go on top, one by one, and where they conflict, or the worktree has
+       * what isn't committed, or its lead is at work in it, it stays as it
+       * was. Then the task follows it, as one Althar opened: its reviews,
+       * comments, checks and conflicts are heard, the lead's tools act on it,
+       * and publishing pushes there. Any it followed before in that
+       * repository isn't listened to any more.
+       */
+      const attach = (input: AttachInput) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const refuse = (message: string) => new AttachRefused({ taskId: input.taskId, message })
+          const [task] = yield* sql<{ projectId: ProjectId; state: string; slug: string; threadId: string }>`
+            SELECT k.project_id, k.state, k.slug, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          if (task.state !== 'open' && task.state !== 'draft')
+            return yield* refuse(`The task is ${task.state === 'done' ? 'done' : task.state}: only an open one follows a pull request.`)
+          const rows = yield* sql<{
+            workspaceId: string
+            path: string
+            branch: string
+            baseCommit: string | null
+            branched: number
+            bindingId: string
+            name: string
+            remotes: string
+            changeTarget: 'upstream' | 'fork' | null
+          }>`
+            SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.branched_at IS NOT NULL AS branched, b.id AS binding_id,
+              b.display_name AS name, b.remote_fingerprints AS remotes, b.change_target
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            ORDER BY b.created_at, b.rowid`
+          // Each repository, where its pull requests are: its own on its host, and the one a fork came from.
+          const places = (yield* Effect.forEach(rows, (row) =>
+            Effect.gen(function* () {
+              if (!existsSync(row.path)) return []
+              const fork = yield* namedRemotes(row.path).pipe(
+                Effect.map(forkOf),
+                Effect.orElseSucceed(() => null),
+              )
+              const remotes =
+                fork === null ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(row.remotes) : [fork.fork.url]
+              const found = yield* connections.hostOf(remotes, { fromCli: true })
+              return found === null ? [] : [{ row, fork, found }]
+            }),
+          )).flat()
+          const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
+          const asked = input.pullRequest.trim()
+          const chosen = yield* Effect.gen(function* () {
+            if (/^https?:\/\//i.test(asked)) {
+              const resolved = yield* connections.resolve(asked)
+              if (resolved === null)
+                return yield* refuse('Althar isn’t connected to where that link points. Connect its host in Settings, then attach it.')
+              if (resolved.ref.kind !== 'change') return yield* refuse('That link isn’t to a pull request.')
+              const ref = resolved.ref
+              // On the host the repository is on, not one of the same path on another host Althar is connected to.
+              const place = places.find(
+                (one) =>
+                  one.found.connectionId === resolved.connectionId &&
+                  (same(one.found.path, ref.path) || (one.fork !== null && same(one.fork.upstream.path, ref.path))),
+              )
+              if (place === undefined)
+                return yield* refuse(`That pull request is on ${ref.path.join('/')}, which isn’t one of the task’s repositories.`)
+              return { ...place, path: ref.path, number: ref.number }
+            }
+            const number = /^#?(\d+)$/.exec(asked)?.[1]
+            if (number === undefined) return yield* refuse('Give the pull request’s link, or its number: #123.')
+            const [only] = places
+            if (only === undefined)
+              return yield* refuse('The task’s repository isn’t on a code host Althar is connected to. Connect it in Settings.')
+            if (places.length > 1)
+              return yield* refuse(
+                `The task changes several repositories (${places.map((one) => one.row.name).join(', ')}): give the pull request’s link.`,
+              )
+            // By its number, where the repository's pull requests open: the one a fork came from, where the project sends them there.
+            const path = only.fork !== null && only.row.changeTarget === 'upstream' ? only.fork.upstream.path : only.found.path
+            return { ...only, path, number: Number(number) }
+          })
+          const { row, fork, found } = chosen
+          const { host } = found
+          const said = (error: ConnectorFailed) =>
+            refuse(
+              error.reason === 'not_found'
+                ? 'That pull request isn’t there, or Althar’s sign-in can’t see it.'
+                : `The host said: ${error.message}`,
+            )
+          const fromHost = <A>(effect: Effect.Effect<A, ConnectorFailed>) => Effect.mapError(effect, said)
+          const repository = yield* fromHost(host.repository(chosen.path))
+          const pull = yield* fromHost(host.change(repository, chosen.number))
+          const path = repository.path
+          const name = `${host.words.short} ${host.words.prefix}${pull.number}`
+          if (pull.state !== 'open') return yield* refuse(`${name} is ${pull.state}: only an open one can be attached.`)
+          // Its branch is on the repository this clone pushes to, or nowhere Althar can push: the fork, else the repository itself.
+          // Where the host doesn't say which repository it is on, a branch of the same name here may be another's: none is pushed to.
+          const own = fork?.fork.path ?? found.path
+          const headOn = pull.headRepository
+          if (headOn === undefined)
+            return yield* refuse(`The host doesn’t say where ${name}’s branch is, so Althar can’t tell it’s one this task pushes to.`)
+          if (headOn !== null && headOn.length === 0) return yield* refuse(`${name}’s branch was on a fork that is gone.`)
+          const headPath = headOn ?? path
+          if (!same(headPath, own))
+            return yield* refuse(
+              `${name}’s branch, ${pull.source}, is on ${headPath.join('/')}, which this task doesn’t push to: it pushes to ${own.join('/')}.`,
+            )
+          const [other] = yield* sql<{ slug: string }>`
+            SELECT k.slug FROM external_links x JOIN tasks k ON k.id = x.task_id
+            WHERE x.project_id = ${task.projectId} AND x.kind = 'change' AND x.url = ${pull.url} AND x.listening = 1
+              AND x.task_id <> ${input.taskId} AND k.state IN ('open', 'draft') LIMIT 1`
+          if (other !== undefined)
+            return yield* refuse(`Task ${other.slug} follows ${name} already. Abandon it first, or leave ${name} to it.`)
+          // One another open task's work still goes to, listened to or not: its pushes would land on the same branch. One it
+          // was attached to goes there only while it last saw it open; closed since, it publishes elsewhere, reopened or not.
+          const [sending] = yield* sql<{ slug: string }>`
+            SELECT k.slug FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id JOIN tasks k ON k.id = w.task_id
+            WHERE c.project_id = ${task.projectId} AND c.pull_request_url = ${pull.url} AND w.task_id <> ${input.taskId}
+              AND k.state IN ('open', 'draft')
+              AND c.id = (SELECT l.id FROM repository_changes l WHERE l.workspace_id = c.workspace_id ORDER BY l.created_at DESC, l.rowid DESC LIMIT 1)
+              AND NOT EXISTS (SELECT 1 FROM external_links x WHERE x.task_id = w.task_id AND x.kind = 'change' AND x.url = c.pull_request_url
+                AND json_extract(x.snapshot, '$.attached') = 1 AND json_extract(x.snapshot, '$.state') <> 'open')
+            LIMIT 1`
+          if (sending !== undefined)
+            return yield* refuse(`Task ${sending.slug}’s work goes to ${name}. Abandon it first, or leave ${name} to it.`)
+          const pushTarget = yield* fromHost(host.pushTarget(same(own, path) ? repository : yield* fromHost(host.repository(own))))
+          // Its head as its branch has it now, fetched here: what the task's branch must be on for its pushes to add to it.
+          const tip = yield* fetchInto(row.path, pushTarget, pull.source, `refs/althar/pull-request/${pull.source}`)
+          if (tip === null) return yield* refuse(`Althar couldn’t fetch ${name}’s branch, ${pull.source}, from ${own.join('/')}.`)
+          let base = row.baseCommit
+          let started = false
+          // A worktree with no branch yet gets the task's; one of that name left from before isn't taken over, nor moved.
+          const leftover =
+            row.branched === 0 && (yield* gitOutcome(row.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${row.branch}`)).code === 0
+          const refuseLeftover = () =>
+            refuse(`A branch called ${row.branch} is in its repository already, from before. Delete or rename it, then attach ${name}.`)
+          if (!(yield* onHead(row.path, tip))) {
+            // The task's own commits, not in the head: after where it started, merges left out.
+            const mine = (yield* git(
+              row.path,
+              'rev-list',
+              '--reverse',
+              '--no-merges',
+              'HEAD',
+              `^${tip}`,
+              ...(base === null ? [] : [`^${base}`]),
+            ))
+              .split('\n')
+              .filter((line) => line !== '')
+            if (input.start !== true) return { kind: 'start', name, source: pull.source, head: tip, own: mine.length } satisfies Attached
+            if (leftover) return yield* refuseLeftover()
+            if (Option.isSome(yield* sessions.running(task.threadId)))
+              return yield* refuse(`Its lead is at work in its worktree. Stop it, or wait for its turn to end, then attach ${name}.`)
+            const left = yield* uncommittedFiles(row.path)
+            if (left.length > 0)
+              return yield* refuse(
+                `What isn’t committed in its worktree would be lost: ${filesWord(left)}. Commit it or drop it, then attach ${name}.`,
+              )
+            const before = yield* commitOf(row.path, 'HEAD')
+            // Kept, so what it was on is never lost.
+            yield* git(row.path, 'update-ref', `refs/althar/before-attach/${row.branch}`, before)
+            yield* git(row.path, 'checkout', '-q', '-B', row.branch, tip)
+            const conflicted = yield* pickOnto(row.path, mine)
+            if (conflicted !== null) {
+              yield* git(row.path, 'reset', '-q', '--hard', before)
+              if (row.branched === 0) {
+                yield* git(row.path, 'checkout', '-q', '--detach', before)
+                yield* git(row.path, 'branch', '-q', '-D', row.branch)
+              }
+              return yield* refuse(
+                `The task’s own commits conflict with ${name}’s head in ${filesWord(conflicted)}, so its branch stays as it was.`,
+              )
+            }
+            // Where its change starts: where what it started from meets the head.
+            const met = yield* gitOutcome(row.path, 'merge-base', base ?? tip, tip)
+            base = met.code === 0 ? met.stdout : tip
+            started = true
+          } else if (row.branched === 0) {
+            if (leftover) return yield* refuseLeftover()
+            yield* git(row.path, 'checkout', '-q', '-b', row.branch)
+          }
+          const kept = yield* commitsAhead(row.path, tip, 'HEAD').pipe(Effect.orElseSucceed(() => 0))
+          const snapshot: Snapshot = { ...snapshotOf(pull, path, host.words, null), headSha: tip, attached: true }
+          const followed = yield* sql<{ id: string; projectId: ProjectId; taskId: string }>`
+            SELECT DISTINCT l.id, l.project_id, l.task_id FROM external_links l JOIN repository_changes c ON c.pull_request_url = l.url
+            WHERE l.task_id = ${input.taskId} AND l.kind = 'change' AND l.listening = 1 AND l.url <> ${pull.url}
+              AND c.workspace_id = ${row.workspaceId}`
+          const linkId = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const at = yield* timestamp
+              const changeSetId = yield* newId(Ids.changeSet)
+              // From no run: the person, or the coordinator, attached it.
+              yield* sql`INSERT INTO change_sets ${sql.insert({ id: changeSetId, projectId: task.projectId, taskId: input.taskId, runId: null, state: 'published', createdAt: at })}`
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'change_set',
+                aggregateId: changeSetId,
+                revision: 1,
+                type: 'change_set.attached',
+                payload: { url: pull.url },
+                actorId: input.actorId,
+              })
+              yield* sql`INSERT INTO repository_changes ${sql.insert({
+                id: yield* newId(Ids.repositoryChange),
+                projectId: task.projectId,
+                changeSetId,
+                bindingId: row.bindingId,
+                workspaceId: row.workspaceId,
+                baseCommit: base,
+                headCommit: tip,
+                branch: row.branch,
+                pullRequestUrl: pull.url,
+                pullRequestState: pull.draft ? 'draft' : 'ready',
+                createdAt: at,
+                updatedAt: at,
+              })}`
+              const [existing] = yield* sql<{ id: string }>`
+                SELECT id FROM external_links WHERE task_id = ${input.taskId} AND kind = 'change' AND product = ${host.product} AND external_id = ${pull.id}`
+              const id = existing?.id ?? (yield* newId(Ids.externalLink))
+              const revision =
+                existing === undefined
+                  ? 1
+                  : yield* change('external_links', id, {
+                      connectionId: found.connectionId,
+                      snapshot: JSON.stringify(snapshot),
+                      listening: 1,
+                      cursor: null,
+                      updatedAt: at,
+                    })
+              if (existing === undefined)
+                yield* sql`INSERT INTO external_links ${sql.insert({
+                  id,
+                  projectId: task.projectId,
+                  taskId: input.taskId,
+                  connectionId: found.connectionId,
+                  product: host.product,
+                  kind: 'change',
+                  externalId: pull.id,
+                  ref: `${path.join('/')}${host.words.prefix}${pull.number}`,
+                  key: `${host.words.prefix}${pull.number}`,
+                  url: pull.url,
+                  snapshot: JSON.stringify(snapshot),
+                  listening: 1,
+                  createdAt: at,
+                  updatedAt: at,
+                })}`
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'external_link',
+                aggregateId: id,
+                revision,
+                type: 'external_link.change_attached',
+                payload: { url: pull.url, number: pull.number, source: pull.source, branch: row.branch, started },
+                actorId: input.actorId,
+              })
+              // It follows this one in that repository now: what it followed before there isn't listened to.
+              for (const one of followed) {
+                const stopped = yield* change('external_links', one.id, { listening: 0, updatedAt: at })
+                yield* fact({
+                  projectId: one.projectId,
+                  aggregateType: 'external_link',
+                  aggregateId: one.id,
+                  revision: stopped,
+                  type: 'external_link.stopped_listening',
+                  payload: { attached: pull.url },
+                  actorId: input.actorId,
+                })
+              }
+              if (started || row.branched === 0) {
+                const branched = yield* change('workspaces', row.workspaceId, {
+                  baseCommit: base,
+                  ...(row.branched === 0 ? { branchedAt: at } : {}),
+                })
+                yield* fact({
+                  projectId: task.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: row.workspaceId,
+                  revision: branched,
+                  type: 'workspace.branched',
+                  payload: { from: row.branch, to: row.branch, base, onto: tip, attached: pull.url },
+                  actorId: input.actorId,
+                })
+              }
+              yield* indexTask(input.taskId)
+              return id
+            }),
+          )
+          const where = places.length > 1 ? ` in ${row.name}` : ''
+          yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `The task follows ${name}${where} now: ${pull.title}`,
+            description: `${
+              started
+                ? `Its branch ${row.branch} starts from ${name}’s head now${kept > 0 ? `, with its ${commitsWord(kept)} on top` : ''}. `
+                : ''
+            }Its work goes to ${name}’s branch, ${pull.source}, on ${own.join('/')}, as a plain push: nothing opens another.`,
+          })
+          const [link] = (yield* linksOf(input.taskId)).filter((one) => one.id === linkId)
+          if (link !== undefined)
+            yield* tellLead(link, [
+              `This task follows ${name} on ${path.join('/')} now, "${pull.title}": ${pull.url}. ${started ? `Your branch ${row.branch} starts from its head now, with your own commits on top. ` : ''}read_pull_request reads it, reply_on_pull_request answers on it, and push_to_pull_request asks the person to push your commits to its branch, ${pull.source}.`,
+            ])
+          yield* touchCard(input.taskId)
+          yield* news(input.taskId)
+          wakeNow(input.taskId)
+          return {
+            kind: 'attached',
+            change: { ...snapshot, linkId, product: host.product, listening: true },
+            started,
+            kept,
+          } satisfies Attached
         })
 
       const stopListening = (taskId: string, url: string) =>
@@ -1486,7 +1921,9 @@ export class Changes extends Context.Service<
       const push = (taskId: string, seen: string, url?: string) =>
         Effect.gen(function* () {
           const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
-          const tip = yield* remoteTip(workspace.path, pushTarget, workspace.branch)
+          // Onto the pull request's own branch, which for one attached to the task may be called otherwise (ADR-052).
+          const onto = sourceOf(snapshot, workspace.branch)
+          const tip = yield* remoteTip(workspace.path, pushTarget, onto)
           const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
           // What Althar last pushed before what it last saw: a pull request read before that push is behind it.
           yield* stillOnHead(taskId, snapshot.url, workspace.path, seen, head, tip, [sent, snapshot.headSha])
@@ -1500,7 +1937,7 @@ export class Changes extends Context.Service<
             head,
           })
           // Refused, it says why in a sentence, not git's hint: the pull request has commits the branch doesn't.
-          yield* pushTo(workspace.path, pushTarget, workspace.branch, head).pipe(
+          yield* pushTo(workspace.path, pushTarget, workspace.branch, head, undefined, onto).pipe(
             Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)),
           )
           yield* settle
@@ -1536,7 +1973,7 @@ export class Changes extends Context.Service<
             ref: workspace.base,
             head,
           })
-          yield* pushTo(workspace.path, pushTarget, workspace.branch, head, replaces).pipe(
+          yield* pushTo(workspace.path, pushTarget, workspace.branch, head, replaces, sourceOf(snapshot, workspace.branch)).pipe(
             Effect.catchTag('GitFailed', (failed) =>
               /\(stale info\)/i.test(failed.stderr)
                 ? Effect.fail(new PushRefused({ taskId, why: 'moved', remote: where }))
@@ -1578,13 +2015,14 @@ export class Changes extends Context.Service<
       const mergeNote = (taskId: string, url?: string) =>
         Effect.gen(function* () {
           const { snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
-          const ref = `refs/althar/pull-request/${workspace.branch}`
-          const head = yield* fetchInto(workspace.path, pushTarget, workspace.branch, ref)
+          const onto = sourceOf(snapshot, workspace.branch)
+          const ref = `refs/althar/pull-request/${onto}`
+          const head = yield* fetchInto(workspace.path, pushTarget, onto, ref)
           if (head === null)
             return yield* new GitFailed({
-              args: ['fetch', workspace.branch],
+              args: ['fetch', onto],
               cwd: workspace.path,
-              stderr: `Couldn't fetch ${workspace.branch} from the host.`,
+              stderr: `Couldn't fetch ${onto} from the host.`,
             })
           const where = nameOf(snapshot)
           const short = head.slice(0, 12)
@@ -2429,13 +2867,14 @@ export class Changes extends Context.Service<
       const caughtUp = (link: LinkRow, read: ChangeRequest, host: CodeHost, repository: Repository) =>
         Effect.gen(function* () {
           const said = read.headSha
+          const onto = read.source
           if (said === null || read.state !== 'open') return said
           const sent = yield* sentTo(link.projectId, read.url)
           if (sent === null || sent === said) return said
           const workspace = yield* worktreeOf(link.taskId, read.url)
           if (workspace === undefined || !(yield* behindAny(workspace.path, [said], [sent]))) return said
           const target = yield* pushTargetOf(host, repository, workspace.path)
-          return (yield* remoteTip(workspace.path, target, workspace.branch)) === sent ? sent : said
+          return (yield* remoteTip(workspace.path, target, onto)) === sent ? sent : said
         }).pipe(Effect.orElseSucceed(() => read.headSha))
 
       /**
@@ -2594,7 +3033,11 @@ export class Changes extends Context.Service<
             if (voice === 'person' || voice === 'member') forLead.push(commentForLead(comment, name))
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
-          const after = snapshotOf(now, before.repository, before.words, checks)
+          // Attached to the task, it stays so (ADR-052).
+          const after = {
+            ...snapshotOf(now, before.repository, before.words, checks),
+            ...(before.attached === true ? { attached: true } : {}),
+          }
           if (after.state !== before.state) {
             happened = true
             if (after.state === 'merged') yield* arrive(link, { kind: 'merged', from: null, where: name, url: now.url })
@@ -4064,7 +4507,7 @@ export class Changes extends Context.Service<
               message: "The task's worktree isn't on this computer, so Althar can't see what is on its branch. Tell the person.",
             })
           // What the pull request has: its branch as the remote says now, else as its host says, else as Althar last pushed it, else as last seen.
-          const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path), workspace.branch)
+          const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path), now.source)
           const ahead = yield* aheadOf(workspace.path, tip, [now.headSha, yield* sentTo(link.projectId, snapshot.url), snapshot.headSha])
           const left = yield* uncommittedFiles(workspace.path).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
           if (ahead.kind === 'behind')
@@ -4323,6 +4766,7 @@ export class Changes extends Context.Service<
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),
         stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
+        attach: (input) => provide(locked(input.taskId)(attaching.withPermits(1)(attach(input)))),
         leadStopped: (where, how = 'stopped') =>
           provide(
             Effect.gen(function* () {

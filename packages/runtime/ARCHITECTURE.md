@@ -62,8 +62,8 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `Queries.ts` | What a client's screens show, read from the store: projects, tasks, a task's thread with its live session and the calls waiting, and the coordinator's thread with its task cards; and what git says of a task's worktrees, kept while each looks the same |
 | `Api.ts` | The API of `@althar/contracts`, served over a port: handlers, and the change feed and streaming text as one `Watch` stream |
 | `Folders.ts` | Folders the person chose, by grant: the app's main process allows them, and the window opens them by grant |
-| `Skills.ts` | The skills a task's lead is given (ADR-052): the store's active set, laid out as read-only copies for the session's agent and handed over as its registry entry says; Althar's catalog installed as the runtime starts; installs from GitHub, their review, updates and roll-back, for the API |
-| `repositoryGuard.ts` | Before every push Althar makes for a task, holds back skill and OpenSpec files its own commits changed unless the project's Repository files switches allow them (ADR-053) |
+| `Skills.ts` | The skills a task's lead is given (ADR-053): the store's active set, laid out as read-only copies for the session's agent and handed over as its registry entry says; Althar's catalog installed as the runtime starts; installs from GitHub, their review, updates and roll-back, for the API |
+| `repositoryGuard.ts` | Before every push Althar makes for a task, holds back skill and OpenSpec files its own commits changed unless the project's Repository files switches allow them (ADR-054) |
 | `words.ts` | What went wrong, in the words the window shows |
 | `git.ts` | The git commands the runtime runs itself |
 | `vocabulary.ts` | A project's own names, for dictation to spell as its code does (ADR-017): its tracked files' names and the names in its most recently changed source files that have parts, most used first |

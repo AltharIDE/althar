@@ -195,8 +195,12 @@ describe('a plain task', () => {
       const place = yield* opened
       const task = yield* started(place, 'Check the partners', 'Look. [lead:finish] [lead:terse]')
       yield* cardOnce(task.id, (one) => one.phase === 'ready')
-      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
+      // Finished, it waits for the person to settle it (ADR-051): they do, once it can be.
+      const markDone = Effect.flatMap(Runtime.envelope('task.mark_done', { taskId: task.id }), (envelope) =>
+        Effect.map(tasks.markDone({ envelope, taskId: task.id }), (done) => [done]),
+      )
       const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
+      yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
       // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task is finished again.
       yield* say(task.threadId, 'And the v2 ones?')
@@ -210,9 +214,7 @@ describe('a plain task', () => {
         (rows) => (rows[0]?.n ?? 0) === 1,
         Duration.seconds(20),
       )
-      // Opened again by the question, it waits for the person to settle it.
-      yield* cardOnce(task.id, (one) => one.phase === 'ready')
-      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
+      yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(
       Effect.provide(

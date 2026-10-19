@@ -187,6 +187,13 @@ const personOf = (user: User | null | undefined): Person =>
     ? { id: 'ghost', login: 'ghost', name: null, bot: false }
     : { id: String(user.id), login: user.login, name: user.name ?? null, bot: user.type === 'Bot' || user.login.endsWith('[bot]') }
 
+/** The repository a pull request's branch is on, as `headRepository` says it; undefined where GitHub doesn't say. */
+const headRepositoryOf = (pull: PullAnswer): ReadonlyArray<string> | null | undefined => {
+  const head = pull.head.repo
+  const base = pull.base.repo?.full_name.toLowerCase()
+  return head === undefined ? undefined : head?.full_name.toLowerCase() === base ? null : head === null ? [] : head.full_name.split('/')
+}
+
 const changeOf = (pull: PullAnswer): ChangeRequest => ({
   id: pull.node_id,
   number: pull.number,
@@ -203,6 +210,7 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   deletions: pull.deletions ?? null,
   changedFiles: pull.changed_files ?? null,
   updatedAt: pull.updated_at,
+  ...(headRepositoryOf(pull) === undefined ? {} : { headRepository: headRepositoryOf(pull) }),
   // Not mergeable, or `dirty`, is GitHub's way of saying the merge conflicts.
   ...(pull.mergeable === false || pull.mergeable_state === 'dirty'
     ? { conflicts: true }
@@ -216,16 +224,12 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
  * author one of the repository's people, and the fork its branch is on (one
  * GitHub no longer has is a fork all the same, with no path).
  */
-const toReviewOf = (pull: PullAnswer): ChangeToReview => {
-  const head = pull.head.repo
-  const base = pull.base.repo?.full_name.toLowerCase()
-  return {
-    ...changeOf(pull),
-    member: memberOf(pull.author_association),
-    fork: head === undefined || head?.full_name.toLowerCase() === base ? null : head === null ? [] : head.full_name.split('/'),
-    baseSha: pull.base.sha ?? null,
-  }
-}
+const toReviewOf = (pull: PullAnswer): ChangeToReview => ({
+  ...changeOf(pull),
+  member: memberOf(pull.author_association),
+  fork: headRepositoryOf(pull) ?? null,
+  baseSha: pull.base.sha ?? null,
+})
 
 /**
  * A pull request as GitHub's search lists it, over GraphQL: REST's list

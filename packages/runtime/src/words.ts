@@ -236,6 +236,7 @@ export const words = (
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
       case 'LaunchRefused':
+      case 'AttachRefused':
         return text(error, 'message')
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
@@ -384,6 +385,7 @@ const reviewIncomplete = {
 export const expected = new Set([
   'SkillRefused',
   'LaunchRefused',
+  'AttachRefused',
   'DraftClosed',
   'DraftUntitled',
   'ReviewDraftClosed',
