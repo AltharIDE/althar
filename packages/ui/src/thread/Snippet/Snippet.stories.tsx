@@ -26,7 +26,7 @@ export const ShowingAll: Story = {
     const c = within(canvasElement)
     const more = c.getByRole('button', { name: 'Show all' })
     await userEvent.click(more)
-    await expect(c.getByRole('button', { name: 'Less' })).toHaveAttribute('aria-expanded', 'true')
+    await expect(c.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true')
   },
 }
 export const Dark: Story = {

@@ -71,7 +71,13 @@
     used most wins.
   - **A shortcut: ⌘⇧D** (Ctrl+Shift+D off the Mac) starts and stops it from
     anywhere in the window; held down, letting go stops it. The composer
-    shown last has it.
+    shown last has it, unless dictation is carried (below): then it stops that.
+  - **It goes with the person.** Leaving its composer while it listens goes
+    on listening, in a pill over the composer on screen (at the window's
+    foot where there is none) that says whose it is, so they can look at
+    what they are talking about. Once written, it is sent from the pill to
+    the thread it was said in, or moved into the composer on screen. The
+    microphone stays one: starting in another thread writes down the first.
 - **Alternatives considered:**
   - Hosted transcription with the person's own key (OpenAI's GPT-Transcribe,
     or OpenRouter's audio endpoint): the best quality on accents and noise,
@@ -115,7 +121,9 @@
   - Respelling turns the project's names into code even where the person
     meant the words ("the refund ledger" as an idea); they see it before
     they send. Names the model mishears as other words ("Alpha" for
-    "Althar") aren't caught.
+    "Althar") aren't caught by respelling; the agent that reads the message
+    is told it was dictated (a mark kept with the message, and a short note
+    after its words in the agent's prompt), so it reads past them.
   - Windows on Arm has no prebuilt binary yet.
 - **Revisit when:** an open model clearly beats Parakeet on code-heavy
   speech, a streaming model is good enough to replace the passes (NVIDIA's

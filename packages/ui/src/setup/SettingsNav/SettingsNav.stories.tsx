@@ -55,6 +55,45 @@ export const Choosing: Story = {
   },
 }
 
+type ProjectId = 'general' | 'code' | 'rules' | 'running' | 'notes'
+
+/** A project's sections, with taking it out of Althar at the foot, in red, apart from them. */
+export const WithAction: Story = {
+  render: function Render() {
+    const [value, setValue] = useState<ProjectId>('general')
+    const [removing, setRemoving] = useState(false)
+    return (
+      <div style={{ width: 248 }}>
+        <SettingsNav
+          label="Project settings"
+          groups={[
+            [
+              { id: 'general', title: 'General', icon: 'gear' },
+              { id: 'code', title: 'Code and issues', icon: 'plug', yours: true },
+            ],
+            [
+              { id: 'rules', title: 'Rules', icon: 'lock' },
+              { id: 'running', title: 'Running', icon: 'play' },
+            ],
+            [{ id: 'notes', title: 'Notes', icon: 'quote' }],
+          ]}
+          value={value}
+          onChange={setValue}
+          action={{ title: 'Remove from Althar…', icon: 'close', danger: true, onSelect: () => setRemoving(true) }}
+        />
+        {removing && <p>Asked first, in a dialog.</p>}
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Remove from Althar…' }))
+    await expect(c.getByText('Asked first, in a dialog.')).toBeVisible()
+    // Doing it opens nothing of its own down the side: General is still the section open.
+    await expect(c.getByRole('button', { name: 'General' })).toHaveAttribute('aria-current', 'page')
+  },
+}
+
 export const AllStates: Story = {
   render: () => (
     <States

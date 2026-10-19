@@ -7,6 +7,7 @@ import { useControlled } from '../../lib/controlled'
 import { useRefocus } from '../../lib/refocus'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
@@ -63,6 +64,7 @@ export interface StuckText {
   abandoned: string
   abandonedNote: string
   undo: string
+  report: string
 }
 
 export const stuckText: StuckText = {
@@ -75,10 +77,10 @@ export const stuckText: StuckText = {
   send: 'Send to the lead',
   cancel: 'Cancel',
   empty: 'Say what it should do first',
-  retry: 'Try another agent',
+  retry: 'Hand to another agent',
   retryLabel: 'Hand the step to',
   again: 'Try again',
-  abandon: 'Abandon',
+  abandon: 'Abandon this step',
   told: 'Told the lead',
   retried: (agent) => `Handed to ${agent}`,
   retriedNote: 'the step starts again from the task’s record',
@@ -86,6 +88,7 @@ export const stuckText: StuckText = {
   abandoned: 'Abandoned',
   abandonedNote: 'the branch and what it found are kept',
   undo: 'Undo',
+  report: 'Report this',
 }
 
 /** What you told a stuck task to do. */
@@ -116,6 +119,8 @@ export interface StuckProps {
   onAgain?: () => void
   /** Settle the task without finishing it. Without it, no Abandon. */
   onAbandon?: () => void
+  /** Report it as a problem with Althar, at the end of its answers. Without it, no Report this. */
+  onReport?: () => void
   /** Take an answer back. Without it there is no Undo, as when the lead has already acted on it. */
   onUndo?: (result: StuckResult) => void
   /** The answer, when the consumer holds it: null for not yet answered. */
@@ -139,6 +144,7 @@ export function Stuck({
   onRetry,
   onAgain,
   onAbandon,
+  onReport,
   onUndo,
   result: resultProp,
   defaultResult = null,
@@ -240,7 +246,7 @@ export function Stuck({
           />
         </div>
       ) : (
-        (onTell || retrying || onAgain || onAbandon) && (
+        (onTell || retrying || onAgain || onAbandon || onReport) && (
           <AskFoot>
             {onTell && (
               <Button ref={tellRef} variant="signal" onClick={() => setTelling(true)}>
@@ -293,6 +299,11 @@ export function Stuck({
               >
                 {t.abandon}
               </Button>
+            )}
+            {onReport && (
+              <LinkButton className={s.report} onClick={onReport}>
+                {t.report}
+              </LinkButton>
             )}
           </AskFoot>
         )

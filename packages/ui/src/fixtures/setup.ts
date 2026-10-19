@@ -45,6 +45,7 @@ export const EVERY_STATE: RuntimeEntry[] = [
     why: 'OpenCode 2 isn’t supported yet: Althar can’t yet keep your own MCP servers out of its sessions, and a rejected command would end the whole turn. Use OpenCode 1 with Althar for now, or another agent.',
   },
   { id: 'aider', name: 'Aider', state: RuntimeState.Checking },
+  { id: 'amp', name: 'Amp', state: RuntimeState.Unchecked, why: 'Althar couldn’t check Amp. Its log has the details.' },
 ]
 
 export const ROLES: SelectOption<string>[] = [

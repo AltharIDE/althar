@@ -1,6 +1,6 @@
 import type { StuckStep } from '@althar/contracts'
 import { Ledger } from '@althar/persistence-sqlite'
-import { Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
@@ -236,14 +236,15 @@ export class Nudges extends Context.Service<
 
       /**
        * Whether a change after `cursor` bears on what needs the person: a call,
-       * a task, its plan or run, a step, a session starting, a turn ending. A
-       * thread's items, most of what is recorded, never do.
+       * a task, its plan or run, a step, a session starting, a turn ending, a
+       * review drafted, posted or dropped. A thread's items, most of what is
+       * recorded, never do.
        */
       const movedSince = (cursor: number) =>
         Effect.map(
           sql<{ moved: number }>`
             SELECT EXISTS (SELECT 1 FROM change_log WHERE cursor > ${cursor} AND aggregate_type IN ('attention_request', 'task',
-              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery')) AS moved`,
+              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery', 'review_draft')) AS moved`,
           (rows) => rows.some((row) => row.moved === 1),
         )
 
@@ -271,7 +272,12 @@ export class Nudges extends Context.Service<
           // Read again once the record next grows, when it couldn't be read.
           yield* Effect.forever(
             round.pipe(
-              Effect.catchCause((cause) => Effect.andThen(Effect.logWarning('Could not read what needs the person', cause), grown)),
+              // Stopping isn't a failure to read: an interrupt ends it, rather than leaving a warning in the log on every quit.
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.andThen(Effect.logWarning('Could not read what needs the person', cause), grown),
+              ),
             ),
           )
         }),

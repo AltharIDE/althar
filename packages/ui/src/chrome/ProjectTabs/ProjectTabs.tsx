@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Logo } from '../../foundations/Logo/Logo'
@@ -12,6 +12,7 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { WindowButtons } from '../WindowButtons/WindowButtons'
 import s from './ProjectTabs.module.css'
+import { type Dragging, useReorder } from './useReorder'
 
 /*
  * The top of the window, and its one bar: a tab for the home, then one for
@@ -26,7 +27,9 @@ import s from './ProjectTabs.module.css'
  * project to open, it opens the new one at once. However many are open,
  * the home's tab stays put; the others give way together, down to their
  * marks, and past that they scroll, by wheel too, fading at the side where
- * more are, with a menu of them all. While Althar's settings are open they
+ * more are, with a menu of them all. A project's tab is dragged along the
+ * bar to change the order, the others giving way; the home's stays first.
+ * While Althar's settings are open they
  * have a tab too, beside the home's, as the app's and no project's: a gear
  * and their name, closed by its ×. On macOS the system draws the traffic
  * lights over its start, so it keeps their space; where the system draws
@@ -45,6 +48,8 @@ export interface ProjectTab {
   running: boolean
   /** Calls waiting on you there. */
   yours: number
+  /** It stays where it is, at the end, and nothing is dropped after it: a project still being made. */
+  fixed?: boolean
 }
 
 /** Althar's settings, while they have a tab of their own. */
@@ -106,6 +111,8 @@ export type ProjectTabsProps = RootProps<
     /** A tab was pressed: a project's id, or null for the home. */
     onSelect: (id: string | null) => void
     onClose: (id: string) => void
+    /** A project's tab was moved: `id` goes before `beforeId`, or to the end where that is null. The home's tab and the settings' stay first. Without it, tabs stay where they are. */
+    onReorder?: (id: string, beforeId: string | null) => void
     /** Calls waiting on you across every project, on the home's tab. */
     yours?: number
     /** The projects without a tab, which the + offers. */
@@ -142,11 +149,19 @@ function Yours({ n, text }: { n: number; text: ProjectTabsText }) {
   )
 }
 
+/** How far a tab is from its place while one is dragged: the dragged one by the pointer, the others as they give way. */
+const tabShift = (dragging: Dragging | null, id: string): CSSProperties | undefined => {
+  if (dragging === null) return undefined
+  const x = dragging.id === id ? dragging.offset : (dragging.shifts[id] ?? 0)
+  return x === 0 ? undefined : { transform: `translateX(${x}px)` }
+}
+
 export function ProjectTabs({
   tabs,
   current: route,
   onSelect,
   onClose,
+  onReorder,
   yours = 0,
   others = [],
   settings,
@@ -201,6 +216,13 @@ export function ProjectTabs({
       ?.querySelector<HTMLElement>('[aria-current="page"]')
       ?.parentElement?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
   }, [current, tabs.length])
+  const movable = tabs.findIndex((tab) => tab.fixed === true)
+  const { dragging, bind } = useReorder({
+    ids: tabs.map((tab) => tab.id),
+    movable: movable < 0 ? tabs.length : movable,
+    list,
+    onReorder,
+  })
   return (
     <header className={cx(s.strip, className)} data-drag="" {...rest}>
       {lights === 'drawn' ? (
@@ -239,14 +261,19 @@ export function ProjectTabs({
             </li>
           )}
         </ul>
-        <ul className={cx(s.tabs, more.before && s.moreBefore, more.after && s.moreAfter)} ref={list}>
+        <ul className={cx(s.tabs, dragging !== null && s.sorting, more.before && s.moreBefore, more.after && s.moreAfter)} ref={list}>
           {tabs.map((tab) => (
-            <li key={tab.id} className={cx(s.tab, s.project, tab.id === current && s.current)}>
+            <li
+              key={tab.id}
+              className={cx(s.tab, s.project, tab.id === current && s.current, dragging?.id === tab.id && s.lifted)}
+              style={tabShift(dragging, tab.id)}
+            >
               <button
                 type="button"
                 className={s.select}
                 aria-current={tab.id === current ? 'page' : undefined}
                 onClick={() => onSelect(tab.id)}
+                {...bind(tab.id)}
               >
                 {/* The dot after its name says what waits; the mark says only that work runs. */}
                 <ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} className={s.mark} />

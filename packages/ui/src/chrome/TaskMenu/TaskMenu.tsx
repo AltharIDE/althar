@@ -1,8 +1,6 @@
 import { useRef } from 'react'
 
-import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Menu, MenuCheckboxItem, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
-import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './TaskMenu.module.css'
 
@@ -24,8 +22,6 @@ import s from './TaskMenu.module.css'
  * button says so; otherwise nothing shows of it until the menu opens.
  *
  * Allowing everything its agents ask is a switch in it while it is open.
- * While everything on the task is allowed, by its own switch or its
- * project's, a warm word beside the button says so, whatever else it says.
  */
 
 /** Whether a task's lead resolves conflicts on its own: as its project says, or, otherwise than it, unasked or when asked. */
@@ -51,6 +47,8 @@ export interface TaskMenuText {
   resumeAbout: string
   abandon: string
   abandonAbout: string
+  /** For a merged task, which abandons only what came after its pull request. */
+  abandonMergedAbout: string
   reopen: string
   reopenAbout: string
   conflicts: string
@@ -67,9 +65,6 @@ export interface TaskMenuText {
   allowAll: string
   allowAllAbout: string
   allowAllProject: string
-  /** Beside the button while everything on the task is allowed: the word, and what it means, by its project's switch or its own. */
-  unrestricted: string
-  unrestrictedAbout: (byProject: boolean) => string
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -91,6 +86,7 @@ export const taskMenuText: TaskMenuText = {
   resumeAbout: 'The lead carries on from the step it was on, in a fresh session.',
   abandon: 'Abandon',
   abandonAbout: 'It ends here, and its change isn’t merged. Its worktree and branch stay.',
+  abandonMergedAbout: 'Its pull request stays merged. The commits after it stay on its branch, in no pull request.',
   reopen: 'Reopen',
   reopenAbout: 'It opens again, on the same worktree and branch.',
   conflicts: 'Resolve conflicts automatically',
@@ -100,15 +96,10 @@ export const taskMenuText: TaskMenuText = {
   conflictsOnAbout: 'The lead fixes merge conflicts itself, and Althar pushes the fix to an open pull request.',
   conflictsOff: 'Off for this task',
   conflictsOffAbout: 'You ask the lead to fix a conflict when one comes up.',
-  conflictsHint: (on) => `Auto-resolve conflicts: ${on ? 'on' : 'off'}`,
+  conflictsHint: (on) => `Resolve conflicts automatically: ${on ? 'on' : 'off'}`,
   allowAll: 'Allow everything on this task',
   allowAllAbout: 'Nothing its agents ask waits for you. Never still holds.',
   allowAllProject: 'On for every task in this project, from its Rules.',
-  unrestricted: 'Unrestricted',
-  unrestrictedAbout: (byProject) =>
-    byProject
-      ? 'Its project allows everything: nothing its agents ask waits for you. Never still holds.'
-      : 'Everything is allowed on this task: nothing its agents ask waits for you. Never still holds.',
 }
 
 export interface TaskMenuProps {
@@ -128,6 +119,8 @@ export interface TaskMenuProps {
   onResume?: () => void
   /** Abandons it; the consumer asks first, since it settles the task. */
   onAbandon?: () => void
+  /** Its change merged: abandoning it leaves out only the commits after it, and it stays merged. */
+  merged?: boolean
   onReopen?: () => void
   /**
    * Whether its lead resolves a conflict on its own: the task's choice, what
@@ -156,6 +149,7 @@ export function TaskMenu({
   onStop,
   onResume,
   onAbandon,
+  merged = false,
   onReopen,
   conflicts,
   allowEverything,
@@ -206,8 +200,6 @@ export function TaskMenu({
   if (!opens && course.length === 0 && !onAbandon && !conflicts && !allowEverything) return null
   // Said beside the button only where the task goes otherwise than its project.
   const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project
-  // Said beside it whenever everything on the task is allowed, by its own switch or its project's.
-  const unrestricted = allowEverything !== undefined && (allowEverything.on || allowEverything.project)
   const menu = (
     <Menu
       label={t.label}
@@ -275,25 +267,17 @@ export function TaskMenu({
       {onAbandon && (
         <>
           {(opens || course.length > 0 || conflicts || allowEverything) && <MenuSeparator />}
-          <MenuItem icon="close" tone="danger" description={t.abandonAbout} onSelect={onAbandon}>
+          <MenuItem icon="close" tone="danger" description={merged ? t.abandonMergedAbout : t.abandonAbout} onSelect={onAbandon}>
             {t.abandon}
           </MenuItem>
         </>
       )}
     </Menu>
   )
-  if (!differs && !unrestricted) return menu
+  if (!differs) return menu
   return (
     <>
-      {unrestricted && (
-        <Tooltip label={t.unrestrictedAbout(!allowEverything.on)} placement="below">
-          <span className={s.unrestricted}>
-            {t.unrestricted}
-            <VisuallyHidden>, {t.unrestrictedAbout(!allowEverything.on)}</VisuallyHidden>
-          </span>
-        </Tooltip>
-      )}
-      {differs && <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>}
+      <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>
       {menu}
     </>
   )

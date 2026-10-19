@@ -12,7 +12,7 @@ import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { text as outputText } from '../src/renderer/shared/CommandOutput'
 import { changed, coordinatorSnapshot, fakeClient, items, snapshot } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 /*
  * What an agent hands back, on a task's screen: a command's output in its
@@ -27,7 +27,15 @@ function Task() {
 }
 
 function Coordinator() {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={vi.fn()} />
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      settings={useSettingsOf('p1')}
+      onTask={vi.fn()}
+    />
+  )
 }
 
 const session = {
@@ -40,6 +48,9 @@ const session = {
   effort: null,
   models: [],
   turnRunning: false,
+  turnStartedAt: null,
+  turnEndedAt: null,
+  held: true,
   context: null,
   background: [],
 }

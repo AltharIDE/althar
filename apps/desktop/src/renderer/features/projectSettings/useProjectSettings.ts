@@ -9,9 +9,9 @@ import { useServices } from '../../data/services'
 
 /*
  * A project's settings' view model: its name and ink, changed in place, its
- * rules in a line, whether its leads resolve conflicts and its tasks move
- * their issues to In Progress, the notes its coordinator keeps, and removing
- * it. A new name or ink shows at once, and goes to the runtime one change
+ * rules, whether its leads resolve conflicts and its tasks move their issues
+ * to In Progress, the notes its coordinator keeps, and removing it. A new
+ * name or ink shows at once, and goes to the runtime one change
  * after another; the tabs and the home hear it through the change feed, and
  * the projects are read again at once too, so it shows everywhere before the
  * feed is heard. One that didn't hold goes back, and says why. So do the

@@ -1,7 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
-import { AgentsAtOnce, AppVersion, Button, ControlCenter, ControlFoot, ControlSheet, IconButton } from '@althar/ui'
+import {
+  AgentsAtOnce,
+  AppVersion,
+  Button,
+  ControlCenter,
+  ControlFoot,
+  ControlFootStart,
+  ControlSheet,
+  IconButton,
+  LinkButton,
+} from '@althar/ui'
 
 import { notesOf } from '../../../main/updates'
 import { reads } from '../../data/reads'
@@ -19,10 +29,11 @@ import { useAgentsAtOnce } from './useAgentsAtOnce'
  * every screen: the kit's Control Center, holding only what is changed
  * often. Round switches for keeping this computer awake while work runs,
  * notifications, their sound, and how hard it works in the bar; under them,
- * how many agents work at once, on a track of its own. In the foot, which
- * Althar this is, and All settings, which opens the Settings tab beside the
- * home's; a card's name opens it at that card's section. Nothing in it says
- * what is running: settings are calm.
+ * how many agents work at once, on a track of its own. In the foot, at its
+ * start, which Althar this is with Report a problem (DEV-61) under it, which
+ * closes the panel for its dialog, and at its end, on the same row, All settings, which opens the Settings tab beside the home's;
+ * a card's name opens it at that card's section. Nothing in it says what is
+ * running: settings are calm.
  */
 
 export interface QuickSettingsProps {
@@ -33,7 +44,8 @@ export interface QuickSettingsProps {
 }
 
 export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsProps) {
-  const { client } = useServices()
+  const { client, host } = useServices()
+  const { reportProblem } = host
   const preferences = usePreferences()
   const sounds = useSounds()
   const atOnce = useAgentsAtOnce()
@@ -77,7 +89,20 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
         )}
       </div>
       <ControlFoot>
-        {version !== undefined && <AppVersion version={version} notes={notesOf(version)} text={{ name: text.version }} />}
+        <ControlFootStart>
+          {version !== undefined && <AppVersion version={version} notes={notesOf(version)} text={{ name: text.version }} />}
+          {reportProblem !== undefined && (
+            <LinkButton
+              onClick={() => {
+                // The panel closes, and the dialog opens over the window.
+                onOpenChange(false)
+                reportProblem({ kind: 'asked', from: 'settings' })
+              }}
+            >
+              {text.report}
+            </LinkButton>
+          )}
+        </ControlFootStart>
         <Button size="small" icon="gear" kbd={text.allKbd} onClick={() => settings(null)}>
           {text.all}
         </Button>

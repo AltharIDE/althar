@@ -186,6 +186,8 @@ export class Coordinator extends Context.Service<
       readonly disposition: Disposition
       /** Images the person sent with it, in the store already: sent to the coordinator with its words. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Some of its words came from dictation: the coordinator is told it may have been misheard. */
+      readonly dictated?: boolean
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
@@ -235,6 +237,7 @@ export class Coordinator extends Context.Service<
         readonly body: string
         readonly disposition: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
@@ -789,7 +792,7 @@ export class Coordinator extends Context.Service<
               ? `${review === null ? 'It' : `${named(review)} reviews it next, and it`} ends on its branch: its repository isn't on a code host Althar knows.`
               : `${review === null ? 'Then' : `${named(review)} reviews it next, then`} Althar opens ${end === 'ready' ? 'its pull request, ready for review' : 'its pull request as a draft'}. Don't push or open it yourself.`
           return opened
-            ? `The task is a change now, called “${title}”. Commit your work, and call finish_step when it's ready, with what it built and your evidence. ${next}`
+            ? `The task is a change now, called “${title}”. Commit your work, and call finish_step when it's ready, with what it built, your evidence and its pull request's description. ${next}`
             : `The task is a change now, called “${title}”, but Althar couldn't open a round of work for it: tell the person, who can write to you to carry on.`
         })
 
@@ -1186,7 +1189,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'start_task',
-          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own, which stays on this Mac. Should the person want what it made as a real change, reviewed and in a pull request, they ask its lead, which makes it one; pass that on with message_lead. A change worth reviewing, or that should end in a pull request from the start, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own, which stays on this computer. Should the person want what it made as a real change, reviewed and in a pull request, they ask its lead, which makes it one; pass that on with message_lead. A change worth reviewing, or that should end in a pull request from the start, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
           {
             type: 'object',
             properties: {

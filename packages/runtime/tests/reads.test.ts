@@ -214,14 +214,25 @@ describe('what screens read from git', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const queries = yield* Queries
-      const { taskId, threadId, worktree } = yield* ready
+      const instance = yield* Instance
+      const { projectId, taskId, threadId, worktree } = yield* ready
       quiet(worktree)
       assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
       writeFileSync(join(worktree, 'notes.md'), 'notes\n')
       assert.isTrue((yield* queries.home()).tasks.some((task) => task.taskId === taskId))
       assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
 
-      yield* sql`UPDATE tasks SET state = 'done', settled_at = ${new Date().toISOString()} WHERE id = ${taskId}`
+      // Settled, it is no longer the home's to list, but the board still shows it (it may be ready again with commits after a merge), so what was read is kept.
+      yield* sql`UPDATE tasks SET state = 'done', settled_at = ${new Date(Date.now() - 60_000).toISOString()} WHERE id = ${taskId}`
+      assert.isFalse((yield* queries.home()).tasks.some((task) => task.taskId === taskId))
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+
+      // Thirty tasks settled since push it off the board: the home lets go of what was kept, and git is read afresh.
+      const now = new Date().toISOString()
+      for (let n = 0; n < 30; n += 1)
+        yield* sql`
+          INSERT INTO tasks (id, project_id, title, slug, state, created_by_actor_id, created_at, settled_at)
+          VALUES (${yield* newId(Ids.task)}, ${projectId}, 'Done since', ${`done-since-${n}`}, 'done', ${instance.personId}, ${now}, ${now})`
       assert.isFalse((yield* queries.home()).tasks.some((task) => task.taskId === taskId))
       assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'notes.md'])
     }).pipe(Effect.provide(withQueries())),

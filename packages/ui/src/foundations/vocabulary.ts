@@ -518,6 +518,8 @@ export enum Room {
   Board = 'board',
   /** The conversation and the board side by side. */
   Both = 'both',
+  /** The project's settings, in place of its work. */
+  Settings = 'settings',
 }
 
 /** Where an agent runtime on this machine stands, as Althar last found it. */
@@ -538,6 +540,8 @@ export enum RuntimeState {
   Outdated = 'outdated',
   /** A version Althar doesn't run yet, such as a new major: no session starts on it, and it says why. */
   Unsupported = 'unsupported',
+  /** Althar couldn't check it this time; the others are checked all the same. */
+  Unchecked = 'unchecked',
 }
 
 /** How this device gets at a project's source. */

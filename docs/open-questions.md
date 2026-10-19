@@ -9,6 +9,41 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Failures kept where they belong, 18 October
+
+- [x] **What one failure may take down.** Only what it belongs to; one item
+  of many says so on its own, and a loop goes on (ARCHITECTURE.md;
+  [ADR-047](decisions/047-failures-kept-where-they-belong-and-reported-at-the-edge.md)).
+- [x] **Whether a failure the runtime catches is reported.** Yes, where it
+  is kept, unless the person caused it or can put it right: as a handled
+  crash report, ten a launch (ADR-047).
+- [x] **The all-or-nothing places left.** A sweep on 18 October found four;
+  each item is now its own. Conflict rounds still `resolving` at launch are
+  settled one by one, and a repository whose worktree is gone or whose git
+  fails is that round's reason, not a stop for the rest. The lead's read of
+  a task's pull requests says of one it can't read why ("web#3: Althar
+  couldn't read it (…)") and reads the others. The plans' countdown and the
+  usage-limit holds read each row on its own, give an item that fails a
+  backoff (`backoff` in `Failures.ts`: 10 seconds, doubling, at most 10
+  minutes), and start again after a round that fails whole (`keptGoing`).
+  One waiting conflict round that can't be read is left out, and the rest
+  still wait (ADR-047).
+
+## Crash reports, 17 October
+
+- [x] **Where errors and crashes go.** PostHog's error tracking, from the
+  main process, masked, behind a switch of their own; no Sentry for now, and
+  native minidumps stay on the computer, only their occurrence sent
+  ([ADR-046](decisions/046-crash-reports-to-posthog-from-main.md)).
+- [x] **On or off at first, and where it is asked.** On, asked once as a
+  quiet line with its switch on the first screen, and in Settings beside
+  Usage data (DEV-66; ADR-046).
+- [ ] **Source maps.** Uploading the window's maps to PostHog in the release
+  workflow, with posthog-cli and a key that can write them (DEV-62).
+- [x] **An agent's adapter that dies.** Reported from the runtime as a
+  handled failure when its session is lost: its id and how its process
+  ended, never what it wrote (ADR-047).
+
 ## OpenCode 2, 15 October
 
 Researched in [the OpenCode 2 plan](plans/opencode-2.md).
@@ -287,7 +322,8 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   fight. A product question to try out before deciding. Althar puts the key
   in the branch and the pull request's title. Since 12 October it moves the
   issue to In Progress as its task's first step starts, once, on Linear and
-  Jira, unless the project's rules turn it off; it never moves one back from
+  Jira, and since 18 October on Trello, unless the project's rules turn it
+  off; it never moves one back from
   further along. In review and done are still open.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own

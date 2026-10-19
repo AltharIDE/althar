@@ -51,7 +51,7 @@ test('runs the default branch from the project’s front, leaves its card in the
     await expect(page.getByRole('menu', { name: 'What it runs' }).getByRole('menuitemcheckbox', { name: 'npm run dev' })).toBeVisible()
     await page.screenshot({ path: 'test-results/run-button.png', animations: 'disabled' })
     await page.keyboard.press('Escape')
-    await page.getByRole('button', { name: 'Run npm run dev' }).click()
+    await page.getByRole('button', { name: 'Run', exact: true }).click()
 
     // Its card, in the coordinator's thread: where it runs, the command, and where it answers once it says.
     const card = page.getByRole('article', { name: 'Run of main' })

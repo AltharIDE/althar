@@ -4,11 +4,22 @@ import { type Dictation, type DictationState as TrayState, DictationSetup, type 
 
 import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
-import { draftOf, setDraftText, useDraftOf } from '../drafts'
+import { draftOf, setDraftDictated, setDraftText, useDraftOf } from '../drafts'
 import { joined, live } from './live'
 import { chooseMicrophone, microphoneToUse, useChosenMicrophone, useMicrophones } from './microphones'
 import { type Record, type Recorded, record as recordMicrophone } from './recorder'
-import { BARS, changeSession, handlesOf, type Said, sessionOf, useSession } from './sessions'
+import {
+  BARS,
+  changeSession,
+  composerShown,
+  type Destination,
+  type Handles,
+  handlesOf,
+  listeningIn,
+  type Said,
+  sessionOf,
+  useSession,
+} from './sessions'
 import { bytes, lengthOf, timeLeft, trayText } from './text'
 import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabulary'
 
@@ -34,10 +45,12 @@ import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabul
  * shows, so a window that never dictates never starts the speech process.
  *
  * What is said belongs to the thread, not the composer (`sessions.ts`):
- * leaving while it listens stops it and writes down what was said, and
- * what is being written down lands in the thread's draft (`drafts.ts`)
- * whether or not its composer still shows. What couldn't be written down
- * is kept, to try again, until the person throws it away.
+ * leaving while it listens goes on listening, carried with the person in a
+ * pill (`Carried.tsx`) that stops, throws away and sends it from anywhere;
+ * what is written down lands in the thread's draft (`drafts.ts`) whether or
+ * not its composer still shows. One thread listens at a time: starting in
+ * another writes down what the first heard. What couldn't be written down is
+ * kept, to try again, until the person throws it away.
  */
 
 /** The longest anyone dictates in one go; it stops and writes it down there. */
@@ -113,6 +126,8 @@ const inserting = (field: HTMLTextAreaElement | null, at: number, words: string)
 export interface DictationOptions {
   /** The project dictated about, whose names are spelt as its code spells them. */
   readonly projectId?: string | null
+  /** Whose it is, said by the pill that carries it once the person leaves; null until the view knows. */
+  readonly to?: Destination | null
   /** The microphone; tests give a fake. */
   readonly record?: Record
 }
@@ -141,6 +156,80 @@ export const together = (kept: Said | null, said: Said): Said => {
   return { samples, sampleRate: said.sampleRate, seconds: kept.seconds + said.seconds }
 }
 
+/**
+ * Writes down all of what was said in `thread`, at where it started: by the
+ * live writer as it stops, or again as it is retried. It lands in the
+ * thread's draft whether or not its composer still shows; written while
+ * none shows, the composer says so when the person is back. What can't be
+ * written down is kept, to try again.
+ */
+export const writeIn = async (thread: string, said: Said, now = handlesOf(thread).writer) => {
+  const held = handlesOf(thread)
+  held.writer = null
+  changeSession(thread, { phase: 'writing' })
+  try {
+    const text = now !== null ? await now.finish(said) : await (held.transcribe ?? nothingToWriteWith)(said)
+    // The window forgot the thread's dictation meanwhile: nothing to land in.
+    if (handlesOf(thread) !== held) return
+    // Nothing was heard: nothing to carry either.
+    if (text === '') return changeSession(thread, { phase: 'idle', interim: '', away: null })
+    const away = held.shown === 0
+    setDraftText(thread, inserting(away ? null : (held.field?.current ?? null), sessionOf(thread).at, text))
+    // Marked once, and kept through any edits: the agent that reads it is told it was dictated.
+    setDraftDictated(thread, true)
+    changeSession(thread, { phase: 'idle', interim: '', arrived: away ? draftOf(thread).text : null })
+  } catch {
+    if (handlesOf(thread) !== held) return
+    changeSession(thread, (now) => ({ phase: 'idle', interim: '', failed: together(now.failed, said) }))
+  }
+}
+
+const nothingToWriteWith = () => Promise.reject(new Error('Nothing to write it down with.'))
+
+const stopClock = (held: Handles) => {
+  if (held.clock === null) return
+  window.clearInterval(held.clock)
+  held.clock = null
+}
+
+/** Stops listening in `thread`, its composer on screen or not, and writes down what was said. */
+export const stopIn = (thread: string) => {
+  const held = handlesOf(thread)
+  stopClock(held)
+  const now = held.recording
+  held.recording = null
+  if (now === null) return
+  const { samples, sampleRate } = now.stop()
+  changeSession(thread, (session) => ({ levels: session.levels.map(() => 0) }))
+  if (samples.length < sampleRate * SHORTEST) {
+    held.writer?.close()
+    held.writer = null
+    return changeSession(thread, { interim: '', phase: 'idle', away: null })
+  }
+  void writeIn(thread, { seconds: sessionOf(thread).seconds, samples, sampleRate })
+}
+
+/** Throws away what `thread` is hearing, its composer on screen or not. */
+export const cancelIn = (thread: string) => {
+  const held = handlesOf(thread)
+  stopClock(held)
+  held.recording?.cancel()
+  held.recording = null
+  held.writer?.close()
+  held.writer = null
+  changeSession(thread, (session) => ({ interim: '', levels: session.levels.map(() => 0), phase: 'idle', away: null }))
+}
+
+/** The clock while `thread` listens, wherever the person is, and its end at the longest anyone dictates. */
+const startClock = (thread: string) => {
+  const held = handlesOf(thread)
+  stopClock(held)
+  held.clock = window.setInterval(() => {
+    changeSession(thread, (session) => ({ seconds: session.seconds + 1 }))
+    if (sessionOf(thread).seconds >= LONGEST) stopIn(thread)
+  }, 1000)
+}
+
 /** A ref for the composer's field that says whether the field is on screen: the composer shows, not just its view. */
 const fieldRef = (onField: (field: HTMLTextAreaElement | null) => void): RefObject<HTMLTextAreaElement | null> => {
   let field: HTMLTextAreaElement | null = null
@@ -157,7 +246,7 @@ const fieldRef = (onField: (field: HTMLTextAreaElement | null) => void): RefObje
 
 /** Dictation into the draft kept under `key` (`drafts.ts`): the thread's, which it outlives its composer for. */
 export function useDictation(key: string, options: DictationOptions = {}): Voice {
-  const { record = recordMicrophone, projectId = null } = options
+  const { record = recordMicrophone, projectId = null, to = null } = options
   const { host, client, cache } = useServices()
   const voice = host.dictation ?? NONE
   /* Whether the composer's field is on screen: a view can keep its dictation while it shows something else, its board or a task's outputs. */
@@ -222,36 +311,14 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       .catch(() => (vocabulary.current = { projectId: null, words: NO_VOCABULARY }))
   }
 
-  /**
-   * Writes down all of what was said in `thread`, at where it started: by the
-   * live writer as it stops, or again as it is retried. It lands in the
-   * thread's draft whether or not its composer still shows; written while
-   * none shows, the composer says so when the person is back. What can't be
-   * written down is kept, to try again.
-   */
-  const write = async (thread: string, said: Said, now = handlesOf(thread).writer) => {
-    const held = handlesOf(thread)
-    held.writer = null
-    changeSession(thread, { phase: 'writing' })
-    try {
-      const text = now === null ? await transcribe(said) : await now.finish(said)
-      // The window forgot the thread's dictation meanwhile: nothing to land in.
-      if (handlesOf(thread) !== held) return
-      if (text === '') return changeSession(thread, { phase: 'idle', interim: '' })
-      const away = held.shown === 0
-      setDraftText(thread, inserting(away ? null : (held.field?.current ?? null), sessionOf(thread).at, text))
-      changeSession(thread, { phase: 'idle', interim: '', arrived: away ? draftOf(thread).text : null })
-    } catch {
-      if (handlesOf(thread) !== held) return
-      changeSession(thread, (now) => ({ phase: 'idle', interim: '', failed: together(now.failed, said) }))
-    }
-  }
-
   const listen = async (state: DictationState) => {
     const held = handlesOf(key)
     if (!(await microphone(state))) return
     // The person left while the system asked: nothing to listen for.
     if (held.shown === 0) return
+    // One thread listens at a time: one carried from elsewhere is written down first.
+    for (const other of listeningIn()) if (other !== key) stopIn(other)
+    held.transcribe = transcribe
     // The model loads while the person talks, so its first words don't wait for it; writing down waits if it must.
     if (!prepared.current) {
       prepared.current = true
@@ -294,37 +361,15 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       interim: '',
       seconds: 0,
       arrived: null,
+      away: null,
       phase: 'listening',
     })
+    startClock(key)
     setProblem(null)
     setOpen(false)
   }
 
-  /** Stops listening in `thread`, and writes down what was said. */
-  const stopIn = (thread: string) => {
-    const held = handlesOf(thread)
-    const now = held.recording
-    held.recording = null
-    if (now === null) return
-    const { samples, sampleRate } = now.stop()
-    changeSession(thread, (session) => ({ levels: session.levels.map(() => 0) }))
-    if (samples.length < sampleRate * SHORTEST) {
-      held.writer?.close()
-      held.writer = null
-      return changeSession(thread, { interim: '', phase: 'idle' })
-    }
-    void write(thread, { seconds: sessionOf(thread).seconds, samples, sampleRate })
-  }
   const stop = () => stopIn(key)
-
-  const cancelListening = () => {
-    const held = handlesOf(key)
-    held.recording?.cancel()
-    held.recording = null
-    held.writer?.close()
-    held.writer = null
-    changeSession(key, (session) => ({ interim: '', levels: session.levels.map(() => 0), phase: 'idle' }))
-  }
 
   /** The menu beside the microphone: kept for next time, and heard from now on where it is listening. */
   const chooseInput = (id: string | null) => chooseMicrophone(id === null ? null : (microphones.find((m) => m.id === id) ?? null))
@@ -389,17 +434,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   })
   useEffect(() => voice?.onEvent(heard), [voice])
 
-  // The clock while listening, and its end at the longest anyone dictates.
   const listening = phase === 'listening'
-  useEffect(() => {
-    if (!listening) return
-    const timer = window.setInterval(() => changeSession(key, (session) => ({ seconds: session.seconds + 1 })), 1000)
-    return () => window.clearInterval(timer)
-  }, [listening, key])
-  const tooLong = useEffectEvent(() => stop())
-  useEffect(() => {
-    if (listening && seconds >= LONGEST) tooLong()
-  }, [listening, seconds])
 
   // While listening, the microphone heard follows the one to hear: chosen in the menu, named once the system names them, gone, or back.
   useEffect(() => {
@@ -409,10 +444,10 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     void held.recording.use(input)
   }, [listening, input, key])
 
-  // Escape while listening throws it away, before anything else hears it (going back from a task).
-  const escape = useEffectEvent(() => cancelListening())
+  // Escape while listening throws it away, before anything else hears it (going back from a task); only where its composer shows, so a pill carrying it is never lost by a key.
+  const escape = useEffectEvent(() => cancelIn(key))
   useEffect(() => {
-    if (!listening) return
+    if (!listening || !showing) return
     const onKey = (event: KeyboardEvent) => {
       // Escape in the list of microphones closes the list, not what is being said.
       if (event.key !== 'Escape' || (event.target instanceof Element && event.target.closest('[role="menu"]') !== null)) return
@@ -422,19 +457,26 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [listening])
+  }, [listening, showing])
 
-  // The thread's composer shows: what is written down lands at its cursor. Leaving it, for another view or another face of this one, stops listening, and writes down what was said; what is being written down goes on, into the thread's draft.
-  const leave = useEffectEvent((thread: string) => stopIn(thread))
+  // Whose it is, for the pill that carries it once the person leaves.
+  useEffect(() => {
+    handlesOf(key).to = to
+  }, [key, to])
+
+  // The thread's composer shows: what is written down lands at its cursor, and nothing is carried. Leaving it, for another view or another face of this one, goes on listening, or writing down, carried with the person.
   useEffect(() => {
     if (!showing) return
     const held = handlesOf(key)
     held.shown += 1
     held.field = inputRef
+    composerShown(key, true)
+    changeSession(key, { away: null })
     return () => {
       held.shown -= 1
       if (held.field === inputRef) held.field = null
-      if (held.shown === 0) leave(key)
+      composerShown(key, false)
+      if (held.shown === 0 && sessionOf(key).phase !== 'idle') changeSession(key, { away: Date.now() })
     }
   }, [key, showing, inputRef])
 
@@ -533,7 +575,8 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
               // Tried again once it has stopped listening, so the two never write over each other.
               if (phase !== 'idle') return
               changeSession(key, { failed: null })
-              return void write(key, failed, null)
+              handlesOf(key).transcribe = transcribe
+              return void writeIn(key, failed, null)
             }
             if (known !== null) void startDownload(known)
           },

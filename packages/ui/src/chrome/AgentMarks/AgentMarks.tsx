@@ -32,6 +32,7 @@ export const agentMarksText: AgentMarksText = {
     [RuntimeState.Installing]: 'downloading',
     [RuntimeState.Outdated]: 'needs an update',
     [RuntimeState.Unsupported]: 'not supported yet',
+    [RuntimeState.Unchecked]: 'couldn’t check',
   },
   out: (back) => (back ? `out until ${back}` : 'out of usage'),
 }
@@ -64,6 +65,7 @@ function say(agent: AgentMark, t: AgentMarksText): { words: string; shown: boole
     case RuntimeState.Missing:
     case RuntimeState.Installing:
     case RuntimeState.Outdated:
+    case RuntimeState.Unchecked:
       return { words: t.state[agent.state], shown: true }
     default:
       return unreachable(agent.state)

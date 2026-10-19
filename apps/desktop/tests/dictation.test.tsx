@@ -7,9 +7,11 @@ import { Composer, DictationTray } from '@althar/ui'
 import type { DictationHost, DictationState } from '../src/renderer/data/services'
 import { microphonesOf, microphoneToUse } from '../src/renderer/shared/dictation/microphones'
 import type { Frame, Record } from '../src/renderer/shared/dictation/recorder'
+import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
 import { together, useDictation } from '../src/renderer/shared/dictation/useDictation'
-import { setDraftText, useDraft } from '../src/renderer/shared/drafts'
+import { draftOf, forgetDrafts, setDraftDictated, setDraftText, useDraft } from '../src/renderer/shared/drafts'
+import { sentWith } from '../src/renderer/shared/useImages'
 import { fakeClient, fakeHost } from './fixtures'
 import { withServices } from './render'
 
@@ -230,6 +232,38 @@ describe('dictating with the model here', () => {
     await waitFor(() => expect(box.value).toBe('Before the PR, check the retry path run it again.'))
   })
 
+  it('marks the draft as dictated, keeps the mark through the person’s edits, and forgets it with the words', async () => {
+    const host = ready()
+    show(host.dictation, fakeRecord().record, { initial: 'Typed first. ' })
+    expect(draftOf('thread:th1').dictated).toBe(false)
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
+    await waitFor(() => expect(field()).toHaveProperty('value', expect.stringContaining('check the retry path')))
+    expect(draftOf('thread:th1').dictated).toBe(true)
+    // Typing more, and cutting some of it away, leaves it dictated: some of its words came from the voice.
+    await userEvent.type(field(), ' and the docs')
+    expect(draftOf('thread:th1')).toMatchObject({ dictated: true })
+    // What goes with it when it is sent says so; a typed one carries nothing.
+    expect(sentWith({ sent: [], pictures: [], dictated: true })).toEqual({ dictated: true })
+    expect(sentWith({ sent: [], pictures: [] })).toEqual({})
+    // Sent, the composer is empty again, and the next message starts typed.
+    setDraftText('thread:th1', '')
+    expect(draftOf('thread:th1').dictated).toBe(false)
+    setDraftDictated('thread:th1', true)
+    expect(draftOf('thread:th1').dictated).toBe(false)
+  })
+
+  it('keeps the mark of dictated words that were kept, as the draft is read again', () => {
+    forgetDrafts()
+    setDraftText('thread:kept', 'Ask Alpha')
+    setDraftDictated('thread:kept', true)
+    setDraftText('thread:typed', 'Ask Althar')
+    // A window that starts again reads them from its storage.
+    forgetDrafts()
+    expect(draftOf('thread:kept')).toMatchObject({ text: 'Ask Alpha', dictated: true })
+    expect(draftOf('thread:typed')).toMatchObject({ text: 'Ask Althar', dictated: false })
+  })
+
   it('loads the model once, however often it listens', async () => {
     const host = ready()
     show(host.dictation, fakeRecord().record)
@@ -410,7 +444,7 @@ describe('dictation’s edges', () => {
     }
   })
 
-  it('stops listening when the composer goes, and writes down what was said into its thread’s draft', async () => {
+  it('goes on listening when the composer goes, carried with the person, and is still listening as it is back', async () => {
     const { record, cancel } = fakeRecord()
     const host = fakeDictation(state({}, { ready: true }))
     const { unmount } = show(host.dictation, record)
@@ -418,10 +452,12 @@ describe('dictation’s edges', () => {
     await screen.findByRole('button', { name: /^Stop dictating/ })
     unmount()
     expect(cancel).not.toHaveBeenCalled()
-    await waitFor(() => expect(host.dictation.transcribe).toHaveBeenCalledTimes(1))
+    expect(host.dictation.transcribe).not.toHaveBeenCalled()
     show(host.dictation, record)
+    await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
     await waitFor(() => expect(field()).toHaveProperty('value', 'check the retry path'))
-    expect(screen.getByText('What you said was written down while you were away.')).toBeTruthy()
+    // Back before it was written down: nothing to say.
+    expect(screen.queryByText('What you said was written down while you were away.')).toBeNull()
   })
 })
 
@@ -600,7 +636,8 @@ describe('choosing the microphone', () => {
     expect(record).toHaveBeenLastCalledWith(expect.any(Function), 'usb')
     unmount()
 
-    // Another launch: the choice is still there.
+    // Another launch: the choice is still there, and nothing listens from the last.
+    forgetSessions()
     const again = fakeRecord()
     show(ready().dictation, again.record)
     const next = await microphoneMenu()

@@ -104,7 +104,7 @@ describe('an issue', () => {
     const tracker = linear()
     return Effect.gen(function* () {
       yield* connect('github', HOST)
-      yield* connect('linear')
+      const linearConnection = yield* connect('linear')
       const { projectId, threadId } = yield* opened(working)
       const coordinator = yield* Coordinator
       const issues = yield* Issues
@@ -127,7 +127,8 @@ describe('an issue', () => {
         snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
       )
       const [ready] = yield* until(cards, (all) => all[0]?.phase === 'ready', Duration.seconds(20))
-      assert.deepInclude(ready?.issue, { product: 'linear', key: 'MER-231' })
+      // With the connection it is read through, which its project's settings say Althar's standing on.
+      assert.deepInclude(ready?.issue, { product: 'linear', key: 'MER-231', connectionId: linearConnection.id })
       assert.strictEqual(ready?.branch, 'althar/mer-231-rate-limit-refunds')
       assert.strictEqual(github.changes[0]?.title, 'MER-231: Rate-limit refunds')
       assert.include(github.changes[0]?.body, 'Issue: [MER-231](https://linear.app/fake/issue/MER-231/rate-limit-refunds-like-charges)')

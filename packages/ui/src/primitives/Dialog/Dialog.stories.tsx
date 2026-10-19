@@ -62,6 +62,18 @@ export const Form: Story = {
   },
 }
 
+/** A form longer than a question: it sits higher, and may take more of the window. */
+export const Tall: Story = {
+  args: {
+    title: 'Report a problem',
+    description: undefined,
+    tall: true,
+    onSubmit: fn(),
+    children: <Field aria-label="What happened?" />,
+    actions: <Button type="submit">Send</Button>,
+  },
+}
+
 /** Escape closes it. */
 export const Escaping: Story = {
   play: async ({ args }) => {
