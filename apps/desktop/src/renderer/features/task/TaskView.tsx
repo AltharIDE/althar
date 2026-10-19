@@ -31,7 +31,7 @@ import {
   TitleBar,
 } from '@althar/ui'
 
-import { device } from '../../shared/device'
+import { device, platform } from '../../shared/device'
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
@@ -143,7 +143,7 @@ export const text = {
   loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
-  diffKey: '⌘D',
+  diffKey: platform === 'darwin' ? '⌘D' : 'Ctrl+D',
 }
 
 /**
