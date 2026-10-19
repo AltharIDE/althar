@@ -17,16 +17,17 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 - [x] **Whether a failure the runtime catches is reported.** Yes, where it
   is kept, unless the person caused it or can put it right: as a handled
   crash report, ten a launch (ADR-047).
-- [ ] **The all-or-nothing places left.** A sweep on 18 October found these
-  and left them for their own change. Conflict rounds still `resolving` at
-  launch are swept one after another, so one whose worktree is gone stops
-  the rest (`Changes.ts`, `settleRound`, `conflicts.ts` `unresolved`). The
-  lead's tool that reads a task's pull requests fails whole for one it can't
-  read (`Changes.ts` `read`). The plans' countdown and the usage-limit holds
-  pick a failing item again at once, and die on one bad row
-  (`Plans.ts` `countdown`, `Runs.ts` `holds`). One bad waiting conflict
-  round hides every one (`Changes.ts` `roundsWaiting`). Leaning: each item
-  its own, with a backoff for one that keeps failing.
+- [x] **The all-or-nothing places left.** A sweep on 18 October found four;
+  each item is now its own. Conflict rounds still `resolving` at launch are
+  settled one by one, and a repository whose worktree is gone or whose git
+  fails is that round's reason, not a stop for the rest. The lead's read of
+  a task's pull requests says of one it can't read why ("web#3: Althar
+  couldn't read it (…)") and reads the others. The plans' countdown and the
+  usage-limit holds read each row on its own, give an item that fails a
+  backoff (`backoff` in `Failures.ts`: 10 seconds, doubling, at most 10
+  minutes), and start again after a round that fails whole (`keptGoing`).
+  One waiting conflict round that can't be read is left out, and the rest
+  still wait (ADR-047).
 
 ## Crash reports, 17 October
 
@@ -42,6 +43,25 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 - [x] **An agent's adapter that dies.** Reported from the runtime as a
   handled failure when its session is lost: its id and how its process
   ended, never what it wrote (ADR-047).
+
+## The Flatpak's sign-in key, 15 October
+
+- [x] **Keep a sign-in key across restarts on GNOME and KDE.** Every Linux
+  Flatpak prefers Chromium's app-specific Secret portal seal (`v12`), KDE
+  included; direct KWallet access is removed from this branch so browser apps
+  do not share the normal key. If the portal is missing, Althar keeps the
+  former synchronous safeStorage behavior only when the selected backend passes
+  `keyringIsSafe`, encryption is available, and the backend is the private
+  sandbox-local `gnome_libsecret` file. This fallback can be session only and
+  may prompt again after restart. The runtime still carries opaque
+  sealed values and never receives the key. See
+  [ADR-028](decisions/028-linux-windows-packages-and-the-keyring.md).
+- [ ] **Run the real GNOME restart test.** It has not been run in this task's
+  KDE-only sandbox. Follow the exact GNOME session or VM steps in ADR-028;
+  verify GitHub stays connected after `flatpak kill dev.althar.app` and the
+  second launch has no `OSCrypt generated a new password` message. #207
+  replaces the closed #201's KDE-specific path with the app-specific portal
+  path on both desktops.
 
 ## Usage data, 12 October
 
@@ -295,7 +315,8 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   fight. A product question to try out before deciding. Althar puts the key
   in the branch and the pull request's title. Since 12 October it moves the
   issue to In Progress as its task's first step starts, once, on Linear and
-  Jira, unless the project's rules turn it off; it never moves one back from
+  Jira, and since 18 October on Trello, unless the project's rules turn it
+  off; it never moves one back from
   further along. In review and done are still open.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own

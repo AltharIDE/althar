@@ -1,0 +1,27 @@
+/* why a switch didn't hold, under what it does */
+.failedLine {
+  display: block;
+  margin-top: 3px;
+  color: var(--danger);
+}
+
+/* a line on the section as a whole, after its parts: lighter than anything in them */
+.quiet {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-4);
+}
+
+/* a row's icon, quieter than its name */
+.glyph {
+  color: var(--t-3);
+}
+
+/* a folder or a pattern under a row's name: code, at the size of a command in the list above */
+.code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 18px;
+}

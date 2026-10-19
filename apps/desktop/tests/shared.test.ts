@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { Brand } from '@althar/ui'
 import { describe, expect, it, vi } from 'vitest'
 
-import { agentLineOf, brandOf } from '../src/renderer/shared/agents'
+import { agentLineOf, brandOf, pinnedOf, signInCautionOf, signInWordsOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor, type Unfurl } from '@althar/contracts'
 import { isSending, mergeItems, newestReads, queueShown, readingNow, sending, unsent, waiting } from '../src/renderer/shared/items'
 import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
@@ -23,6 +23,23 @@ describe('agents', () => {
     expect(agentLineOf({ id: 'claude-code', version: '2.1.263' })).toBe('Anthropic · 2.1.263')
     expect(agentLineOf({ id: 'opencode', version: '1.18.31' })).toBe('1.18.31')
     expect(agentLineOf({ id: 'opencode', version: null })).toBeUndefined()
+    // Antigravity has no version command: its maker alone.
+    expect(agentLineOf({ id: 'antigravity', version: null })).toBe('Google')
+  })
+
+  it('signs Antigravity in with Google, saying first what Google’s terms put on it', () => {
+    expect(brandOf('antigravity')).toBe(Brand.Antigravity)
+    expect(signInWordsOf('antigravity')).toEqual({ plan: 'Google', host: 'accounts.google.com' })
+    expect(signInCautionOf('antigravity')).toMatch(/Google’s terms may count signing in to Antigravity from another app as a breach/)
+    expect(signInCautionOf('codex')).toBeUndefined()
+  })
+
+  it('says a download of one version is that version, from its maker', () => {
+    const download = { size: '115 MB', installing: false, pinned: '1.3.0' }
+    expect(pinnedOf({ id: 'antigravity', name: 'Google Antigravity', download })).toEqual({ from: 'Google', version: '1.3.0' })
+    // Its latest release on GitHub, or none: nothing pinned.
+    expect(pinnedOf({ id: 'opencode', name: 'OpenCode', download: { ...download, pinned: null } })).toBeUndefined()
+    expect(pinnedOf({ id: 'opencode', name: 'OpenCode', download: null })).toBeUndefined()
   })
 })
 

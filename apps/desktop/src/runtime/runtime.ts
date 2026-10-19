@@ -1,29 +1,20 @@
-import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import {
-  backupsIn,
-  connection,
-  databaseIn,
-  Failures,
-  Folders,
-  Nudges,
-  Secrets,
-  SecretsUnavailable,
-  services,
-  UsageData,
-} from '@althar/runtime'
-import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
+import { backupsIn, connection, databaseIn, Failures, Folders, Nudges, Secrets, services, UsageData } from '@althar/runtime'
+import { Cause, Context, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
+import { appFetchOf } from './appFetch'
 import { handledOf, watchCrashes } from './crashes'
 import { editorsHere, openInEditor } from './editors'
 import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
+import { profileInUse } from './profileInUse'
+import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
 
 /*
@@ -88,46 +79,16 @@ const clientIds = Object.fromEntries(
 const githubApp =
   process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
 
-/* Secrets the main process is sealing or opening, by request. */
-const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string; readonly keyring?: boolean }) => void>()
-
-/** Asks the main process to seal a secret, or open one; it alone holds the key. */
-const askMain = (type: 'seal' | 'open', value: string) =>
-  Effect.callback<string, SecretsUnavailable>((resume) => {
-    const requestId = randomUUID()
-    sealing.set(requestId, (answer) =>
-      resume(
-        answer.value === undefined
-          ? Effect.fail(
-              new SecretsUnavailable({
-                reason: answer.error ?? 'Althar couldn’t open its keychain.',
-                ...(answer.keyring === true ? { keyring: true } : {}),
-              }),
-            )
-          : Effect.succeed(answer.value),
-      ),
-    )
-    parent.postMessage({ type, requestId, value })
-    return Effect.sync(() => void sealing.delete(requestId))
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: Duration.seconds(15),
-      orElse: () => Effect.fail(new SecretsUnavailable({ reason: 'Althar’s keychain didn’t answer.' })),
-    }),
-  )
+/* Secrets the main process is sealing or opening (sealing.ts). */
+const { ask: askMain, answer: answerSealed } = sealingWith((message) => parent.postMessage(message))
 
 const secrets = Secrets.sealed(join(profile, 'secrets'), {
   seal: (value) => askMain('seal', value),
   open: (sealed) => askMain('open', sealed),
 })
 
-/**
- * Code hosts and trackers are called over the app's own network, Chromium's:
- * it trusts the certificates in the Mac's keychain, as a company's own
- * GitLab, Bitbucket or Jira often needs, and the Mac's proxy settings.
- * Node's `fetch` knows neither.
- */
-const appFetch: Fetch = (input, init) => net.fetch(input, init)
+/** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
+const appFetch: Fetch = appFetchOf(net)
 
 /** OpenRouter's public list of models, with each one's scores and prices (ADR-015). */
 const MODEL_LIST = 'https://openrouter.ai/api/v1/models'
@@ -251,6 +212,7 @@ const program = Effect.gen(function* () {
       ForeignKeyViolations: (failure) =>
         storeStopped('moving', failure.backup, `Rows in ${failure.tables.join(', ')} point at rows that aren’t there.`),
       BackupFailed: (failure) => storeStopped('copying', null, failure.reason),
+      DatabaseInUse: () => profileInUse((message) => parent.postMessage(message)),
     }),
   )
   isReady(context)
@@ -332,15 +294,12 @@ parent.on('message', (message) => {
     readonly path?: string
     readonly value?: string
     readonly error?: string
+    readonly keyring?: boolean
     readonly threadId?: string
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
-    sealing.get(data.requestId)?.({
-      ...(data.value === undefined ? {} : { value: data.value }),
-      ...(data.error === undefined ? {} : { error: data.error }),
-    })
-    sealing.delete(data.requestId)
+    answerSealed(data.requestId, data)
   }
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)

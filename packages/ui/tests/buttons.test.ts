@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 const PLAIN: Readonly<Record<string, string>> = {
   /* the whole card or row is the target */
   'board/Board/CardTitle.tsx': 'a card’s or row’s title, stretched over it',
+  'board/Board/Board.tsx': 'a collapsed lane’s rail, the whole of which opens it',
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
@@ -22,6 +23,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/NeedLine/NeedLine.tsx': 'the call’s title, which opens its task',
   'home/ProjectList/ProjectList.tsx': 'a project’s row, which opens it; the quiet line, which folds',
   'chrome/ProjectTabs/ProjectTabs.tsx': 'a tab, whose shape joins the bar below it',
+  'board/NextLine/NextLine.tsx': 'a row’s grip in the lane’s margin, held to drag the row',
   'chrome/WindowButtons/WindowButtons.tsx': 'the traffic lights, whose shape is the system’s own',
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview',
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',

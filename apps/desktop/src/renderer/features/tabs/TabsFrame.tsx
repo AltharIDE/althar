@@ -121,6 +121,7 @@ function TabsBar({
         : {})}
       onSelect={select}
       onClose={tabs.close}
+      onReorder={tabs.reorder}
       onOpen={tabs.open}
       onNewProject={tabs.newProject}
       end={
@@ -135,6 +136,7 @@ function TabsBar({
       }
       // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
       lights={host.platform === 'darwin' ? 'space' : 'drawn'}
+      text={{ newProjectKbd: host.platform === 'darwin' ? '⌘N' : 'Ctrl+N' }}
       maximized={chrome.window?.maximized === true}
       onCloseWindow={() => host.window('close')}
       onMinimize={() => host.window('minimize')}

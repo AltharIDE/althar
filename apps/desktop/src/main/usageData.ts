@@ -48,7 +48,7 @@ export const TOOK = ['under_10m', '10m_to_1h', '1h_to_1d', 'over_1d'] as const s
 type FromRuntime = { readonly [E in Said as E['name']]: { readonly [P in keyof E['properties']]: Holds } }
 
 /** How a task settled. */
-export const SETTLED = ['merged_here', 'pull_request', 'abandoned', 'reviewed', 'seen'] as const satisfies ReadonlyArray<Settled>
+export const SETTLED = ['merged_here', 'pull_request', 'abandoned', 'reviewed', 'seen', 'marked'] as const satisfies ReadonlyArray<Settled>
 
 /** What may be sent: each event Althar names, and the properties each may carry. */
 export const USAGE_EVENTS = {

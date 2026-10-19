@@ -107,6 +107,11 @@ export class NothingToWaitFor extends Schema.TaggedError<NothingToWaitFor>()('No
   attentionId: Schema.String,
 }) {}
 
+/** Handing over a step held for a usage limit, for a task with none: it carried on at the reset, or was stopped, meanwhile. */
+export class NotHeld extends Schema.TaggedError<NotHeld>()('NotHeld', {
+  taskId: Schema.String,
+}) {}
+
 /** The message went to the agent before it could be taken back, or was taken back already. */
 export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
   itemId: Schema.String,
@@ -216,10 +221,12 @@ export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefus
  * good, so it is never abandoned or reopened; one whose worktree went with
  * its branch can't be reopened on it; and an abandoned one has no agent on
  * it until it is reopened. A title can't be empty or longer than a title may be.
+ * And a finished task isn't done while what its agents left running, such as
+ * a page, wouldn't stop.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long']),
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long', 'left_running']),
 }) {}
 
 /** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */

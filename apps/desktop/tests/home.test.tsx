@@ -205,7 +205,7 @@ describe('the home', () => {
     // A step a usage limit stopped is out of usage, here as in its task, with when the agent is back.
     const out = within(needs).getByRole('article', { name: 'Out of it' })
     expect(within(out).getByText('Out of usage')).toBeTruthy()
-    expect(within(out).getByText(`Codex reached its usage limit, until ${clock('2026-09-29T14:00:00.000Z')}.`)).toBeTruthy()
+    expect(within(out).getByText(new RegExp(`^Codex ran out of usage .*It's back at ${clock('2026-09-29T14:00:00.000Z')}\\.`))).toBeTruthy()
 
     // Allowed where it is: the line stays, quiet, with what was said where its buttons were, and has focus.
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Allow once' })[0]!)
@@ -441,14 +441,26 @@ describe('the home', () => {
     expect(within(needs).getByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
   })
 
-  it('leaves out a plain task that finished: it waits on its board, and asks nothing of the person here', async () => {
+  it('lists a plain task that finished as Finished, with what its lead said, and leaves out one kept for later', async () => {
     const one = busy()
-    const finished = task({ taskId: 't20', threadId: 'th20', title: 'Which partners call v1?', slug: 'v1', phase: 'ready', kind: 'plain' })
-    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, tasks: [...one.tasks, finished] })) })
+    const finished = task({
+      taskId: 't20',
+      threadId: 'th20',
+      title: 'Which partners call v1?',
+      slug: 'v1',
+      phase: 'ready',
+      kind: 'plain',
+      summary: 'Two partners still call v1.',
+    })
+    const kept = task({ taskId: 't22', threadId: 'th22', title: 'Prototype the tabs', slug: 'tabs', phase: 'kept', kind: 'plain' })
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, tasks: [...one.tasks, finished, kept] })) })
     withServices(<Home />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     expect(within(needs).getByRole('article', { name: 'Name it better' })).toBeTruthy()
-    expect(screen.queryByText('Which partners call v1?')).toBeNull()
+    const line = within(within(needs).getByRole('article', { name: 'Which partners call v1?' }))
+    expect(line.getByText('Finished')).toBeTruthy()
+    expect(line.getByText('Two partners still call v1.')).toBeTruthy()
+    expect(screen.queryByText('Prototype the tabs')).toBeNull()
   })
 
   it('lists a drafted review by its pull request, whose it is and what it found, to review', async () => {

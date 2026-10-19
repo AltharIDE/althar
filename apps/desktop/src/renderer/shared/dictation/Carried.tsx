@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { DictationPill, type DictationPillPhase } from '@althar/ui'
 
 import { useServices } from '../../data/services'
-import { draftOf, setDraftText, useDraftOf } from '../drafts'
+import { draftOf, setDraftDictated, setDraftText, useDraftOf } from '../drafts'
 import s from './Carried.module.css'
 import { changeSession, type Destination, handlesOf, sessionOf, useCarrying, useSession } from './sessions'
 import { lengthOf } from './text'
@@ -82,12 +82,13 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
   // Sent once, however often the pill is drawn again meanwhile. It leaves the draft as it goes, so its composer has nothing of it to send again, and what the person writes there meanwhile is theirs: untouched once it is there, after it if it didn't go.
   const send = (threadId: string) => {
     const body = draftOf(thread).text.trim()
+    const dictated = draftOf(thread).dictated
     const sent = sessionOf(thread)
     if (body === '' || sent.sending !== null) return
     changeSession(thread, { sending: body })
     setDraftText(thread, '')
     setError(null)
-    client.send({ threadId, body, disposition: 'after_current' }).then(
+    client.send({ threadId, body, disposition: 'after_current', ...(dictated ? { dictated } : {}) }).then(
       () => {
         changeSession(thread, { sending: null })
         // Only what was carried as it went is dealt with: dictation started since, and carried in turn, goes on.
@@ -96,6 +97,7 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
       },
       () => {
         setDraftText(thread, (now) => (now.trim() === '' ? body : `${body}\n\n${now.trimStart()}`))
+        if (dictated) setDraftDictated(thread, true)
         changeSession(thread, { sending: null })
         setError(carriedText.didntSend)
       },
@@ -105,8 +107,10 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
   // Into the composer on screen instead, after what is there, and its field takes the cursor.
   const move = () => {
     if (here === null) return
-    const text = draftOf(thread).text.trim()
+    const { dictated, text: said } = draftOf(thread)
+    const text = said.trim()
     setDraftText(here, (now) => (now.trim() === '' ? text : `${now.trimEnd()}\n\n${text}`))
+    if (dictated) setDraftDictated(here, true)
     setDraftText(thread, '')
     done()
     handlesOf(here).field?.current?.focus()

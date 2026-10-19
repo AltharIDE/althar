@@ -75,6 +75,7 @@ export const finderText: FinderText = {
     [FoundState.Running]: 'Running',
     [FoundState.Yours]: 'Needs you',
     [FoundState.Ready]: 'Ready',
+    [FoundState.Kept]: 'Kept for later',
     [FoundState.Stopped]: 'Stopped',
     [FoundState.Merged]: 'Merged',
     [FoundState.Done]: 'Done',
@@ -111,6 +112,7 @@ const toneOf = (state: FoundState) => {
     case FoundState.Ready:
       return s.signal
     case FoundState.Planned:
+    case FoundState.Kept:
     case FoundState.Stopped:
     case FoundState.Merged:
     case FoundState.Done:
@@ -272,15 +274,18 @@ export function Finder({ results, searching = false, query, defaultQuery = '', o
             )}
             {typed && answered && rows.length === 0 && <p className={s.empty}>{t.none(words.trim())}</p>}
           </div>
-          <div className={s.foot} aria-hidden="true">
-            <span>
-              <Kbd>{t.keys.up}</Kbd>
-              <Kbd>{t.keys.down}</Kbd> {t.move}
-            </span>
-            <span>
-              <Kbd>{t.keys.enter}</Kbd> {t.open}
-            </span>
-          </div>
+          {/* how to move and open, while there is something to move to and open */}
+          {rows.length > 0 && (
+            <div className={s.foot} aria-hidden="true">
+              <span>
+                <Kbd>{t.keys.up}</Kbd>
+                <Kbd>{t.keys.down}</Kbd> {t.move}
+              </span>
+              <span>
+                <Kbd>{t.keys.enter}</Kbd> {t.open}
+              </span>
+            </div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

@@ -106,7 +106,7 @@ export const projectOverview = (projectId: string) =>
       `Repositories:\n${repositories
         .map(
           (repository) =>
-            `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
+            `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on this computer at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
         )
         .join('\n')}`,
       `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,

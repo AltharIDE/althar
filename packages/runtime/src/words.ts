@@ -3,6 +3,7 @@ import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
 import type { ReviewDraftIncomplete } from './Reviews'
 
@@ -55,7 +56,7 @@ export const agentSaid = (error: unknown): string | undefined => {
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
       return /ENOENT/.test(reason)
-        ? `${command} isn't installed, or isn't on this Mac's PATH.`
+        ? `${command} isn't installed, or isn't on this computer's PATH.`
         : sentence(`${command} wouldn't start: ${reason}`)
     }
     case 'AgentExited': {
@@ -110,6 +111,7 @@ const kinds: Readonly<Record<string, string>> = {
   repository: 'repository',
   output: 'output',
   document: 'document',
+  note: 'note',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
@@ -146,6 +148,8 @@ export const words = (
           "Althar can't send that image."
         )
       }
+      case 'NoteRefused':
+        return noteRefused[text(error, 'why') as NoteRefused['why']] ?? 'Althar can’t keep that note.'
       case 'SessionRunning':
         return 'An agent is already working on this task.'
       case 'NoSession':
@@ -181,6 +185,8 @@ export const words = (
         return 'Answer each question: pick an option, or write your own.'
       case 'NothingToWaitFor':
         return "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again."
+      case 'NotHeld':
+        return "The step isn't waiting for its usage limit any more: it carried on, or was stopped."
       case 'AlreadyDelivered':
         return "The agent already has that message, so it can't be taken back."
       case 'GitFailed': {
@@ -215,7 +221,7 @@ export const words = (
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
-        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this Mac any more, remove it anyway; its sign-in may stay behind.`
+        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.`
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
@@ -244,7 +250,7 @@ export const words = (
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
       case 'CliSignedOut':
-        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this computer.`
       case 'CliUnanswered':
         return `${text(error, 'tool')} didn't answer in time. Try again in a moment.`
       case 'CliElsewhere':
@@ -328,6 +334,8 @@ const taskRefused = {
   abandoned: 'The task is abandoned. Reopen it to carry on.',
   no_title: 'Give the task a title.',
   title_too_long: 'Keep the title short: what should change, in a few words.',
+  left_running:
+    'Althar couldn’t stop what the task left running, such as a page, so it isn’t done yet. Try Done again, or keep it for later.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Why an issue draft can't change, by where it stands. */
@@ -374,6 +382,7 @@ export const expected = new Set([
   'DocumentRefused',
   'ImageRefused',
   'NotFound',
+  'NoteRefused',
   'UnknownAgent',
   'SessionRunning',
   'NoSession',
@@ -381,11 +390,19 @@ export const expected = new Set([
   'AlwaysNotOffered',
   'QuestionUnanswered',
   'NothingToWaitFor',
+  'NotHeld',
   'RuleOnAnotherList',
   'RulesChanged',
   'AlreadyDelivered',
   'CommandIdReused',
 ])
+
+/** Why a note can't be kept as it is said, by reason. */
+const noteRefused: Readonly<Record<NoteRefused['why'], string>> = {
+  empty: 'A note needs some words. To take one out, remove it.',
+  long: `A note is a sentence or two: at most ${NOTE_LENGTH} characters.`,
+  full: `A project keeps at most ${NOTES_KEPT} notes. Remove one that no longer holds first.`,
+}
 
 /** Why a document isn't shown, by reason. */
 const documentRefused: Readonly<Record<DocumentRefused['reason'], string>> = {
@@ -419,4 +436,6 @@ const accountRefused = {
   usual: "That's the agent's usual sign-in, its first account: it stays.",
   taken: 'That folder is an account already.',
   no_name: 'Give the account a name.',
+  one: "This agent keeps its sign-in where every folder shares it, so it can't have a second account yet: sign its usual one in to the account you want.",
+  no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
 } as const satisfies Record<AccountRefused['reason'], string>

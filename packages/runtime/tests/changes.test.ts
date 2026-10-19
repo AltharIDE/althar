@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { ConnectorFailed } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { BUILT, BUILT_FIXED, BUILT_SETTLED, DESCRIBED } from '@althar/provider-adapters/testing'
 import type { ProjectId } from '@althar/domain'
@@ -28,6 +29,14 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, turns, until } from './support'
+
+/** A check's log as a code host refuses it: GitHub's own 403, with its words, as to a sign-in that may not read Actions. */
+const refused = new ConnectorFailed({
+  product: 'github',
+  reason: 'forbidden',
+  status: 403,
+  message: 'Resource not accessible by integration',
+})
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -167,14 +176,30 @@ describe('a task that ends in a pull request', () => {
       yield* changes.refresh(ready?.taskId ?? '')
       yield* Effect.sleep(Duration.millis(300))
       assert.isFalse((yield* arrivals(threadId)).some((arrival) => arrival.kind === 'checks'))
+      // Each failed check's card shows the end of its log, or why Althar couldn't read it, with where to see it.
+      const job = 'https://github.com/meridian/api/actions/runs/1/job/2'
       github.setChecks(1, [
         { name: 'test', state: 'failed', log: 'FAIL limit.test.ts' },
+        { name: 'verify', state: 'failed', url: job, log: refused },
         { name: 'lint', state: 'passed' },
       ])
       const checked = yield* until(arrivals(threadId), (all) => all.some((arrival) => arrival.kind === 'checks'))
       assert.deepInclude(
         checked.find((arrival) => arrival.kind === 'checks'),
-        { passed: 1, failed: 1, failing: ['test'] },
+        {
+          passed: 1,
+          failed: 2,
+          failing: ['test', 'verify'],
+          logs: [
+            { name: 'test', url: null, log: 'FAIL limit.test.ts', missing: null },
+            {
+              name: 'verify',
+              url: job,
+              log: null,
+              missing: 'GitHub refused (403): Resource not accessible by integration. Its sign-in may not be allowed to read logs',
+            },
+          ],
+        },
       )
 
       // Merged, the task is settled, and nothing listens any more.
@@ -820,11 +845,19 @@ describe('a pull request, by the person and the lead', () => {
 
       github.reviewAs(1, 'dana', 'changes_requested', 'Name it better.')
       github.commentAs(1, 'lee', 'Looks fine to me.')
-      github.setChecks(1, [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts' }])
+      github.setChecks(1, [
+        { name: 'test', state: 'failed', log: 'FAIL limit.test.ts' },
+        { name: 'verify', state: 'failed', url: 'https://github.com/meridian/api/actions/runs/1/job/2', log: refused },
+      ])
       const read = yield* changes.read(taskId)
       assert.include(read, 'PR #1, "Add a retry" (open)')
-      assert.include(read, 'Checks: 0 passed, 1 failed, 0 running (failed: test).')
+      assert.include(read, 'Checks: 0 passed, 2 failed, 0 running (failed: test, verify).')
       assert.include(read, "The end of test's log:\n```\nFAIL limit.test.ts\n```")
+      // A log that couldn't be read says why, and that reading it again won't help.
+      assert.include(
+        read,
+        "Althar couldn't read verify's log: GitHub refused (403): Resource not accessible by integration. Its sign-in may not be allowed to read logs. Reading it again with read_check_log would fail the same way: work from what is here, or reproduce the check locally. Its page: https://github.com/meridian/api/actions/runs/1/job/2",
+      )
       assert.include(read, '- dana reviewed: changes requested\n> Name it better.')
       assert.include(read, '- lee:\n> Looks fine to me.')
 
@@ -1989,7 +2022,7 @@ describe('a change whose checks Althar sees through', () => {
       )
       const [running] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks_running', Duration.seconds(20))
       // Opened by the person, it is theirs: ready though its checks run, and a fix waits for them to push it.
-      yield* (yield* Tasks).see({ taskId: running?.taskId ?? '', finished: false })
+      yield* (yield* Tasks).see({ taskId: running?.taskId ?? '' })
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       first = 'failed'
       yield* until(pushRequests(running?.threadId ?? ''), (asked) => asked.length === 1, Duration.seconds(30))
@@ -2067,7 +2100,20 @@ describe('what failed, in full', () => {
   it.live('gives its lead a check’s whole log, a page at a time', () => {
     const { working, bare } = hosted()
     const log = Array.from({ length: 700 }, (_, index) => `line ${index + 1}`).join('\n')
-    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: 'running', log }] })
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => [
+        { name: 'test', state: 'running', log },
+        { name: 'verify', state: 'failed', log: refused },
+        {
+          name: 'busy',
+          state: 'failed',
+          log: new ConnectorFailed({ product: 'github', reason: 'unreachable', message: 'The service did not answer in time' }),
+        },
+        { name: 'ci/circleci', state: 'failed', url: 'https://circleci.com/gh/meridian/api/7' },
+      ],
+    })
     github.addRepository(['meridian', 'api'])
     return Effect.gen(function* () {
       yield* connect('github', HOST)
@@ -2079,7 +2125,23 @@ describe('what failed, in full', () => {
       assert.match(last, /line 700\n```$/)
       const firstPage = yield* callTool(lead, 'read_check_log', { check: 'Test', from_line: 1 })
       assert.match(firstPage, /^Lines 1 to 300 of 700 of test's log on PR #1; from_line 301 reads on:\n```\nline 1\n/)
-      assert.include(yield* callTool(lead, 'read_check_log', { check: 'lint' }), 'PR #1 has no check called "lint". Its checks: test.')
+      assert.include(
+        yield* callTool(lead, 'read_check_log', { check: 'lint' }),
+        'PR #1 has no check called "lint". Its checks: test, verify, busy, ci/circleci.',
+      )
+      // A log its host won't give says why, in plain words; one it keeps none of, where to see the check instead.
+      assert.include(
+        yield* callTool(lead, 'read_check_log', { check: 'verify' }),
+        "Althar couldn't read verify's log: GitHub refused (403): Resource not accessible by integration. Its sign-in may not be allowed to read logs. Reading it again with read_check_log would fail the same way",
+      )
+      assert.include(
+        yield* callTool(lead, 'read_check_log', { check: 'busy' }),
+        "Althar couldn't read busy's log: GitHub didn't answer: The service did not answer in time. read_check_log may read it in a while.",
+      )
+      assert.strictEqual(
+        yield* callTool(lead, 'read_check_log', { check: 'ci/circleci' }),
+        "PR #1: Althar couldn't read ci/circleci's log: GitHub keeps no log of it that Althar can read. Its page: https://circleci.com/gh/meridian/api/7",
+      )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

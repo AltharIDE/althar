@@ -70,8 +70,8 @@ export function FileChanges({ files, most, onOpen, className, text }: FileChange
 export function Delta({ add, del, className }: { add?: number; del?: number; className?: string }) {
   return (
     <span className={cx(s.delta, className)}>
-      {add != null && <span className={s.add}>+{add}</span>}
-      {del != null && <span className={s.del}>−{del}</span>}
+      {add != null && <span className={add === 0 ? s.none : s.add}>+{add}</span>}
+      {del != null && <span className={del === 0 ? s.none : s.del}>−{del}</span>}
     </span>
   )
 }

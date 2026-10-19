@@ -120,6 +120,8 @@ export enum LimitAnswer {
   Waiting = 'waiting',
   /** Tried the same agent again, as one that didn't say when it resets may be back. */
   Again = 'again',
+  /** Went on without the step: a review, skipped. */
+  Skipped = 'skipped',
 }
 
 /** A step of a task's graph. */
@@ -447,6 +449,8 @@ export enum FoundState {
   Yours = 'you',
   /** Done, waiting for you to accept it. */
   Ready = 'ready',
+  /** Finished, not a change, and kept for later: out of Needs you as it is. */
+  Kept = 'kept',
   Stopped = 'stopped',
   Merged = 'merged',
   /** Settled without a merge to show for it. */
@@ -518,6 +522,8 @@ export enum Room {
   Board = 'board',
   /** The conversation and the board side by side. */
   Both = 'both',
+  /** The project's settings, in place of its work. */
+  Settings = 'settings',
 }
 
 /** Where an agent runtime on this machine stands, as Althar last found it. */

@@ -9,7 +9,7 @@
   display: grid;
   grid-template-columns: 132px minmax(0, 1fr);
   column-gap: 24px;
-  padding: 18px 0 19px;
+  padding: 15px 0 16px;
   border-bottom: 1px solid var(--line);
 }
 /* a part of its own: a gap, then a stronger line over it */
@@ -21,33 +21,33 @@
   border-bottom: 0;
 }
 
+/* the word in the margin: a name, as a setting's is, quieter than the sentence */
 .label {
   grid-column: 1;
   margin: 0;
-  padding-top: 7px;
-  font: 600 10.5px/1 var(--font-label);
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--t-3);
+  padding-top: 5px;
+  font: 500 13px/1.35 var(--font);
+  color: var(--t-2);
 }
+/* read first, but no bigger than the page's title */
 .text {
   grid-column: 2;
   margin: 0;
-  font-size: 18.5px;
+  font-size: 15.5px;
   line-height: 1.75;
-  letter-spacing: -0.008em;
+  letter-spacing: -0.004em;
   color: var(--t-1);
   text-wrap: pretty;
 }
 
 /* what no project can change: smaller, quieter, behind a lock */
 .fixed .text {
-  font-size: 15px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--t-3);
 }
 .fixed .label {
-  padding-top: 5px;
+  padding-top: 2px;
 }
 .lock {
   margin: 0 8px -1px 0;
@@ -74,7 +74,7 @@
   flex-direction: column;
   gap: 6px;
   margin: 0;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--t-3);
 }
 .keyRow {
@@ -91,7 +91,7 @@
   flex: none;
 }
 .keyWord {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--t-1);
   text-decoration: underline;
   text-decoration-color: var(--line-3);

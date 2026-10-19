@@ -58,7 +58,8 @@ export const needText = {
   /** Commits after its last pull request, in none yet, and how big they are. */
   inNone: (commits: number, add: number, del: number) =>
     `${commits === 1 ? '1 commit' : `${commits} commits`} in no pull request · +${add} −${del}`,
-  branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
+  branchSize: (files: number, add: number, del: number) =>
+    files === 0 ? 'Nothing changed on its branch' : `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
   /** A review drafted, in a line: whose pull request, and what the draft found. */
   by: (author: string) => `by ${author}`,
   findings: (n: number) => (n === 0 ? 'no findings' : n === 1 ? '1 finding' : `${n} findings`),
@@ -127,6 +128,11 @@ export const briefOf = (task: HomeTask): string => {
       needText.by(reviewing.author),
       needText.findings(reviewing.findings),
     ].join(' · ')
+  // A task that isn't a change, finished: what its lead said, in its first line; else where it wrote.
+  if (task.kind === 'plain') {
+    const said = task.summary?.split('\n').find((line) => line.trim() !== '')
+    if (said !== undefined) return said
+  }
   const change = task.change
   // Commits after its last pull request merged or closed: a new one is the person's to open.
   const after = task.unshipped
@@ -224,7 +230,7 @@ export const needsOf = ({
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
-    // `ready` is the tasks that wait on the person (`readyOf`): a plain task that finished waits on its board, not here.
+    // `ready` is the tasks that wait on the person (`readyOf`): a task that finished and isn't a change among them.
     if (project === undefined) return []
     const next = nextOf(task)
     return [

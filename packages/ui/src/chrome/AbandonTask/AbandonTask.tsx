@@ -65,7 +65,7 @@ export const abandonTaskText: AbandonTaskText = {
   worktree: (where) => `Its worktree stays in ${where}, as it is.`,
   noWorktree: 'It has no worktree to leave behind.',
   branch: (name) => `Its branch ${name} stays. Nothing is pushed or deleted.`,
-  branchHere: (name) => `Its branch ${name} stays on this Mac.`,
+  branchHere: (name) => `Its branch ${name} stays on this computer.`,
   changes: 'Its pull requests',
   close: (name, host) => `Close ${name} on ${host}`,
   deleteBranch: (host) => `Delete its branch on ${host}`,

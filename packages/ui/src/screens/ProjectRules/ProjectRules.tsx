@@ -305,12 +305,12 @@ export const projectRulesText: ProjectRulesText = {
       [LimitPolicy.Move]: {
         word: 'moves to the next agent free',
         title: 'Move the work to the next agent free',
-        note: 'To the next agent signed in, in the order of your agents. It takes the work over from where it stands',
+        note: 'To the next agent signed in, in the order of your agents. It takes the work over from where it stands. With none free, it waits for the reset, and you can move it to another model meanwhile',
       },
       [LimitPolicy.Wait]: {
         word: 'waits for the reset',
         title: 'Wait for the reset',
-        note: 'The step keeps its place and runs again at the reset',
+        note: 'The step keeps its place and runs again at the reset, unless you move it to another model meanwhile',
       },
       [LimitPolicy.Ask]: {
         word: 'waits for you',
@@ -356,6 +356,8 @@ export type ProjectRulesProps = RootProps<
     project: string
     /** The title's rank; each sentence's margin word is one below. */
     headingLevel?: HeadingLevel
+    /** Whether it heads itself with its title and lede; not where the page around it already names it. The key stays either way. */
+    titled?: boolean
     /** What happens to what no rule keeps, while everything isn't allowed. */
     mode: RestMode
     onModeChange: (mode: RestMode) => void
@@ -473,6 +475,7 @@ const nameShown = (rule: Omit<NamingRuleProps, 'text'>) => {
 export function ProjectRules({
   project,
   headingLevel = 1,
+  titled = true,
   mode,
   onModeChange,
   allowAll,
@@ -673,13 +676,15 @@ export function ProjectRules({
 
   return (
     <div className={cx(s.rules, className)} {...rest}>
-      <header className={s.head}>
-        <div className={s.headText}>
-          <Heading level={headingLevel} className={s.title}>
-            {t.title}
-          </Heading>
-          <p className={s.lede}>{t.lede(project)}</p>
-        </div>
+      <header className={cx(s.head, !titled && s.keyOnly)}>
+        {titled && (
+          <div className={s.headText}>
+            <Heading level={headingLevel} className={s.title}>
+              {t.title}
+            </Heading>
+            <p className={s.lede}>{t.lede(project)}</p>
+          </div>
+        )}
         <CharterKey text={t.key} className={s.key} />
       </header>
 

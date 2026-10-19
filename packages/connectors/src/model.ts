@@ -305,8 +305,18 @@ export interface CodeHost {
    */
   deleteBranch(repository: Repository, change: ChangeRequest): Effect.Effect<void, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
-  /** The end of a check's log, or with `whole` all of it, when the host keeps one Althar can read. */
+  /**
+   * The end of a check's log, or with `whole` all of it. Null for a check the
+   * host keeps no log of, such as one another CI service reported; one it
+   * keeps but won't give (refused, expired, out of reach) fails, with why.
+   */
   checkLog(repository: Repository, check: Check, whole?: boolean): Effect.Effect<string | null, ConnectorFailed>
+  /**
+   * What a check the host keeps no log of reported of itself, where it said
+   * more than its summary: a GitHub check run's own summary and text. Null
+   * where it said nothing more.
+   */
+  checkReport?(repository: Repository, check: Check): Effect.Effect<string | null, ConnectorFailed>
   /**
    * Runs a check again, as for one that may have failed by chance: true where
    * the host began it again, false where it can't run that check again.

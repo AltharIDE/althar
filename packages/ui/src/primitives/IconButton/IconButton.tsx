@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
-import type { OverlayPlacement } from '../../lib/overlay'
+import type { OverlayAlign, OverlayPlacement } from '../../lib/overlay'
 import { Tooltip } from '../HoverCard/HoverCard'
 import { Spinner } from '../Spinner/Spinner'
 import s from './IconButton.module.css'
@@ -15,6 +15,8 @@ export interface IconButtonProps extends Omit<ComponentProps<'button'>, 'childre
   kbd?: string
   /** Where the tooltip opens. */
   tooltip?: OverlayPlacement
+  /** Which of the button's edges the tooltip lines up with: its end, for a button at the end of a row. */
+  tooltipAlign?: OverlayAlign
   /** Its tooltip kept shut, as while it is dragged. */
   tooltipShut?: boolean
   size?: 'small' | 'medium'
@@ -35,6 +37,7 @@ export function IconButton({
   label,
   kbd,
   tooltip = 'above',
+  tooltipAlign = 'start',
   tooltipShut = false,
   size = 'medium',
   tone = 'default',
@@ -47,7 +50,7 @@ export function IconButton({
   const around = 2 * Math.PI * RING
   const done = progress === undefined ? null : Math.max(0, Math.min(1, progress))
   return (
-    <Tooltip label={label} kbd={kbd} placement={tooltip} shut={tooltipShut}>
+    <Tooltip label={label} kbd={kbd} placement={tooltip} align={tooltipAlign} shut={tooltipShut}>
       <button type={type} aria-label={label} aria-busy={busy || undefined} className={cx(s.button, s[size], s[tone], className)} {...rest}>
         {done !== null && (
           <svg className={s.ring} viewBox="0 0 28 28" aria-hidden="true">

@@ -155,6 +155,7 @@ export function D() {
           [FoundState.Merged]: 'In package.json',
           [FoundState.Abandoned]: 'Coordinator',
           [FoundState.Ready]: '',
+          [FoundState.Kept]: '',
         },
         open: 'run',
       }}

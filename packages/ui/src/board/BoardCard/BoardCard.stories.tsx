@@ -24,6 +24,7 @@ import {
 } from '../../fixtures/kinds'
 import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
+import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
 
 const meta = {
@@ -109,7 +110,16 @@ export const PlainWorking: Story = {
     await expect(card.queryByRole('list', { name: 'Steps' })).not.toBeInTheDocument()
   },
 }
-export const PlainFinished: Story = { args: PLAIN_FINISHED }
+/** Finished: its Done and Keep for later in its corner, shown as it is hovered or has the focus. */
+export const PlainFinished: Story = {
+  args: { ...PLAIN_FINISHED, corner: <SettleWays onDone={fn()} onKeep={fn()} doneHint="Settle it, and stop its page." /> },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await userEvent.hover(card.getByText('Finished'))
+    await expect(card.getByRole('button', { name: 'Done' })).toBeInTheDocument()
+    await expect(card.getByRole('button', { name: 'Keep for later' })).toBeInTheDocument()
+  },
+}
 export const PlainWithPictures: Story = {
   args: PLAIN_PICTURES,
   play: async ({ canvasElement }) => {

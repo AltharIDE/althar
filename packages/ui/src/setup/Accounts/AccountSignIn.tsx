@@ -126,15 +126,15 @@ export const accountSignInText: AccountSignInText = {
   cancel: 'Cancel signing in',
   leave: 'Cancel',
   continueWith: (plan) => `Continue with ${plan}`,
-  inTerminalWay: 'Sign in in Terminal',
-  terminal: 'In Terminal',
+  inTerminalWay: 'Sign in from a terminal',
+  terminal: 'In a terminal',
   signInAs: (who) => `Sign in as ${who}`,
   signInAgain: 'Sign in again',
   or: 'or',
   code: 'A code',
   key: (name) => name,
   console: (name) => name,
-  folder: 'A folder on this Mac',
+  folder: 'A folder on this computer',
   holds: (who) => `The browser may still be signed in as ${who}. To add someone else, use another browser profile, or a code.`,
   approveOn: (host) => `Approve on ${host} in your browser`,
   copyLink: 'Copy the link',
@@ -143,10 +143,10 @@ export const accountSignInText: AccountSignInText = {
   continue: 'Continue',
   emptyPaste: 'Paste the code first',
   another: 'Another way',
-  inTerminal: 'Finish signing in in Terminal',
+  inTerminal: 'Finish signing in from the terminal',
   runIt: 'Run this in a terminal to sign in',
   notYet: 'Not signed in yet.',
-  terminalAgain: 'Open Terminal again',
+  terminalAgain: 'Open the terminal again',
   checkAgain: 'Check again',
   finishTerminal: 'Come back here when it’s done, and Althar checks that it signed in.',
   enterAt: (page) => `Enter the code at ${page}`,
@@ -183,6 +183,8 @@ export interface AccountSignInProps {
   ways: AccountSignInWays
   /** Who the browser may still be signed in as, when adding one: said once, under the ways. */
   holds?: string
+  /** What the agent's maker puts on signing in from another app, said under the ways before one is picked. */
+  caution?: string
   /** Goes one way in. */
   onWay: (way: SignInWay) => void
   /** Opens the code's page, or the terminal sign-in again. */
@@ -333,6 +335,7 @@ function Under({
   ways,
   account,
   holds,
+  caution,
   onWay,
   onOpen,
   onCheck,
@@ -378,6 +381,7 @@ function Under({
             ))}
           </div>
           {holds && !account && <p className={s.hint}>{t.holds(holds)}</p>}
+          {caution && <p className={s.hint}>{caution}</p>}
         </div>
       )
     }

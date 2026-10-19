@@ -414,6 +414,25 @@ describe('the API', () => {
     ),
   )
 
+  it.live('says which agents more accounts can be added to: none whose sign-in every folder shares', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({ ...definition, home: { ...definition.home, accounts: 'one' } })),
+        })
+        const status = yield* client.Status({})
+        assert.deepStrictEqual(
+          status.agents.map((agent) => [agent.id, agent.addsAccounts]),
+          [
+            ['claude-code', true],
+            ['codex', false],
+            ['opencode', true],
+          ],
+        )
+      }),
+    ),
+  )
+
   it.live('keeps a failed account check to that account, shows the rest as they are, and reports it', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -653,6 +672,49 @@ describe('the API', () => {
     ),
   )
 
+  it.live("says a project's note in the person's words, as the coordinator then reads it, within a note's bounds", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, context } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const access = { role: 'coordinator' as const, projectId: project.id, threadId: 'none', sessionId: 'none', taskId: null }
+        yield* callTool(access, 'keep_note', { note: 'Issue drafts need an approval card.' }).pipe(Effect.provideContext(context))
+        const [note] = yield* client.GetProjectNotes({ projectId: project.id })
+        const noteId = note?.id ?? ''
+        yield* client.EditProjectNote({
+          commandId: commandId(),
+          projectId: project.id,
+          noteId,
+          body: '  Issue drafts need an approval card,\n on every tracker. ',
+        })
+        // Kept as one line, by whoever kept it first, and the coordinator reads the new words.
+        assert.deepInclude((yield* client.GetProjectNotes({ projectId: project.id }))[0], {
+          id: noteId,
+          body: 'Issue drafts need an approval card, on every tracker.',
+          keptBy: 'coordinator',
+        })
+        assert.include(yield* callTool(access, 'list_notes').pipe(Effect.provideContext(context)), 'on every tracker.')
+        // Empty or too long, it says so and stays as it was.
+        const empty = yield* Effect.flip(client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: ' ' }))
+        assert.strictEqual(empty.reason, 'NoteRefused')
+        const long = yield* Effect.flip(
+          client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: 'x'.repeat(301) }),
+        )
+        assert.match(long.message, /at most 300 characters/)
+        assert.strictEqual(
+          (yield* client.GetProjectNotes({ projectId: project.id }))[0]?.body,
+          'Issue drafts need an approval card, on every tracker.',
+        )
+        // A dropped one can't be changed.
+        yield* client.DropProjectNote({ commandId: commandId(), projectId: project.id, noteId })
+        const dropped = yield* Effect.flip(
+          client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: 'Again.' }),
+        )
+        assert.strictEqual(dropped.message, "That note isn't there any more.")
+      }),
+    ),
+  )
+
   it.live('keeps an always answer as a rule, and a call the rules screen now covers is answered by it', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -770,14 +832,14 @@ describe('the API', () => {
         const refused = yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this Mac's PATH."],
+          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this computer's PATH."],
         )
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.deepStrictEqual(thread.items.at(-1)?.content, {
           source: 'runtime',
           severity: 'error',
           title: "Fake missing couldn't start.",
-          description: "althar-no-such-agent isn't installed, or isn't on this Mac's PATH.",
+          description: "althar-no-such-agent isn't installed, or isn't on this computer's PATH.",
         })
         assert.strictEqual(
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,
@@ -1540,7 +1602,7 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
-  it.live('settles a plain task that finished once the person opens it, and leaves a change ready', () =>
+  it.live('leaves a plain task that finished in Needs you once the person opens it, until they mark it done or keep it for later', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
@@ -1576,14 +1638,26 @@ describe('the coordinator, through the API', () => {
         assert.isNotNull(question?.branch)
         yield* client.SeeTask({ commandId: commandId(), taskId: question?.taskId ?? '' })
         yield* client.SeeTask({ commandId: commandId(), taskId: change.id })
-        const board = yield* client.GetBoard({ projectId: project.id })
-        assert.sameDeepMembers(
-          board.tasks.map((one) => [one.title, one.phase]),
-          [
-            ['Which partners still call v1', 'settled'],
-            ['Retry', 'ready'],
-          ],
-        )
+        const phases = Effect.map(client.GetBoard({ projectId: project.id }), (board) => board.tasks.map((one) => [one.title, one.phase]))
+        // Opened, both still wait on the person.
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'ready'],
+          ['Retry', 'ready'],
+        ])
+        // Kept for later, the plain task is out of Needs you; a change can't be kept, nor marked done.
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'kept'],
+          ['Retry', 'ready'],
+        ])
+        // Marked done, it settles.
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'settled'],
+          ['Retry', 'ready'],
+        ])
         const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
         assert.strictEqual(unknown.reason, 'NotFound')
       }),
@@ -2009,7 +2083,7 @@ describe('code hosts and trackers, through the API', () => {
         )
         // gh isn't signed in here; and a server that doesn't answer is said to be one.
         const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
-        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this Mac."])
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this computer."])
         const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
         assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })

@@ -35,6 +35,9 @@ import { statements as taskSearch } from './0030_task_search'
 import { statements as branchOnFirstWrite } from './0031_branch_on_first_write'
 import { statements as taskAllowEverything } from './0032_task_allow_everything'
 import { statements as runnables } from './0033_runnables'
+import { statements as dictatedInput } from './0034_dictated_input'
+import { statements as line } from './0035_line'
+import { statements as taskKept } from './0036_task_kept'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -87,6 +90,9 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0031_branch_on_first_write', statements: branchOnFirstWrite },
   { key: '0032_task_allow_everything', statements: taskAllowEverything },
   { key: '0033_runnables', statements: runnables },
+  { key: '0034_dictated_input', statements: dictatedInput },
+  { key: '0035_line', statements: line },
+  { key: '0036_task_kept', statements: taskKept },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
