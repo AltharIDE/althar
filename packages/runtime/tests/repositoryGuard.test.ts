@@ -143,11 +143,17 @@ describe('pushing a task’s branch', () => {
       )
       // Nothing left the machine.
       assert.strictEqual(execFileSync('git', ['branch', '--list', branch], { cwd: remote }).toString().trim(), '')
-      // The same commits without them go.
+      // Taken out in a later commit, they would still leave in the commit that added them.
       git(path, 'rm', '-rq', 'apps', 'openspec')
       git(path, 'commit', '-q', '-m', 'Take them out')
-      const clean = git(path, 'rev-parse', 'HEAD')
-      // The commit that added them is still in the branch's history, but what is pushed is what the branch changed: none now.
+      const removed = git(path, 'rev-parse', 'HEAD')
+      assert.include(
+        refusal(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head: removed }]))).said,
+        'openspec/changes/a/proposal.md',
+      )
+      // The same work in commits that never had them goes.
+      git(path, 'reset', '-q', '--hard', `${head}~1`)
+      const clean = commitFiles(path, { 'src/ok.ts': 'ok' })
       assert.deepStrictEqual(yield* changes.pushBranch(task.taskId, [{ repository: slug, head: clean }]), [{ branch, remote: 'origin' }])
       assert.strictEqual(git(remote, 'ls-tree', '-r', '--name-only', branch).split('\n').toSorted().join(','), 'README.md,src/ok.ts')
     }).pipe(Effect.provide(runtime())),
