@@ -42,7 +42,19 @@ describe('every pair has a source', () => {
     const spikes = usagePairs
       .filter((pair) => pair.pays === 'plan' && pair.sources.every((source) => source.kind === 'spike'))
       .map((pair) => `${pair.agent}/${pair.provider}`)
-    expect(spikes.sort()).toEqual(['opencode/github-copilot', 'opencode/google', 'opencode/openai', 'opencode/opencode'])
+    expect(spikes.sort()).toEqual([
+      'antigravity/google',
+      'copilot/github',
+      'grok/xai',
+      'junie/jetbrains',
+      'kimi/moonshot',
+      'mistral-vibe/mistral',
+      'opencode/github-copilot',
+      'opencode/google',
+      'opencode/openai',
+      'opencode/opencode',
+      'qwen-code/qwen',
+    ])
   })
 })
 

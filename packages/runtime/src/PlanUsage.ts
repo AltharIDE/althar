@@ -298,7 +298,16 @@ export class PlanUsage extends Context.Service<
                   ? { agentId: definition.id, source: null, plan: null, windows: [], observedAt: null, fault: null, paidBy: 'key' }
                   : { ...fault(first.kind, first.message), paidBy: 'plan' },
               )
+              return
             }
+            // The agents run over ACP send no windows yet (a spike each): a key needs none, a plan says it has no source.
+            if (definition.id === 'claude-code') return
+            yield* keep(
+              account.id,
+              check.paidBy === 'key'
+                ? { agentId: definition.id, source: null, plan: null, windows: [], observedAt: null, fault: null, paidBy: 'key' }
+                : fault('no_source', `${definition.name} has no usage source Althar reads yet.`),
+            )
           })
 
         const readAll = (force: boolean) =>

@@ -34,6 +34,8 @@ export type Classification =
   | 'status'
   /** `opencode auth list`'s output, one entry per provider (`openCodeCredentials`). */
   | 'auth_list'
+  /** Nothing the agent gives says yet: the account is taken for a plan, which says it has no source. */
+  | 'none'
 
 export interface UsagePair {
   readonly agent: AgentId
@@ -97,6 +99,24 @@ export const usagePairs: ReadonlyArray<UsagePair> = [
     sources: [{ kind: 'spike', note: 'Gemini: retrieveUserQuota; Google no longer serves individual OAuth to Gemini CLI since June 2026' }],
   },
   { agent: 'opencode', provider: 'api-key', pays: 'key', classification: 'auth_list', sources: [] },
+  // The agents run over ACP (#266): none sends its plan's windows yet, so each waits for a spike of its own.
+  ...(
+    [
+      ['copilot', 'github', 'none', 'GitHub Copilot: its premium requests; usage limits come only as errors'],
+      ['junie', 'jetbrains', 'none', 'Junie: the JetBrains AI quota, not sent over ACP'],
+      ['grok', 'xai', 'status', 'Grok Build: its SuperGrok plan, not sent over ACP'],
+      ['kimi', 'moonshot', 'none', 'Kimi Code: its membership plan, not sent over ACP'],
+      ['mistral-vibe', 'mistral', 'none', 'Mistral Vibe: its Le Chat plan, not sent over ACP'],
+      ['qwen-code', 'qwen', 'none', 'Qwen Code: its Qwen OAuth quota, not sent over ACP'],
+      ['antigravity', 'google', 'none', 'Google Antigravity: its plan, not sent over ACP'],
+    ] as const
+  ).map(([agent, provider, classification, note]): UsagePair => ({
+    agent,
+    provider,
+    pays: 'plan',
+    classification,
+    sources: [{ kind: 'spike', note }],
+  })),
 ]
 
 /* OpenCode: plan or key per provider, from `opencode auth list --standalone --format json` (2.x). */

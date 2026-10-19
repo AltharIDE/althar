@@ -323,6 +323,10 @@ before building on it):
 - **No OpenCode plan provider has a source yet**: each needs a spike, and
   the endpoint ones the exception to rule 3 (#221). Until then an OpenCode
   account on a plan shows a fault, not a number.
+- **The agents run over ACP** (#266: Copilot, Junie, Grok Build, Kimi Code,
+  Mistral Vibe, Qwen Code, Antigravity) send no plan windows yet. Each is a
+  gap waiting for its own spike; an account on a plan says it has no source,
+  and a key, where the agent tells one, shows none.
 - **Claude Code's adapter drops a window that arrives before a turn's first
   usage figure** (#1127): Althar carries a patch for it (`patches/`, applied
   by bun to the pinned 0.93.0; a test fails if it is not applied, and a bump

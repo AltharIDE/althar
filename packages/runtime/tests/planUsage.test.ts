@@ -6,9 +6,10 @@ import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
+import { Agents } from '../src/Config'
 import { Live } from '../src/Live'
 import { PlanUsage } from '../src/PlanUsage'
-import { runtime } from './support'
+import { fakeAgents, runtime } from './support'
 
 /*
  * Plan usage (docs/plans/plan-usage.md): where each account's windows come
@@ -413,6 +414,42 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
     Effect.gen(function* () {
       assert.strictEqual(openCode(yield* (yield* PlanUsage).now(true)).fault?.kind, 'cannot_classify')
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['brand-new-plan', 'plan']) }))),
+  )
+})
+
+describe('the agents run over ACP', () => {
+  /* One such agent alone, a fake under Grok's id, paid as the test says. */
+  const grok = (perUse: ReadonlyArray<string>) =>
+    runtime(
+      ':memory:',
+      {},
+      {
+        perUse,
+        agents: Layer.effect(
+          Agents,
+          Effect.gen(function* () {
+            const all = yield* Agents
+            return Agents.of({ list: [yield* all.get('grok')], get: all.get })
+          }).pipe(Effect.orDie),
+        ).pipe(Layer.provide(fakeAgents({}, [], {}, perUse))),
+        usage: { every: Duration.zero, kept: Duration.zero },
+      },
+    )
+
+  it.effect('say a plan has no usage source yet, rather than that it has not been read', () =>
+    Effect.gen(function* () {
+      const view = accountOf(yield* (yield* PlanUsage).now(true), 'grok')
+      assert.strictEqual(view.paidBy, 'plan')
+      assert.deepStrictEqual(view.fault, { kind: 'no_source', message: 'Fake grok has no usage source Althar reads yet.' })
+    }).pipe(Effect.provide(grok([]))),
+  )
+
+  it.effect('show a key with no fault', () =>
+    Effect.gen(function* () {
+      const view = accountOf(yield* (yield* PlanUsage).now(true), 'grok')
+      assert.strictEqual(view.paidBy, 'key')
+      assert.isNull(view.fault)
+    }).pipe(Effect.provide(grok(['grok']))),
   )
 })
 
