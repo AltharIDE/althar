@@ -195,10 +195,10 @@ describe('a plain task', () => {
       const place = yield* opened
       const task = yield* started(place, 'Check the partners', 'Look. [lead:finish] [lead:terse]')
       yield* cardOnce(task.id, (one) => one.phase === 'ready')
-      yield* tasks.see({ taskId: task.id })
+      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
       const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
       yield* until(state, (rows) => rows[0]?.state === 'done')
-      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task is done again.
+      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task is finished again.
       yield* say(task.threadId, 'And the v2 ones?')
       const [told] = yield* until(
         sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,
@@ -210,6 +210,9 @@ describe('a plain task', () => {
         (rows) => (rows[0]?.n ?? 0) === 1,
         Duration.seconds(20),
       )
+      // Opened again by the question, it waits for the person to settle it.
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
       yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(
       Effect.provide(
