@@ -65,11 +65,11 @@ test('shows what the task built and what the lead showed of it: atop its outputs
 
     // Narrow, as beside the Connect panel: the change first, its button and its files in reach, what it made under it.
     // The window's own minimum is wider than what that panel leaves the page, so it goes lower for this.
-    await electronApp.evaluate(({ BrowserWindow }) => {
-      // The task's window, not the island over the notch.
-      const window = BrowserWindow.getAllWindows().find((one) => one.webContents.getURL().includes('/index.html'))
-      window?.setMinimumSize(600, 600)
-      window?.setSize(760, 900)
+    await (
+      await electronApp.browserWindow(page)
+    ).evaluate((window) => {
+      window.setMinimumSize(600, 600)
+      window.setSize(760, 900)
     })
     await page
       .getByRole('radiogroup', { name: 'Face' })
