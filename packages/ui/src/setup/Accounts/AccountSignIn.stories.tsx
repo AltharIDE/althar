@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { device } from '../../foundations/device'
 import { SignInWay } from '../../foundations/vocabulary'
 import { ACCOUNTS, FOUND } from '../../fixtures/setup'
 import { States } from '../../storybook/States'
@@ -65,7 +66,7 @@ export const Choosing: Story = {
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Console)
     await userEvent.click(c.getByRole('button', { name: 'OpenAI API key' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Key)
-    await userEvent.click(c.getByRole('button', { name: 'A folder on this computer' }))
+    await userEvent.click(c.getByRole('button', { name: `A folder on ${device.this}` }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Folder)
     await userEvent.keyboard('{Escape}')
     await expect(args.onCancel).toHaveBeenCalledTimes(1)
@@ -91,7 +92,7 @@ export const InTerminalFirst: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Sign in from a terminal' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Terminal)
-    await expect(c.getByRole('button', { name: 'A folder on this computer' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: `A folder on ${device.this}` })).toBeInTheDocument()
   },
 }
 
