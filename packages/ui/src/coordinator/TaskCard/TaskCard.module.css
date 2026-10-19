@@ -117,9 +117,24 @@
   align-items: center;
   min-width: 0;
   gap: 14px;
+  /* last resort, for a long issue key or model name: clip here, never into the button */
+  overflow: hidden;
 }
 .facts > :not(.pr) {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* the lead keeps its size; the issue key, which can be long, is what clips */
+.facts > .lead {
   flex: none;
+  overflow: visible;
+}
+/* the pull request keeps room for its icon and a few letters before the rest gives way */
+.facts > .pr {
+  flex: 1 1 auto;
+  min-width: 4.5em;
 }
 .pr {
   display: inline-flex;

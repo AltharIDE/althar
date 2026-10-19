@@ -198,6 +198,22 @@ export const FootAtWidths: Story = {
   ),
 }
 
+/** The foot at its worst: a long issue key and a long model name, with and without a pull request, at the narrowest chat. It clips inside the card and never reaches the button. */
+export const LongFacts: Story = {
+  parameters: { layout: 'padded' },
+  decorators: [],
+  render: (args) => {
+    const from = { ...T432.from, id: 'TEAMPROJECT-123456' }
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: 320 }}>
+        <TaskCard {...args} lead={SONNET} effort="High" from={from} />
+        <TaskCard {...args} lead={SONNET} effort="High" from={from} pr="Draft PR 1187" />
+        <TaskCard {...args} {...WaitingOnYou.args} lead={SONNET} from={from} pr="Draft PR 1187" />
+      </div>
+    )
+  },
+}
+
 export const TaskOverTime: Story = { render: () => <OverTime /> }
 
 export const AllStates: Story = {
