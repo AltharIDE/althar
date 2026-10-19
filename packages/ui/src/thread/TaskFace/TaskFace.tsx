@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react'
+import { type CSSProperties, useRef, type ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -14,8 +14,10 @@ export type TaskFaceProps = RootProps<
     children: ReactNode
     /** The composer, under the thread and in its measure. */
     composer: ReactNode
-    /** What opens beside the thread: a document, or a step's own thread. A SidePanel. */
+    /** What opens beside the thread: a document, or a step's own thread. A SidePanel, or a Workbench holding one. */
     panel?: ReactNode
+    /** How wide what opens beside is, in px, where the person drags it (a Workbench); otherwise a share of the window. */
+    panelWidth?: number
     /** How many things arrived since the reader scrolled away, for the pill that takes them down. The host counts them. */
     unseen?: number
     text?: { jump?: Partial<JumpToLatestText> }
@@ -29,11 +31,12 @@ export type TaskFaceProps = RootProps<
  * offers the way back down. What opens where, and what sending does, belong
  * to the host (see ThreadShellProvider).
  */
-export function TaskFace({ children, composer, panel, unseen, text, className, ...rest }: TaskFaceProps) {
+export function TaskFace({ children, composer, panel, panelWidth, unseen, text, className, style, ...rest }: TaskFaceProps) {
   const scroll = useRef<HTMLDivElement>(null)
   const { atBottom, toBottom } = useStickToBottom(scroll)
+  const sized = panel != null && panelWidth !== undefined ? ({ ...style, '--panel-width': `${panelWidth}px` } as CSSProperties) : style
   return (
-    <div className={cx(s.face, panel != null && s.hasPanel, className)} {...rest}>
+    <div className={cx(s.face, panel != null && s.hasPanel, className)} style={sized} {...rest}>
       <div className={s.main}>
         <div className={s.scrollArea}>
           <div ref={scroll} className={s.scroll}>

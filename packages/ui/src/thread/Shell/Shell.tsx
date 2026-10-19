@@ -2,6 +2,7 @@ import { createContext, useContext, type ReactNode } from 'react'
 
 import type { ModelInfo } from '../../primitives/Model/Model'
 import type { StepState } from '../../foundations/vocabulary'
+import type { FoundCode } from '../Code/code'
 
 /*
  * What a thread's host offers the parts inside it: a side panel for reading
@@ -54,11 +55,36 @@ export interface StepRef {
   state?: StepState
 }
 
+/**
+ * What the host does with the code an agent names in what it says: finds
+ * what each name names, where the thread's agent works; shows a peek at
+ * it; opens it beside the thread, or in the person's editor.
+ */
+export interface CodeShell {
+  /**
+   * What a text's names name, by name: only those that are code; undefined
+   * while the host looks. A hook, called once a render by each text that
+   * has any such names, with the same names until its text changes.
+   */
+  useFound: (names: readonly string[]) => ReadonlyMap<string, FoundCode> | undefined
+  /** What the peek over a name holds, as the host fills a CodePeek. */
+  peek: (found: FoundCode) => ReactNode
+  /** Opens it beside the thread; `from` is the name pressed, which stepping through the thread's names goes on from. */
+  open: (found: FoundCode, from: HTMLElement) => void
+  /** Opens it in the person's editor, as ⌘-click on its name does. */
+  openInEditor?: (found: FoundCode) => void
+  /** The name open beside the thread, as written: its chip shows it open, and pressing it again closes it. */
+  opened?: string | null
+  close?: () => void
+}
+
 export interface ThreadShell {
   openDoc?: (doc: DocRef) => void
   /** Opens an image at full size; with the set it belongs to, such as a turn's screenshots, the others are a key away. */
   openImage?: (image: ImageRef, set?: readonly ImageRef[]) => void
   openStep?: (step: StepRef) => void
+  /** The code an agent names: without it, a name in backticks is code text, as any other. */
+  code?: CodeShell
 }
 
 const ThreadShellContext = createContext<ThreadShell>({})
