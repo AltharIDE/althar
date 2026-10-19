@@ -407,8 +407,23 @@ A provider may launch shells, tools, language servers, or tests. Those form a
 **process tree**. Stopping only the first process can leave descendants running.
 
 On Unix-like systems, Althar uses an owned process group. On Windows it uses
-a Job Object or equivalent tree-owning mechanism. These are OS mechanisms for
-addressing all processes launched for one attempt as a unit.
+a Job Object, through a keeper (`packages/provider-adapters/src/keeper.ts`):
+a small C# program, built at first use by the .NET Framework 4 compiler that
+comes with Windows, as Node can't make a job without a native module. Althar
+spawns the keeper with the command; the keeper starts it suspended, puts it in
+a job that kills everything in it once the keeper has gone
+(`KILL_ON_JOB_CLOSE`), lets it run and exits with its code. Everything the
+command starts is in the job from its first instruction, whatever exits in
+between, so the keeper running is the tree running, and killing the keeper
+kills the tree; the tree also goes with Althar, as Node holds the children it
+spawns in a job of its own. Unlike a process group, the tree doesn't outlive
+the command: what it left running goes when it exits, where on Unix it goes
+when Althar, seeing the exit, stops the group. On Windows the keeper is
+spawned attached and hidden (`windowsHide`), never `detached`, and starts the
+command in a new console whose window is created hidden. The console programs
+the command starts share that console, even those that don't ask to be hidden,
+so none opens a window; a command started with no console at all
+(`CREATE_NO_WINDOW`) would have each of them open one.
 
 Cancellation is layered:
 

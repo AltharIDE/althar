@@ -1,4 +1,4 @@
-# ADR-052: The code an agent names opens beside the conversation, read where the agent works, and never edited
+# ADR-053: The code an agent names opens beside the conversation, read where the agent works, and never edited
 
 - **Status:** Accepted
 - **Date:** 2026-10-19

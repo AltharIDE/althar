@@ -527,6 +527,8 @@ describe('the API', () => {
               SkipReview: () => Effect.void,
               RefreshTask: () => Effect.void,
               StopListening: () => Effect.void,
+              AttachPullRequest: () =>
+                Effect.succeed({ kind: 'attached' as const, name: 'PR #1', source: 'main', started: false, kept: 0, own: 0 }),
               StopBackground: () => Effect.void,
               ClearBackground: () => Effect.void,
               RunProject: () => Effect.die('unused'),
