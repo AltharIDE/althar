@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 const PLAIN: Readonly<Record<string, string>> = {
   /* the whole card or row is the target */
   'board/Board/CardTitle.tsx': 'a card’s or row’s title, stretched over it',
+  'board/Board/Board.tsx': 'a collapsed lane’s rail, the whole of which opens it',
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'thread/External/External.tsx': 'the row of an external call',
