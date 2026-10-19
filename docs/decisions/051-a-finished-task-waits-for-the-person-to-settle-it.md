@@ -1,4 +1,4 @@
-# ADR-050: A finished task that isn't a change waits in Needs you until the person settles it
+# ADR-051: A finished task that isn't a change waits in Needs you until the person settles it
 
 - **Status:** Accepted
 - **Date:** 2026-10-19

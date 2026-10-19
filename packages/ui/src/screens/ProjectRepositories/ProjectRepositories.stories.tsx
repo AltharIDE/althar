@@ -42,7 +42,8 @@ export const Default: Story = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement)
     await expect(page.getByRole('heading', { level: 2, name: 'Repositories' })).toBeVisible()
-    await expect(page.getByText('Its folders on this computer, and where each one’s work goes.')).toBeVisible()
+    // The map says what it is: no line under the title, its columns named in plain words.
+    await expect(page.getByRole('heading', { level: 3, name: 'On this computer' })).toBeVisible()
   },
 }
 

@@ -1,21 +1,30 @@
-/* The mark beside its name and its colour, each under a quiet label. */
+/*
+ * The name over its field, the mark beside the field and level with it, then the colour under, on the field's edge:
+ * the mark in a gutter of its own, everything else in one column.
+ */
 .identity {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
+  grid-template-columns: 34px minmax(0, 360px);
+  column-gap: 14px;
+  row-gap: 7px;
+  align-items: center;
 }
-.words {
-  min-width: 0;
-  display: grid;
-  gap: 6px;
+.identity > * {
+  grid-column: 2;
+}
+.mark {
+  grid-row: 2;
+  grid-column: 1;
 }
 .label {
-  font-size: 11.5px;
-  color: var(--t-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.colour {
+  margin-top: 12px;
 }
 .name {
-  margin-bottom: 6px;
   font-weight: 560;
 }
 

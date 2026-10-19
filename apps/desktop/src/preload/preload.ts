@@ -53,7 +53,7 @@ ipcRenderer.on('althar:open', (_event, threadId: unknown) => {
   for (const listener of opening) listener(threadId)
 })
 
-/* An update that couldn't move the store, as the main process says: held for a page that listens later. */
+/* A store the runtime can't serve (an update that couldn't move it, a profile in use), as the main process says: held for a page that listens later. */
 let storeFailure: unknown
 const storeFailed = new Set<(failure: unknown) => void>()
 ipcRenderer.on('althar:store-failed', (_event, failure: unknown) => {
@@ -146,6 +146,7 @@ contextBridge.exposeInMainWorld('althar', {
     return () => void storeFailed.delete(listener)
   },
   showBackup: (): Promise<void> => ipcRenderer.invoke('althar:show-backup'),
+  tryAgain: (): Promise<void> => ipcRenderer.invoke('althar:try-again'),
   // Report a problem (DEV-61): the page's dialog opens, about what it was asked from; main takes the screenshot as it opens, gathers the rest, and sends or saves it.
   reportProblem: (about: unknown): void => reportAsked(about),
   report: {

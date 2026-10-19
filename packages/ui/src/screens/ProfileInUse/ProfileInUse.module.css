@@ -1,0 +1,50 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-2);
+}
+
+.body {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  max-width: 460px;
+}
+
+.mark {
+  margin-bottom: 18px;
+  color: var(--t-1);
+}
+
+.said {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 560;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  color: var(--t-1);
+}
+
+.text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+}

@@ -1,6 +1,6 @@
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
 
-import { adapterNode, asNode } from './process'
+import { adapterNode, asNode, privateTemp, removeTemp } from './process'
 import type { AgentDefinition, LaunchSpec } from './registry'
 
 /*
@@ -10,13 +10,17 @@ import type { AgentDefinition, LaunchSpec } from './registry'
  * stands: the page to approve in the browser, a one-time code to type on
  * another, a code pasted back, done and who as, or why it stopped.
  *
- * Two kinds, as the agents offer them:
+ * Three kinds, as the agents offer them:
  * - Claude Code's `claude auth login` opens the browser itself and comes back
  *   to its own callback; it also prints a page that ends in a code, which it
  *   reads from stdin, for a browser that can't reach back.
  * - Codex's app-server speaks JSON-RPC on stdio: `account/login/start` gives
  *   the page to open, or a device code, and `account/login/completed` says
  *   how it ended. It opens no browser, so Althar does.
+ * - An ACP agent that signs in only through ACP's own `authenticate`
+ *   (Antigravity's server): started as for a session, it prints the page to
+ *   open, and `authenticate` answers once the browser has come back to it.
+ *   Its own way to a browser is turned off, so Althar opens the page.
  */
 
 /** A way in that Althar can run itself. */
@@ -33,6 +37,16 @@ export type InAppSignIn =
       readonly kind: 'codex-app-server'
       readonly ways: ReadonlyArray<SignInWay>
       readonly run: (node: string) => LaunchSpec
+    }
+  | {
+      readonly kind: 'acp-authenticate'
+      readonly ways: ReadonlyArray<SignInWay>
+      /** The agent as a session starts it. */
+      readonly run: (node: string) => LaunchSpec
+      /** The `authenticate` method it signs in with. */
+      readonly method: string
+      /** Where it prints the page to open: the page is what follows. */
+      readonly link: RegExp
     }
 
 /** What a sign-in under way says. */
@@ -108,10 +122,15 @@ export const startSignInFlow = (
   if (inApp === undefined || !inApp.ways.includes(options.way)) return null
   const node = options.node ?? adapterNode()
   const spec = inApp.run(node)
-  const env = { ...process.env, ...asNode({ command: spec.command, args: spec.args }), ...options.home }
+  // Its own environment too, for an agent started as a session is (ACP's `authenticate`), and a temporary folder of its own where it asks.
+  const temp = privateTemp(spec)
+  const env = { ...process.env, ...asNode({ command: spec.command, args: spec.args }), ...spec.env, ...temp?.env, ...options.home }
   // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
   const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
   const child = spawn(launched.command, [...launched.args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+  // Its temporary folder goes once it has stopped, or where it never started.
+  child.on('exit', () => removeTemp(temp?.folder))
+  child.on('error', () => removeTemp(temp?.folder))
   let over = false
   const end = (event?: SignInFlowEvent) => {
     if (over) return
@@ -127,7 +146,12 @@ export const startSignInFlow = (
   child.on('error', (error) => end({ kind: 'failed', message: error.message }))
   // Its input closed under a write (EPIPE) ends the sign-in, rather than the process Althar runs in.
   child.stdin.on('error', () => end({ kind: 'failed', message: 'The agent stopped listening while signing in.' }))
-  const driven = inApp.kind === 'claude-login' ? claude(agent, child, say, end, env) : codex(child, say, end, options)
+  const driven =
+    inApp.kind === 'claude-login'
+      ? claude(agent, child, say, end, env)
+      : inApp.kind === 'codex-app-server'
+        ? codex(child, say, end, options)
+        : acpAuthenticate(agent, inApp, child, say, end, options)
   return {
     paste: (code) => {
       if (!over) driven.paste(code)
@@ -171,7 +195,8 @@ const claude = (
   child.on('exit', (code) => {
     if (code !== 0) return end({ kind: 'failed', message: lastLine(stderr) ?? lastLine(said) ?? 'Claude Code stopped signing in.' })
     // Signed in: its status says who as.
-    const status = agent.signIn.status(adapterNode())
+    const status = agent.signIn.status?.(adapterNode())
+    if (status === undefined) return end({ kind: 'done', who: null, plan: null })
     const ran = status.onDevice === undefined ? status : status.onDevice({ env })
     execFile(ran.command, [...ran.args], { env, timeout: 15_000 }, (_error, stdout) => end({ kind: 'done', ...claudeWho(stdout) }))
   })
@@ -253,3 +278,84 @@ const codex = (child: ChildProcessWithoutNullStreams, say: (event: SignInFlowEve
     },
   }
 }
+
+/*
+ * An ACP agent's own `authenticate` (Antigravity's server): initialized as a
+ * client would, it prints the page to open, on either stream, and answers
+ * once the browser has come back to its own listener on this computer.
+ */
+const acpAuthenticate = (
+  agent: AgentDefinition,
+  inApp: Extract<InAppSignIn, { readonly kind: 'acp-authenticate' }>,
+  child: ChildProcessWithoutNullStreams,
+  say: (event: SignInFlowEvent) => void,
+  end: End,
+  options: SignInFlowOptions,
+) => {
+  let next = 0
+  let shown = false
+  const waiting = new Map<number, (error: string | null) => void>()
+  const send = (method: string, params: unknown, then: (error: string | null) => void) => {
+    const id = ++next
+    waiting.set(id, then)
+    if (child.stdin.writable) child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
+  }
+  // The page, once: only an https address, as the agent printed it.
+  const look = (text: string) => {
+    const page = inApp.link.exec(text)?.[1]
+    if (shown || page === undefined || !page.startsWith('https://')) return
+    shown = true
+    options.openUrl?.(page)
+    say({ kind: 'browser', link: page, paste: false })
+  }
+  const heard = (line: string) => {
+    let message: { readonly id?: unknown; readonly error?: { readonly message?: unknown } }
+    try {
+      message = JSON.parse(line) as typeof message
+    } catch {
+      return look(line)
+    }
+    if (typeof message.id !== 'number') return
+    const then = waiting.get(message.id)
+    waiting.delete(message.id)
+    then?.(message.error === undefined ? null : typeof message.error.message === 'string' ? message.error.message : 'It refused.')
+  }
+  // Each stream a whole line at a time, as a pipe keeps no writes' bounds: the page is never read from half its line.
+  // A last line left unended counts once the stream ends.
+  const byLine = (stream: NodeJS.ReadableStream, each: (line: string) => void) => {
+    let buffer = ''
+    stream.setEncoding('utf8')
+    stream.on('data', (chunk: string) => {
+      buffer += chunk
+      for (let at = buffer.indexOf('\n'); at >= 0; at = buffer.indexOf('\n')) {
+        const line = buffer.slice(0, at)
+        buffer = buffer.slice(at + 1)
+        each(line)
+      }
+    })
+    stream.on('end', () => {
+      if (buffer !== '') each(buffer)
+      buffer = ''
+    })
+  }
+  byLine(child.stdout, heard)
+  byLine(child.stderr, look)
+  child.on('exit', () => end({ kind: 'failed', message: `${agent.name} stopped signing in.` }))
+  send('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'althar', version: '0' } }, (error) => {
+    if (error !== null) return end({ kind: 'failed', message: error })
+    send('authenticate', { methodId: inApp.method }, (failed) =>
+      end(failed === null ? { kind: 'done', who: null, plan: null } : { kind: 'failed', message: refusedWords(agent, failed) }),
+    )
+  })
+  return { paste: () => undefined, cancel: () => undefined }
+}
+
+/** Why an ACP sign-in was turned down, in the person's words where the agent's are a code. */
+const refusedWords = (agent: AgentDefinition, said: string) =>
+  /SUBSCRIPTION_REQUIRED/.test(said)
+    ? `${agent.name} needs an eligible subscription on this account.`
+    : /ineligible|onboarding failed/i.test(said)
+      ? `This account can't use ${agent.name}. Sign in with another.`
+      : /access_denied|denied access|cancelled/i.test(said)
+        ? 'The sign-in wasn’t approved.'
+        : (lastLine(said) ?? said)

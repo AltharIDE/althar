@@ -1,3 +1,4 @@
+import { NOTE_LENGTH } from '@althar/contracts'
 import { type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
 import { Commands } from '@althar/persistence-sqlite'
 import { Effect, Schema } from 'effect'
@@ -16,8 +17,7 @@ import { change, fact, timestamp } from './records'
  * note keeps its row, so what it said stays on the record.
  */
 
-/** How long a note may be: a decision, in a sentence or two. */
-export const NOTE_LENGTH = 300
+export { NOTE_LENGTH }
 
 /** How many notes a project keeps at once, so every brief that holds them stays short. */
 export const NOTES_KEPT = 40
@@ -91,6 +91,51 @@ export const keepNote = (input: { readonly envelope: CommandEnvelope; readonly p
           commandId: input.envelope.commandId,
         })
         return { noteId, kept: true }
+      }),
+    })
+  })
+
+/**
+ * Says one of a project's notes in the person's words, within what keeping
+ * one allows: a sentence or two. The same words change nothing; a note
+ * dropped, or not there, can't be changed. Both are decided in the command's
+ * transaction, so overlapping edits take turns and a retry is answered from
+ * its receipt, whatever was said since.
+ */
+export const editNote = (input: {
+  readonly envelope: CommandEnvelope
+  readonly projectId: string
+  readonly noteId: string
+  readonly body: string
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const commands = yield* Commands
+    const body = input.body.trim().replace(/\s+/g, ' ')
+    if (body === '') return yield* new NoteRefused({ why: 'empty' })
+    if (body.length > NOTE_LENGTH) return yield* new NoteRefused({ why: 'long' })
+    // The note's row, read in the transaction, says whether the project is there before any receipt names it.
+    const projectId = input.projectId as ProjectId
+    yield* commands.execute({
+      envelope: input.envelope,
+      projectId,
+      result: Schema.Void,
+      handle: Effect.gen(function* () {
+        const [note] = yield* sql<{ body: string; droppedAt: string | null }>`
+          SELECT body, dropped_at FROM project_notes WHERE id = ${input.noteId} AND project_id = ${projectId}`
+        if (note === undefined || note.droppedAt !== null) return yield* new NotFound({ kind: 'note', id: input.noteId })
+        if (note.body === body) return
+        const revision = yield* change('project_notes', input.noteId, { body })
+        yield* fact({
+          projectId,
+          aggregateType: 'project_note',
+          aggregateId: input.noteId,
+          revision,
+          type: 'project_note.edited',
+          payload: { body },
+          actorId: input.envelope.actorId,
+          commandId: input.envelope.commandId,
+        })
       }),
     })
   })

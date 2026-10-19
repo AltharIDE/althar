@@ -50,7 +50,7 @@ Then, at most, one card in the card and one fact under it:
 - **Finished, then Done:** a plain task that finished waits as `Finished`
   in Needs you, until the person presses Done or Keep for later, or tells
   its lead; opening it moves nothing
-  ([ADR-050](../decisions/050-a-finished-task-waits-for-the-person-to-settle-it.md)).
+  ([ADR-051](../decisions/051-a-finished-task-waits-for-the-person-to-settle-it.md)).
 - Up next and Settled stay rows, with the kind's word where there is one.
 
 ## Reviews

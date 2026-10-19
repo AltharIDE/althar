@@ -12,7 +12,7 @@ import { NotFound, TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
-import { answeredIn, quickIn } from './kinds'
+import { answeredIn, issueDraftsWaiting, quickIn } from './kinds'
 import { Plans } from './Plans'
 import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
@@ -600,6 +600,7 @@ export class Tasks extends Context.Service<
               (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
               ${sql.unsafe(answeredIn('k'))} AS answered,
               (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
+              + ${sql.unsafe(issueDraftsWaiting('k'))}
               + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
               + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change')
               -- A change, or made one since, or a review with a draft to post: not one to settle as Done.
@@ -619,7 +620,7 @@ export class Tasks extends Context.Service<
           const at = yield* timestamp
           const settled = yield* sql.withTransaction(
             Effect.gen(function* () {
-              // Read again where it is written: a call came or a pull request opened meanwhile, and it stays.
+              // Read again where it is written: a round opened, a call came or a pull request opened meanwhile, and it stays.
               const task = yield* doneable(input.taskId)
               if (task === undefined) return false
               const state = yield* transition(taskLifecycle, 'open', 'done')

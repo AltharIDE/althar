@@ -47,6 +47,29 @@ const FROM_THE_EXECUTOR = [
   'GIT_CONFIG_KEY_0',
   'GIT_CONFIG_VALUE_0',
   'GIT_TERMINAL_PROMPT',
+  // The agents after the first three: each one's home, and what its launch sets to keep it asking, off its own and the repository's settings, and not updating itself.
+  'COPILOT_HOME',
+  'COPILOT_AUTO_UPDATE',
+  'COPILOT_DISABLE_LOGIN_SHELL_ENV',
+  'JUNIE_HOME',
+  'JUNIE_SKIP_UPDATE_CHECK',
+  'JUNIE_CONFIG_DEFAULT_LOCATIONS',
+  'JUNIE_MCP_DEFAULT_LOCATIONS',
+  'GROK_HOME',
+  'GROK_DISABLE_AUTOUPDATER',
+  'GROK_CLAUDE_MCPS_ENABLED',
+  'GROK_CURSOR_MCPS_ENABLED',
+  'GROK_CLAUDE_HOOKS_ENABLED',
+  'GROK_CURSOR_HOOKS_ENABLED',
+  'KIMI_CODE_HOME',
+  'KIMI_CODE_NO_AUTO_UPDATE',
+  'VIBE_HOME',
+  'VIBE_DEFAULT_AGENT',
+  'VIBE_BYPASS_TOOL_PERMISSIONS',
+  'VIBE_SMART_APPROVE_DEFAULT',
+  'VIBE_SMART_APPROVE_AVAILABLE',
+  'VIBE_ENABLE_UPDATE_CHECKS',
+  'QWEN_HOME',
 ] as const
 
 /**
@@ -89,8 +112,12 @@ export const relayOut = (
   facts: DeviceFacts,
 ): LaunchSpec => {
   const args = ['--watch-bus', '--host', '--clear-env']
+  // What the launch put first on its PATH, beyond the sandbox's own (an npm-installed agent's folder, where its Node is), stays first out there.
+  const sandboxPath = new Set((facts.ambient.PATH ?? '').split(':'))
+  const ownPath = (spec.env?.PATH ?? '').split(':').filter((part) => part !== '' && !sandboxPath.has(part))
   for (const name of FROM_THE_DEVICE) {
-    const value = facts.env[name]
+    const value =
+      name === 'PATH' && ownPath.length > 0 ? [...ownPath, facts.env.PATH].filter((part) => part !== undefined).join(':') : facts.env[name]
     if (value !== undefined) args.push(`--env=${name}=${value}`)
   }
   for (const name of FROM_THE_EXECUTOR) {
@@ -115,7 +142,7 @@ export const relayOut = (
  * app's profile (`Accounts.ts`), so the host CLI and its bundled sessions
  * read the same sign-in.
  */
-export const HOST_COMMANDS = ['opencode', 'claude', 'codex'] as const
+export const HOST_COMMANDS = ['opencode', 'claude', 'codex', 'copilot', 'junie', 'grok', 'kimi', 'vibe-acp', 'qwen'] as const
 
 /** A shell script for the device that prints each name it finds, and where: one line, a tab apart. */
 export const whereScript = (names: ReadonlyArray<string>, dirs: ReadonlyArray<string> = usualDirs('linux', '$HOME', {})): string =>

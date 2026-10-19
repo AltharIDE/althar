@@ -50,7 +50,7 @@ export const kindOf = (facts: KindFacts): TaskKind => {
  * Whether the task `task` (a table alias) is a review whose review was
  * posted, with nothing drafted since that waits on the person or is being
  * posted, as SQL: written to again, its lead answered, it is finished as a
- * quick task is, the person's to settle (ADR-050).
+ * quick task is, the person's to settle (ADR-051).
  */
 export const answeredIn = (task: string) =>
   `(EXISTS (SELECT 1 FROM review_drafts ad WHERE ad.task_id = ${task}.id AND ad.state = 'posted')
@@ -66,6 +66,16 @@ export const quickIn = (task: string) =>
       AND coalesce(json_extract(qp.parameters, '$.end'), '') NOT IN ('draft', 'ready', 'none')
     FROM task_plans qp WHERE qp.task_id = ${task}.id AND qp.state IN ('proposed', 'accepted') ORDER BY qp.proposed_at DESC LIMIT 1), 0) = 1
     AND NOT EXISTS (SELECT 1 FROM external_links ql WHERE ql.task_id = ${task}.id AND ql.kind = 'change'))`
+
+/**
+ * How many issues its lead drafted wait on the person for the task `task` (a
+ * table alias), as SQL: drafted and not filed or discarded, or not filed the
+ * last time. Each is a call on the person, as an open one is
+ * (`attention_requests`), though no row of that table stands for it.
+ */
+export const issueDraftsWaiting = (task: string) =>
+  `(SELECT count(*) FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
+    WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain'))`
 
 /**
  * What a plain task handed back, for its card: the pictures its lead showed
