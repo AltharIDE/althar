@@ -410,6 +410,7 @@ export const useTask = (threadId: string): TaskModel => {
         text,
         queued,
         interrupting: disposition === 'interrupt_and_continue',
+        ...(images?.dictated === true ? { dictated: true } : {}),
         ...(images === undefined ? {} : { pictures: images.pictures }),
       })
       id = next.id

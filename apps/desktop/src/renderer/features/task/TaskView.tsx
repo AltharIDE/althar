@@ -42,7 +42,7 @@ import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, useDraft } from '../../shared/drafts'
+import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
@@ -564,6 +564,7 @@ export function TaskView({
     if (said === undefined || !images.fits(said.pictures)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
+      if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said.pictures)
     }
   }

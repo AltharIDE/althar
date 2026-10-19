@@ -188,6 +188,8 @@ export class Coordinator extends Context.Service<
       readonly disposition: Disposition
       /** Images the person sent with it, in the store already: sent to the coordinator with its words. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Some of its words came from dictation: the coordinator is told it may have been misheard. */
+      readonly dictated?: boolean
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
@@ -237,6 +239,7 @@ export class Coordinator extends Context.Service<
         readonly body: string
         readonly disposition: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
