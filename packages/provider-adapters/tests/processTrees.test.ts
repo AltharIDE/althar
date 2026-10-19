@@ -163,37 +163,47 @@ describe('a process tree on Windows', () => {
     )
     assert.isUndefined(compilerOf(env, () => false))
     assert.match(keeperName, /^althar-keeper-[0-9a-f]{16}\.exe$/)
-    // The job kills its processes once the keeper has gone, holds the command from its first instruction, and opens no window.
-    for (const part of ['KillOnJobClose = 0x2000', 'CreateSuspended | CreateNoWindow', 'AssignProcessToJobObject(job, started.hProcess)'])
+    // The job kills its processes once the keeper has gone and holds the command from its first instruction, which runs in a console
+    // of its own whose window is hidden.
+    for (const part of [
+      'KillOnJobClose = 0x2000',
+      'CreateSuspended | CreateNewConsole',
+      'UseStdHandles | UseShowWindow',
+      'wShowWindow = Hide',
+      'AssignProcessToJobObject(job, started.hProcess)',
+    ])
       assert.include(KEEPER_SOURCE, part)
   })
 
-  it.live('runs an agent under the keeper, with the keeper’s pid its own, and stops it by killing the keeper', () =>
-    Effect.gen(function* () {
-      // A keeper as far as Unix can stand in for one: it runs what follows `run`, and goes when killed.
-      const folder = mkdtempSync(join(tmpdir(), 'althar-keeper-test-'))
-      const keeper = join(folder, 'keeper')
-      writeFileSync(keeper, '#!/bin/sh\n[ "$1" = run ] || exit 2\nshift\n"$@" &\ntrap \'kill $!; exit 1\' TERM\nwait $!\n')
-      chmodSync(keeper, 0o755)
-      const trees = windowsTrees({
-        keeper: Effect.succeed(keeper),
-        startedAt: () => Effect.succeed(undefined),
-        exists: () => true,
-        alive: isAlive,
-        kill: (pid) => process.kill(pid, 'SIGTERM'),
-      })
-      const scope = yield* Scope.make()
-      const owned = yield* Scope.provide(scope)(
-        spawnOwned({ command: '/bin/sh', args: ['-c', 'echo started; exec sleep 30'] }, '/tmp', { trees, grace: '50 millis' }),
-      )
-      const reader = owned.stdout.getReader()
-      assert.strictEqual(new TextDecoder().decode((yield* Effect.promise(() => reader.read())).value), 'started\n')
-      reader.releaseLock()
-      assert.isTrue(isAlive(owned.pid))
-      yield* Scope.close(scope, Exit.void)
-      assert.deepStrictEqual(yield* Deferred.await(owned.stopped), { signal: 'SIGKILL', survivors: false })
-      assert.isFalse(isAlive(owned.pid))
-    }),
+  // A shell script stands in for the keeper, which Windows can't run.
+  it.skipIf(process.platform === 'win32')(
+    'runs an agent under the keeper, with the keeper’s pid its own, and stops it by killing the keeper',
+    () =>
+      Effect.gen(function* () {
+        // A keeper as far as Unix can stand in for one: it runs what follows `run`, and goes when killed.
+        const folder = mkdtempSync(join(tmpdir(), 'althar-keeper-test-'))
+        const keeper = join(folder, 'keeper')
+        writeFileSync(keeper, '#!/bin/sh\n[ "$1" = run ] || exit 2\nshift\n"$@" &\ntrap \'kill $!; exit 1\' TERM\nwait $!\n')
+        chmodSync(keeper, 0o755)
+        const trees = windowsTrees({
+          keeper: Effect.succeed(keeper),
+          startedAt: () => Effect.succeed(undefined),
+          exists: () => true,
+          alive: isAlive,
+          kill: (pid) => process.kill(pid, 'SIGTERM'),
+        })
+        const scope = yield* Scope.make()
+        const owned = yield* Scope.provide(scope)(
+          spawnOwned({ command: '/bin/sh', args: ['-c', 'echo started; exec sleep 30'] }, '/tmp', { trees, grace: '50 millis' }),
+        )
+        const reader = owned.stdout.getReader()
+        assert.strictEqual(new TextDecoder().decode((yield* Effect.promise(() => reader.read())).value), 'started\n')
+        reader.releaseLock()
+        assert.isTrue(isAlive(owned.pid))
+        yield* Scope.close(scope, Exit.void)
+        assert.deepStrictEqual(yield* Deferred.await(owned.stopped), { signal: 'SIGKILL', survivors: false })
+        assert.isFalse(isAlive(owned.pid))
+      }),
   )
 
   it.live('fails to start an agent where the keeper can’t be built', () =>
@@ -222,9 +232,16 @@ describe('a process tree on macOS and Linux', () => {
   )
 })
 
-/** Starts a node that runs `code`, and gives what it prints first. */
+/** Starts a node that runs `code`, as a provider would start a tool: not asking to be hidden. */
 const node = (code: string) =>
-  `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(code)}], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })`
+  `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(code)}], { stdio: ['ignore', 'pipe', 'ignore'] })`
+
+/** PowerShell saying whether it has a console window, and whether that window shows: `<handle> <visible>`. */
+const consoleWindow = [
+  'Add-Type -Name W -Namespace A -MemberDefinition',
+  '\'[DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr w);\';',
+  '$w = [A.W]::GetConsoleWindow(); [Console]::Out.Write([string]$w + " " + [A.W]::IsWindowVisible($w))',
+].join(' ')
 
 describe.runIf(process.platform === 'win32')('a real process tree on Windows', () => {
   /** Spawns `code` as an agent, the way Althar does, and gives it with the first line it prints. */
@@ -238,7 +255,7 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
         stdio: ['pipe', 'pipe', 'ignore'],
       })
       const said = yield* Effect.promise(() => new Promise<string>((resolve) => root.stdout.once('data', (data) => resolve(String(data)))))
-      return { trees, root: root.pid ?? 0, said: said.trim().split(' ').map(Number) }
+      return { trees, root: root.pid ?? 0, line: said.trim(), said: said.trim().split(' ').map(Number) }
     })
 
   it.live(
@@ -258,6 +275,22 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
         assert.deepStrictEqual(yield* stopProcessGroup(root, '200 millis'), { signal: 'SIGKILL', survivors: false })
         yield* Effect.sleep('200 millis')
         assert.isFalse(isAlive(serverPid))
+      }),
+    120_000,
+  )
+
+  it.live(
+    'shares a hidden console with the console programs an agent starts, though they don’t ask to be hidden',
+    () =>
+      Effect.gen(function* () {
+        // An agent starts PowerShell as a provider starts a tool, with Node's defaults, and says what PowerShell says of its window.
+        const tool = `require('child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ${JSON.stringify(consoleWindow)}], { stdio: ['ignore', 'pipe', 'ignore'] })`
+        const agent = `const t = ${tool}; let said = ''; t.stdout.on('data', (d) => (said += d)); t.on('exit', () => console.log(said.trim())); setInterval(() => {}, 1000)`
+        const { root, line } = yield* started(agent)
+        const [handle, visible] = line.split(' ')
+        assert.notStrictEqual(handle, '0')
+        assert.strictEqual(visible, 'False')
+        assert.deepStrictEqual(yield* stopProcessGroup(root, '200 millis'), { signal: 'SIGKILL', survivors: false })
       }),
     120_000,
   )

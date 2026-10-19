@@ -420,7 +420,10 @@ spawns in a job of its own. Unlike a process group, the tree doesn't outlive
 the command: what it left running goes when it exits, where on Unix it goes
 when Althar, seeing the exit, stops the group. On Windows the keeper is
 spawned attached and hidden (`windowsHide`), never `detached`, and starts the
-command without a console window, so nothing it runs opens one.
+command in a new console whose window is created hidden. The console programs
+the command starts share that console, even those that don't ask to be hidden,
+so none opens a window; a command started with no console at all
+(`CREATE_NO_WINDOW`) would have each of them open one.
 
 Cancellation is layered:
 

@@ -15,7 +15,10 @@ import { Effect } from 'effect'
  * instruction, however its parents come and go, and the job kills them all
  * once nothing holds it: the keeper alone does, so the tree goes with the
  * keeper, whether it exits or is killed, and with Althar, whose children Node
- * keeps in a job of its own. The keeper also says when a process started.
+ * keeps in a job of its own. The command runs in a console of its own whose
+ * window is never shown, which the console programs it starts share whether
+ * or not they ask to be hidden; with no console, each would open a window of
+ * its own. The keeper also says when a process started.
  *
  * It is C# for the .NET Framework 4 that comes with Windows, built at first
  * use by that framework's compiler into Althar's temporary folder, so Althar
@@ -32,14 +35,16 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 // Althar's keeper (packages/provider-adapters/src/keeper.ts). "run <command line>" runs a command in a Job Object that kills
-// everything in it once the keeper has gone; "started <pid>" prints when a process started, in UTC.
+// everything in it once the keeper has gone, in a console whose window is hidden; "started <pid>" prints when a process started, in UTC.
 static class Keeper
 {
     const uint KillOnJobClose = 0x2000;
     const int ExtendedLimitInformation = 9;
     const uint CreateSuspended = 0x4;
-    const uint CreateNoWindow = 0x08000000;
+    const uint CreateNewConsole = 0x10;
+    const int UseShowWindow = 0x1;
     const int UseStdHandles = 0x100;
+    const short Hide = 0;
     const uint Infinite = 0xFFFFFFFF;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -184,12 +189,15 @@ static class Keeper
 
         StartupInfo startup = new StartupInfo();
         startup.cb = Marshal.SizeOf(typeof(StartupInfo));
-        startup.dwFlags = UseStdHandles;
+        // A console of its own, created hidden, for everything it starts to share: a process with none, as under CREATE_NO_WINDOW,
+        // would have each console program it starts open a window, unless that program asked to be hidden.
+        startup.dwFlags = UseStdHandles | UseShowWindow;
+        startup.wShowWindow = Hide;
         startup.hStdInput = GetStdHandle(-10);
         startup.hStdOutput = GetStdHandle(-11);
         startup.hStdError = GetStdHandle(-12);
         ProcessInformation started;
-        if (!CreateProcess(null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, true, CreateSuspended | CreateNoWindow,
+        if (!CreateProcess(null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, true, CreateSuspended | CreateNewConsole,
                 IntPtr.Zero, null, ref startup, out started))
             throw new Win32Exception();
         if (!AssignProcessToJobObject(job, started.hProcess))

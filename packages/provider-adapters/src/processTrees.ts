@@ -26,7 +26,7 @@ export type TreeSignal = 'SIGTERM' | 'SIGKILL'
 export interface Launch {
   readonly command: string
   readonly args: ReadonlyArray<string>
-  /** In a process group of its own, on Unix; on Windows the keeper is not, and no console window opens for it. */
+  /** In a process group of its own, on Unix; on Windows the keeper is not, and gives the command a console whose window is hidden. */
   readonly detached: boolean
 }
 
