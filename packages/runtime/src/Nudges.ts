@@ -4,6 +4,7 @@ import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } 
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
+import { issueDraftsWaiting } from './kinds'
 import { outStep } from './Limits'
 import { field, parse, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
@@ -88,6 +89,9 @@ export const readyWords = (summary: string): string => {
 }
 
 /** A review drafted, in the words a nudge says it: whose pull request waits for the person to post its review. */
+/** Issues a lead drafted, for the person to file. */
+export const issuesWords = (count: number): string => (count === 1 ? 'An issue to file' : `${count} issues to file`)
+
 export const draftedWords = (number: number, author: string): string => `Review drafted: #${number} by ${author}`
 
 export class Nudges extends Context.Service<
@@ -148,6 +152,7 @@ export class Nudges extends Context.Service<
             AND coalesce((SELECT state FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
               ORDER BY proposed_at DESC LIMIT 1), '') <> 'proposed'
             AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+            AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0
             AND NOT EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
               WHERE e.run_id = r.id AND a.state = 'admitted')
             AND NOT EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
@@ -183,6 +188,7 @@ export class Nudges extends Context.Service<
           JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
           WHERE d.state = 'pending' AND k.state = 'open'
             AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+            AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0
           ORDER BY d.created_at, d.rowid`
         for (const review of drafted) {
           const turning = yield* Effect.map(
@@ -199,6 +205,24 @@ export class Nudges extends Context.Service<
             threadId: review.threadId,
           })
         }
+        // Issues a lead drafted, for the person to file: one nudge for a task, whatever the number.
+        const issues = yield* sql<{ threadId: string; title: string; drafts: number }>`
+          SELECT thread_id, title, drafts FROM (
+            SELECT t.id AS thread_id, k.title, ${sql.unsafe(issueDraftsWaiting('k'))} AS drafts, k.created_at, k.id AS task_id
+            FROM tasks k
+            JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+            WHERE k.state = 'open')
+          WHERE drafts > 0 ORDER BY created_at, task_id`
+        for (const task of issues)
+          found.set(`issues:${task.threadId}`, {
+            _tag: 'Nudge',
+            kind: 'call',
+            key: `issues:${task.threadId}`,
+            title: task.title,
+            body: issuesWords(task.drafts),
+            threadId: task.threadId,
+          })
         return found
       })
 
@@ -238,14 +262,14 @@ export class Nudges extends Context.Service<
       /**
        * Whether a change after `cursor` bears on what needs the person: a call,
        * a task, its plan or run, a step, a session starting, a turn ending, a
-       * review drafted, posted or dropped. A thread's items, most of what is
+       * review or an issue drafted, posted, filed or dropped. A thread's items, most of what is
        * recorded, never do.
        */
       const movedSince = (cursor: number) =>
         Effect.map(
           sql<{ moved: number }>`
             SELECT EXISTS (SELECT 1 FROM change_log WHERE cursor > ${cursor} AND aggregate_type IN ('attention_request', 'task',
-              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery', 'review_draft')) AS moved`,
+              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery', 'review_draft', 'issue_draft')) AS moved`,
           (rows) => rows.some((row) => row.moved === 1),
         )
 

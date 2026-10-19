@@ -18,6 +18,12 @@ import s from './Runtimes.module.css'
  * thing that would change it. Ready rows say who, and nothing else.
  */
 
+/** A download of one version from its maker's own address, rather than a latest release on GitHub: who from, and which. */
+export interface PinnedDownload {
+  from: string
+  version: string
+}
+
 interface RuntimeBase {
   id: string
   name: string
@@ -26,6 +32,8 @@ interface RuntimeBase {
   version?: string
   /** What goes under its row: its accounts, where it has them. */
   detail?: ReactNode
+  /** False where it has no instructions of its own to open (`onHelp`), as for an agent Althar only downloads. */
+  guide?: boolean
 }
 
 /** A runtime on this machine, and where it stands. What a row can say depends on its state, so each state carries only what it needs. */
@@ -54,6 +62,8 @@ export type RuntimeEntry = RuntimeBase &
         state: RuntimeState.Missing
         /** Althar can download it, about this big. Without it, only the agent's own instructions. */
         download?: string
+        /** The one version it fetches, from its maker rather than a latest release on GitHub. */
+        pinned?: PinnedDownload
         /** Why the last download didn't finish, in a sentence. */
         failed?: string
       }
@@ -94,6 +104,7 @@ export interface RuntimesText {
   add: string
   download: string
   downloadNote: (name: string, size: string) => string
+  pinnedNote: (name: string, size: string, pinned: PinnedDownload) => string
   installing: (name: string, size: string) => string
   tryAgain: string
 }
@@ -118,6 +129,8 @@ export const runtimesText: RuntimesText = {
   download: 'Download',
   downloadNote: (name, size) =>
     `Althar can fetch ${name}’s latest release from GitHub, about ${size}, check it, and keep it in its own folder.`,
+  pinnedNote: (name, size, { from, version }) =>
+    `Althar can fetch ${name} ${version} from ${from}, about ${size}, check it, and keep it in its own folder.`,
   installing: (name, size) => `Downloading ${name}, about ${size}, and checking it…`,
   tryAgain: 'Try again',
 }
@@ -186,7 +199,8 @@ type Handlers = Pick<RuntimesProps, 'onSignIn' | 'onCancel' | 'onCheck' | 'onHel
 /* What a row says and offers, by state. `calls` when something waits on you. */
 function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
   const help = (words: string) =>
-    h.onHelp && (
+    h.onHelp &&
+    r.guide !== false && (
       <ActionButton icon="external" onClick={() => h.onHelp?.(r.id)}>
         {words}
       </ActionButton>
@@ -252,7 +266,9 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
       )
       return {
         line: r.failed === undefined ? t.missing : <span role="alert">{r.failed}</span>,
-        ...(fetch && r.download !== undefined ? { note: t.downloadNote(r.name, r.download) } : {}),
+        ...(fetch && r.download !== undefined
+          ? { note: r.pinned === undefined ? t.downloadNote(r.name, r.download) : t.pinnedNote(r.name, r.download, r.pinned) }
+          : {}),
         actions: (fetch || help(t.install) || check) && (
           <>
             {help(t.install)}

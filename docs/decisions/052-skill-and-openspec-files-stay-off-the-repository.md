@@ -1,10 +1,10 @@
-# ADR-051: Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them
+# ADR-052: Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them
 
 - **Status:** Accepted
 - **Date:** 2026-10-18
 - **Owner:** Repository maintainers
 - **Context:** Althar gives its leads skills from a store outside the
-  repository ([ADR-050](050-skills-one-store-a-curated-catalog.md)), but an
+  repository ([ADR-051](051-skills-one-store-a-curated-catalog.md)), but an
   agent can still write `.claude/skills/…`, `.agents/skills/…`,
   `.opencode/skills/…` or `openspec/…` into the worktree, a skill can tell it
   to, and the agent commits by itself, where Althar can't see its staging.

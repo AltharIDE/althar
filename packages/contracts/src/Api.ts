@@ -75,12 +75,19 @@ export const AgentStatus = Schema.Struct({
   ways: Schema.Array(Schema.Literals(['browser', 'device'])),
   /** Its accounts, in the person's order. */
   accounts: Schema.Array(AccountStatus),
+  /** More accounts can be added: its sign-in is kept in each account's own folder (ADR-012). */
+  addsAccounts: Schema.Boolean,
   /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
   installed: Schema.Boolean,
   /** It runs from the copy Althar downloaded, as the person has none of their own. */
   kept: Schema.Boolean,
-  /** Althar can download it for the person, about this big; null where it can't. `installing` while it does. */
-  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean })),
+  /**
+   * Althar can download it for the person, about this big; null where it can't. `installing` while it does.
+   * `pinned`, the one version it fetches from its maker (Antigravity's server); null for its latest release on GitHub.
+   */
+  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean, pinned: Schema.NullOr(Schema.String) })),
+  /** Its maker's page on installing it, for a person who installs it themselves; null where Althar names none. */
+  guide: Schema.NullOr(Schema.String),
   /** Why Althar couldn't check it, in words for the person; null where it could. The other agents are checked all the same. */
   problem: Schema.NullOr(Schema.String),
 })
@@ -407,6 +414,9 @@ export const ProjectNote = Schema.Struct({
   keptBy: Schema.Literals(['coordinator', 'person']),
 })
 export type ProjectNote = typeof ProjectNote.Type
+
+/** How long a note may be: a decision, in a sentence or two. */
+export const NOTE_LENGTH = 300
 export type ProjectList = typeof ProjectList.Type
 
 export const TaskSummary = Schema.Struct({
@@ -2697,6 +2707,8 @@ export const Api = RpcGroup.make(
   call('GetProjectNotes', { projectId: Schema.String }, Schema.Array(ProjectNote)),
   /** Drops one of a project's notes: it no longer holds, and no coordinator session starts with it. */
   command('DropProjectNote', { projectId: Schema.String, noteId: Schema.String }, Schema.Void),
+  /** Says one of a project's notes in other words, the person's: a sentence or two, as the coordinator keeps one. */
+  command('EditProjectNote', { projectId: Schema.String, noteId: Schema.String, body: Schema.String }, Schema.Void),
   /**
    * The names a project's code uses that have parts (`RefundLedger`,
    * `useEffect`, `charges-api.ts`), most used first, so dictation can write

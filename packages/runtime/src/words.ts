@@ -3,6 +3,7 @@ import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
 import type { ReviewDraftIncomplete } from './Reviews'
 
@@ -117,6 +118,7 @@ const kinds: Readonly<Record<string, string>> = {
   repository: 'repository',
   output: 'output',
   document: 'document',
+  note: 'note',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
@@ -153,6 +155,8 @@ export const words = (
           "Althar can't send that image."
         )
       }
+      case 'NoteRefused':
+        return noteRefused[text(error, 'why') as NoteRefused['why']] ?? 'Althar can’t keep that note.'
       case 'SessionRunning':
         return 'An agent is already working on this task.'
       case 'NoSession':
@@ -398,6 +402,7 @@ export const expected = new Set([
   'DocumentRefused',
   'ImageRefused',
   'NotFound',
+  'NoteRefused',
   'UnknownAgent',
   'SessionRunning',
   'NoSession',
@@ -411,6 +416,13 @@ export const expected = new Set([
   'AlreadyDelivered',
   'CommandIdReused',
 ])
+
+/** Why a note can't be kept as it is said, by reason. */
+const noteRefused: Readonly<Record<NoteRefused['why'], string>> = {
+  empty: 'A note needs some words. To take one out, remove it.',
+  long: `A note is a sentence or two: at most ${NOTE_LENGTH} characters.`,
+  full: `A project keeps at most ${NOTES_KEPT} notes. Remove one that no longer holds first.`,
+}
 
 /** Why a document isn't shown, by reason. */
 const documentRefused: Readonly<Record<DocumentRefused['reason'], string>> = {
@@ -444,4 +456,6 @@ const accountRefused = {
   usual: "That's the agent's usual sign-in, its first account: it stays.",
   taken: 'That folder is an account already.',
   no_name: 'Give the account a name.',
+  one: "This agent keeps its sign-in where every folder shares it, so it can't have a second account yet: sign its usual one in to the account you want.",
+  no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
 } as const satisfies Record<AccountRefused['reason'], string>

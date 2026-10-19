@@ -210,13 +210,13 @@ describe('a project’s settings', () => {
     expect(general.getByRole('textbox', { name: 'Name' })).toHaveProperty('value', 'meridian')
   })
 
-  it('says what each switch does on and off, and has its leads resolve conflicts unasked once turned on', async () => {
+  it('says when each switch acts, and has its leads resolve conflicts unasked once turned on', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
-    const tasks = within(screen.getByRole('region', { name: 'How its tasks work' }))
+    const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const conflicts = tasks.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
-    expect(descriptionOf(conflicts)).toMatch(/its lead brings the default branch into the task’s branch.*Off: the task says it conflicts/)
+    expect(descriptionOf(conflicts)).toBe('When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.')
     await userEvent.click(conflicts)
     // On at once, and kept as a revision of the rules, with nothing else in it.
     expect(conflicts.getAttribute('aria-checked')).toBe('true')
@@ -229,11 +229,11 @@ describe('a project’s settings', () => {
   it('moves a task’s issue to In Progress as it starts, on every tracker that has one, unless switched off', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
-    const move = within(screen.getByRole('region', { name: 'How its tasks work' })).getByRole('switch', {
+    const move = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
       name: 'Move issues to In Progress',
     })
     expect(move.getAttribute('aria-checked')).toBe('true')
-    expect(descriptionOf(move)).toMatch(/a Linear, Jira or Trello issue.*GitHub and GitLab issues have no In Progress/)
+    expect(descriptionOf(move)).toBe('When a task starts from a Linear, Jira or Trello issue.')
     await userEvent.click(move)
     // Off at once, before the runtime has said so.
     expect(move.getAttribute('aria-checked')).toBe('false')
@@ -248,7 +248,7 @@ describe('a project’s settings', () => {
       }),
     })
     await openSettings()
-    const tasks = within(screen.getByRole('region', { name: 'How its tasks work' }))
+    const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const move = tasks.getByRole('switch', { name: 'Move issues to In Progress' })
     await userEvent.click(move)
     expect(await tasks.findByRole('alert')).toHaveProperty('textContent', 'The rules changed meanwhile.')
@@ -318,7 +318,7 @@ describe('a project’s settings', () => {
     expect(await files.findByText('The rules changed meanwhile.')).toBeTruthy()
     await waitFor(() => expect(push.getAttribute('aria-checked')).toBe('false'))
     // The task switches say nothing of it.
-    expect(within(screen.getByRole('region', { name: 'How its tasks work' })).queryByText(/changed meanwhile/)).toBeNull()
+    expect(within(screen.getByRole('region', { name: 'Tasks' })).queryByText(/changed meanwhile/)).toBeNull()
   })
 
   it('shows the notes its coordinator keeps, newest first, who kept each, and drops one that no longer holds', async () => {
@@ -353,6 +353,35 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(client.dropProjectNote).toHaveBeenCalledWith('p1', 'note_2'))
     await waitFor(() => expect(sheet('Notes').getAllByRole('listitem')).toHaveLength(1))
     expect(sheet('Notes').getByRole('button', { name: /^Remove “Issue drafts/ })).toBe(document.activeElement)
+  })
+
+  it('says a note in the person’s words where it is, on one line, and puts it back, saying why, where that doesn’t hold', async () => {
+    let kept = [
+      { id: 'note_1', body: 'Issue drafts need an approval card.', createdAt: '2026-10-01T09:00:00.000Z', keptBy: 'coordinator' as const },
+    ]
+    const { client } = windowAt('/projects/p1', {
+      getProjectNotes: vi.fn(async () => kept),
+      editProjectNote: vi.fn(async (_projectId: string, noteId: string, body: string) => {
+        if (body.includes('Jira'))
+          throw new ApiError({ reason: 'NoteRefused', message: 'A note is a sentence or two: at most 300 characters.' })
+        kept = kept.map((note) => (note.id === noteId ? { ...note, body } : note))
+      }),
+    })
+    await openSettings('Notes')
+    await userEvent.click(await sheet('Notes').findByRole('button', { name: 'Edit “Issue drafts need an approval card.”' }))
+    const field = sheet('Notes').getByRole('textbox', { name: 'Note' })
+    expect(field).toBe(document.activeElement)
+    await userEvent.type(field, '{Backspace}, on Linear   only.{Enter}')
+    await waitFor(() =>
+      expect(client.editProjectNote).toHaveBeenCalledWith('p1', 'note_1', 'Issue drafts need an approval card, on Linear only.'),
+    )
+    expect(await sheet('Notes').findByText('Issue drafts need an approval card, on Linear only.')).toBeTruthy()
+    expect(sheet('Notes').getByRole('button', { name: /^Edit “Issue drafts/ })).toBe(document.activeElement)
+    // One that doesn’t hold goes back as it was, saying why.
+    await userEvent.keyboard('{Enter}')
+    await userEvent.type(sheet('Notes').getByRole('textbox', { name: 'Note' }), ' And Jira.{Enter}')
+    expect(await sheet('Notes').findByRole('alert')).toHaveProperty('textContent', 'A note is a sentence or two: at most 300 characters.')
+    expect(await sheet('Notes').findByText('Issue drafts need an approval card, on Linear only.')).toBeTruthy()
   })
 
   it('puts a note back and says why when dropping it doesn’t hold', async () => {
@@ -421,8 +450,8 @@ describe('a project’s trackers, in its settings', () => {
     const side = await openSettings()
     await userEvent.click(side.getByRole('button', { name: 'Code and issues, needs you' }))
     const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
-    expect(trackers.getByText('Linear · MER issues')).toBeTruthy()
-    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.getByText('MER issues · Linear')).toBeTruthy()
+    expect(trackers.getByText('Not connected')).toBeTruthy()
     await userEvent.click(trackers.getByRole('button', { name: 'Connect' }))
     expect(await screen.findByRole('dialog', { name: 'Linear' })).toBeTruthy()
   })
@@ -431,7 +460,7 @@ describe('a project’s trackers, in its settings', () => {
     windowAt('/projects/p1', onLinear(linear('reauth_required')))
     await openSettings('Code and issues')
     const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
-    expect(trackers.getByText(/^Signed out as balazs: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.getByText('Signed out as balazs')).toBeTruthy()
     expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
   })
 
@@ -452,7 +481,7 @@ describe('a project’s trackers, in its settings', () => {
     const side = await openSettings()
     await userEvent.click(side.getByRole('button', { name: 'Code and issues, needs you' }))
     const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
-    expect(trackers.getByText(/^Signed out as balazs-work: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.getByText('Signed out as balazs-work')).toBeTruthy()
     expect(trackers.queryByText('Connected as balazs')).toBeNull()
     // Signing in again opens that account's own sign-in, named for Linear, not the list of every connection.
     await userEvent.click(trackers.getByRole('button', { name: 'Sign in again' }))
@@ -485,7 +514,7 @@ describe('a project’s trackers, in its settings', () => {
     const side = await openSettings()
     await userEvent.click(side.getByRole('button', { name: 'Code and issues, needs you' }))
     const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
-    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.getByText('Not connected')).toBeTruthy()
     expect(trackers.queryByText('Connected as balazs')).toBeNull()
   })
 
@@ -505,7 +534,7 @@ describe('a project’s trackers, in its settings', () => {
     expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
     await openSettings('Code and issues')
     const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
-    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.getByText('Not connected')).toBeTruthy()
     expect(trackers.queryByText('Connected as balazs')).toBeNull()
   })
 
@@ -540,7 +569,7 @@ describe('a project’s trackers, in its settings', () => {
     await openSettings('Code and issues')
     const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
     expect(trackers.getByText('Trello cards')).toBeTruthy()
-    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.getByText('Not connected')).toBeTruthy()
     expect(trackers.queryByText('No tracker yet')).toBeNull()
   })
 

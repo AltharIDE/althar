@@ -1,11 +1,11 @@
 import type { ProjectRepository, ProjectRulesView, Runnable } from '@althar/contracts'
-import { Button, Icon, LinkButton, RunnableList, SettingGroup, SettingList, SettingRow, TaskEnd } from '@althar/ui'
+import { Button, Code, Icon, LinkButton, RunnableList, SettingGroup, SettingList, SettingRow, TaskEnd } from '@althar/ui'
 import { projectRulesText } from '@althar/ui/screens'
 
-import { device } from '../../shared/device'
 import { shortFolder } from '../../shared/folders'
 import { endOf, OWN } from '../rules/RulesSection'
 import { listedOf, RunDialogs, useRunDialogs } from '../runs/Runs'
+import s from './ProjectSettings.module.css'
 import { HEADING } from './sections'
 
 /*
@@ -13,21 +13,20 @@ import { HEADING } from './sections'
  * first what one press of Run starts: reordered, made the default, changed
  * and removed in place, and added to in the same dialogs as from Run. Then
  * where its tasks' work goes: their worktrees on this computer, how their
- * branches are named and what a task ends with, the last two kept with the
+ * branches are named (a folder and a pattern set as code) and what a task
+ * ends with, the last two kept with the
  * rules, where they are changed. What a task ends with is what the runtime
  * does: a pull request only where a host Althar knows is there to open it.
  */
 
 export const text = {
   runs: 'What it runs',
-  runsNote:
-    'With no agent, from Run at the top of its screen. Drag them into the order you want: the first is what one press of Run starts.',
+  runsNote: 'Run starts the first. Drag to change the order.',
   add: 'Add something to run',
   where: 'Where its work goes',
-  whereNote: `Each task works on a branch of its own, in a worktree of its own on ${device.this}.`,
   worktrees: 'Worktrees',
   worktreesUnmade: 'Made with its first task, never in its repositories’ own folders',
-  branches: 'Branches',
+  branches: 'Branch names',
   asDocsSay: 'As each repository’s docs say',
   asDocsSayElse: (own: string) => `As each repository’s docs say, else ${own}`,
   finish: 'When a task is done',
@@ -56,6 +55,21 @@ export const finishOf = (
   if (first === undefined) return { kind: 'unknown' }
   if (end !== null || known.some((host) => host.account?.state === 'ready')) return { kind: 'end', end: endOf(end) }
   return { kind: 'unconnected', host: first.name }
+}
+
+/** How its tasks' branches are named, the pattern as code. */
+function BranchNames({ rules }: { rules: ProjectRulesView }) {
+  const named = branchesOf(rules)
+  if (named === text.asDocsSay) return <>{named}</>
+  const before = text.asDocsSayElse('')
+  return named.startsWith(before) ? (
+    <>
+      {before}
+      <Code className={s.code}>{named.slice(before.length)}</Code>
+    </>
+  ) : (
+    <Code className={s.code}>{named}</Code>
+  )
 }
 
 /** How its tasks' branches are named: the person's pattern, what its repositories' docs say, or Althar's own. */
@@ -118,22 +132,26 @@ export function RunningSection({
           {...(dialogs.showing === null && runs.error !== null ? { error: runs.error } : {})}
         />
       </SettingGroup>
-      <SettingGroup title={text.where} note={text.whereNote} headingLevel={HEADING.part}>
+      <SettingGroup title={text.where} headingLevel={HEADING.part}>
         <SettingList>
           <SettingRow
             title={text.worktrees}
-            note={worktrees === null ? text.worktreesUnmade : shortFolder(worktrees)}
-            glyph={<Icon name="folder" size={15} />}
+            note={worktrees === null ? text.worktreesUnmade : <Code className={s.code}>{shortFolder(worktrees)}</Code>}
+            mark={<Icon name="folder" size={15} className={s.glyph} />}
           >
             {() => null}
           </SettingRow>
           {rules !== null && (
-            <SettingRow title={text.branches} note={branchesOf(rules)} glyph={<Icon name="branch" size={15} />}>
+            <SettingRow
+              title={text.branches}
+              note={<BranchNames rules={rules} />}
+              mark={<Icon name="branch" size={15} className={s.glyph} />}
+            >
               {() => <LinkButton onClick={onRules}>{text.inRules}</LinkButton>}
             </SettingRow>
           )}
           {finish !== null && (
-            <SettingRow title={text.finish} note={finishNote(finish)} glyph={<Icon name="pr" size={15} />}>
+            <SettingRow title={text.finish} note={finishNote(finish)} mark={<Icon name="pr" size={15} className={s.glyph} />}>
               {() =>
                 finish.kind === 'unconnected' ? (
                   <LinkButton onClick={onCode}>{text.connect(finish.host)}</LinkButton>

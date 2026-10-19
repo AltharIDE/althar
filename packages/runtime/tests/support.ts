@@ -81,7 +81,13 @@ export const launches: Array<{
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
 
-export const definition = (id: string, signedOut: ReadonlyArray<string> = [], perUse: ReadonlyArray<string> = []): AgentDefinition => ({
+export const definition = (
+  id: string,
+  signedOut: ReadonlyArray<string> = [],
+  perUse: ReadonlyArray<string> = [],
+  /** Agents whose sign-in every folder shares, which have their one account. */
+  oneAccount: ReadonlyArray<string> = [],
+): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
   source: 'bundled',
@@ -106,7 +112,12 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
     },
   },
   // Shares everything in its usual folder but its sign-in, as OpenCode's data folder does.
-  home: { variable: 'FAKE_HOME', usual: () => join(fakeHomes, id), shared: (names) => names.filter((name) => name !== 'auth.json') },
+  home: {
+    variable: 'FAKE_HOME',
+    usual: () => join(fakeHomes, id),
+    shared: (names) => names.filter((name) => name !== 'auth.json'),
+    ...(oneAccount.includes(id) ? { accounts: 'one' as const } : {}),
+  },
   permissions: codexLikeMeanings,
   permissionJudge: { sessionMeta: { fake: { tools: [] } } },
   // One fake agent passes session options, as Claude Code's entry does.
@@ -148,9 +159,10 @@ export const fakeAgents = (
   /** Options for one agent, over the ones for all. */
   each: Readonly<Record<string, FakeAgentOptions>> = {},
   perUse: ReadonlyArray<string> = [],
+  oneAccount: ReadonlyArray<string> = [],
 ) => {
   const entry = (agentId: string): AgentEntry => ({
-    definition: definition(agentId, signedOut, perUse),
+    definition: definition(agentId, signedOut, perUse, oneAccount),
     transport: (cwd, env = {}, session) => {
       launches.push({ agentId, cwd, env, options: session })
       return agentId === 'process'
@@ -231,6 +243,8 @@ export const runtime = (
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
     /** Agents signed in on a key, paid per use, rather than a plan. */
     readonly perUse?: ReadonlyArray<string>
+    /** Agents whose sign-in every folder shares, which have their one account. */
+    readonly oneAccount?: ReadonlyArray<string>
     readonly stalls?: StallOptions
     readonly stopGrace?: Duration.Duration
     readonly permissionJudgeTimeout?: Duration.Duration
@@ -263,7 +277,7 @@ export const runtime = (
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
-    agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse),
+    agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount),
     countdown: more.countdown ?? Duration.millis(300),
     secrets: Secrets.memory(),
     connectors: more.connectors ?? fakeConnectors({}),

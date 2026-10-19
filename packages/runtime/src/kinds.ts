@@ -58,6 +58,16 @@ export const quickIn = (task: string) =>
     AND NOT EXISTS (SELECT 1 FROM external_links ql WHERE ql.task_id = ${task}.id AND ql.kind = 'change'))`
 
 /**
+ * How many issues its lead drafted wait on the person for the task `task` (a
+ * table alias), as SQL: drafted and not filed or discarded, or not filed the
+ * last time. Each is a call on the person, as an open one is
+ * (`attention_requests`), though no row of that table stands for it.
+ */
+export const issueDraftsWaiting = (task: string) =>
+  `(SELECT count(*) FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
+    WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain'))`
+
+/**
  * What a plain task handed back, for its card: the pictures its lead showed
  * as evidence when it last reported, kept ones only, and the files it wrote
  * or pointed at in what it said since its latest run began, each once, in
