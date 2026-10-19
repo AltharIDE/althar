@@ -47,13 +47,10 @@
   white-space: nowrap;
   color: var(--t-3);
 }
-/* gives way before the status does, so a narrow column cuts it short rather than the card */
+/* short, and never cut: the line beside it is what gives way */
 .at {
   margin-left: auto;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: nowrap;
   color: var(--t-3);
 }
@@ -92,6 +89,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
 }
 .leadModel {
   color: var(--t-1);
@@ -101,36 +99,35 @@
 .effort {
   color: var(--t-3);
 }
-.sep {
-  width: 1px;
-  height: 12px;
-  background: var(--line-2);
+/* what the card says about the task wraps whole facts onto a second line; the button stays put */
+.facts {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: 4px 14px;
 }
-.branch,
 .pr {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
+  max-width: 100%;
+  font-size: 11.5px;
   color: var(--t-2);
 }
-.branch {
-  font-family: var(--mono);
-}
-/* the name is what gives way, with an ellipsis, beside its glyph */
-.branchName {
+.prName {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.pr {
-  font-size: 11.5px;
+.pr svg {
+  flex: none;
 }
 .open {
+  flex: none;
   margin-left: auto;
 }
 

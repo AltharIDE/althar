@@ -20,7 +20,7 @@ const meta = {
     status: TaskStatus.Running,
     at: 0,
     now: 'Implement · writing the backfill script',
-    started: 'started 4m ago',
+    started: '4m ago',
     onOpen: fn(),
   },
 } satisfies Meta<typeof TaskCard>
@@ -49,9 +49,8 @@ export const WaitingOnYou: Story = {
     status: TaskStatus.Yours,
     title: 'Refunds rate-limit like charges',
     lead: CODEX,
-    branch: 'ch/431-refund-limits',
     from: undefined,
-    started: 'started 2h ago',
+    started: '2h ago',
     now: 'Verify on staging · a command that reaches staging',
     steps: ['Triage', 'Implement', 'Review', 'Security review', 'Verify', 'Draft PR'],
     at: 4,
@@ -64,7 +63,6 @@ export const Done: Story = {
     status: TaskStatus.Done,
     title: 'Webhook retries respect partner limits',
     lead: SONNET,
-    branch: 'ch/429-webhook-retries',
     from: undefined,
     started: 'took 48m',
     now: 'Draft PR opened; checks passed',
@@ -81,9 +79,8 @@ export const Paused: Story = {
     status: TaskStatus.Paused,
     title: 'Find why the nightly partner export got slow',
     lead: CODEX,
-    branch: 'ch/433-export-speed',
     from: undefined,
-    started: 'started 40m ago',
+    started: '40m ago',
     now: 'Security review waits for Claude Code · resets 14:00',
     steps: ['Implement', 'Review', 'Security review', 'Draft PR'],
     at: 2,
@@ -97,7 +94,6 @@ export const Stopped: Story = {
     status: TaskStatus.Stopped,
     title: 'Move partner webhooks to the new queue',
     lead: OPUS,
-    branch: 'ch/428-webhook-queue',
     from: undefined,
     started: 'ran 22m',
     now: 'during Implement · the branch is kept',
@@ -159,6 +155,34 @@ function OverTime() {
   )
 }
 
+/** Every status at the narrowest and widest the chat gives it, with an issue, a pull request and a question: text gives way, the button never. */
+export const Widths: Story = {
+  parameters: { layout: 'padded' },
+  decorators: [],
+  render: (args) => {
+    const cards = [
+      { ...args, ...Done.args, from: T432.from },
+      { ...args, ...WaitingOnYou.args, from: T432.from, pr: 'Draft PR 1187, after Draft PR 1102 and PR 1090' },
+      { ...args, ...Paused.args },
+      { ...args, status: TaskStatus.Queued, now: 'Waiting for a free agent · 2 are busy', started: '1m ago' },
+      { ...args, ...Stopped.args },
+      { ...args, effort: 'High', pr: 'Draft PR 1187' },
+      { ...args, question: true, steps: [], title: 'Why do refunds fail fast?', effort: 'High', now: undefined },
+    ]
+    return (
+      <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start' }}>
+        {[320, 720].map((w) => (
+          <div key={w} style={{ width: w, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {cards.map((card, i) => (
+              <TaskCard key={i} {...card} />
+            ))}
+          </div>
+        ))}
+      </div>
+    )
+  },
+}
+
 export const TaskOverTime: Story = { render: () => <OverTime /> }
 
 export const AllStates: Story = {
@@ -173,7 +197,7 @@ export const AllStates: Story = {
         { state: 'paused', node: <TaskCard {...args} {...Paused.args} /> },
         { state: 'stopped', node: <TaskCard {...args} {...Stopped.args} /> },
         { state: 'sent back a step', node: <TaskCard {...args} at={0} seen={2} now="Implement · round 2" /> },
-        { state: 'a question', node: <TaskCard {...args} question branch={undefined} steps={[]} title="Why do refunds fail fast?" /> },
+        { state: 'a question', node: <TaskCard {...args} question steps={[]} title="Why do refunds fail fast?" /> },
         { state: 'no way in', node: <TaskCard {...args} onOpen={undefined} /> },
         { state: 'open, hover', force: 'hover', node: <TaskCard {...args} /> },
         { state: 'open, focus', force: 'focus', node: <TaskCard {...args} /> },
