@@ -75,6 +75,10 @@
   color: var(--t-1);
   white-space: pre-wrap;
 }
+/* the code inside takes the block's type, not the browser's own monospace */
+.md pre code {
+  font: inherit;
+}
 /* a block's copy waits in a band above its first line, in the top-right corner, until the block is hovered, focused or, on touch, always there; the band is reserved, so the code never moves and the copied label never lands on it */
 .block {
   position: relative;
@@ -106,7 +110,8 @@
 .md blockquote {
   padding: 9px 12px;
   border-radius: 8px;
-  background: var(--n-2);
+  /* pressed into whatever it sits on: the thread's own ground is --n-2 */
+  background: var(--sunk);
   color: var(--t-2);
 }
 .md blockquote > * {

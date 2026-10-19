@@ -27,5 +27,6 @@
 - **Trade-off:** a larger download and more memory than Tauri; Electron
   hardening is Althar's job; Chromium updates arrive with Electron
   releases.
-- **Revisit when:** size or memory becomes a real complaint, or work must
-  outlive the app and a daemon is needed.
+- **Revisit when:** size or memory becomes a real complaint. Work outliving
+  the window, a headless host on plain Node, and when a daemon would become
+  worth it are in [ADR-048](048-where-the-runtime-runs-and-who-may-reach-it.md).

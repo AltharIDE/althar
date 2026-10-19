@@ -130,7 +130,7 @@ export const startText: StartText = {
   more: 'Tick more, or drop folders on the window.',
   leaveOut: (name) => `Leave ${name} out`,
   create: 'Make the project',
-  createKbd: '⌘⏎',
+  createKbd: '⌘↵',
 }
 
 export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 'text' | 'runtimes'> {

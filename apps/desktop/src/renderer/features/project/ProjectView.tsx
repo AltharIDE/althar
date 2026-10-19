@@ -18,10 +18,11 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import { platform } from '../../shared/device'
 import { useModels } from '../../data/models'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, useDraft } from '../../shared/drafts'
+import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
@@ -36,6 +37,7 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { takesImages, useImages } from '../../shared/useImages'
 import { BoardView } from '../board/BoardView'
+import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
@@ -170,6 +172,8 @@ export function ProjectView({
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
   const shown = useThreadHost(false)
   const both = useBothWidth()
+  // The lanes the person collapsed, kept for every project, apart beside the conversation.
+  const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
@@ -296,6 +300,7 @@ export function ProjectView({
     if (said === undefined || !images.fits(said.pictures)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
+      if (said.dictated === true) setDraftDictated(draftOf, true)
       images.restore(said.pictures)
     }
   }
@@ -346,7 +351,7 @@ export function ProjectView({
         queued={queuedOf(coordinator?.items ?? [], queue)}
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        text={{ queued: text.queue }}
+        text={{ queued: text.queue, sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
         meter={contextMeter(session, named, model.compact)}
         picker={
@@ -530,6 +535,9 @@ export function ProjectView({
                     onOpen={onTask}
                     closing={closing}
                     actions={board}
+                    line={board.line}
+                    folds={folds}
+                    onFoldsChange={setFolds}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
                 </>

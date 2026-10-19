@@ -105,10 +105,10 @@ describe('accounts in settings', () => {
       const accounts = await codexAccounts()
       await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
       expect(within(accounts).getByText('New account')).toBeTruthy()
-      await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
       await waitFor(() => expect(client.addAccount).toHaveBeenCalledWith({ agentId: 'codex', name: 'Account 3' }))
       await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
-      expect(await within(accounts).findByText('Finish signing in in Terminal')).toBeTruthy()
+      expect(await within(accounts).findByText('Finish signing in from the terminal')).toBeTruthy()
       // While it signs in, the list starts no other.
       expect(screen.getByRole('button', { name: 'Add an account' }).hasAttribute('disabled')).toBe(true)
 
@@ -141,7 +141,7 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     const accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
     // Back from Terminal, and still it can't tell: not signed in yet.
     codex.next(usual('acc_usual', 'signed_in'), { ...usual('acc_added', 'unknown'), name: 'Account 2' })
@@ -285,7 +285,7 @@ describe('accounts in settings', () => {
     // Another way stops the agent's login, and offers the ways again.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Another way' }))
     expect(client.cancelAccountSignIn).toHaveBeenCalledWith('flow_account')
-    expect(within(accounts).getByRole('button', { name: 'In Terminal' })).toBeTruthy()
+    expect(within(accounts).getByRole('button', { name: 'In a terminal' })).toBeTruthy()
     // Signed in again: back to its line, nothing to name.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in again' }))
     finished = true
@@ -299,8 +299,8 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     const accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
-    await within(accounts).findByText('Finish signing in in Terminal')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
+    await within(accounts).findByText('Finish signing in from the terminal')
     await userEvent.click(within(accounts).getByRole('button', { name: 'Cancel signing in' }))
     await waitFor(() => expect(client.removeAccount).toHaveBeenCalledWith('acc_added'))
 
@@ -320,15 +320,15 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     const accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledTimes(1))
-    await userEvent.click(await within(accounts).findByRole('button', { name: 'Open Terminal again' }))
+    await userEvent.click(await within(accounts).findByRole('button', { name: 'Open the terminal again' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledTimes(2))
 
     // Another way: the account made goes, signed out or not.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Another way' }))
     await waitFor(() => expect(removeAccount).toHaveBeenLastCalledWith('acc_added', true))
-    expect(within(accounts).getByRole('button', { name: 'Sign in in Terminal' })).toBeTruthy()
+    expect(within(accounts).getByRole('button', { name: 'Sign in from a terminal' })).toBeTruthy()
   })
 
   it('says what stopped a new account, and removes one made after the sign-in was left', async () => {
@@ -340,15 +340,15 @@ describe('accounts in settings', () => {
 
     // The runtime turning the new account down says why, and goes back to the ways in.
     vi.mocked(client.addAccount).mockRejectedValueOnce(new ApiError({ reason: 'AccountFailed', message: 'No room for another folder.' }))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in from a terminal' }))
     expect(await within(accounts).findByText('No room for another folder.')).toBeTruthy()
     await userEvent.click(within(accounts).getByRole('button', { name: 'Try again' }))
-    expect(within(accounts).getByRole('button', { name: 'Sign in in Terminal' })).toBeTruthy()
+    expect(within(accounts).getByRole('button', { name: 'Sign in from a terminal' })).toBeTruthy()
 
     // Left while the account was being made: it goes once it is.
     let made: (account: Awaited<ReturnType<typeof client.addAccount>>) => void = () => {}
     vi.mocked(client.addAccount).mockImplementationOnce(() => new Promise((resolve) => void (made = resolve)))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in from a terminal' }))
     await userEvent.click(within(accounts).getByRole('button', { name: 'Cancel signing in' }))
     await act(async () => made({ ...usual('acc_late', 'signed_out'), name: 'Account 2', home: '/late' }))
     await waitFor(() => expect(client.removeAccount).toHaveBeenCalledWith('acc_late'))
@@ -364,7 +364,7 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
     expect(await within(screen.getByRole('group', { name: 'New account' })).findByText('per use')).toBeTruthy()
   })
 
@@ -430,7 +430,7 @@ describe('accounts in settings', () => {
     expect(await within(accounts).findByText('codex isn’t installed')).toBeTruthy()
     // Try again goes back to its ways in.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Try again' }))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in from a terminal' }))
     await waitFor(() => expect(signInAccount).toHaveBeenCalledTimes(3))
   })
 

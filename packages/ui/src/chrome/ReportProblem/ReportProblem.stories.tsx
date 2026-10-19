@@ -72,7 +72,7 @@ export const Writing: Story = {
   },
 }
 
-/** ⌘↩ sends from the box, where Enter is a new line. */
+/** ⌘↵ sends from the box, where Enter is a new line. */
 export const SendingByKeys: Story = {
   play: async ({ args }) => {
     const page = within(document.body)

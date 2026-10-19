@@ -1,4 +1,4 @@
-# ADR-048: An ACP agent joins where Althar can hold it to asking, and the rest wait with their reasons
+# ADR-050: An ACP agent joins where Althar can hold it to asking, and the rest wait with their reasons
 
 - **Status:** Accepted
 - **Date:** 2026-10-19

@@ -21,8 +21,10 @@
 }
 .status {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 7px;
+  white-space: nowrap;
   font-weight: 600;
   color: var(--t-1);
 }
@@ -45,13 +47,10 @@
   white-space: nowrap;
   color: var(--t-3);
 }
-/* gives way before the status does, so a narrow column cuts it short rather than the card */
+/* short, and never cut: the line beside it is what gives way */
 .at {
   margin-left: auto;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: nowrap;
   color: var(--t-3);
 }
@@ -88,10 +87,13 @@
 }
 .lead {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
 }
 .leadModel {
+  position: relative;
   color: var(--t-1);
   font-weight: 550;
 }
@@ -99,30 +101,93 @@
 .effort {
   color: var(--t-3);
 }
-.sep {
-  width: 1px;
-  height: 12px;
-  background: var(--line-2);
+/*
+ * The foot is one row at every width. Its facts give way in order, least useful
+ * first, and never wrap: the word "Lead" and the effort, then the model's name
+ * down to its mark (the name stays for a screen reader and on hover). What is
+ * left, the issue and the pull request, is what the card is for. The more facts
+ * it carries, the sooner it lets go of the first ones.
+ */
+.foot {
+  container-type: inline-size;
 }
-.branch,
+.facts {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  min-width: 0;
+  gap: 14px;
+  /* last resort, for a long issue key or model name: clip here, never into the button */
+  overflow: hidden;
+}
+.facts > :not(.pr) {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* the lead keeps its size; the issue key, which can be long, is what clips */
+.facts > .lead {
+  flex: none;
+  overflow: visible;
+}
+/* the pull request keeps room for its icon and a few letters before the rest gives way */
+.facts > .pr {
+  flex: 1 1 auto;
+  min-width: 4.5em;
+}
 .pr {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
+  font-size: 11.5px;
+  color: var(--t-2);
+}
+.prName {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
-  color: var(--t-2);
 }
-.branch {
-  font-family: var(--mono);
+.pr svg {
+  flex: none;
 }
-.pr {
-  font-size: 11.5px;
+@container (max-width: 374px) {
+  .facts {
+    gap: 10px;
+  }
+}
+@container (max-width: 410px) {
+  .facts[data-crowd='2'] :is(.leadLabel, .effort) {
+    display: none;
+  }
+}
+@container (max-width: 350px) {
+  .facts[data-crowd='1'] :is(.leadLabel, .effort) {
+    display: none;
+  }
+}
+@container (max-width: 360px) {
+  .facts[data-crowd='2'] .leadModel > span:first-of-type {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+@container (max-width: 280px) {
+  .facts[data-crowd='1'] .leadModel > span:first-of-type {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 }
 .open {
+  flex: none;
   margin-left: auto;
 }
 

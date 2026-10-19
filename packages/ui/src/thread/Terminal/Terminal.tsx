@@ -20,7 +20,7 @@ export interface TerminalText {
 
 export const terminalText: TerminalText = {
   prompt: '$',
-  showEarlier: (n) => `${n} earlier lines`,
+  showEarlier: (n) => `Show ${n} earlier lines`,
   hideEarlier: 'Hide earlier lines',
   exit: (code) => `exit ${code}`,
   empty: 'No output',

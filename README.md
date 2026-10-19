@@ -278,7 +278,7 @@ Everything runs on your machine. The project's tasks, threads and history are ke
         <img src=".github/readme/agents/on-the-way.svg" width="72" alt="Cursor and Gemini CLI" />
       </picture><br />
       <b>More on the way</b><br />
-      Any agent that speaks the <a href="https://agentclientprotocol.com">Agent Client Protocol</a> and can be held to asking can join (<a href="docs/decisions/048-an-agent-joins-where-althar-can-hold-it-to-asking.md">which, and why</a>)
+      Any agent that speaks the <a href="https://agentclientprotocol.com">Agent Client Protocol</a> and can be held to asking can join (<a href="docs/decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md">which, and why</a>)
     </td>
   </tr>
 </table>

@@ -14,7 +14,7 @@ import { SqlClient } from 'effect/sql'
 import { artifactPath } from '../src/Artifacts'
 import { connection, services } from '../src/Api'
 import { Folders } from '../src/Folders'
-import { promptFor } from '../src/Sessions'
+import { DICTATED, promptFor } from '../src/Sessions'
 import { Secrets } from '../src/Secrets'
 import { transcript } from '../src/threads'
 
@@ -327,6 +327,69 @@ describe('what is said of images', () => {
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: 'Three', disposition: 'after_current' })
         const record = yield* transcript(task.threadId, 10_000).pipe(Effect.provideService(SqlClient.SqlClient, sql))
         assert.include(record.text, '[person] One [sent an image]\n[person] Two [sent 2 images]\n[person] Three')
+      }),
+    ),
+  )
+})
+
+describe('a message that was dictated', () => {
+  it('is told so after its words, once, whether it interrupts or not, and a typed one is not', () => {
+    assert.strictEqual(promptFor([{ body: 'Ask Alpha', disposition: 'after_current', dictated: 1 }], undefined), `Ask Alpha\n\n${DICTATED}`)
+    assert.strictEqual(promptFor([{ body: 'Ask Althar', disposition: 'after_current', dictated: 0 }], undefined), 'Ask Althar')
+    assert.strictEqual(promptFor([{ body: 'Ask Althar', disposition: 'after_current' }], undefined), 'Ask Althar')
+    assert.strictEqual(
+      promptFor([{ body: 'Ask Alter', disposition: 'interrupt_and_continue', dictated: 1 }], undefined),
+      `The person interrupted your last turn to say:\n\nAsk Alter\n\n${DICTATED}\n\nTake it into account, and carry on with the task.`,
+    )
+  })
+
+  it.live('reaches a task’s lead with the mark and the person’s words as they were, and one typed after it does not', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const setup = yield* connected()
+        const { client } = setup
+        const { task } = yield* taskWithLead(setup)
+        const send = { threadId: task.threadId, disposition: 'after_current' as const }
+        yield* client.Send({ ...send, commandId: commandId(), body: 'Fix the Alpha settings', dictated: true })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+          said(value.items).some((text) => text.includes('echo: Fix the Alpha settings')),
+        )
+        yield* client.Send({ ...send, commandId: commandId(), body: 'And the Althar menu' })
+        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+          said(value.items).some((text) => text.includes('echo: And the Althar menu')),
+        )
+        assert.include(said(thread.items), `echo: Fix the Alpha settings\n\n${DICTATED}`)
+        assert.include(said(thread.items), 'echo: And the Althar menu')
+        // The thread shows what they said, nothing more, and says which was dictated for taking it back.
+        assert.deepStrictEqual(
+          messages(thread.items).map((item) => [item.content.text, item.input?.dictated]),
+          [
+            ['Fix the Alpha settings', true],
+            ['And the Althar menu', undefined],
+          ],
+        )
+      }),
+    ),
+  )
+
+  it.live('reaches the coordinator with the mark, which starts it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          body: 'Ask the alter lead',
+          disposition: 'after_current',
+          dictated: true,
+        })
+        const heard = yield* eventually(client.GetCoordinator({ projectId: project.id }), (snapshot) =>
+          said(snapshot.items).some((text) => text.includes('Ask the alter lead')),
+        )
+        assert.include(said(heard.items).join('\n'), `Ask the alter lead\n\n${DICTATED}`)
+        assert.strictEqual(messages(heard.items)[0]?.content.text, 'Ask the alter lead')
       }),
     ),
   )

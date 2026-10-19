@@ -5,6 +5,7 @@
 }
 .body {
   max-width: min(78%, 540px);
+  min-width: 0;
   padding: 10px 15px 9px;
   border-radius: 16px 16px 5px 16px;
   background: var(--you-bubble);
@@ -16,6 +17,7 @@
 .said {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 /* waiting its turn, after a beat: what the person sends an idle lead is queued only until it reads it, which never flashes */
 .queued .body {

@@ -30,7 +30,7 @@ Althar reaches every agent through one protocol, the Agent Client Protocol
 ## Agents in the MVP
 
 Claude Code, Codex and OpenCode are interchangeable from the first version, and
-seven more since October 2026 ([ADR-048](../decisions/048-an-agent-joins-where-althar-can-hold-it-to-asking.md)). A
+seven more since October 2026 ([ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)). A
 task's lead, any step and the coordinator can run on any of them, and a task
 can move between them.
 
@@ -65,7 +65,7 @@ and help. Google Antigravity's server 1.3.0 is as Orca (stablyai/orca) runs
 it, from Orca's code and its recording of a real session; it hasn't run here.
 None has run signed in against its vendor's models yet. Which agents join, and
 why four more wait, is
-[ADR-048](../decisions/048-an-agent-joins-where-althar-can-hold-it-to-asking.md).
+[ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md).
 
 Althar checks sign-in with each agent's documented status command, never by
 reading a credential store, and tells the user the agent's own login command
@@ -79,7 +79,7 @@ below).
 
 Another ACP agent is added by a registry entry and the contract suite, not new
 code, where its entry can say what keeps it asking
-([ADR-048](../decisions/048-an-agent-joins-where-althar-can-hold-it-to-asking.md)).
+([ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)).
 Gemini CLI no longer runs on Google's consumer plans (since 18 June 2026), which
 moved to Antigravity.
 

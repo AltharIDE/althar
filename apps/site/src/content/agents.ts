@@ -6,7 +6,7 @@
  * AGENTS is what Althar runs today, as packages/provider-adapters' registry
  * has it. The rest speak the Agent Client Protocol too (as the ACP registry
  * lists them) and are named in the hero and the "best right now" reel, but
- * Althar doesn't run them yet (ADR-048), so they aren't in AGENTS.
+ * Althar doesn't run them yet (ADR-050), so they aren't in AGENTS.
  */
 
 export enum Agent {

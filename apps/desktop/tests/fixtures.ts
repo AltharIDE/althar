@@ -883,6 +883,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
+    moveInLine: vi.fn(async () => {}),
+    lineOldestFirst: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
@@ -909,6 +911,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     postReviewDraft: vi.fn(async () => {}),
     discardReviewDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
+    handOverHeld: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
       flowId: 'flow1',

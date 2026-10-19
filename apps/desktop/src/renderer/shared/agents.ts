@@ -23,8 +23,16 @@ const BRANDS: Readonly<Record<string, Brand>> = {
 
 export const brandOf = (agentId: string): Brand | undefined => BRANDS[agentId]
 
-/** What a step held for a usage limit waits for: the agent, and when it is back. */
-export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, back at ${at}`
+/** The work a step held for a usage limit stopped, as a card and the task's header say it: what waits. */
+const heldWork: Readonly<Record<string, string>> = { review: 'The review waits', settle: 'The fixes wait' }
+
+/**
+ * What a step held for a usage limit waits for: the agent that ran out, and
+ * when it is back; with the step, what waits too, where there is room for it,
+ * as in the task's header. A card says Paused and shows its step already.
+ */
+export const waitsWords = (agent: string, at: string, step?: string | null) =>
+  `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
 
 /**
  * What work waiting for a free agent waits for (ADR-032): every agent this
@@ -32,6 +40,17 @@ export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, ba
  * lowered the number, says both.
  */
 export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting: ${busyWords(queued, where)}`
+
+/** 1 → Next, 2 → 2nd, 3 → 3rd, 11 → 11th. */
+const ordinal = (n: number) => {
+  if (n === 1) return 'Next'
+  const tens = n % 100
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th'
+  return `${n}${suffix}`
+}
+
+/** Where a task waiting for a free agent stands in its project's line: Next in line, 2nd in line. */
+export const inLineWords = (place: number) => `${ordinal(place)} in line`
 
 /** How busy this computer's agents are, as work that waits for one says it. */
 export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
@@ -55,7 +74,7 @@ const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: s
 export const signInWordsOf = (agentId: string): { readonly plan: string; readonly host: string } =>
   SIGN_IN[agentId] ?? { plan: 'your account', host: 'the sign-in page' }
 
-/** What an agent's maker puts on signing in from an app such as Althar, said before the person signs in (ADR-048). */
+/** What an agent's maker puts on signing in from an app such as Althar, said before the person signs in (ADR-050). */
 const CAUTIONS: Readonly<Record<string, string>> = {
   antigravity: 'Google’s terms may count signing in to Antigravity from another app as a breach, which can suspend the account.',
 }

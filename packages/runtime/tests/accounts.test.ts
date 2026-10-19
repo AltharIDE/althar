@@ -390,7 +390,7 @@ describe('accounts', () => {
       const [usual] = yield* accounts.of('codex')
       yield* accounts.add({ agentId: 'codex', name: 'work', folder: folder('work') })
       const ran = yield* ranOnCodex()
-      assert.match(ran.said, /Fake codex \(main\) reached its usage limit, until [^.]+\. Fake claude-code takes over/)
+      assert.match(ran.said, /Fake codex \(main\) ran out of usage [^,]+, until [^.]+\. Fake claude-code takes the work over/)
       assert.deepStrictEqual(
         (yield* sessionsOn(ran.threadId)).map(([agentId]) => agentId),
         ['codex', 'claude-code'],
@@ -421,7 +421,7 @@ describe('accounts', () => {
       // Saying it again makes no new revision.
       yield* policies.setAccounts(project.projectId, { rotate: true }, instance.personId)
       const ran = yield* ranOnCodex(project.projectId)
-      assert.match(ran.said, /Fake codex \(main\) reached its usage limit, until [^.]+\. Fake codex \(work\) takes over/)
+      assert.match(ran.said, /Fake codex \(main\) ran out of usage [^,]+, until [^.]+\. Fake codex \(work\) takes the work over/)
       assert.deepStrictEqual(yield* sessionsOn(ran.threadId), [
         ['codex', usual?.id],
         ['codex', work.id],
@@ -446,7 +446,7 @@ describe('accounts', () => {
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'Some')
       assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId })).id, usual?.id)
       const limited = yield* ranOnCodex(project.projectId)
-      assert.match(limited.said, /Fake codex reached its usage limit, until [^.]+\. Fake claude-code takes over/)
+      assert.match(limited.said, /Fake codex ran out of usage [^,]+, until [^.]+\. Fake claude-code takes the work over/)
       assert.deepStrictEqual(
         (yield* sessionsOn(limited.threadId)).map(([agentId]) => agentId),
         ['claude-code'],

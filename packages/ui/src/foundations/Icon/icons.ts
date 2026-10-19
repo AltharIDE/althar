@@ -30,6 +30,7 @@ import {
   NavArrowDown,
   NavArrowLeft,
   NavArrowRight,
+  NavArrowUp,
   OpenNewWindow,
   Download,
   Page,
@@ -90,6 +91,7 @@ export const ICONS = {
   chevron: NavArrowRight,
   chevronL: NavArrowLeft,
   chevronD: NavArrowDown,
+  chevronU: NavArrowUp,
   arrow: ArrowRight,
   close: Xmark,
   /** Back to an earlier point: a loop in the graph, a changed intent. */
