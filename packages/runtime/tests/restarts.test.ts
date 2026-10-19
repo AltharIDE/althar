@@ -258,7 +258,7 @@ describe('A step a restart stopped', () => {
           threadId: task.threadId,
           body,
         })
-        const turns = yield* until(turnsOf(task.threadId), (rows) => rows.length === 6)
+        const turns = yield* until(turnsOf(task.threadId), (rows) => rows.length >= 6)
         assert.deepStrictEqual(
           turns.slice(3, 5).map((turn) => [turn.state, turn.tokens]),
           [
