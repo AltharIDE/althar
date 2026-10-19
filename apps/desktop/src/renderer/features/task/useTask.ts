@@ -170,6 +170,13 @@ export interface TaskModel {
   /** Posts that review, as it stands; or again, after it wasn't posted. */
   readonly postReview: (draftId: string) => Promise<void>
   readonly discardReview: (draftId: string) => Promise<void>
+  /** Files an issue the lead drafted, as the person says; changes it before; or throws it away. */
+  readonly fileIssueDraft: (draftId: string) => Promise<void>
+  readonly changeIssueDraft: (
+    draftId: string,
+    edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+  ) => Promise<void>
+  readonly discardIssueDraft: (draftId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
@@ -623,6 +630,9 @@ export const useTask = (threadId: string): TaskModel => {
     changeReview: (draftId, edit) => act(() => client.changeReviewDraft(draftId, edit)),
     postReview: (draftId) => act(() => client.postReviewDraft(draftId)),
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
+    fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
+    changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
+    discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),

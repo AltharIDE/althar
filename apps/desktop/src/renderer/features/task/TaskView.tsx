@@ -5,6 +5,7 @@ import {
   AbandonTask,
   ChangeView,
   BackCrumb,
+  Button,
   ChromeButton,
   Delivery,
   DiffLineKind,
@@ -59,6 +60,7 @@ import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
+import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
@@ -122,6 +124,9 @@ export const text = {
   ready: 'Ready for you',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
+  /** Issues its lead drafted wait for the person to file. */
+  issues: 'Issues to file',
+  fileAll: (count: number) => `File all ${count}`,
   done: 'Done',
   abandoned: 'Abandoned',
   idle: 'Idle',
@@ -157,6 +162,8 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
+  // No call waits, yet the task does: issues its lead drafted wait to be filed.
+  if (snapshot.task.phase === 'waiting') return { status: TaskStatus.Yours, state: text.issues }
   const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
@@ -559,6 +566,10 @@ export function TaskView({
   const can = (action: TaskAction) => snapshot.task.actions.includes(action)
   const { planId } = snapshot.task
   // Its draft pull requests, marked ready from the menu too, while it is under way or ready.
+  // The issues its lead drafted that wait to be filed, oldest first: one press files them all.
+  const waitingIssues = snapshot.items.flatMap((item) =>
+    item.kind === 'issue_draft' && item.content.state === 'pending' ? [item.content.draftId] : [],
+  )
   const drafts = snapshot.task.phase === 'settled' ? [] : snapshot.task.changes.filter((one) => one.state === 'open' && one.draft)
   // Its pull requests still open, offered to close as it is abandoned; those left open after, offered again.
   const openChanges = snapshot.task.changes.filter((one) => one.state === 'open')
@@ -856,6 +867,17 @@ export function TaskView({
                     onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
                   />
                 )}
+                // An issue the lead drafted is filed from its card, only when the person says.
+                draft={(draft) => (
+                  <DraftCard
+                    draft={draft}
+                    actions={{
+                      onFile: (draftId) => void model.fileIssueDraft(draftId),
+                      onChange: model.changeIssueDraft,
+                      onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                    }}
+                  />
+                )}
                 // A review the lead drafted is posted from its card, only when the person says.
                 review={(draft) => (
                   <ReviewCard
@@ -879,6 +901,22 @@ export function TaskView({
                 )}
               />
             </ThreadShellProvider>
+            {waitingIssues.length > 1 && (
+              <div className={s.fileAll}>
+                <Button
+                  variant="signal"
+                  size="small"
+                  busy={model.pending}
+                  onClick={() =>
+                    void (async () => {
+                      for (const draftId of waitingIssues) await model.fileIssueDraft(draftId)
+                    })()
+                  }
+                >
+                  {text.fileAll(waitingIssues.length)}
+                </Button>
+              </div>
+            )}
             {snapshot.attention.map((request) =>
               request.kind === 'stuck' && request.stuck !== null ? (
                 <StuckCall
