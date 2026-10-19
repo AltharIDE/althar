@@ -20,9 +20,12 @@ export interface ContractSubject {
   readonly name: string
   readonly transport: (cwd: string) => Transport
   readonly cwd: string
-  readonly modes: { readonly ask: string; readonly readOnly: string }
+  /** Null where the agent has no mode and asks by its `sessionMeta` (the registry's `modes`). */
+  readonly modes: { readonly ask: string | null; readonly readOnly: string | null }
   readonly modeOptionId?: string
   readonly sessionMeta?: Readonly<Record<string, unknown>>
+  /** Options held at a value for the session's life (the registry's `options.held`). */
+  readonly held?: Readonly<Record<string, string>>
   readonly permissions?: PermissionMeanings
   readonly model: { readonly optionId: string; readonly switchTo: string }
   readonly prompts: { readonly short: string; readonly long: string; readonly command: string; readonly question: string }
@@ -63,6 +66,7 @@ export const sessionIn = (subject: ContractSubject, connection: AgentConnection,
     mode,
     ...(subject.modeOptionId === undefined ? {} : { modeOptionId: subject.modeOptionId }),
     ...(subject.sessionMeta === undefined ? {} : { meta: subject.sessionMeta }),
+    ...(subject.held === undefined ? {} : { held: subject.held }),
   })
 
 export const text = (events: ReadonlyArray<SessionEvent>) =>
@@ -88,6 +92,8 @@ export const contract = (subject: ContractSubject) =>
       withConnection(subject, (connection) =>
         Effect.gen(function* () {
           for (const mode of [subject.modes.ask, subject.modes.readOnly]) {
+            // An agent with no mode starts in none, as its `sessionMeta` holds it.
+            if (mode === null) continue
             const session = yield* sessionIn(subject, connection, mode)
             assert.strictEqual(yield* session.mode, mode)
           }

@@ -272,15 +272,18 @@ export function Finder({ results, searching = false, query, defaultQuery = '', o
             )}
             {typed && answered && rows.length === 0 && <p className={s.empty}>{t.none(words.trim())}</p>}
           </div>
-          <div className={s.foot} aria-hidden="true">
-            <span>
-              <Kbd>{t.keys.up}</Kbd>
-              <Kbd>{t.keys.down}</Kbd> {t.move}
-            </span>
-            <span>
-              <Kbd>{t.keys.enter}</Kbd> {t.open}
-            </span>
-          </div>
+          {/* how to move and open, while there is something to move to and open */}
+          {rows.length > 0 && (
+            <div className={s.foot} aria-hidden="true">
+              <span>
+                <Kbd>{t.keys.up}</Kbd>
+                <Kbd>{t.keys.down}</Kbd> {t.move}
+              </span>
+              <span>
+                <Kbd>{t.keys.enter}</Kbd> {t.open}
+              </span>
+            </div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

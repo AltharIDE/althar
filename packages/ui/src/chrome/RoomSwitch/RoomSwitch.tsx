@@ -2,9 +2,9 @@ import { Room } from '../../foundations/vocabulary'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 
 /*
- * The project window's only navigation: the conversation, the board, both
- * side by side, or the project's settings in their place. A dot says the
- * conversation has news while you are elsewhere, and a violet one that
+ * The project window's only navigation: home (the conversation and the board side
+ * by side), the conversation, the board, or the project's settings in their
+ * place. A dot says the conversation has news while you are elsewhere, and a violet one that
  * something in the settings waits on you, such as a connection to sign in
  * again. What waits on you in the work isn't the board's: the bar's
  * WorkStatus says it, whichever view is on. A task has no place here: it
@@ -23,13 +23,13 @@ export interface RoomSwitchText {
 
 export const roomSwitchText: RoomSwitchText = {
   label: 'View',
-  room: { [Room.Talk]: 'Conversation', [Room.Board]: 'Board', [Room.Both]: 'Both', [Room.Settings]: 'Settings' },
+  room: { [Room.Both]: 'Home', [Room.Talk]: 'Conversation', [Room.Board]: 'Board', [Room.Settings]: 'Settings' },
   key: (n) => `⌘${n}`,
   news: 'new messages',
   yours: 'needs you',
 }
 
-const ROOMS = [Room.Talk, Room.Board, Room.Both, Room.Settings] as const
+const ROOMS = [Room.Both, Room.Talk, Room.Board, Room.Settings] as const
 
 export interface RoomSwitchProps {
   value: Room

@@ -62,6 +62,12 @@ export const scenarios = {
    * person's own words; repeats the answer.
    */
   questions: 'questions',
+  /**
+   * Asks the person to choose as Antigravity does: a permission request on an
+   * `interaction_` tool call, one `allow_once` option for each answer, with
+   * the question in its call's title only; says what was chosen.
+   */
+  choice: 'choice',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
   /** Claude's structured report of a full context. */
@@ -70,6 +76,8 @@ export const scenarios = {
   rateWarning: 'rate-warning',
   /** The agent leaves the mode it was put in, as a plan session does on leaving plan mode. */
   leaveMode: 'leave-mode',
+  /** The agent turns its own approve-everything option on, as Copilot does on `/yolo` (only with `allowAll`). */
+  allowAll: 'allow-all',
   /** Ends the turn, then sends an update between turns. */
   afterTurn: 'after-turn',
   /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
@@ -233,6 +241,14 @@ export interface FakeAgentOptions {
    * them all the same.
    */
   readonly blank?: number | ReadonlyArray<number>
+  /** An option that would approve every request while on, as Copilot's `allow_all`, starting at this value. */
+  readonly allowAll?: 'on' | 'off'
+  /** Once it turns `allow_all` on itself, it won't be turned off again: setting it back fails. */
+  readonly allowAllSticks?: boolean
+  /** It says yes to setting `allow_all`, and leaves it where it was. */
+  readonly allowAllStays?: boolean
+  /** Once it leaves its mode by itself (`leaveMode`), it refuses to be put back in one. */
+  readonly leavesForGood?: boolean
 }
 
 interface SessionState {
@@ -262,6 +278,12 @@ interface SessionState {
   background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
   /** How many commands it has left running, so each has an id of its own. */
   served: number
+  /** Its approve-everything option, where it has one (`allowAll`). */
+  allowAll: string | undefined
+  /** It turned `allow_all` on itself, and, with `allowAllSticks`, keeps it so. */
+  allowAllStuck: boolean
+  /** It left its mode by itself, and, with `leavesForGood`, won't be put back. */
+  leftForGood: boolean
   /** How large it last said its context is, in tokens. */
   contextSize: number
   /** How many prompts it has been given. */
@@ -435,7 +457,8 @@ const playStall = async (
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
  * `[coordinator:review]` starts a review of the pull request whose link the
- * person gave, whose lead, `[lead:review]`, drafts asking for changes with a
+ * person gave, and `[coordinator:keep-note]` keeps what the person said
+ * before it as one of the project's notes; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; asked to, `[lead:make-change]` makes its quick task a change
@@ -938,6 +961,11 @@ const playRole = async (
       }
       return undefined
     }
+    // Told a decision, it keeps it as one of the project's notes: what the person said before the marker, as they said it.
+    if (available.has('keep_note') && text.includes('[coordinator:keep-note]')) {
+      const said = (text.slice(0, text.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+      return await call('keep_note', { note: said.trim() })
+    }
     // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
     if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
       const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
@@ -1013,6 +1041,15 @@ const modeOption = (session: SessionState): acp.SessionConfigOption => ({
   options: MODES.map((value) => ({ value, name: value })),
 })
 
+const allowAllOption = (value: string): acp.SessionConfigOption => ({
+  id: 'allow_all',
+  name: 'Allow all',
+  category: 'permissions',
+  type: 'select',
+  currentValue: value,
+  options: ['on', 'off'].map((each) => ({ value: each, name: each })),
+})
+
 const modelOption = (session: SessionState, variants: boolean): acp.SessionConfigOption => ({
   id: 'model',
   name: 'Model',
@@ -1066,9 +1103,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
   const configOptions = (session: SessionState): Array<acp.SessionConfigOption> => {
     const levels = levelsOf(session.model)
     const effort = levels.length === 0 ? [] : [effortOption(session, levels)]
+    const allowAll = session.allowAll === undefined ? [] : [allowAllOption(session.allowAll)]
     return modes === 'config' || modes === 'stuck'
-      ? [modeOption(session), modelOption(session, variants), ...effort]
-      : [modelOption(session, variants), ...effort]
+      ? [modeOption(session), modelOption(session, variants), ...effort, ...allowAll]
+      : [modelOption(session, variants), ...effort, ...allowAll]
   }
   const sessions = new Map<string, SessionState>()
   const failedOnce = new Set<string>()
@@ -1130,6 +1168,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         served: 0,
         prompts: 0,
         unread: '',
+        allowAll: options.allowAll,
+        allowAllStuck: false,
+        leftForGood: false,
       }
       sessions.set(sessionId, session)
       return {
@@ -1141,6 +1182,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.setMode, ({ params }) => {
       const session = sessionOf(params.sessionId)
       if (!MODES.includes(params.modeId)) throw acp.RequestError.invalidParams(params, `No mode ${params.modeId}`)
+      if (session.leftForGood) throw acp.RequestError.internalError({ details: 'It stays where it went' })
       session.mode = params.modeId
       return {}
     })
@@ -1158,6 +1200,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (variants && value !== session.model) session.effort = levelsOf(value)[0] ?? ''
         session.model = value
       } else if (params.configId === 'effort' && levelsOf(session.model).includes(value)) session.effort = value
+      else if (params.configId === 'allow_all' && session.allowAllStuck)
+        throw acp.RequestError.internalError({ details: 'allow_all is locked on' })
+      else if (params.configId === 'allow_all' && options.allowAllStays === true && session.allowAll !== undefined) {
+        // Said yes to, and stays where it was.
+      } else if (params.configId === 'allow_all' && session.allowAll !== undefined && ['on', 'off'].includes(value))
+        session.allowAll = value
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })
@@ -1521,6 +1569,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(await askPerson(scenario === scenarios.questions ? 'two' : 'plain'))
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
+        case scenarios.choice: {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'interaction_28ffdbf7',
+            title: 'Which color do you prefer?',
+            status: 'pending',
+            rawInput: {},
+          })
+          const chosen = await ask({ toolCallId: 'interaction_28ffdbf7', status: 'pending', rawInput: {} }, [
+            { optionId: '1', name: 'red', kind: 'allow_once' },
+            { optionId: '2', name: 'blue', kind: 'allow_once' },
+          ])
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'interaction_28ffdbf7',
+            status: 'completed',
+            rawOutput: 'Response received',
+          })
+          await say(`chosen=${chosen}`)
+          return session.cancelled ? { stopReason: 'cancelled' } : ended()
+        }
         case scenarios.quota:
           await update({
             sessionUpdate: 'session_info_update',
@@ -1558,7 +1627,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.leaveMode:
           session.mode = 'ask'
-          await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
+          session.leftForGood = options.leavesForGood === true
+          // As its kind says it: a mode option moved, or, with legacy modes alone, the session's current mode.
+          await update(
+            modes === 'legacy'
+              ? { sessionUpdate: 'current_mode_update', currentModeId: session.mode }
+              : { sessionUpdate: 'config_option_update', configOptions: configOptions(session) },
+          )
           await say('Left plan mode')
           return ended()
         case scenarios.background:
@@ -1677,7 +1752,15 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say('after')
           return ended()
         case scenarios.settings:
-          await say(`mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}`)
+          await say(
+            `mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}${session.allowAll === undefined ? '' : ` allow_all=${session.allowAll}`}`,
+          )
+          return ended()
+        case scenarios.allowAll:
+          session.allowAll = 'on'
+          session.allowAllStuck = options.allowAllSticks === true
+          await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
+          await say('Allowing all')
           return ended()
         case scenarios.handsBack: {
           // Codex: a command's output in chunks as it runs, then its exit.

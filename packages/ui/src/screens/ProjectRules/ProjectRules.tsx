@@ -305,12 +305,12 @@ export const projectRulesText: ProjectRulesText = {
       [LimitPolicy.Move]: {
         word: 'moves to the next agent free',
         title: 'Move the work to the next agent free',
-        note: 'To the next agent signed in, in the order of your agents. It takes the work over from where it stands',
+        note: 'To the next agent signed in, in the order of your agents. It takes the work over from where it stands. With none free, it waits for the reset, and you can move it to another model meanwhile',
       },
       [LimitPolicy.Wait]: {
         word: 'waits for the reset',
         title: 'Wait for the reset',
-        note: 'The step keeps its place and runs again at the reset',
+        note: 'The step keeps its place and runs again at the reset, unless you move it to another model meanwhile',
       },
       [LimitPolicy.Ask]: {
         word: 'waits for you',

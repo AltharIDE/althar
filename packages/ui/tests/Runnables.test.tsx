@@ -33,7 +33,8 @@ const listed = () => {
 }
 
 const rows = () => screen.getAllByRole('listitem')
-const names = () => rows().map((row) => row.querySelector('[class*="name"]')?.textContent)
+/** Each row by what names it: its name, or its command where it has none. */
+const names = () => rows().map((row) => (row.querySelector('[class*="name"]') ?? row.querySelector('code'))?.textContent)
 const press = (target: Element | Window, kind: 'pointerDown' | 'pointerMove' | 'pointerUp', clientY: number) =>
   act(() => void fireEvent[kind](target, { pointerId: 1, isPrimary: true, button: 0, clientY }))
 

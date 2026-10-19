@@ -5,6 +5,7 @@ import {
   AbandonTask,
   ChangeView,
   BackCrumb,
+  Button,
   ChromeButton,
   Delivery,
   DiffLineKind,
@@ -31,14 +32,14 @@ import {
   TitleBar,
 } from '@althar/ui'
 
-import { device } from '../../shared/device'
+import { device, platform } from '../../shared/device'
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, useDraft } from '../../shared/drafts'
+import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
@@ -59,9 +60,11 @@ import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
+import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
+import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
 import { ConnectPanel } from '../connections/ConnectPanel'
@@ -122,6 +125,9 @@ export const text = {
   ready: 'Ready for you',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
+  /** Issues its lead drafted wait for the person to file. */
+  issues: 'Issues to file',
+  fileAll: (count: number) => `File all ${count}`,
   done: 'Done',
   abandoned: 'Abandoned',
   idle: 'Idle',
@@ -143,7 +149,7 @@ export const text = {
   loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
-  diffKey: '⌘D',
+  diffKey: platform === 'darwin' ? '⌘D' : 'Ctrl+D',
 }
 
 /**
@@ -157,8 +163,10 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
+  // No call waits, yet the task does: issues its lead drafted wait to be filed.
+  if (snapshot.task.phase === 'waiting') return { status: TaskStatus.Yours, state: text.issues }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
+  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
@@ -549,6 +557,7 @@ export function TaskView({
     if (said === undefined || !images.fits(said.pictures)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
+      if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said.pictures)
     }
   }
@@ -558,6 +567,10 @@ export function TaskView({
   const can = (action: TaskAction) => snapshot.task.actions.includes(action)
   const { planId } = snapshot.task
   // Its draft pull requests, marked ready from the menu too, while it is under way or ready.
+  // The issues its lead drafted that wait to be filed, oldest first: one press files them all.
+  const waitingIssues = snapshot.items.flatMap((item) =>
+    item.kind === 'issue_draft' && item.content.state === 'pending' ? [item.content.draftId] : [],
+  )
   const drafts = snapshot.task.phase === 'settled' ? [] : snapshot.task.changes.filter((one) => one.state === 'open' && one.draft)
   // Its pull requests still open, offered to close as it is abandoned; those left open after, offered again.
   const openChanges = snapshot.task.changes.filter((one) => one.state === 'open')
@@ -641,7 +654,12 @@ export function TaskView({
       {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
         <p className={s.handover}>{text.needsAgent}</p>
       )}
-      <Holders holders={snapshot.task.queued?.holders} onStop={(holder, id) => void model.stopHolding(holder, id)} />
+      <Holders
+        holders={snapshot.task.queued?.holders}
+        onStop={(holder, id) => void model.stopHolding(holder, id)}
+        // 2nd or later in its project's line, it can go first from here.
+        {...((snapshot.task.place ?? 0) > 1 ? { onFront: () => void model.moveToFront() } : {})}
+      />
       {waiting !== null && (
         <p className={s.handover}>
           {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
@@ -655,6 +673,7 @@ export function TaskView({
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={kept} />}
+        text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
         // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
         above={
           (listening.length > 0 || leftRunning.length > 0) && (
@@ -854,6 +873,17 @@ export function TaskView({
                     onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
                   />
                 )}
+                // An issue the lead drafted is filed from its card, only when the person says.
+                draft={(draft) => (
+                  <DraftCard
+                    draft={draft}
+                    actions={{
+                      onFile: (draftId) => void model.fileIssueDraft(draftId),
+                      onChange: model.changeIssueDraft,
+                      onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                    }}
+                  />
+                )}
                 // A review the lead drafted is posted from its card, only when the person says.
                 review={(draft) => (
                   <ReviewCard
@@ -877,6 +907,22 @@ export function TaskView({
                 )}
               />
             </ThreadShellProvider>
+            {waitingIssues.length > 1 && (
+              <div className={s.fileAll}>
+                <Button
+                  variant="signal"
+                  size="small"
+                  busy={model.pending}
+                  onClick={() =>
+                    void (async () => {
+                      for (const draftId of waitingIssues) await model.fileIssueDraft(draftId)
+                    })()
+                  }
+                >
+                  {text.fileAll(waitingIssues.length)}
+                </Button>
+              </div>
+            )}
             {snapshot.attention.map((request) =>
               request.kind === 'stuck' && request.stuck !== null ? (
                 <StuckCall
@@ -900,6 +946,18 @@ export function TaskView({
                       })}
                 />
               ) : null,
+            )}
+            {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
+            {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
+              <HeldLimit
+                key={`${snapshot.task.waits.agentId}:${snapshot.task.waits.until}`}
+                waits={snapshot.task.waits}
+                step={snapshot.task.step === 'review' || snapshot.task.step === 'settle' ? snapshot.task.step : 'implement'}
+                agents={model.agents}
+                agentName={agentName}
+                onHandOver={(to) => void model.handOverHeld(to)}
+                {...(snapshot.task.step === 'review' ? { onSkip: () => void model.skipReview() } : {})}
+              />
             )}
             <PermissionCalls
               requests={snapshot.attention.filter((request) => request.kind === 'permission')}

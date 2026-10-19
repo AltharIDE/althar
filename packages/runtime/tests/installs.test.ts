@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { agents, type LaunchSpec, usingLocated } from '@althar/provider-adapters'
+import { type AgentDefinition, agents, type LaunchSpec, usingLocated } from '@althar/provider-adapters'
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Effect, Exit } from 'effect'
+import { zipSync } from 'fflate'
 
 import { Installs, type InstallsOptions } from '../src/Installs'
 
@@ -58,7 +59,13 @@ describe('downloading an agent', () => {
     const { fetch, asked } = github(archive())
     const { root, run } = using({ fetch })
     const before = await run(Effect.flatMap(Installs, (installs) => installs.state(opencode)))
-    assert.isTrue(Exit.isSuccess(before) && before.value.located === null && before.value.downloadable && before.value.size === '45 MB')
+    assert.isTrue(
+      Exit.isSuccess(before) &&
+        before.value.located === null &&
+        before.value.downloadable &&
+        before.value.size === '45 MB' &&
+        before.value.pinned === null,
+    )
     const done = await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
     assert.isTrue(Exit.isSuccess(done))
     assert.strictEqual(asked[0], 'https://api.github.com/repos/anomalyco/opencode/releases/latest')
@@ -278,5 +285,100 @@ describe('downloading an agent', () => {
     const done = await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
     assert.isTrue(Exit.isSuccess(done))
     assert.lengthOf(asked, 2)
+  })
+})
+
+/*
+ * Antigravity's server: one version from Google's address, the zip and each
+ * of its two programs pinned by sha256, kept together as they run together.
+ */
+describe('downloading a pinned agent', () => {
+  const SERVER = '#!/bin/sh\necho server\n'
+  const HARNESS = '#!/bin/sh\necho harness\n'
+  const URL = 'https://dl.google.example/agy-acp-server-linux-x86_64.zip'
+  const text = (words: string) => new TextEncoder().encode(words)
+  const sum = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+
+  /** A zip of what it holds, and Antigravity with it pinned: its own sha256 and its files', unless told otherwise. */
+  const pinnedTo = (held: Readonly<Record<string, string>>, pins: { zip?: string; files?: Readonly<Record<string, string>> } = {}) => {
+    const zip = zipSync(Object.fromEntries(Object.entries(held).map(([name, body]) => [name, text(body)])))
+    const download = agents.antigravity.cli?.download
+    if (download === undefined || !('version' in download)) throw new Error('Antigravity has a pinned download')
+    const agent: AgentDefinition = {
+      ...agents.antigravity,
+      cli: {
+        name: 'agy_acp_server.par',
+        download: {
+          ...download,
+          assets: {
+            'linux-x64': {
+              url: URL,
+              sha256: pins.zip ?? sum(zip),
+              files: pins.files ?? {
+                'agy_acp_server.par': sum(text(SERVER)),
+                localharness_external: sum(text(HARNESS)),
+              },
+            },
+          },
+        },
+      },
+    }
+    const asked: Array<string> = []
+    const fetch = async (url: string) => {
+      asked.push(url)
+      return new Response(new Uint8Array(zip))
+    }
+    return { agent, fetch, asked }
+  }
+  const whole = { 'agy_acp_server.par': SERVER, localharness_external: HARNESS }
+
+  it('keeps the version it is pinned at, whole and checked, from its maker’s address alone', async () => {
+    const { agent, fetch, asked } = pinnedTo(whole)
+    const { root, run } = using({ fetch })
+    const before = await run(Effect.flatMap(Installs, (installs) => installs.state(agent)))
+    assert.isTrue(Exit.isSuccess(before) && before.value.downloadable && before.value.pinned === '1.3.0')
+    const done = await run(Effect.flatMap(Installs, (installs) => installs.install(agent)))
+    assert.isTrue(Exit.isSuccess(done), JSON.stringify(done))
+    assert.deepStrictEqual(asked, [URL])
+    assert.strictEqual(readlinkSync(join(root, 'antigravity', 'current')), '1.3.0')
+    // Both programs, side by side, as the server finds its harness beside itself.
+    assert.strictEqual(execFileSync(join(root, 'antigravity', 'current', 'agy_acp_server.par'), { encoding: 'utf8' }).trim(), 'server')
+    assert.strictEqual(execFileSync(join(root, 'antigravity', 'current', 'localharness_external'), { encoding: 'utf8' }).trim(), 'harness')
+    assert.deepStrictEqual(readdirSync(join(root, 'antigravity')).toSorted(), ['1.3.0', 'current'])
+    const after = await run(Effect.map(Installs, (installs) => installs.locate(agent)))
+    assert.deepStrictEqual(Exit.isSuccess(after) ? after.value : null, {
+      command: join(root, 'antigravity', 'current', 'agy_acp_server.par'),
+      whose: 'althar',
+    })
+  })
+
+  it('keeps nothing whose archive, or any file in it, isn’t what it was pinned with, or that holds more', async () => {
+    const refused = async (held: Readonly<Record<string, string>>, pins: Parameters<typeof pinnedTo>[1], says: string) => {
+      const { agent, fetch } = pinnedTo(held, pins)
+      const { root, run } = using({ fetch })
+      const exit = await run(Effect.flatMap(Installs, (installs) => installs.install(agent)))
+      assert.isTrue(Exit.isFailure(exit), says)
+      assert.include(JSON.stringify(exit), says)
+      assert.isFalse(existsSync(join(root, 'antigravity', 'current')), says)
+      assert.deepStrictEqual(existsSync(join(root, 'antigravity')) ? readdirSync(join(root, 'antigravity')) : [], [], says)
+    }
+    await refused(whole, { zip: '0'.repeat(64) }, "didn't match its release")
+    await refused(
+      whole,
+      { files: { 'agy_acp_server.par': '0'.repeat(64), localharness_external: sum(text(HARNESS)) } },
+      "didn't hold what it was pinned with",
+    )
+    await refused({ ...whole, 'extra.sh': 'echo planted' }, {}, "couldn't be unpacked")
+    await refused({ ...whole, '../escaped': 'echo planted' }, {}, "couldn't be unpacked")
+    await refused({ 'agy_acp_server.par': SERVER }, {}, "didn't hold what it was pinned with")
+  })
+
+  it('has nothing to download where its maker has no build, as for Windows', async () => {
+    const { fetch } = pinnedTo(whole)
+    const { run } = using({ fetch, platform: 'win32' })
+    const state = await run(Effect.flatMap(Installs, (installs) => installs.state(agents.antigravity)))
+    assert.isTrue(Exit.isSuccess(state) && !state.value.downloadable)
+    const failed = await run(Effect.flatMap(Installs, (installs) => installs.install(agents.antigravity)))
+    assert.include(JSON.stringify(failed), 'no Google Antigravity for this computer')
   })
 })

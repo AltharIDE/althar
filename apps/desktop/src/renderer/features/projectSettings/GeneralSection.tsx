@@ -9,35 +9,27 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
 /*
  * What a project is, and how its tasks work: its name and the ink its mark
  * is drawn in, changed in place; then the switches every task follows, each
- * saying what happens with it on and, on a line of its own, with it off, for
- * someone who has never seen them. One that didn't hold says why under it.
+ * with one line on when it acts. One that didn't hold says why under it.
  * Allowing everything is a rule, so it is with the rules.
  */
 
 export const text = {
-  tasks: 'How its tasks work',
-  tasksNote: (project: string) => `For every task in ${project}, from its next step on.`,
-  off: 'Off:',
+  tasks: 'Tasks',
   conflicts: {
     title: 'Resolve merge conflicts automatically',
-    on: 'When the default branch moves on and a task’s change no longer merges cleanly, its lead brings the default branch into the task’s branch, fixes the clashing lines and runs the checks again, then tells you what it did.',
-    off: 'the task says it conflicts, and waits until you ask its lead to fix it.',
+    line: 'When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.',
   },
   moveIssues: {
     title: 'Move issues to In Progress',
-    on: 'When a task starts from a Linear, Jira or Trello issue, Althar moves the issue to In Progress, so whoever looks at the tracker sees it’s being worked on. A Trello card goes to its board’s Doing or In progress list. GitHub and GitLab issues have no In Progress, so they stay as they are.',
-    off: 'issues stay where they are, and you move them yourself.',
+    line: 'When a task starts from a Linear, Jira or Trello issue.',
   },
 }
 
-/** A switch's note: what it does on, then what happens off, and why it didn't hold where it didn't. */
-function SwitchNote({ on, off, failed }: { on: string; off: string; failed: string | null }) {
+/** A switch's note: when it acts, and why it didn't hold where it didn't. */
+function SwitchNote({ line, failed }: { line: string; failed: string | null }) {
   return (
     <>
-      {on}
-      <span className={s.offLine}>
-        <b className={s.off}>{text.off}</b> {off}
-      </span>
+      {line}
       {failed !== null && (
         <span className={s.failedLine} role="alert">
           {failed}
@@ -50,7 +42,7 @@ function SwitchNote({ on, off, failed }: { on: string; off: string; failed: stri
 /** A switch, in the order they are shown: its rule, its words, and how it stands. */
 interface Shown {
   readonly rule: RuleSwitch
-  readonly words: { readonly title: string; readonly on: string; readonly off: string }
+  readonly words: { readonly title: string; readonly line: string }
   readonly on: boolean
   readonly set: (on: boolean) => void
 }
@@ -81,19 +73,13 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
         {...(model.failed === null ? {} : { error: model.failed })}
       />
       {switches.length > 0 && (
-        <SettingGroup title={text.tasks} note={text.tasksNote(name)} headingLevel={HEADING.part}>
+        <SettingGroup title={text.tasks} headingLevel={HEADING.part}>
           <SettingList>
             {switches.map((one) => (
               <SettingSwitch
                 key={one.rule}
                 title={one.words.title}
-                note={
-                  <SwitchNote
-                    on={one.words.on}
-                    off={one.words.off}
-                    failed={model.ruleFailed?.rule === one.rule ? model.ruleFailed.message : null}
-                  />
-                }
+                note={<SwitchNote line={one.words.line} failed={model.ruleFailed?.rule === one.rule ? model.ruleFailed.message : null} />}
                 checked={one.on}
                 onChange={one.set}
               />

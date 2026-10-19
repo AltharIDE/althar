@@ -21,8 +21,6 @@ import { Rhythm } from '../../lib/rhythm'
 
 export interface TaskCardText {
   status: Record<TaskStatus, string>
-  /** The card's corner: which task, and when it started. */
-  task: (task: string, started: string) => string
   lead: string
   /** For a question: who answered it, where a task has a lead. */
   answeredBy: string
@@ -39,7 +37,6 @@ export const taskCardText: TaskCardText = {
     [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped by you',
   },
-  task: (task, started) => `Task ${task} · ${started}`,
   lead: 'Lead',
   answeredBy: 'Answered by',
   open: 'Open task',
@@ -58,14 +55,13 @@ export interface TaskCardProps {
   seen?: number
   /** What it is doing now, in a line. */
   now?: string
-  /** When it started: 2m ago. */
+  /** When it started, short: 12m ago. */
   started: string
   lead: ModelInfo
   /** How hard its lead thinks, in the picker's words (High); left out where it isn't known. */
   effort?: string
   /** A question, not a change: its lead is who answered it. */
   question?: boolean
-  branch?: string
   /** Where it came from. */
   from?: IssueRefProps
   pr?: string
@@ -92,7 +88,6 @@ export function TaskCard({
   lead,
   effort,
   question,
-  branch,
   from,
   pr,
   meta,
@@ -119,7 +114,7 @@ export function TaskCard({
           {t.status[status]}
         </span>
         {now && <span className={s.nowText}>{now}</span>}
-        <span className={s.at}>{t.task(task, started)}</span>
+        {started && <span className={s.at}>{started}</span>}
       </div>
       <p className={s.title} id={titleId}>
         {title}
@@ -128,40 +123,21 @@ export function TaskCard({
         <StepTrack steps={trackOf(steps, at, seen, status === TaskStatus.Done)} status={status} labels fresh={fresh} className={s.track} />
       )}
       <div className={s.foot}>
-        <span className={s.lead}>
-          {question ? t.answeredBy : t.lead} <Model model={lead} short className={s.leadModel} />
-          {effort !== undefined && <span className={s.effort}>{effort}</span>}
-        </span>
-        {branch && (
-          <>
-            <span className={s.sep} />
-            <span className={s.branch}>
-              <Icon name="branch" size={10} />
-              {branch}
-            </span>
-          </>
-        )}
-        {meta && (
-          <>
-            <span className={s.sep} />
-            <span className={s.pr}>{meta}</span>
-          </>
-        )}
-        {from && (
-          <>
-            <span className={s.sep} />
-            <IssueRef {...from} />
-          </>
-        )}
-        {pr && (
-          <>
-            <span className={s.sep} />
-            <span className={s.pr}>
+        <div className={s.facts} data-crowd={(from ? 1 : 0) + (pr || meta ? 1 : 0)}>
+          <span className={s.lead}>
+            <span className={s.leadLabel}>{question ? t.answeredBy : t.lead}</span>
+            <Model model={lead} short className={s.leadModel} />
+            {effort !== undefined && <span className={s.effort}>{effort}</span>}
+          </span>
+          {meta && <span className={s.pr}>{meta}</span>}
+          {from && <IssueRef {...from} />}
+          {pr && (
+            <span className={s.pr} title={pr}>
               <Icon name="pr" size={11} />
-              {pr}
+              <span className={s.prName}>{pr}</span>
             </span>
-          </>
-        )}
+          )}
+        </div>
         {onOpen && (
           <Button variant={yours ? 'signal' : 'default'} trailingIcon="arrow" className={s.open} onClick={() => onOpen(task)}>
             {yours ? t.answer : t.open}

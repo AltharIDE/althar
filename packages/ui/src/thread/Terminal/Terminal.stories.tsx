@@ -28,7 +28,7 @@ export const WithEarlierLines: Story = {
   args: { earlier: TEST_EARLIER },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: '6 earlier lines' }))
+    await userEvent.click(c.getByRole('button', { name: 'Show 6 earlier lines' }))
     await expect(c.getByText(/keeps the idempotency key/)).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Hide earlier lines' }))
     await expect(c.queryByText(/keeps the idempotency key/)).not.toBeInTheDocument()

@@ -6,7 +6,7 @@
   font-weight: 600;
   color: var(--t-1);
 }
-.merged .outcome {
+.merged .outcome svg {
   color: var(--ok);
 }
 .abandoned .outcome {

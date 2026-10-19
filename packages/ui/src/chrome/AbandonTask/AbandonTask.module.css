@@ -12,3 +12,7 @@
 .changes {
   margin-top: 14px;
 }
+/* first under the description, whose own space is enough */
+.changes:first-child {
+  margin-top: 0;
+}

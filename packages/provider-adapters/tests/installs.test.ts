@@ -91,6 +91,21 @@ describe('finding an agent’s command', () => {
     expect(quoted('/Users/me/a\\b/opencode', 'darwin')).toBe("'/Users/me/a\\b/opencode'")
   })
 
+  it('starts an npm-installed Node script found off the PATH with its own folder first there, where its Node is', () => {
+    const where = process.platform === 'win32' ? 'C:\\npm\\copilot.exe' : '/opt/homebrew/bin/copilot'
+    const copilot = usingLocated(agents.copilot, () => ({ command: where, whose: 'theirs' }))
+    const path = copilot.launch('node').env?.PATH ?? ''
+    expect(path.startsWith(where.slice(0, where.lastIndexOf(process.platform === 'win32' ? '\\' : '/')))).toBe(true)
+    // Its version says the same; on the PATH already, or a copy Althar keeps, it has the PATH it has.
+    expect(copilot.version?.('node').env?.PATH).toBe(path)
+    expect(usingLocated(agents.copilot, () => ({ command: 'copilot', whose: 'theirs' })).launch('node').env?.PATH).toBeUndefined()
+    expect(usingLocated(agents.copilot, () => ({ command: '/kept/copilot', whose: 'althar' })).launch('node').env?.PATH).toBeUndefined()
+    // An agent whose command is a program of its own keeps the PATH it has.
+    expect(
+      usingLocated(agents.grok, () => ({ command: '/Users/me/.grok/bin/grok', whose: 'theirs' })).launch('node').env?.PATH,
+    ).toBeUndefined()
+  })
+
   it('points every command the agent runs at it, looked up each time, and names it in what the person runs to sign in', () => {
     let found: { command: string; whose: 'theirs' | 'bundled' | 'althar' } | null = null
     const pointed = usingLocated(agents.opencode, () => found)
@@ -98,7 +113,7 @@ describe('finding an agent’s command', () => {
     expect(pointed.signIn.login).toBe('opencode auth login')
     found = { command: '/kept/opencode', whose: 'althar' }
     expect(pointed.launch('node')).toMatchObject({ command: '/kept/opencode', args: ['acp'] })
-    expect(pointed.signIn.status('node').command).toBe('/kept/opencode')
+    expect(pointed.signIn.status?.('node').command).toBe('/kept/opencode')
     expect(pointed.version?.('node').command).toBe('/kept/opencode')
     expect(pointed.signIn.login).toBe('/kept/opencode auth login')
     found = { command: 'opencode', whose: 'theirs' }
@@ -106,7 +121,7 @@ describe('finding an agent’s command', () => {
     const codex = usingLocated(agents.codex, () => found)
     expect(codex.launch('node').command).toBe('node')
     found = { command: '/device/codex', whose: 'theirs' }
-    expect(codex.signIn.status('node')).toMatchObject({ command: '/device/codex', args: ['login', 'status'] })
+    expect(codex.signIn.status?.('node')).toMatchObject({ command: '/device/codex', args: ['login', 'status'] })
     expect(codex.signIn.inApp?.run('node')).toMatchObject({ command: '/device/codex', args: ['app-server'] })
     expect(codex.signIn.logout?.run('node')).toMatchObject({ command: '/device/codex', args: ['logout'] })
     expect(codex.version?.('node')).toMatchObject({ command: '/device/codex', args: ['--version'] })
@@ -137,7 +152,7 @@ describe('finding an agent’s command', () => {
   it('points Claude Code’s sign-in, status and version, never its adapter, at the copy that ships', () => {
     const pointed = usingLocated(agents['claude-code'], () => ({ command: '/app/claude', whose: 'bundled' }))
     expect(pointed.launch('node').command).toBe('node')
-    expect(pointed.signIn.status('node').command).toBe('/app/claude')
+    expect(pointed.signIn.status?.('node').command).toBe('/app/claude')
     expect(pointed.signIn.inApp?.run('node').command).toBe('/app/claude')
     expect(pointed.signIn.logout?.run('node').command).toBe('/app/claude')
     expect(pointed.version?.('node').command).toBe('/app/claude')

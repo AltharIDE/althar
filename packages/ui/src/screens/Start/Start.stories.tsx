@@ -3,9 +3,11 @@ import { useState } from 'react'
 import { expect, fireEvent, fn, userEvent, within } from 'storybook/test'
 
 import { FIRST_RUN, NONE_READY } from '../../fixtures/setup'
+import { Brand } from '../../foundations/brands/brands'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { CrashReportsLine } from '../../setup/Preferences/Preferences'
 import { States } from '../../storybook/States'
+import type { RuntimeEntry } from '../../setup/Runtimes/Runtimes'
 import { Start, type StartProps, type StartRepository } from './Start'
 
 /* The repositories a first run finds where people keep code, most recently worked on first. */
@@ -143,6 +145,106 @@ export const CrashReportsAsked: Story = {
 
 /** No agent ready: a project can still be made, and says so. */
 export const NoneReady: Story = { args: { runtimes: NONE_READY } }
+
+/* Every agent Althar runs on a first run: two on this Mac, three it can fetch, and five only their own installers put there. */
+const EVERY_AGENT: RuntimeEntry[] = [
+  ...FIRST_RUN.slice(0, 2),
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, state: RuntimeState.Missing, download: '45 MB' },
+  { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, state: RuntimeState.Missing, download: '110 MB' },
+  { id: 'junie', name: 'Junie', brand: Brand.Junie, state: RuntimeState.Missing },
+  { id: 'grok', name: 'Grok Build', brand: Brand.XAI, state: RuntimeState.Missing },
+  { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, state: RuntimeState.Missing },
+  { id: 'mistral-vibe', name: 'Mistral Vibe', brand: Brand.Mistral, state: RuntimeState.Missing },
+  { id: 'qwen-code', name: 'Qwen Code', brand: Brand.Alibaba, state: RuntimeState.Missing },
+  {
+    id: 'antigravity',
+    name: 'Google Antigravity',
+    brand: Brand.Antigravity,
+    state: RuntimeState.Missing,
+    download: '115 MB',
+    pinned: { from: 'Google', version: '1.3.0' },
+  },
+]
+
+/** Every agent Althar runs: those on this Mac first, a row each; the rest under them, quieter, a tile each, those it can fetch first. */
+export const ManyAgents: Story = {
+  args: { runtimes: EVERY_AGENT },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(within(canvas.getByRole('list', { name: 'Agents on this Mac' })).getAllByRole('listitem')).toHaveLength(2)
+    await expect(canvas.getByText('1 of 2 ready')).toBeVisible()
+    const away = canvas.getByRole('list', { name: 'Agents not on this Mac' })
+    await expect(
+      within(away)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent?.replace(/(\d+ MB|How to install).*$/, '')),
+    ).toEqual(['OpenCode', 'GitHub Copilot', 'Google Antigravity', 'Junie', 'Grok Build', 'Kimi Code', 'Mistral Vibe', 'Qwen Code'])
+    // No long notes: where a download comes from is its button's tooltip.
+    await expect(canvas.queryByText(/latest release from GitHub/)).toBeNull()
+    await userEvent.click(within(away).getByRole('button', { name: 'Download Google Antigravity, 115 MB' }))
+    await expect(args.onInstall).toHaveBeenCalledWith('antigravity')
+    await userEvent.click(within(away).getByRole('button', { name: 'How to install Junie' }))
+    await expect(args.onHelp).toHaveBeenCalledWith('junie')
+    // Back at rest, as the screen opens.
+    ;(document.activeElement as HTMLElement | null)?.blur()
+  },
+}
+
+/** More agents to come: the tiles take them two to a line, and the rows on this Mac and the repositories stay where they are. */
+export const ManyMoreToCome: Story = {
+  args: {
+    runtimes: [
+      ...EVERY_AGENT,
+      ...['Cursor', 'Devin', 'Factory Droid', 'Auggie', 'Gemini CLI', 'Amp', 'Goose', 'Cline', 'Kiro', 'Aider'].map(
+        (name): RuntimeEntry => ({
+          id: name.toLowerCase().replace(/\s+/g, '-'),
+          name,
+          ...(name === 'Cursor' ? { brand: Brand.Cursor } : name === 'Gemini CLI' ? { brand: Brand.GeminiCli } : {}),
+          state: RuntimeState.Missing,
+        }),
+      ),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(within(canvas.getByRole('list', { name: 'Agents not on this Mac' })).getAllByRole('listitem')).toHaveLength(18)
+    await expect(canvas.getByRole('heading', { name: /Repositories/ })).toBeVisible()
+  },
+}
+
+/** Downloading one, and one whose download didn't finish: said in its tile, with a way to try again. */
+export const Downloading: Story = {
+  args: {
+    runtimes: [
+      ...FIRST_RUN.slice(0, 2),
+      { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, state: RuntimeState.Installing, download: '45 MB' },
+      {
+        id: 'copilot',
+        name: 'GitHub Copilot',
+        brand: Brand.GitHubCopilot,
+        state: RuntimeState.Missing,
+        download: '110 MB',
+        failed: 'GitHub couldn’t be reached to find GitHub Copilot.',
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toHaveTextContent('Downloading, 45 MB…')
+    await expect(canvas.getByRole('alert')).toHaveTextContent('GitHub couldn’t be reached to find GitHub Copilot.')
+    await expect(canvas.getByRole('button', { name: 'Try again to download GitHub Copilot, 110 MB' })).toBeVisible()
+  },
+}
+
+/** None on this Mac yet: said where the rows would be, and every agent offered under it. */
+export const NoneHere: Story = {
+  args: { runtimes: EVERY_AGENT.slice(2) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('None is on this Mac yet. Download one below, or install one yourself.')).toBeVisible()
+    await expect(canvas.queryByRole('list', { name: 'Agents on this Mac' })).toBeNull()
+  },
+}
 
 export const AllStates: Story = {
   render: (args) => (

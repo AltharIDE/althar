@@ -129,7 +129,9 @@ export interface Client {
   readonly seeTask: (taskId: string) => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
-  readonly switchAgent: (input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage> }) => Promise<string>
+  readonly switchAgent: (
+    input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage>; readonly dictated?: boolean },
+  ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
   readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
@@ -145,6 +147,10 @@ export interface Client {
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
+  /** Puts a task waiting for a free agent at a place in its project's line, from 0 the front; the line starts in that order. */
+  readonly moveInLine: (taskId: string, to: number) => Promise<void>
+  /** Puts a project's line back in the order its tasks began waiting. */
+  readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
@@ -177,6 +183,8 @@ export interface Client {
     readonly disposition: 'after_current' | 'interrupt_and_continue'
     /** Images sent with it, in order. */
     readonly images?: ReadonlyArray<SentImage>
+    /** Any of its words came from dictation, even if edited after. */
+    readonly dictated?: boolean
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
@@ -275,6 +283,8 @@ export interface Client {
   readonly getProjectNotes: (projectId: string) => Promise<ReadonlyArray<ProjectNote>>
   /** Drops one of a project's notes: no coordinator session starts with it again. */
   readonly dropProjectNote: (projectId: string, noteId: string) => Promise<void>
+  /** Says one of its notes in the person's words. */
+  readonly editProjectNote: (projectId: string, noteId: string, body: string) => Promise<void>
   /** The names a project's code uses that have parts, most used first, for dictation to write as it does. */
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
@@ -367,6 +377,13 @@ export interface Client {
   readonly getRepositoryScripts: (projectId: string) => Promise<ReadonlyArray<RepositoryScript>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
+  /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
+  readonly handOverHeld: (input: {
+    readonly taskId: string
+    readonly agentId: string
+    readonly accountId?: string
+    readonly model?: string
+  }) => Promise<void>
   /**
    * Calls `listener` with each change after `since` (or from now) until the
    * returned function is called; and `onWatching` each time it starts
@@ -489,6 +506,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
+    moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
+    lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
@@ -544,6 +563,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
     getProjectNotes: (projectId) => settle(api.GetProjectNotes({ projectId })),
     dropProjectNote: (projectId, noteId) => command((commandId) => api.DropProjectNote({ commandId, projectId, noteId })),
+    editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
@@ -590,6 +610,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
+    handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.

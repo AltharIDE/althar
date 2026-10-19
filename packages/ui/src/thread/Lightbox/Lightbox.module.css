@@ -43,8 +43,8 @@
    * its own shape, but is never drawn larger than it is. Without them, a
    * 16:9 frame of the screen's size, for a stand-in or one not yet loaded.
    */
-  --chrome: 140px;
-  width: min(calc(var(--w, 1280) * 1px), calc(100vw - 80px), calc((100vh - var(--chrome)) * var(--w, 16) / var(--h, 9)));
+  --room: 140px;
+  width: min(calc(var(--w, 1280) * 1px), calc(100vw - 80px), calc((100vh - var(--room)) * var(--w, 16) / var(--h, 9)));
   aspect-ratio: var(--w, 16) / var(--h, 9);
   overflow: hidden;
   border-radius: 10px;
@@ -62,6 +62,10 @@
   padding: 0 16px;
   font-size: 13px;
   text-align: center;
+  color: var(--t-3);
+}
+/* on the lightbox's dark */
+.none.image {
   color: var(--term-t5);
 }
 .why {
@@ -140,7 +144,7 @@
   overflow: auto;
   aspect-ratio: auto;
   width: min(calc(var(--w) * 1px), calc(100vw - 80px));
-  height: min(calc(var(--h) * 1px), calc(100vh - var(--chrome)));
+  height: min(calc(var(--h) * 1px), calc(100vh - var(--room)));
 }
 .image[data-actual] > .img {
   width: calc(var(--w) * 1px);

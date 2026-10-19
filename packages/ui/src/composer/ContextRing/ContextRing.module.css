@@ -8,7 +8,8 @@
   transition: background var(--fast) var(--ease);
 }
 .ring:hover,
-.ring:focus-visible {
+.ring:focus-visible,
+.ring[aria-expanded='true'] {
   background: var(--n-2);
 }
 .track {

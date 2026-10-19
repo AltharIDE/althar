@@ -10,7 +10,7 @@ It is step 3 of the [MVP plan](../../docs/plans/mvp.md): the coordinator loop.
 bun run dev
 ```
 
-That builds the app and opens it. Agents sign in with their own tools first (`claude auth login`, `codex login`, `opencode auth login`); the start screen shows which are ready.
+That builds the app and opens it. Agents sign in with their own tools first (`claude auth login`, `codex login`, `opencode auth login`, `copilot login`, and so on); the start screen shows which are ready.
 
 The app shares its profile and worktrees with the command-line client (`apps/cli`), so both see the same projects. One runtime at a time can use a profile, so close one before opening the other.
 
