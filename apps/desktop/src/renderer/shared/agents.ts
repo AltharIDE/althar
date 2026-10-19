@@ -16,8 +16,16 @@ const BRANDS: Readonly<Record<string, Brand>> = {
 
 export const brandOf = (agentId: string): Brand | undefined => BRANDS[agentId]
 
-/** What a step held for a usage limit waits for: the agent, and when it is back. */
-export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, back at ${at}`
+/** The work a step held for a usage limit stopped, as a card and the task's header say it: what waits. */
+const heldWork: Readonly<Record<string, string>> = { review: 'The review waits', settle: 'The fixes wait' }
+
+/**
+ * What a step held for a usage limit waits for: the agent that ran out, and
+ * when it is back; with the step, what waits too, where there is room for it,
+ * as in the task's header. A card says Paused and shows its step already.
+ */
+export const waitsWords = (agent: string, at: string, step?: string | null) =>
+  `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
 
 /**
  * What work waiting for a free agent waits for (ADR-032): every agent this
