@@ -1092,8 +1092,12 @@ export const Unshipped = Schema.Struct({
 })
 export type Unshipped = typeof Unshipped.Type
 
-/** Where a task stands, as the coordinator's thread shows it. */
-export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'stopped', 'settled'])
+/**
+ * Where a task stands, as the coordinator's thread shows it. `kept` is a
+ * finished task that isn't a change, which the person kept for later: out of
+ * Needs you as it is, not settled.
+ */
+export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'kept', 'stopped', 'settled'])
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
@@ -1227,6 +1231,8 @@ export const TaskCard = Schema.Struct({
    * so it's the person's: why, in a sentence. Without it, nothing is.
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+  /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
+  keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
@@ -2397,6 +2403,16 @@ export const Api = RpcGroup.make(
   command('LeaveOutCommits', { taskId: Schema.String }, Schema.Void),
   /** Settles a task without its change: its agents stop and its plan doesn't start; its worktree and branch stay as they are. */
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Settles a finished task that isn't a change, as Done: what its agents
+   * left running, such as a page, stops. Nothing for a change, or one at work.
+   */
+  command('MarkTaskDone', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Takes a finished task that isn't a change out of Needs you as it is,
+   * kept for later: nothing stops. Writing to it again brings it back.
+   */
+  command('KeepTaskForLater', { taskId: Schema.String }, Schema.Void),
   /** Gives a task another title, in any state. Its slug, branch, worktree folder, and the title of a pull request or issue already opened, stay as they are. */
   command('RenameTask', { taskId: Schema.String, title: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */

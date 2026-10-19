@@ -175,12 +175,29 @@ export class Tasks extends Context.Service<
      */
     rename(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }): Effect.Effect<void, unknown>
     /**
-     * The person opened the task's screen: when, kept. One that finished as
-     * a plain task (`finished`, as its card reads), with no pull request,
-     * nothing waiting on the person and no plan to start, is done once seen:
-     * settled now. Writing to its lead later opens it again (ADR-034).
+     * The person opened the task's screen: when, kept. Seeing a task moves
+     * nothing: only the person settles one that finished (`markDone`) or
+     * takes it out of Needs you (`keep`).
      */
-    see(input: { readonly taskId: string; readonly finished: boolean }): Effect.Effect<void, unknown>
+    see(input: { readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Settles a finished task that isn't a change as Done, as the person
+     * said, on its card or to its lead: a quick task whose latest run passed,
+     * or is the round its lead is in, with no pull request, nothing waiting on
+     * the person and no plan to start. What its agents left running, such as
+     * a page, stops. Writing to its lead later opens it again (ADR-034).
+     * Whether it settled.
+     */
+    markDone(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
+    /**
+     * Keeps a finished task that isn't a change for later, as the person said:
+     * out of Needs you as it is, with nothing stopped, not settled. A quick
+     * task or a review, open. The person writing to it brings it back
+     * (`bringBack`). Whether it was kept now.
+     */
+    keep(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
+    /** The person wrote to a task kept for later: it is no longer, so what its lead does next ends in Needs you. */
+    bringBack(taskId: string): Effect.Effect<void, unknown>
     /** Does something in the task's turn: never beside its stopping, resuming, abandoning or reopening. */
     inTurn<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
   }
@@ -528,44 +545,110 @@ export class Tasks extends Context.Service<
           if (renamed) yield* touchCard(input.taskId)
         })
 
-      const see = (input: { readonly taskId: string; readonly finished: boolean }) =>
+      const see = (input: { readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* timestamp
           yield* sql`UPDATE tasks SET seen_at = ${at} WHERE id = ${input.taskId}`
-          if (!input.finished) return
+        })
+
+      /** What its agents left running in the background, such as a page, stops: on each of its threads. */
+      const stopLeftRunning = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
+          for (const thread of threads) {
+            const running = yield* sessions.running(thread.id)
+            if (Option.isNone(running)) continue
+            for (const left of running.value.background)
+              if (left.ended === null) yield* Effect.ignore(sessions.stopBackground(thread.id, left.id))
+          }
+        })
+
+      const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
           const settled = yield* sql.withTransaction(
             Effect.gen(function* () {
-              // Read again where it is written: a round opened, a call came or a pull request opened meanwhile, and it stays.
+              // Read again where it is written: a call came or a pull request opened meanwhile, and it stays.
               const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null; open: number }>`
                 SELECT k.project_id, k.state,
                   (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
                   (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
                   + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
                   + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind IN ('change', 'review'))
-                  -- Made a change since the person's screen read it as plain, or never a quick task: not one to settle on sight.
+                  -- A change, or made one since: not one to settle as Done.
                   + (CASE WHEN ${sql.unsafe(quickIn('k'))} THEN 0 ELSE 1 END) AS open
                 FROM tasks k WHERE k.id = ${input.taskId}`
-              if (task === undefined || task.state !== 'open' || task.run !== 'succeeded' || task.open > 0) return false
+              // Its round under way is its lead's, told by the person: it ends where it settled.
+              if (task === undefined || task.state !== 'open' || (task.run !== 'succeeded' && task.run !== 'running') || task.open > 0)
+                return false
               const state = yield* transition(taskLifecycle, 'open', 'done')
-              const revision = yield* change('tasks', input.taskId, { state, settledAt: at })
+              const revision = yield* change('tasks', input.taskId, { state, settledAt: at, keptAt: null })
               yield* fact({
                 projectId: task.projectId,
                 aggregateType: 'task',
                 aggregateId: input.taskId,
                 revision,
                 type: 'task.done',
-                payload: { seen: true },
-                actorId: instance.personId,
+                payload: { marked: true },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
               })
               return true
             }),
           )
-          if (settled) yield* touchCard(input.taskId)
+          if (!settled) return false
+          yield* stopLeftRunning(input.taskId)
+          yield* touchCard(input.taskId)
+          return true
+        })
+
+      const keep = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
+          const kept = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; change: number }>`
+                SELECT k.project_id, k.state, k.kept_at,
+                  -- A quick task, or a review: a change waits on the person in its own way.
+                  CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
+                    THEN 0 ELSE 1 END AS change
+                FROM tasks k WHERE k.id = ${input.taskId}`
+              if (task === undefined || task.state !== 'open' || task.keptAt !== null || task.change === 1) return false
+              const revision = yield* change('tasks', input.taskId, { keptAt: at })
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: input.taskId,
+                revision,
+                type: 'task.kept',
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+              return true
+            }),
+          )
+          if (kept) yield* touchCard(input.taskId)
+          return kept
+        })
+
+      const bringBack = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ keptAt: string | null }>`SELECT kept_at FROM tasks WHERE id = ${taskId}`
+          if (task?.keptAt == null) return
+          yield* sql`UPDATE tasks SET kept_at = NULL WHERE id = ${taskId}`
+          yield* touchCard(taskId)
         })
 
       return Tasks.of({
-        see: (input) => oneAtATime(input.taskId, see(input)),
+        see: (input) => provide(see(input)),
+        markDone: (input) => oneAtATime(input.taskId, markDone(input)),
+        keep: (input) => oneAtATime(input.taskId, keep(input)),
+        bringBack: (taskId) => provide(bringBack(taskId)),
         rename: (input) => provide(rename(input)),
         stop: (input) => oneAtATime(input.taskId, stop(input)),
         resume: (input) => oneAtATime(input.taskId, resume(input)),

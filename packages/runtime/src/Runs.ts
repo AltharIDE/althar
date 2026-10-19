@@ -28,6 +28,7 @@ import { backoff, contained, keptGoing } from './Failures'
 import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
+import { quickIn } from './kinds'
 import { Limits, outWords, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { Policies, usageLimitOf } from './Policies'
@@ -1680,7 +1681,8 @@ export class Runs extends Context.Service<
        * Where a round made nothing new, the task goes back where it was, inside
        * the caller's transaction: its run ends as the one before it did, so its
        * card says what it said before, and a merged task is done again, at the
-       * time it first settled.
+       * time it first settled. A task that isn't a change waits in Needs you
+       * instead: only the person settles one.
        */
       const backWhereItWas = (
         run: RunRow,
@@ -1693,8 +1695,14 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           yield* ends(run, back.ended)
           yield* change('runs', run.runId, { endReason: why })
-          const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${run.taskId}`
+          const [task] = yield* sql<{ state: string; change: number }>`
+            SELECT k.state,
+              CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
+                THEN 0 ELSE 1 END AS change
+            FROM tasks k WHERE k.id = ${run.taskId}`
           if (back.state !== 'done' || task?.state !== 'open' || committed) return
+          // Only the person settles a task that isn't a change: written to after it settled, its round ends in Needs you.
+          if (task.change === 0) return
           const state = yield* transition(taskLifecycle, 'open', 'done')
           const revision = yield* change('tasks', run.taskId, { state, settledAt: back.settledAt })
           yield* fact({

@@ -152,10 +152,10 @@ export class Nudges extends Context.Service<
             AND NOT EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
               WHERE h.task_id = k.id AND s.state = 'starting')
           ORDER BY k.created_at, k.id`
-        // A plain task that finished waits on its board to be seen, and asks nothing of the person (DEV-96).
-        const finished = ready.length === 0 ? new Set<string>() : yield* queries.finished
+        // A task kept for later is out of Needs you: nothing nudges for it.
+        const kept = ready.length === 0 ? new Set<string>() : yield* queries.kept
         for (const task of ready) {
-          if (finished.has(task.taskId)) continue
+          if (kept.has(task.taskId)) continue
           const turning = (threadId: string | null) =>
             threadId === null
               ? Effect.succeed(false)
