@@ -1592,3 +1592,71 @@ describe('the bar and the dock, on the rest of the board', () => {
     expect(await within(dock).findByText('Waiting work', { selector: 'h2' })).toBeTruthy()
   })
 })
+
+describe('collapsing lanes', () => {
+  beforeEach(() => window.localStorage.removeItem('althar.lanes'))
+
+  const theBoard = async () => {
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    return screen.findByRole('region', { name: 'The project’s work' })
+  }
+
+  it('keeps a lane the person collapsed, for every project, and apart beside the conversation', async () => {
+    const work = await theBoard()
+    await userEvent.click(within(work).getByRole('button', { name: 'Collapse Settled' }))
+    expect(document.activeElement).toBe(within(work).getByRole('button', { name: 'Expand Settled, 2' }))
+    expect(JSON.parse(window.localStorage.getItem('althar.lanes') ?? 'null')).toEqual({
+      alone: { collapsed: ['settled'], opened: [] },
+      beside: { collapsed: [], opened: [] },
+    })
+    // Beside the conversation, the board keeps its own.
+    await userEvent.click(screen.getByRole('radio', { name: 'Home' }))
+    const beside = await screen.findByRole('region', { name: 'The project’s work' })
+    expect(within(beside).getByRole('button', { name: 'Collapse Settled' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
+    const alone = await screen.findByRole('region', { name: 'The project’s work' })
+    await userEvent.click(within(alone).getByRole('button', { name: 'Expand Settled, 2' }))
+    expect(JSON.parse(window.localStorage.getItem('althar.lanes') ?? 'null').alone).toEqual({ collapsed: [], opened: ['settled'] })
+  })
+
+  it('opens on what was kept, leaving out what it doesn’t know as a lane', async () => {
+    window.localStorage.setItem('althar.lanes', JSON.stringify({ alone: { collapsed: ['next', 'archive', 3], opened: 'settled' } }))
+    const work = await theBoard()
+    expect(within(work).getByRole('button', { name: 'Expand Up next, 1' })).toBeTruthy()
+    expect(within(work).getByRole('button', { name: 'Collapse Settled' })).toBeTruthy()
+  })
+
+  it('collapses nothing from storage it can’t read', async () => {
+    window.localStorage.setItem('althar.lanes', '{not json')
+    const work = await theBoard()
+    expect(within(work).queryByRole('button', { name: /^Expand/ })).toBeNull()
+    expect(within(work).getByRole('button', { name: 'Collapse Up next' })).toBeTruthy()
+  })
+
+  it('keeps a lane collapsed for this window when storage can be read but won’t take it', async () => {
+    const setItem = Storage.prototype.setItem.bind(window.localStorage)
+    const full = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
+      if (key === 'althar.lanes') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      setItem(key, value)
+    })
+    try {
+      const work = await theBoard()
+      await userEvent.click(within(work).getByRole('button', { name: 'Collapse Settled' }))
+      expect(within(work).getByRole('button', { name: 'Expand Settled, 2' })).toBeTruthy()
+      expect(window.localStorage.getItem('althar.lanes')).toBeNull()
+    } finally {
+      full.mockRestore()
+    }
+  })
+
+  it('keeps Needs you open while something waits in it, saying why', async () => {
+    window.localStorage.setItem('althar.lanes', JSON.stringify({ alone: { collapsed: ['you'], opened: [] } }))
+    const work = await theBoard()
+    const stays = within(work).getByRole('button', { name: 'Needs you stays open while something waits on you' })
+    expect(stays.getAttribute('aria-disabled')).toBe('true')
+    await userEvent.click(stays)
+    expect(within(work).getByRole('button', { name: 'Ship it' })).toBeTruthy()
+  })
+})
