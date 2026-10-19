@@ -59,6 +59,24 @@ export const Change: Story = {
 export const OnePicture: Story = { args: { shots: SHOTS.slice(1, 2) } }
 /** Many pictures, two across. */
 export const ManyPictures: Story = { args: { shots: SHOTS } }
+/** A lead that sent 76 pictures, each its own view: the first six, the rest a press away, and all of them a key away full size. */
+export const SeventySixPictures: Story = {
+  args: {
+    shots: Array.from({ length: 76 }, (_, i) => ({
+      ...(SHOTS[i % SHOTS.length] as GalleryShot),
+      id: `shot-${i}`,
+      caption: `${String.fromCharCode(65 + Math.floor(i / 8))}${(i % 8) + 1} · A view of the refunds, ${i + 1} of 76`,
+    })),
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getAllByRole('button', { name: /full size$/ })).toHaveLength(6)
+    await userEvent.click(c.getByRole('button', { name: 'Show all 76' }))
+    await expect(c.getAllByRole('button', { name: /full size$/ })).toHaveLength(76)
+    await userEvent.click(c.getByRole('button', { name: 'Show fewer' }))
+    await expect(c.getAllByRole('button', { name: /full size$/ })).toHaveLength(6)
+  },
+}
 /** Nothing to look at: what it is, and what it checked. */
 export const NoPictures: Story = { args: { shots: [] } }
 /** Its lead said nothing of what it is: its pictures lead. */

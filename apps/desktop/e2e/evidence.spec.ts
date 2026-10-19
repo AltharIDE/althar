@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test } from '@playwright/test'
+import { expect, type Locator, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { launch, openFirstProject, startTask, toConversation } from './support'
@@ -12,7 +12,8 @@ import { launch, openFirstProject, startTask, toConversation } from './support'
  * real window with the fake agent (`[lead:evidence]`): what it built, then a
  * screenshot it saved in its worktree, served from the artifact store, a
  * test run and what it couldn't try; at the top of what the task made, and
- * under its lead's report in the thread, as what it said last. The screenshots it takes are
+ * under its lead's report in the thread, as what it said last; and narrow,
+ * the change over what it made. The screenshots it takes are
  * this change's own evidence (test-results/evidence-*.png).
  */
 
@@ -61,6 +62,26 @@ test('shows what the task built and what the lead showed of it: atop its outputs
     await page.waitForTimeout(400)
     await page.screenshot({ path: 'test-results/evidence-thread.png', fullPage: true })
     await round.screenshot({ path: 'test-results/evidence-round.png' })
+
+    // Narrow, as beside the Connect panel: the change first, its button and its files in reach, what it made under it.
+    // The window's own minimum is wider than what that panel leaves the page, so it goes lower for this.
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      // The task's window, not the island over the notch.
+      const window = BrowserWindow.getAllWindows().find((one) => one.webContents.getURL().includes('/index.html'))
+      window?.setMinimumSize(600, 600)
+      window?.setSize(760, 900)
+    })
+    await page
+      .getByRole('radiogroup', { name: 'Face' })
+      .getByRole('radio', { name: /Outputs/ })
+      .click()
+    const card = page.getByRole('article').filter({ has: page.getByRole('button', { name: /^Review the diff/ }) })
+    await expect(card.getByRole('button', { name: /^Merge into/ })).toBeVisible()
+    const top = async (one: Locator) => (await one.boundingBox())?.y ?? Number.NaN
+    const story = page.getByRole('heading', { name: 'What changed', level: 2 })
+    await expect.poll(async () => (await top(story)) - (await top(card)), { timeout: 5_000 }).toBeGreaterThan(0)
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: 'test-results/evidence-outputs-narrow.png', scale: 'css' })
   } finally {
     await electronApp.close()
   }

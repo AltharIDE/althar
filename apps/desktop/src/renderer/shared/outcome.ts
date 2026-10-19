@@ -5,9 +5,11 @@ import { piecesOf } from './evidence'
 
 /*
  * What a task came to, as its Outputs page tells it. What it is, in the
- * words its pull request says it: the description its lead wrote for it,
- * else what the lead last said it built, else its last summary, with the
- * part that says what it is apart from the rest. How it looks now: the
+ * words its pull request says it: the description its lead last wrote for
+ * it, else what the lead last said it built, else its last summary, with the
+ * part that says what it is apart from the rest. A change in several
+ * repositories is one task with a pull request in each: what it built says
+ * what it is, and each description follows under its repository's name. How it looks now: the
  * pictures of its last state, each view once, as last taken. A change shows
  * those since it became one, so a prototype's rounds before don't count; any
  * other task, its last round that showed pictures and those after. And what
@@ -58,12 +60,20 @@ export const outcomeOf = (snapshot: ThreadSnapshot): Outcome => {
     .filter((item): item is Report => item.kind === 'step_result' && (item.content.step === 'implement' || item.content.step === 'settle'))
     .sort((one, other) => one.sequence - other.sequence)
 
-  const described = lead.findLast((item) => item.content.descriptions !== undefined)?.content.descriptions
-  const text =
-    (described === undefined ? undefined : Object.values(described)[0]) ??
-    lead.findLast((item) => item.content.built !== null)?.content.built ??
-    lead.at(-1)?.content.summary ??
-    null
+  // Each repository's description as its lead last gave it, in the order they were first given.
+  const described = new Map<string, string>()
+  for (const item of lead) for (const [slug, given] of Object.entries(item.content.descriptions ?? {})) described.set(slug, given)
+  const whole = lead.findLast((item) => item.content.built !== null)?.content.built ?? lead.at(-1)?.content.summary ?? null
+  const [one] = described.values()
+  const story =
+    described.size > 1
+      ? {
+          lede: splitStory(whole ?? one ?? '').lede,
+          rest: [...described].map(([slug, given]) => `# ${slug}\n\n${given.trim()}`).join('\n\n'),
+        }
+      : (one ?? whole) === null
+        ? null
+        : splitStory(one ?? whole ?? '')
 
   const rounds = lead.map((item) => {
     const pieces = piecesOf(item.id, item.content.evidence)
@@ -88,7 +98,7 @@ export const outcomeOf = (snapshot: ThreadSnapshot): Outcome => {
   const latest = new Map<string, string>()
   for (const round of now) for (const shot of round.shots) latest.set(shotName(shot.caption) ?? shot.id, shot.id)
   return {
-    story: text === null ? null : splitStory(text),
+    story,
     shots: now.flatMap((round) => round.shots.filter((shot) => latest.get(shotName(shot.caption) ?? shot.id) === shot.id)),
     checked: rounds.findLast((round) => round.rest.length > 0)?.rest ?? [],
     // The last list it said, even empty: what an earlier step couldn't show, a later one may have.

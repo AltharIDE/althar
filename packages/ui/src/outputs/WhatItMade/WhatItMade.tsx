@@ -15,7 +15,8 @@ import s from './WhatItMade.module.css'
 /*
  * What a task came to, read before deciding on it: what it is, its first
  * paragraph large and the rest a press away; how it looks now, its pictures
- * large, two across, each opening full size with the others a key away; then
+ * large, two across, each opening full size with the others a key away, the
+ * first few of many with the rest a press away too; then
  * what its lead couldn't check, which is still the person's, before what it
  * did. Each part only where there is something to say.
  */
@@ -26,6 +27,9 @@ export interface WhatItMadeText {
   looks: string
   more: string
   less: string
+  /** Under the first few of many pictures, to show them all, and back. */
+  all: (count: number) => string
+  fewer: string
   view: (caption: string) => string
   checked: Partial<CheckedText>
 }
@@ -35,6 +39,8 @@ export const whatItMadeText: WhatItMadeText = {
   looks: 'What it looks like',
   more: 'Read all of it',
   less: 'Show less',
+  all: (count) => `Show all ${count}`,
+  fewer: 'Show fewer',
   view: (caption) => `View ${caption} full size`,
   checked: {},
 }
@@ -55,10 +61,16 @@ export type WhatItMadeProps = RootProps<
   }
 >
 
+/** Past this many pictures, the first few show, the rest a press away: at least three are. */
+const MANY = 8
+const FEW = 6
+
 export function WhatItMade({ story, shots, checked, unverified, headingLevel = 2, text, className, ...rest }: WhatItMadeProps) {
   const t = { ...whatItMadeText, ...text }
   const [open, setOpen] = useState(false)
+  const [all, setAll] = useState(false)
   const { openImage } = useThreadShell()
+  const many = shots.length > MANY
   return (
     <div className={cx(s.made, className)} {...rest}>
       {story !== null && (
@@ -86,7 +98,7 @@ export function WhatItMade({ story, shots, checked, unverified, headingLevel = 2
             <span className={s.count}>{shots.length}</span>
           </Heading>
           <div className={cx(s.shots, shots.length === 1 && s.one)}>
-            {shots.map((shot) => {
+            {(many && !all ? shots.slice(0, FEW) : shots).map((shot) => {
               const frame = (
                 <span
                   className={s.frame}
@@ -112,6 +124,11 @@ export function WhatItMade({ story, shots, checked, unverified, headingLevel = 2
               )
             })}
           </div>
+          {many && (
+            <LinkButton className={s.more} aria-expanded={all} onClick={() => setAll(!all)}>
+              {all ? t.fewer : t.all(shots.length)}
+            </LinkButton>
+          )}
         </section>
       )}
       {/* What it couldn't check is still the person's: it comes first. */}

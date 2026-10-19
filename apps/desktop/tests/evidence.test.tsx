@@ -144,6 +144,18 @@ describe('evidence, as the window draws it', () => {
     const described = items.step({ step: 'settle', descriptions: { meridian: 'Checkout retries once.\n\nThe rest of it.' } })
     expect(outcomeOf(snapshot({ items: [built, described] })).story).toEqual({ lede: 'Checkout retries once.', rest: 'The rest of it.' })
     expect(outcomeOf(snapshot({ items: [built] })).story?.lede).toBe('A retry.')
+    // In several repositories, what it built says what it is, and each one's description as last given follows under its name.
+    const several = [
+      items.step({
+        built: 'Checkout retries twice now.\n\nWhat to try next.',
+        descriptions: { api: 'Api retries once.', web: 'Web retries.' },
+      }),
+      items.step({ step: 'settle', descriptions: { api: 'Api retries twice now.' } }),
+    ]
+    expect(outcomeOf(snapshot({ items: several })).story).toEqual({
+      lede: 'Checkout retries twice now.',
+      rest: '# api\n\nApi retries twice now.\n\n# web\n\nWeb retries.',
+    })
     expect(outcomeOf(snapshot({ items: [items.step({ summary: 'Looked into it.' })] })).story?.lede).toBe('Looked into it.')
     expect(outcomeOf(snapshot({ items: [] })).story).toBeNull()
     // A heading over its first paragraph isn't what it is; a long first paragraph gives its first sentences.
@@ -259,6 +271,30 @@ describe('evidence, as the window draws it', () => {
     withServices(<Task />, quick([RUN]))
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
     expect(await screen.findByRole('heading', { name: 'Nothing changed', level: 2 })).toBeTruthy()
+  })
+
+  it('shows the first six of 76 pictures, each its own view, the rest a press away and all of them full size', async () => {
+    const shots = Array.from({ length: 76 }, (_, i) =>
+      piece({ kind: 'screenshot', caption: `View ${i + 1}`, picture: { ...PICTURE, digest: `${i}`.padStart(64, 'a') } }),
+    )
+    const { client } = fakeClient({
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [items.step({ evidence: shots, built: 'A status page.' })],
+          task: { ...snapshot().task, kind: 'plain', phase: 'ready' },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    expect(await screen.findByRole('heading', { name: /^What it looks like\s*76$/, level: 2 })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /^View View \d+ full size$/ })).toHaveLength(6)
+    // The ones folded away are a key away from the first, full size.
+    await userEvent.click(screen.getByRole('button', { name: 'View View 1 full size' }))
+    expect(within(await screen.findByRole('dialog')).getByText('1 of 76')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Show all 76' }))
+    expect(screen.getAllByRole('button', { name: /^View View \d+ full size$/ })).toHaveLength(76)
   })
 
   it('keeps what the task built when its report is on an earlier page than the one read', async () => {
