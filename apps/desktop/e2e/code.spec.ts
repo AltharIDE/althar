@@ -66,7 +66,7 @@ test('opens the code an agent names: a peek at its lines, the file beside the co
     await expect(page.getByRole('complementary')).toHaveCount(0)
 
     // Beside the board, where the conversation has no room to share, the file opens over the board against it.
-    await page.getByRole('radio', { name: 'Both' }).click()
+    await page.getByRole('radio', { name: 'Home' }).click()
     await page.getByRole('button', { name: 'Open README.md:1' }).last().click()
     await expect(page.getByRole('complementary', { name: 'README.md' })).toBeVisible()
     await page.mouse.move(10, 400)
