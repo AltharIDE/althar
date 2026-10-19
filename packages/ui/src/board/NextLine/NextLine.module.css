@@ -1,7 +1,6 @@
 /* A row in line, with its grip in the lane's margin: shown on hover, on focus, with its menu open and while it is moved. */
 .item {
   position: relative;
-  border-radius: 10px;
 }
 .grip {
   position: absolute;
@@ -32,6 +31,7 @@
 /* The row being moved: lifted off the lane, on paper, as it goes between the others. */
 .lifted {
   z-index: 1;
+  border-radius: 10px;
   background: var(--paper);
   box-shadow:
     inset 0 0 0 1px var(--line-2),
