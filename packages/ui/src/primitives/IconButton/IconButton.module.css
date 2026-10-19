@@ -24,7 +24,7 @@
   color: var(--t-3);
 }
 .default:hover:not(:disabled) {
-  background: var(--n-2);
+  background: var(--sunk);
   color: var(--t-1);
 }
 .default:active:not(:disabled),

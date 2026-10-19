@@ -26,6 +26,17 @@ export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, ba
  */
 export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting: ${busyWords(queued, where)}`
 
+/** 1 → Next, 2 → 2nd, 3 → 3rd, 11 → 11th. */
+const ordinal = (n: number) => {
+  if (n === 1) return 'Next'
+  const tens = n % 100
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th'
+  return `${n}${suffix}`
+}
+
+/** Where a task waiting for a free agent stands in its project's line: Next in line, 2nd in line. */
+export const inLineWords = (place: number) => `${ordinal(place)} in line`
+
 /** How busy this computer's agents are, as work that waits for one says it. */
 export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
   busy > atOnce ? `${busy} agents busy on ${where}, which runs ${atOnce} at once` : `${busy} of ${atOnce} agents busy on ${where}`

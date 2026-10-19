@@ -2,7 +2,7 @@
   min-width: 0;
   height: 30px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--paper);
   box-shadow: inset 0 0 0 1px var(--line-2);
   font-size: 12.5px;
@@ -14,7 +14,7 @@
   box-shadow: inset 0 0 0 1px var(--line-3);
 }
 .field:focus {
-  box-shadow: inset 0 0 0 1px var(--signal-line);
+  box-shadow: inset 0 0 0 1.5px var(--signal);
 }
 .field::placeholder {
   color: var(--t-3);

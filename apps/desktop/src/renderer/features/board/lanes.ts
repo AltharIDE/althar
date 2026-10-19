@@ -4,8 +4,9 @@ import { isFinished, readyOf, standingCalls } from '../../shared/calls'
 
 /*
  * Which lane of the board each task and call goes in. Up next: a task
- * started whose first step waits for a free agent, in the order they will
- * start (it isn't running; nothing of it has had an agent), then a plan
+ * started that waits for a free agent before any agent has worked on it,
+ * whatever its kind (a change with a plan, a quick task, a review), in the
+ * order its project's line starts (it isn't running), then a plan
  * waiting to start, on its countdown or held. Running: work an agent is on,
  * or was on and stopped. Needs you: a task that waits on a call of yours,
  * once, as one card that says the call; a call no task on the board waits
@@ -22,17 +23,20 @@ export interface Waiting {
 }
 
 /**
- * A task started whose first step waits for a free agent: no step has had an
- * agent yet, so it is up next, not running. One mid-work whose later turn waits
- * for a place stays running: a short wait doesn't move it between lanes.
+ * A task started that waits for a free agent before any agent has worked on
+ * it, whatever its kind: it is in its project's line, up next, not running.
+ * One mid-work whose later turn waits for a place stays running: a short wait
+ * doesn't move it between lanes.
  */
-export const startsWhenFree = (task: BoardTask) => task.phase === 'running' && task.planWaits === true && task.queued !== null
+export const startsWhenFree = (task: BoardTask) => task.phase === 'running' && task.inLine === true && task.queued !== null
 
 export interface Lanes {
   /** Up next in order: the tasks that start when an agent is free, then plans on their countdown, then those held. */
   readonly next: ReadonlyArray<BoardTask>
-  /** How many of `next`, from its start, start when an agent is free. */
+  /** How many of `next`, from its start, start when an agent is free: the project's line. */
   readonly free: number
+  /** The line is in an order the person gave it, not the oldest first. */
+  readonly reordered: boolean
   readonly running: ReadonlyArray<BoardTask>
   /** Tasks that wait on a call of the person's, each once, with its call. */
   readonly waiting: ReadonlyArray<Waiting>
@@ -53,7 +57,7 @@ export const lanesOf = (board: BoardSnapshot): Lanes => {
   const standing = standingCalls(board.tasks, board.calls)
   const waiting = of('waiting').map((task) => ({ task, call: standing.find((call) => call.taskId === task.taskId) ?? null }))
   const folded = new Set(waiting.map(({ task }) => task.taskId))
-  // The ones waiting for an agent start in the order the runtime will start them, the oldest where it can't say.
+  // The ones waiting for an agent in the order their line starts, as the runtime says it, the oldest where it can't.
   const free = of('running')
     .filter(startsWhenFree)
     .toSorted((a, b) => (a.place ?? Infinity) - (b.place ?? Infinity) || a.createdAt.localeCompare(b.createdAt))
@@ -61,6 +65,7 @@ export const lanesOf = (board: BoardSnapshot): Lanes => {
     // Next to start first: those waiting for an agent, then the one whose countdown ends soonest, then the held, oldest first.
     next: [...free, ...of('planned', 'held').toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿'))],
     free: free.length,
+    reordered: free.some((task) => task.reordered === true),
     running: of('running', 'stopped').filter((task) => !startsWhenFree(task)),
     waiting,
     calls: standing.filter((call) => call.taskId === null || !folded.has(call.taskId)),
