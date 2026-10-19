@@ -281,6 +281,31 @@ describe('the board’s lanes', () => {
       keptAt: '2026-10-14T11:00:00.000Z',
     })
     const review = task({ taskId: 'r1', threadId: 'thr1', title: 'Review #1199', phase: 'ready', kind: 'review', branch: null })
+    // Its review posted, then written to again, and answered: finished, as a quick task is.
+    const answered = task({
+      taskId: 'r2',
+      threadId: 'thr2',
+      title: 'Review #1200',
+      phase: 'ready',
+      kind: 'review',
+      branch: null,
+      reviewing: {
+        product: 'github',
+        repository: 'meridian/api',
+        number: 1200,
+        url: 'https://github.com/meridian/api/pull/1200',
+        title: 'Retry webhooks',
+        author: 'ninemate',
+        outside: false,
+        additions: 1,
+        deletions: 0,
+        findings: 0,
+        blocking: 0,
+        verdict: 'comment',
+        posted: { url: 'https://github.com/meridian/api/pull/1200#pullrequestreview-1', at: '2026-10-14T09:00:00.000Z' },
+        waiting: false,
+      },
+    })
     const settled = task({
       taskId: 's1',
       threadId: 'ths1',
@@ -295,6 +320,7 @@ describe('the board’s lanes', () => {
           finished,
           kept,
           review,
+          answered,
           settled,
           task({ taskId: 't4', threadId: 'th4', title: 'Rate-limit refunds', phase: 'ready', change: change() }),
         ],
@@ -308,7 +334,7 @@ describe('the board’s lanes', () => {
     )
     const needs = within(screen.getByRole('region', { name: /^Needs you/ }))
     const card = (title: string) => within(needs.getByRole('button', { name: title }).closest('article') ?? document.body)
-    // A finished plain task: both. A review: Keep for later alone. A change: neither.
+    // A finished plain task: both. A review drafted: Keep for later alone. A change: neither.
     await userEvent.click(card('Prototype the tabs').getByRole('button', { name: 'Done' }))
     expect(markDone).toHaveBeenCalledWith('p1')
     await userEvent.click(card('Prototype the tabs').getByRole('button', { name: 'Keep for later' }))
@@ -316,6 +342,10 @@ describe('the board’s lanes', () => {
     expect(card('Review #1199').queryByRole('button', { name: 'Done' })).toBeNull()
     await userEvent.click(card('Review #1199').getByRole('button', { name: 'Keep for later' }))
     expect(keep).toHaveBeenCalledWith('r1')
+    // A review posted and answered since: Finished, with both.
+    expect(card('Review #1200').getByText('Finished')).toBeTruthy()
+    await userEvent.click(card('Review #1200').getByRole('button', { name: 'Done' }))
+    expect(markDone).toHaveBeenCalledWith('r2')
     expect(card('Rate-limit refunds').queryByRole('button', { name: 'Keep for later' })).toBeNull()
     // Settled opens on its ledger, as it always has, with what was kept behind a tab beside it.
     const lane = within(screen.getByRole('region', { name: /^Settled/ }))

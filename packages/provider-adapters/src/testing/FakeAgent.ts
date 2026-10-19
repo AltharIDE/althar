@@ -202,6 +202,8 @@ export interface FakeAgentOptions {
   readonly closed?: (sessionId: string) => void
   /** Called when something a session left running is stopped, with its task's id. */
   readonly stoppedBackground?: (id: string) => void
+  /** Whether to refuse to stop what a session left running, as an agent that can't: asked as each stop is. */
+  readonly refusesStop?: () => boolean
   /** Called with what the client says it can do, as it initializes. */
   readonly initialized?: (capabilities: acp.ClientCapabilities | undefined) => void
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
@@ -1164,6 +1166,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         const session = sessions.get(params.sessionId)
         const left = session?.background.get(params.asyncTaskId)
         if (session === undefined || left === undefined) return { stopped: false }
+        if (options.refusesStop?.() === true) throw new Error('The agent could not stop it.')
         session.background.delete(params.asyncTaskId)
         options.stoppedBackground?.(params.asyncTaskId)
         await client.notify(acp.methods.client.session.update, {

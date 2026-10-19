@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -366,6 +366,37 @@ describe('settling a task that isn’t a change', () => {
       yield* (yield* Sessions).stop(working.threadId)
     }).pipe(Effect.provide(withQueries())),
   )
+
+  it.live('stops what a finished task left running as it is done, and isn’t done while that won’t stop', () => {
+    const stopped: Array<string> = []
+    let refusing = true
+    const agent = { stoppedBackground: (id: string) => void stopped.push(id), refusesStop: () => refusing }
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const project = yield* open
+      const served = yield* plain(project.projectId, 'Sketch the settings page', 'Serve it. [lead:serve] [lead:finish]')
+      yield* cardOnce(served.taskId, (card) => card.phase === 'ready')
+      const running = () =>
+        Effect.map(sessions.running(served.threadId), (session) =>
+          Option.match(session, { onNone: () => [], onSome: (one) => one.background.filter((left) => left.ended === null) }),
+        )
+      yield* until(running(), (left) => left.length === 1, Duration.seconds(20))
+
+      // Its agent won't stop the page: it isn't done, said so, still in Needs you with its page up, to try again.
+      const refused = yield* Effect.flip(markDone(served.taskId))
+      assert.deepInclude(refused, { _tag: 'TaskRefused', why: 'left_running' })
+      assert.strictEqual((yield* row(served.taskId)).state, 'open')
+      assert.strictEqual((yield* cardOnce(served.taskId, () => true)).phase, 'ready')
+      assert.lengthOf(yield* running(), 1)
+
+      // Tried again once it would, the page stops and the task is done.
+      refusing = false
+      assert.isTrue(yield* markDone(served.taskId))
+      assert.lengthOf(stopped, 1)
+      assert.lengthOf(yield* running(), 0)
+      assert.strictEqual((yield* row(served.taskId)).state, 'done')
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', agent)))))
+  })
 
   it.live('is its lead’s to do when the person says so: done, kept for later or discarded, never a change', () =>
     Effect.gen(function* () {

@@ -489,6 +489,79 @@ describe('reviewing someone else’s pull request', () => {
     },
   )
 
+  it.live('opens a posted review again as the person writes to it: answered, or drafted again, it ends in Needs you', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const taskId = task?.id ?? ''
+      const threadId = task?.threadId ?? ''
+      const access = lead(projectId, threadId, taskId)
+      const reviews = yield* Reviews
+      const tasks = yield* Tasks
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const instance = yield* Instance
+      const card = () => Effect.orDie(queries.card(taskId))
+      const turnOver = until(
+        Effect.map(sessions.running(threadId), (running) => [running]),
+        ([running]) => running !== undefined && !Option.exists(running, (session) => session.turnRunning),
+        Duration.seconds(20),
+      )
+      // What the window does as the person writes to it; then its lead's answer, and its turn over.
+      const write = (body: string) =>
+        Effect.gen(function* () {
+          const before = (yield* said(threadId)).length
+          yield* tasks.bringBack(taskId)
+          yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
+          yield* until(said(threadId), (all) => all.length > before, Duration.seconds(20))
+          yield* turnOver
+        })
+      const posted = () =>
+        Effect.gen(function* () {
+          const draft = (yield* cardsIn(threadId)).at(-1)
+          assert.strictEqual((yield* reviews.post(draft?.draftId ?? '', instance.personId)).state, 'posted')
+          assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
+          assert.strictEqual((yield* card()).phase, 'settled')
+        })
+
+      // Its lead reads the pull request first, then drafts.
+      yield* turnOver
+      yield* callTool(access, 'draft_review', { verdict: 'comment', summary: 'Looks fine.' })
+      yield* posted()
+
+      // Written to again, it opens; its lead answers, drafting nothing, and it is finished, in Needs you, the person's to settle.
+      yield* write('Why not approve it?')
+      assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'open')
+      const answered = yield* card()
+      assert.deepInclude(answered, { phase: 'ready', kind: 'review' })
+      assert.isFalse(answered.reviewing?.waiting)
+      assert.strictEqual(
+        (yield* Effect.orDie(queries.projects)).projects.find((one) => one.id === projectId)?.ready,
+        1,
+        'its project counts it',
+      )
+      // Done settles it, as a quick task's does.
+      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId }), taskId }))
+      assert.strictEqual((yield* card()).phase, 'settled')
+
+      // Written to again, its lead drafts again: the draft waits in Needs you, and posting it settles the task once more.
+      yield* write('Approve it after all.')
+      yield* callTool(access, 'draft_review', { verdict: 'approve', summary: 'Good to go.' })
+      const drafted = yield* card()
+      assert.deepInclude(drafted, { phase: 'ready', kind: 'review' })
+      assert.isTrue(drafted.reviewing?.waiting)
+      // Not Done while a draft waits: it is posted, or discarded, on its card.
+      assert.isFalse(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId }), taskId }))
+      yield* posted()
+      assert.lengthOf(github.reviewsPosted, 2)
+    }).pipe(Effect.provide(Nudges.layer.pipe(Layer.provideMerge(withQueries(github)))))
+  })
+
   it.live('says why a review wasn’t posted, offers it again, and says one whose answer was lost may be posted already', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })

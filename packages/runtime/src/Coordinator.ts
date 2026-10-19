@@ -21,7 +21,7 @@ import { branchedWords, branchOnFirstWrite } from './firstWrite'
 import { Instance } from './Instance'
 import { DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
 import { Issues } from './Issues'
-import { quickIn } from './kinds'
+import { answeredIn, quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -806,9 +806,18 @@ export class Coordinator extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const tasks = yield* Tasks
           const { how } = yield* read(Settling, input)
-          const [task] = yield* sql<{ id: string; threadId: string; state: string; keptAt: string | null; quick: number; reviews: number }>`
+          const [task] = yield* sql<{
+            id: string
+            threadId: string
+            state: string
+            keptAt: string | null
+            quick: number
+            reviews: number
+            answered: number
+          }>`
             SELECT k.id, t.id AS thread_id, k.state, k.kept_at, ${sql.unsafe(quickIn('k'))} AS quick,
-              EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews
+              EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
+              ${sql.unsafe(answeredIn('k'))} AS answered
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${access.taskId ?? ''}`
           if (task === undefined)
             return yield* new ToolRefused({ message: 'Only the lead of one of the project’s tasks settles its task.' })
@@ -821,15 +830,24 @@ export class Coordinator extends Context.Service<
           const said = (type: string) => envelope(type, { taskId: task.id }, undefined, instance.systemId)
           switch (how) {
             case 'done':
-              if (task.reviews === 1)
+              // A review posted and answered since is finished as a quick task is; one with a draft settles as it is posted.
+              if (task.reviews === 1 && (task.answered !== 1 || task.state !== 'open'))
                 return yield* new ToolRefused({
                   message:
                     'A review settles once its draft is posted: the person posts it, or discards it, on its draft. If they asked to set it aside, keep it for later instead.',
                 })
               if (task.state === 'done') return 'It is done already: it is in Settled.'
-              return (yield* tasks.markDone({ envelope: yield* said('task.mark_done'), taskId: task.id }))
-                ? 'Marked it done: it is in Settled, and what it left running, such as a page, stopped. Say so in a sentence; writing to you again picks it up.'
-                : 'Althar couldn’t mark it done: something on it waits on the person first. Tell them.'
+              {
+                // A page it left running that wouldn't stop keeps it from being done: said so, for the person to try again.
+                const marked = yield* tasks
+                  .markDone({ envelope: yield* said('task.mark_done'), taskId: task.id })
+                  .pipe(Effect.catch((error) => (error instanceof TaskRefused ? Effect.succeed('left' as const) : Effect.fail(error))))
+                if (marked === 'left')
+                  return 'Althar couldn’t stop what it left running, such as a page, so it isn’t done: it still waits in Needs you. Tell the person, so they can try Done again or keep it for later.'
+                return marked
+                  ? 'Marked it done: it is in Settled, and what it left running, such as a page, stopped. Say so in a sentence; writing to you again picks it up.'
+                  : 'Althar couldn’t mark it done: something on it waits on the person first. Tell them.'
+              }
             case 'keep':
               if (task.state === 'done') return 'It is done already: it is in Settled, so there is nothing to keep.'
               if (task.keptAt !== null) return 'It is kept for later already.'
@@ -1348,7 +1366,7 @@ export class Coordinator extends Context.Service<
         {
           ...tool(
             'settle_task',
-            'Moves this task on as the person tells you, only when they do, never on your own: done (it is settled, and what it left running, such as a page, stops), keep (kept for later: out of their Needs you as it is, with its page still up), or discard (abandoned as your turn ends; its work stays on this computer). For a task that isn’t a change: a quick task, or a review, which only keeps or discards (it settles as its draft is posted). Writing to you again later picks it up.',
+            'Moves this task on as the person tells you, only when they do, never on your own: done (it is settled, and what it left running, such as a page, stops), keep (kept for later: out of their Needs you as it is, with its page still up), or discard (abandoned as your turn ends; its work stays on this computer). For a task that isn’t a change: a quick task, or a review, which only keeps or discards while a draft waits (it settles as its draft is posted), and is done once its review was posted. Writing to you again later picks it up.',
             {
               type: 'object',
               properties: { how: { type: 'string', enum: ['done', 'keep', 'discard'] } },

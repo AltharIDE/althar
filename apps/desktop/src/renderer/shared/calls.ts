@@ -34,10 +34,11 @@ export const readyKindOf = (task: {
   readonly kind?: string | undefined
   readonly unshipped?: unknown
   readonly change?: { readonly state: string } | null | undefined
+  readonly reviewing?: Reviewing
 }): string =>
-  task.kind === 'review'
+  task.kind === 'review' && !isAnswered(task.reviewing)
     ? kindWords.drafted
-    : task.kind === 'plain'
+    : task.kind === 'plain' || task.kind === 'review'
       ? kindWords.finished
       : task.handedBack != null
         ? kindWords.stuck
@@ -64,21 +65,34 @@ export const callKindOf = (call: { readonly kind: string; readonly stuck: { read
 /** Where a call waits, in words: its task, or the conversation with the coordinator, for a question the coordinator asks. */
 export const whereOf = (call: { readonly taskTitle: string | null }): string => call.taskTitle ?? 'Coordinator'
 
+/** What a review task's card and screen know of its review: whether it was posted, and whether a draft waits since. */
+type Reviewing = { readonly posted: unknown; readonly waiting?: boolean | undefined } | null | undefined
+
 /**
- * A plain task that finished (DEV-96): it waits in Needs you, as Finished,
- * counted as any work ready, until the person settles it (Done) or keeps it
- * for later. Opening it moves nothing.
+ * A review whose review was posted, written to again, that its lead answered
+ * drafting nothing to post: finished, as a quick task is (ADR-048).
  */
-export const isFinished = (task: { readonly kind: string; readonly phase: string }): boolean =>
-  task.kind === 'plain' && task.phase === 'ready'
+export const isAnswered = (reviewing: Reviewing): boolean => reviewing != null && reviewing.posted != null && reviewing.waiting === false
+
+/**
+ * A plain task that finished (DEV-96), or a review answered: it waits in
+ * Needs you, as Finished, counted as any work ready, until the person
+ * settles it (Done) or keeps it for later. Opening it moves nothing.
+ */
+export const isFinished = (task: { readonly kind: string; readonly phase: string; readonly reviewing?: Reviewing }): boolean =>
+  (task.kind === 'plain' || (task.kind === 'review' && isAnswered(task.reviewing))) && task.phase === 'ready'
 
 /**
  * Whether a task is the person's to settle with Done or Keep for later: a
  * finished task that isn't a change, waiting in Needs you or kept for later.
- * A review only keeps: it settles as its draft is posted.
+ * A review with a draft only keeps: it settles as its draft is posted.
  */
 export const isSettleable = (task: { readonly kind: string; readonly phase: string }): boolean =>
   task.kind !== 'change' && (task.phase === 'ready' || task.phase === 'kept')
+
+/** Whether a settleable task takes Done: a plain one, or a review answered; a review with a draft settles as it is posted. */
+export const takesDone = (task: { readonly kind: string; readonly reviewing?: Reviewing }): boolean =>
+  task.kind === 'plain' || (task.kind === 'review' && isAnswered(task.reviewing))
 
 /**
  * Whether a task waits on the person as work ready for them: a change to

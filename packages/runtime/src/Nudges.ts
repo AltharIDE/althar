@@ -3,6 +3,7 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { answeredIn } from './kinds'
 import { Agents } from './Config'
 import { field, parse, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
@@ -195,6 +196,26 @@ export class Nudges extends Context.Service<
             key: `ready:${review.taskId}`,
             title: review.title,
             body: draftedWords(review.number, review.author),
+            threadId: review.threadId,
+          })
+        }
+        // A review posted, written to again and answered: finished, the person's to settle (ADR-048), once its lead is done.
+        const answered = yield* sql<{ taskId: string; threadId: string; title: string }>`
+          SELECT k.id AS task_id, t.id AS thread_id, k.title
+          FROM tasks k
+          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE k.state = 'open' AND k.kept_at IS NULL AND ${sql.unsafe(answeredIn('k'))}
+            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+          ORDER BY k.created_at, k.id`
+        for (const review of answered) {
+          if (Option.exists(yield* sessions.running(review.threadId), (session) => session.turnRunning)) continue
+          found.set(`ready:${review.taskId}`, {
+            _tag: 'Nudge',
+            kind: 'ready',
+            key: `ready:${review.taskId}`,
+            title: review.title,
+            body: readyWords(''),
             threadId: review.threadId,
           })
         }

@@ -35,7 +35,7 @@ import { type ReactNode, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { busyWords, queuedWords, waitsWords } from '../../shared/agents'
-import { callKindOf, isSettleable, kindWords, whereOf } from '../../shared/calls'
+import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { doingWords, doneHere, factsOf, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
@@ -363,12 +363,12 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
       }
     }
     case 'review': {
-      // Its draft is posted or discarded in its task; here it is only kept for later.
+      // Its draft is posted or discarded in its task; here it is only kept for later. Posted and answered since, it is finished.
       const ways = settleWaysOf(work, actions)
       const findings = work.reviewing == null ? null : findingsOf(work.reviewing)
       return {
         ...base,
-        word: text.reviewDrafted,
+        word: isAnswered(work.reviewing) ? text.finished : text.reviewDrafted,
         ...(work.reviewing == null ? {} : { object: theirs(work.reviewing) }),
         ...(findings === null && ways === null
           ? {}
@@ -440,7 +440,7 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
   if (!isSettleable(work) || markDone === undefined || keep === undefined) return null
   return (
     <SettleWays
-      {...(work.kind === 'plain' ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
+      {...(takesDone(work) ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
       {...(work.phase === 'ready' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
       {...(actions?.settling?.has(work.taskId) === true ? { busy: 'done' as const } : {})}
     />

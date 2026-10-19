@@ -32,7 +32,7 @@ import {
   SettleWays,
 } from '@althar/ui'
 
-import { isSettleable } from '../../shared/calls'
+import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
 import { device } from '../../shared/device'
@@ -176,9 +176,11 @@ export const statusOf = (
   // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
   if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
   // A review drafted is the person's to post (DEV-96).
-  if (phase === 'ready' && snapshot.task.review != null) return { status: TaskStatus.Yours, state: text.drafted }
+  if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
+    return { status: TaskStatus.Yours, state: text.drafted }
   // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
-  if (phase === 'ready' && snapshot.task.kind === 'plain') return { status: TaskStatus.Yours, state: text.finished }
+  if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
+    return { status: TaskStatus.Yours, state: text.finished }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
   // Kept for later: out of Needs you as it is, until the person writes to it or settles it.
@@ -580,10 +582,12 @@ export function TaskView({
   // A task that finished and isn't a change: Done and Keep for later, beside where it stands; a review only keeps, as it settles
   // once posted. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
   const settleable = !busy && isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '' })
+  // Done for a plain task, or a review posted and answered since; one with a draft settles as it is posted.
+  const done = takesDone({ kind: snapshot.task.kind ?? 'change', reviewing: snapshot.task.review })
   const settle = settleable ? (
     <SettleWays
       ink
-      {...(snapshot.task.kind === 'plain' ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
+      {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
       {...(snapshot.task.phase === 'ready' ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
       {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
     />
@@ -677,7 +681,7 @@ export function TaskView({
         onChange={setDraft}
         // What a task that finished and isn't a change is likely told next, for Tab to take; its lead marks it done (settle_task). A
         // review's draft is posted by the person, on it, so nothing is suggested there.
-        {...(settleable && snapshot.task.kind === 'plain' ? { suggestion: text.suggest } : {})}
+        {...(settleable && done ? { suggestion: text.suggest } : {})}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}

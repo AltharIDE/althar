@@ -113,6 +113,35 @@ describe('a task', () => {
     expect(within(header).getByRole('button', { name: 'Done' })).toBeTruthy()
   })
 
+  it('offers a review posted and answered since Done and Keep for later, as Finished, with the suggestion', async () => {
+    const reviewing = {
+      product: 'github' as const,
+      repository: 'meridian/api',
+      number: 1200,
+      url: 'https://github.com/meridian/api/pull/1200',
+      title: 'Retry webhooks',
+      author: 'ninemate',
+      outside: false,
+      additions: 1,
+      deletions: 0,
+      findings: 0,
+      blocking: 0,
+      verdict: 'comment' as const,
+      posted: { url: 'https://github.com/meridian/api/pull/1200#pullrequestreview-1', at: '2026-10-14T09:00:00.000Z' },
+      waiting: false,
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'review', phase: 'ready', review: reviewing } })),
+    })
+    withServices(<Task />, client)
+    const header = await screen.findByRole('banner', { name: thread().task.title })
+    expect(within(header).getByText('Finished')).toBeTruthy()
+    await userEvent.click(within(header).getByRole('button', { name: 'Done' }))
+    expect(client.markTaskDone).toHaveBeenCalledWith(snapshot().task.id)
+    expect(within(header).getByRole('button', { name: 'Keep for later' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: /./ }).getAttribute('placeholder')).toBe('Mark this as done')
+  })
+
   it('offers a drafted review Keep for later alone, and a change neither', async () => {
     const review = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'review', phase: 'ready' } })) })
     const first = withServices(<Task />, review.client)

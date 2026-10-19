@@ -45,7 +45,7 @@ import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
-import { handedOf, kindOf } from './kinds'
+import { answeredIn, handedOf, kindOf } from './kinds'
 import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
@@ -655,6 +655,7 @@ export class Queries extends Context.Service<
             readonly repositories: string
             readonly ready: string
             readonly drafted: string
+            readonly answered: string
           }
         >`
           SELECT p.id, p.name, p.slug, p.ink,
@@ -686,6 +687,10 @@ export class Queries extends Context.Service<
             (SELECT json_group_array(k.id) FROM tasks k WHERE k.project_id = p.id AND k.state = 'open'
                 AND EXISTS (SELECT 1 FROM review_drafts d WHERE d.task_id = k.id AND d.state IN ('pending', 'failed', 'uncertain'))
                 AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')) AS drafted,
+            -- Or posted, written to again and answered: finished, the person's to settle, once its lead's turn is over (read below).
+            (SELECT json_group_array(json_object('task', k.id, 'thread', t.id)) FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+              WHERE k.project_id = p.id AND k.state = 'open' AND ${sql.unsafe(answeredIn('k'))}
+                AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')) AS answered,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
             coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
             (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
@@ -693,13 +698,26 @@ export class Queries extends Context.Service<
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
         // A task kept for later waits behind its board's Settled, out of Needs you: no count says it.
         const kept = yield* keptForLater
+        // A review answered is finished once its lead's turn is over, as its card says: not while it answers.
+        const sessions = yield* Sessions
+        const answered = new Map<string, ReadonlyArray<string>>()
+        for (const row of rows) {
+          const finished: Array<string> = []
+          for (const one of JSON.parse(row.answered) as ReadonlyArray<{ task: string; thread: string }>)
+            if (!Option.exists(yield* sessions.running(one.thread), (session) => session.turnRunning)) finished.push(one.task)
+          answered.set(row.id, finished)
+        }
         return {
           cursor: at,
-          projects: rows.map(({ drafted, ...row }) => ({
+          projects: rows.map(({ drafted, answered: _answered, ...row }) => ({
             ...row,
             // Each task once: one ready and drafted both, as a review taken over might be, counts once.
             ready: [
-              ...new Set([...(JSON.parse(row.ready) as ReadonlyArray<string>), ...(JSON.parse(drafted) as ReadonlyArray<string>)]),
+              ...new Set([
+                ...(JSON.parse(row.ready) as ReadonlyArray<string>),
+                ...(JSON.parse(drafted) as ReadonlyArray<string>),
+                ...(answered.get(row.id) ?? []),
+              ]),
             ].filter((id) => !kept.has(id)).length,
             rotateAccounts: row.rotateAccounts === 1,
             onlyAccounts:
@@ -1526,8 +1544,9 @@ export class Queries extends Context.Service<
             // again until its lead is done with the note, and a merged task whose lead works on it again is running.
             if (task.waiting > 0) return 'waiting'
             if (busy || queued || resolving !== undefined) return 'running'
-            // A review has no run: drafted, it is the person's to post, as a change is to accept.
-            if (draftWaits !== undefined && task.state === 'open') return 'ready'
+            // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
+            // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-048).
+            if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
             if (task.runState === 'succeeded') return seeing && hands.running ? 'running' : 'ready'

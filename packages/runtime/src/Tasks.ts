@@ -12,7 +12,7 @@ import { NotFound, TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
-import { quickIn } from './kinds'
+import { answeredIn, quickIn } from './kinds'
 import { Plans } from './Plans'
 import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
@@ -183,10 +183,12 @@ export class Tasks extends Context.Service<
     /**
      * Settles a finished task that isn't a change as Done, as the person
      * said, on its card or to its lead: a quick task whose latest run passed,
+     * or a review posted and answered since,
      * or is the round its lead is in, with no pull request, nothing waiting on
      * the person and no plan to start. What its agents left running, such as
      * a page, stops. Writing to its lead later opens it again (ADR-034).
-     * Whether it settled.
+     * Whether it settled; refused (`left_running`), and not settled, where
+     * something it left running wouldn't stop.
      */
     markDone(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
     /**
@@ -196,7 +198,11 @@ export class Tasks extends Context.Service<
      * (`bringBack`). Whether it was kept now.
      */
     keep(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
-    /** The person wrote to a task kept for later: it is no longer, so what its lead does next ends in Needs you. */
+    /**
+     * The person wrote to a task kept for later: it is no longer, so what its
+     * lead does next ends in Needs you. Or to a review whose review was posted,
+     * which has no round to open again: it opens again here.
+     */
     bringBack(taskId: string): Effect.Effect<void, unknown>
     /** Does something in the task's turn: never beside its stopping, resuming, abandoning or reopening. */
     inTurn<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
@@ -554,38 +560,68 @@ export class Tasks extends Context.Service<
           yield* sql`UPDATE tasks SET seen_at = ${at} WHERE id = ${input.taskId}`
         })
 
-      /** What its agents left running in the background, such as a page, stops: on each of its threads. */
+      /**
+       * What its agents left running in the background, such as a page, stops: on each of its threads. Whether all of it did: one
+       * its agent wouldn't stop is still running.
+       */
       const stopLeftRunning = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
+          let stopped = true
           for (const thread of threads) {
             const running = yield* sessions.running(thread.id)
             if (Option.isNone(running)) continue
             for (const left of running.value.background)
-              if (left.ended === null) yield* Effect.ignore(sessions.stopBackground(thread.id, left.id))
+              if (left.ended === null)
+                yield* sessions.stopBackground(thread.id, left.id).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.andThen(
+                      Effect.logWarning('Could not stop what a task left running', cause),
+                      Effect.sync(() => {
+                        stopped = false
+                      }),
+                    ),
+                  ),
+                )
           }
+          return stopped
+        })
+
+      /**
+       * Whether it can be settled as Done now: open, finished or its lead at work on it as the person told it, nothing waiting on
+       * the person, and not a change. A quick task, or a review whose review was posted and that its lead answered since.
+       */
+      const doneable = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null; answered: number; open: number }>`
+            SELECT k.project_id, k.state,
+              (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
+              ${sql.unsafe(answeredIn('k'))} AS answered,
+              (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
+              + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
+              + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change')
+              -- A change, or made one since, or a review with a draft to post: not one to settle as Done.
+              + (CASE WHEN ${sql.unsafe(quickIn('k'))} OR ${sql.unsafe(answeredIn('k'))} THEN 0 ELSE 1 END) AS open
+            FROM tasks k WHERE k.id = ${taskId}`
+          // Its round under way is its lead's, told by the person: it ends where it settled. A review has no round.
+          const finished = task?.run === 'succeeded' || task?.run === 'running' || task?.answered === 1
+          return task !== undefined && task.state === 'open' && finished && task.open === 0 ? task : undefined
         })
 
       const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          if ((yield* doneable(input.taskId)) === undefined) return false
+          // What it left running stops first: one that wouldn't stays up, and the task isn't done, for the person to try again.
+          if (!(yield* stopLeftRunning(input.taskId))) return yield* new TaskRefused({ taskId: input.taskId, why: 'left_running' })
           const at = yield* timestamp
           const settled = yield* sql.withTransaction(
             Effect.gen(function* () {
               // Read again where it is written: a call came or a pull request opened meanwhile, and it stays.
-              const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null; open: number }>`
-                SELECT k.project_id, k.state,
-                  (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
-                  (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
-                  + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
-                  + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind IN ('change', 'review'))
-                  -- A change, or made one since: not one to settle as Done.
-                  + (CASE WHEN ${sql.unsafe(quickIn('k'))} THEN 0 ELSE 1 END) AS open
-                FROM tasks k WHERE k.id = ${input.taskId}`
-              // Its round under way is its lead's, told by the person: it ends where it settled.
-              if (task === undefined || task.state !== 'open' || (task.run !== 'succeeded' && task.run !== 'running') || task.open > 0)
-                return false
+              const task = yield* doneable(input.taskId)
+              if (task === undefined) return false
               const state = yield* transition(taskLifecycle, 'open', 'done')
               const revision = yield* change('tasks', input.taskId, { state, settledAt: at, keptAt: null })
               yield* fact({
@@ -602,7 +638,6 @@ export class Tasks extends Context.Service<
             }),
           )
           if (!settled) return false
-          yield* stopLeftRunning(input.taskId)
           yield* touchCard(input.taskId)
           return true
         })
@@ -640,10 +675,34 @@ export class Tasks extends Context.Service<
       const bringBack = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ keptAt: string | null }>`SELECT kept_at FROM tasks WHERE id = ${taskId}`
-          if (task?.keptAt == null) return
-          yield* sql`UPDATE tasks SET kept_at = NULL WHERE id = ${taskId}`
-          yield* touchCard(taskId)
+          const back = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; review: number }>`
+                SELECT k.project_id, k.state, k.kept_at,
+                  EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS review
+                FROM tasks k WHERE k.id = ${taskId}`
+              if (task === undefined) return false
+              // A review posted has no round to open again (Runs.openRound does for any other): it opens here, and what its lead
+              // drafts or says next waits on the person, in Needs you.
+              if (task.state === 'done' && task.review === 1) {
+                const state = yield* transition(taskLifecycle, 'done', 'open')
+                const revision = yield* change('tasks', taskId, { state, settledAt: null, keptAt: null })
+                yield* fact({
+                  projectId: task.projectId,
+                  aggregateType: 'task',
+                  aggregateId: taskId,
+                  revision,
+                  type: 'task.reopened',
+                  actorId: instance.personId,
+                })
+                return true
+              }
+              if (task.keptAt === null) return false
+              yield* sql`UPDATE tasks SET kept_at = NULL WHERE id = ${taskId}`
+              return true
+            }),
+          )
+          if (back) yield* touchCard(taskId)
         })
 
       return Tasks.of({

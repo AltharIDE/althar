@@ -1151,6 +1151,12 @@ export const ReviewBrief = Schema.Struct({
   verdict: Schema.NullOr(ReviewVerdict),
   /** The review, once posted: its link and when. */
   posted: Schema.NullOr(Schema.Struct({ url: Schema.String, at: Schema.String })),
+  /**
+   * Whether a draft waits for the person to post it. None once its review
+   * was posted: written to again, its lead answered, it is finished, the
+   * person's to mark done or keep for later, as a quick task is (ADR-048).
+   */
+  waiting: Schema.optional(Schema.Boolean),
 })
 export type ReviewBrief = typeof ReviewBrief.Type
 

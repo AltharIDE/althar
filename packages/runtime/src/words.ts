@@ -328,6 +328,8 @@ const taskRefused = {
   abandoned: 'The task is abandoned. Reopen it to carry on.',
   no_title: 'Give the task a title.',
   title_too_long: 'Keep the title short: what should change, in a few words.',
+  left_running:
+    'Althar couldn’t stop what the task left running, such as a page, so it isn’t done yet. Try Done again, or keep it for later.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Why an issue draft can't change, by where it stands. */

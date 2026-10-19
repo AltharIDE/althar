@@ -19,11 +19,12 @@
     notifications: `needsYou` (`shared/calls.ts`) is every ready task again.
   - **Two ways on, beside where it stands:** on its card and in its task's
     header, **Done** settles it (`MarkTaskDone`, `task.done` with
-    `marked: true`) and stops what its agents left running, such as a page;
+    `marked: true`) and stops what its agents left running, such as a page,
+    first: one that won't stop leaves it unsettled, said so, to try again;
     **Keep for later** takes it out of Needs you as it is (`KeepTaskForLater`,
     `tasks.kept_at`, the phase `kept`), behind a Kept for later tab beside
-    Settled. A review only keeps: it settles as its draft is posted. A change
-    keeps its own course.
+    Settled. A review with a draft only keeps: it settles as its draft is
+    posted. A change keeps its own course.
   - **The rest is said to its lead**, which has `settle_task` (done, keep or
     discard) beside `make_it_a_change`, used only when the person says so.
     The task's composer suggests "Mark this as done" in grey; Tab takes it,
@@ -31,7 +32,9 @@
   - **Another round ends in Needs you.** Writing to a kept task brings it
     back (`kept_at` cleared); a round on a settled one that makes nothing
     new no longer puts it back in Settled: only a merged change goes back to
-    done.
+    done. A review posted has no round: writing to it opens it again, and
+    what its lead does next waits in Needs you, a draft to post, or, with
+    none, Finished, with Done and Keep for later as a quick task's.
 - **Alternatives considered:**
   - Keeping settle-on-open and adding a way back: it still moves work the
     person hasn't looked at, and a round's end stays invisible.
