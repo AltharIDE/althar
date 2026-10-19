@@ -97,24 +97,28 @@ describe('the device outside a Flatpak', () => {
     expect(launched.args.slice(-3)).toEqual(['/run/user/1000/doc/abc123/repo/opencode', 'acp', '/run/user/1000/doc/abc123/repo'])
   })
 
-  it('runs an npm-installed agent out there with its own folder first on the PATH, where its Node is', () => {
-    // Copilot as nvm installs it: off the device session's PATH, beside the Node its `#!/usr/bin/env node` needs.
-    const found = '/home/me/.nvm/versions/node/v22.20.0/bin/copilot'
-    const facts = { env: { HOME: '/home/me', PATH: '/usr/bin:/bin' }, uid: 1000, ambient: process.env } satisfies Parameters<
-      typeof relayOut
-    >[2]
-    const copilot = usingLocated(agents.copilot, () => ({
-      command: found,
-      whose: 'theirs',
-      out: (spec) => (at) => relayOut(spec, at, facts),
-    }))
-    const spec = copilot.launch('/usr/bin/node')
-    const launched = spec.onDevice?.({ env: { ...process.env, ...spec.env } })
-    // Its folder, then the device's own PATH: nothing of the sandbox's.
-    expect(launched?.args.filter((arg) => arg.startsWith('--env=PATH='))).toEqual([
-      '--env=PATH=/home/me/.nvm/versions/node/v22.20.0/bin:/usr/bin:/bin',
-    ])
-  })
+  // Through this computer's own PATH, which only a Linux's is like the Flatpak's.
+  it.skipIf(process.platform === 'win32')(
+    'runs an npm-installed agent out there with its own folder first on the PATH, where its Node is',
+    () => {
+      // Copilot as nvm installs it: off the device session's PATH, beside the Node its `#!/usr/bin/env node` needs.
+      const found = '/home/me/.nvm/versions/node/v22.20.0/bin/copilot'
+      const facts = { env: { HOME: '/home/me', PATH: '/usr/bin:/bin' }, uid: 1000, ambient: process.env } satisfies Parameters<
+        typeof relayOut
+      >[2]
+      const copilot = usingLocated(agents.copilot, () => ({
+        command: found,
+        whose: 'theirs',
+        out: (spec) => (at) => relayOut(spec, at, facts),
+      }))
+      const spec = copilot.launch('/usr/bin/node')
+      const launched = spec.onDevice?.({ env: { ...process.env, ...spec.env } })
+      // Its folder, then the device's own PATH: nothing of the sandbox's.
+      expect(launched?.args.filter((arg) => arg.startsWith('--env=PATH='))).toEqual([
+        '--env=PATH=/home/me/.nvm/versions/node/v22.20.0/bin:/usr/bin:/bin',
+      ])
+    },
+  )
 
   it('finds the person’s commands where the device’s shell and installers put them', () => {
     const script = whereScript(HOST_COMMANDS)

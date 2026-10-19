@@ -72,10 +72,14 @@ export interface Reading {
   readonly project: { readonly id: string; readonly name: string } | null
 }
 
-/** The path as the file system has it, without symbolic links, as git names a repository's root. */
+/**
+ * The path as the file system has it, without symbolic links, as git names a
+ * repository's root: on Windows by the native call, the one that expands a
+ * short name (`RUNNER~1`) to the whole one git gives.
+ */
 const real = (path: string) => {
   try {
-    return realpathSync(path)
+    return process.platform === 'win32' ? realpathSync.native(path) : realpathSync(path)
   } catch {
     return path
   }

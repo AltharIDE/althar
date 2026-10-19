@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { posix, resolve } from 'node:path'
 
 import { type LaunchSpec, usualDirs } from '@althar/provider-adapters'
 import type { OnDevice } from '@althar/runtime'
@@ -79,7 +79,7 @@ const FROM_THE_EXECUTOR = [
 export const worktreeEnvironment = (cwd: string, gitFile: string, uid: number): Readonly<Record<string, string>> => {
   const gitDir = /^gitdir:\s*(.+?)\s*$/m.exec(gitFile)?.[1]
   if (gitDir === undefined) return {}
-  return { GIT_DIR: portalPath(resolve(cwd, gitDir), uid), GIT_WORK_TREE: portalPath(cwd, uid) }
+  return { GIT_DIR: portalPath(posix.resolve(cwd, gitDir), uid), GIT_WORK_TREE: portalPath(cwd, uid) }
 }
 
 const worktreeEnvironmentAt = (cwd: string, uid: number): Readonly<Record<string, string>> => {

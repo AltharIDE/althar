@@ -206,46 +206,50 @@ describe('what a report carries', () => {
     ])
   })
 
-  it('hides home paths, repository names and tokens in the message and every frame, and sends no lines of source', async () => {
-    const { fetch, requests } = posthog()
-    const reports = sender(() => true, fetch)
-    reports.thrown(theirs(), 'main', 'uncaught')
-    // Thrown here, where PostHog could read this file's lines round it, with a cause.
-    reports.thrown(
-      new RangeError(`Out of range in ${HOME}/code/meridian`, { cause: new Error(`Can't open ${HOME}/x`) }),
-      'main',
-      'uncaught',
-    )
-    reports.thrown('words alone', 'main', 'rejection')
-    await reports.stop()
-    const events = sent(requests)
-    expect(events).toHaveLength(3)
-    const chained = events.find((event) => event.properties.$exception_list[0]?.type === 'RangeError')
-    expect(chained?.properties.$exception_list.map((exception) => exception.value)).toEqual([
-      'Out of range in ~/…/[repository-1]',
-      "Can't open ~/x",
-    ])
-    expect(
-      events.find((event) => event.properties.$exception_list[0]?.value === 'words alone')?.properties.$exception_list[0]?.stacktrace,
-    ).toBeUndefined()
-    const words = JSON.stringify(events)
-    for (const hidden of [HOME, 'meridian', TOKEN, 'ana']) expect(words).not.toContain(hidden)
-    expect(events.find((event) => event.properties.$exception_list[0]?.type === 'TypeError')?.properties.$exception_list[0]?.value).toBe(
-      'Couldn’t read ~/…/.env with [secret]',
-    )
-    const frames = events.flatMap((event) => event.properties.$exception_list.flatMap((exception) => exception.stacktrace?.frames ?? []))
-    expect(frames.find((frame) => frame.function === 'readSettings')).toMatchObject({ filename: '~/…/settings.js', lineno: 12, colno: 7 })
-    expect(frames.find((frame) => frame.function === 'open')?.filename).toBe(
-      '/Applications/Althar.app/Contents/Resources/app/dist/main/main.js',
-    )
-    expect(frames.length).toBeGreaterThan(3)
-    for (const frame of frames) {
+  // Its frames are a Mac's, and PostHog makes them relative to this computer's working folder, by this computer's paths.
+  it.skipIf(process.platform === 'win32')(
+    'hides home paths, repository names and tokens in the message and every frame, and sends no lines of source',
+    async () => {
+      const { fetch, requests } = posthog()
+      const reports = sender(() => true, fetch)
+      reports.thrown(theirs(), 'main', 'uncaught')
+      // Thrown here, where PostHog could read this file's lines round it, with a cause.
+      reports.thrown(
+        new RangeError(`Out of range in ${HOME}/code/meridian`, { cause: new Error(`Can't open ${HOME}/x`) }),
+        'main',
+        'uncaught',
+      )
+      reports.thrown('words alone', 'main', 'rejection')
+      await reports.stop()
+      const events = sent(requests)
+      expect(events).toHaveLength(3)
+      const chained = events.find((event) => event.properties.$exception_list[0]?.type === 'RangeError')
+      expect(chained?.properties.$exception_list.map((exception) => exception.value)).toEqual([
+        'Out of range in ~/…/[repository-1]',
+        "Can't open ~/x",
+      ])
       expect(
-        Object.keys(frame).filter((key) => !['platform', 'filename', 'abs_path', 'function', 'lineno', 'colno', 'in_app'].includes(key)),
-      ).toEqual([])
-    }
-    expect(words).not.toMatch(/context_line|pre_context|post_context|"vars"/)
-  })
+        events.find((event) => event.properties.$exception_list[0]?.value === 'words alone')?.properties.$exception_list[0]?.stacktrace,
+      ).toBeUndefined()
+      const words = JSON.stringify(events)
+      for (const hidden of [HOME, 'meridian', TOKEN, 'ana']) expect(words).not.toContain(hidden)
+      expect(events.find((event) => event.properties.$exception_list[0]?.type === 'TypeError')?.properties.$exception_list[0]?.value).toBe(
+        'Couldn’t read ~/…/.env with [secret]',
+      )
+      const frames = events.flatMap((event) => event.properties.$exception_list.flatMap((exception) => exception.stacktrace?.frames ?? []))
+      expect(frames.find((frame) => frame.function === 'readSettings')).toMatchObject({ filename: '~/…/settings.js', lineno: 12, colno: 7 })
+      expect(frames.find((frame) => frame.function === 'open')?.filename).toBe(
+        '/Applications/Althar.app/Contents/Resources/app/dist/main/main.js',
+      )
+      expect(frames.length).toBeGreaterThan(3)
+      for (const frame of frames) {
+        expect(
+          Object.keys(frame).filter((key) => !['platform', 'filename', 'abs_path', 'function', 'lineno', 'colno', 'in_app'].includes(key)),
+        ).toEqual([])
+      }
+      expect(words).not.toMatch(/context_line|pre_context|post_context|"vars"/)
+    },
+  )
 
   it('sends the window’s as it sent them for the log, named from its stack, a rejection as one', async () => {
     const { fetch, requests } = posthog()
