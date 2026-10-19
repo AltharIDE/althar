@@ -111,12 +111,12 @@ export interface RepositoryMapText {
 }
 
 export const repositoryMapText: RepositoryMapText = {
-  here: 'On this Mac',
+  here: 'On this computer',
   there: 'Where the work goes',
   roles: repositoryRoleText,
   role: (name) => `Role of ${name}`,
   branch: 'Checked out:',
-  elsewhere: 'Not on this Mac',
+  elsewhere: 'Not on this computer',
   more: (name) => `More for ${name}`,
   open: (host) => `Open on ${host}`,
   leaveOut: 'Leave out of the project',
@@ -148,10 +148,10 @@ export const repositoryMapText: RepositoryMapText = {
   connect: (host) => `Connect ${host}`,
   signInAgain: (host) => `Sign in to ${host} again`,
   nowhere: 'No remote',
-  stays: 'Stays on this Mac',
+  stays: 'Stays on this computer',
   goes: (path, host) => `Its work goes to ${path} on ${host}.`,
   forkGoes: (fork, pullRequests, host) => `It pushes to ${fork} on ${host}, and its pull requests open on ${pullRequests}.`,
-  staysHere: 'Its work stays on this Mac.',
+  staysHere: 'Its work stays on this computer.',
 }
 
 export type RepositoryMapProps = RootProps<

@@ -112,6 +112,66 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('closes a pull request unmerged, leaves one already closed as it is, and says why it can’t', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['PATCH', `${REPO}/pulls/12`, { json: pull({ state: 'closed' }) }],
+      ])
+      const closed = yield* host.closeChange(repository, yield* host.change(repository, 12))
+      assert.strictEqual(closed.state, 'closed')
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PATCH')?.body, { state: 'closed' })
+      // Merged meanwhile, it isn't touched: it says it is merged.
+      const already = github([['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-02T00:00:00Z' }) }]])
+      assert.strictEqual((yield* already.host.closeChange(repository, closed)).state, 'merged')
+      assert.isFalse(already.sent.some((request) => request.method === 'PATCH'))
+      // An account that can't push here is refused, in GitHub's words.
+      const refusing = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['PATCH', `${REPO}/pulls/12`, { status: 403, json: { message: 'Resource not accessible by integration' } }],
+      ])
+      const refused = yield* Effect.flip(refusing.host.closeChange(repository, closed))
+      assert.deepInclude(refused, { reason: 'forbidden', status: 403, message: 'Resource not accessible by integration' })
+    }),
+  )
+
+  it.effect('deletes a closed pull request’s branch where its head is, a fork’s too, and never an open one’s', () =>
+    Effect.gen(function* () {
+      const head = { ref: 'althar/mer-231', sha: 'abc', repo: { full_name: 'meridian/api' } }
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head }) }],
+        ['DELETE', `${REPO}/git/refs/heads/althar/mer-231`, { status: 204 }],
+      ])
+      const change = yield* host.change(repository, 12)
+      yield* host.deleteBranch(repository, change)
+      assert.deepStrictEqual(
+        sent.map((request) => `${request.method} ${request.url}`),
+        [`GET ${REPO}/pulls/12`, `GET ${REPO}/pulls/12`, `DELETE ${REPO}/git/refs/heads/althar/mer-231`],
+      )
+      // From a fork, the fork's branch goes; one already gone, as GitHub says when asked after, is nothing to do.
+      const fork = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head: { ...head, repo: { full_name: 'you/api' } } }) }],
+        ['DELETE', `${API}/repos/you/api/git/refs/heads/althar/mer-231`, { status: 422, json: { message: 'Reference does not exist' } }],
+        ['GET', `${API}/repos/you/api/git/ref/heads/althar/mer-231`, { status: 404, json: { message: 'Not Found' } }],
+      ])
+      yield* fork.host.deleteBranch(repository, change)
+      assert.isTrue(fork.sent.some((request) => request.method === 'DELETE' && request.url.startsWith(`${API}/repos/you/api/`)))
+      // A 422 for a branch still there (its default branch, a validation, throttling) is GitHub refusing, said in its words.
+      const kept = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head }) }],
+        ['DELETE', `${REPO}/git/refs/heads/althar/mer-231`, { status: 422, json: { message: 'Cannot delete the default branch' } }],
+        ['GET', `${REPO}/git/ref/heads/althar/mer-231`, { json: { ref: 'refs/heads/althar/mer-231', object: { sha: 'abc' } } }],
+      ])
+      const stays = yield* Effect.flip(kept.host.deleteBranch(repository, change))
+      assert.deepInclude(stays, { reason: 'rejected', status: 422, message: 'Cannot delete the default branch' })
+      // Still open, its branch stays: deleting it would close the pull request behind the person's back.
+      const open = github([['GET', `${REPO}/pulls/12`, { json: pull({ head }) }]])
+      const refused = yield* Effect.flip(open.host.deleteBranch(repository, change))
+      assert.deepInclude(refused, { reason: 'rejected', message: 'PR #12 is still open, so its branch stays.' })
+      assert.isFalse(open.sent.some((request) => request.method === 'DELETE'))
+    }),
+  )
+
   it.effect('finds the open pull request from a branch', () =>
     Effect.gen(function* () {
       const { host, sent } = github([
@@ -352,22 +412,73 @@ describe('GitHub as a code host', () => {
     }),
   )
 
-  it.effect('reads the end of a GitHub Actions job’s log, and nothing for other checks', () =>
+  it.effect('reads the end of a GitHub Actions job’s log from the storage GitHub redirects to, without the token', () =>
     Effect.gen(function* () {
-      const long = Array.from({ length: 400 }, (_, n) => `line ${n}`).join('\n')
-      const { host } = github([
-        ['GET', `${REPO}/actions/jobs/1/logs`, { text: long }],
-        ['GET', `${REPO}/actions/jobs/9/logs`, { status: 404, json: { message: 'Not Found' } }],
-        ['GET', `${REPO}/actions/jobs/8/logs`, { status: 500, text: 'down' }],
+      const long = Array.from({ length: 400 }, (_, n) => `2026-10-18T19:42:01.0000000Z line ${n}`).join('\n')
+      // As GitHub answers: a 302 to the log in its storage, signed for a minute, which refuses a request that carries a token too.
+      const blob = 'https://productionresultssa0.blob.core.windows.net/actions-results/abc/logs/job/job-logs.txt?sv=2025-01-05&sig=x'
+      const { host, sent } = github([
+        ['GET', `${REPO}/actions/jobs/1/logs`, { status: 302, headers: { location: blob } }],
+        [
+          'GET',
+          blob,
+          (request) =>
+            request.headers.authorization === undefined
+              ? { text: long }
+              : { status: 400, text: '\uFEFF<?xml version="1.0"?><Error><Code>InvalidAuthenticationInfo</Code></Error>' },
+        ],
       ])
-      const check = { name: 'test', state: 'failed' as const, url: null, summary: null }
+      const check = { name: 'verify', state: 'failed' as const, url: null, summary: null }
       const log = yield* host.checkLog(repository, { ...check, id: 'run:1:github-actions' })
       assert.strictEqual(log?.split('\n').length, 150)
       assert.isTrue(log?.endsWith('line 399'))
-      assert.isNull(yield* host.checkLog(repository, { ...check, id: 'run:9:github-actions' }))
+      assert.strictEqual(sent[0]?.headers.authorization, 'Bearer ghu_t')
+      assert.strictEqual(sent[1]?.url, blob)
+      assert.isUndefined(sent[1]?.headers.authorization)
+      assert.isUndefined(sent[1]?.headers['x-github-api-version'])
+      // With `whole`, all of it.
+      assert.strictEqual((yield* host.checkLog(repository, { ...check, id: 'run:1:github-actions' }, true))?.split('\n').length, 400)
+    }),
+  )
+
+  it.effect('says why a GitHub Actions job’s log can’t be read, and reads nothing for other checks', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        ['GET', `${REPO}/actions/jobs/9/logs`, { status: 410, json: { message: 'Gone' } }],
+        ['GET', `${REPO}/actions/jobs/7/logs`, { status: 403, json: { message: 'Resource not accessible by personal access token' } }],
+        ['GET', `${REPO}/actions/jobs/6/logs`, { status: 302, headers: { location: 'https://storage.example/log?sig=old' } }],
+        ['GET', 'https://storage.example/log?sig=old', { status: 403, text: '<Error><Code>AuthenticationFailed</Code></Error>' }],
+        ['GET', `${REPO}/actions/jobs/8/logs`, { status: 500, text: 'down' }],
+      ])
+      const check = { name: 'test', state: 'failed' as const, url: null, summary: null }
+      const failed = (id: string) => Effect.flip(host.checkLog(repository, { ...check, id }))
+      assert.strictEqual((yield* failed('run:9:github-actions')).reason, 'not_found')
+      const refused = yield* failed('run:7:github-actions')
+      assert.strictEqual(refused.reason, 'forbidden')
+      assert.strictEqual(refused.message, 'Resource not accessible by personal access token')
+      // The storage's own XML isn't words: where it was, and what it answered, are.
+      const storage = yield* failed('run:6:github-actions')
+      assert.strictEqual(storage.reason, 'rejected')
+      assert.strictEqual(storage.message, 'storage.example answered 403')
+      assert.strictEqual((yield* failed('run:8:github-actions')).reason, 'unreachable')
       assert.isNull(yield* host.checkLog(repository, { ...check, id: 'status:3' }))
       assert.isNull(yield* host.checkLog(repository, { ...check, id: 'run:2:circleci' }))
-      assert.strictEqual((yield* Effect.flip(host.checkLog(repository, { ...check, id: 'run:8:github-actions' }))).reason, 'unreachable')
+    }),
+  )
+
+  it.effect('reads what a check run from another service reported of itself', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        ['GET', `${REPO}/check-runs/2`, { json: { output: { title: '1 new alert', summary: 'SQL injection', text: 'in src/db.ts:12' } } }],
+        ['GET', `${REPO}/check-runs/3`, { json: { output: { title: 'Failed', summary: null, text: '' } } }],
+      ])
+      const check = { name: 'CodeQL', state: 'failed' as const, url: null, summary: null }
+      assert.strictEqual(
+        yield* host.checkReport!(repository, { ...check, id: 'run:2:github-advanced-security' }),
+        'SQL injection\n\nin src/db.ts:12',
+      )
+      assert.isNull(yield* host.checkReport!(repository, { ...check, id: 'run:3:circleci' }))
+      assert.isNull(yield* host.checkReport!(repository, { ...check, id: 'status:4' }))
     }),
   )
 

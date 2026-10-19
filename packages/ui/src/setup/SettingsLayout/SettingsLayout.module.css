@@ -1,0 +1,45 @@
+/* the page scrolls under the window's bar, with the scrollbar at the window's edge */
+.page {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--n-2);
+}
+
+/* the side gives way first: on a smaller window it narrows and the margins close, so the sheet keeps the room */
+.columns {
+  display: grid;
+  grid-template-columns: clamp(208px, 20vw, 256px) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(16px, 2.2vw, 32px);
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: clamp(16px, 2vw, 28px) clamp(16px, 3vw, 48px) 72px;
+}
+
+/* the side stays in sight while a long section scrolls */
+.side {
+  position: sticky;
+  top: clamp(16px, 2vw, 28px);
+  display: grid;
+  gap: 20px;
+}
+.main {
+  min-width: 0;
+}
+.body {
+  display: grid;
+  gap: 16px;
+  padding: 0 22px 20px;
+}
+
+/* narrow, the side goes over the section */
+@media (width < 820px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: 24px;
+  }
+  .side {
+    position: static;
+  }
+}

@@ -1,9 +1,27 @@
+/* as tall as a line of what the model says, which takes its place; it shows after a beat, so an answer at once never flashes it */
 .thinking {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 22px;
+  min-height: calc(var(--prose-size) * var(--prose-lh));
   font-size: 13px;
+  animation: appear 240ms var(--ease) 300ms both;
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+.took,
+.slow {
+  font-size: 12px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.slow::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--t-4);
 }
 .shimmer {
   background: linear-gradient(90deg, var(--t-3) 0%, var(--t-3) 40%, var(--t-1) 50%, var(--t-3) 60%, var(--t-3) 100%);
@@ -22,6 +40,10 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  /* still after the beat, but without the fade */
+  .thinking {
+    animation-duration: 1ms;
+  }
   .shimmer {
     animation: none;
     color: var(--t-3);

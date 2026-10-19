@@ -22,7 +22,16 @@ export const Conversation: Story = {}
 /** On the board: the conversation has news. */
 export const BoardWithNews: Story = { args: { value: Room.Board, news: true } }
 export const Both: Story = { args: { value: Room.Both } }
-/** What waits on you is the bar's to say: no view carries a dot for it. */
+/** The project's settings in place of its work. */
+export const Settings: Story = { args: { value: Room.Settings } }
+/** A connection to sign in again: Settings carries the violet dot, and says so to a screen reader. */
+export const SettingsNeedYou: Story = {
+  args: { needsYou: true },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('radio', { name: 'Settings, needs you' })).toBeVisible()
+  },
+}
+/** What waits on you in the work is the bar's to say: no view carries a dot for it. */
 export const Switching: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -54,6 +63,7 @@ export const AllStates: Story = {
         { state: 'conversation', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
         { state: 'board, news', node: <RoomSwitch value={Room.Board} onChange={() => {}} news /> },
         { state: 'both', node: <RoomSwitch value={Room.Both} onChange={() => {}} /> },
+        { state: 'settings, needs you', node: <RoomSwitch value={Room.Settings} onChange={() => {}} needsYou /> },
         { state: 'hover', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
         { state: 'focus', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
         { state: 'pressed', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },

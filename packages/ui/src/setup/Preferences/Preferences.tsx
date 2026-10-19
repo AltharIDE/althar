@@ -4,6 +4,7 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Choices } from '../../primitives/Choices/Choices'
+import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Select } from '../../primitives/Select/Select'
@@ -32,12 +33,47 @@ export function SettingList({ children, className, ...rest }: SettingListProps) 
   )
 }
 
+export type SettingGroupProps = RootProps<
+  'section',
+  {
+    title: string
+    /** A line on what the group is, under its name. */
+    note?: ReactNode
+    /** What is done for the group as a whole, at the end of its heading: Add a folder. */
+    action?: ReactNode
+    /** The name's rank in the page's outline: one under the page's own. */
+    headingLevel?: HeadingLevel
+    children: ReactNode
+  }
+>
+
+/** A part of a section of settings, by its name: its rows, or whatever it holds, under a heading with a line on it. */
+export function SettingGroup({ title, note, action, headingLevel = 2, children, className, ...rest }: SettingGroupProps) {
+  const id = useId()
+  return (
+    <section aria-labelledby={id} className={cx(s.group, className)} {...rest}>
+      <div className={s.groupHead}>
+        <div className={s.groupWords}>
+          <Heading level={headingLevel} id={id} className={s.groupTitle}>
+            {title}
+          </Heading>
+          {note !== undefined && <p className={s.groupNote}>{note}</p>}
+        </div>
+        {action !== undefined && <div className={s.groupAction}>{action}</div>}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 export interface SettingRowProps {
   title: string
   /** A line on what it does, under the name. */
   note?: ReactNode
   /** A picture before the name, such as the round glyph of the switch it opened from. */
   glyph?: ReactNode
+  /** A picture that has its own colours, such as a product's mark: before the name as it is, with no round glyph behind it. */
+  mark?: ReactNode
   /** Set in under the row above, which it depends on, in a well. */
   indent?: boolean | undefined
   /** The control, at the end. It is named by `title` through the ids it is given. */
@@ -48,14 +84,15 @@ export interface SettingRowProps {
 }
 
 /** One setting: its name and line, and the control at the end. */
-export function SettingRow({ title, note, glyph, indent = false, children, under, className }: SettingRowProps) {
+export function SettingRow({ title, note, glyph, mark, indent = false, children, under, className }: SettingRowProps) {
   const id = useId()
   const ids = { labelledBy: `${id}-t`, ...(note === undefined ? {} : { describedBy: `${id}-n` }) }
+  const picture = glyph ?? mark
   return (
-    <div className={cx(s.row, indent && s.indent, glyph !== undefined && s.withGlyph, className)}>
-      {glyph !== undefined && (
-        <span className={s.glyph} aria-hidden="true">
-          {glyph}
+    <div className={cx(s.row, indent && s.indent, picture !== undefined && s.withGlyph, className)}>
+      {picture !== undefined && (
+        <span className={glyph === undefined ? s.asIs : s.glyph} aria-hidden="true">
+          {picture}
         </span>
       )}
       <span className={s.words}>
@@ -539,6 +576,81 @@ export function UsageData({ on, onChange, doNotTrack = false, text }: UsageDataP
       onChange={onChange}
       disabled={doNotTrack}
     />
+  )
+}
+
+/* ---- crash reports ----------------------------------------------------------------- */
+
+export interface CrashReportsText {
+  title: string
+  note: string
+  /** Why it is off, whatever was chosen. */
+  doNotTrack: string
+}
+
+export const crashReportsText: CrashReportsText = {
+  title: 'Crash reports',
+  note: 'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
+  doNotTrack: 'Off while DO_NOT_TRACK is set.',
+}
+
+export interface CrashReportsProps {
+  on: boolean
+  onChange: (on: boolean) => void
+  /** DO_NOT_TRACK is set where Althar started: off, whatever was chosen, and not turned on here. */
+  doNotTrack?: boolean
+  text?: Partial<CrashReportsText>
+}
+
+/** Whether Althar sends crash reports, with the one line on what they carry and never carry; beside usage data, a switch of its own. */
+export function CrashReports({ on, onChange, doNotTrack = false, text }: CrashReportsProps) {
+  const t = { ...crashReportsText, ...text }
+  return (
+    <SettingSwitch
+      title={t.title}
+      note={doNotTrack ? t.doNotTrack : t.note}
+      checked={on && !doNotTrack}
+      onChange={onChange}
+      disabled={doNotTrack}
+    />
+  )
+}
+
+export interface CrashReportsLineText {
+  title: string
+  note: string
+  doNotTrack: string
+}
+
+export const crashReportsLineText: CrashReportsLineText = {
+  title: 'Crash reports',
+  note: 'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+  doNotTrack: 'are off while DO_NOT_TRACK is set.',
+}
+
+export interface CrashReportsLineProps extends CrashReportsProps {
+  text?: Partial<CrashReportsLineText>
+  className?: string
+}
+
+/**
+ * Crash reports, asked once, as one quiet line with its switch at the end,
+ * for a first screen to carry at its foot: not a dialog, and nothing to
+ * answer before going on. Settings has the same switch.
+ */
+export function CrashReportsLine({ on, onChange, doNotTrack = false, text, className }: CrashReportsLineProps) {
+  const t = { ...crashReportsLineText, ...text }
+  const id = useId()
+  return (
+    <p className={cx(s.line, className)}>
+      <span className={s.lineWords}>
+        <span id={`${id}-t`} className={s.lineTitle}>
+          {t.title}
+        </span>{' '}
+        <span id={`${id}-n`}>{doNotTrack ? t.doNotTrack : t.note}</span>
+      </span>
+      <Switch checked={on && !doNotTrack} onChange={onChange} disabled={doNotTrack} labelledBy={`${id}-t`} describedBy={`${id}-n`} />
+    </p>
   )
 }
 

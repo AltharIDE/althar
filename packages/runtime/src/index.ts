@@ -1,6 +1,7 @@
 export {
   Agents,
   type AgentEntry,
+  type AgentStderr,
   type BusyOptions,
   RuntimeConfig,
   type RuntimeOptions,
@@ -10,6 +11,7 @@ export {
 } from './Config'
 export { type AtOnce, Busy } from './Busy'
 export { type AtOnceDefault, atOnceFor, type Machine } from './atOnce'
+export { SignIns } from './SignIns'
 export * from './errors'
 export { Instance, type InstanceInfo } from './Instance'
 export { Live, type LiveEvent } from './Live'
@@ -25,6 +27,7 @@ export { connection, handlers, serve, services } from './Api'
 export { Folders } from './Folders'
 export { Queries, type ThreadChange } from './Queries'
 export { type NudgeEvent, type NudgeKind, Nudges } from './Nudges'
+export { contained, type Failure, Failures, failureOf } from './Failures'
 export { familyOf, type Settled, type Took, tookBetween, UsageData, type UsageEvent } from './UsageData'
 export { agentSaid, summarize, words } from './words'
 export { Changes, type ChangeSummary, type Published } from './Changes'

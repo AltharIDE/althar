@@ -36,6 +36,8 @@ export const DraftReady: Story = { args: { onStop: undefined, onMarkReady: fn(),
 export const Abandoned: Story = { args: { onStop: undefined, onAbandon: undefined, onReopen: fn(), defaultOpen: true } }
 /** Merged, it is done for good: only its folder opens. */
 export const Merged: Story = { args: { onStop: undefined, onAbandon: undefined, defaultOpen: true } }
+/** Merged with commits after its pull request in none yet, it is before you: abandoning leaves them out, and it stays merged. */
+export const MergedWithCommitsAfter: Story = { args: { onStop: undefined, merged: true, defaultOpen: true } }
 /** With no editor found, nothing but abandoning. */
 export const OnlyAbandon: Story = { args: { onOpen: undefined, onStop: undefined, defaultOpen: true } }
 /** Long words, as a translation might have them, wrap inside the menu. */
@@ -57,12 +59,12 @@ export const ConflictsOtherwise: Story = { args: { conflicts: { choice: 'on', pr
 export const ConflictsAsTheProject: Story = { args: { conflicts: { choice: 'on', project: true, onChange: fn() } } }
 /** Open, everything its agents ask can be allowed with one switch. */
 export const AllowEverything: Story = { args: { allowEverything: { on: false, project: false, onChange: fn() }, defaultOpen: true } }
-/** Everything on it allowed: Unrestricted beside the button, before whatever else is said there. */
-export const Unrestricted: Story = {
+/** Everything on it allowed, with its conflicts hint beside the button as before. */
+export const AllowedEverything: Story = {
   args: { allowEverything: { on: true, project: false, onChange: fn() }, conflicts: { choice: 'on', project: false, onChange: fn() } },
 }
 /** Its project allows everything: the task's switch shows on, and is turned off in the project's rules. */
-export const UnrestrictedByProject: Story = { args: { allowEverything: { on: false, project: true, onChange: fn() }, defaultOpen: true } }
+export const AllowedByProject: Story = { args: { allowEverything: { on: false, project: true, onChange: fn() }, defaultOpen: true } }
 /** With nothing it can do, there is no menu at all. */
 export const NothingToDo: Story = { args: { onOpen: undefined, onStop: undefined, onAbandon: undefined } }
 
@@ -136,7 +138,6 @@ const allowing = fn()
 export const AllowingEverything: Story = {
   args: { allowEverything: { on: false, project: false, onChange: allowing } },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).queryByText('Unrestricted')).toBeNull()
     const page = await opened(canvasElement)
     await userEvent.click(await page.findByRole('menuitemcheckbox', { name: /Allow everything on this task/ }))
     await expect(allowing).toHaveBeenCalledWith(true)

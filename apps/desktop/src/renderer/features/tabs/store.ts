@@ -140,3 +140,14 @@ export const settingsClosed = (kept: Kept): Kept => {
   const { settings: _closed, ...rest } = kept
   return rest
 }
+
+/** A tab moves: before another's, or to the end. Only the projects' tabs are ordered; the home's stays first. */
+export const moved =
+  (projectId: string, beforeId: string | null) =>
+  (kept: Kept): Kept => {
+    if (!kept.open.includes(projectId)) return kept
+    const rest = kept.open.filter((id) => id !== projectId)
+    const at = beforeId === null ? -1 : rest.indexOf(beforeId)
+    const open = at < 0 ? [...rest, projectId] : [...rest.slice(0, at), projectId, ...rest.slice(at)]
+    return open.every((id, i) => id === kept.open[i]) ? kept : { ...kept, open }
+  }

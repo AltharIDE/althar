@@ -2,6 +2,42 @@
 .list {
   display: grid;
 }
+
+/* a part of a section: its name and a line on it, what is done for all of it at the end, then what it holds; a little apart from the one before */
+.group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.group + .group {
+  margin-top: 14px;
+}
+.groupHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.groupWords {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.groupTitle {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.groupNote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.groupAction {
+  flex: none;
+}
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -34,6 +70,14 @@
   border-radius: 99px;
   background: var(--t-1);
   color: var(--on-ink);
+}
+/* a mark with its own colours, in the glyph's place, as it is */
+.asIs {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--t-1);
 }
 .words {
   display: grid;
@@ -475,4 +519,24 @@
   .breathe {
     animation: none;
   }
+}
+
+/* One quiet line with its switch at the end, for a first screen's foot. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.lineWords {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+.lineTitle {
+  font-weight: 600;
+  color: var(--t-2);
 }

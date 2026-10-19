@@ -5,7 +5,9 @@ import { join } from 'node:path'
  * Draws the menu bar's pictures into resources/tray: Althar's mark, and the
  * mark with a dot for when something waits on you, as template images (black
  * on clear: the menu bar draws them in its own colour), at 18 points and
- * twice that. The mark's geometry is the kit's Logo (a test keeps the two
+ * twice that. Off a Mac there is no template: markLight (white, for a dark
+ * panel) and markDark (near black, for a light one) are drawn the same way.
+ * The mark's geometry is the kit's Logo (a test keeps the two
  * the same). Run it again after the mark changes:
  *   node scripts/trayPictures.ts
  */
@@ -21,8 +23,11 @@ const SIZE = 18
 /** The dot that says something waits on you: at the top right, with clear round it so it reads apart from the mark. */
 const DOT = { cx: 19.4, cy: 5.2, r: 3, clear: 1.6 }
 
-const svg = (yours: boolean) => `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${SIZE}" height="${SIZE}">
+/** The two colours of the mark off a Mac: the tray's own panel is light or dark. */
+const INKS = { Template: '#000000', Light: '#ffffff', Dark: '#1a1a1a' }
+
+const svg = (yours: boolean, ink: string) => `
+<svg xmlns="http://www.w3.org/2000/svg" fill="${ink}" viewBox="0 0 24 24" width="${SIZE}" height="${SIZE}">
   <defs>
     <mask id="room">
       <rect width="24" height="24" fill="white" />
@@ -44,11 +49,12 @@ if (import.meta.main) {
   const browser = await chromium.launch()
   for (const scale of [1, 2]) {
     const page = await browser.newPage({ viewport: { width: SIZE, height: SIZE }, deviceScaleFactor: scale })
-    for (const yours of [false, true]) {
-      await page.setContent(`<body style="margin:0;background:transparent">${svg(yours)}</body>`)
-      const picture = await page.locator('svg').screenshot({ omitBackground: true })
-      writeFileSync(join(out, `mark${yours ? 'Yours' : ''}Template${scale === 2 ? '@2x' : ''}.png`), picture)
-    }
+    for (const [kind, ink] of Object.entries(INKS))
+      for (const yours of [false, true]) {
+        await page.setContent(`<body style="margin:0;background:transparent">${svg(yours, ink)}</body>`)
+        const picture = await page.locator('svg').screenshot({ omitBackground: true })
+        writeFileSync(join(out, `mark${yours ? 'Yours' : ''}${kind}${scale === 2 ? '@2x' : ''}.png`), picture)
+      }
     await page.close()
   }
   await browser.close()

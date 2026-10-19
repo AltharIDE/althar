@@ -10,6 +10,7 @@ import {
   checksOf,
   commentForLead,
   commentLine,
+  descriptionAsk,
   filesLine,
   fromAlthar,
   nameOf,
@@ -88,41 +89,53 @@ describe('what Althar writes about a pull request', () => {
     assert.strictEqual(standing({ state: 'merged', draft: false }), 'merged')
   })
 
-  it('describes it from what the steps reported', () => {
-    assert.strictEqual(
-      bodyOf({ lead: null, review: null, findings: [], issue: null }),
-      '<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
-    )
+  it('describes it as the lead wrote it, else from what the task built, and never with the review or its evidence', () => {
+    const credit = '<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>'
+    assert.strictEqual(bodyOf({ lead: null, issue: null }), credit)
     // Althar's credit turned off, it doesn't sign the description either.
-    assert.strictEqual(bodyOf({ lead: 'Adds a retry.', review: null, findings: [], issue: null, credit: false }), 'Adds a retry.')
-    assert.strictEqual(
-      bodyOf({ lead: '', review: { rounds: 0, verdict: null }, findings: [], issue: { key: '#12', url: 'u', sameHost: true } }),
-      'Issue: #12\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
-    )
+    assert.strictEqual(bodyOf({ lead: 'Adds a retry.', issue: null, credit: false }), 'Adds a retry.')
+    assert.strictEqual(bodyOf({ lead: '', issue: { key: '#12', url: 'u', sameHost: true } }), `Issue: #12\n\n${credit}`)
+    // The lead's description is the body, above the issue's link: not what the task built, which is the person's.
     assert.strictEqual(
       bodyOf({
+        built: 'Checkout retries once. Try it with the network off.',
         lead: 'Retried the call.',
-        review: { rounds: 2, verdict: 'changes_requested' },
-        findings: [
-          { severity: 'major', file: 'src/a.ts', line: 3, claim: 'Never stops.', state: 'fixed', response: null },
-          { severity: 'nit', file: 'README.md', line: null, claim: 'Typo.', state: 'set_aside', response: 'Intended.' },
-          { severity: 'minor', file: null, line: null, claim: 'Name.', state: 'open', response: null },
-          { severity: 'minor', file: null, line: null, claim: 'Odd.', state: 'set_aside', response: null },
-        ],
+        written: '  Checkout gave up on the first failed call. It now retries once.\n',
         issue: { key: 'MER-231', url: 'https://linear.app/m/issue/MER-231', sameHost: false },
       }),
       [
-        'Retried the call.',
-        '### Review\n\nReviewed in 2 rounds.',
-        '- Fixed: major `src/a.ts:3`: Never stops.\n- Set aside: nit `README.md`: Typo. (Intended.)\n- Open: minor: Name.\n- Set aside: minor: Odd.',
+        'Checkout gave up on the first failed call. It now retries once.',
         'Issue: [MER-231](https://linear.app/m/issue/MER-231)',
-        '<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+        credit,
       ].join('\n\n'),
     )
-    assert.include(
-      bodyOf({ lead: null, review: { rounds: 1, verdict: 'pass' }, findings: [], issue: null }),
-      'Passed after one round of review.',
+    // Where it wrote none, as an older task's lead didn't: what the task built, else its last summary.
+    assert.strictEqual(
+      bodyOf({ built: 'Checkout retries once.', lead: 'Retried the call.', written: ' ', issue: null }),
+      `Checkout retries once.\n\n${credit}`,
     )
+    assert.strictEqual(bodyOf({ built: null, lead: 'Retried the call.', issue: null }), `Retried the call.\n\n${credit}`)
+  })
+
+  it('asks the lead for a description a reviewer wants to read, in the template where there is one', () => {
+    const plain = descriptionAsk([{ name: 'api', template: null }], false)
+    assert.match(plain, /^Write the description of the task's pull request before you finish\. It is for whoever reviews it/)
+    assert.include(plain, 'Why: ')
+    assert.include(plain, 'not the tests you wrote')
+    assert.include(plain, 'Never put in it the review')
+    assert.notInclude(plain, '~~~~~markdown')
+    assert.notInclude(plain, 'template')
+    const templated = descriptionAsk(
+      [
+        { name: 'api', template: { path: '.github/pull_request_template.md', text: '## Summary\n' } },
+        { name: 'web', template: null },
+      ],
+      true,
+    )
+    assert.include(templated, ', one for each of api, web.')
+    assert.include(templated, 'leave every box unticked')
+    assert.include(templated, "api's template, .github/pull_request_template.md:\n~~~~~markdown\n## Summary\n\n~~~~~")
+    assert.include(templated, 'each with its repository')
   })
 
   it('lists what people said, with where and in which thread', () => {
@@ -292,6 +305,7 @@ describe('what screens read of a pull request and what arrived', () => {
         passed: null,
         failed: null,
         failing: [],
+        logs: [],
         url: 'u',
         outsider: false,
       },
@@ -301,7 +315,17 @@ describe('what screens read of a pull request and what arrived', () => {
       { outsider: true },
     )
     const checks = itemOf(row('arrival', { source: 'gitlab', kind: 'checks', where: 'MR !4', passed: 2, failed: 1, failing: ['test', 1] }))
-    assert.deepInclude(checks?.content, { from: null, text: null, passed: 2, failed: 1, failing: ['test'], url: null })
+    assert.deepInclude(checks?.content, { from: null, text: null, passed: 2, failed: 1, failing: ['test'], logs: [], url: null })
+    // Failed checks' logs as kept, or why there were none; one not of that shape is left out.
+    const shown = [
+      { name: 'test', url: 'u', log: 'FAIL a.test.ts', missing: null },
+      { name: 'lint', url: null, log: null, missing: 'GitLab refused (403)' },
+    ]
+    const logs = [...shown, { name: 'odd', log: 3 }]
+    const kept = itemOf(
+      row('arrival', { source: 'gitlab', kind: 'checks', where: 'MR !4', passed: 0, failed: 2, failing: ['test', 'lint'], logs }),
+    )
+    assert.deepStrictEqual(kept?.kind === 'arrival' ? kept.content.logs : undefined, shown)
     for (const verdict of ['approved', 'changes_requested', 'commented'] as const)
       assert.deepInclude(itemOf(row('arrival', { source: 'github', kind: 'review', where: 'PR #1', verdict }))?.content, { verdict })
     assert.isUndefined(itemOf(row('arrival', { source: 'gitea', kind: 'comment' })))

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask } from './support'
+import { backToWork, launch, openFirstProject, planTask, projectSettings } from './support'
 
 /*
  * An agent out of usage, as the person sees it. The fake agents are out as
@@ -45,11 +45,7 @@ const startWhileOut = async (out: string, { asks = false }: { readonly asks?: bo
     .click()
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   if (asks) {
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
-    await page
-      .getByRole('dialog', { name: /’s settings$/ })
-      .getByRole('button', { name: /^Rules/ })
-      .click()
+    await projectSettings(page, 'Rules')
     await page.getByRole('button', { name: 'moves to the next agent free', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
     const limits = page.getByRole('listitem', { name: 'Limits' })
@@ -58,8 +54,7 @@ const startWhileOut = async (out: string, { asks = false }: { readonly asks?: bo
     )
     await limits.scrollIntoViewIfNeeded()
     await page.screenshot({ path: 'test-results/limit-ask-rules.png', animations: 'disabled' })
-    await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await backToWork(page)
   }
   await page.getByRole('button', { name: 'Start', exact: true }).click()
   return { electronApp, page }

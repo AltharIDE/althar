@@ -22,7 +22,7 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
-import { leftAsItIs, noListing, noReviews, unstarted } from '../model'
+import { leftAsItIs, noListing, noReviews, stillOpen, unstarted } from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -36,6 +36,9 @@ import { leftAsItIs, noListing, noReviews, unstarted } from '../model'
  * such as a bare repository on disk.
  */
 
+/** A check as a fake host runs it: its log, or the refusal reading it meets, and its page. */
+export type FakeCheck = Pick<Check, 'name' | 'state'> & { readonly log?: string | ConnectorFailed; readonly url?: string }
+
 export interface FakeServiceOptions {
   readonly product?: Product
   readonly account?: Account
@@ -46,7 +49,7 @@ export interface FakeServiceOptions {
   /** Whether a change conflicts with its target, as the host works it out now; without it, the host doesn't say. */
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
-  readonly checksFor?: (number: number, sha: string) => ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }> | undefined
+  readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** Whether it lists changes: true unless said, as every host Althar knows does. */
   readonly lists?: boolean
   /** A scope the connection lacks, which listing changes needs: listing is refused for it, as a host refuses a token without it. */
@@ -88,7 +91,7 @@ export interface FakeControls {
     options?: { readonly path?: string; readonly line?: number; readonly bot?: boolean; readonly member?: boolean },
   ): Comment
   reviewAs(number: number, author: string, verdict: Verdict, body?: string, options?: { readonly member?: boolean }): Review
-  setChecks(number: number, checks: ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }>): void
+  setChecks(number: number, checks: ReadonlyArray<FakeCheck>): void
   /** Someone merges a change on the host itself. */
   mergeByHand(number: number): void
   close(number: number): void
@@ -134,6 +137,8 @@ export interface FakeControls {
   }): ChangeRequest
   /** Every review posted, in order, with the change it is on. */
   readonly reviewsPosted: ReadonlyArray<{ readonly number: number; readonly id: string; readonly review: NewReview }>
+  /** Every branch `deleteBranch` deleted, by the number of the change it was the branch of, in order. */
+  readonly branchesDeleted: ReadonlyArray<number>
   /** Method names, in the order they were called. */
   readonly calls: ReadonlyArray<string>
 }
@@ -169,7 +174,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const comments = new Map<number, Array<Comment>>()
   const reviews = new Map<number, Array<Review>>()
   const checks = new Map<number, Array<Check>>()
-  const logs = new Map<string, string | null>()
+  const logs = new Map<string, string | ConnectorFailed | null>()
   const reran: Array<string> = []
   const starting = new Set<string>()
   const issues = new Map<string, Issue>()
@@ -180,6 +185,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const created: Array<Issue> = []
   const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
   const calls: Array<string> = []
+  const deleted: Array<number> = []
   let ids = 0
   const nextId = () => String((ids += 1))
 
@@ -362,6 +368,18 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         update(change.number, { state: 'merged' })
         return Effect.succeed(changeNumbered(change.number))
       }),
+    closeChange: (_repository, change) =>
+      Effect.andThen(called('closeChange'), () => {
+        // As GitHub: one merged or closed already stays as it is.
+        if (changeNumbered(change.number).state === 'open') update(change.number, { state: 'closed' })
+        return Effect.succeed(changeNumbered(change.number))
+      }),
+    deleteBranch: (_repository, change) =>
+      Effect.andThen(called('deleteBranch'), () => {
+        if (changeNumbered(change.number).state === 'open') return Effect.fail(stillOpen(product, service.words, change.number))
+        if (!deleted.includes(change.number)) deleted.push(change.number)
+        return Effect.void
+      }),
     checks: (_repository, sha) =>
       Effect.andThen(called('checks'), () => {
         const change =
@@ -382,13 +400,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
             logs.set(id, check.log ?? null)
             // Run again, a check shows as running for a reading, as a host's does once it has started it again.
             const again = starting.delete(id)
-            return { id, name: check.name, state: again ? 'running' : check.state, url: null, summary: null }
+            return { id, name: check.name, state: again ? 'running' : check.state, url: check.url ?? null, summary: null }
           }),
         )
       }),
     checkLog: (_repository, check) =>
       Effect.andThen(called('checkLog'), () => {
-        return Effect.succeed(logs.get(check.id) ?? null)
+        const log = logs.get(check.id) ?? null
+        return log instanceof ConnectorFailed ? Effect.fail(log) : Effect.succeed(log)
       }),
     rerun: (_repository, check) =>
       Effect.andThen(called('rerun'), () => {
@@ -617,7 +636,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         list.map((check, index) => {
           const id = `check-${number}-${index}`
           logs.set(id, check.log ?? null)
-          return { id, name: check.name, state: check.state, url: null, summary: null }
+          return { id, name: check.name, state: check.state, url: check.url ?? null, summary: null }
         }),
       )
     },
@@ -674,6 +693,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     },
     get reviewsPosted() {
       return [...posted]
+    },
+    get branchesDeleted() {
+      return [...deleted]
     },
     calls,
   }

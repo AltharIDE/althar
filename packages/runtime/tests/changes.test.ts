@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { ConnectorFailed } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import { BUILT, BUILT_FIXED, BUILT_SETTLED } from '@althar/provider-adapters/testing'
+import { BUILT, BUILT_FIXED, BUILT_SETTLED, DESCRIBED } from '@althar/provider-adapters/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -29,6 +30,14 @@ import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, turns, until } from './support'
 
+/** A check's log as a code host refuses it: GitHub's own 403, with its words, as to a sign-in that may not read Actions. */
+const refused = new ConnectorFailed({
+  product: 'github',
+  reason: 'forbidden',
+  status: 403,
+  message: 'Resource not accessible by integration',
+})
+
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
  * steps are done, Althar commits what the lead left, pushes the branch to
@@ -38,10 +47,8 @@ import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, tur
  * settles the task.
  */
 
-const runtimeWith = (services: { readonly github?: FakeService; readonly linear?: FakeService }) =>
-  Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors(services), listenEvery: Duration.millis(100) })),
-  )
+const runtimeWith = (services: { readonly github?: FakeService; readonly linear?: FakeService }, file = ':memory:') =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors(services), listenEvery: Duration.millis(100) })))
 
 const connect = (product: 'github' | 'linear', webUrl?: string) =>
   Effect.gen(function* () {
@@ -106,13 +113,14 @@ describe('a task that ends in a pull request', () => {
       assert.isTrue(change?.draft)
       assert.strictEqual(`${change?.short} ${change?.prefix}${change?.number}`, 'PR #1')
 
-      // The branch is on the host, its description leading with what the task built, then what the steps reported.
+      // The branch is on the host, described as its lead wrote it for a reviewer, once Althar asked: nothing of the review.
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'althar/add-a-retry')
       assert.strictEqual(opened?.target, 'main')
       assert.isTrue(opened?.draft)
-      assert.isTrue(opened?.body.startsWith(BUILT))
-      assert.include(opened?.body, 'Passed after one round of review.')
+      assert.isTrue(opened?.body.startsWith(`${DESCRIBED}\n\n`))
+      assert.notInclude(opened?.body, BUILT)
+      assert.notMatch(opened?.body ?? '', /review/i)
       // What it pushed is what the lead committed; Althar commits nothing of its own, and is its co-author.
       assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'althar/add-a-retry'), 'Fake Change it')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%B', 'althar/add-a-retry'), `Change it\n\n${coAuthorLine}`)
@@ -168,14 +176,30 @@ describe('a task that ends in a pull request', () => {
       yield* changes.refresh(ready?.taskId ?? '')
       yield* Effect.sleep(Duration.millis(300))
       assert.isFalse((yield* arrivals(threadId)).some((arrival) => arrival.kind === 'checks'))
+      // Each failed check's card shows the end of its log, or why Althar couldn't read it, with where to see it.
+      const job = 'https://github.com/meridian/api/actions/runs/1/job/2'
       github.setChecks(1, [
         { name: 'test', state: 'failed', log: 'FAIL limit.test.ts' },
+        { name: 'verify', state: 'failed', url: job, log: refused },
         { name: 'lint', state: 'passed' },
       ])
       const checked = yield* until(arrivals(threadId), (all) => all.some((arrival) => arrival.kind === 'checks'))
       assert.deepInclude(
         checked.find((arrival) => arrival.kind === 'checks'),
-        { passed: 1, failed: 1, failing: ['test'] },
+        {
+          passed: 1,
+          failed: 2,
+          failing: ['test', 'verify'],
+          logs: [
+            { name: 'test', url: null, log: 'FAIL limit.test.ts', missing: null },
+            {
+              name: 'verify',
+              url: job,
+              log: null,
+              missing: 'GitHub refused (403): Resource not accessible by integration. Its sign-in may not be allowed to read logs',
+            },
+          ],
+        },
       )
 
       // Merged, the task is settled, and nothing listens any more.
@@ -212,16 +236,15 @@ describe('a task that ends in a pull request', () => {
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'feature/add-a-retry')
-      // What the task built, then the lead's description, in the template: its headings and checklist kept, the box it ticked
-      // unticked, Althar's own below.
+      // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's line below.
       assert.strictEqual(
         opened?.body,
-        `${BUILT}\n\n## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`,
+        `## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`,
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('leads a description written in the template with what the task built as settling last said it', () => {
+  it.live('keeps what the task built out of a description written in the template, though settling says it again', () => {
     const { working, bare } = hosted()
     mkdirSync(join(working, '.github'))
     writeFileSync(join(working, '.github', 'pull_request_template.md'), '## What changed\n\n<!-- A line or two. -->\n')
@@ -236,7 +259,8 @@ describe('a task that ends in a pull request', () => {
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
       const body = github.changes[0]?.body ?? ''
-      assert.isTrue(body.startsWith(`${BUILT_SETTLED}\n\n## What changed\n\nDid the task, in the template.`))
+      assert.isTrue(body.startsWith('## What changed\n\nDid the task, in the template.'))
+      assert.notInclude(body, BUILT_SETTLED)
       assert.notInclude(body, BUILT)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -611,31 +635,8 @@ describe('a task that ends in a pull request', () => {
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ branch: string }>`SELECT branch FROM workspaces`
       assert.deepStrictEqual(git(bare, 'ls-tree', '--name-only', workspace?.branch ?? '').split('\n'), ['README.md', 'change.txt'])
-      // The pull request says what the task built, then what was shown, in words: the screenshot is in Althar.
-      const body = github.changes[0]?.body ?? ''
-      assert.include(
-        body,
-        [
-          BUILT,
-          '',
-          '### Evidence',
-          '',
-          '- Screenshot: The retry button after a failed checkout',
-          '- Test run: The checkout tests: `bun test checkout`, exit 0',
-          '  ~~~~',
-          '  checkout.test.ts',
-          '    ✓ retries once',
-          '  ',
-          '  1 passed',
-          '  ~~~~',
-          '',
-          'Screenshots are in Althar, on the task.',
-          '',
-          '### Unverified',
-          '',
-          '- Not tried against the real payment provider: no sandbox account',
-        ].join('\n'),
-      )
+      // The evidence is the person's, in Althar: the pull request is described as the lead wrote it, with none of it.
+      assert.strictEqual(github.changes[0]?.body, `${DESCRIBED}\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -659,43 +660,47 @@ describe('a task that ends in a pull request', () => {
       const settled = results.find((result) => result.step === 'settle')
       assert.deepStrictEqual(settled?.unverified, [])
       assert.strictEqual(results.find((result) => result.step === 'publish')?.summary, 'Opened draft pull request #1.')
-      // The pull request has all it showed, and nothing left unverified: settling cleared it.
+      // The pull request has none of what it showed, settling or not.
       const body = github.changes[0]?.body ?? ''
-      assert.include(body, '- Screenshot: The retry button after a failed checkout\n- Test run: The checkout tests')
-      assert.include(body, '- Test run: The heading test: `bun test heading`, exit 0')
-      assert.notInclude(body, '### Unverified')
+      assert.isTrue(body.startsWith(DESCRIBED))
+      assert.notInclude(body, 'The heading test')
+      assert.notInclude(body, 'exit 0')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('leads its description with what the task built as it ended: a settling that changed the work says it again', () => {
-    const { working, bare } = hosted()
-    const github = makeFakeService({ pushUrl: () => bare })
-    github.addRepository(['meridian', 'api'])
-    return Effect.gen(function* () {
-      yield* connect('github', HOST)
-      // Settling commits a fix but leaves what it built unsaid, until Althar asks for it again.
-      const projectId = yield* ask(
-        working,
-        'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:built-unsaid] [review:findings]',
-      )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
-      const results = (yield* items(ready?.threadId ?? '')).flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
-      assert.deepStrictEqual(
-        results.map((result) => [result.step, result.built ?? null]),
-        [
-          ['implement', BUILT],
-          ['review', null],
-          ['settle', BUILT_SETTLED],
-          ['review', null],
-          ['publish', null],
-        ],
-      )
-      // The pull request leads with it as it now stands, never as it was first said.
-      const body = github.changes[0]?.body ?? ''
-      assert.isTrue(body.startsWith(BUILT_SETTLED))
-      assert.notInclude(body, BUILT)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
+  it.live(
+    'says what the task built as it ended, a settling that changed the work saying it again, and keeps it out of the description',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        // Settling commits a fix but leaves what it built unsaid, until Althar asks for it again.
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:built-unsaid] [review:findings]',
+        )
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+        const results = (yield* items(ready?.threadId ?? '')).flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
+        assert.deepStrictEqual(
+          results.map((result) => [result.step, result.built ?? null]),
+          [
+            ['implement', BUILT],
+            ['review', null],
+            ['settle', BUILT_SETTLED],
+            ['review', null],
+            ['publish', null],
+          ],
+        )
+        // That is the person's; the pull request has the description the lead wrote for its reviewer.
+        const body = github.changes[0]?.body ?? ''
+        assert.isTrue(body.startsWith(DESCRIBED))
+        assert.notInclude(body, BUILT_SETTLED)
+        assert.notInclude(body, BUILT)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+  )
 
   it.live(
     'gives a reviewer carrying on to another round the evidence the lead handed settling',
@@ -840,11 +845,19 @@ describe('a pull request, by the person and the lead', () => {
 
       github.reviewAs(1, 'dana', 'changes_requested', 'Name it better.')
       github.commentAs(1, 'lee', 'Looks fine to me.')
-      github.setChecks(1, [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts' }])
+      github.setChecks(1, [
+        { name: 'test', state: 'failed', log: 'FAIL limit.test.ts' },
+        { name: 'verify', state: 'failed', url: 'https://github.com/meridian/api/actions/runs/1/job/2', log: refused },
+      ])
       const read = yield* changes.read(taskId)
       assert.include(read, 'PR #1, "Add a retry" (open)')
-      assert.include(read, 'Checks: 0 passed, 1 failed, 0 running (failed: test).')
+      assert.include(read, 'Checks: 0 passed, 2 failed, 0 running (failed: test, verify).')
       assert.include(read, "The end of test's log:\n```\nFAIL limit.test.ts\n```")
+      // A log that couldn't be read says why, and that reading it again won't help.
+      assert.include(
+        read,
+        "Althar couldn't read verify's log: GitHub refused (403): Resource not accessible by integration. Its sign-in may not be allowed to read logs. Reading it again with read_check_log would fail the same way: work from what is here, or reproduce the check locally. Its page: https://github.com/meridian/api/actions/runs/1/job/2",
+      )
       assert.include(read, '- dana reviewed: changes requested\n> Name it better.')
       assert.include(read, '- lee:\n> Looks fine to me.')
 
@@ -923,6 +936,181 @@ describe('a pull request, by the person and the lead', () => {
       assert.lengthOf(yield* changes.ofTask(created.taskId), 0)
       assert.isNull(yield* changes.endFor(project.projectId))
     }).pipe(Effect.provide(runtimeWith({})))
+  })
+})
+
+describe('an abandoned task’s pull request', () => {
+  /** A task whose pull request is open on the fake GitHub, ready for the person: its project, its task and its thread. */
+  const opened = (github: FakeService, working: string) =>
+    Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      return { projectId, taskId: ready?.taskId ?? '', threadId: ready?.threadId ?? '', url: github.changes[0]?.url ?? '' }
+    })
+  const abandon = (taskId: string) =>
+    Effect.flatMap(Tasks, (tasks) =>
+      Effect.flatMap(Runtime.envelope('task.abandon', { taskId }), (envelope) => tasks.abandon({ envelope, taskId })),
+    )
+  const fresh = () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return { working, github }
+  }
+
+  it.live('stays open on its host when the person doesn’t close it, and its card says so, as the host does after', () => {
+    const { working, github } = fresh()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, threadId } = yield* opened(github, working)
+      yield* abandon(taskId)
+      // Abandoning alone asks nothing of the host: the pull request is open there, and the card says it is.
+      assert.notInclude(github.calls, 'closeChange')
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      const [card] = yield* cards(projectId)
+      assert.strictEqual(card?.phase, 'settled')
+      assert.strictEqual(card?.change?.state, 'open')
+      // Not listened to any more, as an older Althar left it, it is read from the host once: still open there, it says open.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE external_links SET listening = 0 WHERE task_id = ${taskId} AND kind = 'change'`
+      yield* changes.readSettled
+      assert.strictEqual((yield* changes.ofTask(taskId))[0]?.state, 'open')
+      // Closed on GitHub by hand since, the next read says so, in the card and the thread.
+      github.close(1)
+      yield* changes.readSettled
+      const [seen] = yield* changes.ofTask(taskId)
+      assert.strictEqual(seen?.state, 'closed')
+      assert.isFalse(seen?.listening)
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.state, 'closed')
+      assert.isTrue((yield* arrivals(threadId)).some((arrival) => arrival['kind'] === 'closed'))
+      // Closed, it isn't read again.
+      const reads = github.calls.filter((call) => call === 'change').length
+      yield* changes.readSettled
+      assert.strictEqual(github.calls.filter((call) => call === 'change').length, reads)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('is read from its host at the next launch, its card saying how it stands there now', () => {
+    const { working, github } = fresh()
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-settled-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      // Abandoned with its pull request left open, as an older Althar left it: not listened to, its card saying open.
+      const { projectId, taskId } = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const left = yield* opened(github, working)
+          yield* abandon(left.taskId)
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`UPDATE external_links SET listening = 0 WHERE task_id = ${left.taskId} AND kind = 'change'`
+          return left
+        }).pipe(Effect.provide(runtimeWith({ github }, database))),
+      )
+      // Closed on GitHub by hand while Althar wasn't running.
+      github.close(1)
+      const reads = github.calls.filter((call) => call === 'change').length
+      // Launched again, nothing asked of it: the board's settled row reads it from GitHub, once, and says it is closed.
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const queries = yield* Queries
+          const onBoard = Effect.map(queries.board(projectId), (board) => board.tasks.filter((task) => task.taskId === taskId))
+          const [card] = yield* until(onBoard, ([one]) => one?.change?.state === 'closed', Duration.seconds(20))
+          assert.strictEqual(card?.phase, 'settled')
+          assert.strictEqual(github.calls.filter((call) => call === 'change').length, reads + 1)
+        }).pipe(Effect.provide(runtimeWith({ github }, database))),
+      )
+    })
+  })
+
+  it.live('is closed on its host when the person says, its branch deleted where they ask', () => {
+    const { working, github } = fresh()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, threadId, url } = yield* opened(github, working)
+      yield* abandon(taskId)
+      // The board's settled row reads it open, as GitHub has it; closed, it reads it closed, without waiting for anything else.
+      const onBoard = Effect.flatMap(Queries, (queries) =>
+        Effect.map(queries.board(projectId), (board) => board.tasks.find((task) => task.taskId === taskId)),
+      )
+      assert.strictEqual((yield* onBoard)?.change?.state, 'open')
+      const closed = yield* changes.close(taskId, url, { deleteBranch: true })
+      assert.strictEqual((yield* onBoard)?.change?.state, 'closed')
+      assert.strictEqual(closed.change.state, 'closed')
+      assert.isNull(closed.branch)
+      assert.strictEqual(github.changes[0]?.state, 'closed')
+      assert.deepStrictEqual(github.branchesDeleted, [1])
+      // Closed, it is listened to no more, the card says closed, and the thread says it closed.
+      const [seen] = yield* changes.ofTask(taskId)
+      assert.strictEqual(seen?.state, 'closed')
+      assert.isFalse(seen?.listening)
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.state, 'closed')
+      assert.isTrue((yield* arrivals(threadId)).some((arrival) => arrival['kind'] === 'closed'))
+      // Pressed again, nothing more is asked of the host.
+      const asked = github.calls.filter((call) => call === 'closeChange' || call === 'deleteBranch').length
+      yield* changes.close(taskId, url, { deleteBranch: true })
+      assert.strictEqual(github.calls.filter((call) => call === 'closeChange' || call === 'deleteBranch').length, asked)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('stays open where the host refuses to close it, and says why; a branch it won’t delete is said apart', () => {
+    const { working, github } = fresh()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, url } = yield* opened(github, working)
+      yield* abandon(taskId)
+      github.failNext('closeChange', 'forbidden', undefined, 403)
+      const refused = yield* Effect.flip(changes.close(taskId, url, { deleteBranch: true }))
+      assert.strictEqual(refused instanceof Error ? refused.name : String(refused), 'ConnectorFailed')
+      assert.strictEqual(words(refused, String).message, "GitHub won't let this account do that: The fake closeChange failed (forbidden).")
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      assert.strictEqual((yield* changes.ofTask(taskId))[0]?.state, 'open')
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.state, 'open')
+      assert.deepStrictEqual(github.branchesDeleted, [])
+      // Tried again, it closes; the branch the host won't delete stays, and what it said is returned.
+      github.failNext('deleteBranch', 'forbidden', undefined, 403)
+      const closed = yield* changes.close(taskId, url, { deleteBranch: true })
+      assert.strictEqual(closed.change.state, 'closed')
+      assert.strictEqual(closed.branch, 'The fake deleteBranch failed (forbidden)')
+      assert.strictEqual(github.changes[0]?.state, 'closed')
+      assert.deepStrictEqual(github.branchesDeleted, [])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live(
+    'keeps a pull request merged on its host meanwhile as merged, closing nothing, and leaves its branch where the person asks',
+    () => {
+      const { working, github } = fresh()
+      return Effect.gen(function* () {
+        const changes = yield* Changes
+        const { taskId, url } = yield* opened(github, working)
+        yield* abandon(taskId)
+        github.mergeByHand(1)
+        const merged = yield* changes.close(taskId, url, { deleteBranch: true })
+        assert.strictEqual(merged.change.state, 'merged')
+        assert.isNull(merged.branch)
+        assert.notInclude(github.calls, 'closeChange')
+        assert.deepStrictEqual(github.branchesDeleted, [])
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+  )
+
+  it.live('is closed without deleting its branch where the person doesn’t ask, and a settled read that fails is let go', () => {
+    const { working, github } = fresh()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { taskId, url } = yield* opened(github, working)
+      yield* abandon(taskId)
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE external_links SET listening = 0 WHERE task_id = ${taskId} AND kind = 'change'`
+      // The host failing to answer is logged, not raised, and the pull request stays as it was seen.
+      github.failNext('change', 'unreachable')
+      yield* changes.readSettled
+      assert.strictEqual((yield* changes.ofTask(taskId))[0]?.state, 'open')
+      const closed = yield* changes.close(taskId, url, { deleteBranch: false })
+      assert.strictEqual(closed.change.state, 'closed')
+      assert.isNull(closed.branch)
+      assert.deepStrictEqual(github.branchesDeleted, [])
+    }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
 
@@ -1912,7 +2100,20 @@ describe('what failed, in full', () => {
   it.live('gives its lead a check’s whole log, a page at a time', () => {
     const { working, bare } = hosted()
     const log = Array.from({ length: 700 }, (_, index) => `line ${index + 1}`).join('\n')
-    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: 'running', log }] })
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => [
+        { name: 'test', state: 'running', log },
+        { name: 'verify', state: 'failed', log: refused },
+        {
+          name: 'busy',
+          state: 'failed',
+          log: new ConnectorFailed({ product: 'github', reason: 'unreachable', message: 'The service did not answer in time' }),
+        },
+        { name: 'ci/circleci', state: 'failed', url: 'https://circleci.com/gh/meridian/api/7' },
+      ],
+    })
     github.addRepository(['meridian', 'api'])
     return Effect.gen(function* () {
       yield* connect('github', HOST)
@@ -1924,7 +2125,23 @@ describe('what failed, in full', () => {
       assert.match(last, /line 700\n```$/)
       const firstPage = yield* callTool(lead, 'read_check_log', { check: 'Test', from_line: 1 })
       assert.match(firstPage, /^Lines 1 to 300 of 700 of test's log on PR #1; from_line 301 reads on:\n```\nline 1\n/)
-      assert.include(yield* callTool(lead, 'read_check_log', { check: 'lint' }), 'PR #1 has no check called "lint". Its checks: test.')
+      assert.include(
+        yield* callTool(lead, 'read_check_log', { check: 'lint' }),
+        'PR #1 has no check called "lint". Its checks: test, verify, busy, ci/circleci.',
+      )
+      // A log its host won't give says why, in plain words; one it keeps none of, where to see the check instead.
+      assert.include(
+        yield* callTool(lead, 'read_check_log', { check: 'verify' }),
+        "Althar couldn't read verify's log: GitHub refused (403): Resource not accessible by integration. Its sign-in may not be allowed to read logs. Reading it again with read_check_log would fail the same way",
+      )
+      assert.include(
+        yield* callTool(lead, 'read_check_log', { check: 'busy' }),
+        "Althar couldn't read busy's log: GitHub didn't answer: The service did not answer in time. read_check_log may read it in a while.",
+      )
+      assert.strictEqual(
+        yield* callTool(lead, 'read_check_log', { check: 'ci/circleci' }),
+        "PR #1: Althar couldn't read ci/circleci's log: GitHub keeps no log of it that Althar can read. Its page: https://circleci.com/gh/meridian/api/7",
+      )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

@@ -4,3 +4,31 @@
   align-items: center;
   gap: 7px;
 }
+
+/* The button may shrink, and its main half with it, so what it says is cut short and the title beside it keeps its room. */
+.split.split {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.split > button:first-child {
+  min-width: 0;
+  max-width: 100%;
+}
+/* The button wraps what it says in a span: a flex one that may shrink, so the text inside can be cut. */
+.split > button:first-child > span {
+  display: flex;
+  min-width: 0;
+}
+.live {
+  min-width: 0;
+}
+.text {
+  display: inline-block;
+  min-width: 0;
+  vertical-align: bottom;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

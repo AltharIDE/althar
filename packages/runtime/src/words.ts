@@ -47,13 +47,15 @@ const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${w
 /** What an agent's own error says, when the runtime can put it in words. */
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
+    case 'StartTimedOut':
+      return text(error, 'message')
     case 'AgentStartFailed': {
       const command = text(error, 'command')
       const reason = text(error, 'reason')
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
       return /ENOENT/.test(reason)
-        ? `${command} isn't installed, or isn't on this Mac's PATH.`
+        ? `${command} isn't installed, or isn't on this computer's PATH.`
         : sentence(`${command} wouldn't start: ${reason}`)
     }
     case 'AgentExited': {
@@ -213,7 +215,7 @@ export const words = (
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
-        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this Mac any more, remove it anyway; its sign-in may stay behind.`
+        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.`
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
@@ -242,7 +244,7 @@ export const words = (
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
       case 'CliSignedOut':
-        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this computer.`
       case 'CliUnanswered':
         return `${text(error, 'tool')} didn't answer in time. Try again in a moment.`
       case 'CliElsewhere':
@@ -297,6 +299,10 @@ const cantMerge = {
     `It conflicts with the default branch, in ${files}. The lead is resolving it, as the project’s rules say; merge again once it has.`,
   busy: (where: string) =>
     `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
+  submodule: (where: string) =>
+    `The merge moves the submodule at ${where}, which has changes not committed or isn’t at the commit the default branch has for it. Commit or put them away, or bring it along (git submodule update), then merge again.`,
+  unreadable: (detail: string) =>
+    `Althar couldn’t read the default branch’s checkout, or a submodule the merge moves, so nothing was merged. Where, and what git said:\n${detail}`,
   untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
   moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
   missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,

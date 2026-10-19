@@ -11,6 +11,12 @@
   min-height: 0;
 }
 
+/* its settings, in the views' place: their page scrolls under the front page */
+.settings {
+  flex: 1;
+  min-height: 0;
+}
+
 .talk {
   display: flex;
   flex: 1;
@@ -34,7 +40,11 @@
   flex-direction: column;
   min-width: 0;
   overflow: clip;
-  padding: 16px 0 0 16px;
+  padding: 0 0 0 16px;
+}
+/* The lanes meet the header's line; what stands above them (or instead) keeps its own room. */
+.board > .failure {
+  padding: 16px 16px 0 0;
 }
 /* Beside the conversation, the lanes narrow before the board scrolls. */
 .both .board {

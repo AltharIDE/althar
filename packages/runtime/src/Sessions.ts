@@ -61,6 +61,7 @@ import type { Models } from './Models'
 import type { Policies } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
+import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
@@ -104,6 +105,23 @@ import { agentSaid, summarize } from './words'
  */
 
 export type Disposition = 'after_current' | 'interrupt_and_continue'
+
+/**
+ * An agent that doesn't answer ACP startup must not leave a handover pending forever. The bound covers the whole startup, so it
+ * also cuts off an agent that works but is slow: connecting, `session/new`, and setting the model and effort.
+ */
+const SESSION_START_TIMEOUT = Duration.minutes(2)
+
+/** Starting the agent took longer than its bound: it hung, or was too slow, as opposed to refusing or crashing. */
+export class StartTimedOut extends Schema.TaggedError<StartTimedOut>()('StartTimedOut', {
+  agentId: Schema.String,
+  agentName: Schema.String,
+  after: Schema.Duration,
+}) {
+  override get message(): string {
+    return `Timed out after ${Duration.format(this.after)} waiting for ${this.agentName} to set up a session.`
+  }
+}
 
 export const AcceptedInput = Schema.Struct({ inputId: Schema.String, sequence: Schema.Int })
 export type AcceptedInput = typeof AcceptedInput.Type
@@ -190,6 +208,22 @@ interface ReviewThread {
 type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 
 /** Where a thread's agent works. */
+/**
+ * An agent that went on its own, as a report says it: its id and how its
+ * process ended, never what it wrote. No stack: where Althar noticed says
+ * nothing, and each agent and way of ending is its own report.
+ */
+export const agentLost = (
+  agentId: string,
+  exit: Option.Option<{ readonly code: number | null; readonly signal: string | null }>,
+): Error => {
+  const how = Option.isSome(exit) ? `exit code ${exit.value.code ?? 'none'}, signal ${exit.value.signal ?? 'none'}` : 'no exit seen'
+  const error = new Error(`The ${agentId} agent stopped on its own: ${how}.`)
+  error.name = 'AgentLost'
+  error.stack = ''
+  return error
+}
+
 const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.cwd)
 
 /** Every folder a thread's agent works in: a picture an agent points at is read only from inside them. */
@@ -259,6 +293,8 @@ interface Running {
    * its brief would fill leaves it.
    */
   handover: 'none' | 'under_way' | 'left'
+  /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
+  turnStartedAt: number | null
   /** When its last turn ended, in milliseconds; null before its first. A lead idle past its cache's life is at a break. */
   turnEndedAt: number | null
   /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
@@ -504,6 +540,10 @@ export class Sessions extends Context.Service<
         readonly agentId: string
         readonly accountId: string
         readonly turnRunning: boolean
+        /** When the turn running started, in milliseconds; null between turns. */
+        readonly turnStartedAt: number | null
+        /** When its last turn ended, in milliseconds; null before its first. */
+        readonly turnEndedAt: number | null
         /** The agent's process, where it runs as one. */
         readonly pid: number | null
         /** How full its context is, in tokens, as the agent last said; null until it says. */
@@ -598,6 +638,7 @@ export class Sessions extends Context.Service<
       const live = yield* Live
       const permissions = yield* Permissions
       const questions = yield* Questions
+      const failures = yield* Failures
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
@@ -1116,6 +1157,7 @@ export class Sessions extends Context.Service<
             )
           if (!compacting) running.brief = undefined
           running.turnRunning = true
+          running.turnStartedAt = yield* Clock.currentTimeMillis
           running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
@@ -1151,6 +1193,15 @@ export class Sessions extends Context.Service<
             // What the person wrote shows in the thread; what Althar writes for them goes quietly.
             byPerson: inputs.some((input) => input.shown === 1),
           })
+          // The app's log has each turn's start and end by its ids, never what was said (DEV-61).
+          const turnLog = {
+            turn: turnId,
+            thread: thread.threadId,
+            session: running.sessionId,
+            agent: running.entry.definition.id,
+            ...(session?.model == null ? {} : { model: session.model }),
+          }
+          yield* Effect.logInfo('Turn started').pipe(Effect.annotateLogs(turnLog))
 
           const items = recorder({
             projectId: thread.projectId,
@@ -1306,6 +1357,15 @@ export class Sessions extends Context.Service<
                 ? { source: 'runtime', severity: 'warning', title: `${running.entry.definition.name} couldn't compact its context.` }
                 : { source: 'runtime', severity: 'info', title: compactedWords(running.entry.definition.name, before, running.context) },
             )
+          yield* (state === 'failed' ? Effect.logWarning : Effect.logInfo)('Turn ended').pipe(
+            Effect.annotateLogs({
+              ...turnLog,
+              state,
+              ...(ended === undefined ? {} : { stopReason: ended.stopReason }),
+              ...(errorClass === undefined ? {} : { errorClass }),
+              ...(Option.isSome(failure) ? { failure: failure.value._tag } : {}),
+            }),
+          )
           yield* live.publish({
             _tag: 'TurnEnded',
             threadId: thread.threadId,
@@ -1397,13 +1457,14 @@ export class Sessions extends Context.Service<
             // waits before it holds the turn, so the lead can be stopped meanwhile.
             if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
             const { thread } = running
+            // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
             if (thread.role === 'coordinator')
               return yield* running.delivering.withPermits(1)(
                 Effect.gen(function* () {
                   while (!running.stopping && (yield* deliver(running))) {
                     // Each turn may leave more input queued, such as what arrived while it ran.
                   }
-                }),
+                }).pipe(contained('Sessions.deliver', () => undefined, running.entry.definition.id)),
               )
             // A lead's or a reviewer's turns, one at a time, each waiting for a place among the agents at work here: what
             // is still queued after one wakes it again, and asks again.
@@ -1479,6 +1540,16 @@ export class Sessions extends Context.Service<
                 id: string
               }>`SELECT id FROM turn_deliveries WHERE provider_session_id = ${running.sessionId} AND state IN ('pending', 'delivered')`
               for (const turn of open) {
+                yield* Effect.logWarning('Turn ended').pipe(
+                  Effect.annotateLogs({
+                    turn: turn.id,
+                    thread: running.thread.threadId,
+                    session: running.sessionId,
+                    agent: running.entry.definition.id,
+                    state: 'failed',
+                    errorClass: 'agent_exited',
+                  }),
+                )
                 const revision = yield* change('turn_deliveries', turn.id, { state: 'failed', errorClass: 'agent_exited', endedAt: at })
                 yield* fact({
                   projectId: running.thread.projectId,
@@ -1518,6 +1589,18 @@ export class Sessions extends Context.Service<
                 }[running.thread.role],
               },
             )
+          yield* (state === 'lost' ? Effect.logWarning : Effect.logInfo)('Agent stopped').pipe(
+            Effect.annotateLogs({
+              agent: running.entry.definition.id,
+              session: running.sessionId,
+              thread: running.thread.threadId,
+              state,
+              ...(Option.isSome(exit) ? { exitCode: exit.value.code ?? 'none', signal: exit.value.signal ?? 'none' } : {}),
+            }),
+          )
+          // One that went on its own is reported (ADR-047), by its agent and how its process ended: never what it wrote.
+          if (state === 'lost')
+            yield* failures.report(Cause.die(agentLost(running.entry.definition.id, exit)), 'agent', running.entry.definition.id)
           yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
           yield* Deferred.succeed(running.ended, undefined)
         })
@@ -1651,11 +1734,25 @@ export class Sessions extends Context.Service<
               // An effort the model doesn't offer is no reason not to start.
               yield* settleEffort(definition, agent, effort ?? null)
               return { connection, agent }
-            }).pipe(Scope.provide(scope)),
+            }).pipe(
+              Scope.provide(scope),
+              Effect.timeoutOption(SESSION_START_TIMEOUT),
+              Effect.flatMap((result) => {
+                if (Option.isNone(result)) {
+                  return Effect.fail(
+                    new StartTimedOut({ agentId: definition.id, agentName: definition.name, after: SESSION_START_TIMEOUT }),
+                  )
+                }
+                return Effect.succeed(result.value)
+              }),
+            ),
           )
           if (Exit.isFailure(started)) {
             yield* Scope.close(scope, Exit.void)
             yield* tools.revoke
+            yield* Effect.logWarning('Agent could not start', started.cause).pipe(
+              Effect.annotateLogs({ agent: definition.id, session: sessionId, thread: thread.threadId }),
+            )
             const reason = Cause.pretty(started.cause)
             const summary = summarize(started.cause)
             yield* sql.withTransaction(
@@ -1675,6 +1772,15 @@ export class Sessions extends Context.Service<
             return yield* new SessionFailed({ agentId: definition.id, reason, summary })
           }
           const { connection, agent } = started.value
+          yield* Effect.logInfo('Agent started').pipe(
+            Effect.annotateLogs({
+              agent: definition.id,
+              session: sessionId,
+              thread: thread.threadId,
+              ...(connection.process === undefined ? {} : { pid: connection.process.pid }),
+              adapter: `${connection.info.name} ${connection.info.version ?? ''}`.trim(),
+            }),
+          )
           if (processId !== undefined && connection.process !== undefined) {
             yield* change('processes', processId, {
               pid: connection.process.pid,
@@ -1733,6 +1839,7 @@ export class Sessions extends Context.Service<
             workedAt: null,
             wakeAt: null,
             handover: 'none',
+            turnStartedAt: null,
             turnEndedAt: null,
             atBreak: false,
           }
@@ -2253,11 +2360,11 @@ export class Sessions extends Context.Service<
               ? []
               : [
                   [
-                    'This task is for trying something out: a question, a look around, a prototype. Nothing of it leaves this Mac: nothing is pushed, and no pull request opens.',
+                    'This task is for trying something out: a question, a look around, a prototype. Nothing of it leaves this computer: nothing is pushed, and no pull request opens.',
                     `Put what you'd throw away, such as prototypes, notes and screenshots, in ${scratch}, which git ignores.`,
                     plainFirst === undefined
-                      ? `Writing in the repository is fine: its work is on a branch of its own, ${first?.branch ?? ''}, which stays on this Mac. Commit there as on any task.`
-                      : `Writing in the repository is fine, committed or not: it has no branch yet, and Althar puts what you change there on a branch of its own, ${plainFirst.branch}, when your turn ends or when you call finish_step, and you carry on there in the same folder. That branch stays on this Mac; commit there as on any task.`,
+                      ? `Writing in the repository is fine: its work is on a branch of its own, ${first?.branch ?? ''}, which stays on this computer. Commit there as on any task.`
+                      : `Writing in the repository is fine, committed or not: it has no branch yet, and Althar puts what you change there on a branch of its own, ${plainFirst.branch}, when your turn ends or when you call finish_step, and you carry on there in the same folder. That branch stays on this computer; commit there as on any task.`,
                     'If the person asks to make it a real change, to keep it, have it reviewed or open a pull request, call make_it_a_change: it gets a title for what it does, a reviewer and a pull request to end in.',
                     'Where you changed nothing in the repository, finish_step needs only your summary.',
                   ].join(' '),
@@ -2274,6 +2381,8 @@ export class Sessions extends Context.Service<
             "Show each screenshot once. Don't hand over again, or take again, one you have already handed over, unless the screen has changed since. Never list your screenshots in a table or a list in a message: each one shows with its caption already.",
             // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
             "When you finish the task, say in finish_step's `built` what it has built, as it stands now, the way you would wrap up a session for the person: what it does for them now, the main changes and where they are, anything left open or decided along the way (\"the images aren't in the pull request because…\"), and what they should do next (try it at its local address, push, check it on a real device). A few lines or a short list, in plain words, about where it ended rather than how it got there: a review finding you fixed belongs only if it changed what was built. For a prototype or anything to look at, say how to see it. Settling a review that changes the work, say it again, so it never describes an earlier version; and once the plan's steps are done, when you change the work after (a failed check, what people said on the pull request), call finish_step again with `built` as it now stands.",
+            // The pull request's description is the lead's too, for a reviewer on the code host: not the person's summary again.
+            "Where the task ends in a pull request, write its description as you finish, in finish_step's `descriptions`, in the repository's pull request template where it has one. Your summary and `built` are for the person in Althar; the description is for whoever reviews the pull request on the code host, who hasn't seen your work: why the change exists, what it does, how you went about it and how it was checked, in plain prose, with nothing of the review, your evidence or Althar's workings. finish_step's `descriptions` says more.",
             // Althar reaches the code host for the task (ADR-011).
             `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
@@ -2589,6 +2698,8 @@ export class Sessions extends Context.Service<
                   agentId: running.entry.definition.id,
                   accountId: running.account.id,
                   turnRunning: running.turnRunning,
+                  turnStartedAt: running.turnRunning ? running.turnStartedAt : null,
+                  turnEndedAt: running.turnEndedAt,
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
                   stopping: running.stopping,

@@ -1,14 +1,25 @@
 import type { ReactNode } from 'react'
 
 import type { HomeCall, HomeTask } from '@althar/contracts'
-import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
+import { Button, type EdgeWork, Fact, LinkButton, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { commandOf, titleOf } from '../../shared/callCommand'
-import { callKindOf, isFinished, kindWords, readyKindOf, whereOf } from '../../shared/calls'
+import { callKindOf, isUnshipped, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
-import { factsOf, type Next, nextWords, standingOf } from '../../shared/standing'
+import {
+  doingWords,
+  doneHere,
+  factsOf,
+  labelWords,
+  type DoneHere,
+  type Next,
+  nextWords,
+  standingOf,
+  standingText,
+} from '../../shared/standing'
 import { text as stuckText } from '../task/StuckCall'
+import type { ActionFailure } from '../board/useWorkActions'
 
 /*
  * What waits on the person across every project, as the home and the edge
@@ -16,8 +27,10 @@ import { text as stuckText } from '../task/StuckCall'
  * NeedLine of its kind with the one thing to know to answer it. A permission
  * is answered where it is; a stuck step opens its task. A ready change says
  * what stands between it and merging, as its board card does, and where the
- * place offers it (the home), its button is the one next thing to do: push,
- * accept and merge, or ask its lead to fix the checks or resolve a conflict.
+ * place offers it (the home), its button is the one next thing to do: push or
+ * accept and merge, right there, saying why when that failed and offering to
+ * try again; asking its lead to fix the checks or resolve a conflict is a
+ * link into its task, where the lead is told.
  * Answered there, its line stays where it was, at its height, and goes
  * quiet, with what was said where its answers were, until the place is left.
  */
@@ -42,6 +55,9 @@ export const needText = {
   answer: 'Answer',
   /** A change on its branch alone, by its size. */
   onBranch: 'On its branch',
+  /** Commits after its last pull request, in none yet, and how big they are. */
+  inNone: (commits: number, add: number, del: number) =>
+    `${commits === 1 ? '1 commit' : `${commits} commits`} in no pull request · +${add} −${del}`,
   branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
   /** A review drafted, in a line: whose pull request, and what the draft found. */
   by: (author: string) => `by ${author}`,
@@ -112,6 +128,9 @@ export const briefOf = (task: HomeTask): string => {
       needText.findings(reviewing.findings),
     ].join(' · ')
   const change = task.change
+  // Commits after its last pull request merged or closed: a new one is the person's to open.
+  const after = task.unshipped
+  if (after != null && isUnshipped(task)) return needText.inNone(after.commits, after.add, after.del)
   if (change === null)
     return task.changed === null ? needText.onBranch : needText.branchSize(task.changed.files, task.changed.add, task.changed.del)
   const where = `${change.repository.slice(change.repository.lastIndexOf('/') + 1)} ${change.prefix}${change.number}`
@@ -196,14 +215,17 @@ export const needsOf = ({
             kind: callKindOf(call),
             project,
             title: whereOf(call),
-            brief: stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
+            brief:
+              stuck.step === 'publish' && stuck.why !== 'not_connected'
+                ? stuckText.publishing(stuck)
+                : stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
           },
     ]
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
-    // A plain task that finished waits on its board, not here.
-    if (project === undefined || isFinished(task)) return []
+    // `ready` is the tasks that wait on the person (`readyOf`): a plain task that finished waits on its board, not here.
+    if (project === undefined) return []
     const next = nextOf(task)
     return [
       {
@@ -218,6 +240,9 @@ export const needsOf = ({
     ]
   }),
 ]
+
+/** A permission's Allow once on its line: what Enter gives, where focus is put on it. */
+export const DEFAULT_ANSWER = '[data-default-answer]'
 
 /**
  * A need's line: its title opens its task; a permission's answers give it
@@ -234,19 +259,26 @@ export function needLineOf(
     answers,
     onNext,
     doing,
+    failed,
   }: {
     onOpen: (threadId: string) => void
     onAnswer: (call: HomeCall, project: ProjectRef, decision: 'allow' | 'reject') => void
     /** A permission's answers, in place of Deny and Allow once. */
     answers?: (call: HomeCall, project: ProjectRef) => ReactNode
     /** Does a ready change's next thing; without it, its button opens the task to review. */
-    onNext?: (task: HomeTask, next: Next) => void
+    onNext?: (task: HomeTask, next: DoneHere) => void
     /** Whether a task's next thing is under way, so its button says so and waits. */
     doing?: (taskId: string) => boolean
+    /** What last failed for a task's push or merge, to say in its line and offer to try again. */
+    failed?: (taskId: string) => ActionFailure | undefined
   },
 ): ReactNode {
   const open = () => onOpen(need.threadId)
   const { permission, answer, ready } = need
+  // The next thing done from here, if it is the person's own; and why it failed last time, if it did.
+  const here = ready !== undefined && onNext !== undefined && doneHere(ready.next) ? ready.next : null
+  const failure = ready === undefined ? undefined : failed?.(ready.task.taskId)
+  const why = here !== null && failure !== undefined && failure.action === here.kind ? failure.message : null
   // Answered here: where it was, as high as it was, quiet; focus comes to it from the button pressed.
   if (answer !== undefined)
     return (
@@ -268,19 +300,41 @@ export function needLineOf(
       project={need.project}
       title={need.title}
       {...(need.command === undefined ? {} : { command: need.command })}
-      {...(need.brief === undefined ? {} : { brief: need.brief })}
+      {...(why !== null && here !== null
+        ? {
+            brief: (
+              <>
+                <Fact icon="close" tone="danger" role="alert">
+                  {standingText.nextFailed[here.kind](why)}
+                </Fact>
+                {need.brief !== undefined && <> · {need.brief}</>}
+              </>
+            ),
+          }
+        : need.brief === undefined
+          ? {}
+          : { brief: need.brief })}
       onOpen={open}
       actions={
         ready !== undefined && onNext !== undefined ? (
-          <Button
-            size="small"
-            // Merging and pushing are the person's own to do, so they're violet; asking the lead isn't.
-            {...(ready.next.kind === 'merge' || ready.next.kind === 'push' ? { variant: 'signal' as const } : {})}
-            busy={doing?.(ready.task.taskId) === true}
-            onClick={() => onNext(ready.task, ready.next)}
-          >
-            {nextWords(ready.next)}
-          </Button>
+          here === null ? (
+            // Asking the lead to resolve or fix takes the lead: a link into the task, where it is told.
+            <LinkButton onClick={open}>{nextWords(ready.next)}</LinkButton>
+          ) : (
+            <Button
+              size="small"
+              // Merging and pushing are the person's own to do, so they're violet.
+              variant="signal"
+              // The pull request it acts on, for a screen reader: the line's own words don't name it.
+              {...(ready.task.change === null
+                ? {}
+                : { 'aria-label': labelWords(here, `${ready.task.change.prefix}${ready.task.change.number}`, why !== null) })}
+              busy={doing?.(ready.task.taskId) === true}
+              onClick={() => onNext(ready.task, here)}
+            >
+              {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
+            </Button>
+          )
         ) : permission === undefined ? (
           <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
             {need.kind === kindWords.ready || need.kind === kindWords.drafted
@@ -296,7 +350,8 @@ export function needLineOf(
             <Button size="small" onClick={() => onAnswer(permission, need.project, 'reject')}>
               {needText.deny}
             </Button>
-            <Button size="small" variant="signal" onClick={() => onAnswer(permission, need.project, 'allow')}>
+            {/* The answer Enter gives, where a place puts focus on it as it opens (`DEFAULT_ANSWER`). */}
+            <Button size="small" variant="signal" data-default-answer="" onClick={() => onAnswer(permission, need.project, 'allow')}>
               {needText.allow}
             </Button>
           </>

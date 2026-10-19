@@ -79,6 +79,11 @@ export interface RuntimeOptions {
   readonly stalls?: StallOptions
   /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */
   readonly modelFacts?: ModelFactsOptions
+  /**
+   * What each agent's process writes to stderr, as it comes, by agent and pid: the app keeps it in its log of agents. Without it,
+   * only the last few kilobytes are kept, for the error when an agent stops.
+   */
+  readonly agentStderr?: AgentStderr
   /** How this computer's load is read, and how often at most (`MachineLoad.ts`). */
   readonly load?: LoadOptions
   /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
@@ -130,6 +135,9 @@ export interface SetupOptions {
   /** The shell it runs in, as a login shell: the person's own (`SHELL`) unless a test says otherwise. */
   readonly shell?: string
 }
+
+/** Called with what an agent's process writes to stderr. */
+export type AgentStderr = (agentId: string, chunk: string, pid: number) => void
 
 /** Each is the default unless a test says otherwise. */
 export interface StallOptions {
@@ -200,18 +208,28 @@ export class Agents extends Context.Service<
    * from loading, and with git that takes no repository the pull request
    * carries for its own (`readingUntrusted`).
    */
-  static readonly registry: Layer.Layer<Agents, never, Installs> = Layer.effect(
-    Agents,
-    Effect.gen(function* () {
-      const installs = yield* Installs
-      // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
-      // line the person runs names the app that carries it (`usingLocated`).
-      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID))
-    }),
-  )
+  static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs> =>
+    Layer.effect(
+      Agents,
+      Effect.gen(function* () {
+        const installs = yield* Installs
+        // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
+        // line the person runs names the app that carries it (`usingLocated`).
+        return Agents.fromRegistry(
+          (definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID),
+          stderr,
+        )
+      }),
+    )
 
-  /** The registry's agents, each as `located` points its commands: at the person's own, or the copy Althar downloaded. */
-  static readonly fromRegistry = (located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition) => {
+  /**
+   * The registry's agents, each as `located` points its commands: at the person's own, or the copy Althar downloaded. What each
+   * process writes to stderr goes to `stderr`, where it is given.
+   */
+  static readonly fromRegistry = (
+    located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition,
+    stderr?: AgentStderr,
+  ) => {
     const signedOut = mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
     return Agents.from(
       Object.values(agents)
@@ -226,6 +244,7 @@ export class Agents extends Context.Service<
               _tag: 'Process' as const,
               spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...held, ...env } },
               cwd,
+              ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
             }
           },
         })),
