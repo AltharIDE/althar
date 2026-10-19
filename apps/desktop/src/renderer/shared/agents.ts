@@ -1,5 +1,5 @@
-import type { Queued } from '@althar/contracts'
-import { Brand } from '@althar/ui'
+import type { AgentStatus, Queued } from '@althar/contracts'
+import { Brand, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
 
@@ -71,6 +71,10 @@ const MAKERS: Readonly<Record<string, string>> = {
   'mistral-vibe': 'Mistral AI',
   antigravity: 'Google',
 }
+
+/** A download of one version from its maker (Antigravity's server, from Google), rather than a latest release on GitHub: who from, and which. */
+export const pinnedOf = (agent: Pick<AgentStatus, 'id' | 'name' | 'download'>): PinnedDownload | undefined =>
+  agent.download?.pinned == null ? undefined : { from: MAKERS[agent.id] ?? agent.name, version: agent.download.pinned }
 
 /** What Settings says under an agent's name: who makes it, and its version, where known. */
 export const agentLineOf = (agent: { readonly id: string; readonly version: string | null }): string | undefined => {

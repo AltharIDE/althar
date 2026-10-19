@@ -59,7 +59,13 @@ describe('downloading an agent', () => {
     const { fetch, asked } = github(archive())
     const { root, run } = using({ fetch })
     const before = await run(Effect.flatMap(Installs, (installs) => installs.state(opencode)))
-    assert.isTrue(Exit.isSuccess(before) && before.value.located === null && before.value.downloadable && before.value.size === '45 MB')
+    assert.isTrue(
+      Exit.isSuccess(before) &&
+        before.value.located === null &&
+        before.value.downloadable &&
+        before.value.size === '45 MB' &&
+        before.value.pinned === null,
+    )
     const done = await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
     assert.isTrue(Exit.isSuccess(done))
     assert.strictEqual(asked[0], 'https://api.github.com/repos/anomalyco/opencode/releases/latest')
@@ -330,7 +336,7 @@ describe('downloading a pinned agent', () => {
     const { agent, fetch, asked } = pinnedTo(whole)
     const { root, run } = using({ fetch })
     const before = await run(Effect.flatMap(Installs, (installs) => installs.state(agent)))
-    assert.isTrue(Exit.isSuccess(before) && before.value.downloadable)
+    assert.isTrue(Exit.isSuccess(before) && before.value.downloadable && before.value.pinned === '1.3.0')
     const done = await run(Effect.flatMap(Installs, (installs) => installs.install(agent)))
     assert.isTrue(Exit.isSuccess(done), JSON.stringify(done))
     assert.deepStrictEqual(asked, [URL])

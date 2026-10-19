@@ -63,6 +63,8 @@ export interface InstallState {
   readonly downloadable: boolean
   /** About how big the download is. */
   readonly size: string | null
+  /** The one version it is pinned at, from its maker's address (Antigravity's server); null for a GitHub release's latest. */
+  readonly pinned: string | null
   /** A download of it is under way. */
   readonly installing: boolean
 }
@@ -403,6 +405,7 @@ export class Installs extends Context.Service<
                 root !== undefined &&
                 assetOf<unknown>(definition.cli.download.assets) !== undefined,
               size: definition.cli?.download?.size ?? null,
+              pinned: definition.cli?.download !== undefined && pinned(definition.cli.download) ? definition.cli.download.version : null,
               installing: now.has(definition.id),
             })),
           install,

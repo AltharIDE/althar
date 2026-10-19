@@ -364,7 +364,10 @@ export const handlers = Api.toLayer(
           name: entry.definition.name,
           installed: entry.definition.cli === undefined || install.located !== null,
           kept: install.located?.whose === 'althar',
-          download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
+          download:
+            install.downloadable && install.size !== null
+              ? { size: install.size, installing: install.installing, pinned: install.pinned }
+              : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
           version: yield* versionOf(entry),

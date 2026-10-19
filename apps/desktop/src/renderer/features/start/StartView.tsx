@@ -4,7 +4,7 @@ import type { AgentStatus } from '@althar/contracts'
 import { Button, CrashReportsLine, type RuntimeEntry, RuntimeState } from '@althar/ui'
 import { Start } from '@althar/ui/screens'
 
-import { brandOf } from '../../shared/agents'
+import { brandOf, pinnedOf } from '../../shared/agents'
 import { useServices } from '../../data/services'
 import { device, platform } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
@@ -66,6 +66,7 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
       ...(brand === undefined ? {} : { brand }),
       state: RuntimeState.Missing,
       ...(agent.download === null ? {} : { download: agent.download.size }),
+      ...(pinnedOf(agent) === undefined ? {} : { pinned: pinnedOf(agent) }),
       ...(failed === undefined ? {} : { failed }),
     }
   switch (agent.signIn) {

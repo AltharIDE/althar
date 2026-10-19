@@ -3,18 +3,29 @@ import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { ACCOUNTS, AGENT_TABS, CODEX_MODELS } from '../../fixtures/setup'
+import { Brand } from '../../foundations/brands/brands'
 import { States, statesOn } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
 import { ControlDetail } from '../ControlCenter/ControlCenter'
 import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
-import { AgentTabList, AgentTabPanel, AgentTabs, type AgentTabsProps } from './AgentTabs'
+import { type AgentTab, AgentTabList, AgentTabPanel, AgentTabs, type AgentTabsProps } from './AgentTabs'
 
 const onValueChange = fn()
 
 /* The tabs and the chosen agent as a consumer puts them: the tabs in the head of the module they opened from. */
-function Agents({ value: start = 'codex', models = true, width = 696 }: { value?: string; models?: boolean; width?: number }) {
+function Agents({
+  value: start = 'codex',
+  models = true,
+  width = 696,
+  agents = AGENT_TABS,
+}: {
+  value?: string
+  models?: boolean
+  width?: number
+  agents?: ReadonlyArray<AgentTab>
+}) {
   const [value, setValue] = useState(start)
-  const chosen = AGENT_TABS.find((agent) => agent.id === value)
+  const chosen = agents.find((agent) => agent.id === value)
   return (
     <div style={{ width, padding: 12, borderRadius: 20, background: 'var(--frost)' }}>
       <AgentTabs
@@ -26,8 +37,8 @@ function Agents({ value: start = 'codex', models = true, width = 696 }: { value?
       >
         <ControlDetail
           title="Agents"
-          aside="3 agents · 6 accounts"
-          beside={<AgentTabList label="Agents" agents={AGENT_TABS} />}
+          aside={`${agents.length} agents · 6 accounts`}
+          beside={<AgentTabList label="Agents" agents={agents} />}
           onBack={fn()}
         >
           {chosen && (
@@ -82,6 +93,32 @@ export const AccountsAlone: Story = {
     const c = within(canvasElement)
     await expect(c.getByRole('heading', { name: 'OpenCode' })).toBeInTheDocument()
     await expect(c.queryByRole('group', { name: /models/ })).toBeNull()
+  },
+}
+
+/** Every agent Althar runs, those on this computer first: each tab its mark, and its name once chosen. */
+export const ManyAgents: Story = {
+  render: () => (
+    <Agents
+      value="antigravity"
+      models={false}
+      agents={[
+        ...AGENT_TABS,
+        { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, line: '1.0.98' },
+        { id: 'antigravity', name: 'Google Antigravity', brand: Brand.Antigravity, line: 'Google' },
+        { id: 'junie', name: 'Junie', brand: Brand.Junie },
+        { id: 'grok', name: 'Grok Build', brand: Brand.XAI, line: 'xAI' },
+        { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, line: 'Moonshot AI' },
+        { id: 'mistral-vibe', name: 'Mistral Vibe', brand: Brand.Mistral, line: 'Mistral AI' },
+        { id: 'qwen-code', name: 'Qwen Code', brand: Brand.Alibaba },
+      ]}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getAllByRole('tab')).toHaveLength(10)
+    await expect(c.getByRole('heading', { name: 'Google Antigravity', level: 3 })).toBeInTheDocument()
+    await expect(c.getByText('Google')).toBeInTheDocument()
   },
 }
 

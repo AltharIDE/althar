@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { Brand } from '@althar/ui'
 import { describe, expect, it, vi } from 'vitest'
 
-import { agentLineOf, brandOf, signInCautionOf, signInWordsOf } from '../src/renderer/shared/agents'
+import { agentLineOf, brandOf, pinnedOf, signInCautionOf, signInWordsOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor, type Unfurl } from '@althar/contracts'
 import { isSending, mergeItems, newestReads, queueShown, readingNow, sending, unsent, waiting } from '../src/renderer/shared/items'
 import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
@@ -32,6 +32,14 @@ describe('agents', () => {
     expect(signInWordsOf('antigravity')).toEqual({ plan: 'Google', host: 'accounts.google.com' })
     expect(signInCautionOf('antigravity')).toMatch(/Google’s terms may count signing in to Antigravity from another app as a breach/)
     expect(signInCautionOf('codex')).toBeUndefined()
+  })
+
+  it('says a download of one version is that version, from its maker', () => {
+    const download = { size: '115 MB', installing: false, pinned: '1.3.0' }
+    expect(pinnedOf({ id: 'antigravity', name: 'Google Antigravity', download })).toEqual({ from: 'Google', version: '1.3.0' })
+    // Its latest release on GitHub, or none: nothing pinned.
+    expect(pinnedOf({ id: 'opencode', name: 'OpenCode', download: { ...download, pinned: null } })).toBeUndefined()
+    expect(pinnedOf({ id: 'opencode', name: 'OpenCode', download: null })).toBeUndefined()
   })
 })
 

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { expect, fireEvent, fn, userEvent, within } from 'storybook/test'
 
 import { FIRST_RUN, NONE_READY } from '../../fixtures/setup'
+import { Brand } from '../../foundations/brands/brands'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { CrashReportsLine } from '../../setup/Preferences/Preferences'
 import { States } from '../../storybook/States'
@@ -144,13 +145,22 @@ export const CrashReportsAsked: Story = {
 /** No agent ready: a project can still be made, and says so. */
 export const NoneReady: Story = { args: { runtimes: NONE_READY } }
 
-/** Of the many agents Althar runs, two on this Mac and one it can fetch have rows; the rest are named once, under them. */
+/** Of the many agents Althar runs, two on this Mac and three it can fetch have rows; the rest are named once, under them. */
 export const ManyAgents: Story = {
   args: {
     runtimes: [
       ...FIRST_RUN.slice(0, 2),
-      { id: 'opencode', name: 'OpenCode', state: RuntimeState.Missing, download: '45 MB' },
-      ...['GitHub Copilot', 'Junie', 'Grok Build', 'Kimi Code', 'Mistral Vibe', 'Qwen Code'].map((name) => ({
+      { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, state: RuntimeState.Missing, download: '45 MB' },
+      { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, state: RuntimeState.Missing, download: '110 MB' },
+      {
+        id: 'antigravity',
+        name: 'Google Antigravity',
+        brand: Brand.Antigravity,
+        state: RuntimeState.Missing,
+        download: '115 MB',
+        pinned: { from: 'Google', version: '1.3.0' },
+      },
+      ...['Junie', 'Grok Build', 'Kimi Code', 'Mistral Vibe', 'Qwen Code'].map((name) => ({
         id: name.toLowerCase().replace(/\s+/g, '-'),
         name,
         state: RuntimeState.Missing as const,
@@ -159,12 +169,12 @@ export const ManyAgents: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(within(canvas.getByRole('list', { name: 'Agents on this Mac' })).getAllByRole('listitem')).toHaveLength(3)
-    await expect(canvas.getByText('1 of 3 ready')).toBeVisible()
+    await expect(within(canvas.getByRole('list', { name: 'Agents on this Mac' })).getAllByRole('listitem')).toHaveLength(5)
+    await expect(canvas.getByText('1 of 5 ready')).toBeVisible()
+    // One version from its maker is said as that, not as GitHub's latest.
+    await expect(canvas.getByText(/Althar can fetch Google Antigravity 1\.3\.0 from Google, about 115 MB/)).toBeVisible()
     await expect(
-      canvas.getByText(
-        'Althar also runs GitHub Copilot, Junie, Grok Build, Kimi Code, Mistral Vibe and Qwen Code, once they’re installed on this Mac.',
-      ),
+      canvas.getByText('Althar also runs Junie, Grok Build, Kimi Code, Mistral Vibe and Qwen Code, once they’re installed on this Mac.'),
     ).toBeVisible()
   },
 }

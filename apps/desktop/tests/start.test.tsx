@@ -499,7 +499,9 @@ describe('the start', () => {
       status: vi.fn(async () => ({
         apiVersion: 1,
         appVersion: '0.0.0',
-        agents: withoutOpenCode.map((agent) => (agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing } } : agent)),
+        agents: withoutOpenCode.map((agent) =>
+          agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing, pinned: null } } : agent,
+        ),
       })),
       // The download runs until the test lets it end, so its row is seen downloading however slow the machine.
       installAgent: vi.fn(async () => {

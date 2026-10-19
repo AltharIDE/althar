@@ -106,7 +106,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     addsAccounts: true,
     installed: true,
     kept: false,
-    download: { size: '45 MB', installing: false },
+    download: { size: '45 MB', installing: false, pinned: null },
     problem: null,
   },
 ]

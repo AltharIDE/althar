@@ -38,7 +38,7 @@ import altharFace from '../../../../resources/faces/althar-ai.svg'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
 import { useServices } from '../../data/services'
-import { agentLineOf, brandOf } from '../../shared/agents'
+import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
@@ -228,6 +228,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
             text={{ missing: text.agentHere }}
             {...(brand === undefined ? {} : { brand })}
             {...(chosen.download === null ? {} : { size: chosen.download.size })}
+            {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
             state={
               chosen.download?.installing === true
                 ? { kind: 'installing' }
