@@ -86,13 +86,26 @@ const turnIn = (value: unknown): TurnFacts | null =>
 const listOf = <T>(value: unknown, item: (each: unknown) => T | null, max: number): ReadonlyArray<T> =>
   Array.isArray(value) ? value.slice(0, max).flatMap((each) => item(each) ?? []) : []
 
+/** As many agents as the Worker takes. Althar knows more than that. */
+export const REPORTED_AGENTS = 10
+
+/**
+ * The agents a report names, as many as the Worker takes: those on this
+ * computer first (installed, or with a version), as a report is about them,
+ * each kept in the registry's order.
+ */
+export const reportedAgents = (agents: ReadonlyArray<AgentFacts>): ReadonlyArray<AgentFacts> => {
+  const here = (agent: AgentFacts) => agent.signIn !== 'not_installed' && (agent.signIn !== 'unknown' || agent.version !== null)
+  return [...agents.filter(here), ...agents.filter((agent) => !here(agent))].slice(0, REPORTED_AGENTS)
+}
+
 /** The runtime's facts, as far as they are what they should be; null where the message isn't them at all. */
 export const factsIn = (value: unknown): RuntimeFacts | null => {
   if (!isRecord(value)) return null
   const thread = value.thread
   return {
-    // As many as the Worker takes.
-    agents: listOf(value.agents, agentIn, 10),
+    // Every agent Althar knows, as many as there could be; a report keeps those the Worker takes (reportedAgents).
+    agents: listOf(value.agents, agentIn, 64),
     migrations: listOf(
       value.migrations,
       (each) =>

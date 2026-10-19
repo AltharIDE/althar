@@ -364,12 +364,17 @@ export const handlers = Api.toLayer(
           name: entry.definition.name,
           installed: entry.definition.cli === undefined || install.located !== null,
           kept: install.located?.whose === 'althar',
-          download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
+          download:
+            install.downloadable && install.size !== null
+              ? { size: install.size, installing: install.installing, pinned: install.pinned }
+              : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
           version: yield* versionOf(entry),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
+          addsAccounts: entry.definition.home.accounts !== 'one',
+          guide: entry.definition.cli?.guide ?? null,
           problem: null,
         } satisfies AgentStatus
       }).pipe(
@@ -386,6 +391,9 @@ export const handlers = Api.toLayer(
             version: null,
             ways: entry.definition.signIn.inApp?.ways ?? [],
             accounts: [],
+            addsAccounts: entry.definition.home.accounts !== 'one',
+            // Nothing that might be what failed: its command is read no more here.
+            guide: null,
             problem: `Althar couldn't check ${entry.definition.name}. Its log has the details.`,
           }),
           entry.definition.id,

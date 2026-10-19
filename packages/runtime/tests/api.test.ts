@@ -414,6 +414,25 @@ describe('the API', () => {
     ),
   )
 
+  it.live('says which agents more accounts can be added to: none whose sign-in every folder shares', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({ ...definition, home: { ...definition.home, accounts: 'one' } })),
+        })
+        const status = yield* client.Status({})
+        assert.deepStrictEqual(
+          status.agents.map((agent) => [agent.id, agent.addsAccounts]),
+          [
+            ['claude-code', true],
+            ['codex', false],
+            ['opencode', true],
+          ],
+        )
+      }),
+    ),
+  )
+
   it.live('keeps a failed account check to that account, shows the rest as they are, and reports it', () =>
     Effect.scoped(
       Effect.gen(function* () {

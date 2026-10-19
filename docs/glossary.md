@@ -17,7 +17,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Where tasks open pull requests | `RepositoryBinding.change_target` | For a fork (an `upstream` remote beside `origin`): on the repository it was forked from, or on the fork. The branch is pushed to the fork either way. |
 | Colour | `Project.ink` | The ink a project's mark is drawn in: one of eight, picked for it when it is made, changed under "Name and colour" in its settings. Never "ink" on screen. |
 | Remove from Althar | `Project.archived_at` | Taking a project out of the window and the home. Its agents stop and nothing it planned starts. Its folders, its tasks' worktrees and their branches stay. Opening its folder again makes a new project. Not "delete" or "archive". |
-| Agent | runtime, adapter | Claude Code, Codex, OpenCode and the like, as installed on this machine. |
+| Agent | runtime, adapter | Claude Code, Codex, GitHub Copilot, OpenCode and the like, as installed on this machine. |
 | Account | `AgentAccount`, its home | One sign-in of an agent, kept in a folder of its own. The agent's usual sign-in is its first account; the person can add more, or bring in folders a switcher made. Named by the person ("work"), it shows after the agent's name: "Codex (work)". |
 | Signed in as | `ProviderPrincipal` | Who the agent says you are, for an account. The agent keeps its own sign-in; Althar never holds the credential. |
 | Sign in | vendor login, `auth_required` | Opens the agent's own sign-in, for an account. |

@@ -136,6 +136,28 @@ describe('a report, put together', () => {
     expect(errors.every((line) => line.length <= 500)).toBe(true)
     expect(errors.at(-1)?.startsWith('2026-10-11T12:00:59.000Z main:')).toBe(true)
   })
+
+  it('names as many agents as the Worker takes, those on this computer first', () => {
+    const missing = Array.from({ length: 12 }, (_, at) => ({
+      id: `agent-${at}`,
+      name: `Agent ${at}`,
+      version: null,
+      adapter: null,
+      signIn: 'not_installed' as const,
+    }))
+    const here = { id: 'kimi', name: 'Kimi CLI', version: '1.52.0', adapter: null, signIn: 'signed_out' as const }
+    // Without the runtime, an agent that says its version is on this computer.
+    const said = { id: 'grok', name: 'Grok Build', version: '1.0.63', adapter: null, signIn: 'unknown' as const }
+    const { json } = assemble(gathered({ runtime: { ...facts, agents: [...missing, here, ...facts.agents, said] } }), {
+      text: 'It froze.',
+      email: null,
+      screenshot: false,
+      logs: false,
+    })
+    expect(json.agents).toHaveLength(10)
+    expect(json.agents.slice(0, 3).map((agent) => agent.id)).toEqual(['kimi', 'claude-code', 'grok'])
+    expect(json.agents.slice(3).every((agent) => agent.signIn === 'not_installed')).toBe(true)
+  })
 })
 
 describe('the runtime’s facts', () => {

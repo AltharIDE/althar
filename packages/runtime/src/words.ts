@@ -434,4 +434,6 @@ const accountRefused = {
   usual: "That's the agent's usual sign-in, its first account: it stays.",
   taken: 'That folder is an account already.',
   no_name: 'Give the account a name.',
+  one: "This agent keeps its sign-in where every folder shares it, so it can't have a second account yet: sign its usual one in to the account you want.",
+  no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
 } as const satisfies Record<AccountRefused['reason'], string>
