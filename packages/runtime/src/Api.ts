@@ -709,6 +709,8 @@ export const handlers = Api.toLayer(
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
+      MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
+      LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
@@ -892,6 +894,22 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      HandOverHeld: ({ commandId, taskId, agentId, accountId, model }) => {
+        const answer = {
+          kind: 'retry' as const,
+          agentId,
+          ...(accountId === undefined ? {} : { accountId }),
+          ...(model === undefined ? {} : { model }),
+        }
+        return once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.hand_over_held', { taskId, answer }, commandId), (said) =>
+              runs.handOverHeld({ envelope: said, taskId, answer }),
+            ),
+          ),
+        )
+      },
       AnswerQuestion: ({ commandId, attentionId, answers }) =>
         once(
           commandId,

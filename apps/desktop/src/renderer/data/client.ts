@@ -147,6 +147,10 @@ export interface Client {
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
+  /** Puts a task waiting for a free agent at a place in its project's line, from 0 the front; the line starts in that order. */
+  readonly moveInLine: (taskId: string, to: number) => Promise<void>
+  /** Puts a project's line back in the order its tasks began waiting. */
+  readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
@@ -371,6 +375,13 @@ export interface Client {
   readonly getRepositoryScripts: (projectId: string) => Promise<ReadonlyArray<RepositoryScript>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
+  /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
+  readonly handOverHeld: (input: {
+    readonly taskId: string
+    readonly agentId: string
+    readonly accountId?: string
+    readonly model?: string
+  }) => Promise<void>
   /**
    * Calls `listener` with each change after `since` (or from now) until the
    * returned function is called; and `onWatching` each time it starts
@@ -493,6 +504,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
+    moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
+    lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
@@ -594,6 +607,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
+    handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.

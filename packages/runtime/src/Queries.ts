@@ -15,7 +15,9 @@ import {
   IssueDraftCard,
   ReviewDraftCard,
   type IssueSummary,
+  type HeldForLimit,
   LimitCall,
+  LimitChoice,
   PAGE,
   Unfurl,
   type TaskPhase,
@@ -193,6 +195,9 @@ const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; re
 
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeLimit = Schema.decodeUnknownOption(LimitCall)
+const decodeChoice = Schema.decodeUnknownOption(LimitChoice)
+/** One who could take a held step over, as its hold kept it; one that doesn't read is left out. */
+const choiceOf = (value: unknown) => Option.toArray(decodeChoice(value))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
 
 /** The first of the allow rules a decision keeps, or none where it keeps none. */
@@ -1361,11 +1366,18 @@ export class Queries extends Context.Service<
         }
       })
 
-      /** A waiting task's place in the order what waits starts, among everything that waits: 1 starts first. */
+      /**
+       * A waiting task's place in its project's line, the tasks that wait for a place before any agent has worked on them, in
+       * the order they start (1 first), and whether the line is in the person's order; null where it isn't in the line.
+       */
       const placeOf = (taskId: string) =>
         Effect.gen(function* () {
-          const order = yield* (yield* Busy).order
-          return Math.max(1, order.findIndex((waiter) => waiter.taskId === taskId && waiter.review !== true) + 1)
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+          if (task === undefined) return null
+          const line = yield* (yield* Busy).line(task.projectId)
+          const at = line.tasks.indexOf(taskId)
+          return at < 0 ? null : { place: at + 1, reordered: line.reordered }
         })
 
       /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
@@ -1519,6 +1531,8 @@ export class Queries extends Context.Service<
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
+          // Waiting so before any agent has worked on it, whatever its kind: in its project's line, up next.
+          const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
           const unshipped =
             after.length === 0
               ? null
@@ -1640,17 +1654,28 @@ export class Queries extends Context.Service<
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
-            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true, place: yield* placeOf(taskId) } : {}),
+            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
-      /** What a held step waits for: the agent out of usage, and when it is back. */
-      const waitsOf = (held: string | null) => {
+      /** What a held step waits for: the agent and account out of usage, when it is back, why it waits, and who could take it over now. */
+      const waitsOf = (held: string | null): HeldForLimit | null => {
         const output = held === null ? undefined : parse(held)
         const agentId = text(output, 'heldFor')
         const until = text(output, 'until')
-        return agentId === '' || until === '' ? null : { agentId, until }
+        if (agentId === '' || until === '') return null
+        const account = field(output, 'account')
+        const why = field(output, 'why')
+        const choices = field(output, 'choices')
+        return {
+          agentId,
+          until,
+          ...(typeof account === 'string' ? { accountId: account } : {}),
+          ...(why === 'waits' || why === 'nothing_free' || why === 'asked' ? { why } : {}),
+          ...(Array.isArray(choices) ? { choices: choices.flatMap(choiceOf) } : {}),
+        }
       }
 
       /** How many settled tasks the board shows: the most recent. */
@@ -2058,6 +2083,7 @@ export class Queries extends Context.Service<
               handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,
+              ...(card?.inLine === true && card.place !== undefined ? { place: card.place } : {}),
               steps: card?.plan?.steps ?? [],
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,

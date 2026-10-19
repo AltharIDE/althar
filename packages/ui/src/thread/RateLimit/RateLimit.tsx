@@ -29,7 +29,11 @@ export interface PausedWork {
 }
 
 /** What you told the paused work to do. */
-export type RateLimitResult = { kind: LimitAnswer.Moved; model: ModelInfo } | { kind: LimitAnswer.Waiting } | { kind: LimitAnswer.Again }
+export type RateLimitResult =
+  | { kind: LimitAnswer.Moved; model: ModelInfo }
+  | { kind: LimitAnswer.Waiting }
+  | { kind: LimitAnswer.Again }
+  | { kind: LimitAnswer.Skipped }
 
 export interface RateLimitText {
   kicker: string
@@ -52,7 +56,13 @@ export interface RateLimitText {
   movedNote: string
   waiting: (resets: string) => string
   waitingNote: string
+  /** On work that waits on its own, kept waiting: opens the card again, to move it on after all. */
+  reopen: string
   tryingAgain: (runtime: string) => string
+  /** Go on without the step: for a review. */
+  skip: string
+  skipped: string
+  skippedNote: string
 }
 
 export const rateLimitText: RateLimitText = {
@@ -77,7 +87,11 @@ export const rateLimitText: RateLimitText = {
   movedNote: 'the step picks up from the task’s record',
   waiting: (resets) => `Waiting until ${resets}`,
   waitingNote: 'the step runs again then',
+  reopen: 'Pick another model',
   tryingAgain: (runtime) => `Trying ${runtime} again`,
+  skip: 'Skip the review',
+  skipped: 'Skipped the review',
+  skippedNote: 'the task is ready without one',
 }
 
 export type RateLimitProps = RootProps<
@@ -98,6 +112,14 @@ export type RateLimitProps = RootProps<
     onWait?: () => void
     /** Try the same agent again: for one that didn't say when it resets. */
     onAgain?: () => void
+    /** Go on without the step: a review, skipped. */
+    onSkip?: () => void
+    /**
+     * The work waits for the reset by itself, as the project said or because
+     * nothing else was free: the models are a way on, not an ask, so the card
+     * is drawn in ink, not violet.
+     */
+    held?: boolean
     /** The option the button offers, by id, when the consumer holds it. */
     pick?: string
     /** The option offered first. By default, the first that is not busy. */
@@ -118,9 +140,11 @@ const idOf = (option: RateLimitOption) => option.id ?? option.model.id
  * (ADR-013). The work it paused waits on you, so it is violet like every ask:
  * whose limit and until when, the models free now to move the work to, each
  * with how it is reached, and waiting for the reset; or, where the agent
- * didn't say when that is, trying it again. Under the project's other rules
- * the work moves or waits on its own and the thread says so in a line; see
- * LimitMoved. Once answered it folds to one line.
+ * didn't say when that is, trying it again; and, for a review, going on
+ * without it. Where the work waits for the reset on its own (`held`), the
+ * same choices are a way on, not an ask, and the card is in ink. Once
+ * answered it folds to one line; work that waits on its own, kept waiting,
+ * can be opened again from there, since it still can be moved on.
  */
 export function RateLimit({
   runtime,
@@ -131,6 +155,8 @@ export function RateLimit({
   onSwap,
   onWait,
   onAgain,
+  onSkip,
+  held = false,
   pick: pickProp,
   defaultPick,
   onPickChange,
@@ -164,12 +190,30 @@ export function RateLimit({
         )
       case LimitAnswer.Waiting:
         return (
-          <AskAnswered said={t.waiting(resets ?? '')} {...line}>
+          <AskAnswered
+            said={t.waiting(resets ?? '')}
+            {...line}
+            {...(held
+              ? {
+                  undo: t.reopen,
+                  onUndo: () => {
+                    setAnsweredHere(false)
+                    setResult(null)
+                  },
+                }
+              : {})}
+          >
             <AskNote>· {t.waitingNote}</AskNote>
           </AskAnswered>
         )
       case LimitAnswer.Again:
         return <AskAnswered said={t.tryingAgain(runtime)} {...line} />
+      case LimitAnswer.Skipped:
+        return (
+          <AskAnswered said={t.skipped} {...line}>
+            <AskNote>· {t.skippedNote}</AskNote>
+          </AskAnswered>
+        )
       default:
         return unreachable(result)
     }
@@ -178,7 +222,7 @@ export function RateLimit({
   const moving = onSwap && picked
   const waiting = onWait && resets !== null
   return (
-    <AskCard icon="clock" kicker={t.kicker} who={step} what={t.what(runtime, resets)} className={className} {...rest}>
+    <AskCard icon="clock" kicker={t.kicker} who={step} what={t.what(runtime, resets)} quiet={held} className={className} {...rest}>
       {affects.length > 0 && (
         <p className={s.meta}>
           {t.paused(
@@ -192,11 +236,11 @@ export function RateLimit({
         </p>
       )}
       {onSwap && !picked && <p className={s.meta}>{t.noneFree}</p>}
-      {(moving || waiting || onAgain) && (
+      {(moving || waiting || onAgain || onSkip) && (
         <AskFoot>
           {moving && (
             <SplitButton
-              variant="signal"
+              variant={held ? 'default' : 'signal'}
               onClick={() => {
                 onSwap(idOf(picked))
                 give({ kind: LimitAnswer.Moved, model: picked.model })
@@ -219,7 +263,7 @@ export function RateLimit({
           )}
           {waiting && (
             <Button
-              variant={moving ? 'default' : 'signal'}
+              variant={moving || held ? 'default' : 'signal'}
               onClick={() => {
                 onWait()
                 give({ kind: LimitAnswer.Waiting })
@@ -230,13 +274,24 @@ export function RateLimit({
           )}
           {onAgain && (
             <Button
-              variant={moving || waiting ? 'default' : 'signal'}
+              variant={moving || waiting || held ? 'default' : 'signal'}
               onClick={() => {
                 onAgain()
                 give({ kind: LimitAnswer.Again })
               }}
             >
               {t.again(runtime)}
+            </Button>
+          )}
+          {onSkip && (
+            <Button
+              variant="quiet"
+              onClick={() => {
+                onSkip()
+                give({ kind: LimitAnswer.Skipped })
+              }}
+            >
+              {t.skip}
             </Button>
           )}
         </AskFoot>

@@ -1,9 +1,23 @@
-import { Children, useId, type ReactNode } from 'react'
+import {
+  Children,
+  createContext,
+  type CSSProperties,
+  isValidElement,
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { BoardLane, unreachable } from '../../foundations/vocabulary'
+import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
+import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import s from './Board.module.css'
 
@@ -15,14 +29,25 @@ import s from './Board.module.css'
  * came to. There is no held lane: a task held on a call stays in Up next,
  * and the call itself is what waits on you.
  *
- * The board lays the lanes side by side and scrolls them sideways when they
- * don't fit; each lane scrolls on its own.
+ * The board lays the lanes side by side. Where they don't fit at their
+ * narrowest, it collapses some to rails, so it never scrolls sideways while
+ * it can help it: an empty lane first, then Settled, Up next and Running.
+ * Needs you never collapses while something waits in it. The person collapses
+ * a lane from the chevron its head shows on hover, and opens one from its
+ * rail; one they opened stays open, and another collapses instead. Each lane
+ * scrolls on its own.
  */
 
 export interface BoardText {
   lane: Record<BoardLane, string>
   /** An empty lane. */
   empty: Record<BoardLane, string>
+  /** The chevron on a lane's head, by the lane's name. */
+  collapse: (lane: string) => string
+  /** A collapsed lane's rail, by the lane's name and how many it holds. */
+  expand: (lane: string, count: number) => string
+  /** The chevron on Needs you's head while something waits in it. */
+  stays: string
 }
 
 export const boardText: BoardText = {
@@ -38,20 +63,130 @@ export const boardText: BoardText = {
     [BoardLane.Yours]: 'Nothing needs you.',
     [BoardLane.Settled]: 'Nothing has settled yet.',
   },
+  collapse: (lane) => `Collapse ${lane}`,
+  expand: (lane, count) => `Expand ${lane}, ${count}`,
+  stays: 'Needs you stays open while something waits on you',
 }
+
+/** What the person chose about the lanes: those they collapsed, and those they opened from a rail, kept open while another collapses instead. */
+export interface BoardFolds {
+  readonly collapsed: ReadonlyArray<BoardLane>
+  readonly opened: ReadonlyArray<BoardLane>
+}
+
+export const NO_FOLDS: BoardFolds = { collapsed: [], opened: [] }
+
+/** A collapsed lane's width, in px: a rail. */
+export const RAIL = 40
+/** A lane's narrowest, in px, where the board's container doesn't set `--lane-min`. */
+const NARROWEST = 260
+/** A lane's widest, in px. */
+const WIDEST = 460
+
+/** Which lanes collapse first when the board runs out of room, after what's empty. */
+const FIRST: Record<BoardLane, number> = { [BoardLane.Settled]: 0, [BoardLane.Next]: 1, [BoardLane.Running]: 2, [BoardLane.Yours]: 3 }
+
+/** A lane as the board counts it. */
+export interface LaneCount {
+  readonly lane: BoardLane
+  readonly count: number
+}
+
+/** Needs you, while something waits in it: it can't be collapsed, and opens by itself when something arrives. */
+const heldOf = ({ lane, count }: LaneCount) => lane === BoardLane.Yours && count > 0
+
+/**
+ * The lanes shown as rails: those the person collapsed, and, where the lanes
+ * don't fit `width` at `narrowest` each, as many more as it takes, an empty
+ * lane first, then Settled, Up next and Running. Never Needs you while
+ * something waits in it; never by itself a lane the person opened. A width
+ * not known yet (0) collapses nothing by itself.
+ */
+export function railsOf(lanes: ReadonlyArray<LaneCount>, folds: BoardFolds, width: number, narrowest: number): ReadonlySet<BoardLane> {
+  const rails = new Set(lanes.filter((one) => folds.collapsed.includes(one.lane) && !heldOf(one)).map((one) => one.lane))
+  if (width <= 0) return rails
+  const fits = () => (lanes.length - rails.size) * narrowest + rails.size * RAIL <= width
+  const candidates = lanes
+    .filter((one) => !rails.has(one.lane) && !heldOf(one) && !folds.opened.includes(one.lane))
+    .toSorted((a, b) => Number(b.count === 0) - Number(a.count === 0) || FIRST[a.lane] - FIRST[b.lane])
+  for (const one of candidates) {
+    if (fits()) break
+    rails.add(one.lane)
+  }
+  return rails
+}
+
+/** A lane folded or opened by the person: off the other list, and on its own. */
+const chose = (folds: BoardFolds, lane: BoardLane, collapse: boolean): BoardFolds => {
+  const without = (list: ReadonlyArray<BoardLane>) => list.filter((one) => one !== lane)
+  return collapse
+    ? { collapsed: [...without(folds.collapsed), lane], opened: without(folds.opened) }
+    : { collapsed: without(folds.collapsed), opened: [...without(folds.opened), lane] }
+}
+
+/** How wide the board is, and a lane's narrowest there (its container's `--lane-min`); 0 wide until it is measured. */
+function useRoom(ref: RefObject<HTMLElement | null>) {
+  const [room, setRoom] = useState({ width: 0, narrowest: NARROWEST })
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (element === null || typeof ResizeObserver === 'undefined') return
+    const measure = () => {
+      const width = element.clientWidth
+      const narrowest = Number.parseFloat(getComputedStyle(element).getPropertyValue('--lane-min')) || NARROWEST
+      setRoom((was) => (was.width === width && was.narrowest === narrowest ? was : { width, narrowest }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [ref])
+  return room
+}
+
+interface Folding {
+  /** Shown as a rail. */
+  readonly rail: (lane: BoardLane) => boolean
+  readonly fold: (lane: BoardLane, collapse: boolean) => void
+}
+
+const FoldingContext = createContext<Folding | null>(null)
 
 export interface BoardProps {
   /** Its lanes: BoardLane elements. */
   children: ReactNode
   /** What the board is, for assistive technology. */
   label: string
+  /** The lanes the person collapsed and opened, where the consumer keeps them; otherwise the board keeps them, from `defaultFolds`. */
+  folds?: BoardFolds
+  defaultFolds?: BoardFolds
+  /** Each time the person collapses or opens a lane. */
+  onFoldsChange?: (folds: BoardFolds) => void
   className?: string
 }
 
-export function Board({ children, label, className }: BoardProps) {
+export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFoldsChange, className }: BoardProps) {
+  const [chosen, setChosen] = useControlled(folds, defaultFolds, onFoldsChange)
+  const ref = useRef<HTMLElement>(null)
+  const room = useRoom(ref)
+  const lanes: ReadonlyArray<LaneCount> = Children.toArray(children).flatMap((child) =>
+    isValidElement<BoardColumnProps>(child) && child.type === BoardColumn ? [{ lane: child.props.lane, count: child.props.count }] : [],
+  )
+  const rails = railsOf(lanes, chosen, room.width, room.narrowest)
+  const style: CSSProperties | undefined =
+    lanes.length === 0
+      ? undefined
+      : {
+          gridTemplateColumns: lanes
+            .map((one) => (rails.has(one.lane) ? `minmax(${RAIL}px, ${RAIL}px)` : `minmax(var(--lane-min, ${NARROWEST}px), ${WIDEST}px)`))
+            .join(' '),
+        }
   return (
-    <section aria-label={label} className={cx(s.board, className)}>
-      {children}
+    <section ref={ref} aria-label={label} className={cx(s.board, className)} style={style}>
+      <FoldingContext.Provider
+        value={{ rail: (lane) => rails.has(lane), fold: (lane, collapse) => setChosen(chose(chosen, lane, collapse)) }}
+      >
+        {children}
+      </FoldingContext.Provider>
     </section>
   )
 }
@@ -81,20 +216,111 @@ export interface BoardColumnProps {
   text?: Partial<BoardText>
 }
 
-/** One lane: its name and count, then its cards or rows. Empty, it says so. */
+/**
+ * One lane: its name and count, then its cards or rows. Empty, it says so.
+ * On a board, its head shows a chevron on hover that collapses it to a rail:
+ * its glyph, its count and its name written down it, the whole of it the
+ * button that opens it again. The focus goes with it either way, and where
+ * the board collapses or opens it by itself from under the focus, too.
+ */
 export function BoardColumn({ lane, count, children, headingLevel = 2, text }: BoardColumnProps) {
   const t = { ...boardText, ...text }
   const id = useId()
+  const bodyId = useId()
+  const folding = useContext(FoldingContext)
+  const rail = folding?.rail(lane) ?? false
+  const held = heldOf({ lane, count })
+  const self = useRef<HTMLElement>(null)
+  // Collapsed or opened from its own control, or by the board from under what had the focus in it, the focus goes to
+  // the control that took their place. Focus elsewhere stays where it is.
+  const moved = useRef(false)
+  // What has the focus in the lane, while it does: forgotten when the focus goes elsewhere, or to nothing, unless it
+  // went because the lane took it off the page.
+  const focused = useRef<Element | null>(null)
+  useLayoutEffect(() => {
+    const element = self.current
+    if (element === null) return
+    const into = (event: FocusEvent) => {
+      focused.current = event.target instanceof Element ? event.target : null
+    }
+    const out = ({ target, relatedTarget }: FocusEvent) => {
+      if (relatedTarget instanceof Node && element.contains(relatedTarget)) return
+      if (relatedTarget !== null) focused.current = null
+      else
+        queueMicrotask(() => {
+          if (focused.current === target && target instanceof Element && target.isConnected) focused.current = null
+        })
+    }
+    element.addEventListener('focusin', into)
+    element.addEventListener('focusout', out)
+    return () => {
+      element.removeEventListener('focusin', into)
+      element.removeEventListener('focusout', out)
+    }
+  }, [rail])
+  useLayoutEffect(() => {
+    const active = document.activeElement
+    const lost = focused.current !== null && !focused.current.isConnected && (active === null || active === document.body)
+    if (!moved.current && !lost) return
+    moved.current = false
+    focused.current = null
+    self.current?.querySelector<HTMLButtonElement>(`[data-fold="${rail ? 'expand' : 'collapse'}"]`)?.focus()
+  }, [rail])
+  const fold = (collapse: boolean) => {
+    if (folding === null || (collapse && held)) return
+    moved.current = true
+    folding.fold(lane, collapse)
+  }
+  const name = t.lane[lane]
+
+  if (rail)
+    return (
+      <section ref={self} aria-labelledby={id} className={cx(s.column, s[lane], s.collapsed)}>
+        <span className={s.railGlyph}>
+          <Glyph lane={lane} />
+        </span>
+        <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
+        <Heading level={headingLevel} id={id} className={cx(s.title, s.railName)}>
+          {name}
+        </Heading>
+        <button
+          type="button"
+          className={s.expand}
+          data-fold="expand"
+          aria-expanded="false"
+          aria-label={t.expand(name, count)}
+          onClick={() => fold(false)}
+        />
+      </section>
+    )
+
   return (
-    <section aria-labelledby={id} className={cx(s.column, s[lane])}>
+    <section ref={self} aria-labelledby={id} className={cx(s.column, s[lane])}>
       <header className={s.head}>
         <Glyph lane={lane} />
         <Heading level={headingLevel} id={id} className={s.title}>
-          {t.lane[lane]}
+          {name}
         </Heading>
         <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
+        {folding !== null && (
+          <IconButton
+            icon="chevronL"
+            size="small"
+            tooltip="below"
+            tooltipAlign="end"
+            label={held ? t.stays : t.collapse(name)}
+            className={s.collapse}
+            data-fold="collapse"
+            aria-expanded="true"
+            aria-controls={bodyId}
+            {...(held ? { 'aria-disabled': true } : {})}
+            onClick={() => fold(true)}
+          />
+        )}
       </header>
-      <div className={s.body}>{count > 0 ? children : <p className={s.empty}>{t.empty[lane]}</p>}</div>
+      <div className={s.body} id={bodyId}>
+        {count > 0 ? children : <p className={s.empty}>{t.empty[lane]}</p>}
+      </div>
     </section>
   )
 }
@@ -110,7 +336,12 @@ export function BoardList({ children }: { children: ReactNode }) {
   )
 }
 
-/** A quiet line between groups in a lane, naming the group under it: what starts when an agent is free. */
-export function BoardDivider({ children }: { children: ReactNode }) {
-  return <p className={s.divider}>{children}</p>
+/** A quiet line between groups in a lane, naming the group under it: what starts when an agent is free; at its end, what to do with the group. */
+export function BoardDivider({ children, end }: { children: ReactNode; end?: ReactNode }) {
+  return (
+    <p className={s.divider}>
+      {children}
+      {end !== undefined && end !== null && <span className={s.dividerEnd}>{end}</span>}
+    </p>
+  )
 }

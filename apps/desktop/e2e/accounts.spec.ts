@@ -54,7 +54,9 @@ test('adds an account to an agent, and names the one that ran out when a task mo
     await expect(page.getByText('Ready', { exact: true })).toBeVisible({ timeout: 15_000 })
     await page.getByRole('button', { name: /^Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
-    await expect(page.getByText(/^Claude Code \(main\) reached its usage limit, until .+\. Codex takes over(, on .+)?\.$/)).toBeVisible()
+    await expect(
+      page.getByText(/^Claude Code \(main\) ran out of usage while working on the task, until .+\. Codex takes the work over(, on .+)?\.$/),
+    ).toBeVisible()
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
     await page.screenshot({ path: 'test-results/accounts-moved.png', animations: 'disabled' })
   } finally {

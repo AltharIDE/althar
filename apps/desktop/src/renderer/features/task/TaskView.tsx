@@ -64,6 +64,7 @@ import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
+import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
 import { ConnectPanel } from '../connections/ConnectPanel'
@@ -165,7 +166,7 @@ export const statusOf = (
   // No call waits, yet the task does: issues its lead drafted wait to be filed.
   if (snapshot.task.phase === 'waiting') return { status: TaskStatus.Yours, state: text.issues }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
+  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
@@ -653,7 +654,12 @@ export function TaskView({
       {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
         <p className={s.handover}>{text.needsAgent}</p>
       )}
-      <Holders holders={snapshot.task.queued?.holders} onStop={(holder, id) => void model.stopHolding(holder, id)} />
+      <Holders
+        holders={snapshot.task.queued?.holders}
+        onStop={(holder, id) => void model.stopHolding(holder, id)}
+        // 2nd or later in its project's line, it can go first from here.
+        {...((snapshot.task.place ?? 0) > 1 ? { onFront: () => void model.moveToFront() } : {})}
+      />
       {waiting !== null && (
         <p className={s.handover}>
           {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
@@ -940,6 +946,18 @@ export function TaskView({
                       })}
                 />
               ) : null,
+            )}
+            {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
+            {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
+              <HeldLimit
+                key={`${snapshot.task.waits.agentId}:${snapshot.task.waits.until}`}
+                waits={snapshot.task.waits}
+                step={snapshot.task.step === 'review' || snapshot.task.step === 'settle' ? snapshot.task.step : 'implement'}
+                agents={model.agents}
+                agentName={agentName}
+                onHandOver={(to) => void model.handOverHeld(to)}
+                {...(snapshot.task.step === 'review' ? { onSkip: () => void model.skipReview() } : {})}
+              />
             )}
             <PermissionCalls
               requests={snapshot.attention.filter((request) => request.kind === 'permission')}
