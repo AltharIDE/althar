@@ -62,7 +62,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
       'style',
       /--project-rose/,
     )
-    // How its tasks work: each switch says what it does, on and off.
+    // Tasks: each switch says when it acts.
     await expect(page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })).not.toBeChecked()
     await expect(page.getByRole('switch', { name: 'Move issues to In Progress' })).toBeChecked()
     await page.screenshot({ path: 'test-results/project-settings-general.png', animations: 'disabled' })

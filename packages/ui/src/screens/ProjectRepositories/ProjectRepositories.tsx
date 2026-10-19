@@ -18,8 +18,8 @@ import s from './ProjectRepositories.module.css'
 
 export interface ProjectRepositoriesText {
   title: string
-  /** What they are, under the heading. */
-  note: string
+  /** What they are, under the heading, where the page around them doesn't say. */
+  note?: string
   drop: string
   /** While a folder is held over them. */
   dropping: string
@@ -29,7 +29,6 @@ export interface ProjectRepositoriesText {
 
 export const projectRepositoriesText: ProjectRepositoriesText = {
   title: 'Repositories',
-  note: 'Its folders on this computer, and where each one’s work goes.',
   drop: 'or drop a folder here',
   dropping: 'Let go to add it',
   add: 'Add a folder',
@@ -84,7 +83,7 @@ export function ProjectRepositories({
   return (
     <SettingGroup
       title={t.title}
-      note={t.note}
+      {...(t.note === undefined ? {} : { note: t.note })}
       headingLevel={headingLevel}
       {...(onAdd === undefined
         ? {}
