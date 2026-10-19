@@ -148,7 +148,7 @@ describe('an agent out of usage', () => {
       const [ready] = yield* until(cardOf(projectId), (cards) => cards.some((card) => card.phase === 'ready'), Duration.seconds(20))
       assert.strictEqual(ready?.lead, 'codex')
       assert.deepStrictEqual(yield* said(task.threadId), [
-        `Fake claude-code reached its usage limit, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake codex takes over, on Large.`,
+        `Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake codex takes the work over, on Large.`,
         'implement: Did the task.',
         'The task ends on its branch.',
       ])
@@ -172,7 +172,10 @@ describe('an agent out of usage', () => {
       yield* start
       const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
       assert.deepStrictEqual([held?.phase, held?.step, held?.waits?.agentId], ['running', 'implement', 'claude-code'])
-      assert.include((yield* said(task.threadId))[0], 'The step waits until then.')
+      assert.match(
+        (yield* said(task.threadId))[0] ?? '',
+        /^Fake claude-code ran out of usage while working on the task\. The work waits until .+, when Fake claude-code is back\. To carry on now, pick another model on the task\.$/,
+      )
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
       assert.deepStrictEqual([ready?.lead, ready?.waits], ['claude-code', null])
       assert.include(yield* said(task.threadId), 'implement: Did the task.')
@@ -327,7 +330,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex reached its usage limit, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake opencode takes over.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake opencode takes the review over.`,
       )
       assert.include(lines, 'review: The change holds.')
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
@@ -339,7 +342,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex reached its usage limit, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake claude-code takes over, on Small, and reviews its own work.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake claude-code takes the review over, on Small, and reviews its own work.`,
       )
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
@@ -350,7 +353,11 @@ describe('an agent out of usage', () => {
       const { projectId, task, start } = yield* planned([lead('claude-code')])
       yield* start
       yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
-      assert.include((yield* said(task.threadId))[0], 'The step waits until then.')
+      // It moves work on, but no other was free on a plan: it says so, and that the person can pick one.
+      assert.match(
+        (yield* said(task.threadId))[0] ?? '',
+        /\. No other model was free, so the work waits until .+\. Pick one on the task to carry on now\.$/,
+      )
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(
@@ -382,7 +389,7 @@ describe('an agent out of usage', () => {
       assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
-        `Fake claude-code reached its usage limit, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake codex takes over.`,
+        `Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString())}. Fake codex takes over.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
@@ -401,7 +408,7 @@ describe('an agent out of usage', () => {
         body: 'Is the checkout slow?',
         disposition: 'after_current',
       })
-      yield* until(said(threadId), (lines) => lines.some((line) => line.endsWith('Your message waits until then.')), Duration.seconds(10))
+      yield* until(said(threadId), (lines) => lines.some((line) => line.includes('Your message waits until')), Duration.seconds(10))
       // Back at its reset, the same agent answers.
       const [answer] = yield* until(replies(threadId), (all) => all.length > 0, Duration.seconds(10))
       assert.strictEqual(answer?.agentId, 'claude-code')
@@ -485,7 +492,10 @@ describe('an agent out of usage, where the project asks', () => {
       yield* answer(call.id, { kind: 'wait' })
       const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
       assert.deepStrictEqual([held?.phase, held?.waits?.agentId, held?.waits?.until], ['running', 'claude-code', reset(back)])
-      assert.include(yield* said(task.threadId), `The step waits until ${whenWords(reset(back))}, when Fake claude-code is back.`)
+      assert.include(
+        yield* said(task.threadId),
+        `The work waits until ${whenWords(reset(back))}, when Fake claude-code is back, as you said.`,
+      )
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
       assert.deepStrictEqual([ready?.lead, ready?.waits], ['claude-code', null])
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
@@ -536,7 +546,7 @@ describe('an agent out of usage, where the project asks', () => {
       yield* answer(call.id, { kind: 'wait' })
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
       assert.strictEqual(ready?.lead, 'claude-code')
-      assert.isFalse((yield* said(task.threadId)).some((line) => line.startsWith('The step waits until')))
+      assert.isFalse((yield* said(task.threadId)).some((line) => line.startsWith('The work waits until')))
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
 
@@ -563,6 +573,150 @@ describe('an agent out of usage, where the project asks', () => {
   })
 })
 
+/** The person hands the task's step held for a usage limit to an agent, as they picked. */
+const handOver = (taskId: string, to: Extract<StuckAnswer, { readonly kind: 'retry' }>) =>
+  Effect.gen(function* () {
+    const runs = yield* Runs
+    yield* runs.handOverHeld({ envelope: yield* Runtime.envelope('task.hand_over_held', {}), taskId, answer: to })
+  })
+
+/** Who ran on the thread, in order: agent and model. */
+const ranOn = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ agentId: string; model: string | null }>`
+      SELECT agent_id, model FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at, rowid`
+    return rows.map((row) => [row.agentId, row.model])
+  })
+
+describe('a step held for a usage limit, handed over by the person', () => {
+  it.live('goes to the model picked where the project waits, and isn’t run again at the reset', () => {
+    const back = Date.now() + 3000
+    return Effect.gen(function* () {
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* waits(projectId)
+      yield* start
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
+      // The card says whose account ran out, why it waits, and who could take it over.
+      assert.deepInclude(held?.waits, { agentId: 'claude-code', accountId: yield* usual('claude-code'), why: 'waits' })
+      assert.deepStrictEqual(
+        held?.waits?.choices?.map((choice) => choice.agentId),
+        ['codex', 'opencode'],
+      )
+      const codex = yield* usual('codex')
+      // An account that isn't the agent's own is refused, and the step stays held.
+      const refused = yield* Effect.flip(handOver(task.taskId, { kind: 'retry', agentId: 'codex', accountId: yield* usual('claude-code') }))
+      assert.deepInclude(refused, { _tag: 'NotFound', kind: 'account' })
+      yield* handOver(task.taskId, { kind: 'retry', agentId: 'codex', accountId: codex, model: 'large' })
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
+      assert.deepStrictEqual([ready?.lead, ready?.waits], ['codex', null])
+      // Past the reset, nothing brings the step back on the agent it was held for.
+      yield* Effect.sleep(Duration.millis(Math.max(0, back - Date.now() + 1500)))
+      assert.deepStrictEqual(yield* ranOn(task.threadId), [
+        ['claude-code', 'small'],
+        ['codex', 'large'],
+      ])
+      assert.strictEqual((yield* said(task.threadId)).filter((line) => line === 'implement: Did the task.').length, 1)
+      assert.strictEqual((yield* cardOf(projectId))[0]?.phase, 'ready')
+      // Nothing is held now, so there is nothing to hand over.
+      const after = yield* Effect.flip(handOver(task.taskId, { kind: 'retry', agentId: 'opencode' }))
+      assert.deepInclude(after, { _tag: 'NotHeld' })
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
+  })
+
+  it.live('goes to the model picked where the project moves on but nothing was free, as it said', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* start
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
+      assert.strictEqual(held?.waits?.why, 'nothing_free')
+      assert.include((yield* said(task.threadId))[0], 'No other model was free')
+      // Paid per use, Codex is never moved to unasked; the person may pick it.
+      yield* handOver(task.taskId, { kind: 'retry', agentId: 'codex', accountId: yield* usual('codex') })
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
+      assert.strictEqual(ready?.lead, 'codex')
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(':memory:', {}, { each: { 'claude-code': { outOfUsage: { until: back } } }, perUse: ['codex', 'opencode'] }),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it.live('runs a held review on the agent picked, as a new round', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const { projectId, task, start } = yield* planned(
+        [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false }],
+        'Retry the checkout [lead:finish] [review:pass]',
+      )
+      yield* waits(projectId)
+      yield* start
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(20))
+      assert.deepStrictEqual([held?.step, held?.waits?.agentId], ['review', 'codex'])
+      assert.match((yield* said(task.threadId)).at(-1) ?? '', /^Fake codex ran out of usage during the review\. The review waits until /)
+      yield* handOver(task.taskId, { kind: 'retry', agentId: 'opencode', accountId: yield* usual('opencode') })
+      yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(20))
+      assert.include(yield* said(task.threadId), 'review: The change holds.')
+    }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
+  })
+
+  it.live('waits its turn for a place where every place is taken, and carries on as handed once one frees', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* waits(projectId)
+      yield* start
+      yield* until(cardOf(projectId), (cards) => cards.some((card) => card.waits != null), Duration.seconds(10))
+      // Held, it takes no place: another task's lead takes the one there is, and stays at work.
+      const other = yield* planned([lead('opencode')], 'Hold the place [lead:wait]')
+      yield* other.start
+      yield* until(
+        cardOf(other.projectId),
+        (cards) => cards.some((card) => card.taskId === other.task.taskId && card.phase === 'running' && card.queued === null),
+        Duration.seconds(10),
+      )
+      yield* handOver(task.taskId, { kind: 'retry', agentId: 'codex', accountId: yield* usual('codex') })
+      const [queued] = yield* until(
+        cardOf(projectId),
+        (cards) => cards.some((card) => card.taskId === task.taskId && card.queued !== null),
+        Duration.seconds(10),
+      )
+      assert.isNotNull(queued)
+      assert.strictEqual((yield* cardOf(projectId)).find((card) => card.taskId === task.taskId)?.waits, null)
+      // The place frees: it carries on, on the agent picked.
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.task.threadId, body: '[lead:finish]' })
+      const [ready] = yield* until(
+        cardOf(projectId),
+        (cards) => cards.some((card) => card.taskId === task.taskId && card.phase === 'ready'),
+        Duration.seconds(20),
+      )
+      assert.isDefined(ready)
+      assert.deepStrictEqual(
+        (yield* ranOn(task.threadId)).map(([agentId]) => agentId),
+        ['claude-code', 'codex'],
+      )
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(
+              ':memory:',
+              {},
+              { each: { 'claude-code': { outOfUsage: { until: back } } }, busy: { machine: { cores: 3, memory: 7 * 1024 ** 3 } } },
+            ),
+          ),
+        ),
+      ),
+    )
+  })
+})
+
 describe('a message waiting for a reset', () => {
   it.live('is answered then after Althar restarts, by the agent it waited for', () => {
     const back = Date.now() + 3000
@@ -582,7 +736,7 @@ describe('a message waiting for a reset', () => {
           body: 'Is the checkout slow?',
           disposition: 'after_current',
         })
-        yield* until(said(thread), (lines) => lines.some((line) => line.endsWith('Your message waits until then.')), Duration.seconds(10))
+        yield* until(said(thread), (lines) => lines.some((line) => line.includes('Your message waits until')), Duration.seconds(10))
         return thread
       }).pipe(Effect.provide(layer({ 'claude-code': { outOfUsage: { until: back } } })))
       const [answer] = yield* until(replies(threadId), (all) => all.length > 0, Duration.seconds(15)).pipe(Effect.provide(layer({})))
@@ -662,14 +816,22 @@ describe('limits', () => {
     assert.strictEqual(whenWords(later.toISOString(), now), time)
     assert.match(whenWords(new Date('2026-10-05T09:00:00').toISOString(), now), /, /)
     assert.match(whenWords(new Date('2026-11-20T09:00:00').toISOString(), now), /20/)
-    assert.strictEqual(outWords({ from: 'Codex', resetsAt: null }), 'Codex reached its usage limit.')
+    assert.strictEqual(outWords({ from: 'Codex', resetsAt: null }), 'Codex ran out of usage.')
     assert.strictEqual(
-      outWords({ from: 'Codex', resetsAt: null, waits: 'step' }),
-      'Codex reached its usage limit. The step waits until it is back.',
+      outWords({ from: 'Codex', resetsAt: null, step: 'review', waits: 'step' }),
+      'Codex ran out of usage during the review. The review waits until Codex is back. To carry on now, pick another model on the task.',
+    )
+    assert.strictEqual(
+      outWords({ from: 'Codex', resetsAt: later.toISOString(), step: 'implement', waits: 'step', nothingFree: true }),
+      `Codex ran out of usage while working on the task. No other model was free, so the work waits until ${whenWords(later.toISOString())}, when Codex is back. Pick one on the task to carry on now.`,
+    )
+    assert.strictEqual(
+      outWords({ from: 'Codex', resetsAt: null, step: 'settle', to: { agent: 'Claude Code', model: null } }),
+      'Codex ran out of usage while fixing what the review found. Claude Code takes the fixes over.',
     )
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, to: { agent: 'Claude Code', model: null } }),
-      'Codex reached its usage limit. Claude Code takes over.',
+      'Codex ran out of usage. Claude Code takes over.',
     )
   })
 })

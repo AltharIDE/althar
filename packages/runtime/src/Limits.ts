@@ -45,22 +45,47 @@ export const whenWords = (iso: string, now: Date = new Date()): string => {
   return `${day}, ${time}`
 }
 
-/** What a thread says when an agent is out of usage: who, until when, and who takes the work over, or that it waits. */
+/** A step a usage limit stopped, as a thread says it: while it was at it, and the work that waits or moves. */
+export const outStep = {
+  implement: { during: 'while working on the task', work: 'the work' },
+  settle: { during: 'while fixing what the review found', work: 'the fixes' },
+  review: { during: 'during the review', work: 'the review' },
+} as const
+
+/**
+ * What a thread says when an agent is out of usage: who, on which step, until
+ * when, and what Althar does about it: who takes the work over, or that it
+ * waits, and, for a step, that the person can pick another model meanwhile.
+ */
 export const outWords = (input: {
   readonly from: string
   readonly resetsAt: string | null
+  /** The step it was on; none outside one. */
+  readonly step?: keyof typeof outStep
   /** Who takes over, on which model; `ownWork` where it is the other step's agent, so it reviews what it wrote. */
   readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
   readonly waits?: 'step' | 'message'
+  /** The project moves work on, but no other model was free to take it. */
+  readonly nothingFree?: boolean
 }): string => {
-  const out = `${input.from} reached its usage limit${input.resetsAt === null ? '' : `, until ${whenWords(input.resetsAt)}`}.`
+  const step = input.step === undefined ? undefined : outStep[input.step]
+  const out = `${input.from} ran out of usage${step === undefined ? '' : ` ${step.during}`}`
+  const back = input.resetsAt === null ? null : whenWords(input.resetsAt)
   if (input.to !== undefined)
-    return `${out} ${input.to.agent} takes over${input.to.model === null ? '' : `, on ${input.to.model}`}${
-      input.to.ownWork === true ? ', and reviews its own work' : ''
-    }.`
-  if (input.waits === undefined) return out
-  return `${out} ${input.waits === 'step' ? 'The step' : 'Your message'} waits until ${input.resetsAt === null ? 'it is back' : 'then'}.`
+    return `${out}${back === null ? '' : `, until ${back}`}. ${input.to.agent} takes ${step === undefined ? '' : `${step.work} `}over${
+      input.to.model === null ? '' : `, on ${input.to.model}`
+    }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
+  if (input.waits === undefined) return `${out}${back === null ? '' : `, until ${back}`}.`
+  const until = back === null ? `until ${input.from} is back` : `until ${back}, when ${input.from} is back`
+  if (input.waits === 'message') return `${out}. Your message waits ${until}.`
+  const work = step?.work ?? 'the step'
+  return input.nothingFree === true
+    ? `${out}. No other model was free, so ${work} waits ${until}. Pick one on the task to carry on now.`
+    : `${out}. ${capitalized(work)} waits ${until}. To carry on now, pick another model on the task.`
 }
+
+/** Words that open a sentence. */
+export const capitalized = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
 
 type Failure = SqlError.SqlError | Schema.SchemaError
 
