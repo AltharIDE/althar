@@ -37,6 +37,10 @@ button.file:hover {
 .del {
   color: var(--danger);
 }
+/* nothing added, or nothing removed: no colour to say so */
+.none {
+  color: var(--t-3);
+}
 /* how big the file's change is against the largest, and how much of it is addition */
 .bar {
   display: flex;

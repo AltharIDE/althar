@@ -502,7 +502,7 @@ export const PUSHED = 'refs/althar/pushed/'
  * `PUSHED`. The header that signs the push in goes to git through its
  * environment, so it is in no process's arguments. `onto` is the branch's
  * name there, where it isn't the one here: the head of a pull request the
- * task was attached to (ADR-048).
+ * task was attached to (ADR-049).
  */
 export const pushTo = (
   cwd: string,

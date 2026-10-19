@@ -68,7 +68,7 @@ export function Dialog({
         heading
       ) : (
         <div className={s.head}>
-          <IconButton icon="chevron" label={t.back} size="small" className={s.back} onClick={onBack} />
+          <IconButton icon="chevronL" label={t.back} size="small" className={s.back} onClick={onBack} />
           {heading}
         </div>
       )}

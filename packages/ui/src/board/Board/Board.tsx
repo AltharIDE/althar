@@ -35,7 +35,7 @@ export const boardText: BoardText = {
   empty: {
     [BoardLane.Next]: 'Nothing is waiting to start.',
     [BoardLane.Running]: 'Nothing is running.',
-    [BoardLane.Yours]: 'Nothing is waiting on you.',
+    [BoardLane.Yours]: 'Nothing needs you.',
     [BoardLane.Settled]: 'Nothing has settled yet.',
   },
 }
@@ -92,7 +92,7 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
         <Heading level={headingLevel} id={id} className={s.title}>
           {t.lane[lane]}
         </Heading>
-        <span className={s.count}>{count}</span>
+        <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
       </header>
       <div className={s.body}>{count > 0 ? children : <p className={s.empty}>{t.empty[lane]}</p>}</div>
     </section>

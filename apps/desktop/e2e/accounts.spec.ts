@@ -29,7 +29,7 @@ test('adds an account to an agent, and names the one that ran out when a task mo
       .first()
     await claude.getByRole('button', { name: 'Add an account' }).click()
     await page.screenshot({ path: 'test-results/accounts-adding.png', animations: 'disabled' })
-    await page.getByRole('button', { name: 'Sign in in Terminal' }).click()
+    await page.getByRole('button', { name: 'Sign in from a terminal' }).click()
     // The scripted agent is signed in at once: the new account is named in its line.
     const name = page.getByRole('textbox', { name: 'Name this account' })
     await expect(name).toHaveValue('Account 2')

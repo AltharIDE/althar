@@ -1,8 +1,6 @@
 import { useRef } from 'react'
 
-import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Menu, MenuCheckboxItem, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
-import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './TaskMenu.module.css'
 
@@ -24,8 +22,6 @@ import s from './TaskMenu.module.css'
  * button says so; otherwise nothing shows of it until the menu opens.
  *
  * Allowing everything its agents ask is a switch in it while it is open.
- * While everything on the task is allowed, by its own switch or its
- * project's, a warm word beside the button says so, whatever else it says.
  */
 
 /** Whether a task's lead resolves conflicts on its own: as its project says, or, otherwise than it, unasked or when asked. */
@@ -71,7 +67,6 @@ export interface TaskMenuText {
   allowAll: string
   allowAllAbout: string
   allowAllProject: string
-  /** Beside the button while everything on the task is allowed: the word, and what it means, by its project's switch or its own. */
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -105,7 +100,7 @@ export const taskMenuText: TaskMenuText = {
   conflictsOnAbout: 'The lead fixes merge conflicts itself, and Althar pushes the fix to an open pull request.',
   conflictsOff: 'Off for this task',
   conflictsOffAbout: 'You ask the lead to fix a conflict when one comes up.',
-  conflictsHint: (on) => `Auto-resolve conflicts: ${on ? 'on' : 'off'}`,
+  conflictsHint: (on) => `Resolve conflicts automatically: ${on ? 'on' : 'off'}`,
   allowAll: 'Allow everything on this task',
   allowAllAbout: 'Nothing its agents ask waits for you. Never still holds.',
   allowAllProject: 'On for every task in this project, from its Rules.',
@@ -294,7 +289,7 @@ export function TaskMenu({
   if (!differs) return menu
   return (
     <>
-      {differs && <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>}
+      <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>
       {menu}
     </>
   )

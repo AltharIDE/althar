@@ -175,7 +175,7 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
 }) {}
 
 /**
- * A pull request can't be attached to the task (ADR-048), in words for the
+ * A pull request can't be attached to the task (ADR-049), in words for the
  * person or the coordinator: it isn't one, it's closed, its branch is
  * somewhere the task doesn't push to, another task follows it, or its
  * branch couldn't start from its head.

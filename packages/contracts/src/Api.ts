@@ -693,7 +693,7 @@ export const ChangeSummary = Schema.Struct({
 export type ChangeSummary = typeof ChangeSummary.Type
 
 /**
- * What attaching a pull request to a task did (ADR-048): `attached`, the
+ * What attaching a pull request to a task did (ADR-049): `attached`, the
  * task follows it now, its branch `started` from its head or not, `kept` of
  * its own commits on top; or `start`, where its branch isn't based on that
  * head, what starting from it would keep (`own`), for the person to say.
@@ -2684,7 +2684,7 @@ export const Api = RpcGroup.make(
   command('StopListening', { taskId: Schema.String, url: Schema.String }, Schema.Void),
   /**
    * Attaches the task to an open pull request it didn't open, by its link or
-   * number, and follows it from then on (ADR-048). Where the task's branch
+   * number, and follows it from then on (ADR-049). Where the task's branch
    * isn't based on its head, nothing changes, and it answers `start`, with
    * how many commits of its own starting from the head keeps; `start` says
    * to start it there.
