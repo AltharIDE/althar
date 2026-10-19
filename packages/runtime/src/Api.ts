@@ -913,6 +913,22 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      HandOverHeld: ({ commandId, taskId, agentId, accountId, model }) => {
+        const answer = {
+          kind: 'retry' as const,
+          agentId,
+          ...(accountId === undefined ? {} : { accountId }),
+          ...(model === undefined ? {} : { model }),
+        }
+        return once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.hand_over_held', { taskId, answer }, commandId), (said) =>
+              runs.handOverHeld({ envelope: said, taskId, answer }),
+            ),
+          ),
+        )
+      },
       AnswerQuestion: ({ commandId, attentionId, answers }) =>
         once(
           commandId,

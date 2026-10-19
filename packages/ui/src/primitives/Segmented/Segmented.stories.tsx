@@ -91,7 +91,7 @@ export const AllStates: Story = {
               options={[
                 { value: 'low', label: 'Talk', kbd: '⌘1', dot: 'new', dotLabel: 'new messages' },
                 { value: 'medium', label: 'Board', kbd: '⌘2', dot: 'yours', dotLabel: 'waiting on you' },
-                { value: 'high', label: 'Both', kbd: '⌘3' },
+                { value: 'high', label: 'Home', kbd: '⌘3' },
               ]}
               value="low"
               onChange={() => {}}

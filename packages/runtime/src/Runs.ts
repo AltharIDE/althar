@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import type { LimitCall } from '@althar/contracts'
+import { type LimitCall, LimitChoice } from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
 import {
   type ActorId,
@@ -23,13 +23,13 @@ import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
 import { NotConnected } from './Connections'
-import { AttentionClosed, NoChangeToOpen, NotFound, NothingToWaitFor } from './errors'
+import { AttentionClosed, NoChangeToOpen, NotFound, NotHeld, NothingToWaitFor } from './errors'
 import { backoff, contained, keptGoing } from './Failures'
 import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { quickIn } from './kinds'
-import { Limits, outWords, whenWords } from './Limits'
+import { capitalized, Limits, outStep, outWords, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
@@ -160,14 +160,20 @@ const Reviewed = Schema.Struct({
 /**
  * What a step held for a usage limit keeps (`node_attempts.output`): the
  * agent out, until when, and the account and model it carries on with;
- * held before Althar kept those, it carries on as the agent picks.
+ * held before Althar kept those, it carries on as the agent picks. And, for
+ * the window, why it waits rather than moving on, and who could take it over
+ * meanwhile, as they stood when it was held (`HeldForLimit`).
  */
 const Hold = Schema.Struct({
   heldFor: Schema.String,
   until: Schema.String,
   account: Schema.optional(Schema.NullOr(Schema.String)),
   model: Schema.optional(Schema.NullOr(Schema.String)),
+  why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
+  choices: Schema.optional(Schema.Array(LimitChoice)),
 })
+/** Why a step held for a usage limit waits: its project waits for resets, nothing else was free to move it to, or the person said to. */
+type HoldWhy = NonNullable<typeof Hold.Type.why>
 const decodeHold = Schema.decodeUnknownEffect(Schema.fromJsonString(Hold))
 
 /** Reads a tool's input, or refuses it with what was wrong, for the agent to try again. */
@@ -329,6 +335,8 @@ export type Place =
   | { readonly how: 'next'; readonly reviewer?: PlanStep }
   /** A lead's step that needed the person, carried on as they answered once it has a place. */
   | { readonly how: 'answered'; readonly info: StuckInfo; readonly answer: Exclude<StuckAnswer, { readonly kind: 'wait' }> }
+  /** A lead's step held for a usage limit that the person handed to another agent: the work of a task under way, so it waits its turn. */
+  | { readonly how: 'handed'; readonly info: StuckInfo; readonly answer: Extract<StuckAnswer, { readonly kind: 'retry' }> }
   | { readonly how: 'reset'; readonly agentId: string; readonly accountId: string | null; readonly model: string | null }
 
 /** What a step waiting for a place keeps in its output: how it starts, and since when it waits. */
@@ -387,6 +395,16 @@ export class Runs extends Context.Service<
      * task's own ending would have.
      */
     publish(taskId: string): Effect.Effect<void, unknown>
+    /**
+     * Hands a step held for a usage limit to another agent, as the person
+     * picked, rather than waiting for the reset. NotHeld where it isn't held
+     * for one any more.
+     */
+    handOverHeld(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly answer: Extract<StuckAnswer, { readonly kind: 'retry' }>
+    }): Effect.Effect<void, unknown>
     /** The person's answer to a step that needs them. */
     answerStuck(input: {
       readonly envelope: CommandEnvelope
@@ -2010,7 +2028,7 @@ export class Runs extends Context.Service<
           yield* sayOut(
             run.threadId,
             run.projectId,
-            outWords({ from: from.agent, resetsAt: out.value.resetsAt, to: { ...to, ownWork: next === other } }),
+            outWords({ from: from.agent, resetsAt: out.value.resetsAt, step: planned.key, to: { ...to, ownWork: next === other } }),
           )
           return { agentId: next, model }
         })
@@ -2032,9 +2050,10 @@ export class Runs extends Context.Service<
       /**
        * A step's agent is out of usage (docs/architecture/05). Where the
        * project moves on and an agent is free, the step goes to it, as when the
-       * person hands it over; otherwise it is held until the reset. Where the
-       * project asks, or with no reset known, it needs the person, with who
-       * could take it over and when the agent is back.
+       * person hands it over; otherwise it is held until the reset, with who
+       * could take it over, so the person can hand it on meanwhile
+       * (`handOverHeld`). Where the project asks, or with no reset known, it
+       * needs the person, with who could take it over and when the agent is back.
        */
       const outOfUsage = (on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>, agentId: string, accountId: string | null) =>
         Effect.gen(function* () {
@@ -2045,29 +2064,38 @@ export class Runs extends Context.Service<
           const { implement, review: plannedReview } = yield* stepsOf(on.run)
           const planned = on.step === 'review' ? plannedReview : implement
           const info: StuckInfo = { step: on.step, why: 'usage_limit', detail: null, agentId, round: on.iteration, open: 0 }
+          const step = on.step === 'publish' ? undefined : on.step
           /** Held until its reset: what waits for it, and what brings it back if handing it over doesn't go through. */
-          const hold = sql.withTransaction(
-            Effect.gen(function* () {
-              // Its reset; one already past still waits an hour, so nothing brings the step back mid-handover.
-              const until = out?.until ?? new Date(Date.parse(yield* timestamp) + Duration.toMillis(Duration.hours(1))).toISOString()
-              // The account and model it was on, so it carries on there at the reset, after a restart too.
-              const model = yield* modelOnStep(on.run.taskId, on.step, agentId)
-              const revision = yield* change('node_attempts', on.attemptId, {
-                state: 'held',
-                holdReason: 'usage_limit',
-                output: JSON.stringify({ heldFor: agentId, until, account: accountId, model }),
-              })
-              yield* fact({
-                projectId: on.run.projectId,
-                aggregateType: 'node_attempt',
-                aggregateId: on.attemptId,
-                revision,
-                type: 'node_attempt.held',
-                payload: { reason: 'usage_limit', agentId, until },
-                actorId: instance.systemId,
-              })
-            }),
-          )
+          const hold = (why?: HoldWhy, choices?: LimitCall['choices']) =>
+            sql.withTransaction(
+              Effect.gen(function* () {
+                // Its reset; one already past still waits an hour, so nothing brings the step back mid-handover.
+                const until = out?.until ?? new Date(Date.parse(yield* timestamp) + Duration.toMillis(Duration.hours(1))).toISOString()
+                // The account and model it was on, so it carries on there at the reset, after a restart too.
+                const model = yield* modelOnStep(on.run.taskId, on.step, agentId)
+                const revision = yield* change('node_attempts', on.attemptId, {
+                  state: 'held',
+                  holdReason: 'usage_limit',
+                  output: JSON.stringify({
+                    heldFor: agentId,
+                    until,
+                    account: accountId,
+                    model,
+                    ...(why === undefined ? {} : { why }),
+                    ...(choices === undefined ? {} : { choices }),
+                  } satisfies typeof Hold.Encoded),
+                })
+                yield* fact({
+                  projectId: on.run.projectId,
+                  aggregateType: 'node_attempt',
+                  aggregateId: on.attemptId,
+                  revision,
+                  type: 'node_attempt.held',
+                  payload: { reason: 'usage_limit', agentId, until },
+                  actorId: instance.systemId,
+                })
+              }),
+            )
           const policy = yield* usageLimitOfRun(on.run)
           const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
           if (policy === 'move') {
@@ -2082,24 +2110,34 @@ export class Runs extends Context.Service<
                 ...(planned === undefined ? {} : { planned }),
               })
               const to = next === agentId ? (yield* limits.pick({ agentId: next, projectId: on.run.projectId })).id : null
-              const said = outWords({ from, resetsAt, to: { ...(yield* limits.named(next, model, to)), ownWork: next === other } })
+              const said = outWords({
+                from,
+                resetsAt,
+                ...(step === undefined ? {} : { step }),
+                to: { ...(yield* limits.named(next, model, to)), ownWork: next === other },
+              })
               // Held while the next agent takes over, so nothing it says before it is told the step counts for the step.
-              yield* hold
+              yield* hold()
               const handing = yield* envelope('thread.send', { threadId: on.run.threadId, usageLimit: on.attemptId })
               return yield* carryOn(on.run, on.attemptId, info, { kind: 'retry', agentId: next }, handing, model, said)
             }
           }
-          if (policy === 'ask' || out === null || resetsAt === null) {
-            const choices = yield* limits.choices({
-              accountId,
-              projectId: on.run.projectId,
-              rather: other === undefined ? [] : [other],
-              ...(planned === undefined ? {} : { planned }),
-            })
+          const choices = yield* limits.choices({
+            accountId,
+            projectId: on.run.projectId,
+            rather: other === undefined ? [] : [other],
+            ...(planned === undefined ? {} : { planned }),
+          })
+          if (policy === 'ask' || out === null || resetsAt === null)
             return yield* stuck(on.run, { id: on.attemptId }, { ...info, limit: { accountId, resetsAt, choices } })
-          }
-          yield* hold
-          yield* sayOut(on.run.threadId, on.run.projectId, outWords({ from, resetsAt, waits: 'step' }))
+          // Waiting, it says why: the project waits for resets, or it moves on and nothing else was free.
+          const nothingFree = policy === 'move'
+          yield* hold(nothingFree ? 'nothing_free' : 'waits', choices)
+          yield* sayOut(
+            on.run.threadId,
+            on.run.projectId,
+            outWords({ from, resetsAt, ...(step === undefined ? {} : { step }), waits: 'step', nothingFree }),
+          )
           yield* touchCard(on.run.taskId)
           yield* Queue.offer(holdsChanged, undefined)
         })
@@ -2875,7 +2913,15 @@ export class Runs extends Context.Service<
               const revision = yield* change('node_attempts', attemptId, {
                 state: 'held',
                 holdReason: 'usage_limit',
-                output: JSON.stringify({ heldFor: agentId, until, account: info.limit?.accountId ?? null, model }),
+                output: JSON.stringify({
+                  heldFor: agentId,
+                  until,
+                  account: info.limit?.accountId ?? null,
+                  model,
+                  why: 'asked',
+                  // Who could take it over still, so the person can change their mind before the reset.
+                  ...(info.limit === undefined ? {} : { choices: info.limit.choices }),
+                } satisfies typeof Hold.Encoded),
               })
               yield* fact({
                 projectId: current.projectId,
@@ -2894,10 +2940,108 @@ export class Runs extends Context.Service<
           yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `The step waits until ${whenWords(until)}, when ${from} is back.`,
+            title: `${capitalized(info.step === 'publish' ? 'the step' : outStep[info.step].work)} waits until ${whenWords(until)}, when ${from} is back, as you said.`,
           })
           yield* touchCard(current.taskId)
           yield* Queue.offer(holdsChanged, undefined)
+        })
+
+      /**
+       * The person hands a step held for a usage limit to another agent, on
+       * the account and model they picked, without waiting for the reset: as
+       * answering its call would, had the project asked. Its hold ends where
+       * it is read, so the reset doesn't bring it back too. A lead's step
+       * takes a place among the agents at work on this machine as the work
+       * of a task under way: without one it waits its turn in Up next, after
+       * a restart too, and carries on as handed once one frees. A review
+       * starts its new round on the agent picked, asking for its place so.
+       * A lead's step that can't start then needs the person.
+       */
+      const handOverHeld = (input: {
+        readonly envelope: CommandEnvelope
+        readonly taskId: string
+        readonly answer: Extract<StuckAnswer, { readonly kind: 'retry' }>
+      }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { answer } = input
+          const current = yield* currentRun(input.taskId)
+          const heldOn = () =>
+            current === undefined
+              ? Effect.succeed(undefined)
+              : Effect.map(
+                  sql<{ attemptId: string; nodeKey: string; iteration: number; output: string | null }>`
+                    SELECT a.id AS attempt_id, n.node_key, n.iteration, a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+                    WHERE n.execution_id = ${current.executionId} AND a.state = 'held' AND a.hold_reason = 'usage_limit'
+                    ORDER BY a.admitted_at DESC LIMIT 1`,
+                  ([row]) => row,
+                )
+          const held = yield* heldOn()
+          if (current === undefined || held === undefined) return yield* new NotHeld({ taskId: input.taskId })
+          // An account picked is one of the agent's own, still there.
+          if (answer.accountId !== undefined) {
+            const [owner] = yield* sql<{ agentId: string }>`
+              SELECT agent_id FROM agent_accounts WHERE id = ${answer.accountId} AND removed_at IS NULL`
+            if (owner?.agentId !== answer.agentId) return yield* new NotFound({ kind: 'account', id: answer.accountId })
+          }
+          const hold = yield* decodeHold(held.output ?? '').pipe(Effect.orElseSucceed(() => undefined))
+          const info: StuckInfo = {
+            step: stepOf(held.nodeKey),
+            why: 'usage_limit',
+            detail: null,
+            agentId: hold?.heldFor ?? null,
+            round: held.iteration,
+            open: 0,
+          }
+          /** Its hold ends, read where it is written: false where the reset, or the person's stop, came first. */
+          const release = <R>(then: Effect.Effect<void, unknown, R>) =>
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const [still] = yield* sql<{ state: string; holdReason: string | null }>`
+                  SELECT state, hold_reason FROM node_attempts WHERE id = ${held.attemptId}`
+                if (still?.state !== 'held' || still.holdReason !== 'usage_limit' || !(yield* going(current))) return false
+                const revision = yield* change('node_attempts', held.attemptId, { state: 'admitted', holdReason: null, output: null })
+                yield* fact({
+                  projectId: current.projectId,
+                  aggregateType: 'node_attempt',
+                  aggregateId: held.attemptId,
+                  revision,
+                  type: 'node_attempt.admitted',
+                  payload: { node: held.nodeKey, iteration: held.iteration, handedTo: answer },
+                  actorId: input.envelope.actorId,
+                  commandId: input.envelope.commandId,
+                })
+                yield* then
+                return true
+              }),
+            )
+          /** Carried on as handed; a lead that can't start leaves the step needing the person, as when a plan starts. */
+          const carry = Effect.gen(function* () {
+            const carried = yield* Effect.exit(
+              carryOn(current, held.attemptId, info, answer, input.envelope, undefined, undefined, undefined, 'underway'),
+            )
+            if (carried._tag === 'Failure')
+              yield* stuck(current, { id: held.attemptId }, { ...info, why: 'failed_to_start', detail: summarize(carried.cause) || null })
+          })
+          if (info.step === 'review') {
+            // A review asks for its own place as its new round starts.
+            if (!(yield* release(Effect.void))) return yield* new NotHeld({ taskId: input.taskId })
+            yield* carry
+            return yield* touchCard(current.taskId)
+          }
+          const released = yield* busy.enter(
+            current.taskId,
+            (room) =>
+              release(
+                room
+                  ? Effect.void
+                  : // Admitted only to be held again at once, for a place this time, in the same transaction.
+                    waitForPlace(current, held.attemptId, { how: 'handed', info, answer }),
+              ).pipe(Effect.map((done) => (done ? (room ? ('now' as const) : ('waits' as const)) : ('gone' as const)))),
+            { order: 'underway', next: (how) => (how === 'now' ? provide(carry) : Effect.void) },
+          )
+          if (released === 'gone') return yield* new NotHeld({ taskId: input.taskId })
+          yield* touchCard(current.taskId)
         })
 
       /**
@@ -3432,8 +3576,10 @@ export class Runs extends Context.Service<
               sql.withTransaction(
                 Effect.gen(function* () {
                   // Stopped meanwhile, it waits for the person to resume it, not for the reset.
-                  const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${held.attemptId}`
-                  if (still?.state !== (placed ? 'admitted' : 'held')) return false
+                  // Handed to another agent by the person meanwhile, it isn't held for the reset any more, though it may wait for a place.
+                  const [still] = yield* sql<{ state: string; holdReason: string | null }>`
+                    SELECT state, hold_reason FROM node_attempts WHERE id = ${held.attemptId}`
+                  if (placed ? still?.state !== 'admitted' : still?.state !== 'held' || still.holdReason !== 'usage_limit') return false
                   if (!room) {
                     yield* waitForPlace(current, held.attemptId, {
                       how: 'reset',
@@ -3672,6 +3818,29 @@ export class Runs extends Context.Service<
                 undefined,
                 'person',
               )
+            case 'handed': {
+              // As one handed on at once: an agent that can't start leaves the step needing the person, not admitted with nothing at work.
+              const carried = yield* Effect.exit(
+                carryOn(
+                  current,
+                  row.attemptId,
+                  place.info,
+                  place.answer,
+                  yield* envelope('thread.send', { placed: row.attemptId }),
+                  undefined,
+                  undefined,
+                  undefined,
+                  'underway',
+                ),
+              )
+              if (carried._tag === 'Failure')
+                yield* stuck(
+                  current,
+                  { id: row.attemptId },
+                  { ...place.info, why: 'failed_to_start', detail: summarize(carried.cause) || null },
+                )
+              return
+            }
             case 'next': {
               if (row.nodeKey === 'review') {
                 const step = place.reviewer ?? (JSON.parse(row.config) as PlanStep)
@@ -3947,6 +4116,7 @@ export class Runs extends Context.Service<
         workflowVersion: provide(workflowVersion),
         publish: (taskId) => provide(publish(taskId)),
         answerStuck: (input) => provide(answerStuck(input)),
+        handOverHeld: (input) => provide(handOverHeld(input)),
         resume: (input) => provide(resume(input)),
         answered: (input) => provide(answered(input)),
         planWaits,

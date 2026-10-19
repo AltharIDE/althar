@@ -15,7 +15,9 @@ import {
   IssueDraftCard,
   ReviewDraftCard,
   type IssueSummary,
+  type HeldForLimit,
   LimitCall,
+  LimitChoice,
   PAGE,
   Unfurl,
   type TaskPhase,
@@ -193,6 +195,9 @@ const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; re
 
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeLimit = Schema.decodeUnknownOption(LimitCall)
+const decodeChoice = Schema.decodeUnknownOption(LimitChoice)
+/** One who could take a held step over, as its hold kept it; one that doesn't read is left out. */
+const choiceOf = (value: unknown) => Option.toArray(decodeChoice(value))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
 
 /** The first of the allow rules a decision keeps, or none where it keeps none. */
@@ -1671,12 +1676,22 @@ export class Queries extends Context.Service<
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
-      /** What a held step waits for: the agent out of usage, and when it is back. */
-      const waitsOf = (held: string | null) => {
+      /** What a held step waits for: the agent and account out of usage, when it is back, why it waits, and who could take it over now. */
+      const waitsOf = (held: string | null): HeldForLimit | null => {
         const output = held === null ? undefined : parse(held)
         const agentId = text(output, 'heldFor')
         const until = text(output, 'until')
-        return agentId === '' || until === '' ? null : { agentId, until }
+        if (agentId === '' || until === '') return null
+        const account = field(output, 'account')
+        const why = field(output, 'why')
+        const choices = field(output, 'choices')
+        return {
+          agentId,
+          until,
+          ...(typeof account === 'string' ? { accountId: account } : {}),
+          ...(why === 'waits' || why === 'nothing_free' || why === 'asked' ? { why } : {}),
+          ...(Array.isArray(choices) ? { choices: choices.flatMap(choiceOf) } : {}),
+        }
       }
 
       /** How many settled tasks the board shows: the most recent. */

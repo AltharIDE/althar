@@ -907,6 +907,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     postReviewDraft: vi.fn(async () => {}),
     discardReviewDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
+    handOverHeld: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
       flowId: 'flow1',

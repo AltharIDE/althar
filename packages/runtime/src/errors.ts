@@ -107,6 +107,11 @@ export class NothingToWaitFor extends Schema.TaggedError<NothingToWaitFor>()('No
   attentionId: Schema.String,
 }) {}
 
+/** Handing over a step held for a usage limit, for a task with none: it carried on at the reset, or was stopped, meanwhile. */
+export class NotHeld extends Schema.TaggedError<NotHeld>()('NotHeld', {
+  taskId: Schema.String,
+}) {}
+
 /** The message went to the agent before it could be taken back, or was taken back already. */
 export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
   itemId: Schema.String,

@@ -205,7 +205,7 @@ describe('the home', () => {
     // A step a usage limit stopped is out of usage, here as in its task, with when the agent is back.
     const out = within(needs).getByRole('article', { name: 'Out of it' })
     expect(within(out).getByText('Out of usage')).toBeTruthy()
-    expect(within(out).getByText(`Codex reached its usage limit, until ${clock('2026-09-29T14:00:00.000Z')}.`)).toBeTruthy()
+    expect(within(out).getByText(new RegExp(`^Codex ran out of usage .*It's back at ${clock('2026-09-29T14:00:00.000Z')}\\.`))).toBeTruthy()
 
     // Allowed where it is: the line stays, quiet, with what was said where its buttons were, and has focus.
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Allow once' })[0]!)

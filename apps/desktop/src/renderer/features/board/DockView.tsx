@@ -214,7 +214,7 @@ export function DockView({
           : task.queued !== null
             ? { note: queuedWords(task.queued) }
             : task.waits !== null
-              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
+              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until), task.step) }
               : task.summary === null
                 ? {}
                 : { note: task.summary.split('\n')[0] ?? '' })}

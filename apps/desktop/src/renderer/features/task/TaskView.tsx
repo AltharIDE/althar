@@ -66,6 +66,7 @@ import { behindText, listeningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
+import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
 import { ConnectPanel } from '../connections/ConnectPanel'
@@ -167,7 +168,7 @@ export const statusOf = (
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
+  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
@@ -939,6 +940,18 @@ export function TaskView({
                       })}
                 />
               ) : null,
+            )}
+            {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
+            {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
+              <HeldLimit
+                key={`${snapshot.task.waits.agentId}:${snapshot.task.waits.until}`}
+                waits={snapshot.task.waits}
+                step={snapshot.task.step === 'review' || snapshot.task.step === 'settle' ? snapshot.task.step : 'implement'}
+                agents={model.agents}
+                agentName={agentName}
+                onHandOver={(to) => void model.handOverHeld(to)}
+                {...(snapshot.task.step === 'review' ? { onSkip: () => void model.skipReview() } : {})}
+              />
             )}
             <PermissionCalls
               requests={snapshot.attention.filter((request) => request.kind === 'permission')}
