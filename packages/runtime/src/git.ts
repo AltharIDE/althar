@@ -83,6 +83,7 @@ export const gitOutcome = (
         ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
         timeout: 60_000,
         maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
         env: environmentIn(cwd, {}),
       },
       (error, stdout) =>
@@ -112,6 +113,7 @@ const run = (
         ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
         timeout,
         maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
         env: environmentIn(cwd, env),
       },
       (error, stdout, stderr) =>
