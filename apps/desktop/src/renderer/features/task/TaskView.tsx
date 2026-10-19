@@ -655,6 +655,7 @@ export function TaskView({
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={kept} />}
+        text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
         // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
         above={
           (listening.length > 0 || leftRunning.length > 0) && (
