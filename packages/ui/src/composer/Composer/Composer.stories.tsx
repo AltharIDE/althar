@@ -266,6 +266,18 @@ export const MultiLine: Story = {
   render: () => <Example initial={'Two things:\n1. keep the limiter where it is\n2. add the test first'} />,
 }
 /** The lead is working: an empty composer offers to interrupt it. The task keeps going; the lead waits for you. */
+/** A finished task's likely next word, in grey: Tab takes it into the field, Enter then sends it. */
+export const Suggesting: Story = {
+  render: () => <Example suggestion="Mark this as done" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const field = canvas.getByRole('textbox')
+    await expect(field).toHaveAttribute('placeholder', 'Mark this as done')
+    await userEvent.click(field)
+    await userEvent.keyboard('{Tab}')
+    await expect(field).toHaveValue('Mark this as done')
+  },
+}
 export const Busy: Story = { render: () => <Example busy onStopAgent={() => {}} /> }
 /** The lead is working and you have written something: Enter queues it, and Send now interrupts the lead with it instead. */
 export const BusyWithDraft: Story = { render: () => <Example busy initial="Also check the webhook retry path." /> }

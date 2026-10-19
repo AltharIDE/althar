@@ -228,21 +228,105 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
-  it('keeps a plain task that finished out of Needs you, since it asks nothing, and waits for it above what settled', () => {
+  it('keeps a plain task that finished in Needs you, counted, until the person keeps it for later, the latest kept first', () => {
+    const finished = task({ taskId: 'p1', threadId: 'thp1', title: 'Which partners call v1?', phase: 'ready', kind: 'plain', branch: null })
+    const ready = task({ taskId: 't4', threadId: 'th4', title: 'Rate-limit refunds', phase: 'ready', change: change() })
+    const lanes = lanesOf(board({ tasks: [finished, ready], calls: [] }))
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['p1', 't4'])
+    expect(lanes.kept).toEqual([])
+    expect(yoursOf(lanes)).toBe(2)
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([
+      ['Finished', 'Which partners call v1?'],
+      ['Ready to accept', 'Rate-limit refunds'],
+    ])
+    expect(firstNeedOf(lanes)).toBe('thp1')
+    // Kept for later, it is out of Needs you, with what else was kept, the latest first.
+    const older = task({
+      taskId: 'p2',
+      threadId: 'thp2',
+      title: 'Prototype the tabs',
+      phase: 'kept',
+      kind: 'plain',
+      keptAt: '2026-10-01T09:00:00.000Z',
+    })
+    const kept = lanesOf(board({ tasks: [older, { ...finished, phase: 'kept', keptAt: '2026-10-02T09:00:00.000Z' }, ready], calls: [] }))
+    expect(kept.ready.map((work) => work.taskId)).toEqual(['t4'])
+    expect(kept.kept.map((work) => work.taskId)).toEqual(['p1', 'p2'])
+    expect(yoursOf(kept)).toBe(1)
+    expect(firstNeedOf(kept)).toBe('th4')
+  })
+
+  it('offers Done and Keep for later on a finished card that isn’t a change, and Kept for later beside Settled once there is some', async () => {
+    const markDone = vi.fn(async () => true)
+    const keep = vi.fn(async () => true)
+    const actions = {
+      push: vi.fn(),
+      merge: vi.fn(),
+      pushing: new Set<string>(),
+      merging: new Set<string>(),
+      failed: {},
+      markDone,
+      keep,
+      settling: new Set<string>(),
+    }
+    const finished = task({ taskId: 'p1', threadId: 'thp1', title: 'Prototype the tabs', phase: 'ready', kind: 'plain', branch: null })
+    const kept = task({
+      taskId: 'p2',
+      threadId: 'thp2',
+      title: 'Spike the limits',
+      phase: 'kept',
+      kind: 'plain',
+      branch: null,
+      summary: 'Codex says its limits every turn.',
+      keptAt: '2026-10-14T11:00:00.000Z',
+    })
+    const review = task({ taskId: 'r1', threadId: 'thr1', title: 'Review #1199', phase: 'ready', kind: 'review', branch: null })
+    const settled = task({
+      taskId: 's1',
+      threadId: 'ths1',
+      title: 'Shipped before',
+      phase: 'settled',
+      state: 'done',
+      settledAt: '2026-10-14T10:00:00.000Z',
+    })
     const lanes = lanesOf(
       board({
         tasks: [
-          task({ taskId: 'p1', threadId: 'thp1', title: 'Which partners call v1?', phase: 'ready', kind: 'plain', branch: null }),
+          finished,
+          kept,
+          review,
+          settled,
           task({ taskId: 't4', threadId: 'th4', title: 'Rate-limit refunds', phase: 'ready', change: change() }),
         ],
         calls: [],
+        settledTotal: 1,
       }),
     )
-    expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4'])
-    expect(lanes.finished.map((work) => work.taskId)).toEqual(['p1'])
-    expect(yoursOf(lanes)).toBe(1)
-    expect(needsOf(lanes, () => '', vi.fn()).map((need) => need.title)).toEqual(['Rate-limit refunds'])
-    expect(firstNeedOf(lanes)).toBe('th4')
+    withServices(
+      <BoardView lanes={lanes} agents={agents} now="2026-10-14T12:00:00.000Z" onOpen={vi.fn()} actions={actions} />,
+      fakeClient().client,
+    )
+    const needs = within(screen.getByRole('region', { name: /^Needs you/ }))
+    const card = (title: string) => within(needs.getByRole('button', { name: title }).closest('article') ?? document.body)
+    // A finished plain task: both. A review: Keep for later alone. A change: neither.
+    await userEvent.click(card('Prototype the tabs').getByRole('button', { name: 'Done' }))
+    expect(markDone).toHaveBeenCalledWith('p1')
+    await userEvent.click(card('Prototype the tabs').getByRole('button', { name: 'Keep for later' }))
+    expect(keep).toHaveBeenCalledWith('p1')
+    expect(card('Review #1199').queryByRole('button', { name: 'Done' })).toBeNull()
+    await userEvent.click(card('Review #1199').getByRole('button', { name: 'Keep for later' }))
+    expect(keep).toHaveBeenCalledWith('r1')
+    expect(card('Rate-limit refunds').queryByRole('button', { name: 'Keep for later' })).toBeNull()
+    // Settled opens on its ledger, as it always has, with what was kept behind a tab beside it.
+    const lane = within(screen.getByRole('region', { name: /^Settled/ }))
+    expect(lane.getByText('Shipped before')).toBeTruthy()
+    expect(lane.queryByText('Spike the limits')).toBeNull()
+    await userEvent.click(lane.getByRole('radio', { name: 'Kept for later 1' }))
+    expect(lane.getByText('Spike the limits')).toBeTruthy()
+    expect(lane.getByText('Codex says its limits every turn.')).toBeTruthy()
+    expect(lane.queryByText('Shipped before')).toBeNull()
+    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    expect(markDone).toHaveBeenCalledWith('p2')
   })
 
   it('keeps a merged task with commits after its pull request in Needs you, and settles it once they are left out', () => {

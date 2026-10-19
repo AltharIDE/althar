@@ -1,6 +1,6 @@
 import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
 
-import { isFinished, readyOf, standingCalls } from '../../shared/calls'
+import { readyOf, standingCalls } from '../../shared/calls'
 
 /*
  * Which lane of the board each task and call goes in. Up next: a task
@@ -10,9 +10,10 @@ import { isFinished, readyOf, standingCalls } from '../../shared/calls'
  * or was on and stopped. Needs you: a task that waits on a call of yours,
  * once, as one card that says the call; a call no task on the board waits
  * on (the coordinator's own question, or one for a task held up next); and
- * work ready for the person, as `needsYou` says. Settled: what is done, most
- * recent first, with a plain task that finished above it, until it is opened
- * (it asks nothing of the person, so it isn't in Needs you).
+ * work ready for the person, as `needsYou` says, a task that isn't a change
+ * and finished among it until they settle it. Settled: what is done, most
+ * recent first; and, behind a tab of its own beside it, what the person kept
+ * for later, the latest kept first.
  */
 
 /** A task that waits on the person, with the call it waits on: the oldest, where it has several; null for a moment, before its call is read. */
@@ -40,8 +41,8 @@ export interface Lanes {
   readonly calls: ReadonlyArray<BoardCall>
   /** Work ready for the person: the home lists these too. */
   readonly ready: ReadonlyArray<BoardTask>
-  /** Plain tasks that finished, waiting to be seen: they ask nothing, so they are not among what needs the person. */
-  readonly finished: ReadonlyArray<BoardTask>
+  /** Finished tasks that aren't changes, which the person kept for later: out of Needs you, the latest kept first. */
+  readonly kept: ReadonlyArray<BoardTask>
   /** The most recently settled the board has loaded; `settledTotal` is how many there are in all. */
   readonly settled: ReadonlyArray<BoardTask>
   readonly settledTotal: number
@@ -65,7 +66,7 @@ export const lanesOf = (board: BoardSnapshot): Lanes => {
     waiting,
     calls: standing.filter((call) => call.taskId === null || !folded.has(call.taskId)),
     ready: readyOf(of('ready')),
-    finished: of('ready').filter(isFinished),
+    kept: of('kept').toSorted((a, b) => (b.keptAt ?? '').localeCompare(a.keptAt ?? '')),
     settled: of('settled').toSorted((a, b) => (b.settledAt ?? '').localeCompare(a.settledAt ?? '')),
     settledTotal: board.settledTotal,
   }

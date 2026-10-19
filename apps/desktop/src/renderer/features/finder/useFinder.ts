@@ -32,6 +32,8 @@ export const stateOf = (task: FoundTask): FoundState => {
       return FoundState.Yours
     case 'ready':
       return FoundState.Ready
+    case 'kept':
+      return FoundState.Kept
     case 'stopped':
       return FoundState.Stopped
     case 'settled':

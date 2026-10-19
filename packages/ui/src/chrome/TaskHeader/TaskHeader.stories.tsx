@@ -9,6 +9,7 @@ import { States } from '../../storybook/States'
 import { BackCrumb } from '../BackCrumb/BackCrumb'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { RunButton } from '../RunButton/RunButton'
+import { SettleWays } from '../../board/SettleWays/SettleWays'
 import { TaskMenu } from '../TaskMenu/TaskMenu'
 import { TitleBar } from '../TitleBar/TitleBar'
 import { TaskHeader, type TaskHeaderProps } from './TaskHeader'
@@ -105,6 +106,17 @@ export const NothingBuilt: Story = {
     since: 'answered · 11m ago',
     elapsed: '6m',
     steps: trackOf(['Read', 'Answer'], 1, 1, true),
+  },
+}
+/** A prototype its lead finished: Done, in ink, and Keep for later, right beside where it stands. */
+export const FinishedNotAChange: Story = {
+  args: {
+    title: 'Prototype: allow everything, for a project and a task',
+    status: TaskStatus.Yours,
+    state: 'Finished',
+    branch: undefined,
+    steps: [],
+    beside: <SettleWays ink onDone={fn()} onKeep={fn()} />,
   },
 }
 /** A title too long for the bar: one line, the whole of it on hover. */

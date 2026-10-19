@@ -447,6 +447,8 @@ export enum FoundState {
   Yours = 'you',
   /** Done, waiting for you to accept it. */
   Ready = 'ready',
+  /** Finished, not a change, and kept for later: out of Needs you as it is. */
+  Kept = 'kept',
   Stopped = 'stopped',
   Merged = 'merged',
   /** Settled without a merge to show for it. */

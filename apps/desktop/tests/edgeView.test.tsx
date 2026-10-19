@@ -103,7 +103,7 @@ describe('the edge', () => {
     expect(within(screen.getByRole('article', { name: 'Run npm publish' })).queryByRole('button', { name: 'Allow once' })).toBeNull()
   })
 
-  it('neither lists nor counts a plain task that finished: it waits on its board', async () => {
+  it('lists and counts a plain task that finished, and neither one kept for later', async () => {
     const finished = task({
       taskId: 't9',
       threadId: 'th9',
@@ -112,14 +112,16 @@ describe('the edge', () => {
       kind: 'plain',
       projectId: 'p2',
     })
+    const kept = task({ taskId: 't10', threadId: 'th10', title: 'Prototype the tabs', phase: 'kept', kind: 'plain', projectId: 'p2' })
     const { client } = fakeClient({
-      getHome: vi.fn(async () => home({ tasks: [running, ready, finished], calls: [permission], projects: [project, halyard] })),
+      getHome: vi.fn(async () => home({ tasks: [running, ready, finished, kept], calls: [permission], projects: [project, halyard] })),
     })
     withServices(<Edge />, client)
-    await userEvent.click(await screen.findByRole('button', { name: '2 need you' }))
+    await userEvent.click(await screen.findByRole('button', { name: '3 need you' }))
     expect(screen.getByRole('article', { name: 'Name the limits better' })).toBeTruthy()
-    expect(screen.queryByText('Which partners call v1?')).toBeNull()
-    // Nor is it work in progress.
+    expect(screen.getByRole('article', { name: 'Which partners call v1?' })).toBeTruthy()
+    expect(screen.queryByText('Prototype the tabs')).toBeNull()
+    // Neither is work in progress.
     expect(screen.getByText('1 in progress')).toBeTruthy()
   })
 

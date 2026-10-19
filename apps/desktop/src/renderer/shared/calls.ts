@@ -19,13 +19,15 @@ export const kindWords = {
   unshipped: 'Ready for a new pull request',
   /** A review of someone else's pull request, drafted, waiting to be posted. */
   drafted: 'Review drafted',
+  /** A task that isn't a change, its lead done: the person settles it (Done) or keeps it for later. */
+  finished: 'Finished',
 } as const
 
 /**
- * The word for work that is ready: ready to accept; a review, drafted; or,
- * where its lead couldn't resolve a conflict, or fix the checks on the merge,
- * and it is the person's now, stuck, as any step that can't go on without
- * them is.
+ * The word for work that is ready: ready to accept; a review, drafted; a
+ * plain task, finished; or, where its lead couldn't resolve a conflict, or
+ * fix the checks on the merge, and it is the person's now, stuck, as any step
+ * that can't go on without them is.
  */
 export const readyKindOf = (task: {
   readonly handedBack?: string | null | undefined
@@ -35,11 +37,13 @@ export const readyKindOf = (task: {
 }): string =>
   task.kind === 'review'
     ? kindWords.drafted
-    : task.handedBack != null
-      ? kindWords.stuck
-      : isUnshipped(task)
-        ? kindWords.unshipped
-        : kindWords.ready
+    : task.kind === 'plain'
+      ? kindWords.finished
+      : task.handedBack != null
+        ? kindWords.stuck
+        : isUnshipped(task)
+          ? kindWords.unshipped
+          : kindWords.ready
 
 /** Whether a task has commits after its last pull request merged or closed (or with none), and no pull request open to accept. */
 export const isUnshipped = (task: {
@@ -61,25 +65,33 @@ export const callKindOf = (call: { readonly kind: string; readonly stuck: { read
 export const whereOf = (call: { readonly taskTitle: string | null }): string => call.taskTitle ?? 'Coordinator'
 
 /**
- * A plain task that finished (DEV-96): it waits on its board, as Finished,
- * until the person opens it, and asks nothing of them, so nothing lists or
- * counts it as needing them: not the board's Needs you, the home, the edge,
- * the tabs or the Dock.
+ * A plain task that finished (DEV-96): it waits in Needs you, as Finished,
+ * counted as any work ready, until the person settles it (Done) or keeps it
+ * for later. Opening it moves nothing.
  */
 export const isFinished = (task: { readonly kind: string; readonly phase: string }): boolean =>
   task.kind === 'plain' && task.phase === 'ready'
 
 /**
+ * Whether a task is the person's to settle with Done or Keep for later: a
+ * finished task that isn't a change, waiting in Needs you or kept for later.
+ * A review only keeps: it settles as its draft is posted.
+ */
+export const isSettleable = (task: { readonly kind: string; readonly phase: string }): boolean =>
+  task.kind !== 'change' && (task.phase === 'ready' || task.phase === 'kept')
+
+/**
  * Whether a task waits on the person as work ready for them: a change to
  * accept (its checks passed or failed, with commits to push), commits after
- * its last pull request to open a new one for, a review drafted to post, or
- * work its lead handed back. Every ready task but a Finished one. The one
- * rule for the board's Needs you, the home's list, count and project lines,
- * the edge of the screen and the tabs, so they can't disagree on it. Calls
- * are the other half of what waits on them, and each of those does.
+ * its last pull request to open a new one for, a review drafted to post, a
+ * task that isn't a change finished, or work its lead handed back: every
+ * ready task. One the person kept for later is `kept`, not ready, so it is
+ * out of it until they write to it again. The one rule for the board's
+ * Needs you, the home's list, count and project lines, the edge of the
+ * screen and the tabs, so they can't disagree on it. Calls are the other
+ * half of what waits on them, and each of those does.
  */
-export const needsYou = <T extends { readonly kind: string; readonly phase: string }>(task: T): boolean =>
-  task.phase === 'ready' && !isFinished(task)
+export const needsYou = <T extends { readonly kind: string; readonly phase: string }>(task: T): boolean => task.phase === 'ready'
 
 /** The tasks among these that wait on the person as work ready for them. */
 export const readyOf = <T extends { readonly kind: string; readonly phase: string }>(tasks: ReadonlyArray<T>): ReadonlyArray<T> =>

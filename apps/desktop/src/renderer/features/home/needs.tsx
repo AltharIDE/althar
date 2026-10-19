@@ -127,6 +127,11 @@ export const briefOf = (task: HomeTask): string => {
       needText.by(reviewing.author),
       needText.findings(reviewing.findings),
     ].join(' · ')
+  // A task that isn't a change, finished: what its lead said, in its first line; else where it wrote.
+  if (task.kind === 'plain') {
+    const said = task.summary?.split('\n').find((line) => line.trim() !== '')
+    if (said !== undefined) return said
+  }
   const change = task.change
   // Commits after its last pull request merged or closed: a new one is the person's to open.
   const after = task.unshipped
@@ -224,7 +229,7 @@ export const needsOf = ({
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
-    // `ready` is the tasks that wait on the person (`readyOf`): a plain task that finished waits on its board, not here.
+    // `ready` is the tasks that wait on the person (`readyOf`): a task that finished and isn't a change among them.
     if (project === undefined) return []
     const next = nextOf(task)
     return [

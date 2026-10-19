@@ -441,14 +441,26 @@ describe('the home', () => {
     expect(within(needs).getByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
   })
 
-  it('leaves out a plain task that finished: it waits on its board, and asks nothing of the person here', async () => {
+  it('lists a plain task that finished as Finished, with what its lead said, and leaves out one kept for later', async () => {
     const one = busy()
-    const finished = task({ taskId: 't20', threadId: 'th20', title: 'Which partners call v1?', slug: 'v1', phase: 'ready', kind: 'plain' })
-    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, tasks: [...one.tasks, finished] })) })
+    const finished = task({
+      taskId: 't20',
+      threadId: 'th20',
+      title: 'Which partners call v1?',
+      slug: 'v1',
+      phase: 'ready',
+      kind: 'plain',
+      summary: 'Two partners still call v1.',
+    })
+    const kept = task({ taskId: 't22', threadId: 'th22', title: 'Prototype the tabs', slug: 'tabs', phase: 'kept', kind: 'plain' })
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, tasks: [...one.tasks, finished, kept] })) })
     withServices(<Home />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     expect(within(needs).getByRole('article', { name: 'Name it better' })).toBeTruthy()
-    expect(screen.queryByText('Which partners call v1?')).toBeNull()
+    const line = within(within(needs).getByRole('article', { name: 'Which partners call v1?' }))
+    expect(line.getByText('Finished')).toBeTruthy()
+    expect(line.getByText('Two partners still call v1.')).toBeTruthy()
+    expect(screen.queryByText('Prototype the tabs')).toBeNull()
   })
 
   it('lists a drafted review by its pull request, whose it is and what it found, to review', async () => {

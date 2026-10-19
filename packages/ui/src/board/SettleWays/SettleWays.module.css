@@ -1,0 +1,9 @@
+/* Above the card's own button, whose title is stretched over it; at the end of the foot it sits in. */
+.ways {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}

@@ -122,7 +122,7 @@ export function HomeView({
   const projects = home?.projects ?? []
   const tasks = home?.tasks ?? []
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
-  // Only tasks with an agent on them, or held for a reset, are running; a plain task that finished waits on its board (`needsYou`).
+  // Only tasks with an agent on them, or held for a reset, are running; one kept for later waits on its board.
   const { calls, working, waiting, needs } = homeGlanceOf(home, {
     answered,
     agentName: name,

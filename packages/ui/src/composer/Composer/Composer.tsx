@@ -79,6 +79,8 @@ export const COMPOSER_IMAGE_TYPES = 'image/png,image/jpeg,image/gif,image/webp'
 
 export interface ComposerText {
   send: string
+  /** The key that takes a suggestion into the field, shown where the send button would be. */
+  takeKey: string
   /** The key that sends or queues, shown in the button's tooltip. */
   sendKey: string
   /** Sending while the agent works: it waits until the agent is done with what it is doing. */
@@ -127,6 +129,7 @@ export interface ComposerText {
 
 export const composerText: ComposerText = {
   send: 'Send',
+  takeKey: 'Tab',
   sendKey: '↵',
   queue: 'Queue',
   stop: 'Interrupt the lead',
@@ -180,6 +183,12 @@ export interface ComposerProps {
   onUnqueue?: (id: string) => void
   /** The shortcut that focuses the composer, shown when there is nothing to send. */
   hint?: string
+  /**
+   * What it would most likely be told next, in grey where nothing is
+   * written, as a suggested prompt: Tab takes it into the field, and Enter
+   * then sends it, so a stray key sends nothing. Not while the agent works.
+   */
+  suggestion?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
   /** Dictation carried from another thread (a DictationPill): centred over the composer, above all that floats on its edge, so it covers none of it. */
@@ -230,6 +239,7 @@ export function Composer({
   onEditQueued,
   onUnqueue,
   hint,
+  suggestion,
   above,
   carried,
   tray,
@@ -323,10 +333,13 @@ export function Composer({
     if (out || images.length > 0) onSendNow?.(out)
   }
 
+  /* A suggestion to take, while nothing is written or arriving and the agent is free. */
+  const suggested = suggestion !== undefined && suggestion !== '' && !busy && !drafted && !dictating ? suggestion : null
+
   const shownPlaceholder = (() => {
     if (interim) return ''
     if (elapsed !== null) return t.listening
-    return placeholder
+    return suggested ?? placeholder
   })()
 
   const note = (() => {
@@ -339,6 +352,7 @@ export function Composer({
   const action = (() => {
     if (drafted) return <IconButton icon="up" label={busy ? t.queue : t.send} tone="fill" type="submit" kbd={t.sendKey} />
     if (busy && onStopAgent) return <IconButton icon="square" label={t.stop} tone="fill" onClick={onStopAgent} kbd={t.stopKey} />
+    if (suggested !== null) return <Kbd className={s.kbd}>{t.takeKey}</Kbd>
     if (hint) return <Kbd className={s.kbd}>{hint}</Kbd>
     return null
   })()
@@ -452,6 +466,12 @@ export function Composer({
               onAddImages(pasted)
             }}
             onKeyDown={(e) => {
+              /* Tab takes the suggestion into the field, to send with Enter or change first. */
+              if (e.key === 'Tab' && !e.shiftKey && suggested !== null) {
+                e.preventDefault()
+                onChange(suggested)
+                return
+              }
               if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
               /* Enter while dictating wraps up what was said and leaves it in the field, unsent; while it is written down, it waits. */
               if (dictating) {

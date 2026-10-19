@@ -85,6 +85,47 @@ describe('a task', () => {
     await waitFor(() => expect(client.seeTask).toHaveBeenCalledTimes(2))
   })
 
+  it('waits, finished and not a change, for the person: Done and Keep for later beside where it stands, and a suggestion Tab takes', async () => {
+    let now = thread({ task: { ...thread().task, kind: 'plain', phase: 'ready' } })
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => now) })
+    withServices(<Task />, client)
+    const header = await screen.findByRole('banner', { name: thread().task.title })
+    expect(within(header).getByText('Finished')).toBeTruthy()
+    // Opening it moved nothing: only seen.
+    await waitFor(() => expect(client.seeTask).toHaveBeenCalled())
+    expect(client.markTaskDone).not.toHaveBeenCalled()
+    await userEvent.click(within(header).getByRole('button', { name: 'Keep for later' }))
+    expect(client.keepTaskForLater).toHaveBeenCalledWith(snapshot().task.id)
+    await userEvent.click(within(header).getByRole('button', { name: 'Done' }))
+    expect(client.markTaskDone).toHaveBeenCalledWith(snapshot().task.id)
+    // The composer suggests what it is most likely told: Tab takes it, and nothing goes until Enter.
+    const field = screen.getByRole('textbox', { name: /./ })
+    expect(field.getAttribute('placeholder')).toBe('Mark this as done')
+    await userEvent.click(field)
+    await userEvent.keyboard('{Tab}')
+    expect((field as HTMLTextAreaElement).value).toBe('Mark this as done')
+    expect(client.send).not.toHaveBeenCalled()
+    // Kept for later, it says so, with Done alone beside it.
+    now = thread({ task: { ...thread().task, kind: 'plain', phase: 'kept' } })
+    act(() => emit(changed('task', snapshot().task.id)))
+    expect(await within(header).findByText('Kept for later')).toBeTruthy()
+    expect(within(header).queryByRole('button', { name: 'Keep for later' })).toBeNull()
+    expect(within(header).getByRole('button', { name: 'Done' })).toBeTruthy()
+  })
+
+  it('offers a drafted review Keep for later alone, and a change neither', async () => {
+    const review = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'review', phase: 'ready' } })) })
+    const first = withServices(<Task />, review.client)
+    const header = await screen.findByRole('banner', { name: thread().task.title })
+    expect(within(header).getByRole('button', { name: 'Keep for later' })).toBeTruthy()
+    expect(within(header).queryByRole('button', { name: 'Done' })).toBeNull()
+    first.unmount()
+    const change = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'change', phase: 'ready' } })) })
+    withServices(<Task />, change.client)
+    const again = await screen.findByRole('banner', { name: thread().task.title })
+    expect(within(again).queryByRole('button', { name: 'Keep for later' })).toBeNull()
+  })
+
   it('opens whether or not seeing it goes through', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread()),

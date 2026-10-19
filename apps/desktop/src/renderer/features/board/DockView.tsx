@@ -37,6 +37,7 @@ export const text = {
     waiting: 'Running',
     stopped: 'Stopped',
     ready: 'Ready',
+    kept: 'Kept for later',
     settled: 'Settled',
   } satisfies Record<BoardTask['phase'], string>,
   openTask: 'Open the task',
