@@ -9,6 +9,42 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Automations, 19 October
+
+The proposal, with what each way costs and what I'd pick, is
+[plans/automations.md](plans/automations.md). The prototype picked the
+Automations tab, as cards, each automation on its own page.
+
+- [ ] **While Althar is closed.** Only while it runs, catching up when it
+  opens; that and an opt-in "Open Althar at login, in the background"; or a
+  daemon that survives Quit. Leaning: open at login, opt-in.
+- [ ] **A run the Mac slept through.** Run once on waking within its window;
+  skip it; or hold it for the person, as plans that came due are held.
+  Leaning: once, within the window.
+- [ ] **What a fire does.** Althar starts the kept plan on each subject, or
+  the coordinator is told and decides. Leaning: Althar starts it.
+- [ ] **Each run: a new task, or the open one carried on.** Leaning: a new
+  task for each subject; a change whose pull request is still open carries
+  on with a follow-up.
+- [ ] **What it may do with nobody there.** Leaning: draft pull requests,
+  reviews drafted only, never merge.
+- [ ] **Permission asks at night.** Leaning: the project's rules as they
+  are; asks park in Needs you; no allow-everything for an automation alone.
+- [ ] **Events from outside the team.** Leaning: they fire nothing, unless
+  allowed, and then the run only reads.
+- [ ] **The limits by default.** One place; an hour apart at least; 45
+  minutes a run; stop on a usage limit; plan accounts only at first.
+- [ ] **The coordinator's reach.** Leaning: pause, resume and Run now in
+  words; any other change on a card.
+- [ ] **Where they live.** Leaning: in Althar, the person's own, on the Mac
+  they were made on; no files in the repository.
+- [ ] **Rules or automations** for what needs no agent, such as closing an
+  issue when its pull request merges. Leaning: rules.
+- [ ] **The cloud.** Are runs in the cloud on the way, or is the person's
+  own Mac the product? It changes only how soon a webhook relay is worth it.
+- [ ] **"Run" on screen.** The glossary keeps it off; the picked page has
+  Run now and a history of runs.
+
 ## Failures kept where they belong, 18 October
 
 - [x] **What one failure may take down.** Only what it belongs to; one item
