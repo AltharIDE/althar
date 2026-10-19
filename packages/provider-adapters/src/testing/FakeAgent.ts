@@ -238,6 +238,8 @@ export interface FakeAgentOptions {
   readonly allowAll?: 'on' | 'off'
   /** Once it turns `allow_all` on itself, it won't be turned off again: setting it back fails. */
   readonly allowAllSticks?: boolean
+  /** It says yes to setting `allow_all`, and leaves it where it was. */
+  readonly allowAllStays?: boolean
 }
 
 interface SessionState {
@@ -1175,7 +1177,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       } else if (params.configId === 'effort' && levelsOf(session.model).includes(value)) session.effort = value
       else if (params.configId === 'allow_all' && session.allowAllStuck)
         throw acp.RequestError.internalError({ details: 'allow_all is locked on' })
-      else if (params.configId === 'allow_all' && session.allowAll !== undefined && ['on', 'off'].includes(value)) session.allowAll = value
+      else if (params.configId === 'allow_all' && options.allowAllStays === true && session.allowAll !== undefined) {
+        // Said yes to, and stays where it was.
+      } else if (params.configId === 'allow_all' && session.allowAll !== undefined && ['on', 'off'].includes(value))
+        session.allowAll = value
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })

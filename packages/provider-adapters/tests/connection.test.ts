@@ -902,6 +902,35 @@ describe('AgentConnection', () => {
       ),
     )
 
+    it.live('refuses a session whose held option the agent says yes to and leaves where it was, and closes it', () =>
+      Effect.gen(function* () {
+        const closed: Array<string> = []
+        yield* withConnection(
+          variant({ allowAll: 'on', allowAllStays: true, closed: (sessionId) => closed.push(sessionId) }),
+          (connection) =>
+            Effect.gen(function* () {
+              const error = yield* Effect.flip(connection.newSession({ cwd: '/tmp', mode: 'ask', held: { allow_all: 'off' } }))
+              assert.instanceOf(error, OptionUnavailable)
+              assert.deepStrictEqual([(error as OptionUnavailable).configId, (error as OptionUnavailable).value], ['allow_all', 'off'])
+              assert.deepStrictEqual(closed, ['fake-1'])
+            }),
+        )
+      }),
+    )
+
+    it.live('stops a session whose held option the agent moved and says yes to setting back, but leaves where it was', () =>
+      withConnection(variant({ allowAll: 'off', allowAllStays: true }), (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask', held: { allow_all: 'off' } })
+          const moved = yield* Stream.runCollect(session.prompt(scenarios.allowAll))
+          const said = "The agent's allow_all moved, and Althar couldn't set it back to off, so it stopped the session."
+          assert.deepInclude(moved, { _tag: 'Notice', severity: 'error', title: said })
+          assert.isFalse(moved.some((event) => event._tag === 'Notice' && event.severity === 'info'))
+          assert.instanceOf(yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello))), AgentRequestFailed)
+        }),
+      ),
+    )
+
     it.live('puts a reader back in its mode when the agent leaves it', () =>
       withConnection(fake, (connection) =>
         Effect.gen(function* () {

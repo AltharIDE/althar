@@ -757,8 +757,15 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             const option = all.find((candidate) => candidate.id === configId)
             return option !== undefined && String(option.currentValue) !== value
           })
-        // Where the agent can't be held there, the session is refused, as for a mode it can't be put in.
+        // Where the agent can't be held there, the session is refused, as for a mode it can't be put in: an agent that
+        // answers yes and leaves the option where it was is held no more than one that answers no.
         for (const [configId, value] of loose(yield* Ref.get(current))) yield* setOption(configId, value)
+        const [stillLoose] = loose(yield* Ref.get(current))
+        if (stillLoose !== undefined) {
+          const [configId, value] = stillLoose
+          const option = (yield* Ref.get(current)).find((candidate) => candidate.id === configId)
+          return yield* new OptionUnavailable({ configId, value, available: option?.type === 'select' ? option.values : [] })
+        }
 
         const cancel = Effect.gen(function* () {
           const turn = yield* Ref.get(state.current)
@@ -787,7 +794,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               // that answers one request at a time may take; nothing Althar answers waits on this reader meanwhile.
               for (const [configId, value] of loose(event.options)) {
                 const restored = yield* Effect.exit(setOption(configId, value).pipe(Effect.timeout(Duration.seconds(10))))
-                if (Exit.isSuccess(restored)) {
+                // Set back only where the agent says it is: a yes that leaves it where it was is no.
+                if (Exit.isSuccess(restored) && !loose(restored.value).some(([id]) => id === configId)) {
                   events.push({ _tag: 'Notice', severity: 'info', title: `Althar set the agent's ${configId} back to ${value}.` })
                   continue
                 }
