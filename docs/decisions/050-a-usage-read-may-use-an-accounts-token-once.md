@@ -1,4 +1,4 @@
-# ADR-049: A usage read: an account's access token, read in memory for one call to its provider's usage URL
+# ADR-050: A usage read: an account's access token, read in memory for one call to its provider's usage URL
 
 - **Status:** Accepted (the person approved it on 15 October 2026)
 - **Date:** 2026-10-15

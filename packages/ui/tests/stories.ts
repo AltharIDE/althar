@@ -28,6 +28,7 @@ const BROWSER_ONLY = new Set<string>([
   'composer/Composer/Composer.stories.tsx#LongDictation',
   'chrome/ProjectTabs/ProjectTabs.stories.tsx#Reordering',
   'chrome/ProjectTabs/ProjectTabs.stories.tsx#MissedRelease',
+  'board/NextLine/NextLine.stories.tsx#Dragging',
 ])
 
 /**
