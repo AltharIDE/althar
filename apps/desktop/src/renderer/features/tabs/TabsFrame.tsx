@@ -128,6 +128,7 @@ function TabsBar({
         : {})}
       onSelect={select}
       onClose={tabs.close}
+      onReorder={tabs.reorder}
       onOpen={tabs.open}
       onNewProject={tabs.newProject}
       end={

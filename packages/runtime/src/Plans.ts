@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
 import { NotFound } from './errors'
+import { backoff, keptGoing } from './Failures'
 import { RuntimeConfig } from './Config'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
@@ -184,24 +185,29 @@ export class Plans extends Context.Service<
           return accepted ? yield* runs.run(planId) : null
         })
 
-      // The countdown: the next plan due starts when its time comes, or sooner if a plan changes.
+      /** Plans that couldn't start when their time came, each waiting a while before it is tried again. */
+      const tries = backoff()
+
+      // The countdown: the next plan due starts when its time comes, or sooner if a plan changes. One that couldn't start
+      // is due again once it has waited, and the others start in their time meanwhile.
       const countdown = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         for (;;) {
-          const [next] = yield* sql<{ id: string; startsAt: string }>`
-            SELECT id, starts_at FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL ORDER BY starts_at LIMIT 1`
+          const counting = yield* sql<{ id: string; startsAt: string }>`
+            SELECT id, starts_at FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL`
+          const [next] = counting
+            .map((plan) => ({ id: plan.id, at: Math.max(Date.parse(plan.startsAt), tries.until(plan.id)) }))
+            .toSorted((a, b) => a.at - b.at)
           if (next === undefined) {
             yield* Queue.take(wake)
             continue
           }
-          const wait = Date.parse(next.startsAt) - Date.now()
+          const wait = next.at - Date.now()
           if (wait > 0) {
             yield* Effect.raceFirst(Queue.take(wake), Effect.sleep(Duration.millis(wait)))
             continue
           }
-          yield* start(next.id, instance.systemId, true).pipe(
-            Effect.catchCause((cause) => Effect.logWarning('A plan could not start', cause)),
-          )
+          yield* tries.attempt(next.id, 'Plans.start', start(next.id, instance.systemId, true))
         }
       })
 
@@ -214,7 +220,7 @@ export class Plans extends Context.Service<
           for (const plan of overdue) yield* transition(plan.id, counting, () => ({ startsAt: null }), 'task_plan.held', instance.systemId)
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hold the plans that came due while Althar was closed', cause))),
       )
-      yield* Effect.forkScoped(provide(countdown))
+      yield* Effect.forkScoped(provide(keptGoing('Plans.countdown', countdown)))
 
       return Plans.of({
         propose,

@@ -7,6 +7,7 @@ import {
   AttentionRequest,
   type BoardSnapshot,
   type ChangeSummary,
+  CheckLogShown,
   ChecksSummary,
   type CoordinatorSnapshot,
   type HomeEvent,
@@ -157,6 +158,8 @@ interface ItemRow {
   readonly agentId: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
+  /** For a message the person said: some of it was dictated. */
+  readonly dictated?: number | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
@@ -241,6 +244,10 @@ const number = (value: unknown, key: string): number | null => {
   const found = field(value, key)
   return typeof found === 'number' ? found : null
 }
+
+/** Failed checks' logs as an arrival kept them; one not of that shape, or from before they were kept, is left out. */
+const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
+  Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
 
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
@@ -354,7 +361,14 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
           pictures: picturesOf(field(content, 'pictures')),
         },
-        input: row.inputState === null ? null : { state: row.inputState, interrupting: row.disposition === 'interrupt_and_continue' },
+        input:
+          row.inputState === null
+            ? null
+            : {
+                state: row.inputState,
+                interrupting: row.disposition === 'interrupt_and_continue',
+                ...(row.dictated === 1 ? { dictated: true } : {}),
+              },
       }
     case 'agent_message':
     case 'agent_thought':
@@ -495,6 +509,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           passed: number(content, 'passed'),
           failed: number(content, 'failed'),
           failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
+          logs: logsShown(field(content, 'logs')),
           url: text(content, 'url') || null,
           outsider: field(content, 'outsider') === true,
         },
@@ -735,7 +750,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
-            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, i.created_at,
+            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, u.dictated, i.created_at,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,

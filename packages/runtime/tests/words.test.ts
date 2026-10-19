@@ -305,6 +305,7 @@ describe('what screens read of a pull request and what arrived', () => {
         passed: null,
         failed: null,
         failing: [],
+        logs: [],
         url: 'u',
         outsider: false,
       },
@@ -314,7 +315,17 @@ describe('what screens read of a pull request and what arrived', () => {
       { outsider: true },
     )
     const checks = itemOf(row('arrival', { source: 'gitlab', kind: 'checks', where: 'MR !4', passed: 2, failed: 1, failing: ['test', 1] }))
-    assert.deepInclude(checks?.content, { from: null, text: null, passed: 2, failed: 1, failing: ['test'], url: null })
+    assert.deepInclude(checks?.content, { from: null, text: null, passed: 2, failed: 1, failing: ['test'], logs: [], url: null })
+    // Failed checks' logs as kept, or why there were none; one not of that shape is left out.
+    const shown = [
+      { name: 'test', url: 'u', log: 'FAIL a.test.ts', missing: null },
+      { name: 'lint', url: null, log: null, missing: 'GitLab refused (403)' },
+    ]
+    const logs = [...shown, { name: 'odd', log: 3 }]
+    const kept = itemOf(
+      row('arrival', { source: 'gitlab', kind: 'checks', where: 'MR !4', passed: 0, failed: 2, failing: ['test', 'lint'], logs }),
+    )
+    assert.deepStrictEqual(kept?.kind === 'arrival' ? kept.content.logs : undefined, shown)
     for (const verdict of ['approved', 'changes_requested', 'commented'] as const)
       assert.deepInclude(itemOf(row('arrival', { source: 'github', kind: 'review', where: 'PR #1', verdict }))?.content, { verdict })
     assert.isUndefined(itemOf(row('arrival', { source: 'gitea', kind: 'comment' })))

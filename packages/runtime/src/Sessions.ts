@@ -383,6 +383,13 @@ const settleEffort = (definition: AgentDefinition, agent: AgentSession, asked: s
     }
   })
 
+/** What an agent is told of a message the person dictated, after its words (the standing instructions of a coordinator and a lead explain it). */
+export const DICTATED = "(Dictated by voice: words may be misheard. Read names generously; 'Alpha'/'Alter' likely means Althar.)"
+
+/** The one line of a coordinator's and a lead's standing instructions that explains `DICTATED`. */
+const STANDING_DICTATED =
+  'The person sometimes dictates by voice, and a message that was ends with a note saying so. Read it past transcription mistakes: misheard names (Althar, the project, its files), homophones.'
+
 /** What the person asks an agent's context be compacted with: the agent's own command, sent bare as a turn of its own. */
 export const COMPACT = '/compact'
 
@@ -408,6 +415,8 @@ export const promptFor = (
     readonly cutShort?: string
     /** Images the person sent with it that the agent doesn't get: it doesn't take images, or they aren't kept any more. */
     readonly withheld?: number
+    /** Some of it was dictated (1), so the agent is told it may have been misheard. */
+    readonly dictated?: number
   }>,
   brief: { readonly text: string; readonly closing: string } | undefined,
   /** What Althar tells the agent first, before what was said: what changed while it wasn't speaking. */
@@ -416,10 +425,12 @@ export const promptFor = (
   const parts = inputs.map((input) => {
     // Images it doesn't get are said, so it knows they were there and can ask what they show.
     const withheld = input.withheld ?? 0
-    const body =
+    const noted =
       withheld === 0
         ? input.body
         : `${input.body}${input.body === '' ? '' : '\n\n'}(The person sent ${withheld === 1 ? 'an image' : `${withheld} images`} with this, which Althar couldn't pass on to you.)`
+    // Dictated words are said to be, once, after them: the thread shows the person's words as they are.
+    const body = input.dictated === 1 && input.body !== '' ? `${noted}\n\n${DICTATED}` : noted
     const said =
       input.disposition === 'interrupt_and_continue'
         ? `The person interrupted your last turn to say:\n\n${body}\n\nTake it into account, and carry on with the task.`
@@ -489,6 +500,8 @@ export class Sessions extends Context.Service<
       readonly disposition?: Disposition
       /** Images the person sent with it, in the store already (`keepSent`): sent with its words in every turn that delivers it. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Some of its words came from dictation: every turn that delivers it says so, so the agent reads past what was misheard. */
+      readonly dictated?: boolean
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
       readonly quiet?: boolean
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
@@ -521,7 +534,13 @@ export class Sessions extends Context.Service<
       /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
       readonly about?: 'limit' | 'stall'
       /** What the person said with it, and any images: the new agent's first turn, after its brief, and never the old one's. */
-      readonly message?: { readonly envelope: CommandEnvelope; readonly body: string; readonly images?: ReadonlyArray<InputImage> }
+      readonly message?: {
+        readonly envelope: CommandEnvelope
+        readonly body: string
+        readonly images?: ReadonlyArray<InputImage>
+        /** Some of it was dictated. */
+        readonly dictated?: boolean
+      }
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
       /** The person switched, not Althar: the new agent's first turn is theirs, and goes on at once (ADR-037). */
@@ -1015,12 +1034,13 @@ export class Sessions extends Context.Service<
             id: string
             body: string
             disposition: string
+            dictated: number
             author: string
             shown: number
             given: number
             cutBy: string | null
           }>`
-            SELECT i.id, i.body, i.disposition, a.kind AS author,
+            SELECT i.id, i.body, i.disposition, i.dictated, a.kind AS author,
               EXISTS (SELECT 1 FROM thread_items ti WHERE ti.user_input_id = i.id) AS shown,
               -- An earlier turn gave it to an agent already: the thread shows it where that one read it.
               EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
@@ -2029,6 +2049,7 @@ export class Sessions extends Context.Service<
         readonly body: string
         readonly disposition?: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
@@ -2059,6 +2080,7 @@ export class Sessions extends Context.Service<
                 commandId: input.envelope.commandId,
                 disposition,
                 body: input.body,
+                dictated: input.dictated === true ? 1 : 0,
                 // What Althar writes quietly is its own, whoever's command it came with: the person's words are only what they say.
                 authorActorId: input.quiet === true ? instance.systemId : input.envelope.actorId,
                 state: 'queued',
@@ -2407,6 +2429,7 @@ export class Sessions extends Context.Service<
                   "This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push.",
                 ]
               : []),
+            STANDING_DICTATED,
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it, and the more things it keeps to run beside it, such as Storybook. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command; if you add something worth running by hand, keep it with keep_run.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
@@ -2464,6 +2487,7 @@ export class Sessions extends Context.Service<
             '- Follow what the person has said they prefer, such as an effort for prototypes.',
             "- When unsure, leave it out: the step starts at the person's default for its model, or else at the model's own.",
           ].join('\n'),
+          STANDING_DICTATED,
           'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
         ]
       }
@@ -2519,7 +2543,12 @@ export class Sessions extends Context.Service<
         readonly said?: string
         readonly about?: 'limit' | 'stall'
         readonly accountId?: string
-        readonly message?: { readonly envelope: CommandEnvelope; readonly body: string; readonly images?: ReadonlyArray<InputImage> }
+        readonly message?: {
+          readonly envelope: CommandEnvelope
+          readonly body: string
+          readonly images?: ReadonlyArray<InputImage>
+          readonly dictated?: boolean
+        }
         readonly byPerson?: boolean
       }) =>
         exclusive(
@@ -2553,6 +2582,7 @@ export class Sessions extends Context.Service<
                 threadId: input.threadId,
                 body: input.message.body,
                 ...(input.message.images === undefined ? {} : { images: input.message.images }),
+                ...(input.message.dictated === true ? { dictated: true } : {}),
               })
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
             return yield* activate(connected, {

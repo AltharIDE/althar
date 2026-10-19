@@ -578,15 +578,10 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         const steps = yield* http.json(Steps, 'GET', `${run}/steps?pagelen=100`)
         const failed = steps.values.find((step) => step.state?.result?.name === 'FAILED' || step.state?.result?.name === 'ERROR')
         if (failed === undefined) return null
-        // A finished step's log has moved to storage elsewhere; Bitbucket redirects there.
+        // A finished step's log has moved to storage elsewhere; Bitbucket redirects there, and `text` follows without the token.
         const log = yield* http.text(`${run}/steps/${encodeURIComponent(failed.uuid)}/log`)
         return whole ? log : tail(log)
-      }).pipe(
-        Effect.catchIf(
-          (error) => error.reason === 'not_found' || error.reason === 'forbidden',
-          () => Effect.succeed(null),
-        ),
-      )
+      })
     },
     // A pipeline runs again only whole, as a new one: not a check of its own.
     rerun: () => Effect.succeed(false),
