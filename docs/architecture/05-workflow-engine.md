@@ -420,6 +420,13 @@ every running turn instead, every 30 seconds.
 - **The agent's own limits.** A turn cut off at the agent's output or step
   limit carries on where it was, a few times, before the step is reminded to
   report. A refusal goes to the person at once.
+- **A turn that did nothing.** A turn that ended having used no tokens and
+  said nothing never reached the agent's model: Claude Code's turns end so
+  while another of its processes renews the sign-in they share, as an agent
+  started when Althar starts, after a gap longer than the sign-in lasts, may
+  find. That is no step left unreported: a minute later the agent is told to
+  carry on, up to three times, before it counts as stalled and the person is
+  asked.
 
 On a step, asking the person is a call with what Althar tried; elsewhere, such
 as the coordinator's thread, the thread says why. An agent that stalled even

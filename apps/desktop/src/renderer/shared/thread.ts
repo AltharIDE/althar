@@ -344,6 +344,9 @@ const doingOf = (work: ReadonlyArray<Part>): string | null => {
 
 export const text = { thinking: 'Thinking', planning: 'Planning' }
 
+/** Whether a block after a turn shows that turn is over: a line of Althar's, or what the person said that the agent read. */
+export const endsTurn = (block: Block) => block.kind === 'divider' || (block.kind === 'you' && block.delivery === Delivery.Delivered)
+
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
 export const blocksOf = (
   source: ThreadSource,
@@ -473,8 +476,10 @@ export const blocksOf = (
     if (span !== undefined && after !== undefined) spans.set(before.id, { ...span, to: after.to })
     merged[merged.length - 2] = { ...before, parts: [...before.parts, ...block.parts] }
   })
-  // Each turn folds its work; the one still running says what it is doing now.
-  const live = turnRunning ? merged.findLastIndex((block) => block.kind === 'turn') : -1
+  // Each turn folds its work; the one still running says what it is doing now: the last, unless a line of Althar's or what
+  // the agent read since stands after it, when the turn running is a later one that has said nothing yet, after a restart say.
+  const latest = merged.findLastIndex((block) => block.kind === 'turn')
+  const live = turnRunning && !merged.slice(latest + 1).some(endsTurn) ? latest : -1
   return merged.map((block, index) => {
     if (block.kind !== 'turn') return block
     const span = spans.get(block.id)
