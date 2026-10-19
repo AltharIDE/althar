@@ -245,8 +245,10 @@ describe('the edge', () => {
     const host = fakeHost({ onEdgePointed: vi.fn((listener) => (pointed.push(listener), () => {})) })
     const { client } = fakeClient({ getHome: vi.fn(async () => home({ calls: [permission], projects: [project, halyard] })) })
     withServices(<Edge />, client, host)
-    await userEvent.click(await screen.findByRole('button', { name: '1 needs you' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+    // Pressed without pointing at it: the island's own hover would open it again, a moment later, after it closed.
+    const user = userEvent.setup({ skipHover: true })
+    await user.click(await screen.findByRole('button', { name: '1 needs you' }))
+    await user.click(screen.getByRole('button', { name: 'Allow once' }))
     const line = await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })
     await waitFor(() => expect(line).toBe(document.activeElement))
     act(() => pointed.forEach((listener) => listener(false)))
