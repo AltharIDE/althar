@@ -35,7 +35,6 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   now: stepText.now,
-  task: (task: string, started: string) => (started === '' ? `Task ${task}` : `Task ${task} · ${started}`),
 }
 
 const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
@@ -44,6 +43,7 @@ const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
   running: TaskStatus.Running,
   waiting: TaskStatus.Yours,
   ready: TaskStatus.Done,
+  kept: TaskStatus.Paused,
   stopped: TaskStatus.Stopped,
   settled: TaskStatus.Done,
 }
@@ -179,7 +179,15 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Ready, but its lead couldn't resolve a conflict: it needs the person, and says why.
   const handedBack = card.phase === 'ready' ? (card.handedBack ?? null) : null
   // Waiting for a free agent, it says so, rather than that it runs.
-  const status = card.queued !== null ? TaskStatus.Queued : handedBack === null ? STATUS[card.phase] : TaskStatus.Yours
+  // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
+  const status =
+    card.queued !== null
+      ? TaskStatus.Queued
+      : handedBack !== null
+        ? TaskStatus.Yours
+        : card.waits !== null && card.phase === 'running'
+          ? TaskStatus.Paused
+          : STATUS[card.phase]
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
   const now =
     handedBack !== null
@@ -207,11 +215,10 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       started={card.startedAt === null ? '' : ago(card.startedAt)}
       lead={named(card.lead, card.leadModel)}
       {...(effort === null ? {} : { effort })}
-      {...(card.branch === null ? {} : { branch: card.branch })}
       {...(from === undefined ? {} : { from })}
       {...(card.change === null ? {} : { pr: pullRequestsOf(card.change, card.earlier ?? []) })}
       onOpen={() => actions.onOpen(card.threadId)}
-      text={{ status: text.status, task: text.task }}
+      text={{ status: text.status }}
     />
   )
 }

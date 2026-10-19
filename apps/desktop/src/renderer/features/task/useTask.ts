@@ -117,6 +117,10 @@ export interface TaskModel {
   readonly abandon: (close?: ReadonlyArray<ToClose>) => Promise<{ readonly abandoned: boolean; readonly open: ReadonlyArray<string> }>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
+  /** Settles it as Done, where it finished and isn't a change: what it left running, such as a page, stops. */
+  readonly markDone: () => Promise<void>
+  /** Takes it out of Needs you as it is, kept for later, where it finished and isn't a change. */
+  readonly keep: () => Promise<void>
   /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
   readonly rename: (title: string) => Promise<void>
   /** Starts its plan now, while it waits to start. */
@@ -125,6 +129,8 @@ export interface TaskModel {
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   /** Answers a step that needs the person. */
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
+  /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
+  readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
@@ -170,10 +176,19 @@ export interface TaskModel {
   /** Posts that review, as it stands; or again, after it wasn't posted. */
   readonly postReview: (draftId: string) => Promise<void>
   readonly discardReview: (draftId: string) => Promise<void>
+  /** Files an issue the lead drafted, as the person says; changes it before; or throws it away. */
+  readonly fileIssueDraft: (draftId: string) => Promise<void>
+  readonly changeIssueDraft: (
+    draftId: string,
+    edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+  ) => Promise<void>
+  readonly discardIssueDraft: (draftId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
   readonly stopHolding: (threadId: string, id: string) => Promise<void>
+  /** Puts the task, waiting for a free agent, at the front of its project's line. */
+  readonly moveToFront: () => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
@@ -219,12 +234,12 @@ export const useTask = (threadId: string): TaskModel => {
     if (taskId !== null && hasChange) client.refreshTask(taskId).catch(() => undefined)
   }, [client, taskId, hasChange])
 
-  // Its screen open, the task is seen, once: a plain task that finished is done then (DEV-96). Seeing it again does nothing more.
+  // Its screen open, the task is seen: when, kept. It moves nothing: a task that finished waits for the person to settle it.
   useEffect(() => {
     if (taskId !== null) client.seeTask(taskId).catch(() => undefined)
   }, [client, taskId])
 
-  // And as it becomes ready in front of the person, however quickly it got there: one that finished there has been seen finishing.
+  // And as it becomes ready in front of the person, however quickly it got there: it has been seen finishing.
   const phase = snapshot?.task.phase ?? null
   useEffect(() => {
     if (phase === 'ready' && taskId !== null && document.visibilityState === 'visible') client.seeTask(taskId).catch(() => undefined)
@@ -547,6 +562,7 @@ export const useTask = (threadId: string): TaskModel => {
       return through
     },
     answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
+    handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(
         () => null,
@@ -559,6 +575,8 @@ export const useTask = (threadId: string): TaskModel => {
         for (const url of urls) await client.markReady(taskId, url)
       }),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
+    markDone: () => act(async () => (snapshot === null ? undefined : client.markTaskDone(snapshot.task.id)), doing.markDone),
+    keep: () => act(async () => (snapshot === null ? undefined : client.keepTaskForLater(snapshot.task.id)), doing.keep),
     mergeHere: () =>
       act(async () => {
         setConflict(null)
@@ -623,8 +641,12 @@ export const useTask = (threadId: string): TaskModel => {
     changeReview: (draftId, edit) => act(() => client.changeReviewDraft(draftId, edit)),
     postReview: (draftId) => act(() => client.postReviewDraft(draftId)),
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
+    fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
+    changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
+    discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
+    moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
     runProject: (runnableId = null) =>
       act(async () =>

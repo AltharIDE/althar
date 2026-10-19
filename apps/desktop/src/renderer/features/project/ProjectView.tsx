@@ -37,6 +37,7 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { takesImages, useImages } from '../../shared/useImages'
 import { BoardView } from '../board/BoardView'
+import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
@@ -48,7 +49,7 @@ import { connectionsNeedYou } from '../projectSettings/standing'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
-import { DraftCard, type DraftActions } from './DraftCard'
+import { DraftCard, type DraftActions } from '../../shared/DraftCard'
 import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import s from './Project.module.css'
@@ -172,6 +173,8 @@ export function ProjectView({
   // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread.
   const shown = useThreadHost(false, { threadId: model.coordinator?.threadId ?? null, taskId: null })
   const both = useBothWidth()
+  // The lanes the person collapsed, kept for every project, apart beside the conversation.
+  const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
@@ -546,6 +549,9 @@ export function ProjectView({
                     onOpen={onTask}
                     closing={closing}
                     actions={board}
+                    line={board.line}
+                    folds={folds}
+                    onFoldsChange={setFolds}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
                 </>

@@ -1,4 +1,4 @@
-import type { AgentFacts, RuntimeFacts, TurnFacts } from './facts'
+import { type AgentFacts, reportedAgents, type RuntimeFacts, type TurnFacts } from './facts'
 
 /*
  * A report, put together (DEV-61): what the person wrote and chose, the
@@ -208,7 +208,7 @@ export const assemble = (gathered: Gathered, choices: ReportChoices) => {
     email: choices.email,
     app: gathered.app,
     context: contextOf(gathered),
-    agents: gathered.runtime?.agents ?? [],
+    agents: reportedAgents(gathered.runtime?.agents ?? []),
     migrations: migrations ?? { count: 0, last: null },
     errors: choices.logs ? lastErrors(logs, gathered.runtime?.turns ?? []) : [],
   }

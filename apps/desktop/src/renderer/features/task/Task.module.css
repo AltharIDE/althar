@@ -55,6 +55,10 @@
 .issue {
   display: flex;
 }
+.fileAll {
+  display: flex;
+  justify-content: flex-end;
+}
 .quiet {
   margin: 0;
   font-size: 13px;

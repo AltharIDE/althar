@@ -75,12 +75,19 @@ export const AgentStatus = Schema.Struct({
   ways: Schema.Array(Schema.Literals(['browser', 'device'])),
   /** Its accounts, in the person's order. */
   accounts: Schema.Array(AccountStatus),
+  /** More accounts can be added: its sign-in is kept in each account's own folder (ADR-012). */
+  addsAccounts: Schema.Boolean,
   /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
   installed: Schema.Boolean,
   /** It runs from the copy Althar downloaded, as the person has none of their own. */
   kept: Schema.Boolean,
-  /** Althar can download it for the person, about this big; null where it can't. `installing` while it does. */
-  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean })),
+  /**
+   * Althar can download it for the person, about this big; null where it can't. `installing` while it does.
+   * `pinned`, the one version it fetches from its maker (Antigravity's server); null for its latest release on GitHub.
+   */
+  download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean, pinned: Schema.NullOr(Schema.String) })),
+  /** Its maker's page on installing it, for a person who installs it themselves; null where Althar names none. */
+  guide: Schema.NullOr(Schema.String),
   /** Why Althar couldn't check it, in words for the person; null where it could. The other agents are checked all the same. */
   problem: Schema.NullOr(Schema.String),
 })
@@ -394,6 +401,9 @@ export const ProjectNote = Schema.Struct({
   keptBy: Schema.Literals(['coordinator', 'person']),
 })
 export type ProjectNote = typeof ProjectNote.Type
+
+/** How long a note may be: a decision, in a sentence or two. */
+export const NOTE_LENGTH = 300
 export type ProjectList = typeof ProjectList.Type
 
 export const TaskSummary = Schema.Struct({
@@ -1097,8 +1107,12 @@ export const Unshipped = Schema.Struct({
 })
 export type Unshipped = typeof Unshipped.Type
 
-/** Where a task stands, as the coordinator's thread shows it. */
-export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'stopped', 'settled'])
+/**
+ * Where a task stands, as the coordinator's thread shows it. `kept` is a
+ * finished task that isn't a change, which the person kept for later: out of
+ * Needs you as it is, not settled.
+ */
+export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'kept', 'stopped', 'settled'])
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
@@ -1152,6 +1166,12 @@ export const ReviewBrief = Schema.Struct({
   verdict: Schema.NullOr(ReviewVerdict),
   /** The review, once posted: its link and when. */
   posted: Schema.NullOr(Schema.Struct({ url: Schema.String, at: Schema.String })),
+  /**
+   * Whether a draft waits for the person to post it. None once its review
+   * was posted: written to again, its lead answered, it is finished, the
+   * person's to mark done or keep for later, as a quick task is (ADR-051).
+   */
+  waiting: Schema.optional(Schema.Boolean),
 })
 export type ReviewBrief = typeof ReviewBrief.Type
 
@@ -1164,6 +1184,33 @@ export type ReviewBrief = typeof ReviewBrief.Type
  */
 export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'leaveOut', 'abandon', 'reopen'])
 export type TaskAction = typeof TaskAction.Type
+
+/**
+ * An account that could take over a step a usage limit stopped: the agent,
+ * the account, and the model it would run, by the agent's id for it (null
+ * for the agent's own). Each of the project's accounts but the one out,
+ * whether out of usage or signed in, as they stood: the window reads which
+ * are free now.
+ */
+export const LimitChoice = Schema.Struct({ agentId: Schema.String, accountId: Schema.String, model: Schema.NullOr(Schema.String) })
+export type LimitChoice = typeof LimitChoice.Type
+
+/**
+ * A step held until an agent's usage limit resets: which agent and account
+ * ran out, and when it is back; why it waits rather than moving on (the
+ * project waits for resets, it moves on but no other model was free, or the
+ * person said to wait); and who could take it over now, as they stood when it
+ * was held: the window reads which are free. Held before Althar kept those,
+ * it says only who and until when.
+ */
+export const HeldForLimit = Schema.Struct({
+  agentId: Schema.String,
+  until: Schema.String,
+  accountId: Schema.optional(Schema.NullOr(Schema.String)),
+  why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
+  choices: Schema.optional(Schema.Array(LimitChoice)),
+})
+export type HeldForLimit = typeof HeldForLimit.Type
 
 /**
  * A task as its card shows it, in the coordinator's thread and on the board:
@@ -1225,19 +1272,29 @@ export const TaskCard = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
-  waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+  waits: Schema.NullOr(HeldForLimit),
   /**
    * Ready, but its lead couldn't resolve the conflict its branch has with its
    * default branch, or fix the checks that failed on the merge Althar pushed,
    * so it's the person's: why, in a sentence. Without it, nothing is.
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+  /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
+  keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
-  /** With `planWaits`: its place in the order what waits for a place starts, among everything that waits; 1 starts first. */
+  /**
+   * It waits for a place before any agent has worked on it, whatever its
+   * kind (a plan's first step, a review's or a quick task's lead's first
+   * turn): it is in its project's line, up next.
+   */
+  inLine: Schema.optional(Schema.Boolean),
+  /** With `inLine`: its place in its project's line, in the order the line starts; 1 starts first. */
   place: Schema.optional(Schema.Int),
+  /** With `inLine`: the line is in an order the person gave it, not the oldest first. */
+  reordered: Schema.optional(Schema.Boolean),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1568,16 +1625,6 @@ export const SessionSummary = Schema.Struct({
 })
 export type SessionSummary = typeof SessionSummary.Type
 
-/**
- * An account that could take over a step a usage limit stopped: the agent,
- * the account, and the model it would run, by the agent's id for it (null
- * for the agent's own). Each of the project's accounts but the one out,
- * whether out of usage or signed in, as they stood: the window reads which
- * are free now.
- */
-export const LimitChoice = Schema.Struct({ agentId: Schema.String, accountId: Schema.String, model: Schema.NullOr(Schema.String) })
-export type LimitChoice = typeof LimitChoice.Type
-
 /** What a step a usage limit stopped asks with: whose account, when it resets (null where it didn't say), and who could take it over. */
 export const LimitCall = Schema.Struct({
   accountId: Schema.NullOr(Schema.String),
@@ -1778,9 +1825,11 @@ export const ThreadSnapshot = Schema.Struct({
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
-    waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+    waits: Schema.NullOr(HeldForLimit),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
+    /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
+    place: Schema.optional(Schema.Int),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
     /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */
@@ -2474,6 +2523,16 @@ export const Api = RpcGroup.make(
    * there is room now.
    */
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
+  /**
+   * Puts a task waiting for a free agent before any has worked on it at a
+   * place in its project's line, from 0 the front, the rest keeping their
+   * order; past the end is its end. The line starts in that order, and keeps
+   * it after a restart; a task that joins later goes to its end. Nothing
+   * moves for a task that isn't in the line.
+   */
+  command('MoveInLine', { taskId: Schema.String, to: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }, Schema.Void),
+  /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
+  command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   /**
    * Asks the thread's agent to compact its context, as a turn of its own after
@@ -2517,6 +2576,16 @@ export const Api = RpcGroup.make(
   command('LeaveOutCommits', { taskId: Schema.String }, Schema.Void),
   /** Settles a task without its change: its agents stop and its plan doesn't start; its worktree and branch stay as they are. */
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Settles a finished task that isn't a change, as Done: what its agents
+   * left running, such as a page, stops. Nothing for a change, or one at work.
+   */
+  command('MarkTaskDone', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Takes a finished task that isn't a change out of Needs you as it is,
+   * kept for later: nothing stops. Writing to it again brings it back.
+   */
+  command('KeepTaskForLater', { taskId: Schema.String }, Schema.Void),
   /** Gives a task another title, in any state. Its slug, branch, worktree folder, and the title of a pull request or issue already opened, stay as they are. */
   command('RenameTask', { taskId: Schema.String, title: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
@@ -2558,6 +2627,16 @@ export const Api = RpcGroup.make(
         Schema.Struct({ kind: Schema.Literal('abandon') }),
       ]),
     },
+    Schema.Void,
+  ),
+  /**
+   * Hands a step held for a usage limit to another agent, on the account and
+   * model the person picked, rather than waiting for the reset: as answering
+   * its call would. A lead's step without a free place waits its turn in Up next.
+   */
+  command(
+    'HandOverHeld',
+    { taskId: Schema.String, agentId: Schema.String, accountId: Schema.optional(Schema.String), model: Schema.optional(Schema.String) },
     Schema.Void,
   ),
   /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
@@ -2649,6 +2728,8 @@ export const Api = RpcGroup.make(
   call('GetProjectNotes', { projectId: Schema.String }, Schema.Array(ProjectNote)),
   /** Drops one of a project's notes: it no longer holds, and no coordinator session starts with it. */
   command('DropProjectNote', { projectId: Schema.String, noteId: Schema.String }, Schema.Void),
+  /** Says one of a project's notes in other words, the person's: a sentence or two, as the coordinator keeps one. */
+  command('EditProjectNote', { projectId: Schema.String, noteId: Schema.String, body: Schema.String }, Schema.Void),
   /**
    * The names a project's code uses that have parts (`RefundLedger`,
    * `useEffect`, `charges-api.ts`), most used first, so dictation can write

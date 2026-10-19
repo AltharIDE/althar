@@ -47,7 +47,7 @@ export const text = {
   pushed: 'Pushed the branch.',
 }
 
-type Shared = Omit<ComponentProps<typeof ThreadBlocks>, 'blocks' | 'card' | 'draft' | 'queued'>
+type Shared = Omit<ComponentProps<typeof ThreadBlocks>, 'blocks' | 'card' | 'queued'>
 
 export interface TaskThreadProps extends Shared {
   readonly rounds: ReadonlyArray<RoundBlock>

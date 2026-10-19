@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Children, type ReactNode } from 'react'
 
 import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -51,7 +51,7 @@ export function Arrived({ from, verb, where, at, mark, children, foot, text }: A
         </span>
         {at && <span className={s.at}>{at}</span>}
       </div>
-      {children && <blockquote className={s.body}>{children}</blockquote>}
+      {Children.toArray(children).length > 0 && <blockquote className={s.body}>{children}</blockquote>}
       {foot && <div className={s.foot}>{foot}</div>}
     </article>
   )

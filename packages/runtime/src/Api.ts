@@ -54,7 +54,7 @@ import {
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
-import { dropNote, notesOf } from './notes'
+import { dropNote, editNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
@@ -365,12 +365,17 @@ export const handlers = Api.toLayer(
           name: entry.definition.name,
           installed: entry.definition.cli === undefined || install.located !== null,
           kept: install.located?.whose === 'althar',
-          download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
+          download:
+            install.downloadable && install.size !== null
+              ? { size: install.size, installing: install.installing, pinned: install.pinned }
+              : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
           version: yield* versionOf(entry),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
+          addsAccounts: entry.definition.home.accounts !== 'one',
+          guide: entry.definition.cli?.guide ?? null,
           problem: null,
         } satisfies AgentStatus
       }).pipe(
@@ -387,6 +392,9 @@ export const handlers = Api.toLayer(
             version: null,
             ways: entry.definition.signIn.inApp?.ways ?? [],
             accounts: [],
+            addsAccounts: entry.definition.home.accounts !== 'one',
+            // Nothing that might be what failed: its command is read no more here.
+            guide: null,
             problem: `Althar couldn't check ${entry.definition.name}. Its log has the details.`,
           }),
           entry.definition.id,
@@ -635,14 +643,8 @@ export const handlers = Api.toLayer(
             yield* sql`UPDATE devices SET home_looked_at = ${yield* timestamp} WHERE id = ${instance.deviceId}`
           }),
         ),
-      // The person opened a task: a plain task that finished is done once seen.
-      SeeTask: ({ taskId }) =>
-        api(
-          Effect.gen(function* () {
-            const card = yield* queries.card(taskId)
-            yield* tasks.see({ taskId, finished: card.kind === 'plain' && card.phase === 'ready' })
-          }),
-        ),
+      // The person opened a task: when, kept. It moves nothing: a finished task waits for them to settle it.
+      SeeTask: ({ taskId }) => api(tasks.see({ taskId })),
       StartSession: ({ commandId, threadId, agentId, model, effort }) =>
         once(
           commandId,
@@ -672,6 +674,11 @@ export const handlers = Api.toLayer(
                       ...(kept.length === 0 ? {} : { images: kept }),
                       ...(dictated === true ? { dictated: true } : {}),
                     }
+              // Written to again with the switch, a task kept for later is back, as when it is sent on its own.
+              if (message !== undefined) {
+                const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId} AND kind = 'task'`
+                if (thread?.taskId != null) yield* tasks.bringBack(thread.taskId)
+              }
               const sessionId = yield* sessions.switchAgent({
                 threadId,
                 agentId,
@@ -712,6 +719,8 @@ export const handlers = Api.toLayer(
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
+      MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
+      LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
@@ -778,6 +787,22 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
         ),
+      MarkTaskDone: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(
+            Effect.asVoid(
+              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) => tasks.markDone({ envelope: said, taskId })),
+            ),
+          ),
+        ),
+      KeepTaskForLater: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(
+            Effect.asVoid(Effect.flatMap(envelope('task.keep', { taskId }, commandId), (said) => tasks.keep({ envelope: said, taskId }))),
+          ),
+        ),
       RenameTask: ({ commandId, taskId, title }) =>
         once(
           commandId,
@@ -811,9 +836,13 @@ export const handlers = Api.toLayer(
               ...(dictated === true ? { dictated } : {}),
             }
             // What the person says to the coordinator starts it, if it isn't running.
-            const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`
+            const [thread] = yield* sql<{ kind: string; taskId: string | null }>`SELECT kind, task_id FROM threads WHERE id = ${threadId}`
             if (thread?.kind === 'coordinator') yield* coordinator.say(message)
-            else yield* sessions.send(message)
+            else {
+              // Written to again, a task kept for later is back: what its lead does next ends in Needs you.
+              if (thread?.kind === 'task' && thread.taskId !== null) yield* tasks.bringBack(thread.taskId)
+              yield* sessions.send(message)
+            }
             // Links in what the person said unfurl on their message, without holding up the reply.
             yield* Effect.forkDetach(issues.unfurlInput(commandId))
           }),
@@ -895,6 +924,22 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      HandOverHeld: ({ commandId, taskId, agentId, accountId, model }) => {
+        const answer = {
+          kind: 'retry' as const,
+          agentId,
+          ...(accountId === undefined ? {} : { accountId }),
+          ...(model === undefined ? {} : { model }),
+        }
+        return once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.hand_over_held', { taskId, answer }, commandId), (said) =>
+              runs.handOverHeld({ envelope: said, taskId, answer }),
+            ),
+          ),
+        )
+      },
       AnswerQuestion: ({ commandId, attentionId, answers }) =>
         once(
           commandId,
@@ -1087,6 +1132,16 @@ export const handlers = Api.toLayer(
             Effect.gen(function* () {
               const said = yield* envelope('project.note.drop', { projectId, noteId }, commandId)
               yield* Effect.provideContext(dropNote({ envelope: said, projectId, noteId }), store)
+            }),
+          ),
+        ),
+      EditProjectNote: ({ commandId, projectId, noteId, body }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.note.edit', { projectId, noteId, body }, commandId)
+              yield* Effect.provideContext(editNote({ envelope: said, projectId, noteId, body }), store)
             }),
           ),
         ),

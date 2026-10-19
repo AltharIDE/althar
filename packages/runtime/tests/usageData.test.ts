@@ -268,13 +268,14 @@ describe('usage data', () => {
       yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: host.taskId })
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: host.taskId })
       yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 3)
-      // A review posted, and a plain task done once the person saw it; a round that left a task as it was says nothing.
+      // A review posted, a plain task done once the person saw it, as Althar once settled one, and one they marked done; a round that left a task as it was says nothing.
       const done = (taskId: string, payload: unknown) =>
         fact({ projectId, aggregateType: 'task', aggregateId: taskId, revision: 3, type: 'task.done', payload, actorId: instance.personId })
       yield* done((yield* make('Review the retry')).taskId, { reviewed: 'https://github.test/meridian/pull/7' })
       yield* done((yield* make('Why is checkout slow?')).taskId, { seen: true })
+      yield* done((yield* make('Sketch the settings')).taskId, { marked: true })
       yield* done(here.taskId, { round: 'run_x', back: true })
-      yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 5)
+      yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 6)
       yield* Effect.sleep(Duration.millis(800))
       assert.deepStrictEqual(
         named(events, 'task_settled').map((event) => event.properties),
@@ -284,6 +285,7 @@ describe('usage data', () => {
           { as: 'abandoned', took: 'under_10m', steps: 0 },
           { as: 'reviewed', took: 'under_10m', steps: 0 },
           { as: 'seen', took: 'under_10m', steps: 0 },
+          { as: 'marked', took: 'under_10m', steps: 0 },
         ],
       )
       assert.notInclude(JSON.stringify(events), 'github.test')

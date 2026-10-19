@@ -580,9 +580,10 @@ export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, 
                     order(at, at + step)
                   }}
                 />
+                {/* Named, its name over its command; unnamed, its command alone, as code. */}
                 <span className={s.words}>
-                  <span className={s.name}>{label}</span>
-                  {one.name !== undefined && <code className={s.command}>{one.command}</code>}
+                  {one.name !== undefined && <span className={s.name}>{one.name}</span>}
+                  <code className={s.command}>{one.command}</code>
                   <span className={s.about}>{one.about}</span>
                 </span>
                 {place === 0 ? (

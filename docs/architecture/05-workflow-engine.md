@@ -433,6 +433,18 @@ every running turn instead, every 30 seconds.
 - **The agent's own limits.** A turn cut off at the agent's output or step
   limit carries on where it was, a few times, before the step is reminded to
   report. A refusal goes to the person at once.
+- **A turn that did nothing.** A turn that ended having used no tokens and
+  said nothing never reached the agent's model: Claude Code's turns end so
+  while another of its processes renews the sign-in they share, as an agent
+  started when Althar starts, after a gap longer than the sign-in lasts, may
+  find. That is no step left unreported: a minute later, unless another turn
+  came or waits meanwhile, the agent is told to carry on, up to three such
+  turns in a row, before it counts as stalled and the person is asked. A
+  quick task's round, which may only have been asked something, is told to
+  carry on with what it was last asked, and no report is asked for (ADR-034).
+  Carrying on assumes the agent keeps what it was given in the turns that did
+  nothing, as Claude Code keeps them in its transcript, and reads them with
+  the next; it isn't given them again.
 
 On a step, asking the person is a call with what Althar tried; elsewhere, such
 as the coordinator's thread, the thread says why. An agent that stalled even
@@ -621,7 +633,13 @@ Under the default project rule, the paused work moves on, in this order:
 
 Either way the new session takes the work over from a brief in the same
 workspace (03, Switching model or agent), and the thread shows one line per
-move. Under the wait rule the work is held until the reset. Under the ask
+move. Under the wait rule, or where nothing else was free to move it to, the
+work is held until the reset, and the thread says which it was. A held step
+keeps who could take it over, so the task offers them while it waits, without
+asking: the person can move it to one (as answering the call below would; a
+lead's step waits its turn for a place among the agents at work, as work
+under way), keep waiting, or skip a review. Moving it ends the hold, so the
+reset brings nothing back. Under the ask
 rule, or when the agent didn't say when it resets, the work needs the person:
 an attention request names whose limit it is, when it resets, and each
 account that could take the work over, with the model it would run. The
