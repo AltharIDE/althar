@@ -38,7 +38,7 @@ From `apps/desktop`:
 | --- | --- |
 | `bun run build` | Builds the main process, the runtime, the preload and the window into `dist/` |
 | `bun run build:package` | The same, without the end-to-end tests' hooks, as a packaged app will be built |
-| `bun run package` | Builds that and packages it in `out/dist`: on macOS, `mac-arm64/Althar.app`, signed and notarized where credentials are given, with a dmg, zip and `latest-mac.yml`; on Linux, an AppImage, `.deb`, `.rpm` and `latest-linux.yml`. About 850 MB unpacked, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
+| `bun run package` | Builds that and packages it in `out/dist`: on macOS, `mac-arm64/Althar.app`, signed and notarized where credentials are given, with a dmg, zip and `latest-mac.yml`; on Linux, an AppImage, `.deb`, `.rpm` and `latest-linux.yml`; on Windows, `Althar-<version>-x64-setup.exe` and `latest.yml`. About 850 MB unpacked, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
 | `bun run release` | Packages, signs and notarizes a release, and checks it, as CI does on a version tag. Releases are published from CI only. See below |
 | `bun run start` | Opens what was last built |
 | `bun run check` | Format, type-aware lint and type checks |
@@ -78,6 +78,25 @@ The AppImage is the Linux package that can update itself. The `.deb` and
 Debian- and RPM-based desktops; see the Linux review table in
 `DEVELOPMENT.md`.
 
+### On Windows
+
+`bun run package` on Windows makes an NSIS installer for x64,
+`out/dist/Althar-<version>-x64-setup.exe`, with `latest.yml` for its updates.
+It installs in one click for the person alone, in
+`%LOCALAPPDATA%\Programs\althar`, with no administrator's prompt, a Start
+menu entry and an uninstaller (Settings → Apps). The window has the same
+chrome as on Linux. `scripts/windows-smoke.sh` installs it silently, checks
+what it put where and that the Node, Codex, Claude Code and speech engine in
+it run, opens Althar until its runtime starts, and uninstalls it; CI's
+`windows-installer` workflow runs it on a pull request that changes
+packaging, and uploads the installer as `desktop-windows-installer`.
+
+**The installer is unsigned for now**, so Windows' SmartScreen stops it the
+first time: "Windows protected your PC". Choose **More info**, then **Run
+anyway**. Where the browser holds the download back too, keep it (Edge: …
+→ Keep, then Keep anyway). Signing has its slot: `WINDOWS_SIGNING` in
+`scripts/package.ts`, and the skipped Sign step in `release.yml`.
+
 ### The Flatpak
 
 **The Flatpak is experimental**: a task running under GNOME and KDE is still
@@ -108,22 +127,22 @@ GPU and the keyring. What the Flatpak reaches and what it does not is in
 
 ### The packaged app
 
-The app is packaged for Apple silicon on macOS and x86_64 Linux. Releases are made and published by CI alone, from a version tag on main ([ADR-024](../../docs/decisions/024-signed-releases-and-updates.md)).
+The app is packaged for Apple silicon on macOS, x86_64 Linux and x64 Windows (unsigned for now). Releases are made and published by CI alone, from a version tag on main ([ADR-024](../../docs/decisions/024-signed-releases-and-updates.md)).
 
 - **Signing.** `bun run package` signs every executable in the app on its own, deepest first, with the hardened runtime and a secure timestamp, each with only the entitlements it needs (`scripts/entitlements.ts`, ADR-033). It signs with `ALTHAR_MAC_IDENTITY` where that names a certificate; else with the Developer ID in `CSC_LINK` and `CSC_KEY_PASSWORD` (the certificate and its key as a base64 `.p12`), where they're set; else with Althar's Developer ID where a keychain has it. CI puts the release environment's certificate in a keychain of the job's own and points electron-builder at it (`CSC_KEYCHAIN`). Without any, or with `ALTHAR_MAC_IDENTITY=-`, the app is signed ad hoc, still hardened, and opens only on the Mac that built it. In CI that fails instead. On a Mac, the first time codesign uses the key, macOS asks for the login password: choose Always Allow, or signing waits for an answer.
 - **Notarizing.** With Apple's credentials in the environment, the signed app is sent to Apple's notary service and stapled before the dmg and the zip are made of it, then the dmg is too. Every submission's log is kept in `out/notary/`; a rejected one names each file it found wrong. The credentials are an App Store Connect API key (`APPLE_API_KEY`, the path to its `.p8`, with `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`), or a profile notarytool keeps in the keychain (`APPLE_KEYCHAIN_PROFILE`). Without them nothing is notarized, macOS refuses the app on any other Mac, and in CI the run fails.
-- **Updates.** The macOS app and Linux AppImage check the latest published release ten seconds after they start and every four hours. On macOS, Check for Updates… in the app menu checks on demand. A newer version downloads in the background and is offered in the window's bar and Settings. The `.deb` and `.rpm` are updated by their package managers.
+- **Updates.** The macOS app, the Windows app and the Linux AppImage check the latest published release ten seconds after they start and every four hours. On macOS, Check for Updates… in the app menu checks on demand. A newer version downloads in the background and is offered in the window's bar and Settings. The `.deb` and `.rpm` are updated by their package managers.
 - **Trying an update.** Package one version and keep its app; package a newer one, serve its zip and `latest-mac.yml` from a folder (`python3 -m http.server 8765 --bind 127.0.0.1`), and open the older app with `ALTHAR_UPDATE_FEED=http://127.0.0.1:8765/`. Both must be signed by the same Developer ID.
-- **Node.** The packaged app ships Node for the agent adapters, at Electron's Node version, in `Contents/Resources/node/bin/node` (ADR-033). `bun run package` fetches it from nodejs.org once, into `node_modules/.cache/althar-node`, and checks it against the digests in `scripts/node.ts`; raise those with Electron, and for Node's security releases. Electron's `runAsNode` fuse is off, with `NODE_OPTIONS` and the inspector's flags, so nothing can run Althar's binary as Node: `ELECTRON_RUN_AS_NODE=1` starts the app instead. In dev the adapters run on Electron's binary as Node.
+- **Node.** The packaged app ships Node for the agent adapters, at Electron's Node version, in `Contents/Resources/node/bin/node` (ADR-033), and `resources\node\bin\node.exe` on Windows. `bun run package` fetches it from nodejs.org once, into `node_modules/.cache/althar-node`, and checks it against the digests in `scripts/node.ts`; raise those with Electron, and for Node's security releases. Electron's `runAsNode` fuse is off, with `NODE_OPTIONS` and the inspector's flags, so nothing can run Althar's binary as Node: `ELECTRON_RUN_AS_NODE=1` starts the app instead. In dev the adapters run on Electron's binary as Node.
 
 #### Cutting a release
 
-[`release.yml`](../../.github/workflows/release.yml) runs on a tag `v<version>` pushed on a commit on main. It checks the tag against `package.json`'s version, waits for a reviewer to approve the `release` environment, builds macOS and Linux packages in platform jobs, and leaves one draft GitHub Release with each platform's files. It never runs on a pull request, and it is the only workflow that publishes a desktop release; `desktop.yml` checks Linux packages on pull requests but does not publish them.
+[`release.yml`](../../.github/workflows/release.yml) runs on a tag `v<version>` pushed on a commit on main. It checks the tag against `package.json`'s version, waits for a reviewer to approve the `release` environment, builds macOS, Linux and Windows packages in platform jobs, and leaves one draft GitHub Release with each platform's files. It never runs on a pull request, and it is the only workflow that publishes a desktop release; `post-merge.yml` checks Linux and Windows packages after merge, and `windows-installer.yml` the Windows installer on a pull request that changes packaging, but neither publishes them.
 
 1. On main: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`, under the headings New, Improved and Fixed (leave out one with nothing in it). No commit dump.
 2. Tag that commit and push the tag: `git tag v0.1.1 && git push origin v0.1.1`.
 3. In Actions, open the release run and approve it (Review deployments). Notarizing takes from a few minutes to an hour.
-4. In Releases, open the draft, download its dmg, and try it on a Mac: it should open with only the usual "downloaded from the internet" question.
+4. In Releases, open the draft, download its dmg, and try it on a Mac: it should open with only the usual "downloaded from the internet" question. Try its Windows installer on a Windows machine: SmartScreen warns while it is unsigned (More info → Run anyway).
 5. Publish the draft. Then the updater and the site's Download see it.
 
 Run by hand (Actions → release → Run workflow, on main), it makes the same draft without a tag; publishing it makes the tag. Run again, a release's run brings its draft up to date, and never touches a published release. Where notarizing fails, the run's `notary-logs` artifact names each file Apple found wrong.

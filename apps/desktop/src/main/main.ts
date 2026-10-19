@@ -448,7 +448,9 @@ const startRuntime = () => {
       ALTHAR_APP_VERSION: app.getVersion(),
       ALTHAR_LOGS: logs.dir,
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
-      ...(app.isPackaged ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', 'node') } : {}),
+      ...(app.isPackaged
+        ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
+        : {}),
     },
   })
   logs.keepOutput(child)
@@ -777,8 +779,11 @@ void ready.then(() => {
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   if (!noRuntime) startRuntime()
   // A packaged app looks for updates, and tells every window as one is ready.
-  // electron-updater supports the Linux AppImage feed; deb/rpm use their package managers.
-  if (app.isPackaged && (process.platform === 'darwin' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined)))
+  // electron-updater supports the Mac's zip, Windows' NSIS installer and the Linux AppImage; deb/rpm use their package managers.
+  if (
+    app.isPackaged &&
+    (process.platform === 'darwin' || process.platform === 'win32' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined))
+  )
     updates = startUpdates((glance: UpdateGlance) => {
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
     })
