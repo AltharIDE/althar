@@ -1,9 +1,14 @@
-/* Above the card's own button, whose title is stretched over it; at the end of the foot it sits in. */
+/*
+ * Above the card's own button, whose title is stretched over it; at the end of the foot it sits in. In a narrow card,
+ * Keep for later goes under Done rather than past the card's edge.
+ */
 .ways {
   position: relative;
   display: inline-flex;
-  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
   margin-left: auto;
 }

@@ -123,6 +123,8 @@ export const text = {
   keptTab: (n: number) => `Kept for later ${n}`,
   /** A kept task's row: its word, and when it was kept. */
   kept: 'Kept for later',
+  /** Settled's own tab, while nothing has settled but something was kept for later. */
+  nothingSettled: 'Nothing has settled yet.',
   keptNote: 'Out of Needs you, as they were. Open one and write to it to pick it up again; Done settles it.',
 }
 
@@ -589,7 +591,7 @@ export function BoardView({
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal}>
+      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal} filled={lanes.settledTotal > 0 || lanes.kept.length > 0}>
         {/* What was kept for later, behind a tab of its own beside Settled, only while there is some. */}
         {lanes.kept.length > 0 && (
           <Segmented<'settled' | 'kept'>
@@ -614,6 +616,7 @@ export function BoardView({
           </>
         ) : (
           <>
+            {lanes.settled.length === 0 && <p className={s.shelfNote}>{text.nothingSettled}</p>}
             <BoardList>
               {lanes.settled.map((work) => {
                 const change = work.change

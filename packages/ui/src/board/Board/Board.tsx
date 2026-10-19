@@ -75,6 +75,8 @@ export interface BoardColumnProps {
   lane: BoardLane
   /** How many it holds. */
   count: number
+  /** Whether it has anything to show, where that is more than its count says (Settled, with what was kept for later beside it). */
+  filled?: boolean
   children?: ReactNode
   /** The lane's name's rank in the page's outline. */
   headingLevel?: HeadingLevel
@@ -82,7 +84,7 @@ export interface BoardColumnProps {
 }
 
 /** One lane: its name and count, then its cards or rows. Empty, it says so. */
-export function BoardColumn({ lane, count, children, headingLevel = 2, text }: BoardColumnProps) {
+export function BoardColumn({ lane, count, filled = count > 0, children, headingLevel = 2, text }: BoardColumnProps) {
   const t = { ...boardText, ...text }
   const id = useId()
   return (
@@ -94,7 +96,7 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
         </Heading>
         <span className={s.count}>{count}</span>
       </header>
-      <div className={s.body}>{count > 0 ? children : <p className={s.empty}>{t.empty[lane]}</p>}</div>
+      <div className={s.body}>{filled ? children : <p className={s.empty}>{t.empty[lane]}</p>}</div>
     </section>
   )
 }
