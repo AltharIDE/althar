@@ -13,7 +13,7 @@ import { isSection, type Section, SECTIONS } from '../src/renderer/features/sett
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
-import { connectionList, fakeClient, fakeHost, githubConnection, models, withoutOpenCode } from './fixtures'
+import { agents, connectionList, fakeClient, fakeHost, githubConnection, models, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -357,6 +357,29 @@ describe('the Settings tab', () => {
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
   })
 
+  it('says on its tab alone why an agent couldn’t be checked, the others as they are, and checks again', async () => {
+    const problem = "Althar couldn't check OpenCode. Its log has the details."
+    const unchecked = agents.map((agent) =>
+      agent.id === 'opencode' ? { ...agent, signIn: 'unknown' as const, accounts: [], version: null, download: null, problem } : agent,
+    )
+    const statusOf = vi.fn(async ({ recheck }: { recheck?: boolean } = {}) => ({
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: recheck === true ? agents : unchecked,
+    }))
+    const { client } = fakeClient({ status: statusOf })
+    withServices(<Settings />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('tab', { name: /OpenCode/ }))
+    expect(await alert()).toBe(problem)
+    // The others stand as they are.
+    await userEvent.click(screen.getByRole('tab', { name: /Claude Code/ }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    await userEvent.click(screen.getByRole('tab', { name: /OpenCode/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(statusOf).toHaveBeenCalledWith({ recheck: true })
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
   it('has the code hosts beside the trackers, and connects one in place of the list', async () => {
     withServices(<Settings at="code-hosts" />, fakeClient().client)
     expect(screen.getByRole('heading', { name: 'Code hosts and trackers', level: 1 })).toBeTruthy()
@@ -594,6 +617,28 @@ describe('the Settings tab', () => {
     expect(usage.getAttribute('aria-checked')).toBe('false')
     expect((usage as HTMLButtonElement).disabled).toBe(true)
     expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Off while DO_NOT_TRACK is set.')
+  })
+
+  it('sends crash reports until the person turns them off beside usage data, a switch of their own', async () => {
+    const host = fakeHost()
+    withServices(<Settings at="about" />, fakeClient().client, host)
+    const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
+    expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(crashes)
+    expect(host.setPreference).toHaveBeenLastCalledWith('crashReports', false)
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('false'))
+    // Usage data is its own.
+    expect(screen.getByRole('switch', { name: 'Usage data' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps crash reports off, and can’t turn them on, while DO_NOT_TRACK is set', async () => {
+    withServices(<Settings at="about" />, fakeClient().client, fakeHost({ doNotTrack: true }))
+    const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
+    expect(crashes.getAttribute('aria-checked')).toBe('false')
+    expect((crashes as HTMLButtonElement).disabled).toBe(true)
   })
 })
 

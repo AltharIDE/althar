@@ -52,15 +52,17 @@ export const writePreference = (profile: string, key: string, value: unknown): P
 
 /**
  * The app's own preferences (appPreferences.ts), each as kept or where it
- * starts. A file that is there but can't be read keeps usage data off, and
- * is written again so: the person may have turned it off, and nothing else
- * in it can be read back.
+ * starts. A file that is there but can't be read keeps usage data and crash
+ * reports off, and is written again so: the person may have turned them
+ * off, and nothing else in it can be read back.
  */
 export const readAppPreferences = async (profile: string): Promise<AppPreferences> => {
   const { kept, damaged } = await readFileIn(profile)
   if (!damaged) return preferencesIn(kept)
-  await writePreference(profile, 'usageData', false).catch(() => undefined)
-  return { ...preferencesIn(kept), usageData: false }
+  await writePreference(profile, 'usageData', false)
+    .then(() => writePreference(profile, 'crashReports', false))
+    .catch(() => undefined)
+  return { ...preferencesIn(kept), usageData: false, crashReports: false }
 }
 
 /** Keeps one of the app's preferences, refusing a value its key can't hold. */

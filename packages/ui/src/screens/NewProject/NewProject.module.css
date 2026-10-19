@@ -48,8 +48,8 @@
 }
 .label {
   color: var(--t-3);
-  font: 500 10.5px/1.2 var(--mono);
-  letter-spacing: 0.05em;
+  font: 500 10.5px/1.2 var(--font-label);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .gap {

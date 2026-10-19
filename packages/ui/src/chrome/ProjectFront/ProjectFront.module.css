@@ -18,7 +18,8 @@
 
 .words {
   flex: 1;
-  min-width: 0;
+  /* the name keeps its room however long what runs reads; the end gives way first */
+  min-width: 8rem;
   display: grid;
   gap: 5px;
 }
@@ -95,10 +96,6 @@
   background: var(--n-3);
   color: var(--t-1);
 }
-.open:focus-visible {
-  outline: 2px solid var(--focus, currentColor);
-  outline-offset: 0;
-}
 .noMark {
   width: 10px;
   height: 10px;
@@ -108,7 +105,8 @@
 
 /* the way to its settings, top right; pressed while they are open */
 .end {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   align-self: flex-start;
   display: flex;
   align-items: center;

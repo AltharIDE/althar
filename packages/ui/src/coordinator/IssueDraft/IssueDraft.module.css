@@ -113,11 +113,7 @@
   white-space: nowrap;
 }
 .line:focus-visible {
-  outline: 2px solid var(--t-1);
   outline-offset: 2px;
-}
-.line:focus:not(:focus-visible) {
-  outline: none;
 }
 .lineMark {
   flex: none;

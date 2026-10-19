@@ -5,12 +5,13 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
 import { Coordinator } from '../src/Coordinator'
 import { NotFound } from '../src/errors'
+import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { Limits, outWords, whenWords } from '../src/Limits'
 import { Policies, usageLimitOf } from '../src/Policies'
@@ -197,6 +198,50 @@ describe('an agent out of usage', () => {
       )
       assert.strictEqual(ready?.lead, 'claude-code')
     })
+  })
+
+  it.live('runs the other held steps at their reset past one it can’t read and one that can’t go on, which waits a while', () => {
+    const back = Date.now() + 4000
+    const reported: Array<Failure> = []
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const unreadable = yield* planned([lead('claude-code')], 'Unreadable [lead:finish]')
+      const stuck = yield* planned([lead('claude-code')], 'Stuck [lead:finish]')
+      const kept = yield* planned([lead('claude-code')], 'Kept [lead:finish]')
+      const heldOf = (taskId: string) =>
+        Effect.map(
+          sql<{ id: string; state: string }>`
+            SELECT a.id, a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} ORDER BY a.rowid DESC LIMIT 1`,
+          ([attempt]) => attempt,
+        )
+      for (const one of [unreadable, stuck, kept]) {
+        yield* waits(one.projectId)
+        yield* one.start
+        yield* until(cardOf(one.projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
+      }
+      // One's record no longer reads, and the store won't change another's.
+      const unread = yield* heldOf(unreadable.task.taskId)
+      yield* sql`UPDATE node_attempts SET output = 'null' WHERE id = ${unread?.id ?? ''}`
+      const held = yield* heldOf(stuck.task.taskId)
+      yield* sql.unsafe(
+        `CREATE TRIGGER stuck_step BEFORE UPDATE ON node_attempts WHEN OLD.id = '${held?.id ?? ''}' BEGIN SELECT RAISE(ABORT, 'The step is stuck'); END`,
+      )
+      // At the reset, the third carries on all the same.
+      const [ready] = yield* until(cardOf(kept.projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(12))
+      assert.strictEqual(ready?.lead, 'claude-code')
+      yield* Effect.sleep('500 millis')
+      assert.deepStrictEqual([(yield* heldOf(unreadable.task.taskId))?.state, (yield* heldOf(stuck.task.taskId))?.state], ['held', 'held'])
+      // The one that couldn't go on was tried once, not again at once; the one it can't read is said where it is.
+      assert.deepStrictEqual(reported.filter((failure) => failure.where === 'Runs.resume').length, 1)
+      assert.isTrue(reported.some((failure) => failure.where === 'Runs.held'))
+    }).pipe(
+      Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })),
+      Effect.provideService(Failures, {
+        report: (cause, where, agent) => Effect.sync(() => void reported.push(failureOf(cause, where, agent ?? null))),
+        events: Stream.empty,
+      }),
+    )
   })
 
   it.live('needs the person when the reset isn’t known and nothing else is free', () =>

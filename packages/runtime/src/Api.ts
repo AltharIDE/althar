@@ -26,6 +26,7 @@ import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
 import { Changes } from './Changes'
 import { NotFound } from './errors'
+import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
@@ -179,17 +180,31 @@ export const handlers = Api.toLayer(
     /** What a message's command says of its images: their digests, in order, where it has any; nothing where it has none, as before images. */
     const imagesSaid = (kept: ReadonlyArray<InputImage>) => (kept.length === 0 ? {} : { images: kept.map((image) => image.sha256) })
 
-    /** A call's failure as the window gets it: in words, and in the log when it isn't the person's to put right. */
+    const failures = yield* Failures
+    /** The call being answered, by the name the RPC server gives its span: `Status`, `ListProjects`. */
+    const callName = Effect.currentSpan.pipe(
+      Effect.map((span) => span.name.replace(/^RpcServer\./, '')),
+      Effect.map((name) => (/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name) ? name : 'call')),
+      Effect.orElseSucceed(() => 'call'),
+    )
+
+    /**
+     * A call's failure as the window gets it: in words; and, when it isn't
+     * the person's to put right, in the log and reported, by the call's name.
+     */
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
       Effect.catchCause(effect, (cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
         const error = Cause.findErrorOption(cause)
         const said = words(Option.getOrUndefined(error), agentName)
-        const log =
+        const told =
           Option.isSome(error) && expected.has(said.reason)
             ? Effect.void
-            : Effect.logWarning('A call from the window did not succeed', cause)
-        return Effect.andThen(log, Effect.fail(new ApiError(said)))
+            : Effect.andThen(
+                Effect.logWarning('A call from the window did not succeed', cause),
+                Effect.flatMap(callName, (call) => failures.report(cause, call)),
+              )
+        return Effect.andThen(told, Effect.fail(new ApiError(said)))
       })
 
     /*
@@ -292,7 +307,7 @@ export const handlers = Api.toLayer(
       }
     }
 
-    /* An account as the window shows it: signed in, checked at most once a minute, paid for how, and out until when. */
+    /* An account as the window shows it: signed in, checked at most once a minute, paid for how, and out until when. One whose check failed shows as unknown; the others are shown as they are. */
     const accountStatus = (account: Account, recheck: boolean) =>
       Effect.gen(function* () {
         const check = yield* signIns.account(account, recheck)
@@ -306,16 +321,38 @@ export const handlers = Api.toLayer(
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
         } satisfies AccountStatus
-      })
+      }).pipe(
+        contained(
+          'Status.account',
+          (): AccountStatus => ({
+            id: account.id,
+            name: account.name,
+            home: account.home,
+            signIn: 'unknown',
+            paidBy: 'unknown',
+            outUntil: null,
+            adoptedFrom: account.adoptedFrom,
+          }),
+          account.agentId,
+        ),
+      )
 
     /* Each agent's version, asked of its CLI once a launch. */
     const versions = new Map<string, string | null>()
     const versionOf = (entry: AgentEntry) =>
       versions.has(entry.definition.id)
         ? Effect.succeed(versions.get(entry.definition.id) ?? null)
-        : agentVersion(entry.definition).pipe(Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))))
+        : agentVersion(entry.definition).pipe(
+            Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))),
+            // Asked again next time: one that failed says no version, not a wrong one.
+            contained('Status.version', () => null, entry.definition.id),
+          )
 
-    /* An agent, with its accounts: each check starts the agent's own status command, in the account's home. */
+    /*
+     * An agent, with its accounts: each check starts the agent's own status
+     * command, in the account's home. An agent that couldn't be looked at
+     * says so on its own, and every other agent is shown as it is.
+     */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
         const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
@@ -333,8 +370,27 @@ export const handlers = Api.toLayer(
           version: yield* versionOf(entry),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
+          problem: null,
         } satisfies AgentStatus
-      })
+      }).pipe(
+        contained(
+          'Status.agent',
+          (): AgentStatus => ({
+            id: entry.definition.id,
+            name: entry.definition.name,
+            installed: true,
+            kept: false,
+            download: null,
+            signIn: 'unknown',
+            login: entry.definition.signIn.login,
+            version: null,
+            ways: entry.definition.signIn.inApp?.ways ?? [],
+            accounts: [],
+            problem: `Althar couldn't check ${entry.definition.name}. Its log has the details.`,
+          }),
+          entry.definition.id,
+        ),
+      )
 
     /*
      * Changes from the store's feed after `since`, or from now: the window
@@ -591,7 +647,7 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, dictated }) =>
         once(
           commandId,
           api(
@@ -606,11 +662,12 @@ export const handlers = Api.toLayer(
                       // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
                       envelope: yield* envelope(
                         'thread.send',
-                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept) },
+                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
                       ...(kept.length === 0 ? {} : { images: kept }),
+                      ...(dictated === true ? { dictated: true } : {}),
                     }
               const sessionId = yield* sessions.switchAgent({
                 threadId,
@@ -652,6 +709,8 @@ export const handlers = Api.toLayer(
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
+      MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
+      LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
@@ -732,18 +791,23 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images }) =>
+      Send: ({ commandId, threadId, body, disposition, images, dictated }) =>
         api(
           Effect.gen(function* () {
             // Its images are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
             const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
             const message = {
               // The command says its images by their digests, never their bytes.
-              envelope: yield* envelope('thread.send', { threadId, body, disposition, ...imagesSaid(kept) }, commandId),
+              envelope: yield* envelope(
+                'thread.send',
+                { threadId, body, disposition, ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
+                commandId,
+              ),
               threadId,
               body,
               disposition,
               ...(kept.length === 0 ? {} : { images: kept }),
+              ...(dictated === true ? { dictated } : {}),
             }
             // What the person says to the coordinator starts it, if it isn't running.
             const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`
@@ -1165,6 +1229,8 @@ export const services = (options: Runtime.RuntimeLayerOptions) =>
   Layer.mergeAll(Nudges.layer, UsageData.layer, Folders.layer).pipe(
     Layer.provideMerge(Queries.layer),
     Layer.provideMerge(Runtime.layer(options)),
+    // Below everything, so a failure kept anywhere is said through the one listener.
+    Layer.provideMerge(failuresLayer),
   )
 
 /** One client's connection: the API served over its port, until the port closes. Each window gets one. */

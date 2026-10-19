@@ -174,6 +174,8 @@ export interface TaskModel {
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
   readonly stopHolding: (threadId: string, id: string) => Promise<void>
+  /** Puts the task, waiting for a free agent, at the front of its project's line. */
+  readonly moveToFront: () => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
@@ -242,19 +244,36 @@ export const useTask = (threadId: string): TaskModel => {
     [setSnapshot],
   )
 
-  /** The thread's head again: its task, the agent working, the calls waiting. Its items stay as they are. */
+  /** What the window holds of the thread now, for a read that lands later. */
+  const held = useRef<ReadonlyArray<ThreadItem>>([])
+  held.current = snapshot?.items ?? []
+
+  const readItems = useCallback(
+    (ids: Iterable<string>) =>
+      Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
+    [client, threadId, newest, arrived, fail],
+  )
+
+  /**
+   * The thread's head again: its task, the agent working, the calls waiting.
+   * Its items stay as they are, but for those it may have moved on, read after
+   * it and landing before it: what still waits its turn, and what else is
+   * asked. The runtime has a message delivered before it says the turn on it
+   * runs, so the thread never shows the turn running while what it took still
+   * waits in the queue.
+   */
   const readHead = useCallback(
-    () =>
+    (also: Iterable<string> = []) =>
       newest(
         'head',
-        client.getThread(threadId, { limit: 0 }),
+        client.getThread(threadId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
         (head) =>
           cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
             current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
           ),
         fail,
       ),
-    [client, cache, threadId, newest, fail],
+    [client, cache, threadId, newest, readItems, fail],
   )
 
   const readFiles = useCallback(
@@ -276,9 +295,8 @@ export const useTask = (threadId: string): TaskModel => {
     timer.current = undefined
     const { head, items } = changed.current
     changed.current = { head: false, items: new Set() }
-    if (head) void readHead()
-    for (const itemId of items) void newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail)
-  }, [client, threadId, readHead, newest, arrived, fail])
+    void (head ? readHead(items) : readItems(items))
+  }, [readHead, readItems])
 
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'.
@@ -390,6 +408,7 @@ export const useTask = (threadId: string): TaskModel => {
         text,
         queued,
         interrupting: disposition === 'interrupt_and_continue',
+        ...(images?.dictated === true ? { dictated: true } : {}),
         ...(images === undefined ? {} : { pictures: images.pictures }),
       })
       id = next.id
@@ -608,6 +627,7 @@ export const useTask = (threadId: string): TaskModel => {
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
+    moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
     runProject: (runnableId = null) =>
       act(async () =>

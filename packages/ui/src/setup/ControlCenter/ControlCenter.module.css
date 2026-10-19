@@ -467,6 +467,16 @@ button.toggleWords {
   color: var(--t-3);
 }
 
+/* the version and what goes with it, stacked: the foot's button keeps the row's end at any width, and it is these words that give way (a line wraps) in a panel too narrow for both */
+.footStart {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
 /* a setting at its smallest: a quiet link at the foot's end */
 .link {
   display: inline-flex;

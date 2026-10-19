@@ -58,7 +58,8 @@ export const needText = {
   /** Commits after its last pull request, in none yet, and how big they are. */
   inNone: (commits: number, add: number, del: number) =>
     `${commits === 1 ? '1 commit' : `${commits} commits`} in no pull request · +${add} −${del}`,
-  branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
+  branchSize: (files: number, add: number, del: number) =>
+    files === 0 ? 'Nothing changed on its branch' : `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
   /** A review drafted, in a line: whose pull request, and what the draft found. */
   by: (author: string) => `by ${author}`,
   findings: (n: number) => (n === 0 ? 'no findings' : n === 1 ? '1 finding' : `${n} findings`),
@@ -241,6 +242,9 @@ export const needsOf = ({
   }),
 ]
 
+/** A permission's Allow once on its line: what Enter gives, where focus is put on it. */
+export const DEFAULT_ANSWER = '[data-default-answer]'
+
 /**
  * A need's line: its title opens its task; a permission's answers give it
  * there (Deny and Allow once, unless the place gives every answer the call
@@ -347,7 +351,8 @@ export function needLineOf(
             <Button size="small" onClick={() => onAnswer(permission, need.project, 'reject')}>
               {needText.deny}
             </Button>
-            <Button size="small" variant="signal" onClick={() => onAnswer(permission, need.project, 'allow')}>
+            {/* The answer Enter gives, where a place puts focus on it as it opens (`DEFAULT_ANSWER`). */}
+            <Button size="small" variant="signal" data-default-answer="" onClick={() => onAnswer(permission, need.project, 'allow')}>
               {needText.allow}
             </Button>
           </>

@@ -421,9 +421,6 @@ describe('Trello', () => {
       const link = { url: 'https://github.com/meridian/api/pull/12', title: 'PR #12' }
       yield* tracker.link(found, link)
       yield* tracker.link(found, link)
-      // Which list is in progress is the board's own: a card stays in its list.
-      assert.deepStrictEqual(yield* tracker.start(found), { moved: false, status: found.status })
-      assert.isFalse(tracker.capabilities.starts)
       assert.deepStrictEqual(
         sent.map((request) => [request.method, request.url.replace(`${API}/cards/5c4a1edbee21d48246c126b2`, ''), request.body]),
         [
@@ -438,6 +435,82 @@ describe('Trello', () => {
       assert.strictEqual(tracker.product, 'trello')
     }),
   )
+  describe('moving a card to In Progress', () => {
+    const CARD = `${API}/cards/5c4a1edbee21d48246c126b2`
+    const LISTS = `${API}/boards/4d5ea62fd76aa1136000000c/lists?filter=open&fields=name,closed`
+    /** GET /boards/…/lists, in their order on the board: review and blocked read as started too, but aren't where work starts. */
+    const lists = [
+      { id: 'l-backlog', name: 'Backlog', closed: false },
+      { id: 'l-todo', name: 'To Do', closed: false },
+      { id: 'l-review', name: 'Code review', closed: false },
+      { id: 'l-blocked', name: 'Blocked', closed: false },
+      { id: 'l-doing', name: '🔨 Doing', closed: false },
+      { id: 'l-progress', name: 'In progress', closed: false },
+      { id: 'l-done', name: 'Done', closed: false },
+    ]
+
+    it.effect('moves it to the top of its board’s first list for work under way, past those for review or what is blocked', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = trello([
+          ['GET', `${CARD}?fields=idBoard`, { json: { id: found.id, idBoard: '4d5ea62fd76aa1136000000c' } }],
+          ['GET', LISTS, { json: lists }],
+          ['PUT', CARD, { json: card({ idList: 'l-doing' }) }],
+        ])
+        assert.deepStrictEqual(yield* tracker.start(found), { moved: true, status: { name: '🔨 Doing', category: 'started' } })
+        assert.deepStrictEqual(sent.at(-1)?.body, { idList: 'l-doing', pos: 'top' })
+        assert.isTrue(sent.every((request) => request.headers.authorization === AUTHORIZATION))
+        assert.isTrue(tracker.capabilities.starts)
+      }),
+    )
+
+    it.effect('moves one from the backlog too', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = trello([
+          ['GET', `${CARD}?fields=idBoard`, { json: { id: found.id, idBoard: '4d5ea62fd76aa1136000000c' } }],
+          ['GET', LISTS, { json: lists.filter((list) => list.id !== 'l-doing') }],
+          ['PUT', CARD, { json: card({ idList: 'l-progress' }) }],
+        ])
+        const backlog = { ...found, status: { name: 'Backlog', category: 'backlog' as const } }
+        assert.deepStrictEqual(yield* tracker.start(backlog), { moved: true, status: { name: 'In progress', category: 'started' } })
+        assert.deepStrictEqual(sent.at(-1)?.body, { idList: 'l-progress', pos: 'top' })
+      }),
+    )
+
+    it.effect('leaves one started, done or cancelled as it is, asking Trello nothing', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = trello([])
+        for (const status of [
+          { name: 'Code review', category: 'started' as const },
+          { name: 'Done', category: 'done' as const },
+          { name: 'Won’t do', category: 'cancelled' as const },
+        ]) {
+          assert.deepStrictEqual(yield* tracker.start({ ...found, status }), { moved: false, status })
+        }
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('fails when its board has no list for work under way, or Trello won’t let it be moved', () =>
+      Effect.gen(function* () {
+        const nowhere = trello([
+          ['GET', `${CARD}?fields=idBoard`, { json: { id: found.id, idBoard: '4d5ea62fd76aa1136000000c' } }],
+          ['GET', LISTS, { json: lists.filter((list) => list.id !== 'l-doing' && list.id !== 'l-progress') }],
+        ])
+        const none = yield* Effect.flip(nowhere.tracker.start(found))
+        assert.deepStrictEqual([none.reason, none.message], ['rejected', 'Its board has no list named Doing or In progress'])
+        assert.isFalse(nowhere.sent.some((request) => request.method === 'PUT'))
+        const refused = yield* Effect.flip(
+          trello([
+            ['GET', `${CARD}?fields=idBoard`, { json: { id: found.id, idBoard: '4d5ea62fd76aa1136000000c' } }],
+            ['GET', LISTS, { json: lists }],
+            ['PUT', CARD, { status: 401, text: 'unauthorized permission requested' }],
+          ]).tracker.start(found),
+        )
+        assert.deepStrictEqual([refused.reason, refused.message], ['forbidden', 'unauthorized permission requested'])
+      }),
+    )
+  })
+
   it.effect('lists the open lists on the account’s open boards, each named with its board', () =>
     Effect.gen(function* () {
       const { tracker, sent } = trello([

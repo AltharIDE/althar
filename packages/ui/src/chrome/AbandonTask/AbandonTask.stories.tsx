@@ -46,7 +46,7 @@ export const DeletingItsBranch: Story = {
   play: async ({ args }) => {
     const dialog = await within(document.body).findByRole('dialog', { name: 'Abandon this task?' })
     await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' }))
-    await expect(dialog).toHaveTextContent('Its branch althar/add-a-retry stays on this Mac.')
+    await expect(dialog).toHaveTextContent('Its branch althar/add-a-retry stays on this computer.')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
     await expect(args.onAbandon).toHaveBeenCalledWith({ close: ['pr-1206'], deleteBranch: ['pr-1206'] })
   },

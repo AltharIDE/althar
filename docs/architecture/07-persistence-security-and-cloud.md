@@ -397,6 +397,13 @@ Do not market file synchronization of SQLite/artifacts as collaboration.
 The cloud is introduced when sharing or cross-device continuity is actually
 valuable.
 
+It comes first as a relay, not an authority
+([ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)):
+the laptop's runtime dials out to it, a paired phone talks to the runtime
+through it, encrypted end to end, and it keeps no project state. The laptop
+stays canonical. Cloud authority, as below, comes when a project is shared by
+several people or work must go on with the laptop shut.
+
 ### Shape
 
 Start as a private modular monolith:
@@ -428,6 +435,17 @@ The client resolves the authoritative endpoint behind one typed control-plane
 API.
 
 ### Local runner leases
+
+A lease is held where the attempt is canonical. While the laptop is (the
+relay above), it is the laptop that leases an attempt to a runner in the cloud,
+a headless host (ADR-048), and what follows applies with the roles turned
+round; how a runner claims work is DEV-130's ADR. Once the cloud is the
+authority, it leases to the person's device as written here.
+
+A runner in the cloud takes only credentials that may be used remotely: API
+keys from storage on the cloud side, never a subscription's sign-in or one of
+the laptop's (doc 03, rules 5–8). Work on a subscription stays on the person's
+device, which is the local runner below.
 
 A cloud-authoritative run delegated locally requires:
 

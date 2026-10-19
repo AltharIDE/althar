@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, say, startTask, toConversation } from './support'
 
 /*
  * Allow always (ADR-018), as the person meets it: under "Ask me", a lead's
@@ -18,13 +18,8 @@ import { launch, openFirstProject, say, startTask, toConversation } from './supp
  * `run `.
  */
 
-const openRules = async (page: Page) => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await page
-    .getByRole('dialog', { name: /’s settings$/ })
-    .getByRole('button', { name: /^Rules/ })
-    .click()
-}
+/** The project's rules, a section of its settings. */
+const openRules = (page: Page) => projectSettings(page, 'Rules')
 
 /** Starts a task by telling the coordinator, and opens its conversation once it is ready. */
 const startAndOpen = async (page: Page, title: string) => {
@@ -56,7 +51,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
     const goAhead = page.getByRole('listitem', { name: 'Go ahead' })
     await expect(goAhead).toContainText('Nothing goes ahead by a rule yet: a permission answered with “always allow” adds one here.')
-    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await backToWork(page)
 
     await startAndOpen(page, 'Look at the tree')
 
@@ -82,7 +77,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await page.waitForTimeout(400)
     if (shots) await page.screenshot({ path: join(shots, 'app-allowed-by-rule.png') })
 
-    // The rule is on the rules screen; taken off there, the next asks again.
+    // The rule is in the project's rules; taken off there, the next asks again.
     await backToProject(page)
     await openRules(page)
     const allowed = page.getByRole('listitem', { name: 'Go ahead' })
@@ -91,7 +86,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     if (shots) await page.screenshot({ path: join(shots, 'app-rules-always-allowed.png') })
     await allowed.getByRole('button', { name: 'Remove git status' }).click()
     await expect(allowed).toContainText('Nothing goes ahead by a rule yet')
-    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await backToWork(page)
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)
     await say(page, 'run git status -s')

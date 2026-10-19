@@ -2,13 +2,18 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Brand } from '../../foundations/brands/brands'
 import { Logo } from '../../foundations/Logo/Logo'
+import { BrandMark } from '../../foundations/Marks/Marks'
 import { EdgeSpot } from '../../foundations/vocabulary'
+import { Button } from '../../primitives/Button/Button'
 import { States } from '../../storybook/States'
 import { ControlSheet } from '../ControlCenter/ControlCenter'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
   AgentsAtOnce,
+  CrashReports,
+  CrashReportsLine,
   EdgeHere,
   EdgePlaces,
   EdgeScene,
@@ -17,7 +22,10 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
+  SettingGroup,
   SettingList,
+  SettingRow,
+  SettingSwitch,
   UsageData,
 } from './Preferences'
 
@@ -43,6 +51,7 @@ const onNotify = fn()
 const onPlay = fn()
 const onPlace = fn()
 const onUsage = fn()
+const onCrashes = fn()
 
 /* Stand-ins for what the app puts in the screen: the home layer's Island and EdgeSheet can't be drawn from here. */
 const island = (
@@ -153,6 +162,24 @@ function Usage() {
   )
 }
 
+function Crashes({ line = false }: { line?: boolean }) {
+  const [on, setOn] = useState(true)
+  const change = (next: boolean) => {
+    setOn(next)
+    onCrashes(next)
+  }
+  return line ? (
+    <div style={{ maxWidth: 420 }}>
+      <CrashReportsLine on={on} onChange={change} />
+    </div>
+  ) : (
+    <SettingList>
+      <Usage />
+      <CrashReports on={on} onChange={change} />
+    </SettingList>
+  )
+}
+
 function Places() {
   const [place, setPlace] = useState<'island' | 'menu'>('island')
   return (
@@ -221,6 +248,54 @@ export const UsageDataSwitch: Story = {
     await userEvent.click(usage)
     await expect(onUsage).toHaveBeenCalledWith(false)
     await expect(usage).not.toBeChecked()
+  },
+}
+
+/** Crash reports, beside usage data with a switch of their own: on as they start, with the line on what they carry and never carry; turned off at once. */
+export const CrashReportsSwitch: Story = {
+  render: () => <Crashes />,
+  play: async ({ canvasElement }) => {
+    const crashes = within(canvasElement).getByRole('switch', { name: 'Crash reports' })
+    await expect(crashes).toBeChecked()
+    await expect(crashes).toHaveAccessibleDescription(
+      'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(crashes)
+    await expect(onCrashes).toHaveBeenCalledWith(false)
+    await expect(crashes).not.toBeChecked()
+    await expect(within(canvasElement).getByRole('switch', { name: 'Usage data' })).toBeChecked()
+  },
+}
+
+/** Crash reports asked once on a first screen: one quiet line with its switch, nothing to answer before going on. */
+export const CrashReportsFirstScreen: Story = {
+  render: () => <Crashes line />,
+  play: async ({ canvasElement }) => {
+    const crashes = within(canvasElement).getByRole('switch', { name: 'Crash reports' })
+    await expect(crashes).toBeChecked()
+    await expect(crashes).toHaveAccessibleDescription(
+      'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+    )
+    await userEvent.click(crashes)
+    await expect(onCrashes).toHaveBeenCalledWith(false)
+  },
+}
+
+/** Off and locked while DO_NOT_TRACK is set, in Settings and on the first screen alike. */
+export const CrashReportsDoNotTrack: Story = {
+  render: () => (
+    <div style={{ display: 'grid', gap: 24, maxWidth: 520 }}>
+      <SettingList>
+        <CrashReports on onChange={fn()} doNotTrack />
+      </SettingList>
+      <CrashReportsLine on onChange={fn()} doNotTrack />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    for (const crashes of within(canvasElement).getAllByRole('switch', { name: 'Crash reports' })) {
+      await expect(crashes).not.toBeChecked()
+      await expect(crashes).toBeDisabled()
+    }
   },
 }
 
@@ -480,4 +555,49 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+/** A section's parts, each under its name with what is done for all of it; a product's own mark before its row as it is, with no round glyph. */
+export const Groups: Story = {
+  render: () => (
+    <>
+      <SettingGroup
+        title="Trackers"
+        note="Where its tasks’ issues are."
+        action={
+          <Button size="small" icon="plug">
+            Connect a tracker
+          </Button>
+        }
+      >
+        <SettingList>
+          <SettingRow title="Linear · MER issues" note="Connected as balazs" mark={<BrandMark brand={Brand.Linear} size={18} />}>
+            {() => null}
+          </SettingRow>
+          <SettingRow title="Jira · OPS issues" note="Not connected" mark={<BrandMark brand={Brand.Jira} size={18} />}>
+            {() => (
+              <Button size="small" variant="signal">
+                Connect
+              </Button>
+            )}
+          </SettingRow>
+        </SettingList>
+      </SettingGroup>
+      <SettingGroup title="How its tasks work">
+        <SettingList>
+          <SettingSwitch
+            title="Resolve merge conflicts automatically"
+            note="The lead fixes them and says what it did."
+            checked
+            onChange={fn()}
+          />
+        </SettingList>
+      </SettingGroup>
+    </>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('region', { name: 'Trackers' })).toBeVisible()
+    await expect(c.getByRole('heading', { name: 'How its tasks work', level: 2 })).toBeVisible()
+  },
 }

@@ -19,6 +19,8 @@ export const sending = (
     readonly text: string
     readonly queued: boolean
     readonly interrupting: boolean
+    /** Some of its words were dictated. */
+    readonly dictated?: boolean
     /** The images sent with it. */
     readonly pictures?: ReadonlyArray<Picture>
   },
@@ -32,7 +34,11 @@ export const sending = (
     agentId: null,
     createdAt: new Date().toISOString(),
     content: { text: message.text, links: [], pictures: message.pictures ?? [] },
-    input: { state: message.queued ? 'queued' : 'delivered', interrupting: message.interrupting },
+    input: {
+      state: message.queued ? 'queued' : 'delivered',
+      interrupting: message.interrupting,
+      ...(message.dictated === true ? { dictated: true } : {}),
+    },
   }
   return { id, items: [...items, item] }
 }
@@ -139,6 +145,20 @@ export const queueShown = (session: { readonly turnRunning: boolean } | null, se
   session === null ? !sending : session.turnRunning
 
 /**
+ * Whether what waits after the agent's last reply is being read now, with
+ * nothing to wait behind: no turn runs, and the person's own send is on its
+ * way (which may start the agent), or the agent holds the thread, idle or
+ * starting, with nothing keeping it from reading (`kept`, as a task waiting
+ * for a place or for its agent's usage). What it reads is the reply the
+ * person waits for, not a queue, while the agent starts as much as after.
+ */
+export const readingNow = (
+  session: { readonly turnRunning: boolean; readonly held: boolean; readonly state: string } | null,
+  sending: boolean,
+  kept = false,
+): boolean => !kept && session?.turnRunning !== true && (sending || session?.held === true || session?.state === 'starting')
+
+/**
  * What waits its turn, oldest first, in the composer where the person can
  * edit it or take it back, when the queue shows, with the images that went
  * with it. A message sent now isn't there: it goes first, as soon as the
@@ -147,7 +167,13 @@ export const queueShown = (session: { readonly turnRunning: boolean } | null, se
 export const queuedOf = (
   items: ReadonlyArray<ThreadItem>,
   shown: boolean,
-): ReadonlyArray<{ readonly id: string; readonly text: string; readonly attached?: string; readonly pictures: ReadonlyArray<Picture> }> =>
+): ReadonlyArray<{
+  readonly id: string
+  readonly text: string
+  readonly attached?: string
+  readonly pictures: ReadonlyArray<Picture>
+  readonly dictated?: boolean
+}> =>
   !shown
     ? []
     : items.flatMap((item) =>
@@ -158,6 +184,7 @@ export const queuedOf = (
                 text: item.content.text,
                 ...(item.content.pictures.length === 0 ? {} : { attached: imagesText.attached(item.content.pictures.length) }),
                 pictures: item.content.pictures,
+                ...(item.input.dictated === true ? { dictated: true } : {}),
               },
             ]
           : [],

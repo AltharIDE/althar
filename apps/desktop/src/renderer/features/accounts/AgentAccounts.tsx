@@ -2,6 +2,7 @@ import type { AccountStatus, AgentStatus } from '@althar/contracts'
 import { type AccountEntry, Accounts, AccountSignIn } from '@althar/ui'
 
 import { signInWordsOf } from '../../shared/agents'
+import { device } from '../../shared/device'
 import { shortFolder } from '../../shared/folders'
 import { clock } from '../../shared/time'
 import type { StartModel } from '../start/useStart'
@@ -41,6 +42,7 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
   const node = flow && (
     <AccountSignIn
       agent={agent.name}
+      text={{ folder: `A folder on ${device.this}` }}
       position={again === undefined ? accounts.length + 1 : accounts.indexOf(again) + 1}
       {...(again === undefined ? {} : { account: { name: again.name } })}
       step={flow.step}

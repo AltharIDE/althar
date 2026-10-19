@@ -12,7 +12,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Repository | `RepositoryBinding` | A repository that the project's tasks may change, with its role. It is shared by everyone on the project. |
 | On this Mac, Map it later | `RepositoryLocation`, or none | Where this device keeps that repository. "Map it later" is a binding with no location here. On the Sources view that state is "needs mapping". |
 | Reading it | read-only inspection | What Althar does to a folder before a project exists. It changes nothing. |
-| Role | `RepositoryBinding.role` | What a repository is to its project: Service, Frontend, Infrastructure, Library, Docs or Other. Suggested from its name, changed on the Repositories screen; tasks and the coordinator are told it. |
+| Role | `RepositoryBinding.role` | What a repository is to its project: Service, Frontend, Infrastructure, Library, Docs or Other. Suggested from its name, changed in the project's settings; tasks and the coordinator are told it. |
 | Leave out | `RepositoryBinding.detached_at` | Taking a repository out of a project: new tasks can't change it and the coordinator stops reading it. Tasks made with it keep it. Nothing in its folder changes. Not "remove" or "detach". |
 | Where tasks open pull requests | `RepositoryBinding.change_target` | For a fork (an `upstream` remote beside `origin`): on the repository it was forked from, or on the fork. The branch is pushed to the fork either way. |
 | Colour | `Project.ink` | The ink a project's mark is drawn in: one of eight, picked for it when it is made, changed under "Name and colour" in its settings. Never "ink" on screen. |
@@ -104,7 +104,8 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Report a problem | a problem report, sent to the reports Worker, which makes a Linear issue | From Help in the app's menu on a Mac, the foot of the quick settings, or About Althar in Settings: a dialog with one box, "What happened?". The screenshot of the window and the logs go with it unless the person switches them off; "See what's sent" lists every item; an email if they'd like a reply. Without the reports service, it is saved in Downloads and a mail opens to send it with. |
 | Report this | a problem report about something that went wrong, carrying its task, or what stopped an update | Quiet, at the end of a Stuck call's answers, and on This update couldn’t move your data. It opens Report a problem about that step or that update. On a Stuck call it answers nothing: the step still waits. |
 | Logs | `main.log`, `runtime.log`, `agents.log` | What the app writes as it runs, in the system's place for logs. A report sends the last part of each, with paths in the home folder and repository names hidden. |
-| Install id | usage data's random id, kept in the profile's `desktop.json` | Which install a report came from, and nothing about who. The same id usage data sends, whether or not usage data is on. |
+| Install id | usage data's random id, kept in the profile's `desktop.json` | Which install a report came from, and nothing about who. The same id usage data and crash reports send, whether or not they are on. |
+| Crash reports | `$exception` events to PostHog's error tracking, from the main process (`crashReports.ts`) | What failed in Althar and where in its code, sent without anyone writing in, masked as a report is: never anyone's code, what is written, or any name. A switch of its own beside Usage data in About Althar, and one quiet line with the same switch on the first screen. A native crash's minidump stays on the computer; only that it happened is sent. |
 
 ## What comes back
 

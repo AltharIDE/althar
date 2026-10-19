@@ -33,6 +33,7 @@ import { Cause, Clock, Context, type Crypto, Deferred, Duration, Effect, Exit, F
 import { SqlClient, type SqlError } from 'effect/sql'
 import type { Ledger } from '@althar/persistence-sqlite'
 
+import { contained } from './Failures'
 import { type CliTool, Connectors } from './Config'
 import { NotFound } from './errors'
 import { git, namedRemotes } from './git'
@@ -1336,9 +1337,16 @@ export class Connections extends Context.Service<
           const clis =
             tool === null
               ? []
-              : (yield* Effect.forEach([...instances.values()], ({ product, webUrl }) => cliSignIn(tool, product, webUrl), {
-                  concurrency: 2,
-                })).filter((cli) => cli !== null)
+              : (yield* Effect.forEach(
+                  [...instances.values()],
+                  // One instance whose CLI didn't answer offers no sign-in of its own; the others still do.
+                  ({ product, webUrl }) =>
+                    cliSignIn(tool, product, webUrl).pipe(
+                      Effect.catchTag('CliUnanswered', () => Effect.succeed(null)),
+                      contained('GetConnectGuide.cli', () => null),
+                    ),
+                  { concurrency: 2 },
+                )).filter((cli) => cli !== null)
           // Bitbucket Cloud and Jira Cloud take the Atlassian account's email with a token.
           const wantsEmail = connectors.products.some((info) => info.service === service && info.token.needs === 'email')
           const email = wantsEmail
