@@ -293,6 +293,40 @@ describe('a task', () => {
     expect(reviewedUnfurl(team)).toMatchObject({ kind: 'change', key: 'PR #7', state: 'open', repository: 'meridian/api' })
   })
 
+  it('shows the issues its lead drafted as cards in the thread, files them one by one or all at once, and waits on the person', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.draft({ draftId: 'idr_1', title: 'Refunds skip the limiter' }),
+            items.draft({ draftId: 'idr_2', title: 'Checkout logs no request ids' }),
+            items.draft({
+              draftId: 'idr_3',
+              title: 'Old',
+              state: 'filed',
+              issue: { key: 'MER-3', url: 'https://linear.app/m/issue/MER-3' },
+            }),
+          ],
+          task: { ...base.task, phase: 'waiting' },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const first = (await screen.findByRole('heading', { name: 'Refunds skip the limiter' })).closest('article')
+    await userEvent.click(within(first as HTMLElement).getByRole('button', { name: 'File issue' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_1')
+    await userEvent.click(within(first as HTMLElement).getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueDraft).toHaveBeenCalledWith('idr_1')
+    // Two wait: one press files both, in order; the one filed already isn't counted.
+    await userEvent.click(screen.getByRole('button', { name: 'File all 2' }))
+    await waitFor(() => expect(client.fileIssueDraft).toHaveBeenLastCalledWith('idr_2'))
+    expect(client.fileIssueDraft).toHaveBeenCalledTimes(3)
+    expect(screen.getByRole('link', { name: /MER-3/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-3')
+    // The header says what it waits for, though no call does.
+    expect(statusOf(thread({ task: { ...base.task, phase: 'waiting' } }))).toEqual({ status: TaskStatus.Yours, state: 'Issues to file' })
+  })
+
   it('posts a review draft whose verdict stands chosen, and folds a posted one to its link', async () => {
     const base = snapshot()
     const { client } = fakeClient({

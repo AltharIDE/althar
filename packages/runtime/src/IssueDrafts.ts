@@ -5,20 +5,25 @@ import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
+import { envelope } from './envelope'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { projectRepository } from './Issues'
 import { change, fact, timestamp } from './records'
+import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
+import { ToolRefused } from './ToolServer'
 
 /*
- * Issues the coordinator drafts on the person's connected trackers
- * (docs/architecture/06, "Drafting issues"). A draft is a card in the
- * coordinator's thread: the tracker, where it goes there, its title, body
- * and labels. Nothing reaches the tracker until the person files it from the
- * card, which they may change first; or they discard it. There is no
- * countdown: leaving a draft alone files nothing. A draft that couldn't be
- * filed says why, and can be filed again.
+ * Issues the coordinator, or a task's lead, drafts on the person's connected
+ * trackers (docs/architecture/06, "Drafting issues"). A draft is a card in
+ * the thread of whoever drafted it: the tracker, where it goes there, its
+ * title, body and labels. Nothing reaches the tracker until the person files
+ * it from the card, which they may change first; or they discard it. There is
+ * no countdown: leaving a draft alone files nothing. A draft that couldn't be
+ * filed says why, and can be filed again. A lead is told what became of its
+ * draft once the person files or discards it; the coordinator hears it as
+ * news before its next turn (coordinatorNews.ts).
  *
  * The draft's row is what it is; its card's item carries the same, written
  * in the same transaction as each change, so a thread reads it as it reads
@@ -74,6 +79,48 @@ export class DraftUntitled extends Schema.TaggedError<DraftUntitled>()('DraftUnt
 
 /** How long a list of choices may be, said to the coordinator. */
 const CHOICES = 20
+
+/**
+ * Whether a lead's draft waits for the person to file it from its card. For
+ * now every lead's does; where the person lets leads file on their own, this is
+ * the one place that changes (`draft_issue` in Coordinator.ts files the draft
+ * itself when it is false).
+ */
+export const leadsNeedTheCard: boolean = true
+
+/**
+ * Why a draft can't be made, as the tool's refusal, in words its agent can act
+ * on; an error that isn't one of those is passed on as it is.
+ */
+export const refusedDraft = (error: unknown): unknown => {
+  if (error instanceof DraftUntitled) return new ToolRefused({ message: 'Give the issue a title.' })
+  if (error instanceof ConnectorFailed)
+    return new ToolRefused({ message: `Althar couldn't ask the tracker where issues go: ${error.message}` })
+  if (!(error instanceof IssueTargetNeeded)) return error
+  const choices = error.choices.join(', ')
+  const where = error.tracker ?? 'that tracker'
+  switch (error.reason) {
+    case 'no_tracker':
+      return new ToolRefused({
+        message: 'The person has no tracker connected to Althar, so there is nowhere to draft an issue. They connect one in Settings.',
+      })
+    case 'tracker_needed':
+      return new ToolRefused({ message: `Say which tracker it goes on, as tracker: ${choices}.` })
+    case 'unknown_tracker':
+      return new ToolRefused({ message: `No tracker called ${error.named ?? ''} is connected. Connected: ${choices}.` })
+    case 'container_needed':
+      return new ToolRefused({ message: `Say where on ${where} it goes, as container: ${choices}.` })
+    case 'unknown_container':
+      return new ToolRefused({
+        message:
+          error.tracker === null
+            ? `No connected tracker has anywhere called ${error.named ?? ''} for issues. They have: ${choices}.`
+            : error.choices.length === 0
+              ? `This account can't file issues anywhere on ${where}.`
+              : `${where} has nowhere called ${error.named ?? ''} for issues. It has: ${choices}.`,
+      })
+  }
+}
 
 interface Row {
   readonly id: string
@@ -161,14 +208,14 @@ const trackerNamed = (candidate: Candidate, typed: string) =>
   same(candidate.login, typed) ||
   hostOf(typed) === candidate.host
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | Sessions
 
 export class IssueDrafts extends Context.Service<
   IssueDrafts,
   {
     /**
-     * Drafts an issue, files nothing, and posts its card in the coordinator's
-     * thread. Where it goes: the tracker and container named, or, without
+     * Drafts an issue, files nothing, and posts its card in the thread it is
+     * drafted in: the coordinator's, or a task's. Where it goes: the tracker and container named, or, without
      * them, where the project's issues already come from. Fails with
      * `IssueTargetNeeded` where that isn't clear, `DraftUntitled`, or the
      * tracker's `ConnectorFailed` when asked where issues go.
@@ -181,6 +228,8 @@ export class IssueDrafts extends Context.Service<
       readonly title: string
       readonly body: string
       readonly labels: ReadonlyArray<string>
+      /** The task whose lead drafts it: where its own issue came from is where an unnamed draft goes. */
+      readonly taskId?: string
       readonly actorId: ActorId
     }): Effect.Effect<DraftCard, unknown>
     /** Changes what a draft says, before it is filed: `DraftClosed` after, `DraftUntitled` without a title. */
@@ -201,6 +250,7 @@ export class IssueDrafts extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const connections = yield* Connections
+      const sessions = yield* Sessions
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
       const load = (draftId: string) =>
@@ -274,6 +324,16 @@ export class IssueDrafts extends Context.Service<
             ORDER BY at DESC LIMIT 20`
         })
 
+      /** Where the issue a task came from is, by connection and container: first among where a draft of its lead goes. */
+      const ownOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<{ connectionId: string; container: string; at: string }>`
+            SELECT connection_id, coalesce(json_extract(snapshot, '$.container'), '') AS container, created_at AS at
+              FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' AND connection_id IS NOT NULL
+            ORDER BY created_at LIMIT 1`
+        })
+
       /** Every ready tracker, each told apart from another of its name by its site, and its account where they share one. */
       const candidates = Effect.gen(function* () {
         const trackers = yield* connections.trackers
@@ -305,11 +365,12 @@ export class IssueDrafts extends Context.Service<
        * tracker, or with one several connections answer to, is looked for on
        * each; found on more than one, which is asked, never guessed.
        */
-      const target = (projectId: string, named: { readonly tracker?: string; readonly container?: string }) =>
+      const target = (projectId: string, named: { readonly tracker?: string; readonly container?: string }, taskId?: string) =>
         Effect.gen(function* () {
           const trackers = yield* candidates
           const home = yield* projectRepository(projectId).pipe(Effect.orElseSucceed(() => null))
-          const before = yield* usual(projectId)
+          // A lead's task came from an issue, perhaps: its follow-ups go beside it.
+          const before = [...(taskId === undefined ? [] : yield* ownOf(taskId)), ...(yield* usual(projectId))]
           const labels = trackers.map((one) => one.label)
           const typed = named.tracker?.trim() === '' ? undefined : named.tracker?.trim()
           const wanted = named.container?.trim() === '' ? undefined : named.container?.trim()
@@ -402,10 +463,14 @@ export class IssueDrafts extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const title = input.title.trim()
             if (title === '') return yield* new DraftUntitled({ draftId: null })
-            const where = yield* target(input.projectId, {
-              ...(input.tracker === undefined ? {} : { tracker: input.tracker }),
-              ...(input.container === undefined ? {} : { container: input.container }),
-            })
+            const where = yield* target(
+              input.projectId,
+              {
+                ...(input.tracker === undefined ? {} : { tracker: input.tracker }),
+                ...(input.container === undefined ? {} : { container: input.container }),
+              },
+              input.taskId,
+            )
             // The same title for the same place, waiting in the same thread, is the same draft: an agent that calls again, unsure the
             // first worked, gets the first.
             const [waiting] = yield* sql<{ id: string }>`
@@ -505,6 +570,28 @@ export class IssueDrafts extends Context.Service<
         return `The connection to ${tracker} is gone. Connect it again, then try again.`
       }
 
+      /**
+       * Tells a task's lead what the person decided about a draft of its,
+       * quietly: in its thread, as input Althar writes. Nothing for the
+       * coordinator's drafts, which it hears as news, nor for a task that is
+       * over. A lead that isn't running is told all the same: the input waits
+       * in its queue and it reads it when it is resumed.
+       */
+      const tellLead = (row: Row, words: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ id: string }>`
+            SELECT t.id FROM threads t JOIN tasks k ON k.id = t.task_id
+            WHERE t.id = ${row.threadId} AND t.kind = 'task' AND k.state = 'open'`
+          if (thread === undefined) return
+          yield* sessions.send({
+            envelope: yield* envelope('thread.send', { threadId: thread.id, issueDraft: row.id }, undefined, instance.systemId),
+            threadId: thread.id,
+            body: words,
+            quiet: true,
+          })
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell a lead what became of its issue draft', cause)))
+
       const file: IssueDrafts['Service']['file'] = (draftId, actorId) =>
         provide(
           Effect.gen(function* () {
@@ -545,6 +632,12 @@ export class IssueDrafts extends Context.Service<
               (now) => (now.state === 'filed' ? { key: now.issueKey, url: now.issueUrl } : { error: now.error }),
             )
             if (made._tag === 'Failure') yield* Effect.logWarning('An issue draft could not be filed', made.failure)
+            if (ended.changed && ended.row.state === 'filed') {
+              yield* tellLead(
+                ended.row,
+                `The person filed your issue “${ended.row.title}” on ${tracker}, in ${ended.row.containerName}, as ${ended.row.issueKey ?? ''}: ${ended.row.issueUrl ?? ''}. Refer to it by that key and link.`,
+              )
+            }
             return cardOf(ended.row)
           }),
         )
@@ -552,6 +645,7 @@ export class IssueDrafts extends Context.Service<
       const discard: IssueDrafts['Service']['discard'] = (draftId, actorId) =>
         provide(
           Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
             const result = yield* transition(
               draftId,
               open,
@@ -560,6 +654,16 @@ export class IssueDrafts extends Context.Service<
               actorId,
             )
             if (!result.changed) return yield* closed(result.row)
+            // A filing that ended unsure may have reached the tracker, even if a later try failed plainly: discarding closes only the
+            // draft here, and the lead isn't told the issue doesn't exist.
+            const [unsure] = yield* sql<{ id: string }>`
+              SELECT id FROM record_events WHERE aggregate_type = 'issue_draft' AND aggregate_id = ${result.row.id} AND type = 'issue_draft.uncertain' LIMIT 1`
+            yield* tellLead(
+              result.row,
+              unsure === undefined
+                ? `The person discarded your issue “${result.row.title}”: nothing was filed, so don't refer to it.`
+                : `The person discarded your issue “${result.row.title}” in Althar, but an attempt to file it ended unsure, so it may be on ${result.row.trackerName}, in ${result.row.containerName}, all the same. Don't say it doesn't exist, and look for it with find_issues before you draft it again.`,
+            )
           }),
         )
 
