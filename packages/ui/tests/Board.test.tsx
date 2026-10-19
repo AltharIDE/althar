@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { Board, BoardColumn, NO_FOLDS, RAIL, railsOf } from '../src/board/Board/Board'
+import { Board, BoardColumn, boardText, NO_FOLDS, RAIL, railsOf } from '../src/board/Board/Board'
 import { BoardLane } from '../src/foundations/vocabulary'
 
 /* Up next 2, Running 3, Needs you 1, Settled 40: an afternoon's board. */
@@ -112,5 +112,56 @@ describe('a board that measures itself', () => {
     expect(onFoldsChange).toHaveBeenCalledWith({ collapsed: [], opened: [BoardLane.Settled] })
     expect(screen.getByRole('button', { name: 'Expand Up next, 2' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Collapse Settled' })).toHaveFocus()
+  })
+
+  /* 600 px: Up next and Running open, an empty Needs you and Settled as rails, until something waits on the person. */
+  const afternoon = (waiting: number) => (
+    <>
+      <Board label="Meridian’s work">
+        <BoardColumn lane={BoardLane.Next} count={2}>
+          <button type="button">Add a retry to checkout</button>
+        </BoardColumn>
+        <BoardColumn lane={BoardLane.Running} count={3} />
+        <BoardColumn lane={BoardLane.Yours} count={waiting}>
+          {waiting > 0 && <button type="button">Ship it</button>}
+        </BoardColumn>
+        <BoardColumn lane={BoardLane.Settled} count={40} />
+      </Board>
+      <button type="button">Message the lead</button>
+    </>
+  )
+
+  it('gives the focus to the rail of a lane it collapses from under it, when something arrives in Needs you', () => {
+    width = 600
+    measured()
+    const { rerender } = render(afternoon(0))
+    screen.getByRole('button', { name: 'Add a retry to checkout' }).focus()
+    rerender(afternoon(1))
+    expect(screen.getByRole('button', { name: 'Expand Up next, 2' })).toHaveFocus()
+  })
+
+  it('gives the focus to Needs you’s head when its rail opens by itself under it', () => {
+    width = 600
+    measured()
+    const { rerender } = render(afternoon(0))
+    screen.getByRole('button', { name: 'Expand Needs you, 0' }).focus()
+    rerender(afternoon(1))
+    expect(screen.getByRole('button', { name: boardText.stays })).toHaveFocus()
+  })
+
+  it('leaves the focus alone where it was elsewhere, or had left the lane before it collapsed', async () => {
+    width = 600
+    measured()
+    const { rerender } = render(afternoon(0))
+    screen.getByRole('button', { name: 'Message the lead' }).focus()
+    rerender(afternoon(1))
+    expect(screen.getByRole('button', { name: 'Message the lead' })).toHaveFocus()
+    rerender(afternoon(0))
+    const card = screen.getByRole('button', { name: 'Add a retry to checkout' })
+    card.focus()
+    act(() => card.blur())
+    await act(async () => {})
+    rerender(afternoon(1))
+    expect(document.body).toHaveFocus()
   })
 })

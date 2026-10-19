@@ -57,13 +57,18 @@ const read = (): Kept => {
 }
 
 const write = (kept: Kept) => {
-  const raw = JSON.stringify(kept)
-  last = { raw, kept }
+  let raw: string | null = JSON.stringify(kept)
   try {
     window.localStorage.setItem(STORED, raw)
   } catch {
-    // Kept for this window only.
+    // Kept for this window only: what storage still holds reads as this choice, until storage changes.
+    try {
+      raw = window.localStorage.getItem(STORED)
+    } catch {
+      // Storage can't be read either, so `read` keeps `last` anyway.
+    }
   }
+  last = { raw, kept }
   listeners.forEach((listener) => listener())
 }
 

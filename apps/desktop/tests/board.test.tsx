@@ -1557,6 +1557,22 @@ describe('collapsing lanes', () => {
     expect(within(work).getByRole('button', { name: 'Collapse Up next' })).toBeTruthy()
   })
 
+  it('keeps a lane collapsed for this window when storage can be read but won’t take it', async () => {
+    const setItem = Storage.prototype.setItem.bind(window.localStorage)
+    const full = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
+      if (key === 'althar.lanes') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      setItem(key, value)
+    })
+    try {
+      const work = await theBoard()
+      await userEvent.click(within(work).getByRole('button', { name: 'Collapse Settled' }))
+      expect(within(work).getByRole('button', { name: 'Expand Settled, 2' })).toBeTruthy()
+      expect(window.localStorage.getItem('althar.lanes')).toBeNull()
+    } finally {
+      full.mockRestore()
+    }
+  })
+
   it('keeps Needs you open while something waits in it, saying why', async () => {
     window.localStorage.setItem('althar.lanes', JSON.stringify({ alone: { collapsed: ['you'], opened: [] } }))
     const work = await theBoard()

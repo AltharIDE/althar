@@ -6,7 +6,6 @@ import {
   type ReactNode,
   type RefObject,
   useContext,
-  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -221,7 +220,8 @@ export interface BoardColumnProps {
  * One lane: its name and count, then its cards or rows. Empty, it says so.
  * On a board, its head shows a chevron on hover that collapses it to a rail:
  * its glyph, its count and its name written down it, the whole of it the
- * button that opens it again. The focus goes with it either way.
+ * button that opens it again. The focus goes with it either way, and where
+ * the board collapses or opens it by itself from under the focus, too.
  */
 export function BoardColumn({ lane, count, children, headingLevel = 2, text }: BoardColumnProps) {
   const t = { ...boardText, ...text }
@@ -231,11 +231,39 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
   const rail = folding?.rail(lane) ?? false
   const held = heldOf({ lane, count })
   const self = useRef<HTMLElement>(null)
-  // Collapsed or opened from its own control, the focus goes to what took that control's place.
+  // Collapsed or opened from its own control, or by the board from under what had the focus in it, the focus goes to
+  // the control that took their place. Focus elsewhere stays where it is.
   const moved = useRef(false)
-  useEffect(() => {
-    if (!moved.current) return
+  // What has the focus in the lane, while it does: forgotten when the focus goes elsewhere, or to nothing, unless it
+  // went because the lane took it off the page.
+  const focused = useRef<Element | null>(null)
+  useLayoutEffect(() => {
+    const element = self.current
+    if (element === null) return
+    const into = (event: FocusEvent) => {
+      focused.current = event.target instanceof Element ? event.target : null
+    }
+    const out = ({ target, relatedTarget }: FocusEvent) => {
+      if (relatedTarget instanceof Node && element.contains(relatedTarget)) return
+      if (relatedTarget !== null) focused.current = null
+      else
+        queueMicrotask(() => {
+          if (focused.current === target && target instanceof Element && target.isConnected) focused.current = null
+        })
+    }
+    element.addEventListener('focusin', into)
+    element.addEventListener('focusout', out)
+    return () => {
+      element.removeEventListener('focusin', into)
+      element.removeEventListener('focusout', out)
+    }
+  }, [rail])
+  useLayoutEffect(() => {
+    const active = document.activeElement
+    const lost = focused.current !== null && !focused.current.isConnected && (active === null || active === document.body)
+    if (!moved.current && !lost) return
     moved.current = false
+    focused.current = null
     self.current?.querySelector<HTMLButtonElement>(`[data-fold="${rail ? 'expand' : 'collapse'}"]`)?.focus()
   }, [rail])
   const fold = (collapse: boolean) => {
@@ -279,6 +307,7 @@ export function BoardColumn({ lane, count, children, headingLevel = 2, text }: B
             icon="chevronL"
             size="small"
             tooltip="below"
+            tooltipAlign="end"
             label={held ? t.stays : t.collapse(name)}
             className={s.collapse}
             data-fold="collapse"
