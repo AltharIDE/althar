@@ -1,4 +1,4 @@
-import { type Files } from './hash'
+import { byPath, type Files } from './hash'
 import { type Finding } from './validate'
 
 /** Instructions that would have an agent push or open a pull request itself; Althar pushes. */
@@ -16,9 +16,9 @@ const PUSHES: ReadonlyArray<readonly [RegExp, string]> = [
 export const lintPushes = (files: Files, level: Finding['level']): Finding[] => {
   const decoder = new TextDecoder()
   const findings: Finding[] = []
-  for (const path of [...files.keys()].toSorted()) {
+  for (const [path, bytes] of [...files].toSorted(byPath)) {
     if (!path.endsWith('.md')) continue
-    const text = decoder.decode(files.get(path)!)
+    const text = decoder.decode(bytes)
     for (const [pattern, message] of PUSHES) {
       if (pattern.test(text)) findings.push({ level, code: 'pushes', message, path })
     }

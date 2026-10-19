@@ -16,10 +16,11 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "js-yaml": "4.3.2",
-    "zod": "^4.0.0"
+    "effect": "4.0.0-rc.118",
+    "js-yaml": "4.3.2"
   },
   "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.118",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "5.0.1",

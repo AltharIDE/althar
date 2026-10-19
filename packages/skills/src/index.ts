@@ -1,3 +1,4 @@
+export * from './errors'
 export * from './catalog'
 export * from './frontmatter'
 export * from './guard'

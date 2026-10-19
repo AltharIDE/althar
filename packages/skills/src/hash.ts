@@ -5,9 +5,12 @@ export type Files = ReadonlyMap<string, Uint8Array>
 
 export const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex')
 
+/** Files in path order, as git and the tree hash sort them (by code unit, not by locale); a map holds each path once. */
+export const byPath = ([a]: readonly [string, unknown], [b]: readonly [string, unknown]): number => (a < b ? -1 : 1)
+
 /** Each file's hash, in path order. */
 export const fileHashes = (files: Files): Record<string, string> =>
-  Object.fromEntries([...files.keys()].toSorted().map((path) => [path, sha256(files.get(path)!)]))
+  Object.fromEntries([...files].toSorted(byPath).map(([path, bytes]) => [path, sha256(bytes)]))
 
 /** One hash for the whole tree: the same files give the same hash whatever order they were read in. */
 export const treeHash = (files: Files): string => {

@@ -31,10 +31,10 @@ const segmentsOf = (path: string): string[] =>
  */
 export const protectedKind = (path: string): ProtectedKind | null => {
   const parts = segmentsOf(path)
-  for (let at = 0; at + 1 < parts.length; at++) {
-    const part = parts[at]!.toLowerCase()
+  for (const [at, segment] of parts.slice(0, -1).entries()) {
+    const part = segment.toLowerCase()
     if (part === 'openspec') return 'openspec'
-    if (at + 2 < parts.length && SKILL_ROOTS.has(part) && parts[at + 1]!.toLowerCase() === 'skills') return 'skills'
+    if (at + 2 < parts.length && SKILL_ROOTS.has(part) && parts[at + 1]?.toLowerCase() === 'skills') return 'skills'
   }
   return null
 }

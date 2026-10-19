@@ -4,10 +4,11 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { writeCatalog } from '../../skills/tests/support'
-import { Effect } from 'effect'
+import { Effect, Layer, Stream } from 'effect'
 import type { RuntimeOptions } from '../src/Config'
 import { SqlClient } from 'effect/sql'
 
+import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { Sessions } from '../src/Sessions'
 import { runSkills } from '../src/Skills'
 import { launches, notices, runtime, sessionMetas, task } from './support'
@@ -28,6 +29,16 @@ const makeStore = async (skills: Record<string, Record<string, string>>, needs: 
   return { root, catalog }
 }
 
+/** The skills a thread's last session was given, as its record of becoming active says. */
+const givenTo = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ payload: string }>`
+      SELECT e.payload FROM record_events e JOIN provider_sessions s ON s.id = e.aggregate_id
+      WHERE s.thread_id = ${threadId} AND e.type = 'provider_session.active' ORDER BY e.sequence DESC LIMIT 1`
+    return (JSON.parse(row?.payload ?? '{}') as { skills?: Array<{ id: string; treeHash: string }> }).skills ?? []
+  })
+
 const worktreeOf = (threadId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -44,7 +55,8 @@ const withStore = <A, E, R>(
 ) =>
   Effect.flatMap(
     Effect.promise(() => makeStore(skills, needs)),
-    (store) => body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store }))),
+    // With failures said to a listener, as the app's are, so a test hears what is reported.
+    (store) => body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store }).pipe(Layer.provideMerge(failuresLayer)))),
   )
 
 describe('skills for a task’s lead', () => {
@@ -67,6 +79,13 @@ describe('skills for a task’s lead', () => {
         // Never in the worktree: no skill root, no copy of a skill file in it.
         const worktree = yield* worktreeOf(created.threadId)
         assert.isFalse(plugin.startsWith(worktree))
+        // The session's record says which skills it was given, each at the version it got.
+        const given = yield* givenTo(created.threadId)
+        assert.deepStrictEqual(
+          given.map(({ id }) => id),
+          ['alpha', 'beta'],
+        )
+        for (const { treeHash } of given) assert.match(treeHash, /^[0-9a-f]{64}$/)
         for (const root of ['.claude', '.agents', '.opencode', 'openspec']) assert.isFalse(existsSync(join(worktree, root)), root)
         yield* sessions.stop(created.threadId)
         assert.isFalse(existsSync(plugin))
@@ -89,6 +108,11 @@ describe('skills for a task’s lead', () => {
         assert.isTrue(
           said.some((notice) => notice.description === 'beta needs subagents'),
           JSON.stringify(said),
+        )
+        // Recorded as given: what it got, not what it couldn't use.
+        assert.deepStrictEqual(
+          (yield* givenTo(created.threadId)).map(({ id }) => id),
+          ['alpha'],
         )
         const worktree = yield* worktreeOf(created.threadId)
         for (const root of ['.claude', '.agents', '.opencode', 'openspec']) assert.isFalse(existsSync(join(worktree, root)), root)
@@ -123,14 +147,26 @@ describe('skills for a task’s lead', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('still starts the session, without skills, when the catalog is damaged', () =>
+  it.live('still starts the session, without skills, when the catalog is damaged, and the thread and a report say so', () =>
     withStore({ alpha: skill('alpha') }, {}, (skills) =>
       Effect.gen(function* () {
         writeFileSync(join(skills.catalog, 'catalog.json'), '{}')
+        const heard: Array<Failure> = []
+        yield* Effect.forkChild(Stream.runForEach((yield* Failures).events, (failure) => Effect.sync(() => void heard.push(failure))))
+        yield* Effect.sleep('20 millis')
         const sessions = yield* Sessions
         const { task: created } = yield* task()
         yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
         assert.isUndefined(sessionMetas.at(-1)?.options?.skills)
+        const said = yield* notices(created.threadId)
+        const notice = said.find((one) => one.title?.endsWith('started without its skills.'))
+        assert.deepInclude(notice, { severity: 'warning', description: "Althar couldn't lay them out. Its log has the details." })
+        // Althar's own catalog not loading is not the person's to put right: it is reported, by the agent.
+        yield* Effect.sleep('20 millis')
+        assert.deepInclude(
+          heard.find((one) => one.where === 'skills'),
+          { agent: 'claude-code', name: 'SkillStoreFailed' },
+        )
         yield* sessions.stop(created.threadId)
       }),
     ),
@@ -139,12 +175,14 @@ describe('skills for a task’s lead', () => {
 
 describe('setting skills up for several leads at once', () => {
   it.live('keeps the store consistent and gives each its own run', () =>
-    Effect.promise(async () => {
-      const skills = await makeStore({ alpha: skill('alpha'), beta: skill('beta') }, {})
+    Effect.gen(function* () {
+      const skills = yield* Effect.promise(() => makeStore({ alpha: skill('alpha'), beta: skill('beta') }, {}))
       const claude = { id: 'claude-code', skills: { layout: 'claude-plugin', capabilities: [], via: { kind: 'meta' } } } as const
-      const runs = (await Promise.all(Array.from({ length: 8 }, (_, at) => runSkills(skills, claude, `run-${at}`, [])))).flatMap((run) =>
-        run === undefined ? [] : [run],
-      )
+      const runs = (yield* Effect.forEach(
+        Array.from({ length: 8 }, (_, at) => at),
+        (at) => runSkills(skills, claude, `run-${at}`, []),
+        { concurrency: 'unbounded' },
+      )).flatMap((run) => (run === undefined ? [] : [run]))
       for (const run of runs) {
         assert.isTrue(existsSync(join(run.folder, 'skills', 'alpha', 'SKILL.md')))
         assert.isTrue(existsSync(join(run.folder, 'skills', 'beta', 'SKILL.md')))
@@ -160,7 +198,7 @@ describe('setting skills up for several leads at once', () => {
           ['beta', true],
         ],
       )
-      await Promise.all(runs.map((run) => run.release()))
+      yield* Effect.forEach(runs, (run) => run.release, { concurrency: 'unbounded' })
     }),
   )
 })

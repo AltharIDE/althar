@@ -2,6 +2,7 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
 
 import { loadLocalCatalog } from '../../../packages/skills/src/local'
@@ -24,13 +25,15 @@ describe('the packaged app', () => {
     const source = join(import.meta.dirname, '..', '..', '..', 'packages', 'skills', 'catalog')
     const found = stageSkillsCatalog(source, stage)
     expect(found).toBe(join(stage, 'resources', 'skills-catalog'))
-    const [packaged, built] = await Promise.all([loadLocalCatalog(found), loadLocalCatalog(source)])
+    const [packaged, built] = await Effect.runPromise(Effect.all([loadLocalCatalog(found), loadLocalCatalog(source)]))
     expect(packaged.skills.map(({ entry }) => entry.id)).toEqual(built.skills.map(({ entry }) => entry.id))
     expect(packaged.skills.length).toBeGreaterThan(0)
     // A catalog with a skill gone is never packaged.
     const broken = mkdtempSync(join(tmpdir(), 'althar-catalog-'))
     cpSync(source, broken, { recursive: true })
-    const gone = packaged.skills[0]!.entry.id
+    const first = packaged.skills[0]
+    if (first === undefined) throw new Error('The catalog has no skill to take away')
+    const gone = first.entry.id
     rmSync(join(broken, 'skills', gone), { recursive: true })
     expect(() => stageSkillsCatalog(broken, mkdtempSync(join(tmpdir(), 'althar-stage-')))).toThrow(`missing ${gone}`)
   })

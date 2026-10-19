@@ -6,7 +6,7 @@ import { fetchSkill, findSkills, parseGitHubSource, resolveRef, resolveTree } fr
 import { installLocalCatalog } from '../src/local'
 import { approve, checkUpdates, diffLines, rollBack, setActive, stageFromGitHub, uninstall } from '../src/review'
 import { readInstalls } from '../src/store'
-import { fakeGitHub, skillMd, writeCatalog } from './support'
+import { failure, fakeGitHub, skillMd, writeCatalog, run } from './support'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)
@@ -30,10 +30,10 @@ describe('reading a GitHub source', () => {
 
   it('splits a /tree/ path into the ref GitHub has and the path in it, a branch with a slash too', async () => {
     const { access } = fakeGitHub({ 'o/r': { refs: { main: A, 'feature/new': B }, commits: { [A]: {}, [B]: {} } } })
-    expect(await resolveTree(access, 'o/r', 'feature/new/skills/foo')).toEqual({ ref: 'feature/new', sha: B, subpath: 'skills/foo' })
-    expect(await resolveTree(access, 'o/r', 'main/skills/foo')).toEqual({ ref: 'main', sha: A, subpath: 'skills/foo' })
-    expect(await resolveTree(access, 'o/r', 'feature/new')).toEqual({ ref: 'feature/new', sha: B })
-    await expect(resolveTree(access, 'o/r', 'gone/skills')).rejects.toThrow('no branch, tag or commit starts gone/skills')
+    expect(await run(resolveTree(access, 'o/r', 'feature/new/skills/foo'))).toEqual({ ref: 'feature/new', sha: B, subpath: 'skills/foo' })
+    expect(await run(resolveTree(access, 'o/r', 'main/skills/foo'))).toEqual({ ref: 'main', sha: A, subpath: 'skills/foo' })
+    expect(await run(resolveTree(access, 'o/r', 'feature/new'))).toEqual({ ref: 'feature/new', sha: B })
+    await expect(run(resolveTree(access, 'o/r', 'gone/skills'))).rejects.toThrow('no branch, tag or commit starts gone/skills')
   })
 })
 
@@ -53,14 +53,14 @@ describe('fetching a skill from GitHub', () => {
 
   it('resolves a branch once to its commit, and lists the skills in the repository', async () => {
     const { access } = fakeGitHub({ 'o/r': repo })
-    await expect(resolveRef(access, 'o/r', 'main')).resolves.toBe(A)
-    await expect(findSkills(access, 'o/r', A)).resolves.toEqual(['skills/alpha', 'skills/beta'])
-    await expect(resolveRef(access, 'o/r', 'gone')).rejects.toThrow('not found')
+    await expect(run(resolveRef(access, 'o/r', 'main'))).resolves.toBe(A)
+    await expect(run(findSkills(access, 'o/r', A))).resolves.toEqual(['skills/alpha', 'skills/beta'])
+    await expect(run(resolveRef(access, 'o/r', 'gone'))).rejects.toThrow('not found')
   })
 
   it('fetches only the chosen directory, never the repository’s hooks or manifests, from the raw host', async () => {
     const { access, requests } = fakeGitHub({ 'o/r': repo })
-    const files = await fetchSkill(access, 'o/r', A, 'skills/alpha')
+    const files = await run(fetchSkill(access, 'o/r', A, 'skills/alpha'))
     expect([...files.keys()].toSorted()).toEqual(['SKILL.md', 'references/more.md'])
     expect(requests.filter((path) => path.startsWith('raw.test/'))).toEqual([
       `raw.test/o/r/${A}/skills/alpha/SKILL.md`,
@@ -71,10 +71,10 @@ describe('fetching a skill from GitHub', () => {
 
   it('takes files through the API with a token, and refuses a file that is not what the commit’s tree names', async () => {
     const { access, requests } = fakeGitHub({ 'o/r': repo })
-    await fetchSkill({ ...access, token: 't' }, 'o/r', A, 'skills/alpha')
+    await run(fetchSkill({ ...access, token: 't' }, 'o/r', A, 'skills/alpha'))
     expect(requests.filter((path) => path.includes('/git/blobs/'))).toHaveLength(2)
     const { access: lying } = fakeGitHub({ 'o/r': repo }, { 'skills/alpha/SKILL.md': 'Something else.\n' })
-    await expect(fetchSkill(lying, 'o/r', A, 'skills/alpha')).rejects.toThrow("did not match the commit's tree")
+    await expect(run(fetchSkill(lying, 'o/r', A, 'skills/alpha'))).rejects.toThrow("did not match the commit's tree")
   })
 
   it('refuses a symlink or a submodule in the skill, and a directory with no SKILL.md, before reading a file', async () => {
@@ -87,10 +87,10 @@ describe('fetching a skill from GitHub', () => {
         },
       },
     })
-    await expect(fetchSkill(access, 'o/r', A, 'link')).rejects.toThrow('symlink')
-    await expect(fetchSkill(access, 'o/r', B, 'sub')).rejects.toThrow('submodule')
-    await expect(fetchSkill(access, 'o/r', B, 'none')).rejects.toThrow('no SKILL.md')
-    await expect(fetchSkill(access, 'o/r', B, '../etc')).rejects.toThrow('not a path')
+    await expect(run(fetchSkill(access, 'o/r', A, 'link'))).rejects.toThrow('symlink')
+    await expect(run(fetchSkill(access, 'o/r', B, 'sub'))).rejects.toThrow('submodule')
+    await expect(run(fetchSkill(access, 'o/r', B, 'none'))).rejects.toThrow('no SKILL.md')
+    await expect(run(fetchSkill(access, 'o/r', B, '../etc'))).rejects.toThrow('not a path')
     expect(requests.some((path) => path.startsWith('raw.test/'))).toBe(false)
   })
 
@@ -98,7 +98,7 @@ describe('fetching a skill from GitHub', () => {
     const { access } = fakeGitHub({
       'o/r': { refs: {}, commits: { [A]: { 'big/SKILL.md': skill('big'), 'big/blob.md': 'x'.repeat(100) } } },
     })
-    await expect(fetchSkill(access, 'o/r', A, 'big', { files: 10, bytes: 50, fileBytes: 1000 })).rejects.toThrow('bytes in all')
+    await expect(run(fetchSkill(access, 'o/r', A, 'big', { files: 10, bytes: 50, fileBytes: 1000 }))).rejects.toThrow('bytes in all')
   })
 })
 
@@ -107,7 +107,7 @@ describe('installing a skill from GitHub as a person reviews it', () => {
 
   it('stages a version and shows its card; nothing is installed until it is approved', async () => {
     const { access } = fakeGitHub({ 'o/r': repoAt('Do it.\n') })
-    const card = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' })
+    const card = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
     expect(card).toMatchObject({
       id: 'alpha',
       source: { repo: 'o/r', sha: A, ref: 'main' },
@@ -117,8 +117,8 @@ describe('installing a skill from GitHub as a person reviews it', () => {
     })
     expect(card.files.map((file) => file.path)).toEqual(['SKILL.md'])
     expect(card.changes).toMatchObject([{ path: 'SKILL.md', change: 'added' }])
-    expect((await readInstalls(root)).ok && (await readInstalls(root))).toMatchObject({ value: { installs: [] } })
-    const installed = await approve(root, { id: card.id, ...card.source, treeHash: card.treeHash })
+    expect(await run(readInstalls(root))).toMatchObject({ installs: [] })
+    const installed = await run(approve(root, { id: card.id, ...card.source, treeHash: card.treeHash }))
     expect(installed).toMatchObject({ id: 'alpha', source: 'github', repo: 'o/r', sha: A, ref: 'main', review: 'reviewed', active: true })
   })
 
@@ -134,20 +134,20 @@ describe('installing a skill from GitHub as a person reviews it', () => {
         },
       },
     })
-    const pushy = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'pushy', ref: 'main' })
+    const pushy = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'pushy', ref: 'main' }))
     expect(pushy.installable).toBe(true)
     expect(pushy.findings).toContainEqual(expect.objectContaining({ level: 'flag', code: 'pushes' }))
-    const grant = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'grant', ref: 'main' })
+    const grant = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'grant', ref: 'main' }))
     expect(grant.installable).toBe(false)
-    await expect(approve(root, { id: 'grant', ...grant.source, treeHash: grant.treeHash })).rejects.toThrow('authorizing-field')
+    await expect(run(approve(root, { id: 'grant', ...grant.source, treeHash: grant.treeHash }))).rejects.toThrow('authorizing-field')
   })
 
   it('needs the person’s say-so to put a skill in place of a default of the same name, which the catalog then leaves alone', async () => {
     const catalog = await mkdtemp(join(tmpdir(), 'althar-skills-cat-'))
     await writeCatalog(catalog, { alpha: { 'SKILL.md': skill('alpha', 'Default.\n') } })
-    await installLocalCatalog(root, catalog)
+    await run(installLocalCatalog(root, catalog))
     const { access } = fakeGitHub({ 'o/r': repoAt('Mine.\n') })
-    const card = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' })
+    const card = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
     expect(card.installed).toMatchObject({ source: 'althar-default' })
     expect(card.changes[0]?.lines).toEqual(
       expect.arrayContaining([
@@ -155,13 +155,13 @@ describe('installing a skill from GitHub as a person reviews it', () => {
         { kind: 'added', text: 'Mine.' },
       ]),
     )
-    await expect(approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash })).rejects.toThrow('say-so')
-    await approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash, replace: true })
-    await installLocalCatalog(root, catalog)
-    const read = await readInstalls(root)
-    expect(read.ok && read.value.installs).toMatchObject([{ id: 'alpha', source: 'github', treeHash: card.treeHash }])
+    await expect(run(approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash }))).rejects.toThrow('say-so')
+    await run(approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash, replace: true }))
+    await run(installLocalCatalog(root, catalog))
+    const read = await run(readInstalls(root))
+    expect(read.installs).toMatchObject([{ id: 'alpha', source: 'github', treeHash: card.treeHash }])
     // Rolled back, it is the default again, not the default's files under the GitHub source.
-    const back = await rollBack(root, 'alpha')
+    const back = await run(rollBack(root, 'alpha'))
     expect(back).toMatchObject({ source: 'althar-default', review: 'default' })
     expect([back.repo, back.subpath, back.ref, back.sha, back.history]).toEqual([undefined, undefined, undefined, undefined, undefined])
   })
@@ -171,14 +171,14 @@ describe('installing a skill from GitHub as a person reviews it', () => {
       'o/r': repoAt('Theirs.\n'),
       'me/mine': { refs: { dev: B }, commits: { [B]: { 'alpha/SKILL.md': skill('alpha', 'Mine.\n') } } },
     })
-    const theirs = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' })
-    await approve(root, { id: 'alpha', ...theirs.source, treeHash: theirs.treeHash })
-    const mine = await stageFromGitHub(root, access, { repo: 'me/mine', subpath: 'alpha', ref: 'dev' })
-    await approve(root, { id: 'alpha', ...mine.source, treeHash: mine.treeHash, replace: true })
-    const back = await rollBack(root, 'alpha')
+    const theirs = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
+    await run(approve(root, { id: 'alpha', ...theirs.source, treeHash: theirs.treeHash }))
+    const mine = await run(stageFromGitHub(root, access, { repo: 'me/mine', subpath: 'alpha', ref: 'dev' }))
+    await run(approve(root, { id: 'alpha', ...mine.source, treeHash: mine.treeHash, replace: true }))
+    const back = await run(rollBack(root, 'alpha'))
     expect(back).toMatchObject({ source: 'github', repo: 'o/r', subpath: 'skills/alpha', ref: 'main', sha: A, treeHash: theirs.treeHash })
     // Its update check asks the repository it is from again.
-    expect(await checkUpdates(root, access)).toMatchObject([{ id: 'alpha', state: 'current', sha: A }])
+    expect(await run(checkUpdates(root, access))).toMatchObject([{ id: 'alpha', state: 'current', sha: A }])
   })
 
   it('checks for updates only when asked, stages a newer commit for review, and rolls back to the version before', async () => {
@@ -189,18 +189,18 @@ describe('installing a skill from GitHub as a person reviews it', () => {
       },
     }
     const { access } = fakeGitHub(repos)
-    const first = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' })
-    await approve(root, { id: 'alpha', ...first.source, treeHash: first.treeHash })
-    expect(await checkUpdates(root, access)).toEqual([{ id: 'alpha', state: 'current', sha: A }])
+    const first = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
+    await run(approve(root, { id: 'alpha', ...first.source, treeHash: first.treeHash }))
+    expect(await run(checkUpdates(root, access))).toEqual([{ id: 'alpha', state: 'current', sha: A }])
 
     repos['o/r'].commits[B] = { 'skills/alpha/SKILL.md': skill('alpha', 'Two.\n') }
     repos['o/r'].refs.main = B
-    const [update] = await checkUpdates(root, access)
+    const [update] = await run(checkUpdates(root, access))
     expect(update?.state).toBe('available')
     if (update?.state !== 'available') return
     // Still the old version until the person approves the new one.
-    const before = await readInstalls(root)
-    expect(before.ok && before.value.installs[0]?.treeHash).toBe(first.treeHash)
+    const before = await run(readInstalls(root))
+    expect(before.installs[0]?.treeHash).toBe(first.treeHash)
     expect(update.card.changes[0]?.lines).toEqual(
       expect.arrayContaining([
         { kind: 'removed', text: 'One.' },
@@ -208,38 +208,38 @@ describe('installing a skill from GitHub as a person reviews it', () => {
       ]),
     )
     // Turned off, it stays off once its update is approved.
-    await setActive(root, 'alpha', false)
-    expect(await approve(root, { id: 'alpha', ...update.card.source, treeHash: update.card.treeHash })).toMatchObject({
+    await run(setActive(root, 'alpha', false))
+    expect(await run(approve(root, { id: 'alpha', ...update.card.source, treeHash: update.card.treeHash }))).toMatchObject({
       active: false,
       treeHash: update.card.treeHash,
     })
-    const back = await rollBack(root, 'alpha')
+    const back = await run(rollBack(root, 'alpha'))
     expect(back).toMatchObject({ treeHash: first.treeHash, sha: A, active: false })
     expect(back.history).toBeUndefined()
-    await expect(rollBack(root, 'alpha')).rejects.toThrow('no earlier version')
+    await expect(run(rollBack(root, 'alpha'))).rejects.toThrow('no earlier version')
     expect(JSON.parse(await readFile(join(root, 'installs.json'), 'utf8')).installs[0].ref).toBe('main')
   })
 
   it('reports a repository it cannot reach instead of failing the whole check', async () => {
     const { access } = fakeGitHub({ 'o/r': repoAt('Do it.\n') })
-    const card = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' })
-    await approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash })
+    const card = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
+    await run(approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash }))
     const { access: gone } = fakeGitHub({})
-    expect(await checkUpdates(root, gone)).toMatchObject([{ id: 'alpha', state: 'failed' }])
+    expect(await run(checkUpdates(root, gone))).toMatchObject([{ id: 'alpha', state: 'failed' }])
   })
 
   it('turns an install off and on, removes a person’s own, and only turns a default off', async () => {
     const catalog = await mkdtemp(join(tmpdir(), 'althar-skills-cat-'))
     await writeCatalog(catalog, { beta: { 'SKILL.md': skill('beta') } })
-    await installLocalCatalog(root, catalog)
+    await run(installLocalCatalog(root, catalog))
     const { access } = fakeGitHub({ 'o/r': repoAt('Do it.\n') })
-    const card = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' })
-    await approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash })
-    expect(await setActive(root, 'beta', false)).toMatchObject({ active: false })
-    await expect(uninstall(root, 'beta')).rejects.toThrow('turn it off')
-    await uninstall(root, 'alpha')
-    const read = await readInstalls(root)
-    expect(read.ok && read.value.installs.map(({ id, active }) => [id, active])).toEqual([['beta', false]])
+    const card = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' }))
+    await run(approve(root, { id: 'alpha', ...card.source, treeHash: card.treeHash }))
+    expect(await run(setActive(root, 'beta', false))).toMatchObject({ active: false })
+    await expect(run(uninstall(root, 'beta'))).rejects.toThrow('turn it off')
+    await run(uninstall(root, 'alpha'))
+    const read = await run(readInstalls(root))
+    expect(read.installs.map(({ id, active }) => [id, active])).toEqual([['beta', false]])
   })
 })
 
@@ -253,5 +253,83 @@ describe('the line diff on a card', () => {
       { kind: 'added', text: 'line ten' },
       ...[11, 12, 13].map((at) => ({ kind: 'same', text: `line ${at}` })),
     ])
+  })
+})
+
+describe('what GitHub is asked, and what it answers', () => {
+  const at = (path: string) => (input: string) => input.includes(path)
+
+  it('refuses a name that is no repository or ref, before asking', async () => {
+    const { access, requests } = fakeGitHub({})
+    expect((await failure(resolveRef(access, 'not a repo', 'main'))).message).toContain('not a GitHub repository')
+    expect((await failure(resolveRef(access, 'o/r', ''))).message).toContain('not a ref')
+    expect((await failure(resolveRef(access, 'o/r', 'a..b'))).message).toContain('not a ref')
+    expect((await failure(fetchSkill(access, 'o/r', 'main', 'x'))).message).toContain('full commit SHA')
+    expect(requests).toEqual([])
+  })
+
+  it('refuses an answer that names no commit, a tree too large to list, and a blob not in base64', async () => {
+    const answers = (pick: (input: string) => Response) => ({ api: 'https://api.test', fetch: async (input: string) => pick(input) })
+    expect(
+      (
+        await failure(
+          resolveRef(
+            answers(() => new Response('main')),
+            'o/r',
+            'main',
+          ),
+        )
+      ).message,
+    ).toContain('named no commit')
+    expect(
+      (
+        await failure(
+          findSkills(
+            answers(() => Response.json({ tree: [], truncated: true })),
+            'o/r',
+            A,
+          ),
+        )
+      ).message,
+    ).toContain('too large')
+    const tree = { tree: [{ path: 'SKILL.md', mode: '100644', type: 'blob', sha: B, size: 1 }], truncated: false }
+    const latin = answers((input) => (at('/git/trees/')(input) ? Response.json(tree) : Response.json({ content: 'x', encoding: 'latin1' })))
+    expect((await failure(fetchSkill({ ...latin, token: 't' }, 'o/r', A, ''))).message).toContain('not base64')
+    expect(
+      (
+        await failure(
+          resolveRef(
+            answers(() => new Response('', { status: 422 })),
+            'o/r',
+            'main',
+          ),
+        )
+      ).message,
+    ).toContain('not found')
+  })
+
+  it('takes a skill at the repository’s root, and refuses one over the file count, one too large, and an unsafe path', async () => {
+    const root = { 'SKILL.md': skill('r'), 'a.md': 'a', 'sub/b.md': 'b' }
+    const { access } = fakeGitHub({ 'o/r': { refs: {}, commits: { [A]: root } } })
+    expect([...(await run(fetchSkill(access, 'o/r', A, '/'))).keys()].toSorted()).toEqual(['SKILL.md', 'a.md', 'sub/b.md'])
+    expect(await run(findSkills(access, 'o/r', A))).toEqual([''])
+    expect((await failure(fetchSkill(access, 'o/r', A, '', { files: 2, bytes: 1e6, fileBytes: 1e6 }))).message).toContain('at most 2')
+    expect((await failure(fetchSkill(access, 'o/r', A, '', { files: 9, bytes: 1e6, fileBytes: 10 }))).message).toContain('larger than')
+    expect((await failure(fetchSkill(access, 'o/r', A, 'none'))).message).toContain('no SKILL.md at none')
+    const unsafe = { tree: [{ path: 'x/a\\b', mode: '100644', type: 'blob', sha: B }], truncated: false }
+    const answer = { api: 'https://api.test', fetch: async () => Response.json(unsafe) }
+    expect((await failure(fetchSkill(answer, 'o/r', A, 'x'))).message).toContain('unsafe path')
+    const nameless = { tree: [{ path: 'SKILL.md', mode: '100644', type: 'blob', sha: B }], truncated: false }
+    const noSize = { api: 'https://api.test', fetch: async () => Response.json(nameless) }
+    expect((await failure(fetchSkill(noSize, 'o/r', A, ''))).message).toContain('did not match')
+  })
+
+  it('says a failure that is not an Error in its own words', async () => {
+    const thrower = {
+      fetch: async (): Promise<Response> => {
+        throw 'refused by a proxy'
+      },
+    }
+    expect((await failure(resolveRef(thrower, 'o/r', 'main'))).message).toContain('refused by a proxy')
   })
 })

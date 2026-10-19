@@ -1,6 +1,6 @@
 # Skills across harnesses: shared defaults, installs, and repository boundaries
 
-**Status:** Design for backlog; implement after the newest Althar lands
+**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-048](../decisions/048-skills-one-store-a-curated-catalog.md), [ADR-049](../decisions/049-skill-and-openspec-files-stay-off-the-repository.md)
 **Research checked:** 2026-10-14
 **Upstream baseline:** `upstream/main` at `818df85e35ce4aa704334ffd846878750a30702c`
 
@@ -474,14 +474,17 @@ the two sets overlap enough that we must choose rather than merge.
    personas, plugin manifests or `package.json`. This is a catalog-build rule;
    for user installs the subtree-only fetch in section 3 enforces it.
 3. Curate, don't union: one skill per job from the 6.2 table. As a starting
-   point to confirm in stage 1, not a decision: agent-skills for the
+   point to confirm in stage 1, not a decision (since settled otherwise:
+   every skill of both is carried unless two do the same job, 33 in all, in
+   `packages/skills/catalog/CURATION.md` and ADR-048): agent-skills for the
    lifecycle and engineering skills it alone has (API design, CI/CD,
    security, performance, documentation, source-driven development, code
    review), superpowers for what it alone has (systematic debugging,
    verification-before-completion, worktrees, parallel dispatch where the
    harness has subagents), and one TDD skill. Keep the total near 15 to fit
    Codex's budget alongside the person's own skills.
-4. `althar-skills` is hosted under the account Althar's own repositories use
+4. (Not created: the catalog is vendored in this repository for now,
+   `packages/skills/catalog/`.) `althar-skills` is hosted under the account Althar's own repositories use
    (`ninemate`), decided in stage 1.
 5. The app ships a vendored snapshot of the catalog at a pinned catalog
    version with each upstream `LICENSE` and the `THIRD_PARTY` file. It lands
@@ -603,7 +606,7 @@ checks and the harness permission rules remain the enforcement.
   `pushProtected`, each off unless set. The API reads and sets them. They
   govern what reaches a repository, not what a run is given: delivery is one
   switch for the whole runtime (`RuntimeOptions.skills`), with no per-project
-  selection or bindings yet (stage 4), so every project's Claude Code lead gets
+  selection or bindings yet (stage 4), so every project's lead gets
   the same active set. A per-project switch for delivery does not exist.
 - **Where the write settings bite.** A harness commits in the task's worktree
   by itself, where Althar cannot check its staging, so the first point Althar
@@ -613,13 +616,16 @@ checks and the harness permission rules remain the enforcement.
   interposed), and Althar's local merge into a default branch is not guarded.
 - **Push guard.** Every push Althar makes for a task (publish, push the
   branch, push to a pull request, replace after a rewrite, push after a local
-  merge) first lists what the commits since the task's base changed (git `-z`,
-  no renames, no quoting) and refuses with `PushRefused` (`protected`) any path
-  under a protected root unless `pushProtected` is on. It is path-based and
-  ignores who wrote the file, and a protected file the repository already had
-  and the task did not touch does not block. With no base commit recorded, the
-  base is where the branch left the repository's default branch; only if that
-  is not found either are all paths counted, so the push is held, not let by.
+  merge) first lists what the task's own commits changed (git `-z`, no
+  renames, no quoting) and refuses with `PushRefused` (`protected`) any path
+  under a protected root unless both its write setting and `pushProtected`
+  are on, naming the settings that are off (`needs`). It is path-based and
+  ignores who wrote the file. The task's own commits are those no remote, no
+  default branch Althar fetched and nothing it pushed before already has,
+  past its base; a merge counts only for what its resolution changed, so
+  protected files that came in with the default branch don't block. With
+  nothing found to stop at, every commit counts, so the push is held, not let
+  by.
 
 - **Catalog updates.** Installing the local catalog is serialized per store,
   and a default the catalog no longer lists is dropped from `installs.json`
@@ -648,31 +654,51 @@ checks and the harness permission rules remain the enforcement.
   Settings panel has a Repository files module that says where they stand and
   opens out to the three switches of section 4, each off until turned on and
   each a new revision of the project's rules (`SetProjectRules`'s
-  `repositoryFiles`). A push held back for them says to turn on "Push
-  skill/OpenSpec files" there.
+  `repositoryFiles`). A push held back for them names the switches there
+  that are off for what it held back.
+- **ADRs (2026-10-18).** [ADR-048](../decisions/048-skills-one-store-a-curated-catalog.md)
+  (the store, the catalog, delivery per session) and
+  [ADR-049](../decisions/049-skill-and-openspec-files-stay-off-the-repository.md)
+  (the repository boundary, amending ADR-013 and ADR-016).
 
-**Not yet:** the commit-time check before staging; per-project selection and bindings (stage 4); a
-logged-in Claude Code, Codex or OpenCode session using a skill end to end;
-refusing OpenCode 2.x (per the OpenCode 2 plan, which is not in this tree);
-installs from private repositories; a catalog update channel between app
-releases (`althar-skills`); OpenSpec.
+**Not yet:**
+
+- Blocking a protected write before it happens: path-sensitive write denial
+  in each agent (section 4), the commit-time check before staging, and the
+  one-time grant naming a destination. Today the push is the only barrier.
+- Guarding Althar's local merge into a default branch.
+- Per-project selection and bindings, name conflicts between sources, and
+  Codex's `[[skills.config]]` exclusions (stage 4).
+- The Codex size check: estimating the list against its budget, warning, and
+  reporting what Codex left out (section 2).
+- Reporting skills a repository already has, and same-name collisions with
+  them (section 2's preflight and parity diagnostics).
+- First-run import of skills already in an agent's home (section 1).
+- Removing old stored versions no run uses (section 3's retention).
+- Installs from private repositories.
+- A catalog update channel between app releases (`althar-skills`).
+- Refusing OpenCode 2.x (per the OpenCode 2 plan, which is not in this tree).
+- A logged-in Claude Code, Codex or OpenCode session using a skill end to end.
+- OpenSpec (section 5).
+- The user guide and the maintainer runbook for curating the catalog
+  (stage 7).
 
 ## Open decisions and risks
 
-- The exact skills picked from agent-skills and superpowers are undecided
-  (section 6 gives the sourcing model and a starting split, not the list).
-  Frontmatter, hooks, scripts, output paths and push steps were surveyed by
-  text search and size, not by reading every skill; each chosen skill still
-  needs a full read before it enters the catalog.
+- **Settled:** the skills carried. Every skill of both was read in full on
+  2026-10-18 and 33 are carried (`packages/skills/catalog/CURATION.md`), more
+  than the ~15 section 6 aimed at for Codex's budget; ADR-048 records why and
+  what it costs.
 - Where skill-written planning files (`SPEC.md`, `docs/superpowers/...`) sit
   in the repository settings: a fourth setting, or part of the OpenSpec one.
-- Third-party text inside MIT repos (for example Anthropic's authoring guide
-  in superpowers) needs a per-file scan before anything is vendored.
-- Codex's documented `$HOME/.agents/skills` and the current registry's
-  `CODEX_HOME/skills` sharing need a version-specific probe. Codex may
-  truncate its initial catalog under its context budget; report this and any
-  omissions. OpenCode's isolated-home discovery and Claude versions also
-  need probes at implementation time.
+- **Settled:** third-party text. The per-file read found Anthropic's
+  authoring guide (left out) and text close to Google's Engineering Practices
+  (credited); see `CURATION.md`.
+- Where Codex and OpenCode read skills from was probed (Implementation
+  status, "Checked live"): Codex 0.160.1 through codex-acp's extra roots,
+  OpenCode 1.19.0 through `skills.paths`. Each new version needs the probe
+  again. Codex may still truncate its initial list under its context budget;
+  reporting that is not built.
 - Native repo skills can differ by harness and may be automatically loaded.
   Althar must surface this extra context and prove any attempt to suppress it;
   only Althar-managed selection can be promised identical before that work.

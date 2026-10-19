@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { run } from './support'
 import { describe, expect, it } from 'vitest'
 import { CURATED, LEFT_OUT } from '../scripts/curation'
 import { loadLocalCatalog } from '../src/local'
@@ -10,12 +11,12 @@ const catalog = join(import.meta.dirname, '..', 'catalog')
 
 describe('the default catalog', () => {
   it('loads as the app loads it, every skill valid and at its pinned hash', async () => {
-    const loaded = await loadLocalCatalog(catalog)
+    const loaded = await run(loadLocalCatalog(catalog))
     expect(loaded.skills.map(({ entry }) => entry.id)).toEqual(CURATED.map(({ id }) => id))
   })
 
   it('carries each skill from a pinned commit of an MIT upstream, with that licence beside it', async () => {
-    const { skills } = await loadLocalCatalog(catalog)
+    const { skills } = await run(loadLocalCatalog(catalog))
     for (const { entry } of skills) {
       expect(entry.source).toMatchObject({ kind: 'github', subpath: `skills/${entry.id}` })
       expect(entry.license).toBe('MIT')
@@ -26,7 +27,7 @@ describe('the default catalog', () => {
   })
 
   it('carries no skill it left out, and no file whose terms the upstream licence does not cover', async () => {
-    const { skills } = await loadLocalCatalog(catalog)
+    const { skills } = await run(loadLocalCatalog(catalog))
     const ids = skills.map(({ entry }) => entry.id)
     for (const left of Object.keys(LEFT_OUT).filter((name) => !name.includes('@'))) expect(ids).not.toContain(left)
     const writing = skills.find(({ entry }) => entry.id === 'writing-skills')
@@ -34,7 +35,7 @@ describe('the default catalog', () => {
   })
 
   it('marks every skill that cannot be followed without subagents', async () => {
-    const { skills } = await loadLocalCatalog(catalog)
+    const { skills } = await run(loadLocalCatalog(catalog))
     expect(skills.filter(({ entry }) => entry.needs.includes('subagents')).map(({ entry }) => entry.id)).toEqual([
       'doubt-driven-development',
       'dispatching-parallel-agents',

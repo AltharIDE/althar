@@ -2137,6 +2137,11 @@ export const InstalledSkill = Schema.Struct({
   needs: Schema.Array(Schema.String),
   /** Whether it has an earlier version to go back to. */
   canRollBack: Schema.Boolean,
+  /**
+   * Why it is broken, in words for the person, where Althar can't read what it keeps of it (its record or its stored
+   * files): listed on its own, given to no run, while the rest are listed as they are (ADR-047). Absent when it reads.
+   */
+  problem: Schema.optional(Schema.String),
 })
 export type InstalledSkill = typeof InstalledSkill.Type
 
