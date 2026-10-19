@@ -1661,7 +1661,33 @@ describe('what reaching outside says, in every case', () => {
             items.arrival({ kind: 'review', from: 'lee', verdict: 'approved', text: '' }),
             items.arrival({ kind: 'review', from: 'kim', verdict: null, text: 'Fine.' }),
             items.arrival({ kind: 'checks', from: null, text: null, passed: 3, failed: 0, failing: [] }),
-            items.arrival({ kind: 'checks', from: null, text: null, passed: 0, failed: 2, failing: ['test', 'lint'] }),
+            items.arrival({
+              kind: 'checks',
+              from: null,
+              text: null,
+              passed: 0,
+              failed: 2,
+              failing: ['test', 'lint'],
+              logs: [
+                {
+                  name: 'test',
+                  url: null,
+                  log: [
+                    '2026-10-18T19:42:01.1234567Z Run bun test',
+                    '2026-10-18T19:42:09.0000000Z FAIL limit.test.ts',
+                    '2026-10-18T19:42:09.0000000Z ##[error]Process completed with exit code 1.',
+                    '2026-10-18T19:42:10.0000000Z Post job cleanup.',
+                  ].join('\n'),
+                  missing: null,
+                },
+                {
+                  name: 'lint',
+                  url: 'https://github.com/m/a/actions/runs/1/job/2',
+                  log: null,
+                  missing: 'GitHub refused (401): Bad credentials',
+                },
+              ],
+            }),
             items.arrival({ kind: 'closed', from: null, text: null, source: 'gitlab', where: 'MR !4' }),
             items.arrival({ kind: 'ready', from: null, text: null }),
             items.step({ step: 'publish', summary: 'Pushed althar/x.', change: null }),
@@ -1688,6 +1714,14 @@ describe('what reaching outside says, in every case', () => {
     expect(screen.getByText('Checks passed on PR #12')).toBeTruthy()
     expect(screen.getByText('Checks failed on PR #12')).toBeTruthy()
     expect(screen.getByText('Failed: test, lint')).toBeTruthy()
+    // Each failed check shows the end of its log, without its times, or why it couldn't be read, with its page.
+    expect(screen.getByText('FAIL limit.test.ts')).toBeTruthy()
+    expect(screen.queryByText(/2026-10-18T19:42/)).toBeNull()
+    // It ends where Actions marked it failed, not in the job's cleanup after.
+    expect(screen.getByText('##[error]Process completed with exit code 1.')).toBeTruthy()
+    expect(screen.queryByText('Post job cleanup.')).toBeNull()
+    expect(screen.getByText('Couldn’t read its log: GitHub refused (401): Bad credentials.')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Open its page' }).getAttribute('href')).toBe('https://github.com/m/a/actions/runs/1/job/2')
     expect(screen.getByText('Closed MR !4')).toBeTruthy()
     expect(screen.getByText('Ready for review: PR #12')).toBeTruthy()
     expect(screen.getByText('Pushed althar/x.')).toBeTruthy()

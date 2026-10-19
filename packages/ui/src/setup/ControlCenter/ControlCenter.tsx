@@ -596,6 +596,15 @@ export function ControlFoot({ children, className, ...rest }: RootProps<'div', {
   )
 }
 
+/** The foot's start: what it says of this Althar, one line under another, so the foot's one button stays beside it on the same row. */
+export function ControlFootStart({ children, className, ...rest }: RootProps<'div', { children: ReactNode }>) {
+  return (
+    <div className={cx(s.footStart, className)} {...rest}>
+      {children}
+    </div>
+  )
+}
+
 export interface ControlLinkText {
   off: string
 }

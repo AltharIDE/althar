@@ -5,7 +5,8 @@ import { SqlClient } from 'effect/sql'
 import { Connections } from './Connections'
 import { NotFound } from './errors'
 import { addReadCopy } from './git'
-import { checksLine, checksOf, commentLine, logOf, reviewLine, standing } from './pullRequestWords'
+import { logForLead, readLog } from './checkLogs'
+import { checksLine, checksOf, commentLine, reviewLine, standing } from './pullRequestWords'
 
 /*
  * What every part of Althar knows of a review task (docs/architecture/06,
@@ -136,10 +137,8 @@ export const readReviewed = (review: ReviewOf) =>
     if (now.headSha !== null) {
       const checks = yield* host.checks(repository, now.headSha)
       lines.push(checksLine(checksOf(now.headSha, checks)))
-      for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_SHOWN)) {
-        const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
-        if (log !== null) lines.push(logOf(check.name, log))
-      }
+      for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_SHOWN))
+        lines.push(logForLead(yield* readLog(host, repository, check)))
     }
     const activity = yield* host.activity(repository, review.number, null)
     const said = [

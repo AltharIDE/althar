@@ -301,7 +301,7 @@ before building on it):
   the allowlisted usage reader (`usageRead.ts`) and the only credential-store
   module (`credentialStore.ts`), with the contract test
   (`tests/usageSources.test.ts`) that enforces ADR-048.
-- `packages/persistence-sqlite`: migration 0034, `plan_usage_readings` and
+- `packages/persistence-sqlite`: migration 0035, `plan_usage_readings` and
   `plan_usage_warnings`.
 - `packages/runtime`: `PlanUsage.ts` keeps each account's windows (Codex read
   through its app-server, Claude heard from its sessions, OpenCode by its own

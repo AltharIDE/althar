@@ -121,7 +121,9 @@
   - Respelling turns the project's names into code even where the person
     meant the words ("the refund ledger" as an idea); they see it before
     they send. Names the model mishears as other words ("Alpha" for
-    "Althar") aren't caught.
+    "Althar") aren't caught by respelling; the agent that reads the message
+    is told it was dictated (a mark kept with the message, and a short note
+    after its words in the agent's prompt), so it reads past them.
   - Windows on Arm has no prebuilt binary yet.
 - **Revisit when:** an open model clearly beats Parakeet on code-heavy
   speech, a streaming model is good enough to replace the passes (NVIDIA's
