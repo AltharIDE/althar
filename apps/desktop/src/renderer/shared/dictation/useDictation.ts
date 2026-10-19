@@ -4,7 +4,7 @@ import { type Dictation, type DictationState as TrayState, DictationSetup, type 
 
 import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
-import { draftOf, setDraftText, useDraftOf } from '../drafts'
+import { draftOf, setDraftDictated, setDraftText, useDraftOf } from '../drafts'
 import { joined, live } from './live'
 import { chooseMicrophone, microphoneToUse, useChosenMicrophone, useMicrophones } from './microphones'
 import { type Record, type Recorded, record as recordMicrophone } from './recorder'
@@ -175,6 +175,8 @@ export const writeIn = async (thread: string, said: Said, now = handlesOf(thread
     if (text === '') return changeSession(thread, { phase: 'idle', interim: '', away: null })
     const away = held.shown === 0
     setDraftText(thread, inserting(away ? null : (held.field?.current ?? null), sessionOf(thread).at, text))
+    // Marked once, and kept through any edits: the agent that reads it is told it was dictated.
+    setDraftDictated(thread, true)
     changeSession(thread, { phase: 'idle', interim: '', arrived: away ? draftOf(thread).text : null })
   } catch {
     if (handlesOf(thread) !== held) return
