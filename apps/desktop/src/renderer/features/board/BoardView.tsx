@@ -17,15 +17,14 @@ import {
   FactLine,
   FileChips,
   Findings,
+  KeptRow,
   LinkButton,
   NextLine,
   NextRow,
   NextStep,
   Outcome,
   PullChip,
-  Segmented,
   SettledRow,
-  settledRowText,
   SettleWays,
   TaskKind,
   TaskStatus,
@@ -125,15 +124,14 @@ export const text = {
   /** What Done and Keep for later do, on hover. */
   doneHint: 'Settle it: it moves to Settled, and what it left running, such as a page, stops.',
   keepHint: 'Take it out of Needs you as it is, with its page still up. Writing to it brings it back.',
-  /** The Settled lane's two tabs, while something is kept for later. */
+  /** The two the Settled lane's head names, while something is kept for later; the one showing in ink. */
   settledOrKept: 'Settled or kept for later',
-  settledTab: (n: number) => `Settled ${n}`,
-  keptTab: (n: number) => `Kept for later ${n}`,
-  /** A kept task's row: its word, and when it was kept. */
-  kept: 'Kept for later',
-  /** Settled's own tab, while nothing has settled but something was kept for later. */
+  settledShelf: 'Settled',
+  keptShelf: 'Kept',
+  /** When a kept task was kept, under its title. */
+  keptAt: (ago: string) => `kept ${ago}`,
+  /** Settled, while nothing has settled but something was kept for later. */
   nothingSettled: 'Nothing has settled yet.',
-  keptNote: 'Out of Needs you, as they were. Open one and write to it to pick it up again; Done settles it.',
 }
 
 /** Closing settled tasks' pull requests from their rows: the one closing now, the last that failed and why, and how to close one. */
@@ -356,7 +354,7 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
       return {
         ...base,
         word: text.finished,
-        ...(ways === null ? {} : { foot: ways }),
+        ...(ways === null ? {} : { corner: ways }),
         ...(pictures.length > 0
           ? { object: <Thumbs pictures={pictures.slice(0, HANDED_SHOWN)} /> }
           : files.length > 0
@@ -378,16 +376,8 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         ...base,
         word: isAnswered(work.reviewing) ? text.finished : text.reviewDrafted,
         ...(work.reviewing == null ? {} : { object: theirs(work.reviewing) }),
-        ...(findings === null && ways === null
-          ? {}
-          : {
-              foot: (
-                <>
-                  {findings}
-                  {ways}
-                </>
-              ),
-            }),
+        ...(findings === null ? {} : { foot: findings }),
+        ...(ways === null ? {} : { corner: ways }),
       }
     }
     case 'change': {
@@ -440,8 +430,9 @@ export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merg
   Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling'>>
 
 /**
- * A finished task's Done and Keep for later, where it isn't a change: a
- * review only keeps, as it settles once posted, and one kept has only Done.
+ * A finished task's Done and Keep for later, for its card's corner, where it
+ * isn't a change: a review with a draft only keeps, as it settles once
+ * posted, and one kept has only Done.
  */
 const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactNode => {
   const { markDone, keep } = actions ?? {}
@@ -634,29 +625,31 @@ export function BoardView({
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal} filled={lanes.settledTotal > 0 || lanes.kept.length > 0}>
-        {/* What was kept for later, behind a tab of its own beside Settled, only while there is some. */}
-        {lanes.kept.length > 0 && (
-          <Segmented<'settled' | 'kept'>
-            label={text.settledOrKept}
-            value={shelf}
-            onChange={setShelf}
-            className={s.shelves}
-            options={[
-              { value: 'settled', label: text.settledTab(lanes.settledTotal) },
-              { value: 'kept', label: text.keptTab(lanes.kept.length) },
-            ]}
-          />
-        )}
+      <BoardColumn
+        lane={BoardLane.Settled}
+        count={lanes.settledTotal}
+        filled={lanes.settledTotal > 0 || lanes.kept.length > 0}
+        // What was kept for later, named beside Settled in its head while there is some; pressing it shows it in Settled's place.
+        {...(lanes.kept.length === 0
+          ? {}
+          : {
+              shelves: {
+                label: text.settledOrKept,
+                value: shelf,
+                onChange: (value: string) => setShelf(value === 'kept' ? 'kept' : 'settled'),
+                options: [
+                  { value: 'settled', label: text.settledShelf, count: lanes.settledTotal },
+                  { value: 'kept', label: text.keptShelf, count: lanes.kept.length, icon: 'pin' as const },
+                ],
+              },
+            })}
+      >
         {shelf === 'kept' && lanes.kept.length > 0 ? (
-          <>
-            <p className={s.shelfNote}>{text.keptNote}</p>
-            <BoardList>
-              {lanes.kept.map((work) => (
-                <KeptRow key={work.taskId} work={work} now={now} onOpen={() => onOpen(work.threadId)} actions={actions} />
-              ))}
-            </BoardList>
-          </>
+          <BoardList>
+            {lanes.kept.map((work) => (
+              <Kept key={work.taskId} work={work} now={now} onOpen={() => onOpen(work.threadId)} actions={actions} />
+            ))}
+          </BoardList>
         ) : (
           <>
             {lanes.settled.length === 0 && <p className={s.shelfNote}>{text.nothingSettled}</p>}
@@ -716,38 +709,22 @@ export function BoardView({
 }
 
 /**
- * A task kept for later, as a row behind Settled's tab: what it is, what it
- * came to in a line, and when it was kept, with Done under it where it is
- * the person's to settle (a review settles once posted).
+ * A task kept for later, as a row in Settled's place while Kept shows: what
+ * it is and when it was kept, with Done at its end where it is the person's
+ * to settle (a review with a draft settles once posted).
  */
-function KeptRow({ work, now, onOpen, actions }: { work: BoardTask; now: string; onOpen: () => void; actions: CardActions | undefined }) {
-  const handed = (work.handed?.pictures.length ?? 0) + (work.handed?.files.length ?? 0) > 0
-  const outcome = work.kind === 'plain' && handed ? Outcome.Artifact : Outcome.Answered
-  const kind = kindWordOf(work)
-  const said = work.summary?.split('\n').find((line) => line.trim() !== '')
-  const meta = said ?? work.branch ?? undefined
+function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; onOpen: () => void; actions: CardActions | undefined }) {
   const markDone = actions?.markDone
   const failed = actions?.failed[work.taskId]
   return (
-    <SettledRow
-      outcome={outcome}
-      task={work.slug}
-      {...(kind === undefined ? {} : { kind })}
+    <KeptRow
       title={work.title}
-      {...(meta === undefined ? {} : { meta })}
-      at={work.keptAt == null ? '' : ago(work.keptAt, new Date(now))}
+      at={work.keptAt == null ? '' : text.keptAt(ago(work.keptAt, new Date(now)))}
       onOpen={onOpen}
-      {...(work.kind === 'plain' && markDone !== undefined
-        ? {
-            action: {
-              label: text.done,
-              onAction: () => void markDone(work.taskId),
-              busy: actions?.settling?.has(work.taskId) === true,
-            },
-            ...(failed === undefined ? {} : { error: failed.message }),
-          }
+      {...(takesDone(work) && markDone !== undefined
+        ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint, busy: actions?.settling?.has(work.taskId) === true }
         : {})}
-      text={{ task: unnamed, outcome: { ...settledRowText.outcome, [outcome]: text.kept } }}
+      {...(failed === undefined ? {} : { error: failed.message })}
     />
   )
 }

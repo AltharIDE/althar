@@ -12,13 +12,14 @@ import {
   useState,
 } from 'react'
 
-import { Icon } from '../../foundations/Icon/Icon'
+import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BoardLane, unreachable } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './Board.module.css'
 
 /*
@@ -213,12 +214,33 @@ function Glyph({ lane }: { lane: BoardLane }) {
   }
 }
 
+/** One of two things a lane holds and shows one at a time, as its head names it: Settled, or what was kept for later. */
+export interface LaneShelf {
+  readonly value: string
+  readonly label: string
+  readonly count: number
+  /** Its glyph in the lane's head while it shows, in place of the lane's own. */
+  readonly icon?: IconName
+}
+
 export interface BoardColumnProps {
   lane: BoardLane
   /** How many it holds. */
   count: number
   /** Whether it has anything to show, where that is more than its count says (Settled, with what was kept for later beside it). */
   filled?: boolean
+  /**
+   * What it holds, where it holds two things and shows one: each named in
+   * its head with its count, in place of the lane's own name and count, the
+   * one showing in ink. Pressing the other shows it instead.
+   */
+  shelves?: {
+    /** What choosing between them is: Settled or kept for later. */
+    readonly label: string
+    readonly options: ReadonlyArray<LaneShelf>
+    readonly value: string
+    readonly onChange: (value: string) => void
+  }
   children?: ReactNode
   /** The lane's name's rank in the page's outline. */
   headingLevel?: HeadingLevel
@@ -232,7 +254,7 @@ export interface BoardColumnProps {
  * button that opens it again. The focus goes with it either way, and where
  * the board collapses or opens it by itself from under the focus, too.
  */
-export function BoardColumn({ lane, count, filled = count > 0, children, headingLevel = 2, text }: BoardColumnProps) {
+export function BoardColumn({ lane, count, filled = count > 0, shelves, children, headingLevel = 2, text }: BoardColumnProps) {
   const t = { ...boardText, ...text }
   const id = useId()
   const bodyId = useId()
@@ -281,6 +303,7 @@ export function BoardColumn({ lane, count, filled = count > 0, children, heading
     folding.fold(lane, collapse)
   }
   const name = t.lane[lane]
+  const shown = shelves?.options.find((one) => one.value === shelves.value)
 
   if (rail)
     return (
@@ -306,11 +329,38 @@ export function BoardColumn({ lane, count, filled = count > 0, children, heading
   return (
     <section ref={self} aria-labelledby={id} className={cx(s.column, s[lane])}>
       <header className={s.head}>
-        <Glyph lane={lane} />
-        <Heading level={headingLevel} id={id} className={s.title}>
-          {name}
-        </Heading>
-        <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
+        {shown?.icon === undefined ? <Glyph lane={lane} /> : <Icon name={shown.icon} size={11} className={s.settledGlyph} />}
+        {shelves === undefined ? (
+          <>
+            <Heading level={headingLevel} id={id} className={s.title}>
+              {name}
+            </Heading>
+            <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
+          </>
+        ) : (
+          <>
+            {/* The lane keeps its name in the page's outline; what shows are the two it holds. */}
+            <VisuallyHidden>
+              <Heading level={headingLevel} id={id}>
+                {name}
+              </Heading>
+            </VisuallyHidden>
+            <fieldset className={s.shelves}>
+              <VisuallyHidden as="legend">{shelves.label}</VisuallyHidden>
+              {shelves.options.map((one) => (
+                <button
+                  key={one.value}
+                  type="button"
+                  className={s.shelf}
+                  aria-pressed={one.value === shelves.value}
+                  onClick={() => shelves.onChange(one.value)}
+                >
+                  {one.label} <span className={cx(s.shelfCount, one.count === 0 && s.none)}>{one.count}</span>
+                </button>
+              ))}
+            </fieldset>
+          </>
+        )}
         {folding !== null && (
           <IconButton
             icon="chevronL"

@@ -108,7 +108,7 @@ export const NothingBuilt: Story = {
     steps: trackOf(['Read', 'Answer'], 1, 1, true),
   },
 }
-/** A prototype its lead finished: Done, in ink, and Keep for later, right beside where it stands. */
+/** A prototype its lead finished: Done, in ink, and a pin, Keep for later, right beside where it stands; no step bar. */
 export const FinishedNotAChange: Story = {
   args: {
     title: 'Prototype: allow everything, for a project and a task',
@@ -116,7 +116,7 @@ export const FinishedNotAChange: Story = {
     state: 'Finished',
     branch: undefined,
     steps: [],
-    beside: <SettleWays ink onDone={fn()} onKeep={fn()} />,
+    beside: <SettleWays place="header" onDone={fn()} onKeep={fn()} />,
   },
 }
 /** A title too long for the bar: one line, the whole of it on hover. */

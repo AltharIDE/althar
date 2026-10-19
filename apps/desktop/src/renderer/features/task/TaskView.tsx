@@ -588,7 +588,7 @@ export function TaskView({
   const done = takesDone({ kind: snapshot.task.kind ?? 'change', reviewing: snapshot.task.review })
   const settle = settleable ? (
     <SettleWays
-      ink
+      place="header"
       {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
       {...(snapshot.task.phase === 'ready' ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
       {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
@@ -756,12 +756,17 @@ export function TaskView({
             {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
             {...(since === null ? {} : { since })}
             {...(elapsed === null ? {} : { elapsed })}
-            steps={trackFor(
-              snapshot.task.steps,
-              snapshot.task.step,
-              snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled',
-              snapshot.task.followUp === true,
-            )}
+            // Finished and the person's to settle, its steps are all done: Done says the rest, with no bar beside it.
+            {...(settle === null
+              ? {
+                  steps: trackFor(
+                    snapshot.task.steps,
+                    snapshot.task.step,
+                    snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled',
+                    snapshot.task.followUp === true,
+                  ),
+                }
+              : {})}
             faces={(['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] }))}
             face={shown}
             onFace={setFace}

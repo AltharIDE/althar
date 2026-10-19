@@ -16,7 +16,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** On a finished card: Done, quiet, and Keep for later beside it. */
+/** For a finished card's corner: a pin, Keep for later, and a check, Done, each named on hover. */
 export const OnCard: Story = {
   play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement)
@@ -26,11 +26,11 @@ export const OnCard: Story = {
     await expect(args.onKeep).toHaveBeenCalled()
   },
 }
-/** In the task's header, beside where it stands: Done in ink. */
-export const InHeader: Story = { args: { ink: true } }
+/** In the task's header, beside where it stands: Done in words and in ink, then the pin. */
+export const InHeader: Story = { args: { place: 'header' } }
 /** Kept for later already: Done alone. */
-export const Kept: Story = { args: { onKeep: undefined } }
+export const Kept: Story = { args: { onKeep: undefined, place: 'header' } }
 /** A drafted review: Keep for later alone, as it settles once posted. */
 export const Review: Story = { args: { onDone: undefined } }
 /** Done under way. */
-export const Settling: Story = { args: { busy: 'done', ink: true } }
+export const Settling: Story = { args: { busy: 'done', place: 'header' } }

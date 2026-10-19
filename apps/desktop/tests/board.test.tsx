@@ -334,7 +334,7 @@ describe('the board’s lanes', () => {
     expect(firstNeedOf(kept)).toBe('th4')
   })
 
-  it('offers Done and Keep for later on a finished card that isn’t a change, and Kept for later beside Settled once there is some', async () => {
+  it('offers Done and Keep for later in a finished card’s corner where it isn’t a change, and Kept beside Settled in its head once there is some', async () => {
     const markDone = vi.fn(async () => true)
     const keep = vi.fn(async () => true)
     const actions = {
@@ -425,13 +425,16 @@ describe('the board’s lanes', () => {
     await userEvent.click(card('Review #1200').getByRole('button', { name: 'Done' }))
     expect(markDone).toHaveBeenCalledWith('r2')
     expect(card('Rate-limit refunds').queryByRole('button', { name: 'Keep for later' })).toBeNull()
-    // Settled opens on its ledger, as it always has, with what was kept behind a tab beside it.
+    // Settled opens on its ledger, as it always has, its head naming what was kept beside it.
     const lane = within(screen.getByRole('region', { name: /^Settled/ }))
     expect(lane.getByText('Shipped before')).toBeTruthy()
     expect(lane.queryByText('Spike the limits')).toBeNull()
-    await userEvent.click(lane.getByRole('radio', { name: 'Kept for later 1' }))
+    expect(lane.getByRole('button', { name: /^Settled/, pressed: true })).toBeTruthy()
+    await userEvent.click(lane.getByRole('button', { name: 'Kept 1', pressed: false }))
+    // Pressed, Kept shows in Settled's place: each in a line, when it was kept under its title.
+    expect(lane.getByRole('button', { name: 'Kept 1', pressed: true })).toBeTruthy()
     expect(lane.getByText('Spike the limits')).toBeTruthy()
-    expect(lane.getByText('Codex says its limits every turn.')).toBeTruthy()
+    expect(lane.getByText(/^kept /)).toBeTruthy()
     expect(lane.queryByText('Shipped before')).toBeNull()
     await userEvent.click(lane.getByRole('button', { name: 'Done' }))
     expect(markDone).toHaveBeenCalledWith('p2')

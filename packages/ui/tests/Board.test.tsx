@@ -172,3 +172,31 @@ describe('a board that measures itself', () => {
     expect(document.body).toHaveFocus()
   })
 })
+
+describe('a lane holding two things', () => {
+  it('names both in its head, the one showing pressed, keeps its own name, and shows the other once pressed', () => {
+    const onChange = vi.fn()
+    render(
+      <BoardColumn
+        lane={BoardLane.Settled}
+        count={28}
+        shelves={{
+          label: 'Settled or kept for later',
+          value: 'settled',
+          onChange,
+          options: [
+            { value: 'settled', label: 'Settled', count: 28 },
+            { value: 'kept', label: 'Kept', count: 3, icon: 'pin' },
+          ],
+        }}
+      >
+        <p>The ledger</p>
+      </BoardColumn>,
+    )
+    expect(screen.getByRole('region', { name: 'Settled' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Settled or kept for later' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Settled 28', pressed: true })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Kept 3', pressed: false }))
+    expect(onChange).toHaveBeenCalledWith('kept')
+  })
+})

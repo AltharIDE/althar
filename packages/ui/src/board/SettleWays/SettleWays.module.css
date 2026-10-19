@@ -1,14 +1,6 @@
-/*
- * Above the card's own button, whose title is stretched over it; at the end of the foot it sits in. In a narrow card,
- * Keep for later goes under Done rather than past the card's edge.
- */
+/* On a card, in its corner; in the task's header, beside where it stands. */
 .ways {
-  position: relative;
   display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
   align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  margin-left: auto;
+  gap: 2px;
 }

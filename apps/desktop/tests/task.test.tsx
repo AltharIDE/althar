@@ -86,11 +86,14 @@ describe('a task', () => {
   })
 
   it('waits, finished and not a change, for the person: Done and Keep for later beside where it stands, and a suggestion Tab takes', async () => {
-    let now = thread({ task: { ...thread().task, kind: 'plain', phase: 'ready' } })
+    const steps = [{ key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false }]
+    let now = thread({ task: { ...thread().task, kind: 'plain', phase: 'ready', steps } })
     const { client, emit } = fakeClient({ getThread: vi.fn(async () => now) })
     withServices(<Task />, client)
     const header = await screen.findByRole('banner', { name: thread().task.title })
     expect(within(header).getByText('Finished')).toBeTruthy()
+    // Its steps all done, no bar of them beside Done.
+    expect(within(header).queryByRole('list', { name: 'Steps' })).toBeNull()
     // Opening it moved nothing: only seen.
     await waitFor(() => expect(client.seeTask).toHaveBeenCalled())
     expect(client.markTaskDone).not.toHaveBeenCalled()

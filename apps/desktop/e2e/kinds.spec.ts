@@ -73,17 +73,17 @@ test('shows each kind of task on the board, with nothing to press, and finds one
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await expect(work.getByRole('region', { name: /^Needs you/ }).getByText('Finished', { exact: true })).toBeVisible()
 
-    // Kept for later, it leaves Needs you for Settled's second tab.
+    // Kept for later from its corner, it leaves Needs you for Kept, named beside Settled in its head.
     await finished.getByRole('button', { name: 'Keep for later' }).click()
     const settled = work.getByRole('region', { name: /^Settled/ })
-    await settled.getByRole('radio', { name: 'Kept for later 1' }).click()
+    await settled.getByRole('button', { name: 'Kept 1' }).click()
     await expect(settled.getByText('Which partners still call the v1 endpoint')).toBeVisible()
     await expect(work.getByRole('region', { name: /^Needs you/ }).getByText('Finished', { exact: true })).toHaveCount(0)
     await settled.screenshot({ path: 'test-results/kinds-kept.png', animations: 'disabled', scale: 'css' })
 
     // Done from there, it settles; written to again, it goes back to work, and its round ends in Needs you, not in Settled.
     await settled.getByRole('button', { name: 'Done' }).click()
-    await expect(settled.getByRole('radio')).toHaveCount(0)
+    await expect(settled.getByRole('button', { name: /^Kept \d/ })).toHaveCount(0)
     await expect(settled.getByText('Which partners still call the v1 endpoint')).toBeVisible()
     await settled.getByRole('button', { name: 'Which partners still call the v1 endpoint' }).click()
     await say(page, 'And the v2 ones? [lead:finish]')
