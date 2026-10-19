@@ -167,7 +167,7 @@ describe('the project’s bar', () => {
     await userEvent.keyboard('b')
     expect(checked()).toMatch(/^Board/)
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Both/)
+    expect(checked()).toMatch(/^Home/)
     await userEvent.keyboard('b')
     expect(checked()).toMatch(/^Conversation/)
     await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
@@ -187,7 +187,7 @@ describe('the project’s bar', () => {
       within(views)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Conversation', 'Board', 'Both', 'Settings'])
+    ).toEqual(['Home', 'Conversation', 'Board', 'Settings'])
     await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
     expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
     // Its settings are a view too, kept like the others to open on again.
