@@ -1,4 +1,4 @@
-# ADR-048: The line up next is every task no agent has worked on yet, in the person's order
+# ADR-049: The line up next is every task no agent has worked on yet, in the person's order
 
 - **Status:** Accepted
 - **Date:** 2026-10-19

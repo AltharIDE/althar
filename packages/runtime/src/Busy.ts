@@ -37,7 +37,7 @@ import { Sessions } from './Sessions'
  * turn of a lead or a reviewer not already at work (`turn`): what the person
  * says to it, an agent they start or switch to, and what Althar tells it.
  *
- * What waits goes in the order the person would choose (`Order`, ADR-037, ADR-048):
+ * What waits goes in the order the person would choose (`Order`, ADR-037, ADR-049):
  * first what the person did, which never waits, and starts though every place
  * is taken (their answer, what they say to an agent, a task they resume); then
  * the work of a task already under way (the step after another, a step
