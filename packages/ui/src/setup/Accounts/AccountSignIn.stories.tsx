@@ -59,7 +59,7 @@ export const Choosing: Story = {
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Browser)
     await userEvent.click(c.getByRole('button', { name: 'A code' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Code)
-    await userEvent.click(c.getByRole('button', { name: 'In Terminal' }))
+    await userEvent.click(c.getByRole('button', { name: 'In a terminal' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Terminal)
     await userEvent.click(c.getByRole('button', { name: 'OpenAI Platform' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Console)
@@ -89,7 +89,7 @@ export const InTerminalFirst: Story = {
   args: { ways: { terminal: true, found: FOUND, choose: true }, holds: undefined },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(c.getByRole('button', { name: 'Sign in from a terminal' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Terminal)
     await expect(c.getByRole('button', { name: 'A folder on this computer' })).toBeInTheDocument()
   },
@@ -140,10 +140,10 @@ export const InTerminal: Story = {
   args: { step: { kind: 'terminal', line: 'CODEX_HOME=~/.althar/codex/side codex login', opened: true } },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Finish signing in in Terminal')).toBeInTheDocument()
+    await expect(c.getByText('Finish signing in from the terminal')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Check again' }))
     await expect(args.onCheck).toHaveBeenCalled()
-    await userEvent.click(c.getByRole('button', { name: 'Open Terminal again' }))
+    await userEvent.click(c.getByRole('button', { name: 'Open the terminal again' }))
     await expect(args.onOpen).toHaveBeenCalled()
   },
 }
@@ -163,7 +163,7 @@ export const RunItYourself: Story = {
     const c = within(canvasElement)
     await expect(c.getByText('Run this in a terminal to sign in')).toBeInTheDocument()
     await expect(c.getByText('CODEX_HOME=~/.althar/codex/side codex login')).toBeInTheDocument()
-    await expect(c.queryByRole('button', { name: 'Open Terminal again' })).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Open the terminal again' })).toBeNull()
   },
 }
 

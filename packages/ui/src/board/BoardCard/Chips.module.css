@@ -136,13 +136,13 @@
 .ok {
   color: var(--t-2);
 }
-.ok svg {
-  color: var(--ok);
-}
-/* it needs a hand, but nothing is lost: warm, never red */
+/* it needs a hand, but nothing is lost: a warm glyph, never red, by words that keep their contrast */
 .warm {
-  color: var(--warm);
+  color: var(--t-2);
   font-weight: 500;
+}
+.warm svg {
+  color: var(--warm);
 }
 .danger {
   color: var(--danger);

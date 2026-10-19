@@ -14,10 +14,10 @@
   transition: background var(--fast) var(--ease);
 }
 .option:hover:not(:disabled) {
-  background: var(--n-2);
+  background: var(--sunk);
 }
 .option:active:not(:disabled) {
-  background: var(--n-3);
+  background: var(--n-4);
 }
 .option[aria-checked='true'] {
   background: var(--paper);
@@ -67,7 +67,7 @@
   transition: background var(--fast) var(--ease);
 }
 .tile:hover:not(:disabled) {
-  background: var(--n-3);
+  background: var(--sunk);
 }
 .tile:active:not(:disabled) {
   background: var(--n-4);

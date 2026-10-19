@@ -99,7 +99,7 @@ export interface RuntimesText {
 }
 
 export const runtimesText: RuntimesText = {
-  checking: 'Checking who it is signed in as',
+  checking: 'Checking who it is signed in as…',
   signingIn: (name) => `Finish signing in to ${name} in your browser`,
   signedOut: 'Signed out',
   signInNote: (name) => `Sign in opens ${name}’s own sign-in. Althar never sees your password.`,
@@ -118,7 +118,7 @@ export const runtimesText: RuntimesText = {
   download: 'Download',
   downloadNote: (name, size) =>
     `Althar can fetch ${name}’s latest release from GitHub, about ${size}, check it, and keep it in its own folder.`,
-  installing: (name, size) => `Downloading ${name}, about ${size}, and checking it`,
+  installing: (name, size) => `Downloading ${name}, about ${size}, and checking it…`,
   tryAgain: 'Try again',
 }
 
@@ -191,7 +191,11 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
         {words}
       </ActionButton>
     )
-  const check = h.onCheck && <ActionButton onClick={() => h.onCheck?.(r.id)}>{t.check}</ActionButton>
+  const check = h.onCheck && (
+    <ActionButton flush="end" onClick={() => h.onCheck?.(r.id)}>
+      {t.check}
+    </ActionButton>
+  )
   switch (r.state) {
     case RuntimeState.Ready:
       return { line: [r.account, r.version && `v${r.version}`].filter(Boolean).join(' · ') }
