@@ -443,6 +443,25 @@ describe('the API', () => {
     ),
   )
 
+  it.live('says which agents more accounts can be added to: none whose sign-in every folder shares', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({ ...definition, home: { ...definition.home, accounts: 'one' } })),
+        })
+        const status = yield* client.Status({})
+        assert.deepStrictEqual(
+          status.agents.map((agent) => [agent.id, agent.addsAccounts]),
+          [
+            ['claude-code', true],
+            ['codex', false],
+            ['opencode', true],
+          ],
+        )
+      }),
+    ),
+  )
+
   it.live('keeps a failed account check to that account, shows the rest as they are, and reports it', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -678,6 +697,49 @@ describe('the API', () => {
         assert.strictEqual(missing.reason, 'NotFound')
         const gone = yield* Effect.flip(client.GetProjectNotes({ projectId: 'proj_gone' }))
         assert.strictEqual(gone.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live("says a project's note in the person's words, as the coordinator then reads it, within a note's bounds", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, context } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const access = { role: 'coordinator' as const, projectId: project.id, threadId: 'none', sessionId: 'none', taskId: null }
+        yield* callTool(access, 'keep_note', { note: 'Issue drafts need an approval card.' }).pipe(Effect.provideContext(context))
+        const [note] = yield* client.GetProjectNotes({ projectId: project.id })
+        const noteId = note?.id ?? ''
+        yield* client.EditProjectNote({
+          commandId: commandId(),
+          projectId: project.id,
+          noteId,
+          body: '  Issue drafts need an approval card,\n on every tracker. ',
+        })
+        // Kept as one line, by whoever kept it first, and the coordinator reads the new words.
+        assert.deepInclude((yield* client.GetProjectNotes({ projectId: project.id }))[0], {
+          id: noteId,
+          body: 'Issue drafts need an approval card, on every tracker.',
+          keptBy: 'coordinator',
+        })
+        assert.include(yield* callTool(access, 'list_notes').pipe(Effect.provideContext(context)), 'on every tracker.')
+        // Empty or too long, it says so and stays as it was.
+        const empty = yield* Effect.flip(client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: ' ' }))
+        assert.strictEqual(empty.reason, 'NoteRefused')
+        const long = yield* Effect.flip(
+          client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: 'x'.repeat(301) }),
+        )
+        assert.match(long.message, /at most 300 characters/)
+        assert.strictEqual(
+          (yield* client.GetProjectNotes({ projectId: project.id }))[0]?.body,
+          'Issue drafts need an approval card, on every tracker.',
+        )
+        // A dropped one can't be changed.
+        yield* client.DropProjectNote({ commandId: commandId(), projectId: project.id, noteId })
+        const dropped = yield* Effect.flip(
+          client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: 'Again.' }),
+        )
+        assert.strictEqual(dropped.message, "That note isn't there any more.")
       }),
     ),
   )

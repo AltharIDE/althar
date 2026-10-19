@@ -50,7 +50,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--line);
   /* Picked up by its words as by its grip. */
   cursor: grab;
@@ -90,21 +90,28 @@
 .words {
   display: grid;
   flex: 1;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
 .name {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 500;
   color: var(--t-1);
 }
 
+/* a command reads as one: mono, in a chip */
 .command {
+  justify-self: start;
+  max-width: 100%;
   overflow: hidden;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--n-4);
   font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--t-2);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--t-1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -112,7 +119,7 @@
 .about {
   overflow: hidden;
   font-size: 11.5px;
-  color: var(--t-3);
+  color: var(--t-4);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

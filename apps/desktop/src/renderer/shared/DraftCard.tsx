@@ -3,11 +3,11 @@ import { useState } from 'react'
 import type { IssueDraftState as State } from '@althar/contracts'
 import { IssueDraft, IssueDraftState, Markdown } from '@althar/ui'
 
-import { productBrand } from '../../shared/products'
-import type { IssueDraftContent } from '../../shared/thread'
+import { productBrand } from './products'
+import type { IssueDraftContent } from './thread'
 
 /*
- * An issue the coordinator drafted, in the Talk room: the tracker and where
+ * An issue the coordinator or a task's lead drafted, in their thread: the tracker and where
  * it goes there, what it says, and where it stands. Nothing is filed until
  * the person files it here; they can change it first, or discard it. Once
  * filed, its key and its link; not filed, why, and filing it again; perhaps

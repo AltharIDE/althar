@@ -3,14 +3,17 @@
   display: grid;
 }
 
-/* a part of a section: its name and a line on it, what is done for all of it at the end, then what it holds; a little apart from the one before */
+/* a part of a section: its name and a line on it, what is done for all of it at the end, then what it holds; after
+   anything before it, well apart and under a hairline */
 .group {
   display: grid;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
-.group + .group {
-  margin-top: 14px;
+.group:not(:first-child) {
+  margin-top: 12px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
 }
 .groupHead {
   display: flex;
@@ -23,15 +26,16 @@
   gap: 2px;
   min-width: 0;
 }
+/* a title that reads as one: bigger and darker than the names of the rows under it */
 .groupTitle {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--t-2);
+  color: var(--t-1);
 }
 .groupNote {
   margin: 0;
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.45;
   color: var(--t-3);
 }

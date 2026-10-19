@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, realpathSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -131,6 +131,35 @@ describe('the process transport', () => {
         }
       }),
     ),
+  )
+
+  it.live('gives a process that asks a temporary folder of its own, and removes it once it has stopped', () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const owned = yield* Scope.provide(scope)(
+        spawnOwned(
+          { command: '/bin/sh', args: ['-c', 'echo "$TMPDIR $TEMP $TMP" >&2; touch "$TMPDIR/unpacked"; sleep 30'], privateTemp: true },
+          '/tmp',
+        ),
+      )
+      const temp = owned.temp ?? ''
+      assert.match(temp, /althar-agent-/)
+      for (let waited = 0; !existsSync(join(temp, 'unpacked')) && waited < 2_000; waited += 25) yield* Effect.sleep('25 millis')
+      assert.strictEqual(owned.stderrTail().trim(), `${temp} ${temp} ${temp}`)
+      yield* Scope.close(scope, Exit.void)
+      assert.isFalse(existsSync(temp))
+      // One that doesn't ask shares Althar's.
+      const shared = yield* Effect.scoped(spawnOwned({ command: '/bin/sh', args: ['-c', 'exit 0'] }, '/tmp'))
+      assert.isUndefined(shared.temp)
+    }),
+  )
+
+  it.live('removes the temporary folder of a command that never started', () =>
+    Effect.gen(function* () {
+      const before = readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length
+      yield* Effect.flip(Effect.scoped(spawnOwned({ command: 'althar-no-such-agent', args: [], privateTemp: true }, '/tmp')))
+      assert.isAtMost(readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length, before)
+    }),
   )
 
   it.live('fails to start a command that does not exist', () =>

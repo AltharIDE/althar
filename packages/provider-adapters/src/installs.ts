@@ -1,6 +1,6 @@
 import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join, win32 } from 'node:path'
+import { delimiter, dirname, isAbsolute, join, win32 } from 'node:path'
 
 import type { AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
 
@@ -25,6 +25,8 @@ export const usualDirs = (
     return [
       at(home, '.local', 'bin'),
       at(home, '.opencode', 'bin'),
+      at(home, '.grok', 'bin'),
+      at(home, '.kimi-code', 'bin'),
       at(home, '.bun', 'bin'),
       at(home, 'scoop', 'shims'),
       ...(env.APPDATA === undefined ? [] : [at(env.APPDATA, 'npm')]),
@@ -35,6 +37,8 @@ export const usualDirs = (
     '/usr/local/bin',
     join(home, '.local', 'bin'),
     join(home, '.opencode', 'bin'),
+    join(home, '.grok', 'bin'),
+    join(home, '.kimi-code', 'bin'),
     join(home, '.bun', 'bin'),
   ]
 }
@@ -162,7 +166,17 @@ export const usingLocated = (
       const spec = make(...args)
       const found = spec.command === cli.name ? find() : null
       if (found === null) return spec
-      const named = { ...spec, command: found.command }
+      // An npm-installed Node script found off the PATH finds the Node beside it, as it would in the terminal that installed it.
+      const path =
+        cli.node === true && found.whose === 'theirs' && isAbsolute(found.command)
+          ? {
+              env: {
+                ...spec.env,
+                PATH: [dirname(found.command), process.env.PATH].filter((part) => part !== undefined && part !== '').join(delimiter),
+              },
+            }
+          : {}
+      const named = { ...spec, command: found.command, ...path }
       return found.out === undefined ? named : { ...named, onDevice: found.out(named) }
     }
   const { signIn } = definition
@@ -177,7 +191,7 @@ export const usingLocated = (
           ? signIn.login
           : `${inATerminal(found, flatpakId)}${signIn.login.slice(cli.name.length)}`
       },
-      status: pointed(signIn.status),
+      ...(signIn.status === undefined ? {} : { status: pointed(signIn.status) }),
       ...(signIn.credentials === undefined ? {} : { credentials: pointed(signIn.credentials) }),
       ...(signIn.inApp === undefined ? {} : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
       ...(signIn.logout === undefined ? {} : { logout: { ...signIn.logout, run: pointed(signIn.logout.run) } }),

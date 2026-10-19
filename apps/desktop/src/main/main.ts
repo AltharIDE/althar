@@ -23,6 +23,7 @@ import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
 import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
+import { afterExit } from './restarts'
 import { alertSounds, playSound } from './sounds'
 import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
 import { checkNow, startUpdates } from './updater'
@@ -88,8 +89,6 @@ const here = import.meta.dirname
 const SHUTDOWN_GRACE = 20_000
 /** How long focus settles, moving between Althar's windows, before the edge hears whether Althar is in front. */
 const FOCUS_SETTLE = 120
-/** Restarts allowed within a minute before a crashing runtime ends the app instead. */
-const RESTARTS_PER_MINUTE = 3
 
 let runtime: UtilityProcess | undefined
 let quitting = false
@@ -121,9 +120,11 @@ if (quiet) Notification.isSupported = () => false
 /* The end-to-end tests' PostHog, on this computer (ALTHAR_FAKE_POSTHOG): usage data goes there, under a key of its own. Packaged builds leave this out. */
 const fakePostHog = __ALTHAR_TEST_HOOKS__ ? (process.env.ALTHAR_FAKE_POSTHOG ?? '') : ''
 const usageTarget = fakePostHog === '' ? __ALTHAR_USAGE__ : { key: 'phc_fake', host: fakePostHog }
-const restarts: Array<number> = []
-/* The store an update couldn't move, once the runtime says so: every window shows it, and no runtime starts again. */
+let restarts: ReadonlyArray<number> = []
+/* The store an update couldn't move, or a profile another Althar has open, once the runtime says so: every window shows it, and no runtime starts again. */
 let storeFailure: StoreFailure | undefined
+/* The person asked to try a profile again: the runtime that found it open is stopped, and a new one starts in its place. */
+let retrying = false
 
 /** The profile and worktrees, as the command-line client has them: a Flatpak's home is a fresh empty one each run, so it keeps worktrees beside its profile (locations.ts). */
 const locations = () => locationsOf(process.env, process.platform, homedir())
@@ -157,6 +158,19 @@ app.setPath(
  * says only that one happened, where crash reports are on (crashReports.ts).
  */
 crashReporter.start({ uploadToServer: false })
+
+/*
+ * One Althar to a profile. A second launch (the Dock, a shortcut, a link)
+ * brings the first one's window forward and ends; it starts no runtime of
+ * its own, which could not open the profile the first holds. The lock is
+ * Electron's, kept per user data folder, which is set above from the
+ * profile: Althars on profiles of their own, as the end-to-end tests give,
+ * run side by side.
+ */
+const primary = app.requestSingleInstanceLock()
+if (!primary) app.quit()
+/** When the app is ready, in the instance that holds the lock; in a second, never: it quits without opening anything. */
+const ready = primary ? app.whenReady() : new Promise<void>(() => {})
 
 /*
  * The app's logs (logs.ts, DEV-61): where the system keeps an app's logs, or
@@ -244,7 +258,7 @@ const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
  * and an update installed when it opens on another version than last time.
  */
 const install = preferencesRead.then(() => installOf(locations().profile, app.getVersion()))
-const usage = Promise.all([install, app.whenReady()]).then(([install]) => {
+const usage = Promise.all([install, ready]).then(([install]) => {
   const sender = usageData({
     ...usageTarget,
     installId: install.id,
@@ -300,7 +314,7 @@ const maskHere = async () => {
  * is on and DO_NOT_TRACK isn't set. What fails before then waits for it.
  * Their first: a native crash since the last launch, once each.
  */
-const crashes = Promise.all([install, app.whenReady()]).then(([install]) => {
+const crashes = Promise.all([install, ready]).then(([install]) => {
   const sender = crashReports({
     ...usageTarget,
     installId: install.id,
@@ -446,10 +460,12 @@ const startRuntime = () => {
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
     if (message.type === 'usage') return recordUsage(message.usage)
     if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
-    if (message.type === 'store-failed') {
+    if (message.type === 'store-failed' || message.type === 'profile-in-use') {
       storeFailure = storeFailureOf(message)
-      // What stopped it goes in main's log too, so a report of it carries it.
-      if (storeFailure !== undefined)
+      // What stopped it goes in main's log too, so a report of it carries it. A profile in use is the person's to put right, not an error.
+      if (storeFailure?.stopped === 'held')
+        logs.info('Profile is open in another Althar or the command line', { reason: storeFailure.reason })
+      else if (storeFailure !== undefined)
         logs.error('Update couldn’t move the store', { stopped: storeFailure.stopped, reason: storeFailure.reason })
       for (const window of BrowserWindow.getAllWindows()) connect(window)
       return
@@ -471,12 +487,13 @@ const startRuntime = () => {
       settle(null)
       granting.delete(requestId)
     }
-    if (quitting || storeFailure !== undefined) return
     // A crash is survivable: reconciliation makes a restart safe, and each window reconnects when it reloads.
-    const now = Date.now()
-    restarts.push(now)
-    while (restarts[0] !== undefined && restarts[0] < now - 60_000) restarts.shift()
-    if (restarts.length <= RESTARTS_PER_MINUTE) {
+    const after = afterExit({ quitting, stopped: storeFailure !== undefined, retrying, restarts, now: Date.now() })
+    restarts = after.restarts
+    if (after.next === 'stay') return
+    if (after.next === 'start') {
+      retrying = false
+      storeFailure = undefined
       startRuntime()
       for (const window of BrowserWindow.getAllWindows()) window.webContents.reload()
       return
@@ -657,6 +674,13 @@ ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
   return path === null ? null : allowFolder(path)
 })
 
+// The person closed whatever had the profile open and asks Althar to try it again: the runtime that found it held stops, and a new one starts.
+ipcMain.handle('althar:try-again', () => {
+  if (storeFailure?.stopped !== 'held' || retrying) return
+  retrying = true
+  runtime?.postMessage({ type: 'shutdown' })
+})
+
 // Shows the copy of the store from before an update that couldn't move it, in the system's file manager.
 ipcMain.handle('althar:show-backup', () => {
   const backup = storeFailure?.backup
@@ -732,7 +756,7 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
   else bringForward()
 })
 
-void app.whenReady().then(() => {
+void ready.then(() => {
   // Quiet, Althar is never the active app and has no place on the Dock or in the app switcher.
   if (quiet) app.setActivationPolicy?.('accessory')
   // The window asks for nothing but dictation's microphone and the clipboard token it requests while connecting; its notifications come from main.
@@ -809,6 +833,9 @@ void app.whenReady().then(() => {
     if (windows.size === 0) openWindow()
   })
 })
+
+// A second launch of Althar on this profile: the first one comes forward.
+app.on('second-instance', () => void ready.then(bringForward))
 
 // Closing the last window isn't quitting on macOS: the runtime and its work carry on.
 app.on('window-all-closed', () => {

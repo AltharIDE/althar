@@ -3,7 +3,7 @@ import { basename, join } from 'node:path'
 
 import { agents, type AgentDefinition } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent } from '@althar/provider-adapters/testing'
-import { Agents } from '@althar/runtime'
+import { type AgentEntry, Agents } from '@althar/runtime'
 import { Layer } from 'effect'
 
 /*
@@ -59,10 +59,26 @@ const out = new Map(
 /** How long each fake agent takes to start a session, in milliseconds, where ALTHAR_FAKE_SLOW_START says: for what shows meanwhile. */
 const slowStart = process.env.ALTHAR_FAKE_SLOW_START === undefined ? undefined : Number(process.env.ALTHAR_FAKE_SLOW_START)
 
+/**
+ * Every other agent the registry has, as it is, where ALTHAR_FAKE_EVERY_AGENT
+ * is set: for what the window shows with all of them. None is started; where
+ * its command isn't on this computer, it shows as not there, to download or
+ * install.
+ */
+const others = (): ReadonlyArray<AgentEntry> =>
+  process.env.ALTHAR_FAKE_EVERY_AGENT !== '1'
+    ? []
+    : Object.values(agents)
+        .filter((real) => real.id !== 'claude-code' && real.id !== 'codex')
+        .map((real) => ({
+          definition: real,
+          transport: (cwd: string) => ({ _tag: 'Process' as const, spec: { command: 'althar-e2e-not-started', args: [] }, cwd }),
+        }))
+
 export const fakeAgents = Layer.succeed(
   Agents,
-  Agents.from(
-    [agents['claude-code'], agents.codex].map((real) => {
+  Agents.from([
+    ...[agents['claude-code'], agents.codex].map((real) => {
       const limited = out.get(real.id)
       return {
         definition: definition(real),
@@ -76,5 +92,6 @@ export const fakeAgents = Layer.succeed(
         },
       }
     }),
-  ),
+    ...others(),
+  ]),
 )

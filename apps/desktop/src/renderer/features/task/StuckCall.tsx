@@ -34,7 +34,7 @@ export const text = {
       case 'not_connected':
         return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then press Try again."
       case 'usage_limit':
-        return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt))
+        return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt), stuck.step)
       case 'stalled':
         return `${agent} has gone quiet: there has been no sign of work on this step for a while. ${review ? 'Review again, or skip the review.' : 'Start it again, or hand the step to another agent.'}`
       case 'looping':
@@ -110,7 +110,7 @@ export function StuckCall({
     return (
       <LimitCall
         request={request}
-        step={text.step[stuck.step]}
+        step={stuck.step}
         agentId={stuck.agentId}
         limit={stuck.limit}
         agents={agents}

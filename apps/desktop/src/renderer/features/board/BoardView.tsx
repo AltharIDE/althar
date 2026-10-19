@@ -6,6 +6,7 @@ import {
   type BoardCardProps,
   BoardColumn,
   BoardDivider,
+  type BoardFolds,
   BoardLane,
   BoardList,
   BranchChip,
@@ -48,7 +49,8 @@ import type { WorkActions } from './useWorkActions'
 
 /*
  * The project's work, as the kit's board lays it out: up next, running,
- * needs you, settled. A card has little to press: the whole of it opens
+ * needs you, settled, each lane collapsed to a rail where the person
+ * collapsed it or the board has no room for it. A card has little to press: the whole of it opens
  * its task, where a call is answered, work is accepted and the lead is told
  * what's next. The exception is a ready change's Push and Accept and merge,
  * which do it right there. Its top line says where the task stands in a word, then its
@@ -466,6 +468,8 @@ export function BoardView({
   closing,
   actions,
   line,
+  folds,
+  onFoldsChange,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -481,6 +485,9 @@ export function BoardView({
   actions?: CardActions
   /** Putting the line of tasks waiting for a free agent in the person's order; without it, the line stays as it is. */
   line?: LineActions
+  /** The lanes the person collapsed and opened, where they are kept; without them, the board keeps them while it is shown. */
+  folds?: BoardFolds
+  onFoldsChange?: (folds: BoardFolds) => void
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
@@ -515,7 +522,7 @@ export function BoardView({
   }
 
   return (
-    <Board label={text.label}>
+    <Board label={text.label} {...(folds === undefined ? {} : { folds })} {...(onFoldsChange === undefined ? {} : { onFoldsChange })}>
       <BoardColumn lane={BoardLane.Next} count={lanes.next.length}>
         {lanes.free > 0 && (
           <BoardDivider
