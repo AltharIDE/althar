@@ -532,6 +532,7 @@ export function ProjectView({
                     onOpen={onTask}
                     closing={closing}
                     actions={board}
+                    line={board.line}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
                 </>

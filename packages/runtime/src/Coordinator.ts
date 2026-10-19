@@ -103,7 +103,7 @@ const Drafted = Schema.Struct({
   issue: Schema.optional(Schema.String),
   repositories: Schema.optional(Schema.Array(Schema.String)),
 })
-/* A task drafted to work on an open pull request, such as to answer its review: it starts on that pull request's head (ADR-049). */
+/* A task drafted to work on an open pull request, such as to answer its review: it starts on that pull request's head (ADR-050). */
 const DraftedTask = Schema.Struct({ ...Drafted.fields, pull_request: Schema.optional(Schema.Union([Schema.String, Schema.Number])) })
 /* A task attached to an open pull request, by its link or number; `start_from_head`, the person's word to start its branch there. */
 const Attaching = Schema.Struct({
@@ -565,7 +565,7 @@ export class Coordinator extends Context.Service<
         })
 
       /**
-       * Attaches a task to an open pull request it didn't open (ADR-049), as
+       * Attaches a task to an open pull request it didn't open (ADR-050), as
        * the person can from the task: then it follows it. Where its branch
        * isn't based on that pull request's head, nothing changes until the
        * person says to start it from there.

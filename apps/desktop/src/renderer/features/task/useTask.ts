@@ -181,6 +181,8 @@ export interface TaskModel {
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
   readonly stopHolding: (threadId: string, id: string) => Promise<void>
+  /** Puts the task, waiting for a free agent, at the front of its project's line. */
+  readonly moveToFront: () => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
@@ -639,6 +641,7 @@ export const useTask = (threadId: string): TaskModel => {
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
+    moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
     runProject: (runnableId = null) =>
       act(async () =>

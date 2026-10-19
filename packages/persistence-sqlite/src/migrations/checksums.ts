@@ -38,5 +38,6 @@ export const checksums: Readonly<Record<string, string>> = {
   '0032_task_allow_everything': '8309781094a686d53ac3ea6149d527ffa9d697cf460c55a937e85e6bfcfa949b',
   '0033_runnables': 'b4d5103100101a8c571902d51ecb9c8395bdf109d31ffb4f555ef94cf8f2e6a9',
   '0034_dictated_input': '746c32131264f6b5544430c97efd48587fe14db5db1e046c992136ac53858101',
-  '0035_attached_change_sets': '1fde6e504a76e9c3bb92b7f7d486220f007bfc66214b3bed93da239d82ed847c',
+  '0035_line': '682993690b64c610bda73f71371d513ce207995099cd1152cfdaf3c71a57511b',
+  '0036_attached_change_sets': '1fde6e504a76e9c3bb92b7f7d486220f007bfc66214b3bed93da239d82ed847c',
 }

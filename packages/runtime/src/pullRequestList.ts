@@ -12,7 +12,7 @@ import { Instance } from './Instance'
  * the coordinator finds them before it reviews any (`find_pull_requests`):
  * a short line each, never what they say beyond their titles, which are
  * quoted as their authors' words. Each says whether Althar opened it, for
- * which task, which task follows it (ADR-049), or whether a task reviews it
+ * which task, which task follows it (ADR-050), or whether a task reviews it
  * already, so asking twice doesn't start a second review. A fork whose pull
  * requests open on the repository it came from lists that one's too, first:
  * its pull requests are there. Read-only: nothing reaches the host but reads.
