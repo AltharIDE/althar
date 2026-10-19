@@ -56,6 +56,8 @@ export interface RateLimitText {
   movedNote: string
   waiting: (resets: string) => string
   waitingNote: string
+  /** On work that waits on its own, kept waiting: opens the card again, to move it on after all. */
+  reopen: string
   tryingAgain: (runtime: string) => string
   /** Go on without the step: for a review. */
   skip: string
@@ -85,6 +87,7 @@ export const rateLimitText: RateLimitText = {
   movedNote: 'the step picks up from the task’s record',
   waiting: (resets) => `Waiting until ${resets}`,
   waitingNote: 'the step runs again then',
+  reopen: 'Pick another model',
   tryingAgain: (runtime) => `Trying ${runtime} again`,
   skip: 'Skip the review',
   skipped: 'Skipped the review',
@@ -140,7 +143,8 @@ const idOf = (option: RateLimitOption) => option.id ?? option.model.id
  * didn't say when that is, trying it again; and, for a review, going on
  * without it. Where the work waits for the reset on its own (`held`), the
  * same choices are a way on, not an ask, and the card is in ink. Once
- * answered it folds to one line.
+ * answered it folds to one line; work that waits on its own, kept waiting,
+ * can be opened again from there, since it still can be moved on.
  */
 export function RateLimit({
   runtime,
@@ -186,7 +190,19 @@ export function RateLimit({
         )
       case LimitAnswer.Waiting:
         return (
-          <AskAnswered said={t.waiting(resets ?? '')} {...line}>
+          <AskAnswered
+            said={t.waiting(resets ?? '')}
+            {...line}
+            {...(held
+              ? {
+                  undo: t.reopen,
+                  onUndo: () => {
+                    setAnsweredHere(false)
+                    setResult(null)
+                  },
+                }
+              : {})}
+          >
             <AskNote>· {t.waitingNote}</AskNote>
           </AskAnswered>
         )

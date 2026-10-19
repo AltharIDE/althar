@@ -39,4 +39,19 @@ describe('RateLimit', () => {
     expect(onSkip).toHaveBeenCalledOnce()
     expect(screen.getByText('Skipped the review')).toBeTruthy()
   })
+  it('opens work that waits on its own again, kept waiting, so it can still be moved on', async () => {
+    const onSwap = vi.fn()
+    render(<RateLimit runtime="Claude Code" resets="14:00" held options={options} onSwap={onSwap} onWait={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Wait until 14:00' }))
+    expect(screen.getByText('Waiting until 14:00')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Pick another model' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Continue with/ }))
+    expect(onSwap).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an ask answered with Wait folded', async () => {
+    render(<RateLimit runtime="Claude Code" resets="14:00" options={options} onSwap={vi.fn()} onWait={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Wait until 14:00' }))
+    expect(screen.queryByRole('button', { name: 'Pick another model' })).toBeNull()
+  })
 })

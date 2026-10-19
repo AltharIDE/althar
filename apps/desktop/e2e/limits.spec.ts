@@ -216,6 +216,12 @@ test('lets the person hand a step held for the reset to another model, from the 
     await page.getByRole('button', { name: 'Choose another model' }).click()
     await expect(page.getByRole('menuitemradio', { name: /via Codex/ })).toBeVisible()
     await page.keyboard.press('Escape')
+    // Kept waiting, it folds, and still opens again to move it on after all.
+    await page.getByRole('button', { name: /^Wait until / }).click()
+    const waiting = page.getByText(/^Waiting until /)
+    await expect(waiting).toBeVisible()
+    await waiting.locator('xpath=..').screenshot({ path: 'test-results/limit-held-waiting.png', scale: 'css' })
+    await page.getByRole('button', { name: 'Pick another model' }).click()
     await page.getByRole('button', { name: /^Continue with/ }).click()
     // Handed to Codex, it carries on there now, and the reset brings nothing back.
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible({ timeout: 15_000 })

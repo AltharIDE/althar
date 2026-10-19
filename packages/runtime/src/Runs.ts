@@ -3810,18 +3810,29 @@ export class Runs extends Context.Service<
                 undefined,
                 'person',
               )
-            case 'handed':
-              return yield* carryOn(
-                current,
-                row.attemptId,
-                place.info,
-                place.answer,
-                yield* envelope('thread.send', { placed: row.attemptId }),
-                undefined,
-                undefined,
-                undefined,
-                'underway',
+            case 'handed': {
+              // As one handed on at once: an agent that can't start leaves the step needing the person, not admitted with nothing at work.
+              const carried = yield* Effect.exit(
+                carryOn(
+                  current,
+                  row.attemptId,
+                  place.info,
+                  place.answer,
+                  yield* envelope('thread.send', { placed: row.attemptId }),
+                  undefined,
+                  undefined,
+                  undefined,
+                  'underway',
+                ),
               )
+              if (carried._tag === 'Failure')
+                yield* stuck(
+                  current,
+                  { id: row.attemptId },
+                  { ...place.info, why: 'failed_to_start', detail: summarize(carried.cause) || null },
+                )
+              return
+            }
             case 'next': {
               if (row.nodeKey === 'review') {
                 const step = place.reviewer ?? (JSON.parse(row.config) as PlanStep)

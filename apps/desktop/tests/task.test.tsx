@@ -2172,6 +2172,10 @@ describe('a task', () => {
     await userEvent.click(await screen.findByRole('button', { name: `Wait until ${clock(back)}` }))
     expect(await screen.findByText(`Waiting until ${clock(back)}`)).toBeTruthy()
     expect(client.handOverHeld).toHaveBeenCalledOnce()
+    // Still held, it can be moved on after all, in the same view.
+    await userEvent.click(screen.getByRole('button', { name: 'Pick another model' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Continue with/ }))
+    await waitFor(() => expect(client.handOverHeld).toHaveBeenCalledTimes(2))
   })
 
   it('reads the accounts again at the reset of one out of usage, so it can be picked then', async () => {

@@ -9,6 +9,7 @@ import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
+import { Agents } from '../src/Config'
 import { Coordinator } from '../src/Coordinator'
 import { NotFound } from '../src/errors'
 import { type Failure, failureOf, Failures } from '../src/Failures'
@@ -22,7 +23,7 @@ import { type PlanStep, Runs, type StuckAnswer } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
-import { items, repository, runtime, until } from './support'
+import { fakeAgents, items, repository, runtime, until } from './support'
 
 /*
  * An agent out of usage (docs/architecture/05): its work moves on to the
@@ -714,6 +715,107 @@ describe('a step held for a usage limit, handed over by the person', () => {
         ),
       ),
     )
+  })
+})
+
+/**
+ * In the store at `file`: a task whose lead, out of usage, the person handed
+ * to Codex on its large model while another task's lead held the only place,
+ * so it waits its turn in Up next as Althar stops.
+ */
+const handedWhileBusy = (file: string, back: number) =>
+  Effect.gen(function* () {
+    const { projectId, task, start } = yield* planned([lead('claude-code')])
+    yield* waits(projectId)
+    yield* start
+    yield* until(cardOf(projectId), (cards) => cards.some((card) => card.waits != null), Duration.seconds(10))
+    const other = yield* planned([lead('opencode')], 'Hold the place [lead:wait]')
+    yield* other.start
+    yield* until(
+      cardOf(other.projectId),
+      (cards) => cards.some((card) => card.taskId === other.task.taskId && card.phase === 'running' && card.queued === null),
+      Duration.seconds(10),
+    )
+    yield* handOver(task.taskId, { kind: 'retry', agentId: 'codex', accountId: yield* usual('codex'), model: 'large' })
+    yield* until(
+      cardOf(projectId),
+      (cards) => cards.some((card) => card.taskId === task.taskId && card.queued !== null),
+      Duration.seconds(10),
+    )
+    return { projectId, task }
+  }).pipe(
+    Effect.provide(
+      Queries.layer.pipe(
+        Layer.provideMerge(
+          runtime(
+            file,
+            {},
+            { each: { 'claude-code': { outOfUsage: { until: back } } }, busy: { machine: { cores: 3, memory: 7 * 1024 ** 3 } } },
+          ),
+        ),
+      ),
+    ),
+  )
+
+describe('a held step handed over while every place is taken, across a restart', () => {
+  const store = () => join(mkdtempSync(join(tmpdir(), 'althar-handed-')), 'althar.sqlite')
+
+  it.live('carries on, on the agent, account and model picked', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const file = store()
+      const { projectId, task } = yield* handedWhileBusy(file, back)
+      yield* Effect.gen(function* () {
+        // With a place free at the next launch, it starts as the person handed it, and not on the agent it was held for.
+        yield* until(
+          cardOf(projectId),
+          (cards) => cards.some((card) => card.taskId === task.taskId && card.phase === 'ready'),
+          Duration.seconds(20),
+        )
+        assert.deepStrictEqual(yield* ranOn(task.threadId), [
+          ['claude-code', 'small'],
+          ['codex', 'large'],
+        ])
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { each: { 'claude-code': { outOfUsage: { until: back } } } }))),
+        ),
+      )
+    })
+  })
+
+  it.live('needs the person where the agent picked can’t start once it has a place', () => {
+    const back = Date.now() + HOUR
+    return Effect.gen(function* () {
+      const file = store()
+      const { task } = yield* handedWhileBusy(file, back)
+      // Codex no longer starts by the next launch.
+      const broken = Layer.effect(
+        Agents,
+        Effect.gen(function* () {
+          const agents = yield* Agents
+          const missing = yield* Effect.orDie(agents.get('missing'))
+          const failing = (entry: (typeof agents.list)[number]) =>
+            entry.definition.id === 'codex' ? { ...entry, transport: missing.transport } : entry
+          return Agents.of({ list: agents.list.map(failing), get: (agentId) => Effect.map(agents.get(agentId), failing) })
+        }),
+      ).pipe(Layer.provide(fakeAgents()))
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const [call] = yield* until(
+          sql<{ why: string }>`
+            SELECT json_extract(payload, '$.why') AS why FROM attention_requests
+            WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`,
+          (rows) => rows.length === 1,
+          Duration.seconds(20),
+        )
+        assert.strictEqual(call?.why, 'failed_to_start')
+        const states = yield* sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND n.node_key = 'implement' ORDER BY a.rowid DESC LIMIT 1`
+        assert.deepStrictEqual(states, [{ state: 'waiting_attention' }])
+      }).pipe(Effect.provide(runtime(file, {}, { agents: broken })))
+    })
   })
 })
 
