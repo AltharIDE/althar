@@ -13,8 +13,9 @@ import { connectGitHub, launch, openFirstProject, say, startTask } from './suppo
  * GitHub: with one agent at a time, held by a server a finished task left
  * running, three reviews of someone else's pull requests and a quick task
  * wait in Up next, not Running, though none has a plan's first step. The
- * person drags the quick task to the front, and moves the review last in
- * line to the front from its own view; when the server stops, the line starts
+ * person drags the quick task to the front, to the back, and to the front
+ * again let go outside the lane, starts a drag they cancel with Escape, and
+ * moves the review last in line to the front from its own view; when the server stops, the line starts
  * in the person's order. Shots: test-results/line-*.png.
  */
 
@@ -108,6 +109,62 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await page.mouse.move(1400, 880)
     await page.waitForTimeout(400)
     await next.screenshot({ path: 'test-results/line-dropped.png', scale: 'css', animations: 'disabled' })
+
+    const JUMP = 'Try the double jump'
+    const inOrder = async (titles: ReadonlyArray<string>) => {
+      for (const [index, title] of titles.entries()) await expect(rows.nth(index)).toContainText(title)
+    }
+    // Presses a row's grip, to drag it from there.
+    const grab = async (title: string) => {
+      await rows.filter({ hasText: title }).hover()
+      const box = await next.getByRole('button', { name: new RegExp(`^Move ${title}.* in the line$`) }).boundingBox()
+      if (box === null) throw new Error(`${title} has no grip`)
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      await page.mouse.down()
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    }
+    const glide = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+      for (let step = 1; step <= 10; step++)
+        await page.mouse.move(from.x + ((to.x - from.x) * step) / 10, from.y + ((to.y - from.y) * step) / 10)
+    }
+    const reviews = PULLS.map((title, index) => `Review #${index + 1}: ${title}`)
+
+    // Down across the whole line: it goes to the back, and stays there once the runtime says the order.
+    const bottom = await rows.nth(3).boundingBox()
+    if (bottom === null) throw new Error('The line isn’t laid out')
+    const down = await grab(JUMP)
+    await glide(down, { x: down.x, y: bottom.y + bottom.height - 4 })
+    await inOrder([...reviews, JUMP])
+    await expect(rows.nth(3)).toContainText('4th in line')
+    await next.screenshot({ path: 'test-results/line-dragging-down.png', scale: 'css', animations: 'disabled' })
+    await page.mouse.up()
+    await page.waitForTimeout(2500)
+    await inOrder([...reviews, JUMP])
+
+    // Up again, let go outside the lane, above it at the window's edge: it goes where the row showed it, the front.
+    const above = await next.getByText('Starts when an agent is free').boundingBox()
+    if (above === null) throw new Error('The line has no divider')
+    const up = await grab(JUMP)
+    await glide(up, { x: 4, y: above.y - 30 })
+    await inOrder([JUMP, ...reviews])
+    await page.mouse.up()
+    await page.waitForTimeout(2500)
+    await inOrder([JUMP, ...reviews])
+
+    // Escape mid-drag puts the row back; the release after it, and hovering the grips later, move nothing.
+    const first = await rows.nth(0).boundingBox()
+    if (first === null) throw new Error('The line isn’t laid out')
+    const cancelled = await grab(reviews[2] ?? '')
+    await glide(cancelled, { x: cancelled.x, y: first.y + 4 })
+    await inOrder([reviews[2] ?? '', JUMP, reviews[0] ?? '', reviews[1] ?? ''])
+    await page.keyboard.press('Escape')
+    await inOrder([JUMP, ...reviews])
+    await page.mouse.up()
+    await glide({ x: cancelled.x, y: first.y + 4 }, { x: cancelled.x, y: cancelled.y })
+    await glide({ x: cancelled.x, y: cancelled.y }, { x: cancelled.x, y: first.y + 4 })
+    await page.waitForTimeout(2500)
+    await inOrder([JUMP, ...reviews])
+    await expect(page.getByRole('region', { name: 'Up next' })).toBeVisible()
 
     // The last review, 4th in line, goes to the front from its own view.
     await rows
