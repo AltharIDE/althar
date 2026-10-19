@@ -1094,7 +1094,7 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const said = yield* envelope('project.note.edit', { projectId, noteId }, commandId)
+              const said = yield* envelope('project.note.edit', { projectId, noteId, body }, commandId)
               yield* Effect.provideContext(editNote({ envelope: said, projectId, noteId, body }), store)
             }),
           ),
