@@ -83,6 +83,7 @@ export const gitOutcome = (
         ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
         timeout: 60_000,
         maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
         env: environmentIn(cwd, {}),
       },
       (error, stdout) =>
@@ -112,6 +113,7 @@ const run = (
         ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
         timeout,
         maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
         env: environmentIn(cwd, env),
       },
       (error, stdout, stderr) =>
@@ -500,7 +502,9 @@ export const PUSHED = 'refs/althar/pushed/'
  * the branch has, and only that (`--force-with-lease`), so commits someone
  * else pushed meanwhile are never lost. Pushed, the branch is kept under
  * `PUSHED`. The header that signs the push in goes to git through its
- * environment, so it is in no process's arguments.
+ * environment, so it is in no process's arguments. `onto` is the branch's
+ * name there, where it isn't the one here: the head of a pull request the
+ * task was attached to (ADR-052).
  */
 export const pushTo = (
   cwd: string,
@@ -509,6 +513,7 @@ export const pushTo = (
   /** What is pushed: the worktree's head, or a commit the person saw. */
   commit = 'HEAD',
   lease?: string,
+  onto = branch,
 ) =>
   run(
     120_000,
@@ -517,9 +522,9 @@ export const pushTo = (
       'push',
       '--quiet',
       '--no-verify',
-      ...(lease === undefined ? [] : [`--force-with-lease=refs/heads/${branch}:${lease}`]),
+      ...(lease === undefined ? [] : [`--force-with-lease=refs/heads/${onto}:${lease}`]),
       target.url,
-      `${commit}:refs/heads/${branch}`,
+      `${commit}:refs/heads/${onto}`,
     ],
     signedIn(target),
   ).pipe(

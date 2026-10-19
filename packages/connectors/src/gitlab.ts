@@ -79,6 +79,8 @@ const MergeAnswer = Schema.Struct({
   target_branch: Schema.String,
   /** The project the branch is on: a fork's, for a merge request from one. */
   source_project_id: Schema.optional(Schema.Number),
+  /** The project it goes into. */
+  target_project_id: Schema.optional(Schema.Number),
   sha: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(User)),
   // A string, and "1000+" past a thousand files; said only when one merge request is read.
@@ -214,6 +216,8 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
     : request.detailed_merge_status === undefined || CHECKING.has(request.detailed_merge_status)
       ? {}
       : { conflicts: request.has_conflicts === true }),
+  // A branch of the project's own; one from a fork's, `change` reads where it is.
+  ...(request.source_project_id !== undefined && request.source_project_id === request.target_project_id ? { headRepository: null } : {}),
 })
 
 /** GitLab's state for each a list can ask for. */
@@ -488,9 +492,19 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       Effect.gen(function* () {
         const request = yield* http.cached(MergeAnswer, `${project(repository)}/merge_requests/${number}`)
         const size = yield* sizeOf(repository, request)
-        return size === null
-          ? changeOf(request)
-          : { ...changeOf(request), additions: size.additions, deletions: size.deletions, changedFiles: size.files }
+        // The fork its branch is on, by its path; none where it is gone.
+        const fork =
+          request.source_project_id === undefined || request.source_project_id === request.target_project_id
+            ? undefined
+            : yield* http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
+                Effect.map((answer) => answer.path_with_namespace.split('/')),
+                Effect.catchIf(
+                  (error) => error.reason === 'not_found',
+                  () => Effect.succeed([]),
+                ),
+              )
+        const change = fork === undefined ? changeOf(request) : { ...changeOf(request), headRepository: fork }
+        return size === null ? change : { ...change, additions: size.additions, deletions: size.deletions, changedFiles: size.files }
       }),
     listChanges: (repository, query) =>
       Effect.gen(function* () {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
   AbandonTask,
+  AttachPullRequest,
   ChangeView,
   BackCrumb,
   Button,
@@ -76,7 +77,7 @@ import { serviceOfProduct } from '../connections/ways'
 import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
 import { NoOutputsView } from './NoOutputsView'
-import { conflictsOf, hasOutputs, Outputs } from './Outputs'
+import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
@@ -337,6 +338,11 @@ export function TaskView({
   const [connecting, setConnecting] = useState(false)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
+  // Attaching it to a pull request asks which; then, where its branch isn't based on that one's head, whether to start it there.
+  const [attaching, setAttaching] = useState<{
+    readonly value: string
+    readonly start?: { readonly name: string; readonly source: string; readonly own: number }
+  } | null>(null)
   // Abandoned, the pull requests it was to close that are still open, by address, offered again: null until then.
   const [leftOpen, setLeftOpen] = useState<ReadonlyArray<string> | null>(null)
   const endAbandoning = () => {
@@ -404,7 +410,7 @@ export function TaskView({
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
   // c and o switch the faces, and Escape goes back to the project: never while typing, or with something else open.
-  const open = changes.open || abandoning
+  const open = changes.open || abandoning || attaching !== null
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || typing(event) || open) return
@@ -634,6 +640,16 @@ export function TaskView({
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
+        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-052); a
+        // review reads one only.
+        {...(can('abandon') && snapshot.task.phase !== 'settled' && snapshot.task.review == null && snapshot.task.worktree !== null
+          ? {
+              onAttach: () => {
+                model.dismissError()
+                setAttaching({ value: '' })
+              },
+            }
+          : {})}
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
@@ -802,7 +818,7 @@ export function TaskView({
       {snapshot.task.review != null && (
         <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
       )}
-      {shown === 'out' && !hasOutputs(snapshot) ? (
+      {shown === 'out' && !hasOutputsToShow(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
         <div className={connecting ? s.withPanel : s.outputsFace}>
@@ -810,7 +826,6 @@ export function TaskView({
           <ThreadShellProvider value={host.shell}>
             <Outputs
               snapshot={snapshot}
-              lead={lead}
               pending={model.pending}
               doing={model.doing}
               error={model.error}
@@ -827,8 +842,6 @@ export function TaskView({
                 })
               }
               onMarkReady={(url) => void model.markReady(url)}
-              // Sending it back is a note to its lead, which starts it again if it stopped.
-              onSendBack={(note) => send(note, false)}
               onOpenFile={changes.show}
               conflict={model.conflict}
               onPushHere={() => void model.pushHere()}
@@ -1050,6 +1063,32 @@ export function TaskView({
               })
           }
           onClose={endAbandoning}
+        />
+      )}
+      {attaching !== null && (
+        <AttachPullRequest
+          key={attaching.start === undefined ? 'ask' : 'start'}
+          defaultValue={attaching.value}
+          {...(attaching.start === undefined
+            ? {}
+            : {
+                start: attaching.start,
+                onBack: () => {
+                  model.dismissError()
+                  setAttaching({ value: attaching.value })
+                },
+              })}
+          busy={model.pending}
+          {...(model.error === null ? {} : { error: model.error })}
+          onAttach={(pullRequest, start) =>
+            void model.attach(pullRequest, start).then((done) => {
+              if (done === null) return
+              setAttaching(
+                done.kind === 'start' ? { value: pullRequest, start: { name: done.name, source: done.source, own: done.own } } : null,
+              )
+            })
+          }
+          onClose={() => setAttaching(null)}
         />
       )}
       {changes.open && (

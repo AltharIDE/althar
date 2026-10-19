@@ -2187,6 +2187,68 @@ describe('code hosts and trackers, through the API', () => {
 describe('words', () => {
   const name = (agentId: string) => (agentId === 'codex' ? 'Codex' : agentId)
 
+  it('says the rest of what can go wrong as the window shows it, and a reason it has no words for in general ones', () => {
+    const said = (error: unknown) => words(error, name).message
+    const cases: ReadonlyArray<readonly [unknown, string]> = [
+      [
+        { _tag: 'InstallFailed', agentId: 'opencode', summary: 'GitHub couldn’t be reached to find OpenCode.' },
+        'GitHub couldn’t be reached to find OpenCode.',
+      ],
+      [{ _tag: 'AlwaysNotOffered' }, "That can't be kept as a rule for this request. Answer it once instead."],
+      [{ _tag: 'QuestionUnanswered' }, 'Answer each question: pick an option, or write your own.'],
+      [{ _tag: 'NotHeld' }, "The step isn't waiting for its usage limit any more: it carried on, or was stopped."],
+      [{ _tag: 'LaunchRefused', message: 'Codex needs Node 20 or later.' }, 'Codex needs Node 20 or later.'],
+      [
+        { _tag: 'SignOutFailed', line: 'codex logout' },
+        "Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.",
+      ],
+      [{ _tag: 'DraftClosed', state: 'filed' }, 'That issue is filed already. Change it on its tracker.'],
+      [{ _tag: 'DraftClosed', state: 'archived' }, 'That issue draft can’t change now.'],
+      [{ _tag: 'DraftUntitled' }, 'An issue needs a title.'],
+      [{ _tag: 'CliUnanswered', tool: 'gh' }, "gh didn't answer in time. Try again in a moment."],
+      [
+        { _tag: 'CliElsewhere', tool: 'glab', address: 'http://git.example' },
+        "Althar only gives glab's sign-in to a server it knows, over HTTPS. http://git.example isn't one.",
+      ],
+      [
+        { _tag: 'OtherAccount', login: 'dana', expected: 'meridian-bot' },
+        "This token is dana's. Make one as meridian-bot, or connect dana as well from the list.",
+      ],
+      [
+        { _tag: 'RuleOnAnotherList', exact: true, pattern: 'rm -rf build', list: 'ask' },
+        '“rm -rf build” is on “Always ask me”, which comes first, so nothing changed. Take it off “Always ask me” first.',
+      ],
+      [
+        { _tag: 'PushRefused', remote: 'origin', why: 'refused', said: 'pre-receive hook declined.' },
+        'origin refused the push: pre-receive hook declined.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: 'src/a.ts' },
+        'The lead left changes it didn’t commit, in src/a.ts. Ask it to commit them or clear them away, then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: '' },
+        'The lead left changes it didn’t commit. Ask it to commit them or clear them away, then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'conflicts', detail: 'README.md' },
+        'The new commits don’t apply on the default branch as it is now: they conflict in README.md. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'conflicts', detail: '' },
+        'The new commits don’t apply on the default branch as it is now: they conflict. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+      ],
+      // A reason added since, with no words of its own yet: the general sentence for its kind.
+      [{ _tag: 'ProjectRefused', reason: 'new_reason' }, "Althar can't change the project that way."],
+      [{ _tag: 'DocumentRefused', reason: 'new_reason' }, 'Althar can’t show that file here.'],
+      [{ _tag: 'ImageRefused', reason: 'new_reason', name: 'shot.png' }, "Althar can't send that image."],
+      [{ _tag: 'NoteRefused', why: 'new_reason' }, 'Althar can’t keep that note.'],
+      [{ _tag: 'CantMerge', why: 'new_reason', detail: 'It moved.' }, "Althar couldn't merge it. It moved."],
+      [{ _tag: 'AccountRefused', reason: 'new_reason' }, "Althar can't add that account."],
+    ]
+    for (const [error, words] of cases) assert.strictEqual(said(error), words, JSON.stringify(error))
+  })
+
   it("says each of the runtime's errors as the window shows it", () => {
     const said = (error: unknown) => words(error, name).message
     assert.strictEqual(

@@ -195,10 +195,14 @@ describe('a plain task', () => {
       const place = yield* opened
       const task = yield* started(place, 'Check the partners', 'Look. [lead:finish] [lead:terse]')
       yield* cardOnce(task.id, (one) => one.phase === 'ready')
-      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
+      // Finished, it waits for the person to settle it (ADR-051): they do, once it can be.
+      const markDone = Effect.flatMap(Runtime.envelope('task.mark_done', { taskId: task.id }), (envelope) =>
+        Effect.map(tasks.markDone({ envelope, taskId: task.id }), (done) => [done]),
+      )
       const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
+      yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
-      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task waits for the person again (ADR-051).
+      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task is done again.
       yield* say(task.threadId, 'And the v2 ones?')
       const [told] = yield* until(
         sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,
@@ -210,7 +214,8 @@ describe('a plain task', () => {
         (rows) => (rows[0]?.n ?? 0) === 1,
         Duration.seconds(20),
       )
-      yield* until(state, (rows) => rows[0]?.state === 'open')
+      yield* until(markDone, ([done]) => done === true)
+      yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { blank: [2] }, { idle: { blank: Duration.millis(100) } }))),
@@ -705,6 +710,13 @@ describe('making a quick task a change', () => {
       yield* say(task.threadId, 'I really like it: can we make it a real thing? [lead:make-change] [lead:finish]')
       const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'implement', 'review', 'publish'])
+      // Its thread says when it became a change, between what the quick task showed and what the change did, and the
+      // description its lead wrote for the pull request, which its Outputs says it is with.
+      const read = yield* (yield* Queries).thread(task.threadId)
+      const [quick, made] = read.items.flatMap((item) => (item.kind === 'step_result' && item.content.step === 'implement' ? [item] : []))
+      const at = read.task.madeChangeAt ?? ''
+      assert.isTrue(quick !== undefined && made !== undefined && quick.createdAt <= at && at <= made.createdAt, at)
+      assert.isAbove(Object.values(made?.content.descriptions ?? {}).join('').length, 0)
       // Renamed for what it does, with its review and its ending in its plan, and nothing of staying here.
       assert.strictEqual(card.title, 'Make the sketch real')
       assert.deepStrictEqual(

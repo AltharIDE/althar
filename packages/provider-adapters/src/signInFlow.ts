@@ -127,7 +127,7 @@ export const startSignInFlow = (
   const env = { ...process.env, ...asNode({ command: spec.command, args: spec.args }), ...spec.env, ...temp?.env, ...options.home }
   // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
   const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
-  const child = spawn(launched.command, [...launched.args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawn(launched.command, [...launched.args], { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   // Its temporary folder goes once it has stopped, or where it never started.
   child.on('exit', () => removeTemp(temp?.folder))
   child.on('error', () => removeTemp(temp?.folder))
@@ -198,7 +198,9 @@ const claude = (
     const status = agent.signIn.status?.(adapterNode())
     if (status === undefined) return end({ kind: 'done', who: null, plan: null })
     const ran = status.onDevice === undefined ? status : status.onDevice({ env })
-    execFile(ran.command, [...ran.args], { env, timeout: 15_000 }, (_error, stdout) => end({ kind: 'done', ...claudeWho(stdout) }))
+    execFile(ran.command, [...ran.args], { env, timeout: 15_000, windowsHide: true }, (_error, stdout) =>
+      end({ kind: 'done', ...claudeWho(stdout) }),
+    )
   })
   return {
     paste: (code: string) => void child.stdin.write(`${code.trim()}\n`),

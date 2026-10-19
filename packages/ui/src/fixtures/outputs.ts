@@ -25,7 +25,6 @@ export const PRS_418: PullRequest[] = [
     number: 412,
     url: 'https://github.com/stripe-internal/meridian-web/pull/412',
     files: [{ path: 'src/middleware/require-auth.ts', add: 14, del: 3 }],
-    after: { number: 1187, why: 'calls invalidate() from the API change' },
   },
 ]
 
@@ -67,78 +66,56 @@ export const CHECKS_PASSED: ChangeCheck[] = [
   { id: 'integration', name: 'Integration', state: CheckState.Passed, detail: '38 passed, across both repositories' },
 ]
 
-type Data = Omit<ChangeSetProps, 'onAccept' | 'onSendBack' | 'onReviewDiff' | 'onOpenFile' | 'text'>
+type Data = Omit<ChangeSetProps, 'actions' | 'onReviewDiff' | 'onOpenFile' | 'text'>
 
-const BASE_418 = {
-  host: GITHUB,
-  title: 'Repair token refresh on privilege change',
-  branch: 'ch/418-token-refresh',
-  base: 'main',
-  lead: OPUS,
-  reviewers: [SONNET, GEMINI_PRO],
-  prs: PRS_418,
-}
+/** The host's checks alone: its review is a line of its own. */
+const hosts = (checks: ChangeCheck[]) => checks.filter((check) => check.id !== 'review')
+
+const BASE_418 = { host: GITHUB, prs: PRS_418 }
 
 export const CHANGE_DRAFT: Data = {
   ...BASE_418,
   state: ChangeState.Draft,
-  note: 'Opens for review when every check passes',
-  commits: 9,
-  checks: CHECKS_RUNNING,
+  checks: hosts(CHECKS_RUNNING),
+  review: { state: CheckState.Passed, by: [SONNET, GEMINI_PRO] },
 }
 
 export const CHANGE_HELD: Data = {
   ...BASE_418,
   state: ChangeState.Draft,
-  note: 'Held until you make the call on the fallback',
-  commits: 6,
   checks: CHECKS_HELD,
 }
 
 export const CHANGE_READY: Data = {
   ...BASE_418,
   state: ChangeState.Ready,
-  note: 'Every check passed · nothing merges until you accept',
-  commits: 11,
-  checks: CHECKS_PASSED,
+  checks: hosts(CHECKS_PASSED),
+  review: { state: CheckState.Passed, by: [SONNET, GEMINI_PRO] },
 }
 
-export const CHANGE_MERGED: Data = {
+export const CHANGE_FAILED: Data = {
   ...BASE_418,
-  state: ChangeState.Merged,
-  note: 'Accepted by you · merged in order · 3h ago',
-  commits: 11,
-  checks: CHECKS_PASSED,
+  state: ChangeState.Ready,
+  checks: CHECKS_FAILED,
+  review: { state: CheckState.Passed, by: [SONNET, GEMINI_PRO] },
 }
+
+export const CHANGE_MERGED: Data = { ...CHANGE_READY, state: ChangeState.Merged }
 
 export const CHANGE_ONE_REPO: Data = {
   host: GITHUB,
-  title: 'Return 409 when a refund idempotency key is reused',
-  branch: 'ch/416-idem-409',
-  base: 'main',
-  lead: OPUS,
-  reviewers: [OPUS],
   prs: PR_416,
   state: ChangeState.Ready,
-  note: 'Every check passed · nothing merges until you accept',
-  commits: 4,
   checks: [
     { id: 'unit', name: 'Unit', state: CheckState.Passed, detail: '88 passed' },
-    { id: 'review', name: 'Review', state: CheckState.Passed, by: [OPUS], detail: '1 finding, fixed' },
     { id: 'integration', name: 'Integration', state: CheckState.Passed, detail: '12 passed' },
   ],
+  review: { state: CheckState.Passed, by: [OPUS] },
 }
 
 /** Work that ended on its branch, with no pull request: its repository's files, and the review it passed; it merges on this Mac. */
 export const CHANGE_BRANCH: Data = {
-  title: 'Return 409 when a refund idempotency key is reused',
-  branch: 'althar/return-409-on-reuse',
-  base: 'main',
-  lead: OPUS,
-  reviewers: [SONNET],
   prs: [{ repo: 'meridian-api', files: PR_416[0]?.files ?? [] }],
   state: ChangeState.Branch,
-  note: 'Its repository isn’t on a code host Althar knows · nothing was pushed',
-  commits: 2,
-  checks: [{ id: 'review', name: 'Review', state: CheckState.Passed, by: [SONNET], detail: 'passed on the second round' }],
+  review: { state: CheckState.Passed, by: [SONNET] },
 }
