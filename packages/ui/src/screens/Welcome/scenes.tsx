@@ -224,17 +224,7 @@ export function TaskScene({ live, instant }: SceneProps) {
         )}
         {shown > 1 && (
           <div className={s.enter}>
-            <TaskCard
-              {...TASK}
-              status={TaskStatus.Running}
-              steps={STEPS}
-              at={at}
-              now={DOING[at]}
-              started="just now"
-              lead={OPUS}
-              branch="ch/418-token-refresh"
-              fresh
-            />
+            <TaskCard {...TASK} status={TaskStatus.Running} steps={STEPS} at={at} now={DOING[at]} started="just now" lead={OPUS} fresh />
           </div>
         )}
       </div>

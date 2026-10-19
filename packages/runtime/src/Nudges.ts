@@ -4,6 +4,7 @@ import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } 
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
+import { outStep } from './Limits'
 import { field, parse, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
 import { Sessions } from './Sessions'
@@ -63,7 +64,7 @@ export const callWords = (
     const stuck = stuckOf(call.payload)
     if (stuck.why === 'usage_limit' && stuck.agentId !== null) {
       const agent = agents.find((entry) => entry.definition.id === stuck.agentId)?.definition.name ?? stuck.agentId
-      return `Needs you: ${agent} reached its usage limit`
+      return `Needs you: ${agent} ran out of usage${stuck.step === 'publish' ? '' : ` ${outStep[stuck.step].during}`}`
     }
     return `Needs you: ${STEPS[stuck.step]} is stuck`
   }

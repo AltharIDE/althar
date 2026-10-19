@@ -120,6 +120,8 @@ export enum LimitAnswer {
   Waiting = 'waiting',
   /** Tried the same agent again, as one that didn't say when it resets may be back. */
   Again = 'again',
+  /** Went on without the step: a review, skipped. */
+  Skipped = 'skipped',
 }
 
 /** A step of a task's graph. */

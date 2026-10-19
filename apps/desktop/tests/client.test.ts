@@ -297,6 +297,7 @@ describe('the client', () => {
           RollBackSkill: () => Effect.die('unused'),
           SetSkillActive: () => Effect.die('unused'),
           UninstallSkill: () => Effect.die('unused'),
+          HandOverHeld: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),
           StartSignIn: () => Effect.die('unused'),
           GetSignIn: () => Effect.die('unused'),

@@ -188,6 +188,8 @@ export const words = (
         return 'Answer each question: pick an option, or write your own.'
       case 'NothingToWaitFor':
         return "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again."
+      case 'NotHeld':
+        return "The step isn't waiting for its usage limit any more: it carried on, or was stopped."
       case 'AlreadyDelivered':
         return "The agent already has that message, so it can't be taken back."
       case 'GitFailed': {
@@ -403,6 +405,7 @@ export const expected = new Set([
   'AlwaysNotOffered',
   'QuestionUnanswered',
   'NothingToWaitFor',
+  'NotHeld',
   'RuleOnAnotherList',
   'RulesChanged',
   'AlreadyDelivered',
