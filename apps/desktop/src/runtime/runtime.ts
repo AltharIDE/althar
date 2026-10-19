@@ -25,6 +25,7 @@ import { editorsHere, openInEditor } from './editors'
 import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
+import { profileInUse } from './profileInUse'
 import { openInBrowser, openInTerminal } from './terminal'
 
 /*
@@ -247,6 +248,7 @@ const program = Effect.gen(function* () {
       ForeignKeyViolations: (failure) =>
         storeStopped('moving', failure.backup, `Rows in ${failure.tables.join(', ')} point at rows that aren’t there.`),
       BackupFailed: (failure) => storeStopped('copying', null, failure.reason),
+      DatabaseInUse: () => profileInUse((message) => parent.postMessage(message)),
     }),
   )
   isReady(context)

@@ -1025,6 +1025,7 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   onOpen: vi.fn(() => () => {}),
   onStoreFailed: vi.fn(() => () => {}),
   showBackup: vi.fn(async () => {}),
+  tryAgain: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
   edge: vi.fn(async () => ({ place: 'island', notch: true, platform: 'darwin', tray: true })),
