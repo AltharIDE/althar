@@ -14,9 +14,9 @@ import { launch, openFirstProject, planTask, say } from './support'
  * work, its steps on its card; and a plain task, started with no plan, that
  * finished and waits in Needs you as Finished, opened or not, until the
  * person presses Done or Keep for later (ADR-050). No other card has
- * anything to press but itself. Kept, it waits behind Settled's tab; Done,
- * it settles; written to again, its round ends back in Needs you. Then ⌘K
- * finds a task by what it was about.
+ * anything to press but itself. Kept, it waits under Kept, named beside
+ * Settled in its head; Done, it settles; written to again, its round ends
+ * back in Needs you. Then ⌘K finds a task by what it was about.
  */
 
 test('shows each kind of task on the board, with nothing to press, and finds one by what it was about', async () => {
