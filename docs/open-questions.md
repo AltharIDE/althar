@@ -25,23 +25,35 @@ Automations tab, as cards, each automation on its own page.
   the coordinator is told and decides. Leaning: Althar starts it.
 - [ ] **Each run: a new task, or the open one carried on.** Leaning: a new
   task for each subject; a change whose pull request is still open carries
-  on with a follow-up.
+  on with a follow-up round, which is new, its commits going up as a check
+  fix's do; a task the person took over is skipped.
 - [ ] **What it may do with nobody there.** Leaning: draft pull requests,
-  reviews drafted only, never merge.
+  reviews drafted only whatever the team-reviews setting says, never merge.
 - [ ] **Permission asks at night.** Leaning: the project's rules as they
-  are; asks park in Needs you; no allow-everything for an automation alone.
+  are; asks park in Needs you; no allow-everything for an automation alone,
+  and the project's allow everything doesn't reach its runs.
 - [ ] **Events from outside the team.** Leaning: they fire nothing, unless
   allowed, and then the run only reads.
 - [ ] **The limits by default.** One place; an hour apart at least; 45
-  minutes a run; stop on a usage limit; plan accounts only at first.
-- [ ] **The coordinator's reach.** Leaning: pause, resume and Run now in
-  words; any other change on a card.
+  minutes of work a run, over all its steps; runs a day capped for all
+  automations together; stop on a usage limit; plan accounts only at
+  first, which leaves OpenCode out.
+- [ ] **The coordinator's reach.** Leaning: pause in words; resume and Run
+  now on a small card; any other change on a card.
 - [ ] **Where they live.** Leaning: in Althar, the person's own, on the Mac
   they were made on; no files in the repository.
 - [ ] **Rules or automations** for what needs no agent, such as closing an
   issue when its pull request merges. Leaning: rules.
 - [ ] **The cloud.** Are runs in the cloud on the way, or is the person's
   own Mac the product? It changes only how soon a webhook relay is worth it.
+- [ ] **A run's worktree.** One warm worktree for each automation; remove a
+  settled run's, which ADR-006 doesn't allow today; or keep them all.
+  Leaning: warm for changes and sweeps, removed for review copies, only what
+  an automation made.
+- [ ] **9:00 where the person is, or where it was made.** Leaning: where the
+  person is.
+- [ ] **What Pause all stops.** Only what would start, or runs under way
+  too. Leaning: only what would start.
 - [ ] **"Run" on screen.** The glossary keeps it off; the picked page has
   Run now and a history of runs.
 

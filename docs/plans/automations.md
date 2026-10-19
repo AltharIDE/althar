@@ -33,17 +33,19 @@
 - **A run can do no more than the person, and less by default.** Althar
   takes every outward step itself, as it does today: a draft pull request, a
   drafted review, a held plan. It never merges. A run that would ask the
-  person parks in Needs you without holding a place. Events from outside the
-  team fire nothing by default.
+  person parks in Needs you without holding a place, and the project's
+  allow everything doesn't reach it. Events from outside the team fire
+  nothing by default.
 - **Small by construction:** one place for automations at most, after the
-  person's own work; a time limit a run; at least an hour between runs;
-  three failures in a row pause it; a run that found nothing leaves no card.
+  person's own work, for every step of its task; a time limit a run, over
+  all its steps; at least an hour between runs; three failures in a row
+  pause it; a query that found nothing starts no task.
 - **Ready for the cloud without building it.** The occurrence is a record
   with an idempotency key, whoever noticed the trigger; starting its task is
   a step of its own that could be leased to a device. Moving the clock or the
   webhooks to a server later swaps one part, not the model. Running agents in
   the cloud is a different product, and a separate decision.
-- **Twelve calls are the person's**, at the end, each with what I'd pick.
+- **Fifteen calls are the person's**, at the end, each with what I'd pick.
 
 ## What was picked
 
@@ -96,25 +98,30 @@ Three records, three lifetimes:
   happened. It exists even when nothing starts: skipped (paused, busy, out of
   its window, overlapping, no longer needed), nothing to do, missed while the
   Mac slept. It is the history the page shows, and the unit of dedupe:
-  `(automation, slot)` for a schedule, `(automation, subject, version)` for
-  an event, unique in SQLite and written before anything starts. Every
-  product that does this well lands here: delivery is at least once, so
-  dedupe at the record (Superset's partial unique indexes, Kubernetes'
-  "jobs should be idempotent").
+  `(automation, slot)` for a schedule, `(automation, slot, subject)` for a
+  schedule with a subject query, `(automation, subject, version)` for an
+  event, unique in SQLite and written before anything starts. A slot is the
+  time it was due, as its rule says it (a local date and time), not when the
+  stagger starts it. Every product that does this well lands here: delivery
+  is at least once, so dedupe at the record (Superset's partial unique
+  indexes, Kubernetes' "jobs should be idempotent").
 - **The task** is unchanged, and carries the occurrence that started it.
   Its kind is read from what it has
   ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)): a
   review automation makes review tasks, a nightly bump makes changes, a sweep
   that only reports makes plain tasks.
 
-Keeping the occurrence apart from the task buys three things: a run that
-found nothing leaves no card; duplicates are refused by a constraint, not
+Keeping the occurrence apart from the task buys three things: a query that
+found nothing starts no task; duplicates are refused by a constraint, not
 by care; and it is the seam for the cloud, since whoever notices the trigger
 writes occurrences and whoever has the repository starts the task.
 
 An occurrence is marked started only once its task has started, not when it
 was dispatched: Claude Code's desktop tasks wrote "last run" at dispatch,
-dropped the run during startup, and showed it as done.
+dropped the run during startup, and showed it as done. And the occurrence
+names its task in the same transaction that makes the task, since both are
+in the one SQLite database: a restart in between finds the task and carries
+it on, and never makes a second.
 
 ### Subjects: why the morning review is four tasks
 
@@ -133,6 +140,15 @@ opened since the last time, not yours, not reviewed yet". Where no query
 fits, the subject is the project as a whole, and the lead does the choosing
 in one task. The connectors mostly list with filters already (`listChanges`
 takes an author, review requested and draft); "opened since" is missing.
+
+"Since the last time" means since the last listing that came back whole,
+not the last fire: a slot skipped because the Mac was busy, or a listing
+that failed, moves nothing on. "Not reviewed by a task already" is what
+keeps a pull request from being reviewed twice; "since" only keeps the
+listing short. A listing holds at most its `limit`, newest first, and says
+when the host has `more`; `listChanges` doesn't page, so the oldest are the
+ones cut. It needs paging or the "opened since" filter, and until then a
+listing with more says how many it left, rather than moving past them.
 
 ### Who decides what a fire does
 
@@ -213,7 +229,10 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
 - **9:00 where the person is.** Keep the zone, but read the time in the
   Mac's zone of the moment, as Calendar's floating times do, so travelling
   doesn't move the morning review to 3:00. The zone is still kept, for a
-  server that has none.
+  server that has none. So the next time, kept as an instant, is worked out
+  again when the Mac's zone changes; and since a slot is its local date and
+  time, flying across zones never runs a day's 9:00 twice, and a day the
+  flight skips is missed, as any. Fixed or travelling time is call 14.
 - **Daylight saving:** a 2:30 that doesn't exist runs at 3:30 (Temporal's
   `compatible`); a 1:30 that happens twice runs once, the first time.
 - **The next slot comes from the last slot, not from now** (Superset
@@ -223,12 +242,14 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
   from a hash of its id, so nine automations at 9:00 don't start at once and
   nothing hammers the hour (GitHub, Claude's desktop tasks, gh-aw do the
   same).
-- **Missed:** once, if still within a window (half its period, at most 12
-  hours: a nightly 2:00 still runs at 8:52, a weekday 9:00 review still runs
-  at 14:00, an hourly one doesn't catch up), otherwise "missed", said in its
-  history. Never every slot it missed: launchd and systemd coalesce to one,
-  Claude's desktop tasks run "exactly one catch-up run for the most recently
-  missed time", and Codex's replayed eight runs in 21 minutes.
+- **Missed:** once, if still within a window (half the time to its next
+  slot, at most 12 hours, from when it was due rather than from its
+  staggered start: a nightly 2:00 still runs at 8:52, a weekday 9:00 review
+  still runs at 14:00, even on a Friday, and an hourly one only within half
+  an hour), otherwise "missed", said in its history. Never every slot it
+  missed: launchd and systemd coalesce to one, Claude's desktop tasks run
+  "exactly one catch-up run for the most recently missed time", and Codex's
+  replayed eight runs in 21 minutes.
 - **The run is told when it was due:** a run due at 9:00 that starts at
   14:00 says so in its brief ("this was due at 9:00; it is 14:00").
 - **Overlap:** while its last run still runs, the next is skipped (Kubernetes'
@@ -236,6 +257,15 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
   lose work to it. A change automation whose last pull request is still
   open continues that task with a follow-up round rather than opening
   another, as a dependency bot updates its one pull request (call 4).
+  That is new: today Althar's own messages to a lead don't open a round,
+  and a round never publishes by itself
+  ([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+  It takes a round Althar opens for the automation, carrying the new
+  occurrence, whose commits go up to the open pull request as a check fix's
+  do while the change is in Althar's hands
+  ([ADR-040](../decisions/040-a-change-reaches-the-person-green.md)). A
+  task the person took over or stopped isn't carried on: the run is
+  skipped, saying it's theirs now.
 - **Catch-ups at launch go one at a time,** after the person's own work, so
   waking doesn't start everything at once (Claude Code issue #51120).
 
@@ -243,10 +273,10 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
 
 | Trigger | Where it comes from | How | Cost |
 |---|---|---|---|
-| A task's pull request merged or closed; a task finished; checks failed on a task's pull request | Althar's own record (`record_events`) | Tail the record by cursor, as `Nudges` and `UsageData` do | Free, at once |
+| A task's pull request merged or closed; a task finished; checks failed on a task's pull request | Althar's own record (`record_events`) | Tail the record by a cursor kept on disk, so what happened while Althar was closed still fires. `UsageData` tails it only from where it stood at launch, its cursor in memory, and `Nudges` reads `change_log`, so neither is one to copy | Free, at once |
 | Someone asks the person's review | The host's list of open pull requests with `reviewRequested` (`listChanges`, exists), or search `user-review-requested:@me` | One poll a repository every few minutes, shared by every automation | A few dozen requests an hour a repository |
-| Checks fail on main | Main's head commit (REST with an ETag: free when unchanged), then `statusCheckRollup` when it moved or is pending (GraphQL, 1 point) | Fire on the change to failing, for that commit | Near free |
-| An issue gets a label, on GitHub | Issues by label, updated since the watermark (REST with an ETag) | Watermark with an overlap; key (issue, label, when labelled) | Near free |
+| Checks fail on main | Main's head commit (REST with an ETag: free when unchanged), then `statusCheckRollup` when it moved, or while it isn't passing, since a rerun changes it on the same commit (GraphQL, 1 point) | Fire on the change to failing, for that commit | Near free |
+| An issue gets a label, on GitHub | Issues by label, updated since the watermark (REST with an ETag), and the issue's timeline for who put it on | Watermark with an overlap; key (issue, label, when it was seen put on) | Near free |
 | An issue gets a label, on Linear | `issues(filter: {labels, updatedAt > watermark})` | Slow and narrow: Linear "especially discourage[s] polling" | Complexity points |
 | A pull request opened or merged, not by Althar | Open or recently closed pull requests, updated since | As above | Near free |
 
@@ -257,31 +287,49 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
   keeps 300 events or 30 days, and has no checks.
 - **Conditions, not edges.** Compare the state ("main's head fails at this
   commit") rather than replaying every event; it survives gaps.
-- **Nothing fires for what was already there.** Turning one on sets its
-  watermark to that moment. The card can offer "Include what's open now",
-  which Try it once now uses.
+- **Each trigger says what its version is.** For a condition, it is when
+  Althar saw it become true: it fires once while it holds, and again only
+  once it was seen not to. A review asked again after the person reviewed
+  fires again; one asked again while still asked doesn't. A label taken off
+  and put back between two polls fires nothing new, unless the timeline is
+  read. Checks on main are keyed by the commit, so a rerun that fails again
+  fires nothing new.
+- **Nothing fires for what was already there.** Turning one on sets its own
+  start to that moment. The card can offer "Include what's open now", which
+  Try it once now uses.
 - **After Althar was closed:** catch up from the watermark within a day,
   coalesced by subject (a pull request whose checks failed three times fires
   once, on its latest state). Older is "missed": Superset's code says "a run
   fired for a day-old event is worse than none".
 - **Still wanted?** Right before its task starts, an occurrence checks its
   subject again: still open, still failing, still asking. If not, it is
-  skipped as no longer needed.
+  skipped as no longer needed. It checks the automation too: still on, and
+  still at the revision it fired with. The task keeps the version it was
+  admitted at, as a review already reads the head its lead was given.
 - **One budget, shared.** The person's 5,000 requests an hour on GitHub are
   shared with Althar's listening to pull requests and with the agents' own
   `gh` calls. So: one poller a repository and source, shared by every
-  automation; ETags kept on disk (today they are in memory and lost at each
-  restart, `http.ts:224`); backoff with jitter and a queue for each
-  connection, which [06](../architecture/06-integrations-and-skills.md)
-  asks for and isn't built.
+  automation; ETags kept on disk with the answer they stand for (today both
+  are in memory and lost at each restart, `http.ts:224`); backoff with
+  jitter and a queue for each connection, which
+  [06](../architecture/06-integrations-and-skills.md) asks for and isn't
+  built. The poller's cursor is shared, and each automation's start is its
+  own: what a poll found becomes every automation's occurrences in the
+  transaction that moves the poller on, so neither runs ahead of the other.
 - **What the connectors lack:** a branch's head commit; a tracker query by
-  label and by updated-since; "opened since" on `listChanges`.
+  label and by updated-since; "opened since" on `listChanges`, and paging;
+  an issue's timeline, for when a label went on and who put it there
+  (`Issue` has its labels and `updatedAt`, nothing more).
 - **Not its own echo.** Runs act with the person's own token, so "ignore our
-  bot" can't work. Althar keeps a receipt of every outward step it takes
-  (`mutation_receipts`): an automation never fires on what Althar did unless
-  it says so, and fires at most a few times an hour (claude-code-action
-  reacted to its own replies; another issue there asks for a guard against
-  "denial of wallet").
+  bot" can't work. Althar keeps what it did outward, in three places today:
+  receipts for opening, marking ready, merging, closing and replying, and
+  for moving issues (`mutation_receipts`); the commits it pushed
+  (`repository_changes`); and the reviews it posted (`review_drafts`). The
+  guard reads all three, and counts the checks a push of Althar's started as
+  Althar's too: an automation never fires on what Althar did unless it says
+  so, and fires at most a few times an hour (claude-code-action reacted to
+  its own replies; another issue there asks for a guard against "denial of
+  wallet").
 - **Webhooks need a relay we run.** A GitHub App has one webhook address,
   so it takes a server: GitHub App webhooks to a Worker and a Durable Object
   for each person, then a WebSocket to the desktop. GitHub says
@@ -294,24 +342,34 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
 
 **Turning an automation on approves that exact request:** its prompt, its
 ending, its subjects ([07](../architecture/07-persistence-security-and-cloud.md),
-"Approval integrity"). A change that widens any of them needs the person to
-turn it on again; one that narrows doesn't.
+"Approval integrity"). Whether new words narrow or widen can't be told, so
+any change to its prompt, its lead (agent, model, account), how often it
+runs, its review, its ending or its subjects needs the person to turn it on
+again. Only a tighter limit doesn't: fewer runs a day, a shorter time.
 
 - **Outward steps stay Althar's,** as today. Althar pushes and opens the
   pull request at the end of a run, posts a review only when the person does
-  or `post_team_reviews` allows, and files an issue only when the person
-  does. This is GitHub's "safe outputs" design (the agent proposes, a
-  separate trusted step writes, with a cap for each kind), and Althar
-  already has it. No automation gets a tool that writes outside the Mac.
+  (call 5), and files an issue only when the person does. This is GitHub's
+  "safe outputs" design (the agent proposes, a separate trusted step writes,
+  with a cap for each kind), and Althar mostly has it. An automation's lead
+  gets no tool that writes outside the Mac, and two that ordinary leads have
+  are taken away: `reply_on_pull_request`, which posts on the pull request,
+  and `set_run_command`, since what it keeps runs in every next task's setup
+  as Althar's own process, outside the sandbox
+  ([ADR-023](../decisions/023-althar-runs-the-project.md)).
 - **A draft pull request as policy, not as a prompt;** at most one open pull
   request for each automation and subject; ready for review only where the
-  person chose it. It never merges, and pushing to the default branch still
-  always asks.
+  person chose it. It never merges, and pushing to the default branch always
+  asks. Today that holds only while the project's allow everything is off:
+  allow everything goes over what always asks
+  ([ADR-013](../decisions/013-project-rules.md)'s order,
+  [ADR-043](../decisions/043-allow-everything-is-one-switch-for-a-project-or-a-task.md)).
 - **Permissions are the project's rules, as they are.** What would ask the
   person parks the run: its place goes after the 5 minutes an asking agent
   already keeps it (`Busy.ts:186`), and the task waits in Needs you with the
   automation named. Nothing widens for automations: they can't carry an
-  allow-everything of their own (call 6).
+  allow-everything of their own, and the project's doesn't reach them (call
+  6).
 - **Try it once now shows what it would ask.** Where the project's rules
   ask a lot, automations will mostly park; the trial says so ("it asked 3
   times") and points at the rules, before it's on. Claude Code's desktop
@@ -323,52 +381,84 @@ turn it on again; one that narrows doesn't.
   as Claude's routines wrap theirs. Events from people GitHub doesn't name as
   the repository's own fire nothing by default; allowed, the run is a reader
   (no network, runs nothing), as a review of an outside pull request already
-  is (call 7).
+  is (call 7). Who counts is whoever made it happen: who asked the review,
+  who put the label on, who opened the pull request. A teammate's label on
+  an outsider's issue fires, and the issue's text is still quoted as from
+  outside. A schedule's subject query takes the same test, and where the
+  connector can't say who, nothing fires. A review is a reader whoever opened
+  the pull request, and its review waits for the person, so the morning
+  review can take outside pull requests as it is.
 - **A run can't make automations.** Leads get no automation tools. Codex's
   runaway was a heartbeat an agent made for itself, re-sending a 4.36M-token
-  thread every 10 minutes.
+  thread every 10 minutes. Nor can what the coordinator reads: a lead's
+  report or a pull request's text can't get it to resume one or run it now,
+  since both go on a card (call 9).
 
 ## Capacity, cost and the morning after
 
 - **Places:** a new order, `automation`, after `new`
   ([ADR-037](../decisions/037-what-the-person-does-goes-first.md),
   `Busy.ts:76-82`), so nothing of the person's waits behind an automation.
-  One place for automations at most, by default; never over the number,
-  which only the person's own work may go over.
+  It holds for every step of the task, not only its first: today the step
+  after another, a step carried on after a restart and one back from a
+  usage limit are all `underway` (`orderOf` in `Runs.ts`), ahead of the
+  person's new work. The task carries its occurrence, so each of its steps
+  waits as `automation`. One place for automations at most, by default; never
+  over the number, which only the person's own work may go over. That is a
+  count of an automation's agents at work, not a rank: a rank only says who
+  goes first.
 - **A deadline to start:** an occurrence that can't start inside its window,
   because the Mac was busy all day, is skipped and says so ("the Mac was
   busy"), not queued for ever.
 - **Plans (Claude Max, ChatGPT Pro):** Althar can't read how much of a plan
   is left; it learns of a limit only from the agent's error
   (`failures.ts`). What keeps the person's morning safe is therefore:
-  - a time limit for each run (45 minutes by default);
+  - a time limit for each run (45 minutes of its agents' work by default),
+    counted on the occurrence over all its steps, its review and its check
+    fixes (up to three,
+    [ADR-040](../decisions/040-a-change-reaches-the-person-green.md)), since
+    the stall watch starts its budget whole at each step (`fresh` in
+    `Stalls.ts`);
   - a turn budget lower than the stall watch's 6 hours and 40 turns
-    (`Stalls.ts:71-72`);
-  - runs a day, capped;
+    (`Stalls.ts:71-72`), counted the same way;
+  - runs a day, capped for each automation and for all of them together,
+    Run now and catch-ups included;
   - on a usage limit, an automation never moves to another account or agent
     (the project's rule may `move` a task's work): it stops, and says so.
-- **Per-use models (an API key, OpenRouter):** today work never moves to a
-  paid account unasked (`Limits.ts:97`). An automation on one needs a cap per
-  run and per month, and that needs cost accounting Althar doesn't have:
-  tokens are kept per turn (`turn_deliveries.usage`), money only for the
-  permission judge. **First version: plan accounts only;** per-use comes with
-  cost accounting (`runs.budget` is already in the schema, unused).
+- **Per-use models (an API key, OpenRouter):** today work never moves to
+  another agent's paid account unasked (`Limits.ts:97`), but an agent's own
+  accounts take over whatever pays for them
+  ([ADR-012](../decisions/012-several-accounts-per-agent.md)), and the
+  permission judge spends the coordinator's account. An automation on one
+  needs a cap per run and per month, and that needs cost accounting Althar
+  doesn't have: tokens are kept per turn (`turn_deliveries.usage`), money
+  only for the permission judge. **First version: plan accounts only,** as
+  a check of its own: an automation's lead and reviewer start only on an
+  account a plan pays for, and its asks are judged only on one, else they
+  wait for the person. OpenCode always says a key, so it leads no
+  automation at first. Per-use comes with cost accounting (`runs.budget` is
+  already in the schema, unused).
 - **Each run's worktree:** a new task makes a worktree and runs its setup,
   installing what the lockfile names
   ([ADR-023](../decisions/023-althar-runs-the-project.md)), which takes
   minutes and gigabytes for a JavaScript project. Thirty nightly runs make
   thirty worktrees. Either keep one warm worktree for each automation, or
   remove a run's worktree once it settled with nothing to keep (nothing to
-  do; merged; reviewed and posted). This is the easiest place for automations
-  to quietly fill a disk.
+  do; merged; reviewed and posted). Removing goes against what Althar
+  promises today, that it never removes the person's worktrees for them
+  ([ADR-006](../decisions/006-worktree-per-task.md),
+  [01](../architecture/01-concepts-and-project-model.md)), and a document an
+  agent handed back is gone with its worktree
+  ([ADR-020](../decisions/020-what-agents-hand-back.md)). So it is call 13.
+  This is the easiest place for automations to quietly fill a disk.
 
 ## Failures, and what reaches the person
 
 | Mark | Meaning |
 |---|---|
 | Made something | A pull request, a drafted review, a held plan, a report |
-| Nothing to do | Its lead looked and found nothing; no task card |
-| Failed | Its task stopped without finishing |
+| Nothing to do | Its query found nothing, so no task; or its lead looked and found nothing, and its task settled out of sight |
+| Failed | Its task stopped without finishing, or Althar couldn't start one: a query or a connector failed |
 | Missed | The Mac was asleep or Althar closed, past its window |
 | Skipped | Paused, busy past its deadline, still running, or no longer needed |
 | Running | Its task is under way |
@@ -377,20 +467,30 @@ turn it on again; one that narrows doesn't.
   `dispatched`, and a green routine in Claude "does not mean the task…
   succeeded"; both left people with silent failures.
 - **Quiet by default.** Runs show in the tab. The tasks they make show on
-  the board as any task does: a drafted review waits in Needs you. A run
-  that found nothing makes no task and no notification.
+  the board as any task does: a drafted review waits in Needs you. A query
+  that found nothing makes no task and no notification. A lead that found
+  nothing has a task, since a lead only runs in one, and a plan posts its
+  card in the conversation when proposed (`Plans.ts:168`). So a run's card
+  goes on the automation's page instead, and a task that found nothing
+  settles as done, stays in the automation's history, and never reaches the
+  board.
 - **Three failures in a row pause it,** with one call in Needs you saying
   why and what to do (Run it now, Change it), and no notification for each
   failure. Factory pauses after five failures or ten days missed, Zapier at
-  95% errors over seven days.
+  95% errors over seven days. A failure is an occurrence that failed once
+  its own tries were spent: its task failed, or its query did. Nothing to
+  do and made something end the streak; skipped and missed leave it as it
+  was. A slot with several subjects counts once, as failed only if all of
+  them did.
 - **What expires pauses it, with the reason:** a model gone, a repository
   left out, a connection signed out. Claude's routines turn off after 72
   hours without GitHub, rather than failing every night.
-- **After a restart,** an occurrence admitted but not started starts once
-  the runtime has reconciled, if still in its window; a task already started
-  carries on as any task does.
+- **After a restart,** an occurrence admitted with no task yet starts once
+  the runtime has reconciled, if still in its window; one that names its
+  task carries on as any task does.
 - **One switch stops everything:** "Pause all automations", in the quick
   settings and the tab's menu. Removing a project pauses its automations.
+  Whether it also stops runs under way is call 15.
 
 ## Where they live
 
@@ -411,19 +511,26 @@ tables, a revision on every row that changes, the project in every key):
 
 ```text
 automations              id, project_id, device_id, name, state (on | paused),
-                         paused_by (person | itself), pause_reason, revision
-automation_revisions     automation_id, revision, prompt, lead (agent, model, effort),
-                         review, ending, trigger (rule and zone, or event kind and
-                         filters), limits (window, overlap, time, runs a day),
+                         paused_by (person | itself), pause_reason, since, revision
+automation_revisions     automation_id, project_id, revision, prompt,
+                         lead (agent, model, effort), review, ending,
+                         trigger (rule and zone, or event kind and filters),
+                         limits (window, overlap, time, runs a day),
                          made_by (person | coordinator), made_at
-automation_occurrences   id, automation_id, revision, cause (schedule | event | now),
-                         due_at, subject_key, subject_version, state, outcome,
-                         reason, task_id
-                         unique (automation_id, due_at) for a schedule
+automation_occurrences   id, automation_id, project_id, automation_revision,
+                         cause (schedule | event | now), slot, subject_key,
+                         subject_version, state, outcome, reason, task_id, revision
+                         unique (automation_id, slot) for a schedule
+                         unique (automation_id, slot, subject_key) for a schedule's subjects
                          unique (automation_id, subject_key, subject_version) for an event
-automation_cursors       connection, repository, source → watermark, etag, polled_at
+automation_cursors       connection, repository, source → watermark, etag, answer, polled_at
                          (shared by every automation that reads it)
 ```
+
+References between them are composite, `(id, project_id)`.
+`automation_revision` is the definition an occurrence ran with; `revision`
+is the occurrence's own, as its state moves. `since` is when it was turned
+on, which events count from.
 
 Facts in the record: `automation.created`, `automation.changed`,
 `automation.paused`, `occurrence.fired`, `occurrence.skipped`. Subjects are
@@ -434,8 +541,10 @@ Cursor's automations.
 **The coordinator's tools:** `propose_automation` (a card; nothing runs until
 Turn on), `change_automation` (a card with what changed; widening needs Turn
 on again), `list_automations`, `read_automation`, `pause_automation`,
-`resume_automation`, `run_automation_now`. Pausing, resuming and Run now
-need no card (call 9). Leads get none of them.
+`resume_automation`, `run_automation_now`. Pausing needs no card, since it
+only stops. Resuming and Run now go on a small card (call 9): both spend,
+and the coordinator reads what leads report and what pull requests say. Run
+now keeps every limit a fire has. Leads get none of them.
 
 ## The cloud
 
@@ -483,8 +592,14 @@ feel instant. Runs in the cloud only if Althar becomes a product for teams.
 - **Sleep:** a fake power source in the runtime (wake, unlock, dark wake), so
   the catch-up policy is tested in units, not on a laptop.
 - **Events:** fake connectors with scripted timelines (a review requested,
-  requested again, closed; checks failing three times), asserting one
-  occurrence for each subject and version, with a restart in the middle.
+  requested again, closed; checks failing three times; a label taken off
+  and put back), asserting one occurrence for each subject and version, with
+  a restart in the middle, and one between making a task and its
+  occurrence naming it.
+- **Queries:** a listing with more than its cap, and one that fails, so the
+  next slot still finds what they left.
+- **Rules:** a project with allow everything on, where an automation's push
+  to the default branch still asks.
 - **A soak:** thirty nightly fires against the fakes: the board stays calm,
   the disk bounded, no duplicates.
 - **Real accounts on demand,** one end-to-end run for each trigger, as the
@@ -496,14 +611,21 @@ feel instant. Runs in the cloud only if Althar becomes a product for teams.
 ## In what order
 
 1. **Schedules and Althar's own events, on this Mac.** The tab, the page,
-   the card, the coordinator's tools; occurrences; catching up once; one
-   place; time limits; pausing itself; plan accounts only; worktree cleanup.
-   That covers release notes, the nightly bump, the weekly polish and flaky
-   sweeps, and the morning review, a schedule with a pull request query.
+   the card, the coordinator's tools; occurrences and their keys; catching
+   up once; the still-wanted check, since four reviews in one place start
+   one after another, and a pull request can merge while its review waits;
+   who may trigger, for a query's subjects; one place, for every step; time
+   limits over all of a run's steps; pausing itself; plan accounts only,
+   checked; the follow-up round for a change automation; worktrees as call
+   13 settles them; open at login, offered the first time a schedule is
+   turned on. That covers release notes, the
+   nightly bump, the weekly polish and flaky sweeps, and the morning review,
+   a schedule with a pull request query.
 2. **Events polled from GitHub:** review requested, checks failing on main,
-   a label added, a pull request opened or merged; shared pollers with ETags
-   kept on disk; who may trigger; the still-wanted check.
-3. **In the background:** open at login; Linear and GitLab triggers;
+   a label added, a pull request opened or merged; shared pollers with
+   their cursors, ETags and answers kept on disk; who may trigger, for
+   labels, from the issue's timeline.
+3. **More trackers, and paying per use:** Linear and GitLab triggers;
    per-use models with caps, once cost is counted.
 4. **The cloud, if and when:** the relay, then the clock and leases. Runs
    in the cloud are a separate decision.
@@ -523,23 +645,36 @@ feel instant. Runs in the cloud only if Althar becomes a product for teams.
 4. **Each run: a new task, or the open one carried on.** **I'd pick** a new
    task for each subject; reviews one task a pull request; a change
    automation whose last pull request is still open carries that task on
-   with a follow-up round instead of opening another.
+   with a follow-up round instead of opening another, its commits going up
+   to that pull request without asking, as a check fix's do. That round is
+   new to Althar (ADR-034). A task the person took over or stopped is
+   skipped.
 5. **What it may do with nobody there.** Draft pull requests yes; ready for
    review only where chosen; never merge. Reviews: drafted only, or posted
    under the existing "Post reviews of my team's pull requests without
    asking"? **I'd pick drafted only** in the first version, whatever that
-   setting says.
+   setting says. Today the setting posts at once, from inside the drafting
+   tool (`Reviews.ts:877`), so an automation's review needs its own check
+   there.
 6. **Permission asks at night.** **I'd pick** the project's rules as they
    are, with asks parking in Needs you, and no allow-everything for an
-   automation alone.
+   automation alone. And the project's allow everything doesn't reach an
+   automation's run: what always asks, asks, and parks. The other way is to
+   let it through, which means an automation can push to the default branch
+   in a project that allows everything.
 7. **Events from people outside the team.** (a) They fire nothing; (b)
    allowed, the run reads only (no network, runs nothing). **I'd pick (a)**
    by default, with (b) on the automation's page.
 8. **The limits by default.** One place for automations; at least an hour
-   apart; 45 minutes a run; on a usage limit, stop rather than move; plan
-   accounts only at first. Keep, or change the numbers.
-9. **The coordinator's reach.** Pausing, resuming and Run now in words, with
-   no card; any other change on a card. **I'd pick this.**
+   apart; 45 minutes of work a run, over all its steps; a cap on runs a day
+   for all automations together; on a usage limit, stop rather than move;
+   plan accounts only at first, which leaves OpenCode out, since it always
+   says a key. Keep, or change the numbers.
+9. **The coordinator's reach.** (a) Pausing, resuming and Run now in words,
+   with no card; (b) pausing in words, and resuming and Run now on a small
+   card. Any other change is on a card either way. **I'd pick (b):**
+   resuming and running spend, and the coordinator reads text from outside
+   that could ask it to.
 10. **Where they live.** **I'd pick** in Althar, the person's own, on the
     Mac they were made on; no files in the repository at first.
 11. **Rules or automations** for what needs no agent (close the issue when
@@ -547,6 +682,20 @@ feel instant. Runs in the cloud only if Althar becomes a product for teams.
 12. **The cloud.** Is running agents in the cloud on the way in the next six
     months or so, or is the person's own Mac the product? The model is the
     same either way; it only changes how soon a relay is worth building.
+13. **A run's worktree.** (a) Keep one warm worktree for each automation,
+    set up once, for runs that follow each other; (b) remove a run's
+    worktree once it settled with nothing to keep, which ADR-006 doesn't
+    allow today; (c) keep them all, as any task's. **I'd pick (a) for
+    changes and plain sweeps, and (b) for review copies,** each only for what
+    an automation made, with nothing uncommitted, nothing running there and
+    no document it handed back still shown; ADR-006 gains that exception.
+14. **9:00 where the person is, or where it was made.** **I'd pick** where
+    the person is, read in the Mac's zone of the moment, as Calendar's
+    floating times do.
+15. **What Pause all stops.** (a) Only what would start; runs under way
+    finish; (b) every run under way too. **I'd pick (a):** stopping a run
+    halfway loses its work, as Cursor's cancelled runs do. Each running task
+    can still be stopped from its card.
 
 And a word for the glossary: it keeps "run" off the screen, but the picked
 page says Run now, and the history shows runs. Either "run" joins the
