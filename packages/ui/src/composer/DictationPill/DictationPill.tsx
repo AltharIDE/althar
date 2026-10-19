@@ -50,7 +50,7 @@ export const dictationPillText: DictationPillText = {
   retry: 'Try again',
   writing: 'Writing it down…',
   nothing: 'Listening…',
-  failed: (said) => `${said} of what you said couldn't be written down.`,
+  failed: (said) => `${said} of what you said couldn’t be written down.`,
   edit: 'What you said',
 }
 
@@ -158,7 +158,7 @@ export function DictationPill({
         {phase === 'listening' && onStop && (
           <IconButton icon="square" size="small" label={t.stop} {...(kbd === undefined ? {} : { kbd })} onClick={onStop} />
         )}
-        <IconButton icon="up" size="small" label={t.open} onClick={() => setOpened(true)} />
+        <IconButton icon="chevronU" size="small" label={t.open} onClick={() => setOpened(true)} />
       </div>
     )
 

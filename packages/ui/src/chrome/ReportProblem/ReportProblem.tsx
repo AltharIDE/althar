@@ -53,7 +53,7 @@ export const reportProblemText: ReportProblemText = {
   reading: 'Reading what goes with it…',
   email: 'Email, if you’d like a reply',
   send: 'Send',
-  sendKbd: '⌘↩',
+  sendKbd: '⌘↵',
   cancel: 'Cancel',
   close: 'Close',
 }
@@ -214,7 +214,7 @@ export function ReportProblem({
     }
     onSend({ text: what.trim(), screenshot: shot && screenshot !== undefined, logs, email: email.trim() })
   }
-  // ⌘↩ (Ctrl+Enter elsewhere) sends from the box, where Enter is a new line.
+  // ⌘↵ (Ctrl+Enter elsewhere) sends from the box, where Enter is a new line.
   const sendOnKeys = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()

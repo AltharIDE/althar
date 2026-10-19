@@ -199,7 +199,7 @@ export class Nudges extends Context.Service<
             threadId: review.threadId,
           })
         }
-        // A review posted, written to again and answered: finished, the person's to settle (ADR-048), once its lead is done.
+        // A review posted, written to again and answered: finished, the person's to settle (ADR-049), once its lead is done.
         const answered = yield* sql<{ taskId: string; threadId: string; title: string }>`
           SELECT k.id AS task_id, t.id AS thread_id, k.title
           FROM tasks k

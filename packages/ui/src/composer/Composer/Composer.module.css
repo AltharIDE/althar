@@ -307,8 +307,9 @@
   white-space: nowrap;
 }
 
+/* the hint holds the send button's place, so nothing beside it moves when the first letter is typed */
 .kbd {
-  margin: 0 6px 0 2px;
+  margin: 0 6px;
 }
 
 /* the other way to send while the agent works: quieter than the button, beside the note that explains it */

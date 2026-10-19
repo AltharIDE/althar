@@ -133,7 +133,7 @@ describe('Welcome', { timeout: 30000 }, () => {
     expect(screen.queryByText('Answered: back to the work')).not.toBeInTheDocument()
     next()
     await run(100)
-    expect(screen.getByText('Nothing is waiting on you.')).toBeInTheDocument()
+    expect(screen.getByText('Nothing needs you.')).toBeInTheDocument()
     expect(screen.getByText('Answered: back to the work')).toBeInTheDocument()
   })
 

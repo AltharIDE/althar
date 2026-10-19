@@ -1167,7 +1167,7 @@ describe('a task', () => {
     const { client } = await taskMenu({ resolveConflicts: { task: null, project: true } })
     expect(screen.getByRole('menuitemradio', { name: /Use the project setting/ }).getAttribute('aria-checked')).toBe('true')
     expect(screen.getByText('It’s on for this project.')).toBeTruthy()
-    expect(screen.queryByText('Auto-resolve conflicts: on')).toBeNull()
+    expect(screen.queryByText('Resolve conflicts automatically: on')).toBeNull()
     await userEvent.click(screen.getByRole('menuitemradio', { name: /Off for this task/ }))
     await waitFor(() => expect(client.setTaskResolveConflicts).toHaveBeenCalledWith({ taskId: 't1', resolveConflicts: false }))
   })
@@ -1179,9 +1179,10 @@ describe('a task', () => {
       })
       const view = withServices(<Task />, client)
       await screen.findByRole('button', { name: 'More for this task' })
-      const said = [screen.queryByText('Auto-resolve conflicts: on'), screen.queryByText('Auto-resolve conflicts: off')].map(
-        (one) => one !== null,
-      )
+      const said = [
+        screen.queryByText('Resolve conflicts automatically: on'),
+        screen.queryByText('Resolve conflicts automatically: off'),
+      ].map((one) => one !== null)
       view.unmount()
       return said
     }

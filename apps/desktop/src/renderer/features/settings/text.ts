@@ -9,11 +9,11 @@ export const text = {
   gear: 'Althar settings',
   /** The quick settings, as a screen reader names them. */
   quick: 'Quick settings',
-  kbd: '⌘,',
+  kbd: platform === 'darwin' ? '⌘,' : 'Ctrl+,',
   /** The Settings tab, and the way to it from the quick settings. */
   settings: 'Settings',
   all: 'All settings',
-  allKbd: '⌘⇧,',
+  allKbd: platform === 'darwin' ? '⌘⇧,' : 'Ctrl+Shift+,',
   agents: 'Agents',
   connecting: `Looking at the agents on ${device.this}…`,
   agentHere: (name: string) => `${name} isn’t on ${device.this}`,

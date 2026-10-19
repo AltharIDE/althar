@@ -22,7 +22,7 @@
 .count {
   font: 500 11px/1 var(--mono);
   font-variant-numeric: tabular-nums;
-  color: var(--t-4);
+  color: var(--t-3);
 }
 .add {
   margin-left: auto;

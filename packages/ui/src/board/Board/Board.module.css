@@ -50,6 +50,10 @@
 .you .count {
   color: var(--signal);
 }
+/* nothing waits on you: the count says so in ink */
+.you .none {
+  color: var(--t-3);
+}
 .ring {
   flex: none;
   width: 8px;
@@ -85,7 +89,7 @@ span.you {
   border-radius: 12px;
   text-align: center;
   font-size: 12px;
-  color: var(--t-3);
+  color: var(--t-2);
 }
 /* a quiet line naming the group under it, ruled to the lane's edge */
 .divider {
@@ -206,6 +210,10 @@ span.you {
   font: 500 11px/1 var(--mono);
   letter-spacing: -0.02em;
   color: var(--t-3);
+}
+/* a consumer that names no task leaves no gap for it */
+.ref:empty {
+  display: none;
 }
 .at {
   margin-left: auto;

@@ -1554,7 +1554,7 @@ export class Queries extends Context.Service<
             if (task.waiting > 0) return 'waiting'
             if (busy || queued || resolving !== undefined) return 'running'
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
-            // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-048).
+            // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-049).
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'

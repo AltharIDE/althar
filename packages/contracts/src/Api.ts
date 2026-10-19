@@ -1159,7 +1159,7 @@ export const ReviewBrief = Schema.Struct({
   /**
    * Whether a draft waits for the person to post it. None once its review
    * was posted: written to again, its lead answered, it is finished, the
-   * person's to mark done or keep for later, as a quick task is (ADR-048).
+   * person's to mark done or keep for later, as a quick task is (ADR-049).
    */
   waiting: Schema.optional(Schema.Boolean),
 })

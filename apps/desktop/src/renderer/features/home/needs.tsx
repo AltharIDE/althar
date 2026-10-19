@@ -58,7 +58,8 @@ export const needText = {
   /** Commits after its last pull request, in none yet, and how big they are. */
   inNone: (commits: number, add: number, del: number) =>
     `${commits === 1 ? '1 commit' : `${commits} commits`} in no pull request · +${add} −${del}`,
-  branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
+  branchSize: (files: number, add: number, del: number) =>
+    files === 0 ? 'Nothing changed on its branch' : `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
   /** A review drafted, in a line: whose pull request, and what the draft found. */
   by: (author: string) => `by ${author}`,
   findings: (n: number) => (n === 0 ? 'no findings' : n === 1 ? '1 finding' : `${n} findings`),

@@ -74,7 +74,7 @@ export function SettledRow({ outcome, task, kind, title, meta, at, current, onOp
     <article className={cx(b.row, s[outcome])} aria-current={current || undefined}>
       <div className={b.top}>
         <span className={s.outcome}>
-          <Icon name={glyph(outcome)} size={12} />
+          <Icon name={glyph(outcome)} size={11} />
           {t.outcome[outcome]}
         </span>
         <span className={b.ref}>{t.task(task)}</span>

@@ -183,7 +183,7 @@
   height: 16px;
   margin-left: -1px;
   border-radius: 2px;
-  background: var(--signal);
+  background: var(--t-1);
 }
 .thumb {
   position: absolute;
@@ -203,19 +203,18 @@
   transform: scale(1.12);
 }
 .track:focus-visible .thumb {
-  box-shadow:
-    0 0 0 4px var(--signal-dim),
-    var(--lift-2);
+  outline: 1.5px solid var(--signal);
+  outline-offset: 1px;
 }
 /* it clicks into the default */
 .clicked {
-  border-color: var(--signal);
+  border-color: var(--t-1);
   animation: click 280ms ease-out;
 }
 @keyframes click {
   40% {
     transform: scale(1.28);
-    box-shadow: 0 0 0 6px var(--signal-dim);
+    box-shadow: 0 0 0 6px var(--line-2);
   }
 }
 .scale {
@@ -224,13 +223,13 @@
   justify-content: space-between;
   margin-top: 6px;
   font-size: 11px;
-  color: var(--t-4);
+  color: var(--t-3);
   font-variant-numeric: tabular-nums;
 }
 .mark {
   position: absolute;
   transform: translateX(-50%);
-  color: var(--signal);
+  color: var(--t-2);
   white-space: nowrap;
 }
 .markStart {
@@ -421,7 +420,7 @@
   box-shadow: 0 0 0 2px var(--t-1);
 }
 .place:has(:focus-visible) {
-  outline: 2px solid var(--live);
+  outline: 1.5px solid var(--signal);
   outline-offset: 2px;
 }
 .place .scene {

@@ -77,7 +77,7 @@
     lost on a detached head: the same folder, the same lead and session.
     That keeps the work safe, and nothing more. The branch stays on this
     Mac, the task stays plain (Finished, then Done once the person settles
-    it, [ADR-048](048-a-finished-task-waits-for-the-person-to-settle-it.md)), and its
+    it, [ADR-049](049-a-finished-task-waits-for-the-person-to-settle-it.md)), and its
     thread says so ("This task's work is on a branch of its own now, …,
     which stays on this Mac"). When the person asks to turn it into a real
     change, its lead calls `make_it_a_change`: the task is renamed, its plan

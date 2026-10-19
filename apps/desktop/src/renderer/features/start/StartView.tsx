@@ -36,7 +36,7 @@ export const text = {
       looking: `Looking around ${device.this}…`,
       agentsLabel: `Agents on ${device.this}`,
       add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: `${key}N` },
-      createKbd: platform === 'darwin' ? '⌘⏎' : 'Ctrl+Enter',
+      createKbd: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter',
     }
   },
 }
@@ -160,7 +160,7 @@ function First({
       if (made !== null) onProject(made.id)
     })
 
-  // ⌘N adds a folder, ⌘⏎ makes the project, as the screen says; Ctrl off a Mac. Keys typed into an account's form, or into
+  // ⌘N adds a folder, ⌘↵ makes the project, as the screen says; Ctrl off a Mac. Keys typed into an account's form, or into
   // what is open over the screen, are theirs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
