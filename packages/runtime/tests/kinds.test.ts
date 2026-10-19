@@ -25,8 +25,9 @@ import { callTool, repository, runtime, until } from './support'
  * plan stays on this Mac and ends in nothing, with no pull request, whatever
  * its lead wrote; a review reads someone else's pull request; everything else
  * is a change, every planned task among them. A plain task that finished
- * waits on its board as Finished, and nothing else counts it; seeing it
- * settles it as done, and writing to its lead opens it again.
+ * waits in Needs you as Finished, counted as any task ready, until the
+ * person marks it done or keeps it for later; seeing it moves nothing, and
+ * writing to its lead opens it again.
  */
 
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
@@ -363,6 +364,45 @@ describe('settling a task that isn’t a change', () => {
       // Pressed again, nothing more happens.
       assert.isFalse(yield* markDone(question.taskId))
       yield* (yield* Sessions).stop(working.threadId)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('is its lead’s to do when the person says so: done, kept for later or discarded, never a change', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const sessions = yield* Sessions
+      const project = yield* open
+      const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
+      const sketch = yield* plain(project.projectId, 'Sketch the settings', '[lead:finish]')
+      const change = yield* planned(project.projectId, 'Retry the checkout', '[lead:finish] [lead:edit]')
+      for (const task of [question, sketch, change]) yield* cardOnce(task.taskId, (card) => card.phase === 'ready')
+      const write = (task: { readonly taskId: string; readonly threadId: string }, body: string) =>
+        Effect.gen(function* () {
+          yield* tasks.bringBack(task.taskId)
+          yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+            threadId: task.threadId,
+            body,
+          })
+        })
+
+      // Told to keep it, its lead keeps it for later; told it is done, settles it, in the round the person's words opened.
+      yield* write(question, 'Keep this for later. [lead:task-keep]')
+      yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
+      yield* write(question, 'Mark this as done. [lead:task-done]')
+      yield* cardOnce(question.taskId, (card) => card.phase === 'settled')
+      assert.strictEqual((yield* row(question.taskId)).state, 'done')
+      // Told to discard it, it is abandoned as the lead's turn ends.
+      yield* write(sketch, 'Drop it. [lead:task-discard]')
+      yield* until(
+        Effect.map(row(sketch.taskId), (task) => [task]),
+        ([task]) => task?.state === 'abandoned',
+        Duration.seconds(20),
+      )
+      // A change isn't its lead's to settle: it stays, ready to accept.
+      yield* write(change, 'Mark this as done. [lead:task-done]')
+      yield* cardOnce(change.taskId, (card) => card.phase === 'ready')
+      assert.strictEqual((yield* row(change.taskId)).state, 'open')
     }).pipe(Effect.provide(withQueries())),
   )
 

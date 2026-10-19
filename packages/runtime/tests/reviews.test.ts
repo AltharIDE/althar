@@ -276,9 +276,10 @@ describe('reviewing someone else’s pull request', () => {
       // A team's pull request: untrusted all the same, but not offline.
       assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { untrusted: true } })
 
-      // It is given only what reads, and draft_review; the rest is refused when called, listed or not: nothing it could change
-      // the project with, such as how it runs, which Althar runs outside any sandbox, and nothing that reaches the host.
-      assert.deepStrictEqual(yield* listTools(access), ['draft_review', 'read_issue', 'read_pull_request'])
+      // It is given only what reads, draft_review, and settle_task to keep or discard it as the person says; the rest is refused
+      // when called, listed or not: nothing it could change the project with, such as how it runs, which Althar runs outside any
+      // sandbox, and nothing that reaches the host.
+      assert.deepStrictEqual(yield* listTools(access), ['draft_review', 'read_issue', 'read_pull_request', 'settle_task'])
       const refusals = {
         finish_step: { summary: 'Done.' },
         set_run_command: { command: 'sh ./serve.sh', setup: 'sh ./setup.sh' },

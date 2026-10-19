@@ -14,6 +14,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime, until } from './support'
 
@@ -113,19 +114,11 @@ describe('nudges', () => {
     }).pipe(Effect.provide(withNudges())),
   )
 
-  it.live('never say, or count, a plain task that finished: it waits on its board to be seen', () =>
+  it.live('say and count a plain task that finished, as any task ready, until the person keeps it for later', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
-      const sql = yield* SqlClient.SqlClient
-      // A question, with no branch and no pull request at its end.
+      // A question, with no branch and no pull request at its end: it waits in Needs you, said and counted.
       const plain = yield* started('Which partners still call v1? [lead:finish]', true)
-      yield* until(
-        sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${plain.taskId}`,
-        (rows) => rows[0]?.state === 'succeeded',
-        Duration.seconds(20),
-      )
-      // Then a change that is ready: said, and counted alone.
-      yield* started('Retry the checkout [lead:finish] [lead:edit]')
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.length === 1,
@@ -135,8 +128,27 @@ describe('nudges', () => {
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 1,
       )
-      assert.deepStrictEqual(nudged(events), [['Retry the checkout [lead:finish] [lead:edit]', 'Ready: Did the task.']])
-      assert.isFalse(counts(events).some((count) => count > 1))
+      assert.deepStrictEqual(nudged(events), [['Which partners still call v1? [lead:finish]', 'Ready: Did the task.']])
+      // Kept for later, it is out of Needs you: no longer counted.
+      const tasks = yield* Tasks
+      assert.isTrue(yield* tasks.keep({ envelope: yield* Runtime.envelope('task.keep', { taskId: plain.taskId }), taskId: plain.taskId }))
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 0,
+        Duration.seconds(20),
+      )
+      // Then a change that is ready: said, and counted alone.
+      yield* started('Retry the checkout [lead:finish] [lead:edit]')
+      yield* until(
+        Effect.sync(() => nudged(events)),
+        (said) => said.length === 2,
+        Duration.seconds(20),
+      )
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 1,
+      )
+      assert.strictEqual(counts(events).at(-1), 1)
       yield* stop
     }).pipe(Effect.provide(withNudges())),
   )

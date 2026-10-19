@@ -738,6 +738,9 @@ const playRole = async (
         })
         if (!text.includes('[lead:finish]')) return made
       }
+      // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
+      const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
+      if (moved !== undefined && available.has('settle_task')) return await call('settle_task', { how: moved })
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')

@@ -549,6 +549,8 @@ export class Tasks extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* timestamp
+          const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
           yield* sql`UPDATE tasks SET seen_at = ${at} WHERE id = ${input.taskId}`
         })
 
