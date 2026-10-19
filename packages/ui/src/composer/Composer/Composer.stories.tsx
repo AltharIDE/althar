@@ -519,6 +519,30 @@ export const SeveralQueued: Story = {
     />
   ),
 }
+const long =
+  "Okay, so there's a few bits and bars that um we would need to fix. Number one, I've attached a screenshot just here of the passcard, which is just a bit convoluted. Like you can see that some things are just not fitting."
+export const LongQueued: Story = {
+  render: () => (
+    <div style={{ width: 340 }}>
+      <Example
+        busy
+        onStopAgent={() => {}}
+        waiting={[
+          long,
+          'https://example.com/a/very/long/path/that/has/no/spaces/in/it/at/all/and/keeps/going/on/and/on/forever?x=1',
+          'Short one.',
+        ]}
+      />
+    </div>
+  ),
+}
+export const LongQueuedWide: Story = {
+  render: () => (
+    <div style={{ width: 760 }}>
+      <Example busy onStopAgent={() => {}} waiting={[long]} />
+    </div>
+  ),
+}
 export const Listening_: Story = {
   name: 'Listening',
   render: () => (
