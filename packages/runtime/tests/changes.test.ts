@@ -2022,7 +2022,7 @@ describe('a change whose checks Althar sees through', () => {
       )
       const [running] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks_running', Duration.seconds(20))
       // Opened by the person, it is theirs: ready though its checks run, and a fix waits for them to push it.
-      yield* (yield* Tasks).see({ taskId: running?.taskId ?? '', finished: false })
+      yield* (yield* Tasks).see({ taskId: running?.taskId ?? '' })
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       first = 'failed'
       yield* until(pushRequests(running?.threadId ?? ''), (asked) => asked.length === 1, Duration.seconds(30))

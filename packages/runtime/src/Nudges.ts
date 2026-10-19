@@ -4,7 +4,7 @@ import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } 
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
-import { issueDraftsWaiting } from './kinds'
+import { answeredIn, issueDraftsWaiting } from './kinds'
 import { outStep } from './Limits'
 import { field, parse, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
@@ -158,10 +158,10 @@ export class Nudges extends Context.Service<
             AND NOT EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
               WHERE h.task_id = k.id AND s.state = 'starting')
           ORDER BY k.created_at, k.id`
-        // A plain task that finished waits on its board to be seen, and asks nothing of the person (DEV-96).
-        const finished = ready.length === 0 ? new Set<string>() : yield* queries.finished
+        // A task kept for later is out of Needs you: nothing nudges for it.
+        const kept = ready.length === 0 ? new Set<string>() : yield* queries.kept
         for (const task of ready) {
-          if (finished.has(task.taskId)) continue
+          if (kept.has(task.taskId)) continue
           const turning = (threadId: string | null) =>
             threadId === null
               ? Effect.succeed(false)
@@ -202,6 +202,27 @@ export class Nudges extends Context.Service<
             key: `ready:${review.taskId}`,
             title: review.title,
             body: draftedWords(review.number, review.author),
+            threadId: review.threadId,
+          })
+        }
+        // A review posted, written to again and answered: finished, the person's to settle (ADR-051), once its lead is done.
+        const answered = yield* sql<{ taskId: string; threadId: string; title: string }>`
+          SELECT k.id AS task_id, t.id AS thread_id, k.title
+          FROM tasks k
+          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE k.state = 'open' AND k.kept_at IS NULL AND ${sql.unsafe(answeredIn('k'))}
+            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+            AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0
+          ORDER BY k.created_at, k.id`
+        for (const review of answered) {
+          if (Option.exists(yield* sessions.running(review.threadId), (session) => session.turnRunning)) continue
+          found.set(`ready:${review.taskId}`, {
+            _tag: 'Nudge',
+            kind: 'ready',
+            key: `ready:${review.taskId}`,
+            title: review.title,
+            body: readyWords(''),
             threadId: review.threadId,
           })
         }

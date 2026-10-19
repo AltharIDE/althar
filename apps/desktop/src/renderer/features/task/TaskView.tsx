@@ -31,8 +31,12 @@ import {
   ThreadMeasure,
   ThreadSkeleton,
   TitleBar,
+  SettleWays,
 } from '@althar/ui'
 
+import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
+import { text as boardText } from '../board/BoardView'
+import { doing } from './actions'
 import { device, platform } from '../../shared/device'
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
@@ -126,6 +130,11 @@ export const text = {
   ready: 'Ready for you',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
+  /** A task that isn't a change, its lead done: the person settles it, or keeps it for later. */
+  finished: 'Finished',
+  kept: 'Kept for later',
+  /** What the composer suggests to a task that finished and isn't a change, in grey: Tab takes it, Enter sends it to its lead. */
+  suggest: 'Mark this as done',
   /** Issues its lead drafted wait for the person to file. */
   issues: 'Issues to file',
   fileAll: (count: number) => `File all ${count}`,
@@ -176,9 +185,15 @@ export const statusOf = (
   // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
   if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
   // A review drafted is the person's to post (DEV-96).
-  if (phase === 'ready' && snapshot.task.review != null) return { status: TaskStatus.Yours, state: text.drafted }
+  if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
+    return { status: TaskStatus.Yours, state: text.drafted }
+  // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
+  if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
+    return { status: TaskStatus.Yours, state: text.finished }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
+  // Kept for later: out of Needs you as it is, until the person writes to it or settles it.
+  if (phase === 'kept') return { status: TaskStatus.Paused, state: text.kept }
   // Abandoned, it says so in place of where it stood, as stopped does.
   if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
   // On a step another agent takes, a review, while its lead waits.
@@ -583,6 +598,19 @@ export function TaskView({
   const offered = leftOpen === null ? openChanges : openChanges.filter((one) => leftOpen.includes(one.url))
   // Its newest pull request that merged: what a merged task's commits came after.
   const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
+  // A task that finished and isn't a change: Done and Keep for later, beside where it stands; a review only keeps, as it settles
+  // once posted. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
+  const settleable = !busy && isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '' })
+  // Done for a plain task, or a review posted and answered since; one with a draft settles as it is posted.
+  const done = takesDone({ kind: snapshot.task.kind ?? 'change', reviewing: snapshot.task.review })
+  const settle = settleable ? (
+    <SettleWays
+      place="header"
+      {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
+      {...(snapshot.task.phase === 'ready' ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
+      {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
+    />
+  ) : null
   // What it changed opens over the window; what else it can do is in its menu.
   const actions = (
     <>
@@ -612,7 +640,7 @@ export function TaskView({
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
-        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-051); a
+        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-052); a
         // review reads one only.
         {...(can('abandon') && snapshot.task.phase !== 'settled' && snapshot.task.review == null && snapshot.task.worktree !== null
           ? {
@@ -685,6 +713,9 @@ export function TaskView({
       <Composer
         value={draft}
         onChange={setDraft}
+        // What a task that finished and isn't a change is likely told next, for Tab to take; its lead marks it done (settle_task). A
+        // review's draft is posted by the person, on it, so nothing is suggested there.
+        {...(settleable && done ? { suggestion: text.suggest } : {})}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
@@ -752,15 +783,21 @@ export function TaskView({
             {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
             {...(since === null ? {} : { since })}
             {...(elapsed === null ? {} : { elapsed })}
-            steps={trackFor(
-              snapshot.task.steps,
-              snapshot.task.step,
-              snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled',
-              snapshot.task.followUp === true,
-            )}
+            // Finished and the person's to settle, its steps are all done: Done says the rest, with no bar beside it.
+            {...(settle === null
+              ? {
+                  steps: trackFor(
+                    snapshot.task.steps,
+                    snapshot.task.step,
+                    snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled',
+                    snapshot.task.followUp === true,
+                  ),
+                }
+              : {})}
             faces={(['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] }))}
             face={shown}
             onFace={setFace}
+            {...(settle === null ? {} : { beside: settle })}
             actions={actions}
           />
         }

@@ -47,6 +47,16 @@ export const kindOf = (facts: KindFacts): TaskKind => {
 }
 
 /**
+ * Whether the task `task` (a table alias) is a review whose review was
+ * posted, with nothing drafted since that waits on the person or is being
+ * posted, as SQL: written to again, its lead answered, it is finished as a
+ * quick task is, the person's to settle (ADR-051).
+ */
+export const answeredIn = (task: string) =>
+  `(EXISTS (SELECT 1 FROM review_drafts ad WHERE ad.task_id = ${task}.id AND ad.state = 'posted')
+    AND NOT EXISTS (SELECT 1 FROM review_drafts ad WHERE ad.task_id = ${task}.id AND ad.state IN ('pending', 'posting', 'failed', 'uncertain')))`
+
+/**
  * Whether the task `task` (a table alias) is a quick task still, as SQL:
  * its latest plan says it stays on this Mac and ends in nothing, and it has
  * no pull request of its own. What makes it plain, as `kindOf` reads it.

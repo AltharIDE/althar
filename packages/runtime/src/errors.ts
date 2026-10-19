@@ -180,7 +180,7 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
 }) {}
 
 /**
- * A pull request can't be attached to the task (ADR-051), in words for the
+ * A pull request can't be attached to the task (ADR-052), in words for the
  * person or the coordinator: it isn't one, it's closed, its branch is
  * somewhere the task doesn't push to, another task follows it, or its
  * branch couldn't start from its head.
@@ -232,10 +232,12 @@ export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefus
  * good, so it is never abandoned or reopened; one whose worktree went with
  * its branch can't be reopened on it; and an abandoned one has no agent on
  * it until it is reopened. A title can't be empty or longer than a title may be.
+ * And a finished task isn't done while what its agents left running, such as
+ * a page, wouldn't stop.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long']),
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long', 'left_running']),
 }) {}
 
 /** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */

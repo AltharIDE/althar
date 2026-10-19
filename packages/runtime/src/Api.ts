@@ -641,14 +641,8 @@ export const handlers = Api.toLayer(
             yield* sql`UPDATE devices SET home_looked_at = ${yield* timestamp} WHERE id = ${instance.deviceId}`
           }),
         ),
-      // The person opened a task: a plain task that finished is done once seen.
-      SeeTask: ({ taskId }) =>
-        api(
-          Effect.gen(function* () {
-            const card = yield* queries.card(taskId)
-            yield* tasks.see({ taskId, finished: card.kind === 'plain' && card.phase === 'ready' })
-          }),
-        ),
+      // The person opened a task: when, kept. It moves nothing: a finished task waits for them to settle it.
+      SeeTask: ({ taskId }) => api(tasks.see({ taskId })),
       StartSession: ({ commandId, threadId, agentId, model, effort }) =>
         once(
           commandId,
@@ -678,6 +672,11 @@ export const handlers = Api.toLayer(
                       ...(kept.length === 0 ? {} : { images: kept }),
                       ...(dictated === true ? { dictated: true } : {}),
                     }
+              // Written to again with the switch, a task kept for later is back, as when it is sent on its own.
+              if (message !== undefined) {
+                const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId} AND kind = 'task'`
+                if (thread?.taskId != null) yield* tasks.bringBack(thread.taskId)
+              }
               const sessionId = yield* sessions.switchAgent({
                 threadId,
                 agentId,
@@ -786,6 +785,22 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
         ),
+      MarkTaskDone: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(
+            Effect.asVoid(
+              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) => tasks.markDone({ envelope: said, taskId })),
+            ),
+          ),
+        ),
+      KeepTaskForLater: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(
+            Effect.asVoid(Effect.flatMap(envelope('task.keep', { taskId }, commandId), (said) => tasks.keep({ envelope: said, taskId }))),
+          ),
+        ),
       RenameTask: ({ commandId, taskId, title }) =>
         once(
           commandId,
@@ -819,9 +834,13 @@ export const handlers = Api.toLayer(
               ...(dictated === true ? { dictated } : {}),
             }
             // What the person says to the coordinator starts it, if it isn't running.
-            const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`
+            const [thread] = yield* sql<{ kind: string; taskId: string | null }>`SELECT kind, task_id FROM threads WHERE id = ${threadId}`
             if (thread?.kind === 'coordinator') yield* coordinator.say(message)
-            else yield* sessions.send(message)
+            else {
+              // Written to again, a task kept for later is back: what its lead does next ends in Needs you.
+              if (thread?.kind === 'task' && thread.taskId !== null) yield* tasks.bringBack(thread.taskId)
+              yield* sessions.send(message)
+            }
             // Links in what the person said unfurl on their message, without holding up the reply.
             yield* Effect.forkDetach(issues.unfurlInput(commandId))
           }),

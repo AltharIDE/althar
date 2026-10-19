@@ -1,4 +1,4 @@
-# ADR-051: A task can be attached to an open pull request it didn't open
+# ADR-052: A task can be attached to an open pull request it didn't open
 
 - **Status:** Accepted
 - **Date:** 2026-10-17
@@ -51,7 +51,7 @@
     already, from before, it is neither taken over nor moved, and attaching
     says so.
   - **The record:** a change set of no run (`change_sets.run_id` may be null
-    now, migration 0036: a drafted task has no run yet), a repository change
+    now, migration 0037: a drafted task has no run yet), a repository change
     for the task's worktree with that pull request's link and head, and its
     external link, listening, whose snapshot keeps the pull request's own
     branch (`source`) and that it was attached (`attached`). What the task
