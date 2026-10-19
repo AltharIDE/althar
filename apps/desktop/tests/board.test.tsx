@@ -896,7 +896,7 @@ describe('every state the board shows', () => {
       ),
     ).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
-    expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
+    expect(screen.getByText(new RegExp(`waits: Codex is out of usage until ${clock('2026-10-01T13:40:00.000Z')}$`))).toBeTruthy()
     // One waiting for a free agent says so, and what for.
     expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
     expect(screen.getByText('Waiting')).toBeTruthy()

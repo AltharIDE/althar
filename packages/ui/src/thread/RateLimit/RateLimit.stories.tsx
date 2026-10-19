@@ -55,6 +55,33 @@ export const TwoAccounts: Story = {
   },
 }
 
+/**
+ * The work waits for the reset on its own, as nothing else was free: the
+ * models are a way on, not an ask, so the card is in ink; a review can be
+ * skipped.
+ */
+export const Held: Story = {
+  args: {
+    held: true,
+    step: 'Review',
+    onSkip: fn(),
+    text: {
+      what: () =>
+        'Claude Code ran out of usage during the review. No other model was free, so the review waits until 14:00, when Claude Code is back. Pick one now to carry on.',
+    },
+  },
+}
+
+export const Skipping: Story = {
+  args: { step: 'Review', onSkip: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Skip the review' }))
+    await expect(args.onSkip).toHaveBeenCalledOnce()
+    await expect(document.activeElement).toHaveTextContent('Skipped the review')
+  },
+}
+
 export const Moving: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)

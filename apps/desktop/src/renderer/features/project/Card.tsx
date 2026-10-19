@@ -189,7 +189,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
         : card.queued !== null
           ? queuedWords(card.queued)
           : card.waits !== null
-            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
+            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), card.step)
             : card.step === null
               ? undefined
               : text.now[card.step]
