@@ -283,7 +283,11 @@ describe('downloading an agent', () => {
     chmodSync(mine, 0o755)
     const own = using({ platform: process.platform, arch: process.arch, search: { env: { PATH: theirs }, dirs: [] } })
     const found = await own.run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
-    assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, { command: 'claude', whose: 'theirs' })
+    // Named bare, as the shell finds it; on Windows by the path it was found at, as a launch there needs.
+    assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, {
+      command: process.platform === 'win32' ? mine : 'claude',
+      whose: 'theirs',
+    })
   })
 
   // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
