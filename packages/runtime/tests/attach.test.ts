@@ -3,10 +3,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { type FakeService, type FakeServiceOptions, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -55,7 +55,13 @@ const commit = (cwd: string, file: string, text: string) => {
  * pull request into the second from the fork's `fix-send-back`, its commit
  * on the fork only.
  */
-const forked = (options: { readonly fork?: ReadonlyArray<string>; readonly state?: 'open' | 'closed' } = {}) => {
+const forked = (
+  options: {
+    readonly fork?: ReadonlyArray<string>
+    readonly state?: 'open' | 'closed'
+    readonly host?: Pick<FakeServiceOptions, 'reviews' | 'saysHead'>
+  } = {},
+) => {
   const { working, bare } = hosted(['you', 'api'])
   git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)
   git(working, 'checkout', '-q', '-b', 'fix-send-back')
@@ -66,6 +72,7 @@ const forked = (options: { readonly fork?: ReadonlyArray<string>; readonly state
   const github: FakeService = makeFakeService({
     pushUrl: () => bare,
     headOf: (number) => (number === 1 ? tipOf(bare, 'fix-send-back') : null),
+    ...options.host,
   })
   github.addRepository(['you', 'api'])
   github.addRepository(['meridian', 'api'])
@@ -331,6 +338,81 @@ describe('a task attached to a pull request it didn’t open', () => {
           }).pipe(Effect.provide(withQueries(theirs.github)))
         }),
       )
+  })
+
+  it.live('reads where the branch is on a host without reviews too, and refuses where the host doesn’t say', () => {
+    // An outsider's fork's branch, on a host that reads no changes to review, as GitLab and Bitbucket don't.
+    const theirs = forked({ fork: ['dana', 'api'], host: { reviews: false } })
+    return Effect.gen(function* () {
+      const { task, personId } = yield* project(theirs.working)
+      const refused = yield* Effect.flip(
+        (yield* Changes).attach({ taskId: task.taskId, pullRequest: '#1', start: true, actorId: personId }),
+      )
+      assert.include((refused as { message?: string }).message, 'is on dana/api, which this task doesn’t push to')
+      assert.isNull(tipOf(theirs.bare, task.branch))
+    })
+      .pipe(Effect.provide(withQueries(theirs.github)))
+      .pipe(
+        Effect.andThen(() => {
+          const unsaid = forked({ host: { reviews: false, saysHead: false } })
+          return Effect.gen(function* () {
+            const { task, personId } = yield* project(unsaid.working)
+            const changes = yield* Changes
+            const refused = yield* Effect.flip(changes.attach({ taskId: task.taskId, pullRequest: '#1', start: true, actorId: personId }))
+            assert.strictEqual(
+              (refused as { message?: string }).message,
+              'The host doesn’t say where PR #1’s branch is, so Althar can’t tell it’s one this task pushes to.',
+            )
+            assert.lengthOf(yield* changes.ofTask(task.taskId), 0)
+          }).pipe(Effect.provide(withQueries(unsaid.github)))
+        }),
+      )
+  })
+
+  it.live('gives a pull request two tasks attach at once to one of them only', () => {
+    const { github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { projectId, task, personId } = yield* project(working)
+      const changes = yield* Changes
+      const other = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Answer it again' }),
+        projectId,
+        title: 'Answer it again',
+      })
+      const both = yield* Effect.all(
+        [task.taskId, other.taskId].map((taskId) =>
+          Effect.exit(changes.attach({ taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId })),
+        ),
+        { concurrency: 'unbounded' },
+      )
+      assert.lengthOf(both.filter(Exit.isSuccess), 1)
+      const followed = [...(yield* changes.ofTask(task.taskId)), ...(yield* changes.ofTask(other.taskId))]
+      assert.lengthOf(followed, 1)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('refuses, saying why, where a worktree with no branch yet has one of the task’s branch’s name left from before', () => {
+    const { bare, github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { task, personId } = yield* project(working)
+      const sql = yield* SqlClient.SqlClient
+      // On the head already, with no branch of its own yet; one of its name left there, elsewhere.
+      const left = git(task.worktree, 'rev-parse', task.branch)
+      git(task.worktree, 'fetch', '-q', bare, 'fix-send-back')
+      git(task.worktree, 'checkout', '-q', '--detach', 'FETCH_HEAD')
+      yield* sql`UPDATE workspaces SET branched_at = NULL WHERE task_id = ${task.taskId}`
+      const changes = yield* Changes
+      const refused = yield* Effect.flip(
+        changes.attach({ taskId: task.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId }),
+      )
+      assert.strictEqual((refused as { _tag?: string })._tag, 'AttachRefused')
+      assert.strictEqual(
+        (refused as { message?: string }).message,
+        `A branch called ${task.branch} is in its repository already, from before. Delete or rename it, then attach PR #1.`,
+      )
+      assert.strictEqual(git(task.worktree, 'rev-parse', task.branch), left)
+      assert.lengthOf(yield* changes.ofTask(task.taskId), 0)
+    }).pipe(Effect.provide(withQueries(github)))
   })
 
   it.live('is the coordinator’s to do too, asking the person before it starts a branch over; and it finds upstream’s pull requests', () => {

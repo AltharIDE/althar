@@ -694,6 +694,12 @@ export class Changes extends Context.Service<
        * merge of several repositories moved and is about to put back.
        */
       const branches = Semaphore.makeUnsafe(1)
+      /*
+       * Pull requests are attached one at a time across every task: whether
+       * another task follows one, or sends its work there, is read and the
+       * attachment written with no other attaching in between.
+       */
+      const attaching = Semaphore.makeUnsafe(1)
       /* What Althar made again of agents' commits, kept in the profile (credit.ts). */
       const memory: Memory = {
         recall: (commits) => recallMade(commits).pipe(Effect.provideContext(context)),
@@ -1413,12 +1419,11 @@ export class Changes extends Context.Service<
           const name = `${host.words.short} ${host.words.prefix}${pull.number}`
           if (pull.state !== 'open') return yield* refuse(`${name} is ${pull.state}: only an open one can be attached.`)
           // Its branch is on the repository this clone pushes to, or nowhere Althar can push: the fork, else the repository itself.
+          // Where the host doesn't say which repository it is on, a branch of the same name here may be another's: none is pushed to.
           const own = fork?.fork.path ?? found.path
-          const headOn = host.capabilities.reviews
-            ? (yield* fromHost(host.changeToReview(repository, pull.number))).fork
-            : same(path, own)
-              ? null
-              : own
+          const headOn = pull.headRepository
+          if (headOn === undefined)
+            return yield* refuse(`The host doesn’t say where ${name}’s branch is, so Althar can’t tell it’s one this task pushes to.`)
           if (headOn !== null && headOn.length === 0) return yield* refuse(`${name}’s branch was on a fork that is gone.`)
           const headPath = headOn ?? path
           if (!same(headPath, own))
@@ -1449,6 +1454,11 @@ export class Changes extends Context.Service<
           if (tip === null) return yield* refuse(`Althar couldn’t fetch ${name}’s branch, ${pull.source}, from ${own.join('/')}.`)
           let base = row.baseCommit
           let started = false
+          // A worktree with no branch yet gets the task's; one of that name left from before isn't taken over, nor moved.
+          const leftover =
+            row.branched === 0 && (yield* gitOutcome(row.path, 'rev-parse', '--verify', '--quiet', `refs/heads/${row.branch}`)).code === 0
+          const refuseLeftover = () =>
+            refuse(`A branch called ${row.branch} is in its repository already, from before. Delete or rename it, then attach ${name}.`)
           if (!(yield* onHead(row.path, tip))) {
             // The task's own commits, not in the head: after where it started, merges left out.
             const mine = (yield* git(
@@ -1463,6 +1473,7 @@ export class Changes extends Context.Service<
               .split('\n')
               .filter((line) => line !== '')
             if (input.start !== true) return { kind: 'start', name, source: pull.source, head: tip, own: mine.length } satisfies Attached
+            if (leftover) return yield* refuseLeftover()
             if (Option.isSome(yield* sessions.running(task.threadId)))
               return yield* refuse(`Its lead is at work in its worktree. Stop it, or wait for its turn to end, then attach ${name}.`)
             const left = yield* uncommittedFiles(row.path)
@@ -1489,7 +1500,10 @@ export class Changes extends Context.Service<
             const met = yield* gitOutcome(row.path, 'merge-base', base ?? tip, tip)
             base = met.code === 0 ? met.stdout : tip
             started = true
-          } else if (row.branched === 0) yield* git(row.path, 'checkout', '-q', '-b', row.branch)
+          } else if (row.branched === 0) {
+            if (leftover) return yield* refuseLeftover()
+            yield* git(row.path, 'checkout', '-q', '-b', row.branch)
+          }
           const kept = yield* commitsAhead(row.path, tip, 'HEAD').pipe(Effect.orElseSucceed(() => 0))
           const snapshot: Snapshot = { ...snapshotOf(pull, path, host.words, null), headSha: tip, attached: true }
           const followed = yield* sql<{ id: string; projectId: ProjectId; taskId: string }>`
@@ -4706,7 +4720,7 @@ export class Changes extends Context.Service<
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),
         stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
-        attach: (input) => provide(locked(input.taskId)(attach(input))),
+        attach: (input) => provide(locked(input.taskId)(attaching.withPermits(1)(attach(input)))),
         leadStopped: (where, how = 'stopped') =>
           provide(
             Effect.gen(function* () {

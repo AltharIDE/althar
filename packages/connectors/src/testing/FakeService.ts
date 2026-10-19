@@ -58,6 +58,10 @@ export interface FakeServiceOptions {
   readonly listReads?: number
   /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
   readonly reruns?: boolean
+  /** Whether it reads changes to review: as GitHub does, unless said, and no other. */
+  readonly reviews?: boolean
+  /** Whether reading a change says the repository its branch is on: it does, unless a test says, as a host that can't. */
+  readonly saysHead?: boolean
 }
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
@@ -233,7 +237,14 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const service: FakeService = {
     product,
     words: product === 'gitlab' ? { noun: 'merge request', short: 'MR', prefix: '!' } : { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: product === 'github', links: true, starts: true },
+    capabilities: {
+      drafts: true,
+      checkLogs: true,
+      threads: true,
+      reviews: options.reviews ?? product === 'github',
+      links: true,
+      starts: true,
+    },
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
       Effect.andThen(called('repository'), () => {
@@ -291,7 +302,13 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (found === undefined) return Effect.fail(missing(`change ${number}`))
         const head = options.headOf?.(number) ?? null
         const conflicts = found.state === 'open' ? options.conflictsOf?.(number) : undefined
-        return Effect.succeed({ ...found, ...(head === null ? {} : { headSha: head }), ...(conflicts === undefined ? {} : { conflicts }) })
+        const fork = forks.get(number)
+        return Effect.succeed({
+          ...found,
+          ...(head === null ? {} : { headSha: head }),
+          ...(conflicts === undefined ? {} : { conflicts }),
+          ...(options.saysHead === false ? {} : { headRepository: fork === undefined ? null : fork === '' ? [] : fork.split('/') }),
+        })
       }),
     listChanges: (repository, query) =>
       Effect.andThen(called('listChanges'), () => {

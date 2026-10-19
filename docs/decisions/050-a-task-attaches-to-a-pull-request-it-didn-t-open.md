@@ -25,13 +25,20 @@
     fork came from; by its number, where the repository's pull requests open
     (upstream, for a fork that sends them there). Only an open one. Its
     branch must be on the repository the task pushes to (the fork, else the
-    repository itself), as GitHub's reading of it says: one on someone else's
-    fork is refused, since Althar can't push there. A link is taken only on
+    repository itself), as the host's reading of it says (`headRepository`:
+    GitHub's head repository, GitLab's source project, Bitbucket's source
+    repository): one on someone else's fork is refused, since Althar can't
+    push there. Where a host doesn't say, it is refused too: a branch of the
+    same name on the task's repository may not be the one it merges from,
+    and pushing there would move another branch, perhaps the default one.
+    A link is taken only on
     the host the task's repository is on, not one of the same path on
     another host Althar is connected to. One another open task follows, or
     whose work still goes to it after it stopped listening, stays that
     task's; one it was attached to only while it last saw it open, so one
-    closed and reopened since can go to another.
+    closed and reopened since can go to another. Pull requests are attached
+    one at a time across every task, so two tasks attaching one at once
+    can't both take it.
   - **Its branch:** where the task's branch already has that pull request's
     head, it stays as it is. Where it doesn't, nothing changes until the
     person says to start it there: then the head is fetched, the branch is
@@ -39,9 +46,12 @@
     started that aren't in the head go on top, one by one, as a next pull
     request's do (ADR-034). Where they conflict, the worktree has what isn't
     committed, or the lead is at work in it, it stays as it was, and says
-    why. Where it was is kept under `refs/althar/before-attach/`.
+    why. Where it was is kept under `refs/althar/before-attach/`. A worktree
+    with no branch yet gets the task's; where a branch of that name is there
+    already, from before, it is neither taken over nor moved, and attaching
+    says so.
   - **The record:** a change set of no run (`change_sets.run_id` may be null
-    now, migration 0034: a drafted task has no run yet), a repository change
+    now, migration 0036: a drafted task has no run yet), a repository change
     for the task's worktree with that pull request's link and head, and its
     external link, listening, whose snapshot keeps the pull request's own
     branch (`source`) and that it was attached (`attached`). What the task
