@@ -30,6 +30,8 @@ const agents: Record<string, { readonly command: string; readonly args: Readonly
   kimi: { command: 'kimi', args: ['acp'] },
   'mistral-vibe': { command: 'vibe-acp', args: [] },
   'qwen-code': { command: 'qwen', args: ['--acp', '--approval-mode', 'default'] },
+  // Where its download is on the PATH: it unpacks about 1 GB into the temporary folder as it starts.
+  antigravity: { command: 'agy_acp_server.par', args: process.platform === 'linux' ? ['--uid='] : [] },
   // Not in the registry yet (docs/architecture/03, Agents not run yet): probed signed in, they can be.
   cursor: { command: 'cursor-agent', args: ['acp'] },
   devin: { command: 'devin', args: ['acp'] },

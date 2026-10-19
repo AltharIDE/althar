@@ -62,6 +62,12 @@ export const scenarios = {
    * person's own words; repeats the answer.
    */
   questions: 'questions',
+  /**
+   * Asks the person to choose as Antigravity does: a permission request on an
+   * `interaction_` tool call, one `allow_once` option for each answer, with
+   * the question in its call's title only; says what was chosen.
+   */
+  choice: 'choice',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
   /** Claude's structured report of a full context. */
@@ -1516,6 +1522,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.question:
         case scenarios.questions: {
           await say(await askPerson(scenario === scenarios.questions ? 'two' : 'plain'))
+          return session.cancelled ? { stopReason: 'cancelled' } : ended()
+        }
+        case scenarios.choice: {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'interaction_28ffdbf7',
+            title: 'Which color do you prefer?',
+            status: 'pending',
+            rawInput: {},
+          })
+          const chosen = await ask({ toolCallId: 'interaction_28ffdbf7', status: 'pending', rawInput: {} }, [
+            { optionId: '1', name: 'red', kind: 'allow_once' },
+            { optionId: '2', name: 'blue', kind: 'allow_once' },
+          ])
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'interaction_28ffdbf7',
+            status: 'completed',
+            rawOutput: 'Response received',
+          })
+          await say(`chosen=${chosen}`)
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
         case scenarios.quota:

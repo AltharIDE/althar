@@ -50,7 +50,7 @@ export const USUAL = 'main'
 export class SignOutFailed extends Schema.TaggedError<SignOutFailed>()('SignOutFailed', { line: Schema.String }) {}
 
 export class AccountRefused extends Schema.TaggedError<AccountRefused>()('AccountRefused', {
-  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one']),
+  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one', 'no_terminal']),
 }) {}
 
 /**
@@ -122,7 +122,7 @@ export class Accounts extends Context.Service<
     /** Folders known switchers keep the agent's accounts in that aren't accounts here yet. */
     found(agentId: string): Effect.Effect<ReadonlyArray<Found>, SqlError.SqlError>
     /** The line that signs the account in with the agent's own tool, in its home. */
-    login(accountId: string): Effect.Effect<string, NotFound | UnknownAgent | SqlError.SqlError>
+    login(accountId: string): Effect.Effect<string, AccountRefused | NotFound | UnknownAgent | SqlError.SqlError>
   }
 >()('@althar/runtime/Accounts') {
   static readonly layer: Layer.Layer<Accounts, never, Store> = Layer.effect(
@@ -404,6 +404,8 @@ export class Accounts extends Context.Service<
               const account = yield* get(accountId)
               const definition = definitionOf(account.agentId)
               if (definition === undefined) return yield* new UnknownAgent({ agentId: account.agentId })
+              // One that signs in only inside Althar (Antigravity, over ACP) has nothing to run in a terminal.
+              if (definition.signIn.login === '') return yield* new AccountRefused({ reason: 'no_terminal' })
               // The home a session gets (`env`), not the folder: the usual
               // Claude account in a Flatpak signs in where its sessions read.
               const home = env(account)[definition.home.variable]

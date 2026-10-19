@@ -653,6 +653,60 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live(
+      'asks the person, never the rules, what an agent asks as a permission on a question’s tool call, and answers with their pick',
+      () =>
+        Effect.gen(function* () {
+          const choose = (onQuestion?: (question: Question) => Effect.Effect<QuestionAnswer>, questions: string | null = 'interaction_') =>
+            Effect.scoped(
+              Effect.gen(function* () {
+                const ruled: Array<string> = []
+                const connection = yield* connect({
+                  transport: { _tag: 'InProcess', agent: fakeAgent() },
+                  onPermission: (request) =>
+                    Effect.sync(() => ruled.push(request.toolCallId)).pipe(Effect.as({ decision: 'allow' as const })),
+                  permissions: { rejectAndContinue: [], rejectAndStop: [], allowScopes: {}, ...(questions === null ? {} : { questions }) },
+                  ...(onQuestion === undefined ? {} : { onQuestion }),
+                })
+                const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+                return { said: text(yield* Stream.runCollect(session.prompt(scenarios.choice))), ruled }
+              }),
+            )
+          const seen: Array<Question> = []
+          const picked = yield* choose((question) =>
+            Effect.sync(() => seen.push(question)).pipe(
+              Effect.as({ action: 'accept' as const, content: questionContent(question, { answer: { values: ['2'] } }) }),
+            ),
+          )
+          assert.deepStrictEqual(picked, { said: 'chosen=2', ruled: [] })
+          assert.deepStrictEqual(seen, [
+            {
+              sessionId: 'fake-1',
+              toolCallId: 'interaction_28ffdbf7',
+              message: 'Which color do you prefer?',
+              fields: [
+                {
+                  id: 'answer',
+                  question: 'Which color do you prefer?',
+                  type: 'choice',
+                  options: [
+                    { value: '1', label: 'red' },
+                    { value: '2', label: 'blue' },
+                  ],
+                  multiple: false,
+                  required: true,
+                },
+              ],
+            },
+          ])
+          // Declined, or with no one to ask, it is cancelled: never the first answer, as the rules would allow it.
+          assert.deepStrictEqual(yield* choose(() => Effect.succeed({ action: 'decline' })), { said: 'chosen=cancelled', ruled: [] })
+          assert.deepStrictEqual(yield* choose(), { said: 'chosen=cancelled', ruled: [] })
+          // An agent that doesn't ask so has it go to the rules, as any other request.
+          assert.deepStrictEqual(yield* choose(undefined, null), { said: 'chosen=1', ruled: ['interaction_28ffdbf7'] })
+        }),
+    )
+
     it.live('hears what the agent said before asking in this turn only', () =>
       Effect.scoped(
         Effect.gen(function* () {

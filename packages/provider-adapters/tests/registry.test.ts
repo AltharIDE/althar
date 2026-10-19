@@ -43,14 +43,16 @@ describe('the agent registry', () => {
     })
     assert.deepInclude(copilot.launch('/usr/bin/node').env ?? {}, { COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' })
     assert.deepInclude(junie.launch('/usr/bin/node').env ?? {}, { JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false' })
+    // Antigravity's mode is held where it asks, as its others approve without asking.
+    assert.deepStrictEqual(agents.antigravity.options.held, { mode: 'default' })
     // None is launched with a flag that approves.
-    for (const agent of [copilot, junie, grok, agents.kimi, agents['mistral-vibe'], agents['qwen-code']])
+    for (const agent of [copilot, junie, grok, agents.kimi, agents['mistral-vibe'], agents['qwen-code'], agents.antigravity])
       for (const arg of agent.launch('/usr/bin/node').args)
         assert.notMatch(arg, /allow|yolo|autopilot|brave|approve|skip-permissions/i, agent.id)
   })
 
   it('sends the later agents only Althar’s own commands, as one of theirs turns their asking off', () => {
-    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code'] as const)
+    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code', 'antigravity'] as const)
       assert.strictEqual(agents[id].commands, 'althar', id)
     for (const id of ['claude-code', 'codex', 'opencode'] as const) assert.isUndefined(agents[id].commands, id)
   })
@@ -63,9 +65,34 @@ describe('the agent registry', () => {
   })
 
   it('leads no review of a pull request, and judges no permission, on an agent its session can’t hold to reading', () => {
-    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code'] as const) {
+    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code', 'antigravity'] as const) {
       assert.isUndefined(agents[id].reviewing, id)
       assert.isUndefined(agents[id].permissionJudge, id)
+    }
+  })
+
+  it('runs Antigravity’s server as Google’s registry launches it, its sign-in its home’s own, with no browser and a temporary folder of its own', () => {
+    const spec = agents.antigravity.launch('/usr/bin/node')
+    assert.strictEqual(spec.command, 'agy_acp_server.par')
+    assert.deepStrictEqual(spec.args, process.platform === 'linux' ? ['--uid='] : [])
+    assert.deepStrictEqual(spec.env, { AGY_ACP_FORCE_FILE_STORAGE: '1', PYTHONUNBUFFERED: '1', BROWSER: 'true' })
+    assert.isTrue(spec.privateTemp)
+    // Every role in the mode that asks, and what it asks the person never answered by the rules.
+    assert.deepStrictEqual(agents.antigravity.modes, { ask: 'default', readOnly: null, reader: 'default' })
+    assert.strictEqual(agents.antigravity.permissions.questions, 'interaction_')
+    for (const agent of Object.values(agents).filter((entry) => entry.id !== 'antigravity')) assert.isUndefined(agent.permissions.questions)
+  })
+
+  it('downloads Antigravity’s server only from Google, at one version, each archive and both its programs pinned, and none for Windows', () => {
+    const download = agents.antigravity.cli?.download
+    if (download === undefined || !('version' in download)) return assert.fail('Antigravity has a pinned download')
+    assert.strictEqual(download.version, '1.3.0')
+    assert.deepStrictEqual(Object.keys(download.assets).sort(), ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'])
+    for (const [platform, asset] of Object.entries(download.assets)) {
+      assert.match(asset.url, /^https:\/\/dl\.google\.com\/agy-extensions\/releases\/(macos|linux)\/agy-acp-server-1\.3\.0-/, platform)
+      assert.match(asset.sha256, /^[0-9a-f]{64}$/, platform)
+      assert.deepStrictEqual(Object.keys(asset.files).sort(), ['agy_acp_server.par', 'localharness_external'], platform)
+      for (const sha256 of Object.values(asset.files)) assert.match(sha256, /^[0-9a-f]{64}$/, platform)
     }
   })
 

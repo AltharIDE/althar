@@ -69,6 +69,7 @@ const AGENT_MAKERS: Readonly<Record<string, Lab>> = {
   grok: Lab.XAI,
   kimi: Lab.Moonshot,
   'mistral-vibe': Lab.Mistral,
+  antigravity: Lab.Google,
 }
 
 /** An agent's own mark, for the list of agents. */
@@ -77,6 +78,7 @@ const AGENT_BRANDS: Readonly<Record<string, Brand>> = {
   codex: Brand.Codex,
   copilot: Brand.GitHubCopilot,
   junie: Brand.Junie,
+  antigravity: Brand.Antigravity,
 }
 
 const labOf = (agentId: string, words: string): Lab | undefined => {

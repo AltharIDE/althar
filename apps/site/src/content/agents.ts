@@ -21,6 +21,7 @@ export enum Agent {
   Mistral = 'mistral',
   Junie = 'junie',
   Grok = 'grok',
+  Antigravity = 'antigravity',
 }
 
 export interface AgentInfo {
@@ -47,6 +48,12 @@ export const AGENTS: readonly AgentInfo[] = [
   { id: Agent.Kimi, name: 'Kimi Code', signIn: 'A Kimi Code membership', runs: { code: 'kimi acp', whose: 'yours' } },
   { id: Agent.Mistral, name: 'Mistral Vibe', signIn: 'Le Chat Pro or Team', runs: { code: 'vibe-acp', whose: 'yours' } },
   { id: Agent.Qwen, name: 'Qwen Code', signIn: 'Alibaba Cloud Coding Plan, or any API key', runs: { code: 'qwen --acp', whose: 'yours' } },
+  {
+    id: Agent.Antigravity,
+    name: 'Google Antigravity',
+    signIn: 'A Google account, in Althar',
+    runs: { code: 'agy_acp_server.par', whose: 'yours' },
+  },
 ]
 
 const NAMED: Record<Agent, string> = {
@@ -61,6 +68,7 @@ const NAMED: Record<Agent, string> = {
   [Agent.Mistral]: 'Mistral Vibe',
   [Agent.Junie]: 'Junie',
   [Agent.Grok]: 'Grok Build',
+  [Agent.Antigravity]: 'Google Antigravity',
 }
 
 export const agentName = (id: Agent): string => NAMED[id]

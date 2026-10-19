@@ -264,6 +264,16 @@ Everything runs on your machine. The project's tasks, threads and history are ke
     </td>
     <td width="20%" align="center" valign="top">
       <picture>
+        <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/antigravity-dark.svg" />
+        <img src=".github/readme/agents/antigravity.svg" width="48" alt="" />
+      </picture><br />
+      <b>Google Antigravity</b><br />
+      A Google account, signed in inside Althar
+    </td>
+  </tr>
+  <tr>
+    <td width="20%" align="center" valign="top">
+      <picture>
         <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/on-the-way-dark.svg" />
         <img src=".github/readme/agents/on-the-way.svg" width="72" alt="Cursor and Gemini CLI" />
       </picture><br />

@@ -21,7 +21,7 @@ import {
   takingBackground,
 } from './background'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
-import { type Question, type QuestionAnswer, questionFields } from './questions'
+import { type Question, type QuestionAnswer, type QuestionField, questionFields } from './questions'
 import type { LaunchSpec, PermissionMeanings } from './registry'
 
 /*
@@ -404,18 +404,63 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
      * when the session ends (ADR-021).
      */
     const askQuestion = (params: acp.CreateElicitationRequest, fromAgent: AbortSignal): Promise<acp.CreateElicitationResponse> => {
-      const ask = options.onQuestion
-      if (ask === undefined || params.mode !== 'form' || !('requestedSchema' in params)) return Promise.resolve({ action: 'cancel' })
+      if (options.onQuestion === undefined || params.mode !== 'form' || !('requestedSchema' in params))
+        return Promise.resolve({ action: 'cancel' })
       const sessionId = 'sessionId' in params && typeof params.sessionId === 'string' ? params.sessionId : undefined
       const toolCallId = 'toolCallId' in params && typeof params.toolCallId === 'string' ? params.toolCallId : undefined
+      return asked(sessionId, toolCallId, params.message, questionFields(params.requestedSchema, params.message), fromAgent).then(
+        (answer): acp.CreateElicitationResponse =>
+          answer.action === 'accept'
+            ? { action: 'accept', content: { ...answer.content } as Record<string, string | number | boolean | Array<string>> }
+            : { action: answer.action },
+      )
+    }
+
+    /*
+     * A permission request that is the model asking the person (the registry's
+     * `questions`: Antigravity's `interaction_` tool calls, one option for each
+     * answer, all `allow_once`): a question of one choice, never the rules', as
+     * the rules would allow the first answer. With no one to ask, it is cancelled.
+     */
+    const askChoice = (params: acp.RequestPermissionRequest, fromAgent: AbortSignal): Promise<acp.RequestPermissionResponse> => {
+      if (options.onQuestion === undefined) return Promise.resolve(CANCELLED)
+      const toolCall = params.toolCall as { readonly toolCallId: string; readonly title?: string | null }
+      const known = calls.get(`${params.sessionId}\u0000${toolCall.toolCallId}`)
+      const asking = toolCall.title?.trim() || known?.title?.trim() || 'The agent asks you to choose.'
+      const field: QuestionField = {
+        id: 'answer',
+        question: asking,
+        type: 'choice',
+        options: params.options.map((option) => ({ value: option.optionId, label: option.name })),
+        multiple: false,
+        required: true,
+      }
+      return asked(params.sessionId, toolCall.toolCallId, asking, [field], fromAgent).then((answer) => {
+        const chosen = answer.action === 'accept' ? answer.content.answer : undefined
+        return typeof chosen === 'string' && params.options.some((option) => option.optionId === chosen)
+          ? { outcome: { outcome: 'selected', optionId: chosen } }
+          : CANCELLED
+      })
+    }
+
+    /** Asks the person, until the agent withdraws the question or the connection closes; a cancel where no one could. */
+    const asked = (
+      sessionId: string | undefined,
+      toolCallId: string | undefined,
+      message: string,
+      fields: ReadonlyArray<QuestionField>,
+      fromAgent: AbortSignal,
+    ): Promise<QuestionAnswer> => {
+      const ask = options.onQuestion
+      if (ask === undefined) return Promise.resolve({ action: 'cancel' })
       // What it said just before: since its last tool call, or else the last it said before that, in this turn.
       const heard = sessionId === undefined ? undefined : said.get(sessionId)
       const before = heard?.current.trim() || heard?.last.trim() || ''
       const question: Question = {
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(toolCallId === undefined ? {} : { toolCallId }),
-        message: params.message,
-        fields: questionFields(params.requestedSchema, params.message),
+        message,
+        fields,
         ...(before === '' ? {} : { said: before }),
       }
       const dropped = new AbortController()
@@ -429,13 +474,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       fromAgent.addEventListener('abort', withdrawn, { once: true })
       return Effect.runPromiseWith(context)(ask(question), { signal: dropped.signal })
         .then(
-          (answer): acp.CreateElicitationResponse =>
-            dropped.signal.aborted
-              ? { action: 'cancel' }
-              : answer.action === 'accept'
-                ? { action: 'accept', content: { ...answer.content } as Record<string, string | number | boolean | Array<string>> }
-                : { action: answer.action },
-          (): acp.CreateElicitationResponse => ({ action: 'cancel' }),
+          (answer): QuestionAnswer => (dropped.signal.aborted ? { action: 'cancel' } : answer),
+          (): QuestionAnswer => ({ action: 'cancel' }),
         )
         .finally(() => {
           pending?.delete(drop)
@@ -499,7 +539,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         hear(params.sessionId, params.update)
         receive(params.sessionId, { _tag: 'Update', update: params.update })
       })
-      .onRequest(acp.methods.client.session.requestPermission, (request) => answerPermission(described(request.params), request.signal))
+      .onRequest(acp.methods.client.session.requestPermission, (request) =>
+        options.permissions?.questions !== undefined && request.params.toolCall.toolCallId.startsWith(options.permissions.questions)
+          ? askChoice(request.params, request.signal)
+          : answerPermission(described(request.params), request.signal),
+      )
       .onRequest(acp.methods.client.elicitation.create, (request) => askQuestion(request.params, request.signal))
 
     let owned: OwnedProcess | undefined

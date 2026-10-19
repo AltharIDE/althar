@@ -92,6 +92,8 @@ describe('reading sign-in status', () => {
         'kimi login',
         'vibe --setup',
         'qwen',
+        // It signs in only over ACP, inside Althar.
+        '',
       ],
     )
   })
@@ -114,6 +116,7 @@ describe('an agent’s homes', () => {
       ['KIMI_CODE_HOME', '/Users/me/.kimi-code'],
       ['VIBE_HOME', '/Users/me/.vibe'],
       ['QWEN_HOME', '/Users/me/.qwen'],
+      ['GEMINI_HOME', '/Users/me/.gemini'],
     ])
     assert.deepStrictEqual(
       usual({
@@ -126,8 +129,9 @@ describe('an agent’s homes', () => {
         KIMI_CODE_HOME: '/k',
         VIBE_HOME: '/v',
         QWEN_HOME: '/q',
+        GEMINI_HOME: '/m',
       }).map(([, folder]) => folder),
-      ['/c', '/x', '/d', '/p', '/j', '/g', '/k', '/v', '/q'],
+      ['/c', '/x', '/d', '/p', '/j', '/g', '/k', '/v', '/q', '/m'],
     )
   })
 
@@ -165,6 +169,11 @@ describe('an agent’s homes', () => {
     ]
     for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code'] as const)
       assert.includeMembers(['AGENTS.md', 'skills'], [...agents[id].home.shared(kept)], id)
+    // Antigravity's usual folder is Gemini CLI's too: its sign-in, its `config/` of MCP servers and hooks, and Gemini CLI's own stay.
+    assert.deepStrictEqual(
+      agents.antigravity.home.shared(['antigravity-acp', 'config', 'antigravity-cli', 'settings.json', 'oauth_creds.json', 'GEMINI.md']),
+      ['GEMINI.md'],
+    )
   })
 })
 

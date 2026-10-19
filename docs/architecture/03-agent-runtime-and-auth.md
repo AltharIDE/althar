@@ -30,7 +30,7 @@ Althar reaches every agent through one protocol, the Agent Client Protocol
 ## Agents in the MVP
 
 Claude Code, Codex and OpenCode are interchangeable from the first version, and
-six more since October 2026 ([ADR-048](../decisions/048-an-agent-joins-where-althar-can-hold-it-to-asking.md)). A
+seven more since October 2026 ([ADR-048](../decisions/048-an-agent-joins-where-althar-can-hold-it-to-asking.md)). A
 task's lead, any step and the coordinator can run on any of them, and a task
 can move between them.
 
@@ -45,6 +45,7 @@ can move between them.
 | Kimi Code | `kimi acp`, native | A Kimi Code membership; status from `kimi provider list` | Commands ask; edits inside a git repository and web fetches don't. Its plan mode refuses edits, so readers run there |
 | Mistral Vibe | `vibe-acp`, native | A Mistral key its browser sign-in makes, paid by Le Chat Pro or Team, or pay-as-you-go; no status command | Its `ask` mode asks before edits, web, MCP tools and most commands; no read-only mode, so readers ask and Althar's rules deny their writes. One account: its key is a keychain item every folder shares |
 | Qwen Code | `qwen --acp --approval-mode default`, native | Alibaba Cloud's Coding Plan key or any provider's; no status command | Starts in `auto`, a model judging what is safe, unless told. Commands it reads as only reading run unasked. A repository's `.qwen/settings.json` can add allow rules |
+| Google Antigravity | `agy_acp_server.par`, Google's own ACP server, apart from the `agy` CLI; Althar downloads 1.3.0 from Google at the person's asking, pinned by sha256, as Orca does. No Windows build | A Google account, signed in only inside Althar over ACP's `authenticate`; no status command | Every role runs in `default`, held there, as `auto_edit` and `yolo` approve unasked; no read-only mode, so Althar's rules deny a reader's writes. The model's questions come as permission requests on `interaction_` tool calls and go to the person. Its sign-in is the home's own file, not the keychain. Google's terms may count a sign-in from another app a breach |
 
 What each agent reports was read from the agents themselves on 28 September
 2026, with `scripts/probe.ts` in `@althar/provider-adapters`: claude-agent-acp
@@ -60,8 +61,10 @@ The six after them were read on 18 and 19 October 2026 (GitHub Copilot CLI
 Qwen Code 0.25.2): each started over ACP with a home of its own and no
 sign-in, against a stand-in model on the computer where it takes one, so their
 sessions, options and permission requests were seen; and from their own code
-and help. None has run signed in against its vendor's models yet. Which agents
-join, and why five more wait, is
+and help. Google Antigravity's server 1.3.0 is as Orca (stablyai/orca) runs
+it, from Orca's code and its recording of a real session; it hasn't run here.
+None has run signed in against its vendor's models yet. Which agents join, and
+why four more wait, is
 [ADR-048](../decisions/048-an-agent-joins-where-althar-can-hold-it-to-asking.md).
 
 Althar checks sign-in with each agent's documented status command, never by
@@ -85,7 +88,6 @@ moved to Antigravity.
 | Agent | What it waits for |
 |---|---|
 | Cursor | A signed-in probe of its current build: what was read is two months older, and its plan and ask modes are its servers', which may not keep Althar's tools |
-| Google Antigravity | Terms that let a third-party app use its sign-in, and a build to read |
 | Devin | A mode that asks before an edit; and the kinds of its permission options, some of which switch the session to bypass |
 | Factory Droid | Its `Script` tool asking in an ACP session |
 | Auggie | Augment's permission to build it in; and a way to make it ask that doesn't name each tool |
@@ -275,7 +277,7 @@ Each agent is a registry entry, not a code path:
 
 ```ts
 type AgentDefinition = {
-  id: "claude-code" | "codex" | "opencode" | "copilot" | "junie" | "grok" | "kimi" | "mistral-vibe" | "qwen-code"
+  id: "claude-code" | "codex" | "opencode" | "copilot" | "junie" | "grok" | "kimi" | "mistral-vibe" | "qwen-code" | "antigravity"
   source: "bundled" | "user_installed"
   launch: (node: string) => LaunchSpec // command, args, env, which parent variables it inherits
   modes: { ask: string | null; readOnly: string | null; reader: string | null } // null: no modes, it asks by its `sessionMeta`

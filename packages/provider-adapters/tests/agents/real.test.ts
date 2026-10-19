@@ -75,6 +75,8 @@ const otherModel: Record<AgentId, string> = {
   kimi: 'kimi-k3',
   'mistral-vibe': 'devstral-medium-2',
   'qwen-code': 'qwen3-coder-plus',
+  // Its efforts are models of their own, as Orca's recording of 1.3.0 lists them.
+  antigravity: 'gemini-3.8-flash-low',
 }
 
 /**
@@ -96,6 +98,7 @@ const command: Record<AgentId, string> = {
   kimi: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
   'mistral-vibe': 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
   'qwen-code': 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
+  antigravity: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
 }
 
 /**
@@ -114,6 +117,8 @@ const asks: Record<AgentId, ContractSubject['asks']> = {
   kimi: 'words',
   'mistral-vibe': 'words',
   'qwen-code': 'words',
+  // Its questions come as permission requests on `interaction_` tool calls, which Althar asks as a choice.
+  antigravity: 'form',
 }
 
 /** A question each agent asks: with its question tool, where it has one. */
@@ -129,6 +134,8 @@ const question: Record<AgentId, string> = {
   kimi: 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
   'mistral-vibe': 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
   'qwen-code': 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
+  antigravity:
+    'Before anything else, use your tool for asking me a question to ask which colour the button should be, with the options Red and Blue. Then reply with only the colour I chose.',
 }
 
 const only = process.env.ALTHAR_AGENTS?.split(',')

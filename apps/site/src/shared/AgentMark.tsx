@@ -13,6 +13,7 @@ const BRAND_OF: Partial<Record<Agent, Brand>> = {
   [Agent.Mistral]: Brand.Mistral,
   [Agent.Junie]: Brand.Junie,
   [Agent.Grok]: Brand.XAI,
+  [Agent.Antigravity]: Brand.Antigravity,
 }
 
 /** An agent's mark, in the text colour. OpenCode has none in @althar/ui, so it gets a plain square. */

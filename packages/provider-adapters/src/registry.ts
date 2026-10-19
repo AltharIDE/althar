@@ -21,9 +21,23 @@ import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from '
  * permission requests are what they said, and the rest is from their own
  * code and help. None has run against its vendor's models yet, signed in
  * (`bun run test:agents`), which is what each entry's gaps leave open.
+ *
+ * Google Antigravity's ACP server 1.3.0 is as Orca (stablyai/orca, MIT) runs
+ * it, read from its code and its recording of a real session on 19 October
+ * 2026: not yet started here.
  */
 
-export type AgentId = 'claude-code' | 'codex' | 'opencode' | 'copilot' | 'junie' | 'grok' | 'kimi' | 'mistral-vibe' | 'qwen-code'
+export type AgentId =
+  | 'claude-code'
+  | 'codex'
+  | 'opencode'
+  | 'copilot'
+  | 'junie'
+  | 'grok'
+  | 'kimi'
+  | 'mistral-vibe'
+  | 'qwen-code'
+  | 'antigravity'
 
 /**
  * A launch that happens out on the device rather than here: the person's own
@@ -50,6 +64,12 @@ export interface LaunchSpec {
    * executor runs it there instead, with the cwd and environment it assembled.
    */
   readonly onDevice?: OutOnDevice
+  /**
+   * A temporary folder of its own (`TMPDIR`, `TEMP`, `TMP`), removed once it
+   * has stopped: for an agent that unpacks itself there each time it starts
+   * (Antigravity's server, about 1 GB), which a stopped one would leave behind.
+   */
+  readonly privateTemp?: true
 }
 
 /**
@@ -64,6 +84,12 @@ export interface PermissionMeanings {
   readonly rejectAndStop: ReadonlyArray<string>
   /** How far each allow option reaches, when it is not just this action. */
   readonly allowScopes: Readonly<Record<string, 'once' | 'turn' | 'session'>>
+  /**
+   * The start of the tool call ids on which a request is the model asking the
+   * person, one option for each answer, not for a permission (Antigravity's
+   * `interaction_`): it goes to the person as a question, never to the rules.
+   */
+  readonly questions?: string
 }
 
 export interface AgentDefinition {
@@ -119,6 +145,7 @@ export interface AgentDefinition {
      * by itself only when its plan pays.
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
+    /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
     /** Its sign-in as Althar runs it, without a terminal (`signInFlow.ts`); without it, `login` in a terminal. */
     readonly inApp?: InAppSignIn
@@ -242,12 +269,30 @@ export interface AgentCli {
   readonly download?: AgentDownload
 }
 
-export interface AgentDownload {
+export type AgentDownload = GitHubDownload | PinnedDownload
+
+/** An agent's latest release on GitHub, each file with the sha256 GitHub gives it; the command alone is kept. */
+export interface GitHubDownload {
   /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
   readonly repository: string
   /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
   readonly assets: Readonly<Record<string, string>>
   /** About how big the download is, as the person reads it. */
+  readonly size: string
+}
+
+/**
+ * One version of an agent, from an address its maker gives, each file pinned
+ * by the sha256 it was seen with, where the maker publishes none (Google, for
+ * Antigravity's server). The whole archive is kept, as what it holds runs
+ * together, and nothing in it runs unless every pinned file is exactly so.
+ */
+export interface PinnedDownload {
+  readonly version: string
+  /** For each `platform-arch`, the zip's address and sha256, and the sha256 of each file it holds by name. */
+  readonly assets: Readonly<
+    Record<string, { readonly url: string; readonly sha256: string; readonly files: Readonly<Record<string, string>> }>
+  >
   readonly size: string
 }
 
@@ -1067,6 +1112,123 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       'Commands it reads as only reading run without asking.',
       'Every rejection ends the turn; Althar carries the turn on itself.',
       'No status command, so its sign-in shows only when a session starts.',
+    ],
+  },
+  /*
+   * Google's own ACP server for Antigravity, which the `agy` CLI doesn't
+   * have, downloaded apart from it. Its `default` mode asks before its tools;
+   * `auto_edit` and `yolo` approve without asking, and it has no read-only
+   * mode, so every role runs in `default`, held there, with Althar's rules
+   * denying a reader every write. The model asks the person a question as a
+   * permission request on an `interaction_` tool call, one option for each
+   * answer, which goes to the person and never to the rules.
+   */
+  antigravity: {
+    id: 'antigravity',
+    name: 'Google Antigravity',
+    source: 'user_installed',
+    /*
+     * Its sign-in in the home's own file rather than the keychain item every
+     * server on the computer shares; no browser of its own (Althar opens the
+     * page); and a temporary folder of its own, as it unpacks itself there
+     * (about 1 GB) each time it starts. On Linux, `--uid=`, without which it
+     * drops to nobody when started as root (the registry's own launch).
+     */
+    launch: () => ({
+      command: 'agy_acp_server.par',
+      args: process.platform === 'linux' ? ['--uid='] : [],
+      env: { AGY_ACP_FORCE_FILE_STORAGE: '1', PYTHONUNBUFFERED: '1', BROWSER: 'true' },
+      inheritEnv: ['GEMINI_HOME'],
+      privateTemp: true,
+    }),
+    modes: { ask: 'default', readOnly: null, reader: 'default' },
+    /* Its effort is in its model's id (`gemini-3.8-flash-high`); `yolo`, a mode, is held off by holding the mode. */
+    options: { mode: 'mode', model: 'model', held: { mode: 'default' } },
+    /*
+     * It has no status or login command: it signs in only over ACP, with a
+     * Google account (`oauth-personal`), and a session's start says whether it
+     * is. Its other ways, a Gemini key or Google Cloud's, never reach it, past
+     * Althar's allowlist.
+     */
+    signIn: {
+      read: () => undefined,
+      login: '',
+      inApp: {
+        kind: 'acp-authenticate',
+        ways: ['browser'],
+        run: () => agents.antigravity.launch(''),
+        method: 'oauth-personal',
+        link: /Open the following link to authenticate the ACP server:\s*(\S+)/,
+      },
+    },
+    /*
+     * Its sign-in, settings and conversations are `antigravity-acp/` in the
+     * folder; `config/` holds the person's MCP servers and hooks, and the
+     * usual folder is Gemini CLI's too: none of them is shared.
+     */
+    home: {
+      variable: 'GEMINI_HOME',
+      usual: (env, homeDir) => env.GEMINI_HOME || join(homeDir, '.gemini'),
+      shared: only(['GEMINI.md']),
+    },
+    /* Its approvals' option ids are not yet seen: each is read by its kind. */
+    permissions: { rejectAndContinue: [], rejectAndStop: [], allowScopes: {}, questions: 'interaction_' },
+    /*
+     * Google publishes no license to pass it on and no checksums: Althar
+     * downloads it from Google at the person's asking, version 1.3.0 as Orca
+     * pins it, each archive and both programs in it by the sha256 Orca
+     * measured. The server finds its harness, `localharness_external`, beside
+     * itself. No build for Windows.
+     */
+    cli: {
+      name: 'agy_acp_server.par',
+      download: {
+        version: '1.3.0',
+        assets: {
+          'darwin-arm64': {
+            url: 'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.3.0-darwin-arm64.zip',
+            sha256: '7cd97045f7b4fe81175a107cdf16f9c51484e3c78a5162cae415338bb6aa5b88',
+            files: {
+              'agy_acp_server.par': 'cb1f0725183ed922079ed6cd1d2422b4d8be44c5fb60be3e9a43d8d04f99a18e',
+              localharness_external: 'b04b00662c1821b953a409d43626b86d1229130eeb2078b4e1304c06199aa481',
+            },
+          },
+          'darwin-x64': {
+            url: 'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.3.0-darwin-x86_64.zip',
+            sha256: 'bb23956b89984bf5d354af2c3725e6c57f0cc1b7228e77a0e91c9c2bc1d47646',
+            files: {
+              'agy_acp_server.par': 'f31bd5797eeb225a5efa12e24573f1f4eb157ec00698dd6a2cda6f0d924705cf',
+              localharness_external: 'd724f49b2c9e440c5d37925b1da203fc204c17dd9c662df45094c641f9806bc6',
+            },
+          },
+          'linux-x64': {
+            url: 'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.3.0-linux-x86_64.zip',
+            sha256: '9fb60956af0a9d76220a4db91ca9ac88e2a2372ad68f985ab5fceace6b825b96',
+            files: {
+              'agy_acp_server.par': 'cf6feaebdacfc2255dcfc8883db99b15de8554698554e2a1e78e5ccec1c68a20',
+              localharness_external: '63042ca43fc7a69600683920f7706689b82cf8aecefe21dc18cf35e99c9dde4d',
+            },
+          },
+          'linux-arm64': {
+            url: 'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.3.0-linux-arm64.zip',
+            sha256: '500b0bc0fb858e88f4df404d4cedf80bf9298c178291e39e383d6c50b111cbdf',
+            files: {
+              'agy_acp_server.par': '03ea51ff7a60cb1b44e65da40fdb35f1f457db7950d1651d9e86945c8aa584c6',
+              localharness_external: '7fe676f1234889900800bad3ca50fb9b55f1e16ee4cb82b789f84ae5145fd582',
+            },
+          },
+        },
+        size: process.platform === 'darwin' ? '115 MB' : '330 MB',
+      },
+    },
+    commands: 'althar',
+    knownGaps: [
+      "Google's Antigravity terms call reaching it with its Google sign-in from third-party software a breach that can suspend the account; Google lists this server for other editors, and Orca runs it so, but whether Althar counts is not settled.",
+      "Its usual folder's `config/` loads the person's own hooks and MCP servers; an account Althar made has neither.",
+      'Its approvals’ option ids are not yet seen, so each is read by its kind.',
+      'No status command, so its sign-in shows only when a session starts.',
+      'No build for Windows.',
+      'It unpacks about 1 GB into a temporary folder each time it starts, removed when it stops.',
     ],
   },
 }

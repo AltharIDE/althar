@@ -39,6 +39,7 @@ export enum Brand {
   Cursor = 'cursor',
   GitHubCopilot = 'github-copilot',
   Junie = 'junie',
+  Antigravity = 'antigravity',
   Ollama = 'ollama',
   LMStudio = 'lm-studio',
   OpenRouter = 'openrouter',
@@ -396,6 +397,15 @@ export const BRANDS: Record<Brand, BrandDrawing> = {
     paths: [
       {
         d: 'M24 9.333C24 18.666 20 24 9.333 24H8v-8h1.333C14 16 16 14 16 9.333V8h8v1.333zM8 16H0V8h8v8zM16 8H8V0h8v8z',
+      },
+    ],
+  },
+  [Brand.Antigravity]: {
+    name: 'Antigravity',
+    evenOdd: true,
+    paths: [
+      {
+        d: 'M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z',
       },
     ],
   },

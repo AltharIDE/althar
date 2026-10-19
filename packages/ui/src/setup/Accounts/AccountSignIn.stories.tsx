@@ -84,6 +84,23 @@ export const OnlyTheBrowser: Story = {
   },
 }
 
+/** An agent that signs in only in the browser, whose maker's terms put a risk on it: said under the way, before it is picked. */
+export const WithACaution: Story = {
+  args: {
+    agent: 'Google Antigravity',
+    ways: { browser: 'Google', found: [], choose: true },
+    holds: undefined,
+    caution: 'Google’s terms may count signing in to Antigravity from another app as a breach, which can suspend the account.',
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/may count signing in to Antigravity from another app/)).toBeVisible()
+    await expect(c.queryByRole('button', { name: 'In Terminal' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Continue with Google' }))
+    await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Browser)
+  },
+}
+
 /** An agent that signs in with its own command: in Terminal first, then a folder another tool already signed in. */
 export const InTerminalFirst: Story = {
   args: { ways: { terminal: true, found: FOUND, choose: true }, holds: undefined },

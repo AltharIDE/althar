@@ -1,3 +1,6 @@
+import { readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+
 import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
@@ -54,6 +57,44 @@ process.stdin.once('data', (data) => {
   process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n')
   setTimeout(() => process.exit(0), 2000)
 })`
+
+/**
+ * Antigravity's ACP server: answers initialize; on authenticate prints the
+ * page to open, as it does, on stdout or stderr, then answers as the browser
+ * would have it. Its temporary folder is where it says.
+ */
+const ACP_SERVER = (ending: 'success' | 'subscription', stream: 'stdout' | 'stderr') => `
+let buffer = ''
+const say = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
+process.stderr.write('temp ' + process.env.TMPDIR + '\\n')
+process.stdin.on('data', (data) => {
+  buffer += data
+  for (let at = buffer.indexOf('\\n'); at >= 0; at = buffer.indexOf('\\n')) {
+    const message = JSON.parse(buffer.slice(0, at))
+    buffer = buffer.slice(at + 1)
+    if (message.method === 'initialize') say({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1, authMethods: [{ id: message.params.clientInfo.name === 'althar' ? 'oauth-personal' : 'x', name: 'Log in with Google' }] } })
+    if (message.method === 'authenticate') {
+      if (message.params.methodId !== 'oauth-personal') return say({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'no such method' } })
+      process.${stream}.write('Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/v2/auth?state=s1\\n')
+      setTimeout(() => say(${ending === 'success' ? "{ jsonrpc: '2.0', id: message.id, result: {} }" : "{ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Internal error: SUBSCRIPTION_REQUIRED' } }"}), 30)
+    }
+  }
+})
+setInterval(() => {}, 1000)`
+
+const antigravity = (ending: 'success' | 'subscription' = 'success', stream: 'stdout' | 'stderr' = 'stderr'): AgentDefinition => ({
+  ...agents.antigravity,
+  signIn: {
+    ...agents.antigravity.signIn,
+    inApp: {
+      kind: 'acp-authenticate',
+      ways: ['browser'],
+      run: () => ({ command: 'bun', args: ['-e', ACP_SERVER(ending, stream)], privateTemp: true }),
+      method: 'oauth-personal',
+      link: /Open the following link to authenticate the ACP server:\s*(\S+)/,
+    },
+  },
+})
 
 const claude = (login = CLAUDE_LOGIN): AgentDefinition => ({
   ...agents['claude-code'],
@@ -149,6 +190,33 @@ describe('signing in inside Althar', () => {
     }
     const said = await run(deaf, { way: 'browser' })
     expect(said.at(-1)?.kind).toBe('failed')
+  })
+
+  it('signs Antigravity in over ACP: opens the page it prints, on either stream, and ends when it answers', async () => {
+    for (const stream of ['stderr', 'stdout'] as const) {
+      const opened: string[] = []
+      const said = await run(antigravity('success', stream), { way: 'browser', openUrl: (url) => void opened.push(url) })
+      expect(opened).toEqual(['https://accounts.google.com/o/oauth2/v2/auth?state=s1'])
+      expect(said).toEqual([
+        { kind: 'browser', link: 'https://accounts.google.com/o/oauth2/v2/auth?state=s1', paste: false },
+        { kind: 'done', who: null, plan: null },
+      ])
+    }
+  })
+
+  it('says, in the person’s words, that Antigravity turned the account down, and leaves no temporary folder', async () => {
+    const before = readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length
+    const said = await run(antigravity('subscription'), { way: 'browser' })
+    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length).toBeLessThanOrEqual(before)
+  })
+
+  it('has Antigravity sign in only inside Althar, as it has no command of its own', () => {
+    expect(agents.antigravity.signIn.login).toBe('')
+    expect(agents.antigravity.signIn.inApp?.kind).toBe('acp-authenticate')
+    expect(agents.antigravity.signIn.inApp?.ways).toEqual(['browser'])
+    expect(startSignInFlow(agents.antigravity, () => {}, { way: 'device' })).toBeNull()
   })
 
   it('stops when cancelled, saying nothing more', async () => {
