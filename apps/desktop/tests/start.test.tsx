@@ -84,6 +84,18 @@ describe('accounts in settings', () => {
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
   })
 
+  it('offers no second account for an agent whose sign-in every folder shares', async () => {
+    const one: Status = {
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: [{ ...agents[1]!, accounts: [usual('acc_usual', 'signed_in')], addsAccounts: false }],
+    }
+    const { client } = fakeClient({ status: vi.fn(async () => one) })
+    withServices(<Settings />, client)
+    await codexAccounts()
+    expect(screen.queryByRole('button', { name: 'Add an account' })).toBeNull()
+  })
+
   it(
     'signs a new account in in Terminal, in its line, says when it isn’t yet, and names it once it is',
     async () => {

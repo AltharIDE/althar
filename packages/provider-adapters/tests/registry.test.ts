@@ -15,10 +15,57 @@ describe('the agent registry', () => {
 
   it('never starts an agent in a mode that skips asking', () => {
     for (const agent of Object.values(agents)) {
-      assert.notMatch(agent.modes.ask, /bypass|full-access|yolo/i, agent.id)
+      // One with no mode asks by what its session's meta holds it to, and has none for reading either.
+      if (agent.modes.ask === null) {
+        assert.isDefined(agent.sessionMeta, agent.id)
+        assert.isNull(agent.modes.reader, agent.id)
+        continue
+      }
+      for (const mode of [agent.modes.ask, agent.modes.reader])
+        assert.notMatch(mode ?? '', /bypass|full-access|yolo|autopilot|auto-approve|accept-edits|\bauto\b/i, agent.id)
       // codex-acp's `agent` mode answers its own requests with an automatic reviewer.
       assert.notStrictEqual(`${agent.id}:${agent.modes.ask}`, 'codex:agent')
       assert.notStrictEqual(agent.modes.ask, agent.modes.readOnly)
+    }
+  })
+
+  it('keeps off, for every session, what would have the later agents approve without asking', () => {
+    const { copilot, junie, grok } = agents
+    assert.deepStrictEqual(copilot.options.held, { allow_all: 'off' })
+    assert.deepStrictEqual(junie.options.held, { brave_mode: 'off' })
+    assert.deepStrictEqual(grok.sessionMeta?.(), { yoloMode: false, autoMode: false })
+    assert.deepStrictEqual(grok.sessionMeta?.('reader'), { yoloMode: false, autoMode: false })
+    assert.includeMembers([...agents['qwen-code'].launch('/usr/bin/node').args], ['--approval-mode', 'default'])
+    assert.deepInclude(agents['mistral-vibe'].launch('/usr/bin/node').env ?? {}, {
+      VIBE_DEFAULT_AGENT: 'ask',
+      VIBE_BYPASS_TOOL_PERMISSIONS: 'false',
+      VIBE_SMART_APPROVE_DEFAULT: 'false',
+    })
+    assert.deepInclude(copilot.launch('/usr/bin/node').env ?? {}, { COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' })
+    assert.deepInclude(junie.launch('/usr/bin/node').env ?? {}, { JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false' })
+    // None is launched with a flag that approves.
+    for (const agent of [copilot, junie, grok, agents.kimi, agents['mistral-vibe'], agents['qwen-code']])
+      for (const arg of agent.launch('/usr/bin/node').args)
+        assert.notMatch(arg, /allow|yolo|autopilot|brave|approve|skip-permissions/i, agent.id)
+  })
+
+  it('sends the later agents only Althar’s own commands, as one of theirs turns their asking off', () => {
+    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code'] as const)
+      assert.strictEqual(agents[id].commands, 'althar', id)
+    for (const id of ['claude-code', 'codex', 'opencode'] as const) assert.isUndefined(agents[id].commands, id)
+  })
+
+  it('gives one account to an agent whose sign-in isn’t its folder’s own', () => {
+    const one = Object.values(agents)
+      .filter((agent) => agent.home.accounts === 'one')
+      .map((agent) => agent.id)
+    assert.deepStrictEqual(one, ['copilot', 'junie', 'mistral-vibe'])
+  })
+
+  it('leads no review of a pull request, and judges no permission, on an agent its session can’t hold to reading', () => {
+    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code'] as const) {
+      assert.isUndefined(agents[id].reviewing, id)
+      assert.isUndefined(agents[id].permissionJudge, id)
     }
   })
 

@@ -89,6 +89,20 @@ const ranOnCodex = (projectId?: string) =>
   })
 
 describe('accounts', () => {
+  it.effect('keep an agent whose sign-in every folder shares to its usual account, and the window offers no other', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const refused = yield* Effect.flip(accounts.add({ agentId: 'opencode', name: 'Work' }))
+      assert.deepInclude(refused, { _tag: 'AccountRefused', reason: 'one' })
+      assert.deepStrictEqual(
+        (yield* accounts.of('opencode')).map((account) => account.home),
+        [null],
+      )
+      // Another agent adds accounts as before.
+      assert.isNotNull((yield* accounts.add({ agentId: 'codex', name: 'Work' })).home)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { oneAccount: ['opencode'] }))))),
+  )
+
   it.effect('gives the usual Claude account one persistent home when sessions run in a Flatpak', () =>
     Effect.gen(function* () {
       const accounts = yield* Accounts

@@ -150,7 +150,7 @@ export const ManyAgents: Story = {
     runtimes: [
       ...FIRST_RUN.slice(0, 2),
       { id: 'opencode', name: 'OpenCode', state: RuntimeState.Missing, download: '45 MB' },
-      ...['GitHub Copilot', 'Cursor', 'Antigravity', 'Junie', 'Grok Build'].map((name) => ({
+      ...['GitHub Copilot', 'Junie', 'Grok Build', 'Kimi Code', 'Mistral Vibe', 'Qwen Code'].map((name) => ({
         id: name.toLowerCase().replace(/\s+/g, '-'),
         name,
         state: RuntimeState.Missing as const,
@@ -162,7 +162,9 @@ export const ManyAgents: Story = {
     await expect(within(canvas.getByRole('list', { name: 'Agents on this Mac' })).getAllByRole('listitem')).toHaveLength(3)
     await expect(canvas.getByText('1 of 3 ready')).toBeVisible()
     await expect(
-      canvas.getByText('Althar also runs GitHub Copilot, Cursor, Antigravity, Junie and Grok Build, once they’re installed on this Mac.'),
+      canvas.getByText(
+        'Althar also runs GitHub Copilot, Junie, Grok Build, Kimi Code, Mistral Vibe and Qwen Code, once they’re installed on this Mac.',
+      ),
     ).toBeVisible()
   },
 }

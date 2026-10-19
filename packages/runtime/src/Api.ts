@@ -370,6 +370,7 @@ export const handlers = Api.toLayer(
           version: yield* versionOf(entry),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
+          addsAccounts: entry.definition.home.accounts !== 'one',
           problem: null,
         } satisfies AgentStatus
       }).pipe(
@@ -386,6 +387,7 @@ export const handlers = Api.toLayer(
             version: null,
             ways: entry.definition.signIn.inApp?.ways ?? [],
             accounts: [],
+            addsAccounts: entry.definition.home.accounts !== 'one',
             problem: `Althar couldn't check ${entry.definition.name}. Its log has the details.`,
           }),
           entry.definition.id,

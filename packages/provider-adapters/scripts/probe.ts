@@ -24,6 +24,16 @@ const agents: Record<string, { readonly command: string; readonly args: Readonly
   'claude-code': { command: process.execPath, args: [bin('@agentclientprotocol/claude-agent-acp', 'dist/index.js')] },
   codex: { command: process.execPath, args: [bin('@agentclientprotocol/codex-acp', 'dist/index.js')] },
   opencode: { command: 'opencode', args: ['acp'] },
+  copilot: { command: 'copilot', args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'] },
+  junie: { command: 'junie', args: ['--acp=true'] },
+  grok: { command: 'grok', args: ['agent', '--no-leader', 'stdio'] },
+  kimi: { command: 'kimi', args: ['acp'] },
+  'mistral-vibe': { command: 'vibe-acp', args: [] },
+  'qwen-code': { command: 'qwen', args: ['--acp', '--approval-mode', 'default'] },
+  // Not in the registry yet (docs/architecture/03, Agents not run yet): probed signed in, they can be.
+  cursor: { command: 'cursor-agent', args: ['acp'] },
+  devin: { command: 'devin', args: ['acp'] },
+  droid: { command: 'droid', args: ['exec', '--output-format', 'acp'] },
 }
 
 /** A select's values, its groups' included. */

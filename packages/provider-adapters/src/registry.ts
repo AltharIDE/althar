@@ -11,9 +11,19 @@ import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from '
  * new model; OpenCode's effort on 8 October 2026, which it offers only once
  * a session is on a model that has levels. Probe again after upgrading any
  * of them.
+ *
+ * GitHub Copilot CLI 1.0.98, Junie 3659.7, Grok Build 1.0.63, Kimi Code
+ * 2.2.0, Mistral Vibe 2.26.1 and Qwen Code 0.25.2 were read on 18 and 19
+ * October 2026, each
+ * started over ACP with a home of its own and no sign-in, against a stand-in
+ * model on this machine where it takes one (a provider of its own, or a key
+ * it doesn't check before its first turn): their sessions, options and
+ * permission requests are what they said, and the rest is from their own
+ * code and help. None has run against its vendor's models yet, signed in
+ * (`bun run test:agents`), which is what each entry's gaps leave open.
  */
 
-export type AgentId = 'claude-code' | 'codex' | 'opencode'
+export type AgentId = 'claude-code' | 'codex' | 'opencode' | 'copilot' | 'junie' | 'grok' | 'kimi' | 'mistral-vibe' | 'qwen-code'
 
 /**
  * A launch that happens out on the device rather than here: the person's own
@@ -71,22 +81,36 @@ export interface AgentDefinition {
    * Althar's tools. Claude Code's plan mode and OpenCode's plan agent are
    * instructions to the model, and it refuses Althar's tools in them
    * (scripts/probe-tools.ts in the runtime), so those roles run in the mode
-   * that asks, with Althar's rules denying every write.
+   * that asks, with Althar's rules denying every write. Null where the agent
+   * has no mode at all and asks by what its `sessionMeta` sends (Grok's):
+   * started so, it is refused if it offers modes after all.
    */
-  readonly modes: { readonly ask: string; readonly readOnly: string; readonly reader: string }
+  readonly modes: { readonly ask: string | null; readonly readOnly: string | null; readonly reader: string | null }
   /**
    * The ids of its session config options. `ownEffort` is the effort level
    * that leaves a model at its own default, for an agent that otherwise puts
    * a session on a model's first level: Althar sets it where nothing chose one.
    */
-  readonly options: { readonly mode: string; readonly model: string; readonly effort?: string; readonly ownEffort?: string }
+  readonly options: {
+    readonly mode: string
+    readonly model: string
+    readonly effort?: string
+    readonly ownEffort?: string
+    /**
+     * Options held at a value for every session's whole life, set as it
+     * starts and set back whenever the agent moves one: those that would
+     * approve without asking (Copilot's `allow_all`, Junie's `brave_mode`).
+     */
+    readonly held?: Readonly<Record<string, string>>
+  }
   /**
    * The agent's own sign-in (docs/architecture/03: the official tool owns it).
    * Althar runs the documented status command and reads its output; it
    * never reads a credential store. `login` is what the user runs.
    */
   readonly signIn: {
-    readonly status: (node: string) => LaunchSpec
+    /** Without one (the agent has no status command), Althar can't tell, and the first session says. */
+    readonly status?: (node: string) => LaunchSpec
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
     /**
@@ -121,6 +145,13 @@ export interface AgentDefinition {
     readonly variable: string
     readonly usual: (env: Readonly<Record<string, string | undefined>>, homeDir: string) => string
     readonly shared: (names: ReadonlyArray<string>) => ReadonlyArray<string>
+    /**
+     * `'one'` where its sign-in isn't kept in the folder, but in a keychain
+     * item every folder shares (Mistral Vibe's), or that isn't known yet: a
+     * second account would sign the first one out, so it has its usual one
+     * alone. Without it, as many as the person adds.
+     */
+    readonly accounts?: 'one'
   }
   readonly permissions: PermissionMeanings
   /** What prints its own version, for Settings; without it, none is shown. */
@@ -173,6 +204,14 @@ export interface AgentDefinition {
    * only the servers it is given.
    */
   readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
+  /**
+   * `'althar'` where a message that starts with `/` runs one of its own
+   * commands, and one of them turns its asking off (Copilot's `/yolo`, Grok's
+   * `/always-approve`), with more than it lists: only those Althar sends
+   * itself (`/compact`) go as commands, and the person's go as words. Without
+   * it, the person's commands reach it as they are.
+   */
+  readonly commands?: 'althar'
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
 }
@@ -191,6 +230,12 @@ export interface SessionOptions {
 export interface AgentCli {
   /** The command by name, as on the person's PATH; `.exe` is added on Windows. */
   readonly name: string
+  /**
+   * Where npm installed it, its command is a Node script (`#!/usr/bin/env
+   * node`), and an app opened from the Finder has no Node on its PATH: it
+   * starts with the folder it was found in first there, where npm's Node is.
+   */
+  readonly node?: true
   /** The copy that ships with Althar, by its path; null where this platform has none. */
   readonly bundled?: () => string | null
   /** Where Althar can download it. */
@@ -683,6 +728,345 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     knownGaps: [
       'Provider rate limits come back as errors; API keys have no plan windows.',
       'Carrying on after a rejection relies on an experimental setting, continue_loop_on_deny.',
+    ],
+  },
+  /*
+   * GitHub's own ACP server, in its CLI (public preview). It asks before
+   * every edit, command and web fetch in its `#agent` mode, and its `#plan`
+   * mode refuses edits in its runtime: as for Claude Code, a reader runs in
+   * the mode that asks, with Althar's rules denying every write, as plan mode
+   * adds instructions of its own. Its mode ids are ACP's own addresses.
+   */
+  copilot: {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    source: 'user_installed',
+    /*
+     * The version it was installed as, not one it downloaded since
+     * (`--no-auto-update`); none of the GitHub tools it would reach with the
+     * person's sign-in (`--disable-builtin-mcps`), as Althar pushes for agents;
+     * and not the person's login-shell environment, which it otherwise gives
+     * every command it runs, past Althar's allowlist.
+     */
+    launch: () => ({
+      command: 'copilot',
+      args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'],
+      env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
+      inheritEnv: ['COPILOT_HOME'],
+    }),
+    modes: {
+      ask: 'https://agentclientprotocol.com/protocol/session-modes#agent',
+      readOnly: 'https://agentclientprotocol.com/protocol/session-modes#plan',
+      reader: 'https://agentclientprotocol.com/protocol/session-modes#agent',
+    },
+    /* `allow_all` approves every request while on, and its `/yolo` turns it on (`commands` keeps the person's off). */
+    options: { mode: 'mode', model: 'model', effort: 'reasoning_effort', held: { allow_all: 'off' } },
+    /*
+     * It has no status command: whether it is signed in shows when a session
+     * starts. A sign-in is the person's Copilot plan; a key of their own
+     * (`COPILOT_PROVIDER_*`) never reaches its sessions, past Althar's allowlist.
+     */
+    signIn: { read: () => undefined, login: 'copilot login' },
+    /*
+     * Its sign-in is a keychain item (service `copilot-cli`), not known to be
+     * the folder's own, so it has one account until two are seen apart. Its
+     * settings, hooks, MCP servers and saved approvals stay its usual folder's.
+     */
+    home: {
+      variable: 'COPILOT_HOME',
+      usual: (env, homeDir) => env.COPILOT_HOME || join(homeDir, '.copilot'),
+      shared: only(['copilot-instructions.md', 'instructions', 'agents', 'skills']),
+      accounts: 'one',
+    },
+    /* Seen 18 October 2026: allow_once, allow_always (for the session) and reject_once, which ends the turn. */
+    permissions: { rejectAndContinue: [], rejectAndStop: ['reject_once'], allowScopes: { allow_once: 'once' } },
+    version: () => ({ command: 'copilot', args: ['--version'] }),
+    /*
+     * Its license lets anyone install and run copies; its releases are at
+     * github/copilot-cli, each file with GitHub's sha256, `copilot` at the
+     * archive's root. Seen 19 October 2026, v1.0.98. An npm install is a Node
+     * script, and on Windows a `.cmd`, which Althar can't start.
+     */
+    cli: {
+      name: 'copilot',
+      node: true,
+      download: {
+        repository: 'github/copilot-cli',
+        assets: {
+          'darwin-arm64': 'copilot-darwin-arm64.tar.gz',
+          'darwin-x64': 'copilot-darwin-x64.tar.gz',
+          'linux-arm64': 'copilot-linux-arm64.tar.gz',
+          'linux-x64': 'copilot-linux-x64.tar.gz',
+          'linux-arm64-musl': 'copilot-linuxmusl-arm64.tar.gz',
+          'linux-x64-musl': 'copilot-linuxmusl-x64.tar.gz',
+          'win32-arm64': 'copilot-win32-arm64.zip',
+          'win32-x64': 'copilot-win32-x64.zip',
+        },
+        size: '110 MB',
+      },
+    },
+    commands: 'althar',
+    knownGaps: [
+      "A repository's hooks (`.github/hooks`, `.github/copilot/settings.json`, `.claude/settings.json`) run, and can approve a tool past its asking, with no way to turn them off from the launch: so it never leads a review of a pull request.",
+      'Every rejection ends the turn; Althar carries the turn on itself.',
+      "Loads the person's own MCP servers from its folder's `mcp-config.json`.",
+      "A signed-in `gh` alone doesn't sign its sessions in: Althar gives agents none of the person's code-host sign-ins, so it needs `copilot login`.",
+      'No status command, so its sign-in shows only when a session starts; and one account, until its keychain item is seen to be each folder’s own.',
+      'Usage limits come only as errors.',
+    ],
+  },
+  /*
+   * JetBrains' own ACP server. With its brave mode off, commands, edits to
+   * build, config and secret files and to anything outside the project, and
+   * MCP tools ask; ordinary edits inside the project don't, as Codex's in its
+   * sandbox. Its plan mode takes the edit tools away and keeps commands,
+   * which ask, so a reader runs there.
+   */
+  junie: {
+    id: 'junie',
+    name: 'Junie',
+    source: 'user_installed',
+    /* No config of its own or the repository's (`.junie/config.json` can turn brave mode on), and no MCP servers but Althar's. */
+    launch: () => ({
+      command: 'junie',
+      args: ['--acp=true'],
+      env: { JUNIE_SKIP_UPDATE_CHECK: '1', JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false', JUNIE_MCP_DEFAULT_LOCATIONS: 'false' },
+      inheritEnv: ['JUNIE_HOME'],
+    }),
+    modes: { ask: 'default', readOnly: 'plan', reader: 'plan' },
+    /*
+     * Its mode option has no category, and `brave_mode` has the mode's, so the
+     * mode is found by its id. Brave mode on approves everything, and its
+     * default, `brave-auto`, has a model approve the commands it thinks safe.
+     */
+    options: { mode: 'mode', model: 'model', effort: 'effort', held: { brave_mode: 'off' } },
+    /* It has no status command: whether it is signed in shows when a session starts. Sign in with a JetBrains account in its own window. */
+    signIn: { read: () => undefined, login: 'junie' },
+    /*
+     * Its sign-in is a keychain item named after the folder's path (on
+     * Windows a file in it), which deleting the folder would leave behind,
+     * and it signs out only over ACP: one account, until Althar signs a home
+     * out before removing it. `settings.json` takes the brave mode Althar sets.
+     */
+    home: {
+      variable: 'JUNIE_HOME',
+      usual: (env, homeDir) => env.JUNIE_HOME || join(homeDir, '.junie'),
+      shared: only(['AGENTS.md', 'skills', 'agent-skills', 'agents', 'commands']),
+      accounts: 'one',
+    },
+    /* Seen 19 October 2026: its option ids are their labels. `No` skips the action and it carries on; `stop` ends a turn at its step limit. */
+    permissions: { rejectAndContinue: ['No'], rejectAndStop: ['stop'], allowScopes: { Yes: 'once', continue: 'once' } },
+    version: () => ({ command: 'junie', args: ['--version'] }),
+    /* Its installer's `junie` is a bash script in ~/.local/bin; on Windows a `.bat`, which Althar can't start. */
+    cli: { name: 'junie' },
+    commands: 'althar',
+    knownGaps: [
+      "Ordinary edits inside the project don't ask; edits to build, config and secret files, and outside it, do.",
+      'Its plan mode keeps commands, which ask; whether it keeps Althar’s tools there is not yet checked.',
+      'ACP launches trust the project: its skills, agents and commands load.',
+      'It keeps the brave mode a session is set to in its `settings.json`, so its own window starts with brave mode off too.',
+      'No status command, so its sign-in shows only when a session starts; and one account, until Althar signs a home out before removing it.',
+    ],
+  },
+  /*
+   * xAI's own ACP server, in its CLI. It offers no modes: what keeps it
+   * asking is its session's `_meta`, which turns its always-approve and its
+   * model-judged auto mode off whatever the person's config says. Every
+   * rejection ends its turn.
+   */
+  grok: {
+    id: 'grok',
+    name: 'Grok Build',
+    source: 'user_installed',
+    /*
+     * A process of its own rather than one a config's leader mode shares, not
+     * updating itself, and none of the MCP servers or hooks it reads from
+     * Claude Code's and Cursor's settings.
+     */
+    launch: () => ({
+      command: 'grok',
+      args: ['agent', '--no-leader', 'stdio'],
+      env: {
+        GROK_DISABLE_AUTOUPDATER: '1',
+        GROK_CLAUDE_MCPS_ENABLED: '0',
+        GROK_CURSOR_MCPS_ENABLED: '0',
+        GROK_CLAUDE_HOOKS_ENABLED: '0',
+        GROK_CURSOR_HOOKS_ENABLED: '0',
+      },
+      inheritEnv: ['GROK_HOME'],
+    }),
+    modes: { ask: null, readOnly: null, reader: null },
+    options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
+    signIn: {
+      /* `grok models` says how it is signed in, first, and exits 0 either way. */
+      status: () => ({ command: 'grok', args: ['models'] }),
+      read: (output) => (/not authenticated/i.test(output) ? false : /logged in with|authenticated via/i.test(output) ? true : undefined),
+      paidBy: (output) => (/logged in with/i.test(output) ? 'plan' : /XAI_API_KEY|deployment key/i.test(output) ? 'key' : undefined),
+      login: 'grok login',
+      logout: { run: () => ({ command: 'grok', args: ['logout'] }), line: 'grok logout' },
+    },
+    /*
+     * Its sign-in is `auth.json` in the folder. Its config holds the person's
+     * allow rules and MCP servers, and `trusted_folders.toml` and its sessions'
+     * saved grants approve things: none of them is shared.
+     */
+    home: {
+      variable: 'GROK_HOME',
+      usual: (env, homeDir) => env.GROK_HOME || join(homeDir, '.grok'),
+      shared: only(['pager.toml', 'skills', 'agents', 'rules', 'workflows']),
+    },
+    /* Seen 18 October 2026: a command's always-allow is kept for the project, and reject-always too; every rejection ends the turn. */
+    permissions: { rejectAndContinue: [], rejectAndStop: ['reject-once', 'reject-always'], allowScopes: { 'allow-once': 'once' } },
+    sessionMeta: () => ({ yoloMode: false, autoMode: false }),
+    version: () => ({ command: 'grok', args: ['--version'] }),
+    /* Its installers put it in ~/.grok/bin, a native program everywhere; its npm `grok` is one on a Mac and Linux too. */
+    cli: { name: 'grok' },
+    commands: 'althar',
+    knownGaps: [
+      "The allow rules in the person's `~/.claude/settings.json` approve its commands before Althar sees them.",
+      'Its web search never asks.',
+      'Every rejection ends the turn; Althar carries the turn on itself.',
+      "A worktree Althar makes is a folder it doesn't trust, so it doesn't read the repository's AGENTS.md.",
+    ],
+  },
+  /*
+   * Moonshot's own ACP server, in Kimi Code (the CLI that followed Kimi CLI
+   * 1.x). In `default` every command asks; edits inside a git repository
+   * don't, as Codex's in its sandbox, and its web fetch and search never do.
+   * Its plan mode refuses edits and keeps commands, which ask, so a reader
+   * runs there. It says `default` as it starts whatever its config says, so
+   * Althar setting the mode is what holds it.
+   */
+  kimi: {
+    id: 'kimi',
+    name: 'Kimi Code',
+    source: 'user_installed',
+    launch: () => ({ command: 'kimi', args: ['acp'], env: { KIMI_CODE_NO_AUTO_UPDATE: '1' }, inheritEnv: ['KIMI_CODE_HOME'] }),
+    modes: { ask: 'default', readOnly: 'plan', reader: 'plan' },
+    options: { mode: 'mode', model: 'model', effort: 'thinking' },
+    signIn: {
+      /* Its providers are what its login wrote: none is signed out. What it lists signed in is not yet seen. */
+      status: () => ({ command: 'kimi', args: ['provider', 'list'] }),
+      read: (output) => (/no providers configured/i.test(output) ? false : undefined),
+      login: 'kimi login',
+    },
+    /*
+     * Its sign-in is `credentials/` in the folder, gone with it. Its config
+     * holds the providers its login wrote and the mode it starts in, and
+     * `mcp.json` the person's MCP servers: neither is shared.
+     */
+    home: {
+      variable: 'KIMI_CODE_HOME',
+      usual: (env, homeDir) => env.KIMI_CODE_HOME || join(homeDir, '.kimi-code'),
+      shared: only(['tui.toml', 'skills', 'agents']),
+    },
+    /* Seen 19 October 2026: `reject` fails the tool and it carries on; `approve_always` is the session's, for that command or file. */
+    permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { approve_once: 'once' } },
+    version: () => ({ command: 'kimi', args: ['--version'] }),
+    /*
+     * Its installer's is a program of its own in ~/.kimi-code/bin; npm's a
+     * Node script, on Windows a `.cmd`. MIT, but its releases are bare
+     * zstd-compressed programs, which Althar's downloads don't unpack yet.
+     */
+    cli: { name: 'kimi', node: true },
+    commands: 'althar',
+    knownGaps: [
+      "Edits inside a git repository don't ask; commands do.",
+      'Its web fetch and search never ask.',
+      "Loads the person's own MCP servers from its folder's `mcp.json`, and its plugins'.",
+      'The archived Kimi CLI 1.x answers to `kimi` too, with its own modes; a reader on it is refused.',
+    ],
+  },
+  /*
+   * Mistral's own ACP server. Its `ask` mode asks before edits, web, MCP
+   * tools and every command but a few it reads as safe inside the workdir.
+   * It has no read-only mode over ACP, so a reader runs in `ask`, with
+   * Althar's rules denying every write.
+   */
+  'mistral-vibe': {
+    id: 'mistral-vibe',
+    name: 'Mistral Vibe',
+    source: 'user_installed',
+    /* Its settings from the environment win over the person's and the repository's: asking, with no model judging what is safe. */
+    launch: () => ({
+      command: 'vibe-acp',
+      args: [],
+      env: {
+        VIBE_DEFAULT_AGENT: 'ask',
+        VIBE_BYPASS_TOOL_PERMISSIONS: 'false',
+        VIBE_SMART_APPROVE_DEFAULT: 'false',
+        VIBE_SMART_APPROVE_AVAILABLE: 'false',
+        VIBE_ENABLE_UPDATE_CHECKS: 'false',
+      },
+      inheritEnv: ['VIBE_HOME'],
+    }),
+    modes: { ask: 'ask', readOnly: null, reader: 'ask' },
+    /* Its effort is the model's thinking, an option of its own kind. */
+    options: { mode: 'mode', model: 'model', effort: 'thinking' },
+    /*
+     * It has no status command. Its browser sign-in makes a Mistral key for the
+     * account, which a Le Chat Pro or Team plan pays for, and pay-as-you-go
+     * otherwise: Althar can't tell which.
+     */
+    signIn: { read: () => undefined, login: 'vibe --setup' },
+    /* Its key is a keychain item every folder shares, so it has one account. Its config holds the person's MCP servers. */
+    home: {
+      variable: 'VIBE_HOME',
+      usual: (env, homeDir) => env.VIBE_HOME || join(homeDir, '.vibe'),
+      shared: only(['AGENTS.md', 'agents', 'prompts', 'skills']),
+      accounts: 'one',
+    },
+    /* From its code (vibe/acp/utils.py), not yet seen in a turn: rejecting tells the model to try another way, and it carries on. */
+    permissions: { rejectAndContinue: ['reject_once'], rejectAndStop: [], allowScopes: { allow_once: 'once' } },
+    version: () => ({ command: 'vibe-acp', args: ['--version'] }),
+    /* `uv tool install mistral-vibe` puts it in ~/.local/bin. Its releases need their whole folder, which Althar's downloads don't keep. */
+    cli: { name: 'vibe-acp' },
+    commands: 'althar',
+    knownGaps: [
+      'No read-only mode over ACP: a reader asks, and Althar’s rules deny it every write.',
+      "Loads the person's own MCP servers from its folder's `config.toml`, and Mistral's connectors.",
+      'No status command, so its sign-in shows only when a session starts; and one account, as its key is shared.',
+      'Whether its web search asks under its newer harness is not yet checked.',
+    ],
+  },
+  /*
+   * Alibaba's Qwen team's ACP server. In `default` it asks before edits, web
+   * fetches, MCP tools and every command it doesn't read as only reading.
+   * Its plan mode refuses whatever would ask, Althar's tools too, so a reader
+   * runs in `default`, with Althar's rules denying every write. It starts in
+   * `auto`, where a model approves what it thinks safe, unless told.
+   */
+  'qwen-code': {
+    id: 'qwen-code',
+    name: 'Qwen Code',
+    source: 'user_installed',
+    launch: () => ({ command: 'qwen', args: ['--acp', '--approval-mode', 'default'], inheritEnv: ['QWEN_HOME'] }),
+    modes: { ask: 'default', readOnly: 'plan', reader: 'default' },
+    /* Its efforts are a model's own, and `default` leaves one at its own. */
+    options: { mode: 'mode', model: 'model', effort: 'reasoning_effort', ownEffort: 'default' },
+    /*
+     * It has no status command, and keeps its keys in its settings, which
+     * Althar never reads: Alibaba Cloud's Coding Plan key, or any provider's.
+     * Sign in with `/auth` in its own window.
+     */
+    signIn: { read: () => undefined, login: 'qwen' },
+    /* Its keys and the person's settings share `settings.json`, which isn't shared. */
+    home: {
+      variable: 'QWEN_HOME',
+      usual: (env, homeDir) => env.QWEN_HOME || join(homeDir, '.qwen'),
+      shared: only(['QWEN.md', 'skills', 'agents', 'commands', 'output-styles']),
+    },
+    /* From its code (toPermissionOptions): `cancel` is the only rejection, and ends the turn. */
+    permissions: { rejectAndContinue: [], rejectAndStop: ['cancel'], allowScopes: { proceed_once: 'once' } },
+    version: () => ({ command: 'qwen', args: ['--version'] }),
+    /* An npm install is a Node script, on Windows a `.cmd`; the standalone one starts its own Node from a shell script. */
+    cli: { name: 'qwen', node: true },
+    commands: 'althar',
+    knownGaps: [
+      "A repository's `.qwen/settings.json` can add allow rules, hooks and MCP servers, and it trusts every folder.",
+      'Commands it reads as only reading run without asking.',
+      'Every rejection ends the turn; Althar carries the turn on itself.',
+      'No status command, so its sign-in shows only when a session starts.',
     ],
   },
 }

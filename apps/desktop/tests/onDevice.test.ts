@@ -41,7 +41,7 @@ describe('the device outside a Flatpak', () => {
         GIT_WORK_TREE: '/run/user/1000/doc/abc123/repo',
       },
     )
-    expect(HOST_COMMANDS).toEqual(['opencode', 'claude', 'codex'])
+    expect(HOST_COMMANDS).toEqual(['opencode', 'claude', 'codex', 'copilot', 'junie', 'grok', 'kimi', 'vibe-acp', 'qwen'])
   })
 
   it('takes a launch out to the device with the names it needs and what the agent was given, and nothing else', () => {

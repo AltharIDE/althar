@@ -171,7 +171,8 @@ const claude = (
   child.on('exit', (code) => {
     if (code !== 0) return end({ kind: 'failed', message: lastLine(stderr) ?? lastLine(said) ?? 'Claude Code stopped signing in.' })
     // Signed in: its status says who as.
-    const status = agent.signIn.status(adapterNode())
+    const status = agent.signIn.status?.(adapterNode())
+    if (status === undefined) return end({ kind: 'done', who: null, plan: null })
     const ran = status.onDevice === undefined ? status : status.onDevice({ env })
     execFile(ran.command, [...ran.args], { env, timeout: 15_000 }, (_error, stdout) => end({ kind: 'done', ...claudeWho(stdout) }))
   })

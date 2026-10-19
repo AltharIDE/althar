@@ -63,10 +63,21 @@ const MAKERS: ReadonlyArray<readonly [RegExp, Lab]> = [
 ]
 
 /** The maker of an agent's own models, where it has one. */
-const AGENT_MAKERS: Readonly<Record<string, Lab>> = { 'claude-code': Lab.Anthropic, codex: Lab.OpenAI }
+const AGENT_MAKERS: Readonly<Record<string, Lab>> = {
+  'claude-code': Lab.Anthropic,
+  codex: Lab.OpenAI,
+  grok: Lab.XAI,
+  kimi: Lab.Moonshot,
+  'mistral-vibe': Lab.Mistral,
+}
 
 /** An agent's own mark, for the list of agents. */
-const AGENT_BRANDS: Readonly<Record<string, Brand>> = { 'claude-code': Brand.ClaudeCode, codex: Brand.Codex }
+const AGENT_BRANDS: Readonly<Record<string, Brand>> = {
+  'claude-code': Brand.ClaudeCode,
+  codex: Brand.Codex,
+  copilot: Brand.GitHubCopilot,
+  junie: Brand.Junie,
+}
 
 const labOf = (agentId: string, words: string): Lab | undefined => {
   const said = words.toLowerCase()

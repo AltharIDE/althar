@@ -75,6 +75,8 @@ export const AgentStatus = Schema.Struct({
   ways: Schema.Array(Schema.Literals(['browser', 'device'])),
   /** Its accounts, in the person's order. */
   accounts: Schema.Array(AccountStatus),
+  /** More accounts can be added: its sign-in is kept in each account's own folder (ADR-012). */
+  addsAccounts: Schema.Boolean,
   /** Its command is on this device, the person's or the copy Althar downloaded; an agent that ships with Althar always is. */
   installed: Schema.Boolean,
   /** It runs from the copy Althar downloaded, as the person has none of their own. */

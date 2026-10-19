@@ -12,6 +12,12 @@ const BRANDS: Readonly<Record<string, Brand>> = {
   'claude-code': Brand.Anthropic,
   codex: Brand.OpenAI,
   opencode: Brand.OpenCode,
+  copilot: Brand.GitHubCopilot,
+  junie: Brand.Junie,
+  grok: Brand.XAI,
+  kimi: Brand.Moonshot,
+  'mistral-vibe': Brand.Mistral,
+  'qwen-code': Brand.Alibaba,
 }
 
 export const brandOf = (agentId: string): Brand | undefined => BRANDS[agentId]
@@ -48,7 +54,13 @@ export const signInWordsOf = (agentId: string): { readonly plan: string; readonl
   SIGN_IN[agentId] ?? { plan: 'your account', host: 'the sign-in page' }
 
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
-const MAKERS: Readonly<Record<string, string>> = { 'claude-code': 'Anthropic', codex: 'OpenAI' }
+const MAKERS: Readonly<Record<string, string>> = {
+  'claude-code': 'Anthropic',
+  codex: 'OpenAI',
+  grok: 'xAI',
+  kimi: 'Moonshot AI',
+  'mistral-vibe': 'Mistral AI',
+}
 
 /** What Settings says under an agent's name: who makes it, and its version, where known. */
 export const agentLineOf = (agent: { readonly id: string; readonly version: string | null }): string | undefined => {

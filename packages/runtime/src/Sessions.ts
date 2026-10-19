@@ -384,6 +384,28 @@ const settleEffort = (definition: AgentDefinition, agent: AgentSession, asked: s
 /** What the person asks an agent's context be compacted with: the agent's own command, sent bare as a turn of its own. */
 export const COMPACT = '/compact'
 
+/**
+ * The options a session holds at a value for its life (the registry's
+ * `options.held`), and for a role that only reads, its mode option at the
+ * reader's mode, so an agent that moves itself out of it is put back.
+ */
+export const heldFor = (definition: AgentDefinition, reads: boolean): { readonly held?: Readonly<Record<string, string>> } => {
+  const reader = reads ? definition.modes.reader : null
+  const held = { ...definition.options.held, ...(reader === null ? {} : { [definition.options.mode]: reader }) }
+  return Object.keys(held).length === 0 ? {} : { held }
+}
+
+/**
+ * What the agent is told for a turn, where a message that starts with `/`
+ * would run one of its own commands and Althar sends it only its own
+ * (the registry's `commands`): the person's, said as words, so it reads
+ * them rather than running them. Althar's own (`COMPACT`) goes bare.
+ */
+export const asTold = (definition: AgentDefinition, prompt: string): string =>
+  definition.commands === 'althar' && prompt !== COMPACT && prompt.trimStart().startsWith('/')
+    ? `The person wrote this, which Althar passes on as words, not as one of your commands:\n\n${prompt}`
+    : prompt
+
 /** Tokens in a line: 412k, 1.2M. */
 const tokensWord = (tokens: number) => (tokens >= 1_000_000 ? `${Math.round(tokens / 100_000) / 10}M` : `${Math.round(tokens / 1000)}k`)
 
@@ -1064,7 +1086,7 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          let prompt = compacting ? COMPACT : promptFor(inputs, briefed)
+          let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed))
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -1087,7 +1109,7 @@ export class Sessions extends Context.Service<
                       Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
                     ),
                   )
-                  prompt = promptFor(inputs, briefed, news)
+                  prompt = asTold(running.entry.definition, promptFor(inputs, briefed, news))
                 }
                 const at = yield* timestamp
                 yield* sql`INSERT INTO turn_deliveries ${sql.insert({
@@ -1720,6 +1742,8 @@ export class Sessions extends Context.Service<
                 // Althar's tools, offline where the agent lets Althar take its network away (the registry says what each is held to).
                 mode: reads ? definition.modes.reader : definition.modes.ask,
                 modeOptionId: definition.options.mode,
+                // What would approve without asking stays off; and a role that only reads stays in its mode, whatever the agent does.
+                ...heldFor(definition, reads),
                 mcpServers: [tools.server],
                 ...(definition.sessionMeta === undefined
                   ? {}

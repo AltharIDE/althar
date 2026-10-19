@@ -157,14 +157,26 @@ export type McpServer =
 
 export interface NewSessionOptions {
   readonly cwd: string
-  /** The mode to start in. Required: a session never runs in the mode the agent defaults to (ADR-007). */
-  readonly mode: string
+  /**
+   * The mode to start in: a session never runs in the mode the agent
+   * defaults to (ADR-007). Null only for an agent that has no modes and asks
+   * by what `meta` holds it to (the registry's entry says so): one that
+   * offers modes after all is refused, as its entry no longer says what it is.
+   */
+  readonly mode: string | null
   /** The id of the agent's mode option (the registry's `options.mode`). Without it, the option in the `mode` category is used. */
   readonly modeOptionId?: string
   readonly mcpServers?: ReadonlyArray<McpServer>
   readonly additionalDirectories?: ReadonlyArray<string>
   /** Extra `_meta` for `session/new`: the registry's `sessionMeta`. */
   readonly meta?: Readonly<Record<string, unknown>>
+  /**
+   * Config options held at a value for the session's whole life, such as one
+   * that approves every request while on (Copilot's `allow_all`): set as it
+   * starts, where the agent offers them, and set back whenever the agent says
+   * one moved.
+   */
+  readonly held?: Readonly<Record<string, string>>
 }
 
 type Failure = AgentRequestFailed | AgentExited
@@ -665,27 +677,43 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         /*
          * The mode is set before anything else, and checked. Agents expose it
          * as a config option, or as legacy session modes; an agent with
-         * neither can't be made to ask, so the session is refused.
+         * neither can't be made to ask, so the session is refused, unless it
+         * is one that asks by its `_meta` and is started with no mode.
          */
         const modeOption = modeOptionOf(yield* Ref.get(current))
         const legacy = started.modes
-        if (modeOption !== undefined) {
+        const legacyIds = legacy?.availableModes.map((candidate) => candidate.id) ?? []
+        if (sessionOptions.mode === null) {
+          if (modeOption !== undefined || legacyIds.length > 0) {
+            return yield* new OptionUnavailable({
+              configId: modeOption?.id ?? 'mode',
+              value: '',
+              available: modeOption?.values ?? legacyIds,
+            })
+          }
+        } else if (modeOption !== undefined) {
           yield* setOption(modeOption.id, sessionOptions.mode)
           if ((yield* Ref.get(mode)) !== sessionOptions.mode) {
             return yield* new OptionUnavailable({ configId: modeOption.id, value: sessionOptions.mode, available: modeOption.values })
           }
         } else if (legacy !== null && legacy !== undefined) {
-          const available = legacy.availableModes.map((candidate) => candidate.id)
-          if (!available.includes(sessionOptions.mode)) {
-            return yield* new OptionUnavailable({ configId: 'mode', value: sessionOptions.mode, available })
-          }
-          yield* call('session/set_mode', () =>
-            connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId: sessionOptions.mode }),
-          )
-          yield* Ref.set(mode, sessionOptions.mode)
+          const modeId = sessionOptions.mode
+          if (!legacyIds.includes(modeId)) return yield* new OptionUnavailable({ configId: 'mode', value: modeId, available: legacyIds })
+          yield* call('session/set_mode', () => connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId }))
+          yield* Ref.set(mode, modeId)
         } else {
           return yield* new OptionUnavailable({ configId: 'mode', value: sessionOptions.mode, available: [] })
         }
+
+        /** Each held option the agent offers that isn't where it is held, as it now says. */
+        const held = Object.entries(sessionOptions.held ?? {})
+        const loose = (all: ReadonlyArray<ConfigOption>) =>
+          held.filter(([configId, value]) => {
+            const option = all.find((candidate) => candidate.id === configId)
+            return option !== undefined && String(option.currentValue) !== value
+          })
+        // Where the agent can't be held there, the session is refused, as for a mode it can't be put in.
+        for (const [configId, value] of loose(yield* Ref.get(current))) yield* setOption(configId, value)
 
         /** What an update means here: the mode it changes, and a failure the agent reported in structured form. */
         const interpret = (update: acp.SessionUpdate) =>
@@ -694,7 +722,19 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             const events: Array<SessionEvent> = [event]
             if (event._tag === 'OptionsChanged') {
               yield* Ref.set(current, event.options)
-              const changed = modeOptionOf(event.options)
+              // A held option the agent moved goes back before anything else it says is read, for as long as an agent
+              // that answers one request at a time may take; nothing Althar answers waits on this reader meanwhile.
+              for (const [configId, value] of loose(event.options)) {
+                const restored = yield* Effect.exit(setOption(configId, value).pipe(Effect.timeout(Duration.seconds(10))))
+                events.push({
+                  _tag: 'Notice',
+                  severity: Exit.isSuccess(restored) ? 'info' : 'error',
+                  title: Exit.isSuccess(restored)
+                    ? `Althar set the agent's ${configId} back to ${value}.`
+                    : `The agent's ${configId} moved, and Althar couldn't set it back to ${value}.`,
+                })
+              }
+              const changed = modeOptionOf(yield* Ref.get(current))
               if (changed !== undefined && String(changed.currentValue) !== (yield* Ref.get(mode))) {
                 yield* Ref.set(mode, String(changed.currentValue))
                 events.push({ _tag: 'ModeChanged', modeId: String(changed.currentValue), byAgent: true })

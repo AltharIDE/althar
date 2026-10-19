@@ -50,7 +50,7 @@ export const USUAL = 'main'
 export class SignOutFailed extends Schema.TaggedError<SignOutFailed>()('SignOutFailed', { line: Schema.String }) {}
 
 export class AccountRefused extends Schema.TaggedError<AccountRefused>()('AccountRefused', {
-  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name']),
+  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one']),
 }) {}
 
 /**
@@ -281,6 +281,8 @@ export class Accounts extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const definition = definitionOf(input.agentId)
           if (definition === undefined) return yield* new UnknownAgent({ agentId: input.agentId })
+          // Its sign-in isn't kept in a folder, so a second account would sign the first out (the registry's `home.accounts`).
+          if (definition.home.accounts === 'one') return yield* new AccountRefused({ reason: 'one' })
           const name = yield* named(input.name)
           const accounts = yield* of(input.agentId)
           const folder = input.folder

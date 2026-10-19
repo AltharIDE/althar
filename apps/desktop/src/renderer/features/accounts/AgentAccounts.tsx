@@ -68,7 +68,8 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
     <Accounts
       agent={agent.name}
       accounts={accounts.map((account) => accountEntry(account))}
-      onAdd={() => signIn.add(agent.id)}
+      // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
+      {...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {})}
       onSignIn={(accountId) => signIn.again(agent.id, accountId)}
       onRename={(accountId, name) => void start.renameAccount(accountId, name)}
       onMove={(accountId, to) => void start.moveAccount(agent.id, accountId, to)}

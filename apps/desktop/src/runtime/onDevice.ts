@@ -115,7 +115,7 @@ export const relayOut = (
  * app's profile (`Accounts.ts`), so the host CLI and its bundled sessions
  * read the same sign-in.
  */
-export const HOST_COMMANDS = ['opencode', 'claude', 'codex'] as const
+export const HOST_COMMANDS = ['opencode', 'claude', 'codex', 'copilot', 'junie', 'grok', 'kimi', 'vibe-acp', 'qwen'] as const
 
 /** A shell script for the device that prints each name it finds, and where: one line, a tab apart. */
 export const whereScript = (names: ReadonlyArray<string>, dirs: ReadonlyArray<string> = usualDirs('linux', '$HOME', {})): string =>

@@ -799,6 +799,50 @@ describe('AgentConnection', () => {
       ),
     )
 
+    it.live('starts an agent with no modes in none, where its entry says its meta makes it ask', () =>
+      withConnection(variant({ modes: 'none' }), (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: null, meta: { yoloMode: false } })
+          assert.strictEqual(yield* session.mode, '')
+          assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
+        }),
+      ),
+    )
+
+    it.live('refuses to start an agent in no mode once it offers modes, as its entry no longer says what it is', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const error = yield* Effect.flip(connection.newSession({ cwd: '/tmp', mode: null }))
+          assert.instanceOf(error, OptionUnavailable)
+          assert.deepStrictEqual((error as OptionUnavailable).available, ['ask', 'read-only', 'bypass'])
+        }),
+      ),
+    )
+
+    it.live('holds an option where it is held: set as the session starts, and set back when the agent moves it', () =>
+      withConnection(variant({ allowAll: 'on' }), (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask', held: { allow_all: 'off', colour: 'blue' } })
+          assert.match(text(yield* Stream.runCollect(session.prompt(scenarios.settings))), /allow_all=off$/)
+          const moved = yield* Stream.runCollect(session.prompt(scenarios.allowAll))
+          assert.deepInclude(moved, { _tag: 'Notice', severity: 'info', title: "Althar set the agent's allow_all back to off." })
+          assert.match(text(yield* Stream.runCollect(session.prompt(scenarios.settings))), /allow_all=off$/)
+        }),
+      ),
+    )
+
+    it.live('puts a reader back in its mode when the agent leaves it', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'read-only', held: { mode: 'read-only' } })
+          const events = yield* Stream.runCollect(session.prompt(scenarios.leaveMode))
+          assert.strictEqual(yield* session.mode, 'read-only')
+          assert.isFalse(events.some((event) => event._tag === 'ModeChanged'))
+          assert.match(text(yield* Stream.runCollect(session.prompt(scenarios.settings))), /^mode=read-only /)
+        }),
+      ),
+    )
+
     it.live('refuses a session whose mode did not change when set, and closes it at once', () =>
       Effect.gen(function* () {
         const closed: Array<string> = []

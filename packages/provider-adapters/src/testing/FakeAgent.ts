@@ -70,6 +70,8 @@ export const scenarios = {
   rateWarning: 'rate-warning',
   /** The agent leaves the mode it was put in, as a plan session does on leaving plan mode. */
   leaveMode: 'leave-mode',
+  /** The agent turns its own approve-everything option on, as Copilot does on `/yolo` (only with `allowAll`). */
+  allowAll: 'allow-all',
   /** Ends the turn, then sends an update between turns. */
   afterTurn: 'after-turn',
   /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
@@ -226,6 +228,8 @@ export interface FakeAgentOptions {
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
+  /** An option that would approve every request while on, as Copilot's `allow_all`, starting at this value. */
+  readonly allowAll?: 'on' | 'off'
 }
 
 interface SessionState {
@@ -255,6 +259,8 @@ interface SessionState {
   background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
   /** How many commands it has left running, so each has an id of its own. */
   served: number
+  /** Its approve-everything option, where it has one (`allowAll`). */
+  allowAll: string | undefined
   /** How large it last said its context is, in tokens. */
   contextSize: number
 }
@@ -1002,6 +1008,15 @@ const modeOption = (session: SessionState): acp.SessionConfigOption => ({
   options: MODES.map((value) => ({ value, name: value })),
 })
 
+const allowAllOption = (value: string): acp.SessionConfigOption => ({
+  id: 'allow_all',
+  name: 'Allow all',
+  category: 'permissions',
+  type: 'select',
+  currentValue: value,
+  options: ['on', 'off'].map((each) => ({ value: each, name: each })),
+})
+
 const modelOption = (session: SessionState, variants: boolean): acp.SessionConfigOption => ({
   id: 'model',
   name: 'Model',
@@ -1055,9 +1070,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
   const configOptions = (session: SessionState): Array<acp.SessionConfigOption> => {
     const levels = levelsOf(session.model)
     const effort = levels.length === 0 ? [] : [effortOption(session, levels)]
+    const allowAll = session.allowAll === undefined ? [] : [allowAllOption(session.allowAll)]
     return modes === 'config' || modes === 'stuck'
-      ? [modeOption(session), modelOption(session, variants), ...effort]
-      : [modelOption(session, variants), ...effort]
+      ? [modeOption(session), modelOption(session, variants), ...effort, ...allowAll]
+      : [modelOption(session, variants), ...effort, ...allowAll]
   }
   const sessions = new Map<string, SessionState>()
   const failedOnce = new Set<string>()
@@ -1117,6 +1133,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         runs: 0,
         background: new Map(),
         served: 0,
+        allowAll: options.allowAll,
       }
       sessions.set(sessionId, session)
       return {
@@ -1145,6 +1162,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (variants && value !== session.model) session.effort = levelsOf(value)[0] ?? ''
         session.model = value
       } else if (params.configId === 'effort' && levelsOf(session.model).includes(value)) session.effort = value
+      else if (params.configId === 'allow_all' && session.allowAll !== undefined && ['on', 'off'].includes(value)) session.allowAll = value
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })
@@ -1656,7 +1674,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say('after')
           return ended()
         case scenarios.settings:
-          await say(`mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}`)
+          await say(
+            `mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}${session.allowAll === undefined ? '' : ` allow_all=${session.allowAll}`}`,
+          )
+          return ended()
+        case scenarios.allowAll:
+          session.allowAll = 'on'
+          await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
+          await say('Allowing all')
           return ended()
         case scenarios.handsBack: {
           // Codex: a command's output in chunks as it runs, then its exit.
