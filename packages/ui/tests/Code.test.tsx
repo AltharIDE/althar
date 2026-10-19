@@ -23,6 +23,7 @@ import {
   markOf,
   mayBeCode,
   PLAIN_PATH,
+  withoutLines,
 } from '../src/thread/Code/code'
 import { CodeLines } from '../src/thread/Code/CodeLines'
 import { codeNamesIn, Markdown } from '../src/thread/Markdown/Markdown'
@@ -100,6 +101,24 @@ describe('the names an agent writes', () => {
       'model.ts',
       'docs/decisions/012-refund-limits.md',
     ])
+  })
+})
+
+describe('a name without its lines', () => {
+  it('keeps what comes before the lines it gives, however it gives them', () => {
+    expect(withoutLines('src/runs/Runs.ts:359')).toBe('src/runs/Runs.ts')
+    expect(withoutLines('model.ts:12-30')).toBe('model.ts')
+    expect(withoutLines('model.ts#L12-L30')).toBe('model.ts')
+    expect(withoutLines('model.ts')).toBe('model.ts')
+  })
+
+  it('reads a long run of what looks like lines at once, not again from each place', () => {
+    const started = performance.now()
+    // What a pattern tried again from each place, failing at the end, takes seconds over.
+    expect(withoutLines(`a${':9'.repeat(40_000)}\n!`)).toBe('a')
+    expect(withoutLines(`a${':'.repeat(100_000)}`)).toBe(`a${':'.repeat(100_000)}`)
+    expect(withoutLines(`a${'#'.repeat(100_000)}`)).toBe(`a${'#'.repeat(100_000)}`)
+    expect(performance.now() - started).toBeLessThan(100)
   })
 })
 

@@ -72,6 +72,12 @@ export type CodeMode = 'now' | 'then' | 'change'
 
 export const nameOf = (path: string) => path.replace(/\/$/, '').split('/').pop() ?? path
 
+/** A name without the lines it gives: all before its first `:` and digit, or `#L`. Searched once, not tried from every place. */
+export const withoutLines = (name: string) => {
+  const at = name.search(/:\d|#L/)
+  return at < 0 ? name : name.slice(0, at)
+}
+
 export const folderOf = (path: string) => {
   const clean = path.replace(/\/$/, '')
   return clean.slice(0, clean.length - nameOf(clean).length)

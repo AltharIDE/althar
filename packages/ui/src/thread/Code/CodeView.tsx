@@ -21,6 +21,7 @@ import {
   markOf,
   nameOf,
   sizeOf,
+  withoutLines,
 } from './code'
 import { CodeLines, codeLinesText, type CodeLinesText } from './CodeLines'
 import s from './Code.module.css'
@@ -139,7 +140,7 @@ function Folder({ path }: { path: string }) {
 
 /** What a name names, as a title: the file's name and its lines, or the name in code; with its folder after, where asked. */
 export function CodeTitle({ found, folder = false }: { found: FoundCode; folder?: boolean }) {
-  const name = found.kind === 'several' ? found.name.replace(/(:\d.*|#L.*)$/, '') : nameOf(found.path)
+  const name = found.kind === 'several' ? withoutLines(found.name) : nameOf(found.path)
   const lines = found.kind === 'missing' ? '' : found.kind === 'file' && found.symbol !== undefined ? '' : linesOf(found.line, found.end)
   return (
     <span className={s.title}>
@@ -364,7 +365,7 @@ function Body({
   if (found.kind === 'several')
     return (
       <div className={s.say}>
-        <h3>{t.severalTitle(found.paths.length, nameOf(found.name.replace(/(:\d.*|#L.*)$/, '')))}</h3>
+        <h3>{t.severalTitle(found.paths.length, nameOf(withoutLines(found.name)))}</h3>
         <p>{t.several}</p>
         <Choices paths={found.paths} suffix={linesOf(found.line, found.end)} onGo={onGo} />
       </div>

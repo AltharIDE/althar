@@ -5,7 +5,7 @@ import { cx } from '../../lib/cx'
 import { Code } from '../../primitives/Code/Code'
 import { Popover } from '../../primitives/Popover/Popover'
 import { useThreadShell } from '../Shell/Shell'
-import { codeKey, type FoundCode, linesOf, nameOf } from './code'
+import { codeKey, type FoundCode, linesOf, nameOf, withoutLines } from './code'
 import s from './Code.module.css'
 
 export interface CodeRefText {
@@ -25,7 +25,7 @@ export interface CodeRefProps {
 /** What the name says on its chip: the file's name and lines, the name in code as written, or the name of one that isn't there. */
 function Label({ found }: { found: FoundCode }) {
   if (found.kind === 'file' && found.symbol !== undefined) return <span>{found.name}</span>
-  const name = found.kind === 'several' ? nameOf(found.name.replace(/(:\d.*|#L.*)$/, '')) : nameOf(found.path)
+  const name = found.kind === 'several' ? nameOf(withoutLines(found.name)) : nameOf(found.path)
   const lines = found.kind === 'missing' ? '' : linesOf(found.line, found.end)
   return (
     <>
