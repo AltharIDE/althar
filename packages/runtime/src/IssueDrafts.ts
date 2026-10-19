@@ -1,7 +1,7 @@
 import { type Container, ConnectorFailed, type Issue, type Product, products, type Tracker } from '@althar/connectors'
 import { type ActorId, Ids, type IssueDraftState, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
+import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
@@ -573,8 +573,9 @@ export class IssueDrafts extends Context.Service<
       /**
        * Tells a task's lead what the person decided about a draft of its,
        * quietly: in its thread, as input Althar writes. Nothing for the
-       * coordinator's drafts, which it hears as news, nor for a lead that
-       * isn't running or a task that is over: nobody is there to read it.
+       * coordinator's drafts, which it hears as news, nor for a task that is
+       * over. A lead that isn't running is told all the same: the input waits
+       * in its queue and it reads it when it is resumed.
        */
       const tellLead = (row: Row, words: string) =>
         Effect.gen(function* () {
@@ -582,7 +583,7 @@ export class IssueDrafts extends Context.Service<
           const [thread] = yield* sql<{ id: string }>`
             SELECT t.id FROM threads t JOIN tasks k ON k.id = t.task_id
             WHERE t.id = ${row.threadId} AND t.kind = 'task' AND k.state = 'open'`
-          if (thread === undefined || Option.isNone(yield* sessions.running(thread.id))) return
+          if (thread === undefined) return
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: thread.id, issueDraft: row.id }, undefined, instance.systemId),
             threadId: thread.id,
@@ -644,6 +645,7 @@ export class IssueDrafts extends Context.Service<
       const discard: IssueDrafts['Service']['discard'] = (draftId, actorId) =>
         provide(
           Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
             const result = yield* transition(
               draftId,
               open,
@@ -652,7 +654,16 @@ export class IssueDrafts extends Context.Service<
               actorId,
             )
             if (!result.changed) return yield* closed(result.row)
-            yield* tellLead(result.row, `The person discarded your issue “${result.row.title}”: nothing was filed, so don't refer to it.`)
+            // A filing that ended unsure may have reached the tracker, even if a later try failed plainly: discarding closes only the
+            // draft here, and the lead isn't told the issue doesn't exist.
+            const [unsure] = yield* sql<{ id: string }>`
+              SELECT id FROM record_events WHERE aggregate_type = 'issue_draft' AND aggregate_id = ${result.row.id} AND type = 'issue_draft.uncertain' LIMIT 1`
+            yield* tellLead(
+              result.row,
+              unsure === undefined
+                ? `The person discarded your issue “${result.row.title}”: nothing was filed, so don't refer to it.`
+                : `The person discarded your issue “${result.row.title}” in Althar, but an attempt to file it ended unsure, so it may be on ${result.row.trackerName}, in ${result.row.containerName}, all the same. Don't say it doesn't exist, and look for it with find_issues before you draft it again.`,
+            )
           }),
         )
 

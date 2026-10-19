@@ -20,6 +20,7 @@ import { Issues } from '../src/Issues'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { transcript } from '../src/threads'
 import { type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, listTools, repository, runtime, turns, until } from './support'
@@ -671,6 +672,64 @@ describe('issue drafts', () => {
           (yield* coordinatorNews((yield* project(repository())).threadId, projectId, yield* modelNamer)) ?? '',
           'Refunds skip the limiter',
         )
+      }).pipe(Effect.provide(withQueries({ linear })))
+    })
+
+    /** What Althar has queued for a thread to read, quietly, as the lead will when it is resumed. */
+    const queuedFor = (threadId: string) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const rows = yield* sql<{
+          body: string
+        }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued' ORDER BY sequence`
+        return rows.map((row) => row.body).join('\n')
+      })
+
+    it.live('are told to a lead that isn’t running: its outcome waits in the queue for when it is resumed', () => {
+      const linear = linearWith(MERIDIAN)
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const drafts = yield* IssueDrafts
+        const instance = yield* Instance
+        const { task, lead } = yield* led('Add a retry')
+        yield* callTool(lead, 'draft_issue', { title: 'Refunds skip the limiter' })
+        // The person stops the lead, then files the card.
+        yield* (yield* Sessions).stop(task.threadId)
+        const [card] = yield* cardsIn(task.threadId)
+        const filed = yield* drafts.file(card?.draftId ?? '', instance.personId)
+        assert.strictEqual(filed.issue?.key, 'MER-1')
+        assert.include(
+          yield* queuedFor(task.threadId),
+          `The person filed your issue “Refunds skip the limiter” on Linear, in Meridian, as MER-1: ${filed.issue?.url}`,
+        )
+      }).pipe(Effect.provide(withQueries({ linear })))
+    })
+
+    it.live('discarded after a filing ended unsure aren’t said to be nowhere: the issue may be on the tracker', () => {
+      const linear = linearWith(MERIDIAN)
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const drafts = yield* IssueDrafts
+        const instance = yield* Instance
+        const { task, lead } = yield* led('Add a retry')
+        yield* callTool(lead, 'draft_issue', { title: 'Doubted' })
+        yield* callTool(lead, 'draft_issue', { title: 'Refused' })
+        const [doubted, refused] = yield* cardsIn(task.threadId)
+        yield* (yield* Sessions).stop(task.threadId)
+        // One whose answer was lost, one the tracker plainly refused.
+        linear.failNext('create', 'invalid_response')
+        yield* drafts.file(doubted?.draftId ?? '', instance.personId)
+        linear.failNext('create', 'rejected')
+        yield* drafts.file(refused?.draftId ?? '', instance.personId)
+        yield* drafts.discard(doubted?.draftId ?? '', instance.personId)
+        yield* drafts.discard(refused?.draftId ?? '', instance.personId)
+        const heard = yield* queuedFor(task.threadId)
+        assert.include(
+          heard,
+          'The person discarded your issue “Doubted” in Althar, but an attempt to file it ended unsure, so it may be on Linear, in Meridian, all the same.',
+        )
+        assert.include(heard, 'The person discarded your issue “Refused”: nothing was filed')
+        assert.notInclude(heard, '“Doubted”: nothing was filed')
       }).pipe(Effect.provide(withQueries({ linear })))
     })
 
