@@ -67,7 +67,8 @@
       `sessionMeta`; started so, it is refused if it offers modes after all.
     - `options.held` keeps an option at a value for the session's life (Copilot's
       `allow_all`, Junie's `brave_mode`): set as it starts, set back when the
-      agent moves it. A role that only reads holds its mode option the same way,
+      agent moves it. Where it can't be set back, the turn fails and the
+      session takes no more prompts. A role that only reads holds its mode option the same way,
       every agent's, so a reader that leaves its mode is put back.
     - `commands: 'althar'` says the person's messages that start with `/` to
       the agent as words, where one of its commands turns its asking off

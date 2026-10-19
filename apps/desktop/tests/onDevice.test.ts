@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { agents } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import {
@@ -42,6 +43,21 @@ describe('the device outside a Flatpak', () => {
       },
     )
     expect(HOST_COMMANDS).toEqual(['opencode', 'claude', 'codex', 'copilot', 'junie', 'grok', 'kimi', 'vibe-acp', 'qwen'])
+  })
+
+  it('carries out to the device, for every agent it may run there, its account’s home and what its launch sets', () => {
+    const facts = { env: { HOME: '/home/me', PATH: '/usr/bin' }, uid: 1000, ambient: {} } satisfies Parameters<typeof relayOut>[2]
+    const missing = Object.values(agents)
+      .filter((agent) => agent.cli !== undefined && (HOST_COMMANDS as ReadonlyArray<string>).includes(agent.cli.name))
+      .flatMap((agent) => {
+        const spec = agent.launch('/usr/bin/node')
+        const names = [...new Set([agent.home.variable, ...Object.keys(spec.env ?? {}), ...(spec.inheritEnv ?? [])])]
+        // An account's home, and whatever the agent inherits, as an executor would set them; its launch's own as they are.
+        const env = { ...Object.fromEntries(names.map((name) => [name, '/home/me/.althar/accounts/work'])), ...spec.env }
+        const crossed = relayOut({ command: agent.cli?.name ?? '', args: [] }, { env }, facts).args
+        return names.filter((name) => !crossed.some((arg) => arg.startsWith(`--env=${name}=`))).map((name) => `${agent.id}: ${name}`)
+      })
+    expect(missing).toEqual([])
   })
 
   it('takes a launch out to the device with the names it needs and what the agent was given, and nothing else', () => {

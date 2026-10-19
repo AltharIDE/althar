@@ -174,7 +174,8 @@ export interface NewSessionOptions {
    * Config options held at a value for the session's whole life, such as one
    * that approves every request while on (Copilot's `allow_all`): set as it
    * starts, where the agent offers them, and set back whenever the agent says
-   * one moved.
+   * one moved. Where it can't be set back, the turn is stopped as failed, and
+   * the session takes no more prompts.
    */
   readonly held?: Readonly<Record<string, string>>
 }
@@ -759,6 +760,22 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         // Where the agent can't be held there, the session is refused, as for a mode it can't be put in.
         for (const [configId, value] of loose(yield* Ref.get(current))) yield* setOption(configId, value)
 
+        const cancel = Effect.gen(function* () {
+          const turn = yield* Ref.get(state.current)
+          if (Option.isSome(turn)) turn.value.cancelled = true
+          yield* call('session/cancel', () => connection.agent.notify(acp.methods.agent.session.cancel, { sessionId }))
+          for (const drop of waiting.get(sessionId) ?? []) drop()
+        })
+
+        /**
+         * A held option the agent moved and Althar couldn't set back: the
+         * session no longer asks as it was started to, so its turn is stopped
+         * and it takes no more prompts. A new one is held from its start.
+         */
+        let unheld: { readonly configId: string; readonly value: string } | undefined
+        const unheldWords = (moved: { readonly configId: string; readonly value: string }) =>
+          `The agent's ${moved.configId} moved, and Althar couldn't set it back to ${moved.value}, so it stopped the session.`
+
         /** What an update means here: the mode it changes, and a failure the agent reported in structured form. */
         const interpret = (update: acp.SessionUpdate) =>
           Effect.gen(function* () {
@@ -770,13 +787,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               // that answers one request at a time may take; nothing Althar answers waits on this reader meanwhile.
               for (const [configId, value] of loose(event.options)) {
                 const restored = yield* Effect.exit(setOption(configId, value).pipe(Effect.timeout(Duration.seconds(10))))
-                events.push({
-                  _tag: 'Notice',
-                  severity: Exit.isSuccess(restored) ? 'info' : 'error',
-                  title: Exit.isSuccess(restored)
-                    ? `Althar set the agent's ${configId} back to ${value}.`
-                    : `The agent's ${configId} moved, and Althar couldn't set it back to ${value}.`,
-                })
+                if (Exit.isSuccess(restored)) {
+                  events.push({ _tag: 'Notice', severity: 'info', title: `Althar set the agent's ${configId} back to ${value}.` })
+                  continue
+                }
+                // Left where it approves without asking, it goes no further: the turn fails, and nothing more is sent.
+                unheld ??= { configId, value }
+                const turn = Option.getOrUndefined(yield* Ref.get(state.current))
+                if (turn !== undefined) turn.failure = { failure: 'unknown', message: unheldWords(unheld) }
+                yield* Effect.ignore(cancel)
+                events.push({ _tag: 'Notice', severity: 'error', title: unheldWords(unheld) })
               }
               const changed = modeOptionOf(yield* Ref.get(current))
               if (changed !== undefined && String(changed.currentValue) !== (yield* Ref.get(mode))) {
@@ -889,6 +909,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         ): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
           Stream.unwrap(
             Effect.gen(function* () {
+              if (unheld !== undefined)
+                return yield* new AgentRequestFailed({
+                  method: 'session/set_config_option',
+                  failure: 'unknown',
+                  message: unheldWords(unheld),
+                })
               const turn: Turn = {
                 queue: yield* Queue.unbounded<SessionEvent, Failure | Cause.Done>(),
                 done: yield* Deferred.make<void>(),
@@ -908,13 +934,6 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               return Stream.fromQueue(turn.queue)
             }),
           )
-
-        const cancel = Effect.gen(function* () {
-          const turn = yield* Ref.get(state.current)
-          if (Option.isSome(turn)) turn.value.cancelled = true
-          yield* call('session/cancel', () => connection.agent.notify(acp.methods.agent.session.cancel, { sessionId }))
-          for (const drop of waiting.get(sessionId) ?? []) drop()
-        })
 
         const interrupt = Effect.gen(function* () {
           const turn = yield* Ref.get(state.current)

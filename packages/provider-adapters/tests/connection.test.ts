@@ -885,6 +885,23 @@ describe('AgentConnection', () => {
       ),
     )
 
+    it.live('stops a session whose held option the agent moved and Althar couldn’t set back, failing its turn and refusing the next', () =>
+      withConnection(variant({ allowAll: 'on', allowAllSticks: true }), (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask', held: { allow_all: 'off' } })
+          const moved = yield* Stream.runCollect(session.prompt(scenarios.allowAll))
+          const said = "The agent's allow_all moved, and Althar couldn't set it back to off, so it stopped the session."
+          assert.deepInclude(moved, { _tag: 'Notice', severity: 'error', title: said })
+          const ended = moved.at(-1)
+          assert.deepStrictEqual(ended?._tag === 'TurnEnded' ? ended.failure : undefined, { failure: 'unknown', message: said })
+          // Nothing more reaches an agent left approving without asking.
+          const next = yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello)))
+          assert.instanceOf(next, AgentRequestFailed)
+          assert.strictEqual((next as AgentRequestFailed).message, said)
+        }),
+      ),
+    )
+
     it.live('puts a reader back in its mode when the agent leaves it', () =>
       withConnection(fake, (connection) =>
         Effect.gen(function* () {

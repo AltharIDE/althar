@@ -236,6 +236,8 @@ export interface FakeAgentOptions {
   readonly images?: boolean
   /** An option that would approve every request while on, as Copilot's `allow_all`, starting at this value. */
   readonly allowAll?: 'on' | 'off'
+  /** Once it turns `allow_all` on itself, it won't be turned off again: setting it back fails. */
+  readonly allowAllSticks?: boolean
 }
 
 interface SessionState {
@@ -267,6 +269,8 @@ interface SessionState {
   served: number
   /** Its approve-everything option, where it has one (`allowAll`). */
   allowAll: string | undefined
+  /** It turned `allow_all` on itself, and, with `allowAllSticks`, keeps it so. */
+  allowAllStuck: boolean
   /** How large it last said its context is, in tokens. */
   contextSize: number
 }
@@ -1140,6 +1144,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         background: new Map(),
         served: 0,
         allowAll: options.allowAll,
+        allowAllStuck: false,
       }
       sessions.set(sessionId, session)
       return {
@@ -1168,6 +1173,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (variants && value !== session.model) session.effort = levelsOf(value)[0] ?? ''
         session.model = value
       } else if (params.configId === 'effort' && levelsOf(session.model).includes(value)) session.effort = value
+      else if (params.configId === 'allow_all' && session.allowAllStuck)
+        throw acp.RequestError.internalError({ details: 'allow_all is locked on' })
       else if (params.configId === 'allow_all' && session.allowAll !== undefined && ['on', 'off'].includes(value)) session.allowAll = value
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
@@ -1707,6 +1714,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.allowAll:
           session.allowAll = 'on'
+          session.allowAllStuck = options.allowAllSticks === true
           await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
           await say('Allowing all')
           return ended()
