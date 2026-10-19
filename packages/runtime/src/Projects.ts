@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs'
-import { basename, join, relative } from 'node:path'
+import { basename, join, relative, sep } from 'node:path'
 
 import { inkFor, type ProjectInk } from '@althar/contracts'
 import {
@@ -121,7 +121,12 @@ export const readFolder = (opened: string) =>
     if (root !== null)
       return root === path
         ? { kind: 'repository' as const, name: basename(path), repositories: [yield* describe(root, null)] }
-        : { kind: 'inside' as const, name: basename(path), repositories: [yield* describe(root, relative(root, path))] }
+        : // The folder in it, with `/` as git writes it, on Windows too.
+          {
+            kind: 'inside' as const,
+            name: basename(path),
+            repositories: [yield* describe(root, relative(root, path).split(sep).join('/'))],
+          }
     let entries: ReadonlyArray<string> = []
     try {
       entries = readdirSync(path, { withFileTypes: true })

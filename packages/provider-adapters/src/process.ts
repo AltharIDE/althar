@@ -172,6 +172,8 @@ export const spawnOwned = (
             cwd,
             detached: launch.detached,
             windowsHide: true,
+            // Joined as they are, the program's own path quoted, as Node's own `shell: true` runs cmd.exe.
+            ...(launched.verbatim === true ? { windowsVerbatimArguments: true, argv0: `"${launch.command}"` } : {}),
             stdio: ['pipe', 'pipe', 'pipe'],
             env,
           }),

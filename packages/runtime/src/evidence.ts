@@ -101,7 +101,8 @@ const findPicture = (path: string, worktrees: ReadonlyArray<string>) =>
     for (const root of worktrees) {
       const realRoot = yield* inside(root, [root])
       if (realRoot !== null && real.startsWith(`${realRoot}${sep}`)) {
-        at = { worktree: root, file: relative(realRoot, real) }
+        // Where in it, the way git and the person write it: with `/`, on Windows too.
+        at = { worktree: root, file: relative(realRoot, real).split(sep).join('/') }
         break
       }
     }

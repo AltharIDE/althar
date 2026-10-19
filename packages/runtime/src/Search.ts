@@ -1,4 +1,4 @@
-import { basename, isAbsolute } from 'node:path'
+import { basename, isAbsolute, sep } from 'node:path'
 
 import type { FoundPart, FoundTask, TaskPhase } from '@althar/contracts'
 import { Effect, Layer } from 'effect'
@@ -50,9 +50,14 @@ const keep = (parts: ReadonlyArray<string>) => parts.join('\n').slice(0, KEPT)
 /** A file a tool call names, as the task knows it: inside one of its worktrees, from there; with several, under its folder's name. */
 export const fileOf = (path: string, worktrees: ReadonlyArray<string>): string | null => {
   if (!isAbsolute(path)) return path
-  const within = worktrees.find((worktree) => path.startsWith(`${worktree.replace(/\/+$/, '')}/`))
+  // A worktree's own folder ends at `/`, or at this system's separator (`\` on Windows); what follows is written with `/`.
+  const rootOf = (worktree: string) => worktree.replace(/[\\/]+$/, '')
+  const within = worktrees.find((worktree) => [`${rootOf(worktree)}/`, `${rootOf(worktree)}${sep}`].some((root) => path.startsWith(root)))
   if (within === undefined) return null
-  const relative = path.slice(within.replace(/\/+$/, '').length + 1)
+  const relative = path
+    .slice(rootOf(within).length + 1)
+    .split(sep)
+    .join('/')
   return worktrees.length > 1 ? `${basename(within)}/${relative}` : relative
 }
 

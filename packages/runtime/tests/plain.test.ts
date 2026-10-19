@@ -400,7 +400,8 @@ describe('a plain task', () => {
       for (const task of [quiet, wrote]) {
         yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { task }), taskId: task.id })
         const worktree = yield* worktreeOf(task.id)
-        rmSync(worktree.path, { recursive: true, force: true })
+        // Again a moment later where Windows won't yet, while its lead's process, which worked in it, is still going.
+        rmSync(worktree.path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
         yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', { task }), taskId: task.id })
       }
       const plain = yield* worktreeOf(quiet.id)

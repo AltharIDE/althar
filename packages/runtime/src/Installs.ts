@@ -171,6 +171,9 @@ const unzipInto = (bytes: Uint8Array, folder: string, names: ReadonlySet<string>
 const fail = (agentId: string, summary: string, reason: unknown = summary) =>
   new InstallFailed({ agentId, summary, reason: reason instanceof Error ? reason.message : String(reason) })
 
+/** The bsdtar this computer has. */
+const tarHere = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
+
 const run = (command: string, args: ReadonlyArray<string>, timeout = 60_000) =>
   Effect.callback<string, Error>((resume) => {
     execFile(command, [...args], { timeout, windowsHide: true }, (error, stdout, stderr) =>
@@ -337,8 +340,9 @@ export class Installs extends Context.Service<
             }
             const archive = join(folder, assetOf(install.assets) ?? 'download')
             writeFileSync(archive, bytes)
-            // bsdtar, as macOS and Windows have, unpacks a zip as well as a gzipped tar.
-            yield* run('tar', ['-xf', archive, '-C', unpacked]).pipe(
+            // bsdtar, as macOS and Windows have, unpacks a zip as well as a gzipped tar: on Windows its own, by its path, as
+            // Git's GNU tar may come first on the PATH, which takes neither a zip nor a drive (C:) in a path.
+            yield* run(tarHere, ['-xf', archive, '-C', unpacked]).pipe(
               Effect.mapError((error) => fail(definition.id, `${definition.name}'s download couldn't be unpacked.`, error)),
             )
             const program = programName(name, platform)

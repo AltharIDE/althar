@@ -313,7 +313,10 @@ describe('accounts', () => {
         mkdirSync(join(home, made), { recursive: true })
       writeFileSync(join(home, '.codex-notes'), 'not a folder')
       const was = process.env.HOME
+      const wasProfile = process.env.USERPROFILE
+      // The home Node gives: HOME, and on Windows USERPROFILE.
       process.env.HOME = home
+      process.env.USERPROFILE = home
       try {
         const found = yield* accounts.found('codex')
         assert.deepStrictEqual(found.map((place) => [place.name, place.tool]).toSorted(), [
@@ -335,6 +338,8 @@ describe('accounts', () => {
       } finally {
         if (was === undefined) delete process.env.HOME
         else process.env.HOME = was
+        if (wasProfile === undefined) delete process.env.USERPROFILE
+        else process.env.USERPROFILE = wasProfile
       }
     }).pipe(Effect.provide(withAccounts())),
   )

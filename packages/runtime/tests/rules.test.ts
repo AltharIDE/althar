@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
@@ -283,8 +283,9 @@ describe('the always-ask list', () => {
     ['kubectl apply -f prod.yaml', 'Deploying or publishing always asks.'],
     ['terraform apply', 'Deploying or publishing always asks.'],
     ['npm publish', 'Deploying or publishing always asks.'],
-    ['git -C /Users/someone/other commit -m x', 'Git in another folder always asks: /Users/someone/other'],
-    ['git --git-dir=/elsewhere/.git log', 'Git in another folder always asks: /elsewhere/.git'],
+    // The folder as this computer takes it: on Windows, on the drive the tests run on.
+    ['git -C /Users/someone/other commit -m x', `Git in another folder always asks: ${resolve('/Users/someone/other')}`],
+    ['git --git-dir=/elsewhere/.git log', `Git in another folder always asks: ${resolve('/elsewhere/.git')}`],
     ['cd ~/other && git commit -m x', 'Git in another folder always asks:'],
     ['echo x >> ~/.zshrc', "Writing outside the task's worktree always asks:"],
     ['touch ~/althar-probe.txt', "Writing outside the task's worktree always asks:"],

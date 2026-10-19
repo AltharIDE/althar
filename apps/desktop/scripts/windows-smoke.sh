@@ -67,7 +67,8 @@ echo "Uninstalling"
 MSYS_NO_PATHCONV=1 "$dir/Uninstall Althar.exe" /S
 # The uninstaller copies itself away and returns at once, so its work is waited for.
 if wait_for '[ ! -f "$dir/Althar.exe" ]'; then ok "uninstalled"; else bad "Althar.exe is still in $dir"; fi
-[ ! -f "$menu" ] && ok "Start menu entry removed" || bad "the Start menu entry stayed"
+# The shortcut goes after the program's files, so it too is waited for.
+if wait_for '[ ! -f "$menu" ]'; then ok "Start menu entry removed"; else bad "the Start menu entry stayed"; fi
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -17,6 +17,9 @@ import { lastLinesOf, type SetUp, shellFor, toldOf } from '../src/Setups'
 import { Tasks } from '../src/Tasks'
 import { items, repository, runtime, until } from './support'
 
+/** Windows, where what some tests stand on isn't (each says what). */
+const windows = process.platform === 'win32'
+
 /*
  * A task's worktree set up by Althar itself, before its lead starts
  * (ADR-023): the install its lockfile names, or the setup kept for its
@@ -273,7 +276,11 @@ describe('what sets up a worktree', () => {
     assert.strictEqual(shellFor('bun install', 'darwin', '/opt/homebrew/bin/fish').command, '/bin/zsh')
     assert.strictEqual(shellFor('bun install', 'linux', undefined).command, '/bin/sh')
     assert.strictEqual(shellFor('bun install', 'linux', 'zsh').command, '/bin/sh')
-    assert.deepStrictEqual(shellFor('npm ci', 'win32', undefined), { command: 'cmd.exe', args: ['/d', '/s', '/c', '(npm ci) 2>&1'] })
+    assert.deepStrictEqual(shellFor('npm ci', 'win32', undefined), {
+      command: 'cmd.exe',
+      args: ['/d', '/s', '/c', '"(npm ci) 2>&1"'],
+      verbatim: true,
+    })
   })
 
   it('keeps the end of what it printed, without colours or the lines a progress bar wrote over', () => {
@@ -340,7 +347,7 @@ describe('setting up a task’s worktree', () => {
     Effect.gen(function* () {
       const { task } = yield* taskIn(withWorkspaces())
       const [workspace] = yield* setUp(task.taskId, Duration.seconds(60))
-      assert.deepInclude(workspace?.setup, { command: INSTALL, code: 0 })
+      assert.deepInclude(workspace?.setup, { command: INSTALL, code: 0 }, workspace?.setup?.last ?? '')
       assert.isTrue(existsSync(join(task.worktree, 'packages', 'app', 'node_modules', 'greet', 'index.js')))
       assert.strictEqual(git(task.worktree, 'status', '--porcelain'), '')
     }).pipe(Effect.provide(runtime())),
@@ -364,7 +371,7 @@ describe('setting up a task’s worktree', () => {
 
   it.live('runs the setup kept for the repository instead, and the lead’s first turn waits for it', () =>
     Effect.gen(function* () {
-      const kept = 'sleep 1; printf ready > kept.txt'
+      const kept = `node -e "setTimeout(() => require('fs').writeFileSync('kept.txt', 'ready'), 1000)"`
       const { task } = yield* taskIn(withPackages(), kept)
       // Started at once, its lead is given nothing until the worktree is set up.
       const brief = yield* lead(task.threadId)
@@ -384,7 +391,7 @@ describe('setting up a task’s worktree', () => {
   it.live('stops a lead that waits on its worktree’s setup at once, and the setup goes on', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
-      const { task } = yield* taskIn(repository(), 'sleep 2; printf ready > kept.txt')
+      const { task } = yield* taskIn(repository(), `node -e "setTimeout(() => require('fs').writeFileSync('kept.txt', 'ready'), 2000)"`)
       yield* sessions.start({ threadId: task.threadId, agentId: 'claude-code' })
       const asked = Date.now()
       yield* sessions.stop(task.threadId)
@@ -409,7 +416,7 @@ describe('setting up a task’s worktree', () => {
 
   it.live('shows a setup that failed, with the end of what it printed, and starts the lead all the same, told what failed', () =>
     Effect.gen(function* () {
-      const failing = "echo 'resolving'; echo 'npm ERR! missing: left-pad' >&2; exit 3"
+      const failing = `node -e "console.log('resolving'); console.error('npm ERR! missing: left-pad'); process.exit(3)"`
       const { task } = yield* taskIn(repository(), failing)
       const [workspace] = yield* setUp(task.taskId)
       assert.deepInclude(workspace?.setup, { command: failing, code: 3, timedOut: false, last: 'resolving\nnpm ERR! missing: left-pad' })
@@ -428,7 +435,8 @@ describe('setting up a task’s worktree', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('says a setup that couldn’t start, and starts the lead all the same', () =>
+  // Not on Windows: a setup runs in cmd.exe there, whatever shell the person has, so it always starts.
+  it.live.skipIf(windows)('says a setup that couldn’t start, and starts the lead all the same', () =>
     Effect.gen(function* () {
       const { task } = yield* taskIn(repository(), 'make deps')
       const [workspace] = yield* setUp(task.taskId)
@@ -442,7 +450,7 @@ describe('setting up a task’s worktree', () => {
 
   it.live('stops a setup that runs out of time, and the lead starts all the same', () =>
     Effect.gen(function* () {
-      const { task } = yield* taskIn(repository(), 'echo waiting; sleep 30')
+      const { task } = yield* taskIn(repository(), `node -e "console.log('waiting'); setTimeout(() => {}, 30000)"`)
       const [workspace] = yield* setUp(task.taskId)
       assert.deepInclude(workspace?.setup, { code: null, timedOut: true, last: 'waiting' })
       // Its process group is stopped, and recorded so.
@@ -457,7 +465,7 @@ describe('setting up a task’s worktree', () => {
     Effect.gen(function* () {
       const file = join(mkdtempSync(join(tmpdir(), 'althar-profile-')), 'althar.sqlite')
       // The first time it waits a long while; the next, it is quick.
-      const slowOnce = 'if [ -f tried ]; then echo again; else touch tried; echo started; sleep 30; fi'
+      const slowOnce = `node -e "const fs = require('fs'); if (fs.existsSync('tried')) console.log('again'); else { fs.writeFileSync('tried', ''); console.log('started'); setTimeout(() => {}, 30000) }"`
       const first = yield* Effect.gen(function* () {
         const { task } = yield* taskIn(repository(), slowOnce)
         const [ran] = yield* until(setupProcesses, (rows) => rows[0]?.state === 'running')

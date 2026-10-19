@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -15,6 +15,9 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { notices, repository, runtime } from './support'
+
+/** Windows, where what some tests stand on isn't (each says what). */
+const windows = process.platform === 'win32'
 
 /*
  * Merging a task without a pull request into its repositories' default
@@ -130,9 +133,7 @@ describe('merging a task here', () => {
       const mergedOf = Effect.map(queries.thread(task.threadId, {}), (snapshot) => snapshot.task.merged)
       assert.deepStrictEqual(yield* mergedOf, [])
       yield* mergeHere(task.taskId, [{ repository: slug, head }])
-      assert.deepStrictEqual(yield* mergedOf, [
-        { repository: slug, name: root.split('/').at(-1) ?? '', branch: 'main', remote: 'origin/main', ahead: 1 },
-      ])
+      assert.deepStrictEqual(yield* mergedOf, [{ repository: slug, name: basename(root), branch: 'main', remote: 'origin/main', ahead: 1 }])
       const changes = yield* Changes
       assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [{ branch: 'main', remote: 'origin/main' }])
       // The task's commit as it merged: credited, Althar its co-author.
@@ -455,7 +456,8 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('fast-forwards with a git older than 2.36, which has no `worktree list -z`', () => {
+  // Not on Windows: the older git stands in as a shell script on the PATH.
+  it.live.skipIf(windows)('fast-forwards with a git older than 2.36, which has no `worktree list -z`', () => {
     // git as 2.35 had it, in front of the real one: no `worktree list -z` (2.36), no `merge-tree --write-tree` (2.38).
     const shim = realpathSync(mkdtempSync(join(tmpdir(), 'althar-old-git-')))
     const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
@@ -486,7 +488,8 @@ describe('merging a task here', () => {
     }).pipe(Effect.ensuring(Effect.sync(() => (process.env.PATH = path))), Effect.provide(runtime()))
   })
 
-  it.live('finds the worktree that has a branch whatever its path', () =>
+  // Not on Windows: Windows names allow no newline.
+  it.live.skipIf(windows)('finds the worktree that has a branch whatever its path', () =>
     Effect.gen(function* () {
       const root = repository()
       const head = git(root, 'rev-parse', 'HEAD')
