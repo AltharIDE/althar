@@ -222,4 +222,18 @@ describe('pushing a task’s branch', () => {
       assert.strictEqual(refused.said, '.opencode/skills/x/SKILL.md, openspec/changes/b/proposal.md')
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('holds a directory the task put where the repository had only a file of that name', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      const base = commitFiles(root, { openspec: 'a file, not the specs' })
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+      git(root, 'rm', '-q', 'openspec')
+      const head = commitFiles(root, { 'openspec/changes/b/proposal.md': 'brought in' })
+      const refused = refusal(
+        yield* Effect.flip(guardPush({ projectId: project.projectId, taskId: 't', remote: 'origin/main', cwd: root, base, head })),
+      )
+      assert.strictEqual(refused.said, 'openspec/changes/b/proposal.md')
+    }).pipe(Effect.provide(runtime())),
+  )
 })

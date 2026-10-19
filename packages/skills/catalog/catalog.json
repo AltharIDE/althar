@@ -185,7 +185,7 @@
         "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
         "subpath": "skills/git-workflow-and-versioning"
       },
-      "treeHash": "d1846593bec1a6756d361e77c604733f1fa8bfa09f2fdb48d828819f633f4720",
+      "treeHash": "cb99d045f6ea3b631e05af043fc35152aef4ca277fdc092f67cf966ba289003d",
       "upstreamTreeHash": "91c8c72654ee6ef163e49df26d1810cb7a6a91a4d8dee5b9f1bc03fd1fb8ec3a",
       "license": "MIT",
       "copyright": "Copyright (c) 2025 Addy Osmani",

@@ -132,7 +132,7 @@ main (always deployable)
 
 - Branch from `main` (or the team's default branch)
 - Keep branches short-lived (merge within 1-3 days) — long-lived branches are hidden costs
-- Delete branches after merge
+- Leave deleting a task's branch to Althar, which does it once the work is merged
 - Prefer feature flags over long-lived branches for incomplete features
 
 ### Branch Naming

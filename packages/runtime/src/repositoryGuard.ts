@@ -60,8 +60,9 @@ const ownedByRepository = (cwd: string, base: string | null, ref: string | undef
     const tracked = new Set<string>()
     for (const directory of directories)
       for (const stop of stops) {
-        const found = yield* gitOutcome(cwd, 'cat-file', '-e', `${stop}:${directory}`)
-        if (found.code === 0) {
+        // A directory only: a file of that name the task replaced with one is not the repository's skills or specs.
+        const found = yield* gitOutcome(cwd, 'cat-file', '-t', `${stop}:${directory}`)
+        if (found.code === 0 && found.stdout === 'tree') {
           tracked.add(directory)
           break
         }

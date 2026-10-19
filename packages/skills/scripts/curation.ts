@@ -212,6 +212,11 @@ export const CURATED: ReadonlyArray<Curated> = [
       },
       {
         file: 'SKILL.md',
+        find: '- Delete branches after merge\n',
+        replace: "- Leave deleting a task's branch to Althar, which does it once the work is merged\n",
+      },
+      {
+        file: 'SKILL.md',
         find: 'If an agent goes off the rails, `git reset --hard HEAD` takes you back to the last successful state.',
         replace:
           'If an agent goes off the rails, `git restore` on the files it changed takes you back to the last successful commit; never `git reset --hard`, which also throws away work you meant to keep.',
