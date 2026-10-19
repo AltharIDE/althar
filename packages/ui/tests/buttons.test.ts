@@ -14,6 +14,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'board/Board/Board.tsx': 'a collapsed lane’s rail, the whole of which opens it',
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
+  'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
+  'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
