@@ -77,6 +77,10 @@
 .item[data-disabled] :where(*) {
   color: inherit;
 }
+/* why it can't be chosen is still read */
+.item[data-disabled] .description {
+  color: var(--t-3);
+}
 .item[data-state='checked'] {
   font-weight: 550;
 }
