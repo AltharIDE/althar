@@ -406,9 +406,17 @@ The runtime records:
 A provider may launch shells, tools, language servers, or tests. Those form a
 **process tree**. Stopping only the first process can leave descendants running.
 
-On Unix-like systems, Althar uses an owned process group. On Windows it uses
-a Job Object or equivalent tree-owning mechanism. These are OS mechanisms for
-addressing all processes launched for one attempt as a unit.
+On Unix-like systems, Althar uses an owned process group. Windows has none:
+there Althar reads the tree from the OS's list of processes, each with its
+parent and when it started, and kills every process in it by pid
+(`packages/provider-adapters/src/processTrees.ts`). Windows keeps the pid of a
+process's parent after that parent exits, so what the agent started is still
+found once the agent has gone, and start times tell a parent from a later
+process given its pid. What this misses is a process whose own parent, below
+the agent, exited first; a Job Object would catch it, but Node can't make one
+without a native module. On Windows a child is spawned attached and hidden
+(`windowsHide`), never `detached`: a detached child has no console, so each
+console program it starts would open a window of its own.
 
 Cancellation is layered:
 

@@ -50,8 +50,9 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
       const leaderStarted = yield* osStartTime(stale.pid)
       // Ours when the leader is the process recorded; or when the leader has gone but its group lives on, since a
       // pid isn't reused while a group with that id exists. Then what the agent left running, such as a dev server, is stopped too.
+      // Windows has no groups: there the start recorded tells the leader's children from a later process's given its pid.
       const ours = leaderStarted === undefined || leaderStarted === stale.osStartedAt
-      if (ours) stop = yield* stopProcessGroup(stale.pid, Duration.seconds(2))
+      if (ours) stop = yield* stopProcessGroup(stale.pid, Duration.seconds(2), stale.osStartedAt ?? undefined)
     }
     const stopped = stop !== undefined && stop.signal !== 'none'
     if (stopped) processesStopped += 1
