@@ -127,7 +127,6 @@ function RouteRow({ route, ghost = false }: { route: Route; ghost?: boolean }) {
             at={route.task.steps.length}
             started="took 1h 18m"
             lead={OPUS}
-            branch={route.task.branch}
           />
         </Shot>
       </div>

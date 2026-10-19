@@ -35,7 +35,6 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   now: stepText.now,
-  task: (task: string, started: string) => (started === '' ? `Task ${task}` : `Task ${task} · ${started}`),
 }
 
 const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
@@ -207,11 +206,10 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       started={card.startedAt === null ? '' : ago(card.startedAt)}
       lead={named(card.lead, card.leadModel)}
       {...(effort === null ? {} : { effort })}
-      {...(card.branch === null ? {} : { branch: card.branch })}
       {...(from === undefined ? {} : { from })}
       {...(card.change === null ? {} : { pr: pullRequestsOf(card.change, card.earlier ?? []) })}
       onOpen={() => actions.onOpen(card.threadId)}
-      text={{ status: text.status, task: text.task }}
+      text={{ status: text.status }}
     />
   )
 }
