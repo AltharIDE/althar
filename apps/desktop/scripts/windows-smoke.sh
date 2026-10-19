@@ -4,7 +4,7 @@
 # alone (their own folders and registry, with no administrator's prompt), a
 # Start menu entry and an uninstaller, the updater's settings, and the Node,
 # Codex, Claude Code and speech engine the app runs, each run once. Then it
-# opens Althar on a profile of its own until its runtime starts, and
+# opens Althar on a profile of its own until its runtime is ready, and
 # uninstalls it. Run in Git Bash, from apps/desktop, after bun run package:
 #
 #   bash scripts/windows-smoke.sh
@@ -29,7 +29,8 @@ uninstall_key='HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall'
 [ -f "$installer" ] || { echo "No $installer: run bun run package first."; exit 1; }
 echo "Installing $installer"
 # /S: silently. Per user, it asks for no elevation; one that did would hang here, with no one to say yes, until the job's timeout.
-"$installer" /S
+# Git Bash would turn /S into a Windows path (C:/Program Files/Git/S) on its way to a Windows program, so it is passed as is.
+MSYS_NO_PATHCONV=1 "$installer" /S
 if wait_for '[ -f "$dir/Althar.exe" ] && [ -f "$dir/Uninstall Althar.exe" ]'; then ok "installed in $dir, with its uninstaller"; else bad "nothing installed in $dir"; fi
 [ -f "$menu" ] && ok "Start menu entry" || bad "no Start menu entry at $menu"
 if MSYS_NO_PATHCONV=1 reg query "$uninstall_key" /s /f Althar /d | grep -q DisplayName; then
@@ -52,17 +53,18 @@ for adapter in @agentclientprotocol/claude-agent-acp @agentclientprotocol/codex-
   [ -f "$modules/$adapter/package.json" ] && ok "$adapter" || bad "no $adapter"
 done
 
-# Althar itself, on a profile of its own, until the main process says its runtime started, in Electron's utility process.
+# Althar itself, on a profile of its own, until its runtime says it is ready: it has loaded, opened its store and started its
+# services in Electron's utility process, on the shipped modules. The main process's "Runtime started" comes before any of that.
 profile="$(cygpath -u "${RUNNER_TEMP:-$TEMP}")/althar-smoke-profile"
 rm -rf "$profile"
 ALTHAR_PROFILE="$(cygpath -w "$profile")" ALTHAR_WORKTREES="$(cygpath -w "$profile/worktrees")" "$dir/Althar.exe" &
-if wait_for 'grep -qs "Runtime started" "$profile"/logs/*'; then ok "Althar opens and its runtime starts"; else bad "Althar's runtime didn't start"; fi
+if wait_for 'grep -qs "Runtime ready" "$profile"/logs/runtime.log'; then ok "Althar opens and its runtime is ready"; else bad "Althar's runtime didn't get ready"; fi
 cat "$profile"/logs/* 2>/dev/null | tail -n 40
 MSYS_NO_PATHCONV=1 taskkill /IM Althar.exe /T /F >/dev/null 2>&1
 wait_for '! tasklist | grep -qi althar.exe' || true
 
 echo "Uninstalling"
-"$dir/Uninstall Althar.exe" /S
+MSYS_NO_PATHCONV=1 "$dir/Uninstall Althar.exe" /S
 # The uninstaller copies itself away and returns at once, so its work is waited for.
 if wait_for '[ ! -f "$dir/Althar.exe" ]'; then ok "uninstalled"; else bad "Althar.exe is still in $dir"; fi
 [ ! -f "$menu" ] && ok "Start menu entry removed" || bad "the Start menu entry stayed"
