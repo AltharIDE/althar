@@ -62,6 +62,8 @@ describe('the models every agent offers', () => {
       version: null,
       ways: [],
       accounts: [],
+      addsAccounts: true,
+      guide: null,
       installed: true,
       kept: false,
       download: null,

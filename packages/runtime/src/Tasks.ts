@@ -12,7 +12,7 @@ import { NotFound, TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
-import { quickIn } from './kinds'
+import { issueDraftsWaiting, quickIn } from './kinds'
 import { Plans } from './Plans'
 import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
@@ -541,6 +541,7 @@ export class Tasks extends Context.Service<
                 SELECT k.project_id, k.state,
                   (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
                   (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
+                  + ${sql.unsafe(issueDraftsWaiting('k'))}
                   + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
                   + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind IN ('change', 'review'))
                   -- Made a change since the person's screen read it as plain, or never a quick task: not one to settle on sight.

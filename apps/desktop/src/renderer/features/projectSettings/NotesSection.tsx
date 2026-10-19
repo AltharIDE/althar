@@ -1,4 +1,4 @@
-import type { ProjectNote } from '@althar/contracts'
+import { NOTE_LENGTH, type ProjectNote } from '@althar/contracts'
 import { type KeptNote, ProjectNotes } from '@althar/ui'
 
 import { PartPending, pendingText } from '../../shared/Pending'
@@ -7,8 +7,9 @@ import type { ProjectSettingsModel } from './useProjectSettings'
 
 /*
  * The notes a project's coordinator keeps (ADR-031), newest first, each
- * saying who kept it and when; one that no longer holds is dropped from its
- * card, and goes back, saying why, where that didn't hold.
+ * saying who kept it and when; one is said in the person's words, or dropped
+ * when it no longer holds, from its card, and goes back as it was, saying
+ * why, where that didn't hold.
  */
 
 export const text = {
@@ -27,7 +28,9 @@ export function NotesSection({ model }: { model: ProjectSettingsModel }) {
   return (
     <ProjectNotes
       notes={model.notes.toReversed().map((note) => keptOf(note))}
+      onEdit={(id, body) => void model.editNote(id, body)}
       onRemove={(id) => void model.dropNote(id)}
+      limit={NOTE_LENGTH}
       {...(model.noteFailed === null ? {} : { error: model.noteFailed })}
     />
   )

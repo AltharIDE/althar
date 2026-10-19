@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
@@ -6,7 +7,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
 import { dueForHandover, FRESH_ROOM, HANDOVER_AT, handoverRecord, openTasks, RECENT_MESSAGES, roomFor } from '../src/handover'
-import { keepNote, NOTES_KEPT, notesOf } from '../src/notes'
+import { editNote, keepNote, NOTES_KEPT, notesOf } from '../src/notes'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -522,6 +523,36 @@ describe("the coordinator's notes", () => {
         (yield* notesOf(projectId)).map((note) => [note.body, note.keptBy]),
         [['Ship on Thursdays only.', 'person']],
       )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('take the person’s words once a command: in turn when two overlap, and a retry answered from its receipt', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const { noteId } = yield* keepNote({
+        envelope: yield* Runtime.envelope('project.note.keep', {}),
+        projectId: projectId as Parameters<typeof keepNote>[0]['projectId'],
+        body: 'Ship on Thursdays.',
+      })
+      // As the window sends one: its words in the command, under the window's id for it.
+      const edit = (commandId: string, body: string) =>
+        Effect.flatMap(Runtime.envelope('project.note.edit', { projectId, noteId, body }, commandId), (envelope) =>
+          editNote({ envelope, projectId, noteId, body }),
+        )
+      const [toFriday, backToThursday, sameAgain, toMonday] = Array.from({ length: 4 }, () => `cmd_${randomBytes(16).toString('hex')}`)
+      const said = Effect.map(notesOf(projectId), ([note]) => note?.body)
+      // Changed and changed back at once, the second reads what the first said: the words said last hold.
+      yield* Effect.all([edit(toFriday!, 'Ship on Fridays.'), edit(backToThursday!, 'Ship on Thursdays.')], { concurrency: 'unbounded' })
+      assert.strictEqual(yield* said, 'Ship on Thursdays.')
+      // The same words change nothing, but are answered as said: sent again after another change, they don't undo it.
+      yield* edit(sameAgain!, 'Ship on Thursdays.')
+      yield* edit(toMonday!, 'Ship on Mondays.')
+      yield* edit(sameAgain!, 'Ship on Thursdays.')
+      assert.strictEqual(yield* said, 'Ship on Mondays.')
+      // A command's id with other words is another command, and refused.
+      const reused = yield* Effect.flip(edit(toMonday!, 'Ship on Sundays.'))
+      assert.strictEqual(reused._tag, 'CommandIdReused')
+      assert.strictEqual(yield* said, 'Ship on Mondays.')
     }).pipe(Effect.provide(withQueries())),
   )
 

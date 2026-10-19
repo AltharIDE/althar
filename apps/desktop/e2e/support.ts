@@ -44,7 +44,8 @@ export const launch = async (home: string, env: Record<string, string> = {}) => 
     Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_')),
   )
   const electronApp = await electron.launch({
-    args: [app],
+    // Chromium refuses to run as root with its sandbox, as in a container: there, without it.
+    args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
     env: {
       ...inherited,
       ALTHAR_PROFILE: join(home, 'profile'),

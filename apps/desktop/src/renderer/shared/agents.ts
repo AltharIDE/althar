@@ -1,5 +1,5 @@
-import type { Queued } from '@althar/contracts'
-import { Brand } from '@althar/ui'
+import type { AgentStatus, Queued } from '@althar/contracts'
+import { Brand, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
 
@@ -12,12 +12,27 @@ const BRANDS: Readonly<Record<string, Brand>> = {
   'claude-code': Brand.Anthropic,
   codex: Brand.OpenAI,
   opencode: Brand.OpenCode,
+  copilot: Brand.GitHubCopilot,
+  junie: Brand.Junie,
+  grok: Brand.XAI,
+  kimi: Brand.Moonshot,
+  'mistral-vibe': Brand.Mistral,
+  'qwen-code': Brand.Alibaba,
+  antigravity: Brand.Antigravity,
 }
 
 export const brandOf = (agentId: string): Brand | undefined => BRANDS[agentId]
 
-/** What a step held for a usage limit waits for: the agent, and when it is back. */
-export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, back at ${at}`
+/** The work a step held for a usage limit stopped, as a card and the task's header say it: what waits. */
+const heldWork: Readonly<Record<string, string>> = { review: 'The review waits', settle: 'The fixes wait' }
+
+/**
+ * What a step held for a usage limit waits for: the agent that ran out, and
+ * when it is back; with the step, what waits too, where there is room for it,
+ * as in the task's header. A card says Paused and shows its step already.
+ */
+export const waitsWords = (agent: string, at: string, step?: string | null) =>
+  `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
 
 /**
  * What work waiting for a free agent waits for (ADR-032): every agent this
@@ -53,13 +68,32 @@ export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {
   'claude-code': { plan: 'Claude', host: 'claude.ai' },
   codex: { plan: 'ChatGPT', host: 'chatgpt.com' },
+  antigravity: { plan: 'Google', host: 'accounts.google.com' },
 }
 
 export const signInWordsOf = (agentId: string): { readonly plan: string; readonly host: string } =>
   SIGN_IN[agentId] ?? { plan: 'your account', host: 'the sign-in page' }
 
+/** What an agent's maker puts on signing in from an app such as Althar, said before the person signs in (ADR-050). */
+const CAUTIONS: Readonly<Record<string, string>> = {
+  antigravity: 'Google’s terms may count signing in to Antigravity from another app as a breach, which can suspend the account.',
+}
+
+export const signInCautionOf = (agentId: string): string | undefined => CAUTIONS[agentId]
+
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
-const MAKERS: Readonly<Record<string, string>> = { 'claude-code': 'Anthropic', codex: 'OpenAI' }
+const MAKERS: Readonly<Record<string, string>> = {
+  'claude-code': 'Anthropic',
+  codex: 'OpenAI',
+  grok: 'xAI',
+  kimi: 'Moonshot AI',
+  'mistral-vibe': 'Mistral AI',
+  antigravity: 'Google',
+}
+
+/** A download of one version from its maker (Antigravity's server, from Google), rather than a latest release on GitHub: who from, and which. */
+export const pinnedOf = (agent: Pick<AgentStatus, 'id' | 'name' | 'download'>): PinnedDownload | undefined =>
+  agent.download?.pinned == null ? undefined : { from: MAKERS[agent.id] ?? agent.name, version: agent.download.pinned }
 
 /** What Settings says under an agent's name: who makes it, and its version, where known. */
 export const agentLineOf = (agent: { readonly id: string; readonly version: string | null }): string | undefined => {
