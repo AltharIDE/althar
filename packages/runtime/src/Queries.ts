@@ -1,5 +1,5 @@
 import { HOSTED, newPullRequestLink } from '@althar/connectors'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
@@ -24,6 +24,9 @@ import {
   type TaskCard,
   type TaskList,
   type TaskSummary,
+  type CodeFound,
+  type CodePlace,
+  type CodeText,
   type DocumentText,
   FieldAnswer,
   type OutputText,
@@ -47,11 +50,12 @@ import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { handedOf, kindOf, quickIn } from './kinds'
 import { documentText, outputText } from './reading'
+import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
-import { commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
+import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
@@ -617,6 +621,18 @@ export class Queries extends Context.Service<
     document(threadId: string, path: string): Effect.Effect<DocumentText, SqlError.SqlError | NotFound | DocumentRefused>
     /** One file a task changed, as a diff from its base to its worktree; only a file it changed. */
     fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
+    /** Where a thread's agent works, for the code it names: its task's worktrees here, or the project's repositories at their default branches. */
+    codeRoots(threadId: string): Effect.Effect<CodeRoots, SqlError.SqlError | NotFound>
+    /** What the names in a thread's messages name there, each message as it was when said where it is an item of the thread. */
+    findCode(
+      threadId: string,
+      messages: ReadonlyArray<{ readonly itemId?: string | undefined; readonly names: ReadonlyArray<string> }>,
+    ): Effect.Effect<
+      { readonly place: CodePlace; readonly messages: ReadonlyArray<{ readonly found: ReadonlyArray<CodeFound> }> },
+      SqlError.SqlError | NotFound
+    >
+    /** A file there, as findCode named it: as it is now, or at a commit its default branch was at when a message was said. */
+    readCode(threadId: string, path: string, commit?: string, line?: number): Effect.Effect<CodeText, SqlError.SqlError | NotFound>
     /** A task's card, as its board shows it: where it stands and what it makes. */
     card(taskId: string): Effect.Effect<TaskCard, unknown>
     /** The plain tasks that finished and wait to be seen, by id: nothing counts them as waiting on the person. */
@@ -1182,6 +1198,112 @@ export class Queries extends Context.Service<
                 },
               }
             : diff
+        })
+
+      /** Where a folder really is, as an agent may write it: its links followed. */
+      const realOrNot = (path: string) => {
+        try {
+          return [realpathSync(path)].filter((real) => real !== path)
+        } catch {
+          return []
+        }
+      }
+
+      /**
+       * Where a thread's agent works, for the code it names (code.ts): its
+       * task's worktrees on this device, as they are; or for the coordinator,
+       * each of the project's repositories here at its default branch, as this
+       * device last fetched it (the coordinator's own copy is made from it), or
+       * as the branch is here when it never was.
+       */
+      const codeRoots = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string | null; projectId: string; project: string }>`
+            SELECT t.task_id, t.project_id, p.slug AS project FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ${threadId}`
+          if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: threadId })
+          if (thread.taskId !== null) {
+            const worktrees = (yield* worktreesOf(thread.taskId)).filter((worktree) => existsSync(worktree.path))
+            const roots = yield* Effect.forEach(worktrees, (worktree) =>
+              Effect.map(
+                worktree.baseCommit === null ? Effect.succeed(null) : baseOf(worktree.path, worktree.baseRef, worktree.baseCommit),
+                (base): CodeRoot => ({
+                  slug: worktree.slug,
+                  name: worktree.name,
+                  branch: worktree.branch,
+                  path: worktree.path,
+                  commit: null,
+                  base,
+                  within: null,
+                  seen: realOrNot(worktree.path),
+                  editor: worktree.path,
+                }),
+              ),
+            )
+            return { kind: 'task', roots } satisfies CodeRoots
+          }
+          const bindings = yield* sql<{ slug: string; name: string; base: string | null; within: string | null; repository: string }>`
+            SELECT b.slug, b.display_name AS name, b.default_base_ref AS base, b.folder AS within, l.path AS repository
+            FROM repository_bindings b
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE b.project_id = ${thread.projectId} AND b.detached_at IS NULL
+            ORDER BY b.created_at, b.rowid`
+          const roots = yield* Effect.forEach(bindings, (binding) =>
+            Effect.gen(function* () {
+              const branch = binding.base ?? 'main'
+              const commit = yield* commitOf(binding.repository, `origin/${branch}`).pipe(
+                Effect.catch(() => commitOf(binding.repository, branch)),
+                Effect.option,
+              )
+              if (Option.isNone(commit)) return []
+              const copy = join(config.worktreeRoot, thread.project, '.coordinator', binding.slug)
+              const root: CodeRoot = {
+                slug: binding.slug,
+                name: binding.name,
+                branch,
+                path: binding.repository,
+                commit: commit.value,
+                base: null,
+                within: binding.within,
+                seen: [copy, ...realOrNot(copy), ...realOrNot(binding.repository)],
+                editor: binding.repository,
+              }
+              return [root]
+            }),
+          )
+          return { kind: 'default', roots: roots.flat() } satisfies CodeRoots
+        })
+
+      /** What the names in a thread's messages name, where its agent works; a coordinator's message, from its default branch as it was when said. */
+      const codeFound = (
+        threadId: string,
+        messages: ReadonlyArray<{ readonly itemId?: string | undefined; readonly names: ReadonlyArray<string> }>,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const place = yield* codeRoots(threadId)
+          const ids = [...new Set(messages.flatMap((message) => (message.itemId === undefined ? [] : [message.itemId])))]
+          const said =
+            place.kind === 'default' && ids.length > 0
+              ? new Map(
+                  (yield* sql<{ id: string; createdAt: string }>`
+                    SELECT id, created_at FROM thread_items WHERE thread_id = ${threadId} AND id IN ${sql.in(ids)}`).map((row) => [
+                    row.id,
+                    row.createdAt,
+                  ]),
+                )
+              : new Map<string, string>()
+          const found = yield* findCode(
+            place,
+            messages.map((message) => ({
+              at: message.itemId === undefined ? null : (said.get(message.itemId) ?? null),
+              names: message.names,
+            })),
+          )
+          return {
+            place: { kind: place.kind, repositories: place.roots.map(({ slug, name, branch }) => ({ slug, name, branch })) },
+            messages: found.map((one) => ({ found: one })),
+          }
         })
 
       /** A task's issue and pull requests, as their external links last saw them, and the connection its issue is read through. */
@@ -2192,6 +2314,10 @@ export class Queries extends Context.Service<
           ),
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path) => run(diffOf(taskId, path)),
+        codeRoots: (threadId) => run(codeRoots(threadId)),
+        findCode: (threadId, messages) => run(codeFound(threadId, messages)),
+        readCode: (threadId, path, commit, line) =>
+          run(Effect.flatMap(codeRoots(threadId), (place) => readCode(place, path, commit, line))),
         card: (taskId) =>
           run(
             Effect.flatMap(cardFor(taskId), (found) =>

@@ -1206,6 +1206,77 @@ describe('editors, through the API', () => {
       }),
     ),
   )
+
+  it.live('finds, reads and opens the code an agent names: a task’s in its worktree, the coordinator’s on the default branch', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<[string, string, string | null, number | null]> = []
+        const { client, grant } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (editor, folder, file, line) => Effect.sync(() => void opens.push([editor, folder, file, line])).pipe(Effect.as(true)),
+          },
+        })
+        const folder = realpathSync(repository())
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry later' })
+        const worktree = realpathSync((yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? '')
+        mkdirSync(join(worktree, 'src'))
+        writeFileSync(join(worktree, 'src', 'retry.ts'), 'export function retryLater() {\n  return 1\n}\n')
+
+        // The lead's names, in its worktree as it is: what it hasn't committed, and a name in code it declared there.
+        const named = yield* client.FindCode({
+          threadId: task.threadId,
+          messages: [{ names: ['src/retry.ts:2', 'retry.ts', 'README.md', 'retryLater', 'npm test'] }],
+        })
+        assert.deepStrictEqual(
+          [named.place.kind, named.place.repositories.length, named.place.repositories[0]?.branch.startsWith('althar/')],
+          ['task', 1, true],
+        )
+        assert.deepStrictEqual(
+          named.messages[0]?.found.map((found) => (found.kind === 'file' ? [found.path, found.line, found.changed] : [found.kind])),
+          [
+            ['src/retry.ts', 2, { add: 3, del: 0 }],
+            ['src/retry.ts', undefined, { add: 3, del: 0 }],
+            ['README.md', undefined, null],
+            ['src/retry.ts', 1, { add: 3, del: 0 }],
+          ],
+        )
+        assert.deepInclude(yield* client.ReadCode({ threadId: task.threadId, path: 'src/retry.ts' }), { from: 1, total: 3, cut: false })
+        assert.strictEqual(
+          (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path: '../outside.ts' }))).message,
+          "That file isn't there any more.",
+        )
+        assert.isTrue(
+          yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: 'src/retry.ts', line: 2 }),
+        )
+        // A file that isn't there opens its folder alone; one out of it, nothing.
+        assert.isTrue(
+          yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: 'src/gone.ts', line: 4 }),
+        )
+        assert.isFalse(yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: '../x.ts' }))
+
+        // The coordinator's, on the default branch: what the task wrote isn't there, and opens in the person's own checkout.
+        const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
+        const said = yield* client.FindCode({ threadId, messages: [{ names: ['README.md:1', 'src/retry.ts'] }] })
+        assert.deepStrictEqual([said.place.kind, said.place.repositories[0]?.branch], ['default', 'main'])
+        assert.deepStrictEqual(
+          said.messages[0]?.found.map((found) => [found.kind, found.name]),
+          [
+            ['file', 'README.md:1'],
+            ['missing', 'src/retry.ts'],
+          ],
+        )
+        assert.deepInclude(yield* client.ReadCode({ threadId, path: 'README.md' }), { text: '# Meridian\n', total: 1 })
+        assert.isTrue(yield* client.OpenCode({ commandId: commandId(), threadId, editor: 'zed', path: 'README.md', line: 1 }))
+        assert.deepStrictEqual(opens, [
+          ['zed', worktree, join(worktree, 'src/retry.ts'), 2],
+          ['zed', worktree, null, null],
+          ['zed', folder, join(folder, 'README.md'), 1],
+        ])
+      }),
+    ),
+  )
 })
 
 describe('a project’s menu, through the API', () => {

@@ -110,6 +110,7 @@ const kinds: Readonly<Record<string, string>> = {
   repository: 'repository',
   output: 'output',
   document: 'document',
+  file: 'file',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
