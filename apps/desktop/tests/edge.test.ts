@@ -8,7 +8,8 @@ import { LOGO_BORE, LOGO_SECTION } from '@althar/ui'
 
 import { BORE, SECTION } from '../scripts/trayPictures'
 import { readAppIcon, writeAppIcon } from '../src/main/appIcon'
-import { edgeIn, notchIn, pointerOn, readEdge, sheetBounds, writeEdge } from '../src/main/edge'
+import { darkPanel, isSchemeChange, parseScheme, parseSystemUsesLightTheme, restartAfter } from '../src/main/colorScheme'
+import { edgeIn, markFile, notchIn, pointerOn, readEdge, sheetBounds, trayItems, writeEdge } from '../src/main/edge'
 
 /*
  * Where Althar shows while the person is in another app: the notch AppKit
@@ -113,11 +114,68 @@ describe('the menu bar’s pictures', () => {
 
   it('are there, at both sizes, as template images', () => {
     const tray = join(import.meta.dirname, '..', 'resources', 'tray')
-    for (const name of ['markTemplate', 'markYoursTemplate'])
+    for (const name of ['markTemplate', 'markYoursTemplate', 'markLight', 'markYoursLight', 'markDark', 'markYoursDark'])
       for (const scale of ['', '@2x']) {
         const path = join(tray, `${name}${scale}.png`)
         expect(existsSync(path), path).toBe(true)
         expect(statSync(path).size).toBeGreaterThan(100)
       }
+  })
+})
+
+describe('the tray off a Mac', () => {
+  it('draws a light mark on a dark panel, a dark one on a light panel, and a template on a Mac', () => {
+    expect(markFile('linux', true, false)).toBe('markLight.png')
+    expect(markFile('win32', false, true)).toBe('markYoursDark.png')
+    expect(markFile('darwin', true, true)).toBe('markYoursTemplate.png')
+    expect(markFile('darwin', false, false)).toBe('markTemplate.png')
+  })
+
+  it('has a menu that opens, says what waits, and quits', () => {
+    expect(trayItems(0).map((item) => ('label' in item ? item.label : '-'))).toEqual(['Open Althar', '-', 'Quit Althar'])
+    expect(trayItems(1)[1]).toMatchObject({ label: '1 thing waiting on you', action: 'open' })
+    expect(trayItems(3)[1]).toMatchObject({ label: '3 things waiting on you' })
+  })
+})
+
+describe('the desktop colour scheme on Linux', () => {
+  it('reads the portal value, as gdbus prints it for a read and for the change signal', () => {
+    expect(parseScheme('(<<uint32 1>>,)\n')).toBe(1)
+    expect(parseScheme('(<uint32 2>,)')).toBe(2)
+    const signal = "SettingChanged ('org.freedesktop.appearance', 'color-scheme', <uint32 0>)"
+    expect(parseScheme(`/org/freedesktop/portal/desktop: org.freedesktop.portal.Settings.${signal}`)).toBe(0)
+    expect(parseScheme('Error: no such interface')).toBeUndefined()
+  })
+
+  it('has a light mark on a dark panel unless the desktop says light', () => {
+    expect(darkPanel(1)).toBe(true)
+    expect(darkPanel(2)).toBe(false)
+    expect(darkPanel(0)).toBe(true)
+    expect(darkPanel(undefined)).toBe(true)
+  })
+})
+
+describe('the monitor and the Windows taskbar', () => {
+  it('takes only the colour-scheme change of the appearance namespace', () => {
+    const line = (namespace: string, key: string) =>
+      `/org/freedesktop/portal/desktop: org.freedesktop.portal.Settings.SettingChanged ('${namespace}', '${key}', <uint32 1>)`
+    expect(isSchemeChange(line('org.freedesktop.appearance', 'color-scheme'))).toBe(true)
+    expect(isSchemeChange(line('org.freedesktop.appearance', 'accent-color'))).toBe(false)
+    expect(isSchemeChange(line('org.gnome.desktop.interface', 'color-scheme'))).toBe(false)
+    expect(isSchemeChange('Monitoring signals on object /org/freedesktop/portal/desktop')).toBe(false)
+  })
+
+  it('waits longer each time the monitor ends again, up to a minute', () => {
+    expect([0, 1, 2, 3].map(restartAfter)).toEqual([1000, 2000, 4000, 8000])
+    expect(restartAfter(20)).toBe(60_000)
+  })
+
+  it('reads the taskbar theme from the registry, not the apps one', () => {
+    const query = (name: string, value: string) =>
+      `\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\r\n    ${name}    REG_DWORD    ${value}\r\n`
+    expect(parseSystemUsesLightTheme(query('SystemUsesLightTheme', '0x0'))).toBe(false)
+    expect(parseSystemUsesLightTheme(query('SystemUsesLightTheme', '0x1'))).toBe(true)
+    expect(parseSystemUsesLightTheme(query('AppsUseLightTheme', '0x1'))).toBeUndefined()
+    expect(parseSystemUsesLightTheme('ERROR: The system was unable to find the specified registry key or value.')).toBeUndefined()
   })
 })

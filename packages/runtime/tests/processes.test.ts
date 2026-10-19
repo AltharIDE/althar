@@ -4,11 +4,12 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect } from 'effect'
+import { Effect, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { thisDevice } from '../src/device'
 import { SessionFailed } from '../src/errors'
+import { type Failure, failureOf, Failures } from '../src/Failures'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { notices, runtime, task, turns, until } from './support'
@@ -62,6 +63,9 @@ describe('agents as processes', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  /** What went on its own, as reported. */
+  const lost: Array<Failure> = []
+
   it.live('marks a session lost, and its turn failed, when the agent exits mid-turn', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
@@ -83,7 +87,18 @@ describe('agents as processes', () => {
       // The thread says why nothing is happening.
       const [said] = yield* until(notices(created.threadId), (rows) => rows.length > 0)
       assert.strictEqual(said?.title, 'Fake process stopped on its own.')
-    }).pipe(Effect.provide(runtime())),
+      // And it is reported, by the agent and how its process ended: never what it wrote.
+      assert.deepStrictEqual(
+        lost.map((each) => [each.where, each.agent, each.name, each.message, each.stack]),
+        [['agent', 'process', 'AgentLost', 'The process agent stopped on its own: exit code 3, signal none.', '']],
+      )
+    }).pipe(
+      Effect.provide(runtime()),
+      Effect.provideService(Failures, {
+        report: (cause, where, agent) => Effect.sync(() => void lost.push(failureOf(cause, where, agent ?? null))),
+        events: Stream.empty,
+      }),
+    ),
   )
 
   it.live('records a session that could not start, and its process as unknown', () =>

@@ -1,7 +1,6 @@
-import { ReportProblem } from '@althar/ui'
+import { keys, modKey, ReportProblem } from '@althar/ui'
 
 import type { Host } from '../../data/services'
-import { platform } from '../../shared/device'
 import { itemsOf, text } from './reportWords'
 import { type ReportModel, useReport } from './useReport'
 
@@ -33,7 +32,7 @@ export function ReportView({ model }: { readonly model: ReportModel }) {
       {...(state.error === null ? {} : { error: state.error })}
       {...(done === null ? {} : { done: done.kind === 'sent' ? text.sent : text.saved(done.file) })}
       // The shortcut as this system writes it.
-      text={{ sendKbd: platform === 'darwin' ? '⌘↩' : 'Ctrl+↩' }}
+      text={{ sendKbd: modKey(keys.return) }}
       onSend={(draft) => void model.send(draft)}
       onClose={model.close}
     />

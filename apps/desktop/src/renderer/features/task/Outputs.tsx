@@ -315,7 +315,7 @@ export function Outputs({
         {...(task.merged.some((one) => one.ahead > 0 && one.remote !== null) && onPushHere !== undefined
           ? { onPush: onPushHere, pushing: acting === doing.pushHere }
           : {})}
-        text={{ push: () => text.pushHere(task.merged), prs: text.repositories }}
+        text={{ push: () => text.pushHere(task.merged), prs: text.repositories, here: `Merges on ${device.this}` }}
         {...(error === null ? {} : { error })}
       />
     ) : null

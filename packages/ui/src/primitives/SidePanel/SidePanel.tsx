@@ -87,7 +87,7 @@ export function SidePanel({
       }}
     >
       <div className={cx(s.head, onBack !== undefined && s.stepped, headClassName)}>
-        {onBack !== undefined && <IconButton icon="chevron" label={t.back} size="small" className={s.back} onClick={onBack} />}
+        {onBack !== undefined && <IconButton icon="chevronL" label={t.back} size="small" className={s.back} onClick={onBack} />}
         {head}
         <span className={s.actions}>
           {actions}

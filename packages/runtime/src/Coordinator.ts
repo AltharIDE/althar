@@ -187,6 +187,8 @@ export class Coordinator extends Context.Service<
       readonly disposition: Disposition
       /** Images the person sent with it, in the store already: sent to the coordinator with its words. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Some of its words came from dictation: the coordinator is told it may have been misheard. */
+      readonly dictated?: boolean
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
@@ -236,6 +238,7 @@ export class Coordinator extends Context.Service<
         readonly body: string
         readonly disposition: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
@@ -790,7 +793,7 @@ export class Coordinator extends Context.Service<
               ? `${review === null ? 'It' : `${named(review)} reviews it next, and it`} ends on its branch: its repository isn't on a code host Althar knows.`
               : `${review === null ? 'Then' : `${named(review)} reviews it next, then`} Althar opens ${end === 'ready' ? 'its pull request, ready for review' : 'its pull request as a draft'}. Don't push or open it yourself.`
           return opened
-            ? `The task is a change now, called “${title}”. Commit your work, and call finish_step when it's ready, with what it built and your evidence. ${next}`
+            ? `The task is a change now, called “${title}”. Commit your work, and call finish_step when it's ready, with what it built, your evidence and its pull request's description. ${next}`
             : `The task is a change now, called “${title}”, but Althar couldn't open a round of work for it: tell the person, who can write to you to carry on.`
         })
 

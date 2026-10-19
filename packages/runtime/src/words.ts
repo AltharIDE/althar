@@ -48,6 +48,8 @@ const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${w
 /** What an agent's own error says, when the runtime can put it in words. */
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
+    case 'StartTimedOut':
+      return text(error, 'message')
     case 'AgentStartFailed': {
       const command = text(error, 'command')
       const reason = text(error, 'reason')

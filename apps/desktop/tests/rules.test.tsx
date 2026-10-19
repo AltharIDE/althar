@@ -5,13 +5,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type ProjectRulesView } from '@althar/contracts'
 
-import { RulesView } from '../src/renderer/features/rules/RulesView'
+import { RulesSection } from '../src/renderer/features/rules/RulesSection'
 import { useRules } from '../src/renderer/features/rules/useRules'
 import { agents, changed, fakeClient, projectRules, usual } from './fixtures'
 import { withServices } from './render'
 
-function Rules({ onBack = vi.fn() }: { onBack?: () => void }) {
-  return <RulesView model={useRules('p1')} onBack={onBack} />
+/** The rules, as their section of the project's settings has them: named by the page around them, so with no title of their own. */
+function Rules() {
+  return <RulesSection model={useRules('p1')} />
 }
 
 const rulesOf = (rules: Partial<ProjectRulesView>) => vi.fn(async () => ({ ...projectRules, ...rules }))
@@ -45,8 +46,9 @@ describe('a project’s rules', () => {
       }),
     })
     withServices(<Rules />, client)
-    await screen.findByRole('heading', { name: 'Rules', level: 1 })
-    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
+    await screen.findByRole('heading', { name: 'Always', level: 3 })
+    expect(screen.queryByRole('heading', { name: 'Rules' })).toBeNull()
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
       'Always',
       'Never',
       'Ask me',
@@ -256,7 +258,7 @@ describe('a project’s rules', () => {
           <button type="button" onClick={() => setProjectId('p2')}>
             Another project
           </button>
-          <RulesView model={useRules(projectId)} onBack={vi.fn()} />
+          <RulesSection model={useRules(projectId)} />
         </>
       )
     }
@@ -448,23 +450,6 @@ describe('a project’s rules', () => {
     withServices(<Rules />, client)
     expect(await screen.findByRole('button', { name: 'as each repository says' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'each repository’s template, where it has one' })).toBeTruthy()
-  })
-
-  it('goes back on Escape, but not while something on the page takes it', async () => {
-    const onBack = vi.fn()
-    withServices(<Rules onBack={onBack} />, fakeClient().client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Add a command to Never' }))
-    await userEvent.keyboard('{Escape}')
-    expect(onBack).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: 'force pushing' }))
-    await screen.findByRole('menu')
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
-    expect(onBack).not.toHaveBeenCalled()
-    await userEvent.keyboard('{Escape}')
-    expect(onBack).toHaveBeenCalledTimes(1)
-    await userEvent.click(screen.getByRole('button', { name: /meridian/ }))
-    expect(onBack).toHaveBeenCalledTimes(2)
   })
 
   it('says what went wrong saving', async () => {

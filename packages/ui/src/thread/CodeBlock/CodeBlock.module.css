@@ -18,7 +18,8 @@
   color: var(--t-3);
 }
 .file {
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: 8ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -29,16 +30,22 @@
   font-weight: 400;
   color: var(--t-3);
 }
+/* narrow, what it is gives way before its name, and nothing runs out of the head */
 .lang {
-  flex: none;
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--t-3);
 }
 .changed {
-  color: var(--ok);
+  color: var(--add-sign);
   font-weight: 550;
 }
 .actions {
+  flex: none;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -90,13 +97,14 @@
   color: var(--t-3);
   user-select: none;
 }
+/* changed lines, in a diff's added greens */
 .hl {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  background: var(--add-line);
 }
 .hl .n {
-  background: color-mix(in srgb, var(--ok) 22%, var(--n-1));
-  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--ok) 45%, transparent);
-  color: var(--ok);
+  background: var(--add-gutter);
+  box-shadow: inset -1px 0 0 var(--add-word);
+  color: var(--add-sign);
   font-weight: 600;
 }
 

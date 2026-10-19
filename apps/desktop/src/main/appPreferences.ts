@@ -53,6 +53,8 @@ export const PREFERENCES = {
   showLoad: onOff(true),
   /** Anonymous usage data: the steps people take, never what they write (usageData.ts). */
   usageData: onOff(true),
+  /** Crash reports: what failed in Althar and where in its code, masked, never what anyone wrote (crashReports.ts). */
+  crashReports: onOff(true),
 } as const
 
 type Kinds = typeof PREFERENCES
@@ -73,6 +75,6 @@ export const holds = <K extends PreferenceKey>(key: K, value: unknown): value is
 export const preferencesIn = (kept: Readonly<Record<string, unknown>>): AppPreferences =>
   Object.fromEntries(PREFERENCE_KEYS.map((key) => [key, holds(key, kept[key]) ? kept[key] : PREFERENCES[key].starts])) as AppPreferences
 
-/** Whether the person asked every tool on this computer to send nothing, as consoledonottrack.com has it: usage data is off, whatever its switch says. */
+/** Whether the person asked every tool on this computer to send nothing, as consoledonottrack.com has it: usage data and crash reports are off, whatever their switches say. */
 export const doNotTrack = (env: Readonly<Record<string, string | undefined>>): boolean =>
   ['1', 'true', 'yes'].includes((env.DO_NOT_TRACK ?? '').trim().toLowerCase())

@@ -174,6 +174,10 @@ export const codexLikeMeanings = {
 }
 
 export interface FakeAgentOptions {
+  /** Hold `session/new` open to exercise startup timeout cleanup. */
+  readonly beforeNewSession?: () => Promise<void>
+  /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
+  readonly beforeInitialize?: () => Promise<void>
   /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
   readonly judgment?: (input: {
     readonly prompt: string
@@ -473,6 +477,9 @@ const playStall = async (
 export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
 export const BUILT_SETTLED =
   'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** The description it writes for the task's pull request, where the repository has no template. */
+export const DESCRIBED =
+  'Checkout gave up on the first failed payment call, so a dropped connection lost the order. It now retries once before it says the payment failed.'
 /** What it says the task built once it fixed a failed check, after its plan was done. */
 export const BUILT_FIXED =
   'Checkout retries once when the payment call fails, in `src/checkout.ts`, and its check passes again. Push the fix.'
@@ -759,7 +766,8 @@ const playRole = async (
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
       const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
-      // Asked for its pull request's description in the repository's template, it writes under the first heading, and ticks a box it shouldn't.
+      // Asked for its pull request's description, it writes one for each repository named; in the repository's template, it writes
+      // under the first heading, and ticks a box it shouldn't.
       // Asked to show its work, it saves a screenshot in its worktree, uncommitted, and hands it with a test run and what it couldn't try.
       const evidence = (): Record<string, unknown> => {
         if (!session.markers.has('[lead:evidence]')) return {}
@@ -783,10 +791,13 @@ const playRole = async (
         // A lead that says only what it did, `[lead:terse]`: nothing of what the task built.
         const built = session.markers.has('[lead:terse]') ? {} : { built: BUILT }
         const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...evidence() })
+        if (!answer.startsWith("Write the description of the task's pull request")) return answer
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
-        if (template === undefined) return answer
-        const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
-        return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions: [{ text }] })
+        const text =
+          template === undefined ? DESCRIBED : template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
+        const names = /, one for each of ([^.]+)\./.exec(answer)?.[1]?.split(', ')
+        const descriptions = names === undefined ? [{ text }] : names.map((repository) => ({ repository, text }))
+        return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions, ...evidence() })
       }
       // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.
       // Started again for it, it reads its brief first: the failure is in what it is told, not always at the start.
@@ -1059,7 +1070,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
 
   return acp
     .agent({ name: 'fake-agent' })
-    .onRequest(acp.methods.agent.initialize, ({ params }) => {
+    .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+      await options.beforeInitialize?.()
       options.initialized?.(params.clientCapabilities ?? undefined)
       return options.bare === true
         ? { protocolVersion: acp.PROTOCOL_VERSION }
@@ -1078,6 +1090,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     })
     .onRequest(acp.methods.agent.session.new, async ({ params }) => {
       if (options.slowStart !== undefined) await pause(options.slowStart)
+      await options.beforeNewSession?.()
       created += 1
       const sessionId = `fake-${created}`
       const session: SessionState = {

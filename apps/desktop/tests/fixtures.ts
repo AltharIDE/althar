@@ -78,6 +78,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     installed: true,
     kept: false,
     download: null,
+    problem: null,
   },
   {
     id: 'codex',
@@ -90,6 +91,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     installed: true,
     kept: false,
     download: null,
+    problem: null,
   },
   {
     id: 'opencode',
@@ -102,6 +104,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     installed: true,
     kept: false,
     download: { size: '45 MB', installing: false },
+    problem: null,
   },
 ]
 
@@ -430,6 +433,7 @@ export const items = {
       passed: null,
       failed: null,
       failing: [],
+      logs: [],
       url: null,
       outsider: false,
       ...content,
@@ -873,6 +877,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
+    moveInLine: vi.fn(async () => {}),
+    lineOldestFirst: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),

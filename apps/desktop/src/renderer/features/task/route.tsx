@@ -5,7 +5,8 @@ import { Room } from '@althar/ui'
 import { reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { ThreadPending } from '../../shared/Pending'
-import { useWhenRemoved } from '../project/useProjectSettings'
+import { settingsSearch } from '../project/route'
+import { useWhenRemoved } from '../projectSettings/useProjectSettings'
 import { useVisit } from '../tabs/TabsFrame'
 import { TaskView } from './TaskView'
 import { useTask } from './useTask'
@@ -21,8 +22,13 @@ function TaskScreen({ threadId }: { threadId: string }) {
   // Back to the project, which opens on the view it was last on.
   const back = () =>
     void (project === undefined ? navigate({ to: '/' }) : navigate({ to: '/projects/$projectId', params: { projectId: project.id } }))
+  // Its project's rules are a section of the project's settings.
   const rules =
-    project === undefined ? {} : { onRules: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId: project.id } }) }
+    project === undefined
+      ? {}
+      : {
+          onRules: () => void navigate({ to: '/projects/$projectId', params: { projectId: project.id }, search: settingsSearch('rules') }),
+        }
   return <TaskView model={model} onBack={back} {...rules} />
 }
 

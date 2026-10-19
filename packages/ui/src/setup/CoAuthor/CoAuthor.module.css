@@ -143,6 +143,20 @@
   font-size: 11px;
   color: var(--t-2);
 }
+/* Althar's name, a link as the version's notes are: in the line's ink, underlined faintly */
+.sub a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+  transition:
+    color var(--fast) var(--ease),
+    text-decoration-color var(--fast) var(--ease);
+}
+.sub a:hover {
+  color: var(--t-1);
+  text-decoration-color: currentColor;
+}
 
 /* faces, round, Althar's over the person's edge */
 .faces {

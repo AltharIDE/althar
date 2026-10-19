@@ -74,7 +74,7 @@
   margin-top: 8px;
   padding: 10px 12px;
   border-radius: 8px;
-  background: var(--frost-well);
+  background: var(--n-2);
   overflow-wrap: anywhere;
 }
 .reading {

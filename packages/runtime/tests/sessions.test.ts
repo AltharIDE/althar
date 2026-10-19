@@ -4,7 +4,8 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Fiber, Layer, Option, Stream } from 'effect'
+import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
@@ -15,13 +16,19 @@ import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { errorClassOf, promptFor, Sessions } from '../src/Sessions'
+import { DICTATED, errorClassOf, promptFor, Sessions } from '../src/Sessions'
 import { items, repository, runtime, task, turns, until } from './support'
 
-const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current') =>
+const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current', dictated = false) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
-    return yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body, disposition })
+    return yield* sessions.send({
+      envelope: yield* Runtime.envelope('thread.send', { threadId, body }),
+      threadId,
+      body,
+      disposition,
+      ...(dictated ? { dictated } : {}),
+    })
   })
 
 /** The thread item of what the person said, and where that input stands. */
@@ -157,6 +164,46 @@ describe('sessions', () => {
         replies.at(-1),
         `echo: ${promptFor([{ body: 'use the retry helper', disposition: 'interrupt_and_continue' }], undefined)}`,
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('tells the agent a message was dictated, and only that one, in the prompt and not in the thread', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, 'ask alpha about the retry', 'after_current', true)
+      yield* ended(created.threadId, 1)
+      yield* say(created.threadId, 'ask Althar about the cache')
+      yield* ended(created.threadId, 2)
+      const all = yield* threadItems(created.threadId)
+      const said = all.filter((item) => item.kind === 'user_message').map((item) => item.content.text)
+      const replies = all.filter((item) => item.kind === 'agent_message').map((item) => String(item.content.text))
+      // What the thread shows is what the person said, as it was.
+      assert.deepStrictEqual(said.slice(-2), ['ask alpha about the retry', 'ask Althar about the cache'])
+      assert.strictEqual(replies.at(-2), `echo: ask alpha about the retry\n\n${DICTATED}`)
+      assert.strictEqual(replies.at(-1), 'echo: ask Althar about the cache')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps the mark on a dictated message that waits behind a turn, and says it as the thread shows it', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, scenarios.slow)
+      yield* until(threadItems(created.threadId), (rows) => rows.some((item) => item.content.text === 'Starting'))
+      const queued = yield* say(created.threadId, 'then check the alter docs', 'after_current', true)
+      const row = yield* message(queued.inputId)
+      assert.strictEqual(row.state, 'queued')
+      // The thread shows its words as they were said, marker or not.
+      const waiting = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'user_message').at(-1)
+      assert.strictEqual(waiting?.content.text, 'then check the alter docs')
+      yield* sessions.interrupt(created.threadId)
+      yield* ended(created.threadId, 2)
+      const replies = (yield* threadItems(created.threadId))
+        .filter((item) => item.kind === 'agent_message')
+        .map((item) => String(item.content.text))
+      assert.strictEqual(replies.at(-1), `echo: then check the alter docs\n\n${DICTATED}`)
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -770,6 +817,98 @@ describe('sessions', () => {
         assert.strictEqual((yield* ended(created.threadId, 1))[0]?.state, 'completed')
       }).pipe(Effect.provide(runtime())),
     )
+
+    // The agent's startup stops answering at `hangsIn`; the timeout then cuts it off and the current lead carries on.
+    const timesOutStartup = (hangsIn: 'beforeInitialize' | 'beforeNewSession') => {
+      let entered!: () => void
+      const waitingForStartup = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      let releaseStartup!: () => void
+      const startupResponse = new Promise<void>((resolve) => {
+        releaseStartup = resolve
+      })
+      const startupTimeoutScheduled = Deferred.makeUnsafe<void>()
+      const testGuardScheduled = Deferred.makeUnsafe<void>()
+      // The test clock stands in for time, and the timeout isn't reachable from here, so the clock is watched instead: the
+      // timeout is found as the one 2-minute `Clock.sleep` (SESSION_START_TIMEOUT, which relies on `Effect.timeoutOption`
+      // sleeping on the Clock service) and the test's own 3-minute guard as the 3-minute one. Change either duration, or
+      // how the timeout waits, and this stops finding it and the test hangs rather than fails.
+      const observedClock = Layer.effect(
+        Clock.Clock,
+        Effect.gen(function* () {
+          const baseClock = yield* Clock.Clock
+          const clock = Object.create(baseClock) as Clock.Clock
+          Object.defineProperty(clock, 'sleep', {
+            value: (duration: Duration.Duration) =>
+              Effect.gen(function* () {
+                const millis = Duration.toMillis(duration)
+                if (millis === Duration.toMillis(Duration.minutes(2))) {
+                  yield* Deferred.succeed(startupTimeoutScheduled, undefined)
+                } else if (millis === Duration.toMillis(Duration.minutes(3))) {
+                  yield* Deferred.succeed(testGuardScheduled, undefined)
+                }
+                yield* baseClock.sleep(duration)
+              }),
+          })
+          return clock
+        }),
+      ).pipe(Layer.provideMerge(TestClock.layer()))
+      const app = runtime(
+        ':memory:',
+        {},
+        {
+          each: {
+            opencode: {
+              [hangsIn]: () => {
+                entered()
+                return startupResponse
+              },
+            },
+          },
+        },
+      ).pipe(Layer.provideMerge(observedClock))
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const { task: created } = yield* task()
+        const first = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+        const attempt = yield* Effect.forkChild(Effect.exit(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })))
+        yield* Effect.promise(() => waitingForStartup)
+        yield* Deferred.await(startupTimeoutScheduled)
+        const timeout = yield* Effect.forkChild(Effect.timeoutOption(Fiber.join(attempt), Duration.minutes(3)))
+        yield* Deferred.await(testGuardScheduled)
+        yield* TestClock.adjust(Duration.minutes(3))
+        const finished = yield* Fiber.join(timeout)
+        releaseStartup()
+        if (Option.isNone(finished)) throw new Error('The startup attempt should finish before the test guard.')
+        if (Exit.isSuccess(finished.value)) throw new Error('The startup attempt should fail after its timeout.')
+        const failure = finished.value.cause.reasons.find(Cause.isFailReason)
+        if (failure === undefined) throw new Error('The startup attempt should fail with a typed error.')
+        assert.instanceOf(failure.error, SessionFailed)
+        assert.include(failure.error.summary, 'Timed out after 2m waiting for Fake opencode to set up a session.')
+        // The tag is what tells a hang from a failure, in the log and for telemetry.
+        assert.include(failure.error.reason, 'StartTimedOut')
+
+        assert.strictEqual((yield* session(first))?.state, 'active')
+        assert.strictEqual(Option.getOrUndefined(yield* sessions.running(created.threadId))?.sessionId, first)
+        const states = yield* sql<{ agentId: string; state: string }>`
+          SELECT agent_id, state FROM provider_sessions ORDER BY agent_id`
+        assert.deepStrictEqual(states, [
+          { agentId: 'codex', state: 'active' },
+          { agentId: 'opencode', state: 'failed' },
+        ])
+        const notices = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'notice')
+        assert.strictEqual(notices.at(-1)?.content.title, "Fake opencode couldn't start.")
+        assert.include(String(notices.at(-1)?.content.description), 'Timed out after 2m waiting for Fake opencode to set up a session')
+      }).pipe(Effect.ensuring(Effect.sync(releaseStartup)), Effect.provide(app))
+    }
+
+    it.effect('times out an ACP startup that hangs in session/new, records the failure and leaves the current lead running', () =>
+      timesOutStartup('beforeNewSession'),
+    )
+
+    it.effect('times out an ACP startup that hangs in initialize', () => timesOutStartup('beforeInitialize'))
 
     it.live('starts one session when two starts race', () =>
       Effect.gen(function* () {

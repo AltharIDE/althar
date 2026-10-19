@@ -17,6 +17,7 @@ import {
   LinkButton,
   Listening,
   type ModelInfo,
+  keys,
   modKey,
   ReachLine,
   Running,
@@ -34,13 +35,14 @@ import {
   TitleBar,
 } from '@althar/ui'
 
+import { device } from '../../shared/device'
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, useDraft } from '../../shared/drafts'
+import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
@@ -337,10 +339,17 @@ export function TaskView({
   )
   // An agent's question waiting is kept to answer it here, whatever else the task is.
   const [asking, setAsking] = useState<string | null | undefined>(undefined)
+  // Without one, a permission waiting as it opens takes focus, so Enter answers it; one that comes later takes it only while nothing else has it.
+  const [permitting, setPermitting] = useState(false)
   if (face === null && model.snapshot !== null) {
-    setAsking(model.snapshot.attention.find((call) => call.kind === 'question')?.id ?? null)
+    const question = model.snapshot.attention.find((call) => call.kind === 'question')
+    setAsking(question?.id ?? null)
+    setPermitting(question === undefined && model.snapshot.attention.some((call) => call.kind === 'permission'))
     // A call waiting is answered in the conversation, ahead of a view picked earlier.
     showFace(model.snapshot.attention.length > 0 ? 'talk' : (chosenFaces.get(model.snapshot.task.id) ?? openingFace(model.snapshot)))
+  } else if (permitting && model.snapshot !== null && !model.snapshot.attention.some((call) => call.kind === 'permission')) {
+    // Those answered, one that comes later is like any other: it doesn't take focus from what is being typed.
+    setPermitting(false)
   }
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
@@ -544,6 +553,7 @@ export function TaskView({
     if (said === undefined || !images.fits(said.pictures)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
+      if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said.pictures)
     }
   }
@@ -636,7 +646,12 @@ export function TaskView({
       {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
         <p className={s.handover}>{text.needsAgent}</p>
       )}
-      <Holders holders={snapshot.task.queued?.holders} onStop={(holder, id) => void model.stopHolding(holder, id)} />
+      <Holders
+        holders={snapshot.task.queued?.holders}
+        onStop={(holder, id) => void model.stopHolding(holder, id)}
+        // 2nd or later in its project's line, it can go first from here.
+        {...((snapshot.task.place ?? 0) > 1 ? { onFront: () => void model.moveToFront() } : {})}
+      />
       {waiting !== null && (
         <p className={s.handover}>
           {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
@@ -650,6 +665,7 @@ export function TaskView({
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={kept} />}
+        text={{ sendNowKey: modKey(keys.return) }}
         // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
         above={
           (listening.length > 0 || leftRunning.length > 0) && (
@@ -899,6 +915,7 @@ export function TaskView({
             <PermissionCalls
               requests={snapshot.attention.filter((request) => request.kind === 'permission')}
               project={snapshot.project.name}
+              focusOnMount={permitting || 'idle'}
               onAnswer={model.answer}
               // Out of what the project always asks about: everything on this task allowed, where it isn't yet; or the rules.
               wayOut={{
@@ -914,6 +931,7 @@ export function TaskView({
       {host.lightbox}
       {abandoning && (
         <AbandonTask
+          text={{ branchHere: (name) => `Its branch ${name} stays on ${device.this}.` }}
           activity={can('stop') ? TaskActivity.Working : can('start') ? TaskActivity.Planned : TaskActivity.Still}
           worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
           branch={snapshot.task.branch}

@@ -367,9 +367,7 @@ export interface ListedRunnable {
   about: string
 }
 
-export interface RunnablesText {
-  title: (project: string) => string
-  description: string
+export interface RunnableListText {
   default: string
   makeDefault: string
   /** Its grip, to drag it by or move it with the arrow keys. */
@@ -377,27 +375,35 @@ export interface RunnablesText {
   moveKeys: string
   edit: (label: string) => string
   remove: (label: string) => string
-  add: string
   empty: string
-  done: string
 }
 
-export const runnablesText: RunnablesText = {
-  title: (project) => `What ${project} runs`,
-  description: 'Drag them into the order you want. The first is the default: a single press of Run runs it.',
+export const runnableListText: RunnableListText = {
   default: 'Default',
   makeDefault: 'Make default',
   move: (label) => `Drag to move ${label}`,
   moveKeys: '↑ ↓',
   edit: (label) => `Edit ${label}`,
   remove: (label) => `Remove ${label}`,
-  add: 'Add something to run',
   empty: 'Nothing to run yet.',
+}
+
+export interface RunnablesText extends RunnableListText {
+  title: (project: string) => string
+  description: string
+  add: string
+  done: string
+}
+
+export const runnablesText: RunnablesText = {
+  ...runnableListText,
+  title: (project) => `What ${project} runs`,
+  description: 'Drag them into the order you want. The first is the default: a single press of Run runs it.',
+  add: 'Add something to run',
   done: 'Done',
 }
 
-export interface RunnablesProps {
-  project: string
+export interface RunnableListProps {
   /** What the project runs, in its order: the first is its default. */
   runnables: readonly ListedRunnable[]
   /** Puts them in a new order, every one by id: the first is the default. */
@@ -406,10 +412,15 @@ export interface RunnablesProps {
   onDefault: (id: string) => void
   onEdit: (id: string) => void
   onRemove: (id: string) => void
-  onAdd: () => void
-  onClose: () => void
   /** What went wrong ordering or removing one. */
   error?: string
+  text?: Partial<RunnableListText>
+}
+
+export interface RunnablesProps extends Omit<RunnableListProps, 'text'> {
+  project: string
+  onAdd: () => void
+  onClose: () => void
   text?: Partial<RunnablesText>
 }
 
@@ -454,8 +465,14 @@ const moved = (ids: readonly string[], from: number, to: number) => {
 const placeOf = (at: number, { from, to }: Dragged) =>
   at === from ? to : from < at && at <= to ? at - 1 : to <= at && at < from ? at + 1 : at
 
-export function Runnables({ project, runnables, onOrder, onDefault, onEdit, onRemove, onAdd, onClose, error, text }: RunnablesProps) {
-  const t = { ...runnablesText, ...text }
+/**
+ * What the project runs, in the person's order, the first its default:
+ * dragged into another order by a row's grip or its words, or moved with the
+ * arrow keys on its grip; made the default, changed or removed from its row.
+ * On a page of the project's settings, or in the dialog with the whole list.
+ */
+export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, error, text }: RunnableListProps) {
+  const t = { ...runnableListText, ...text }
   const list = useRef<HTMLOListElement>(null)
   const [dragged, setDragged] = useState<Dragged | null>(null)
   // The order it was put in shows until the list it is given changes, or says what went wrong, so a row dropped doesn't jump back while it is kept.
@@ -529,23 +546,7 @@ export function Runnables({ project, runnables, onOrder, onDefault, onEdit, onRe
 
   const moving = dragged?.lifted === true ? dragged : null
   return (
-    <Dialog
-      title={t.title(project)}
-      description={t.description}
-      onClose={onClose}
-      width={640}
-      actions={
-        <>
-          <Button variant="quiet" icon="plus" onClick={onAdd} className={s.remove}>
-            {t.add}
-          </Button>
-          {/* oxlint-disable-next-line jsx-a11y/no-autofocus -- a dialog takes focus anyway: here, not on a grip, whose tooltip would open over the list */}
-          <Button variant="ink" onClick={onClose} autoFocus>
-            {t.done}
-          </Button>
-        </>
-      }
-    >
+    <>
       {shown.length === 0 ? (
         <p className={s.quiet}>{t.empty}</p>
       ) : (
@@ -603,6 +604,32 @@ export function Runnables({ project, runnables, onOrder, onDefault, onEdit, onRe
           {error}
         </p>
       )}
+    </>
+  )
+}
+
+/** The whole list, in a dialog: the way to add another under it, and Done. */
+export function Runnables({ project, onAdd, onClose, text, ...list }: RunnablesProps) {
+  const t = { ...runnablesText, ...text }
+  return (
+    <Dialog
+      title={t.title(project)}
+      description={t.description}
+      onClose={onClose}
+      width={640}
+      actions={
+        <>
+          <Button variant="quiet" icon="plus" onClick={onAdd} className={s.remove}>
+            {t.add}
+          </Button>
+          {/* oxlint-disable-next-line jsx-a11y/no-autofocus -- a dialog takes focus anyway: here, not on a grip, whose tooltip would open over the list */}
+          <Button variant="ink" onClick={onClose} autoFocus>
+            {t.done}
+          </Button>
+        </>
+      }
+    >
+      <RunnableList {...list} text={t} />
     </Dialog>
   )
 }

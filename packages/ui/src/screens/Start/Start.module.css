@@ -280,6 +280,8 @@
   padding: 18px 18px 18px 0;
 }
 .sheet {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow-y: auto;
   padding: 48px clamp(24px, 3.4vw, 52px) 40px;
@@ -289,6 +291,10 @@
     0 0 0 1px var(--line),
     var(--lift-dialog);
   transition: opacity 420ms var(--ease);
+}
+/* What it holds keeps its height, and the sheet scrolls. */
+.sheet > * {
+  flex-shrink: 0;
 }
 /* While a folder is held over the window, the sheet steps back for it. */
 .over .sheet {
@@ -316,6 +322,16 @@
 }
 .repos {
   margin-top: 34px;
+}
+/* A quiet line at the sheet's foot, ruled off from what was found, at the bottom where there is room. */
+.foot {
+  flex: none;
+  margin-top: auto;
+  padding-top: 30px;
+}
+.footLine {
+  padding-top: 14px;
+  box-shadow: inset 0 1px 0 var(--line);
 }
 .quiet {
   margin: 0;
@@ -353,8 +369,8 @@
 }
 .repo:focus-visible,
 .repo:has(:focus-visible) {
-  outline: 2px solid var(--live);
-  outline-offset: -2px;
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
 }
 .tick:focus-visible {
   outline: none;
@@ -369,7 +385,8 @@
   width: 16px;
   height: 16px;
   border-radius: 5px;
-  box-shadow: inset 0 0 0 1.5px var(--line-2);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
   color: var(--on-ink);
   transition:
     background var(--fast) var(--ease),

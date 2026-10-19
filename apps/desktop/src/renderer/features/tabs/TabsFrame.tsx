@@ -2,7 +2,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useS
 import { createPortal } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
 
-import { commandDown, LoadMeter, primaryDown, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
+import { commandDown, LoadMeter, primaryDown, modKey, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
@@ -121,6 +121,7 @@ function TabsBar({
         : {})}
       onSelect={select}
       onClose={tabs.close}
+      onReorder={tabs.reorder}
       onOpen={tabs.open}
       onNewProject={tabs.newProject}
       end={
@@ -135,6 +136,7 @@ function TabsBar({
       }
       // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
       lights={host.platform === 'darwin' ? 'space' : 'drawn'}
+      text={{ newProjectKbd: modKey('N') }}
       maximized={chrome.window?.maximized === true}
       onCloseWindow={() => host.window('close')}
       onMinimize={() => host.window('minimize')}

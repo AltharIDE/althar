@@ -29,7 +29,9 @@
   transition: background var(--base) var(--ease);
 }
 
+/* positioned, so it paints over its dot, which is */
 .glyph {
+  position: relative;
   width: 8px;
   height: 8px;
   overflow: visible;
@@ -61,7 +63,8 @@
   background: #62b04f;
 }
 
+/* round, close about its dot */
 .lights button:focus-visible {
-  outline: 2px solid var(--signal);
-  outline-offset: 2px;
+  border-radius: 50%;
+  outline-offset: -4px;
 }
