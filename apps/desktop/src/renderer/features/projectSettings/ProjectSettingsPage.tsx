@@ -72,7 +72,7 @@ export function ProjectSettingsPage({
       <SettingsLayout
         section={section}
         title={open.title}
-        lede={open.lede}
+        {...(open.lede === undefined ? {} : { lede: open.lede })}
         headingLevel={HEADING.title}
         side={
           <SettingsNav

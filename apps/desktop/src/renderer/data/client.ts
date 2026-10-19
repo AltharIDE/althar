@@ -283,6 +283,8 @@ export interface Client {
   readonly getProjectNotes: (projectId: string) => Promise<ReadonlyArray<ProjectNote>>
   /** Drops one of a project's notes: no coordinator session starts with it again. */
   readonly dropProjectNote: (projectId: string, noteId: string) => Promise<void>
+  /** Says one of its notes in the person's words. */
+  readonly editProjectNote: (projectId: string, noteId: string, body: string) => Promise<void>
   /** The names a project's code uses that have parts, most used first, for dictation to write as it does. */
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
@@ -561,6 +563,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
     getProjectNotes: (projectId) => settle(api.GetProjectNotes({ projectId })),
     dropProjectNote: (projectId, noteId) => command((commandId) => api.DropProjectNote({ commandId, projectId, noteId })),
+    editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),

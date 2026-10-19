@@ -53,7 +53,7 @@ import {
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
-import { dropNote, notesOf } from './notes'
+import { dropNote, editNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
@@ -1102,6 +1102,16 @@ export const handlers = Api.toLayer(
             Effect.gen(function* () {
               const said = yield* envelope('project.note.drop', { projectId, noteId }, commandId)
               yield* Effect.provideContext(dropNote({ envelope: said, projectId, noteId }), store)
+            }),
+          ),
+        ),
+      EditProjectNote: ({ commandId, projectId, noteId, body }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.note.edit', { projectId, noteId, body }, commandId)
+              yield* Effect.provideContext(editNote({ envelope: said, projectId, noteId, body }), store)
             }),
           ),
         ),

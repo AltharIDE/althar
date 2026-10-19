@@ -501,6 +501,7 @@ describe('the API', () => {
               GetProjectRules: () => Effect.die('unused'),
               GetProjectNotes: () => Effect.succeed([]),
               DropProjectNote: () => Effect.void,
+              EditProjectNote: () => Effect.void,
               GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
               SetProjectInk: () => Effect.die('unused'),

@@ -16,8 +16,8 @@ import { useServices } from '../../data/services'
  * the projects are read again at once too, so it shows everywhere before the
  * feed is heard. One that didn't hold goes back, and says why. So do the
  * switches, each a rule saved as the rules screen saves one, and a note
- * dropped, which goes at once. Removing it from Althar is asked in a dialog
- * first.
+ * dropped or said in other words, which goes at once. Removing it from
+ * Althar is asked in a dialog first.
  */
 
 /** A rule the settings switch in place. */
@@ -38,7 +38,9 @@ export interface ProjectSettingsModel {
   /** The decisions its coordinator keeps, oldest first (ADR-031). */
   readonly notes: ReadonlyArray<ProjectNote> | null
   readonly dropNote: (noteId: string) => Promise<void>
-  /** Why the last note dropped is still there. */
+  /** Says a note in the person's words: shown at once, and back as it was, saying why, where that didn't hold. */
+  readonly editNote: (noteId: string, body: string) => Promise<void>
+  /** Why the last note dropped is still there, or the last one changed says what it did. */
   readonly noteFailed: string | null
   /** Turns on or off the project's leads resolving conflicts on their own (ADR-030). */
   readonly setResolveConflicts: (on: boolean) => void
@@ -149,6 +151,21 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     },
     [cache, client, projectId],
   )
+  const editNote = useCallback(
+    async (noteId: string, body: string) => {
+      setNoteFailed(null)
+      cache.setQueryData<ReadonlyArray<ProjectNote>>(keys.notes(projectId), (was) =>
+        was?.map((note) => (note.id === noteId ? { ...note, body } : note)),
+      )
+      try {
+        await client.editProjectNote(projectId, noteId, body)
+      } catch (failure) {
+        setNoteFailed(messageOf(failure))
+      }
+      await cache.invalidateQueries({ queryKey: keys.notes(projectId) })
+    },
+    [cache, client, projectId],
+  )
 
   const [removing, setRemoving] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -189,6 +206,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     rules,
     notes,
     dropNote,
+    editNote,
     noteFailed,
     setResolveConflicts,
     setMoveIssues,

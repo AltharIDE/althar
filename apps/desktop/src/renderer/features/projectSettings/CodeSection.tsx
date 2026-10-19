@@ -15,29 +15,28 @@ import { type Standing, standingOf } from './standing'
  * What a project's code and issues are: its repositories, where each is and
  * where its work goes, with the code hosts they push to; then the trackers
  * its tasks' issues are on, each by its mark as it is, saying who Althar is
- * there, or in violet what can't happen until the person connects it or
- * signs in again, with the button that does. Connections are Althar's, for
+ * there, or in violet that it isn't connected or is signed out, with the
+ * button that connects it or signs in again. Connections are Althar's, for
  * every project: managing them is in Althar's own settings.
  */
 
 export const text = {
   trackers: 'Trackers',
-  trackersNote: 'Where its tasks’ issues are. The coordinator starts tasks from them, and they move as the work starts.',
   connectTracker: 'Connect a tracker',
   none: 'No tracker yet',
-  noneNote: 'None of its tasks has started from an issue. Connect a tracker, and the coordinator can start tasks from its issues.',
-  /** Linear · MER issues; a tracker whose issues share no key by its name alone: Trello cards. */
+  noneNote: 'Connect one, and the coordinator can start tasks from its issues.',
+  /** MER issues · Linear; a tracker whose issues share no key by its name alone: Trello cards. */
   issues: (tracker: Tracker) =>
-    tracker.key === null ? frontText.issues(tracker) : `${productName(tracker.product)} · ${frontText.issues(tracker)}`,
+    tracker.key === null ? frontText.issues(tracker) : `${frontText.issues(tracker)} · ${productName(tracker.product)}`,
   standing: {
     connected: (login: string) => `Connected as ${login}`,
-    notConnected: 'Not connected: Althar can’t read its issues, or move them as their tasks start.',
-    signedOut: (login: string) => `Signed out as ${login}: Althar can’t read its issues, or move them, until you sign in again.`,
+    notConnected: 'Not connected',
+    signedOut: (login: string) => `Signed out as ${login}`,
   },
   connect: 'Connect',
   signIn: 'Sign in again',
   openOn: (tracker: Tracker) => `Open on ${productName(tracker.product)}`,
-  appWide: 'Connections are Althar’s, not the project’s: a code host or tracker connected once is there for every project.',
+  appWide: 'Connections are shared by every project.',
   manage: 'Manage connections',
 }
 
@@ -113,7 +112,6 @@ export function CodeSection({
       <SettingGroup
         title={text.trackers}
         headingLevel={HEADING.part}
-        note={text.trackersNote}
         action={
           <Button size="small" icon="plug" onClick={() => onConnect('all')}>
             {text.connectTracker}

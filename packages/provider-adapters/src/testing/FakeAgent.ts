@@ -424,7 +424,8 @@ const playStall = async (
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
  * `[coordinator:review]` starts a review of the pull request whose link the
- * person gave, whose lead, `[lead:review]`, drafts asking for changes with a
+ * person gave, and `[coordinator:keep-note]` keeps what the person said
+ * before it as one of the project's notes; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; asked to, `[lead:make-change]` makes its quick task a change
@@ -926,6 +927,11 @@ const playRole = async (
         return 'Stopped working.'
       }
       return undefined
+    }
+    // Told a decision, it keeps it as one of the project's notes: what the person said before the marker, as they said it.
+    if (available.has('keep_note') && text.includes('[coordinator:keep-note]')) {
+      const said = (text.slice(0, text.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+      return await call('keep_note', { note: said.trim() })
     }
     // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
     if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {

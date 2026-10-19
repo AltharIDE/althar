@@ -182,9 +182,9 @@ as "issue drafts need an approval card, on every tracker", is kept as one of
 the project's notes, a sentence each, at most 40. The coordinator's brief
 tells it to keep one when the person decides something like that, and to
 drop one they take back; every brief of it holds them, and so does
-`project_overview`. The person sees them in the project's settings, and
-removes what no longer holds. Each is a row with its record; a removed one
-keeps its row.
+`project_overview`. The person sees them in the project's settings, says
+one in their own words, and removes what no longer holds. Each is a row
+with its record; a removed one keeps its row.
 
 ### The compaction seam
 
