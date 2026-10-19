@@ -3,6 +3,7 @@ import { createContext, type KeyboardEvent, type ReactNode, useContext, useEffec
 
 import type { CodePlace, DiffLine as ApiDiffLine } from '@althar/contracts'
 import {
+  codeKey,
   type CodeMode,
   CodePanel,
   CodePeek,
@@ -13,6 +14,7 @@ import {
   firstMode,
   type FoundCode,
   lineToOpen,
+  markOf,
   Menu,
   MenuItem,
   SplitButton,
@@ -76,7 +78,8 @@ const useCodeRead = (threadId: string, found: FoundCode, mode: CodeMode, fresh: 
   const { client } = useServices()
   const file = found.kind === 'file' && found.content === 'text' ? found : null
   const commit = file !== null && mode === 'then' ? (file.since?.commit ?? null) : null
-  const line = file === null ? null : (lineToOpen(file) ?? file.line ?? null)
+  // Around the lines marked in the way it is shown: as they were, read as it was; else where they are now.
+  const line = file === null ? null : (markOf(file, mode)?.line ?? lineToOpen(file) ?? file.line ?? null)
   const read = useQuery({
     queryKey: codeKeys.text(threadId, file?.path ?? '', commit, line),
     queryFn: () =>
@@ -178,11 +181,12 @@ const namesInThread = (): HTMLElement[] =>
     (chip) => chip.closest('[data-workbench]') === null && chip.closest('[hidden], [inert]') === null,
   )
 
-/** Where the name a file was opened from is among the thread's: the chip itself while it is there, else the first of its name. */
+/** Where the name a file was opened from is among the thread's: the chip itself while it is there, else the first naming the same. */
 const placeAmong = (names: readonly HTMLElement[], open: CodeOpen | null) => {
   if (open === null) return -1
   const at = open.from === null ? -1 : names.indexOf(open.from)
-  return at >= 0 ? at : names.findIndex((chip) => chip.dataset.codeRef === open.found.name)
+  const key = codeKey(open.found)
+  return at >= 0 ? at : names.findIndex((chip) => chip.dataset.codeRef === key)
 }
 
 /**
@@ -194,9 +198,10 @@ const stepFrom = (open: CodeOpen | null, by: -1 | 1) => {
   const names = namesInThread()
   let at = placeAmong(names, open)
   if (at < 0) at = by === 1 ? -1 : names.length
+  const key = open === null ? null : codeKey(open.found)
   for (let next = at + by; next >= 0 && next < names.length; next += by) {
     const chip = names[next]
-    if (chip === undefined || chip.dataset.codeRef === open?.found.name) continue
+    if (chip === undefined || chip.dataset.codeRef === key) continue
     chip.scrollIntoView?.({ block: 'center' })
     chip.click()
     return
@@ -224,8 +229,8 @@ function CodePanelOf({
 }) {
   const { client } = useServices()
   const { found } = open
-  const [kept, setKept] = useState<{ readonly name: string; readonly mode: CodeMode } | null>(null)
-  const mode = kept !== null && kept.name === found.name ? kept.mode : firstMode(found)
+  const [kept, setKept] = useState<{ readonly key: string; readonly mode: CodeMode } | null>(null)
+  const mode = kept !== null && kept.key === codeKey(found) ? kept.mode : firstMode(found)
   const read = useCodeRead(threadId, found, mode, true)
   const change = useCodeChange(taskId, found, mode === 'change')
   const place = useQuery(placeRead(client, threadId)).data
@@ -244,7 +249,7 @@ function CodePanelOf({
       found={found}
       {...(place === undefined ? {} : { where: whereOf(place, found) })}
       mode={mode}
-      onMode={(next) => setKept({ name: found.name, mode: next })}
+      onMode={(next) => setKept({ key: codeKey(found), mode: next })}
       {...(read === undefined ? {} : { read })}
       {...(change === undefined ? {} : { change })}
       actions={<OpenCodeIn found={found} threadId={threadId} compact={width < 400} />}
@@ -322,7 +327,7 @@ export const useCodeHost = ({
   useLayoutEffect(() => {
     latest.current = { onOpen, onClose, go, inEditor: editors.open }
   })
-  const opened = open?.found.name ?? null
+  const opened = open === null ? null : codeKey(open.found)
   const mainId = main?.id
   const shell = useMemo<CodeShell | undefined>(() => {
     if (threadId === null) return undefined
@@ -351,7 +356,7 @@ export const useCodeHost = ({
     panel: (width) =>
       threadId === null || open === null ? null : (
         <CodePanelOf
-          key={open.found.name}
+          key={codeKey(open.found)}
           open={open}
           threadId={threadId}
           taskId={taskId}

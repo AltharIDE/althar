@@ -36,6 +36,19 @@ export type FoundCode =
 
 export type FoundFile = Extract<FoundCode, { kind: 'file' }>
 
+/**
+ * What a name names, as one reference: its name and what it was found to
+ * be. The same name in two messages may name two files, by the folders each
+ * names, or the same lines at two times; each is a reference of its own.
+ */
+export const codeKey = (found: FoundCode): string =>
+  (found.kind === 'file'
+    ? [found.kind, found.name, found.path, found.line ?? '', found.end ?? '', found.since?.commit ?? '']
+    : found.kind === 'missing'
+      ? [found.kind, found.name, found.path]
+      : [found.kind, found.name, ...found.paths]
+  ).join('\n')
+
 /** A file's text as the host read it: whole, or past a size the lines around those named. */
 export interface CodeRead {
   readonly text: string

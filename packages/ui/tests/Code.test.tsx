@@ -13,7 +13,17 @@ import {
   modelSeveral,
 } from '../src/fixtures/code'
 import { isProse, languageOf, useColoured } from '../src/lib/syntax'
-import { copyOf, firstMode, type FoundCode, lineToOpen, markOf, mayBeCode, PLAIN_PATH } from '../src/thread/Code/code'
+import {
+  codeKey,
+  copyOf,
+  firstMode,
+  type FoundCode,
+  type FoundFile,
+  lineToOpen,
+  markOf,
+  mayBeCode,
+  PLAIN_PATH,
+} from '../src/thread/Code/code'
 import { CodeLines } from '../src/thread/Code/CodeLines'
 import { codeNamesIn, Markdown } from '../src/thread/Markdown/Markdown'
 import { type CodeShell, ThreadShellProvider } from '../src/thread/Shell/Shell'
@@ -174,7 +184,7 @@ describe('names in a message, with a host that finds code', () => {
     const code = host(new Map([['src/refunds/limits.ts:22-33', limitsFound]]), {
       openInEditor,
       close,
-      opened: 'src/refunds/limits.ts:22-33',
+      opened: codeKey(limitsFound),
     })
     render(
       <ThreadShellProvider value={{ code }}>
@@ -187,6 +197,34 @@ describe('names in a message, with a host that finds code', () => {
     fireEvent.click(chip)
     expect(close).toHaveBeenCalled()
     expect(code.open).not.toHaveBeenCalled()
+  })
+
+  it('tells the same name in two messages apart where it names two files, or the same lines at two times', () => {
+    const inSrc: FoundFile = { ...limitsFound, name: 'limits.ts' }
+    const inTest: FoundFile = { ...inSrc, path: 'test/refunds/limits.ts' }
+    const open = vi.fn()
+    const close = vi.fn()
+    const shell = (found: FoundCode) => host(new Map([['limits.ts', found]]), { open, close, opened: codeKey(inSrc) })
+    render(
+      <>
+        <ThreadShellProvider value={{ code: shell(inSrc) }}>
+          <Markdown source="In `limits.ts`." />
+        </ThreadShellProvider>
+        <ThreadShellProvider value={{ code: shell(inTest) }}>
+          <Markdown source="And its test’s `limits.ts`." />
+        </ThreadShellProvider>
+      </>,
+    )
+    const [first, second] = screen.getAllByRole('button')
+    expect(first).toHaveAttribute('data-open')
+    expect(second).not.toHaveAttribute('data-open')
+    // The other file opens, rather than the one open closing.
+    fireEvent.click(second as HTMLElement)
+    expect(open).toHaveBeenCalledWith(inTest, second)
+    expect(close).not.toHaveBeenCalled()
+    const later: FoundFile = { ...limitsMoved, since: { commit: 'b0a7e11', said: '2026-10-19T09:00:00.000Z', now: { line: 19 } } }
+    expect(codeKey(later)).not.toBe(codeKey(limitsMoved))
+    expect(codeKey({ ...limitsFound })).toBe(codeKey(limitsFound))
   })
 
   it('without a host that finds code, is code text as ever', () => {

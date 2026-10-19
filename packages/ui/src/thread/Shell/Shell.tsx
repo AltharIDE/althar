@@ -73,7 +73,7 @@ export interface CodeShell {
   open: (found: FoundCode, from: HTMLElement | null) => void
   /** Opens it in the person's editor, as ⌘-click on its name does. */
   openInEditor?: (found: FoundCode) => void
-  /** The name open beside the thread, as written: its chip shows it open, and pressing it again closes it. */
+  /** The reference open beside the thread, as its `codeKey`: its chips show it open, and pressing one again closes it. */
   opened?: string | null
   close?: () => void
 }

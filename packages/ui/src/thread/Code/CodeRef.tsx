@@ -5,7 +5,7 @@ import { cx } from '../../lib/cx'
 import { Code } from '../../primitives/Code/Code'
 import { Popover } from '../../primitives/Popover/Popover'
 import { useThreadShell } from '../Shell/Shell'
-import { type FoundCode, linesOf, nameOf } from './code'
+import { codeKey, type FoundCode, linesOf, nameOf } from './code'
 import s from './Code.module.css'
 
 export interface CodeRefText {
@@ -51,7 +51,8 @@ export function CodeRef({ found, plain = false, text }: CodeRefProps) {
   // The chip, for the peek to open beside from: kept as it mounts, not read from a ref while drawing.
   const [button, setButton] = useState<HTMLButtonElement | null>(null)
   if (code === undefined) return plain ? found.name : <Code>{found.name}</Code>
-  const open = code.opened === found.name
+  const key = codeKey(found)
+  const open = code.opened === key
   const onClick = (event: MouseEvent<HTMLButtonElement>) => {
     // A press opens it; it doesn't toggle the peek, which the pointer opens.
     event.preventDefault()
@@ -68,7 +69,7 @@ export function CodeRef({ found, plain = false, text }: CodeRefProps) {
       className={
         plain ? s.plain : cx(s.ref, found.kind === 'missing' && s.missing, found.kind === 'file' && found.symbol !== undefined && s.symbol)
       }
-      data-code-ref={found.name}
+      data-code-ref={key}
       data-open={open || undefined}
       aria-label={t.open(where)}
       onClick={onClick}

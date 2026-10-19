@@ -21,7 +21,7 @@ import { Markdown } from '../Markdown/Markdown'
 import { type CodeShell, ThreadShellProvider } from '../Shell/Shell'
 import { TaskFace } from '../TaskFace/TaskFace'
 import { Workbench } from '../Workbench/Workbench'
-import { type CodeMode, type CodeWhere, firstMode, type FoundCode } from './code'
+import { codeKey, type CodeMode, type CodeWhere, firstMode, type FoundCode } from './code'
 import { CodePanel, CodePeek } from './CodeView'
 
 const meta = {
@@ -236,7 +236,7 @@ export const InAMessage: Story = {
     const code: CodeShell = {
       useFound: () => FOUND,
       peek: (found) => <CodePeek found={found} where={TASK} read={limitsRead} onBeside={fn()} onGo={fn()} />,
-      open: (found) => setOpened(found.name),
+      open: (found) => setOpened(codeKey(found)),
       opened,
       close: () => setOpened(null),
     }

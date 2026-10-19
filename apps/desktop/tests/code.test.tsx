@@ -109,6 +109,41 @@ describe('the code a lead names, on a task’s screen', () => {
     await waitFor(() => expect(screen.queryByRole('complementary')).toBeNull())
   })
 
+  it('opens and steps to the same name in two messages where each names another file', async () => {
+    const first = items.says('In `apps/desktop/src/`, `model.ts` keeps it.')
+    const second = items.says('And in `packages/ui/src/`, `model.ts` draws it.')
+    const inDesktop: CodeFound = { ...runs, name: 'model.ts', path: 'apps/desktop/src/model.ts' }
+    const inKit: CodeFound = { ...inDesktop, path: 'packages/ui/src/model.ts' }
+    const readCode = reading()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ items: [items.you('Where?'), first, items.you('And?'), second] })),
+      // Each message's folder tells its model.ts apart.
+      findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<{ readonly itemId?: string }>) => ({
+        place: { kind: 'task' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'althar/add-a-retry' }] },
+        messages: messages.map((message) => ({ found: [message.itemId === first.id ? inDesktop : inKit] })),
+      })),
+      readCode,
+    })
+    withServices(<Task />, client)
+    const desktop = await screen.findByRole('button', { name: 'Open apps/desktop/src/model.ts:2' })
+    const kit = await screen.findByRole('button', { name: 'Open packages/ui/src/model.ts:2' })
+
+    await userEvent.click(desktop)
+    await screen.findByRole('complementary', { name: 'model.ts' })
+    expect(desktop.hasAttribute('data-open')).toBe(true)
+    expect(kit.hasAttribute('data-open')).toBe(false)
+    // The other one opens in its place, rather than closing the one open.
+    await userEvent.click(kit)
+    await waitFor(() => expect(readCode).toHaveBeenCalledWith('th1', 'packages/ui/src/model.ts', { line: 2 }))
+    expect(screen.getByRole('complementary', { name: 'model.ts' })).toBeTruthy()
+    expect(kit.hasAttribute('data-open')).toBe(true)
+    expect(desktop.hasAttribute('data-open')).toBe(false)
+    // And ⌥↑ steps back to the first, rather than past it as the same name.
+    fireEvent.keyDown(document.body, { key: 'ArrowUp', altKey: true })
+    await waitFor(() => expect(desktop.hasAttribute('data-open')).toBe(true))
+    expect(screen.getByRole('complementary', { name: 'model.ts' })).toBeTruthy()
+  })
+
   it('⌘-press on a name opens it in the editor, without opening it beside', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => snapshot({ items: [items.says('In `src/retry.ts:2`.')] })),
@@ -179,6 +214,50 @@ describe('the conversation’s workbench', () => {
     fireEvent.keyDown(edge, { key: 'ArrowLeft' })
     expect(Number(edge.getAttribute('aria-valuenow'))).toBe(was + 16)
     expect(window.localStorage.getItem('althar.bench')).toBe(String(was + 16))
+  })
+})
+
+/** The coordinator's thread, as its screen hosts it: a message naming a line of a long file, put far down it since. */
+function Coordinator() {
+  const host = useThreadHost(false, { threadId: 'th1', taskId: null })
+  return (
+    <ThreadShellProvider value={host.shell}>
+      <Markdown source="It waits at `src/runs/Runs.ts:10000`." />
+      {host.workbench(null)}
+    </ThreadShellProvider>
+  )
+}
+
+describe('a long file the coordinator named', () => {
+  it('reads it around the line as it is now, and as it was when said around the line it named', async () => {
+    const moved: CodeFound = {
+      ...runs,
+      name: 'src/runs/Runs.ts:10000',
+      line: 10000,
+      lines: 12_000,
+      byName: false,
+      since: { commit: 'abc1234', said: '2026-10-18T16:40:00.000Z', now: { line: 11_000 } },
+    }
+    const readCode = vi.fn(async (_threadId: string, path: string) => ({
+      path,
+      text: '// a line\n',
+      from: 10_990,
+      total: 12_000,
+      cut: true,
+    }))
+    const { client } = fakeClient({
+      findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<unknown>) => ({
+        place: { kind: 'default' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'main' }] },
+        messages: messages.map(() => ({ found: [moved] })),
+      })),
+      readCode,
+    })
+    withServices(<Coordinator />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Open src/runs/Runs.ts:10000' }))
+    const panel = await screen.findByRole('complementary', { name: 'Runs.ts' })
+    await waitFor(() => expect(readCode).toHaveBeenCalledWith('th1', 'src/runs/Runs.ts', { line: 11_000 }))
+    await userEvent.click(within(panel).getByRole('radio', { name: 'When said' }))
+    await waitFor(() => expect(readCode).toHaveBeenCalledWith('th1', 'src/runs/Runs.ts', { commit: 'abc1234', line: 10_000 }))
   })
 })
 
