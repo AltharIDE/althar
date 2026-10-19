@@ -195,10 +195,14 @@ describe('a plain task', () => {
       const place = yield* opened
       const task = yield* started(place, 'Check the partners', 'Look. [lead:finish] [lead:terse]')
       yield* cardOnce(task.id, (one) => one.phase === 'ready')
-      assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
+      // Finished, it waits for the person to settle it (ADR-051): they do, once it can be.
+      const markDone = Effect.flatMap(Runtime.envelope('task.mark_done', { taskId: task.id }), (envelope) =>
+        Effect.map(tasks.markDone({ envelope, taskId: task.id }), (done) => [done]),
+      )
       const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
+      yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
-      // A question, whose first turn does nothing: told to carry on, the lead answers it, and it waits in Needs you, not settled again.
+      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task is done again.
       yield* say(task.threadId, 'And the v2 ones?')
       const [told] = yield* until(
         sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,
@@ -210,8 +214,8 @@ describe('a plain task', () => {
         (rows) => (rows[0]?.n ?? 0) === 1,
         Duration.seconds(20),
       )
-      assert.strictEqual((yield* state)[0]?.state, 'open')
-      assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready')).kind, 'plain')
+      yield* until(markDone, ([done]) => done === true)
+      yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { blank: [2] }, { idle: { blank: Duration.millis(100) } }))),

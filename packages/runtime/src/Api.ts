@@ -9,6 +9,7 @@ import {
   Api,
   ApiError,
   type AgentStatus,
+  type Attachment,
   type PortLike,
   serverProtocol,
   type WatchEvent,
@@ -1234,6 +1235,26 @@ export const handlers = Api.toLayer(
         ),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
       StopListening: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.stopListening(taskId, url))),
+      AttachPullRequest: ({ commandId, taskId, pullRequest, start }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              pullRequests.attach({ taskId, pullRequest, start: start === true, actorId: instance.personId }),
+              (done): Attachment =>
+                done.kind === 'start'
+                  ? { kind: 'start', name: done.name, source: done.source, started: false, kept: 0, own: done.own }
+                  : {
+                      kind: 'attached',
+                      name: `${done.change.words.short} ${done.change.words.prefix}${done.change.number}`,
+                      source: done.change.source ?? '',
+                      started: done.started,
+                      kept: done.kept,
+                      own: done.kept,
+                    },
+            ),
+          ),
+        ),
       StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
       ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
       RunProject: ({ commandId, projectId, taskId, threadId, runnableId }) =>

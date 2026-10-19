@@ -40,4 +40,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0034_dictated_input': '746c32131264f6b5544430c97efd48587fe14db5db1e046c992136ac53858101',
   '0035_line': '682993690b64c610bda73f71371d513ce207995099cd1152cfdaf3c71a57511b',
   '0036_task_kept': 'c2746f1815024236a13a4de561fc61562559c6f6667acd825ce39732cd85104b',
+  '0037_attached_change_sets': '1fde6e504a76e9c3bb92b7f7d486220f007bfc66214b3bed93da239d82ed847c',
 }

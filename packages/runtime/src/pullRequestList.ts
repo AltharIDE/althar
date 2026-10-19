@@ -3,14 +3,19 @@ import { Clock, Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
+import { forkOf } from './forks'
+import { namedRemotes } from './git'
+import { Instance } from './Instance'
 
 /*
  * The pull requests in a project's repositories, whoever opened them, as
  * the coordinator finds them before it reviews any (`find_pull_requests`):
  * a short line each, never what they say beyond their titles, which are
  * quoted as their authors' words. Each says whether Althar opened it, for
- * which task, or whether a task reviews it already, so asking twice doesn't
- * start a second review. Read-only: nothing reaches the host but reads.
+ * which task, which task follows it (ADR-052), or whether a task reviews it
+ * already, so asking twice doesn't start a second review. A fork whose pull
+ * requests open on the repository it came from lists that one's too, first:
+ * its pull requests are there. Read-only: nothing reaches the host but reads.
  */
 
 /** How many pull requests a repository lists, newest change first: enough to pick from, few enough to read. */
@@ -25,11 +30,12 @@ export interface PullRequestQuery {
   readonly draft?: boolean
 }
 
-/** A task that holds a pull request: one Althar opened for it, or one that reviews it; and whether that task is still open. */
+/** A task that holds a pull request: one Althar opened for it, or attached it to (`attached`), or one that reviews it; and whether that task is still open. */
 interface Held {
   readonly kind: 'change' | 'review'
   readonly slug: string
   readonly open: boolean
+  readonly attached?: boolean
 }
 
 /** How long ago something changed, as a person says it. */
@@ -57,11 +63,13 @@ const CHECKS: Readonly<Record<NonNullable<ListedChange['checks']>, string>> = {
 
 /** What Althar knows of a pull request: the task it opened it for, and the task that reviews it, or did. */
 const heldWords = (held: ReadonlyArray<Held> | undefined): string => {
-  const opened = held?.find((one) => one.kind === 'change')
+  const followed = held?.find((one) => one.kind === 'change' && one.attached === true && one.open)
+  const opened = held?.find((one) => one.kind === 'change' && one.attached !== true)
   const reviewing = held?.find((one) => one.kind === 'review' && one.open)
   const reviewed = held?.find((one) => one.kind === 'review')
   return [
     opened === undefined ? '' : `Althar opened it, for task ${opened.slug}`,
+    followed === undefined ? '' : `task ${followed.slug} follows it`,
     reviewing !== undefined
       ? `task ${reviewing.slug} reviews it already: don’t start another`
       : reviewed === undefined
@@ -129,63 +137,88 @@ export const findPullRequests = (projectId: string, asked: PullRequestQuery) =>
       ...(asked.reviewRequested === true ? { reviewRequested: true } : {}),
       ...(asked.draft === undefined ? {} : { draft: asked.draft }),
     }
-    const bindings = yield* sql<{ name: string; remotes: string }>`
-      SELECT display_name AS name, remote_fingerprints AS remotes FROM repository_bindings
-      WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at, rowid`
+    const instance = yield* Instance
+    const bindings = yield* sql<{ name: string; remotes: string; path: string | null; changeTarget: string | null }>`
+      SELECT b.display_name AS name, b.remote_fingerprints AS remotes, l.path, b.change_target FROM repository_bindings b
+      LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+      WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
     if (bindings.length === 0) return 'The project has no repositories.'
     // What Althar holds of the project's pull requests, by their links: the ones it opened, and the ones its tasks review.
-    const links = yield* sql<{ kind: 'change' | 'review'; url: string; slug: string; state: string }>`
-      SELECT x.kind, x.url, k.slug, k.state FROM external_links x JOIN tasks k ON k.id = x.task_id
+    const links = yield* sql<{ kind: 'change' | 'review'; url: string; slug: string; state: string; attached: number | null }>`
+      SELECT x.kind, x.url, k.slug, k.state, json_extract(x.snapshot, '$.attached') AS attached FROM external_links x
+      JOIN tasks k ON k.id = x.task_id
       WHERE x.project_id = ${projectId} AND x.kind IN ('change', 'review') ORDER BY x.created_at DESC`
     const held = new Map<string, Array<Held>>()
     for (const link of links) {
       const key = link.url.toLowerCase()
-      held.set(key, [...(held.get(key) ?? []), { kind: link.kind, slug: link.slug, open: link.state === 'open' }])
+      held.set(key, [
+        ...(held.get(key) ?? []),
+        { kind: link.kind, slug: link.slug, open: link.state === 'open' || link.state === 'draft', attached: link.attached === 1 },
+      ])
     }
     const now = yield* Clock.currentTimeMillis
-    const several = bindings.length > 1
-    const sections = yield* Effect.forEach(
-      bindings,
-      (binding) =>
-        Effect.gen(function* () {
-          const remotes = Option.getOrElse(
-            Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes),
-            () => [],
-          )
-          const found = yield* connections.hostOf(remotes)
-          if (found === null)
-            return `${binding.name}: it isn’t on a code host Althar is connected to, so its pull requests can’t be listed. The person connects its host in Settings.`
-          const { host } = found
-          const noun = host.words.noun
-          const where = several ? `${binding.name} (${found.path.join('/')})` : found.path.join('/')
-          const listed = yield* host.repository(found.path).pipe(
-            Effect.flatMap((repository) => host.listChanges(repository, query)),
-            Effect.map((list) => ({ list })),
-            Effect.catch((error) =>
-              error instanceof ConnectorFailed ? Effect.succeed({ failed: failureWords(error, noun) }) : Effect.fail(error),
-            ),
-          )
-          if ('failed' in listed) return `${where}: ${listed.failed}`
-          const { changes, more } = listed.list
-          const which = query.state === 'all' ? `${noun}s` : `${query.state} ${noun}s`
-          if (changes.length === 0)
-            return more
-              ? `${where}: none of the newest ${which} Althar read match, and older ones weren’t read: narrow it with author or text.`
-              : `${where}: no ${which} match.`
+    // Each repository to list: a binding's own, and before it the one a fork sends its pull requests to; or why it can't be.
+    const places = (yield* Effect.forEach(bindings, (binding) =>
+      Effect.gen(function* () {
+        const remotes = Option.getOrElse(
+          Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes),
+          () => [],
+        )
+        const found = yield* connections.hostOf(remotes)
+        if (found === null)
           return [
-            `${upper(which)} in ${where}, newest change first:`,
-            ...changes.map((change) =>
-              lineOf(change, {
-                prefix: host.words.prefix,
-                state: query.state,
-                now,
-                linked: several,
-                ...withHeld(held.get(change.url.toLowerCase())),
-              }),
-            ),
-            ...(more ? [`More match than these ${changes.length}: narrow it with author, text, review_requested or draft.`] : []),
-          ].join('\n')
-        }),
+            `${binding.name}: it isn’t on a code host Althar is connected to, so its pull requests can’t be listed. The person connects its host in Settings.`,
+          ]
+        const fork =
+          binding.path === null || binding.changeTarget !== 'upstream'
+            ? null
+            : yield* namedRemotes(binding.path).pipe(
+                Effect.map(forkOf),
+                Effect.orElseSucceed(() => null),
+              )
+        const paths = fork === null ? [found.path] : [fork.upstream.path, found.path]
+        return paths.map((path) => ({ host: found.host, path, name: binding.name }))
+      }),
+    )).flat()
+    // Several, a number alone doesn't say which: each says its repository, and its link.
+    const several = places.length > 1
+    const sections = yield* Effect.forEach(
+      places,
+      (place) =>
+        typeof place === 'string'
+          ? Effect.succeed(place)
+          : Effect.gen(function* () {
+              const { host, path } = place
+              const noun = host.words.noun
+              const where = bindings.length > 1 ? `${place.name} (${path.join('/')})` : path.join('/')
+              const listed = yield* host.repository(path).pipe(
+                Effect.flatMap((repository) => host.listChanges(repository, query)),
+                Effect.map((list) => ({ list })),
+                Effect.catch((error) =>
+                  error instanceof ConnectorFailed ? Effect.succeed({ failed: failureWords(error, noun) }) : Effect.fail(error),
+                ),
+              )
+              if ('failed' in listed) return `${where}: ${listed.failed}`
+              const { changes, more } = listed.list
+              const which = query.state === 'all' ? `${noun}s` : `${query.state} ${noun}s`
+              if (changes.length === 0)
+                return more
+                  ? `${where}: none of the newest ${which} Althar read match, and older ones weren’t read: narrow it with author or text.`
+                  : `${where}: no ${which} match.`
+              return [
+                `${upper(which)} in ${where}, newest change first:`,
+                ...changes.map((change) =>
+                  lineOf(change, {
+                    prefix: host.words.prefix,
+                    state: query.state,
+                    now,
+                    linked: several,
+                    ...withHeld(held.get(change.url.toLowerCase())),
+                  }),
+                ),
+                ...(more ? [`More match than these ${changes.length}: narrow it with author, text, review_requested or draft.`] : []),
+              ].join('\n')
+            }),
       { concurrency: 4 },
     )
     return [

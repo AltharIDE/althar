@@ -214,6 +214,7 @@ describe('Bitbucket Cloud as a code host', () => {
         deletions: null,
         changedFiles: null,
         updatedAt: '2025-08-22T07:42:42.339Z',
+        headRepository: null,
       })
       assert.strictEqual(
         decodeURIComponent(new URL(sent[0]?.url ?? '').searchParams.get('q') ?? ''),
@@ -221,6 +222,22 @@ describe('Bitbucket Cloud as a code host', () => {
       )
       assert.isNull(yield* host.findChange(ace, 'say "hi"\\'))
       assert.include(decodeURIComponent(sent[1]?.url ?? ''), 'source.branch.name = "say \\"hi\\"\\\\"')
+    }),
+  )
+
+  it.effect('says the fork a pull request’s branch is on, and one that is gone', () =>
+    Effect.gen(function* () {
+      const source = pull().source
+      const { host } = cloud([
+        [
+          'GET',
+          /source\.branch\.name%20%3D%20%22forked%22/,
+          { json: { values: [pull({ source: { ...source, repository: { type: 'repository', full_name: 'dana/ace' } } })] } },
+        ],
+        ['GET', /source\.branch\.name%20%3D%20%22gone%22/, { json: { values: [pull({ source: { ...source, repository: null } })] } }],
+      ])
+      assert.deepStrictEqual((yield* host.findChange(ace, 'forked'))?.headRepository, ['dana', 'ace'])
+      assert.deepStrictEqual((yield* host.findChange(ace, 'gone'))?.headRepository, [])
     }),
   )
 
@@ -1141,9 +1158,17 @@ describe('Bitbucket Data Center as a code host', () => {
         deletions: null,
         changedFiles: null,
         updatedAt: '2013-01-25T03:52:00.000Z',
+        headRepository: null,
       })
       assert.isNull(yield* host.findChange(prj, 'other'))
       assert.lengthOf(sent, 2)
+    }),
+  )
+
+  it.effect('says the fork a pull request’s branch is on, by its project and slug', () =>
+    Effect.gen(function* () {
+      const { host } = center([['GET', `${MY}/pull-requests/101`, { json: pr({ fromRef: ref('feature-ABC-123', 'babecafe', 'DANA') }) }]])
+      assert.deepStrictEqual((yield* host.change(prj, 101)).headRepository, ['DANA', 'my-repo'])
     }),
   )
 
