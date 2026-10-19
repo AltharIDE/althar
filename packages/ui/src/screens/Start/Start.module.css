@@ -323,6 +323,96 @@
 .repos {
   margin-top: 34px;
 }
+/*
+ * The agents not on this computer, under those that are and quieter: a
+ * smaller heading, ruled off, and a tile each, side by side where there is
+ * room, so many more fit in a few lines. A tile's mark and name are a step
+ * down from a row's; its one way in sits at its end.
+ */
+.away {
+  container-type: inline-size;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.awayLabel {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.spares {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.spare {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 38px;
+  padding: 4px 0;
+}
+.spareMark {
+  display: flex;
+  justify-content: center;
+  color: var(--t-3);
+}
+.spareName {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.spareWay {
+  display: flex;
+  justify-content: flex-end;
+}
+.spareBusy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.spareHelp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.spareHelp:hover {
+  color: var(--t-1);
+}
+.spareFailed {
+  grid-column: 2 / -1;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+/* Where the sheet is narrow, one tile to a line. */
+@container (max-width: 420px) {
+  .spares {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 /* A quiet line at the sheet's foot, ruled off from what was found, at the bottom where there is room. */
 .foot {
   flex: none;

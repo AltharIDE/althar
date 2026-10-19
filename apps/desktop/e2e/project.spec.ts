@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, chooseFolder, launch, openFirstProject, projectSettings } from './support'
+import { backToWork, chooseFolder, launch, openFirstProject, projectSettings, say } from './support'
 
 /*
  * A project made in a tab of its own, named first and then given its
@@ -62,7 +62,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
       'style',
       /--project-rose/,
     )
-    // How its tasks work: each switch says what it does, on and off.
+    // Tasks: each switch says when it acts.
     await expect(page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })).not.toBeChecked()
     await expect(page.getByRole('switch', { name: 'Move issues to In Progress' })).toBeChecked()
     await page.screenshot({ path: 'test-results/project-settings-general.png', animations: 'disabled' })
@@ -188,6 +188,47 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     await expect(page.getByRole('heading', { name: 'Northwind', level: 1 })).toBeVisible()
     await expect(tabs.getByRole('button', { name: /^Scratch/ })).toHaveCount(0)
     await expect(tabs.getByRole('listitem')).toHaveCount(3)
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('says a note the coordinator kept in the person’s own words, in place, shown as markdown and kept so', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const meridian = repository(home, 'meridian')
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, meridian)
+    // The person decides something in conversation, and the coordinator keeps it.
+    await say(page, 'Release from `main` on Tuesdays, **never on a Friday**. [coordinator:keep-note]')
+    await expect(page.getByText(/^Kept as note_/)).toBeVisible()
+
+    // In the project's settings, its code and emphasis show as markdown has them.
+    await projectSettings(page, 'Notes')
+    const notes = page.getByRole('region', { name: 'Notes' })
+    await expect(notes.locator('code', { hasText: 'main' })).toBeVisible()
+    await expect(notes.locator('strong', { hasText: 'never on a Friday' })).toBeVisible()
+
+    // Changed where it is: its pencil, the words as they were said, then Enter.
+    await notes.getByRole('button', { name: /^Edit “Release from/ }).click()
+    const field = notes.getByRole('textbox', { name: 'Note' })
+    await expect(field).toHaveValue('Release from `main` on Tuesdays, **never on a Friday**.')
+    await field.fill('Release from `main` on Tuesdays and Thursdays, as [the runbook](https://example.test/runbook) says.')
+    await field.press('Enter')
+    await expect(field).toBeHidden()
+    await expect(notes.getByRole('link', { name: 'the runbook' })).toHaveAttribute('href', 'https://example.test/runbook')
+    await page.screenshot({ path: 'test-results/project-note-edited.png', animations: 'disabled' })
+
+    // Read afresh from Althar, it says the new words, as they were said.
+    await page.reload()
+    await projectSettings(page, 'Notes')
+    await expect(notes.getByRole('link', { name: 'the runbook' })).toBeVisible()
+    await expect(notes.locator('code', { hasText: 'main' })).toBeVisible()
+    await expect(notes.locator('strong')).toHaveCount(0)
+    await notes.getByRole('button', { name: /^Edit “Release from/ }).click()
+    await expect(notes.getByRole('textbox', { name: 'Note' })).toHaveValue(
+      'Release from `main` on Tuesdays and Thursdays, as [the runbook](https://example.test/runbook) says.',
+    )
   } finally {
     await electronApp.close()
   }

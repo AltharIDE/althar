@@ -38,7 +38,7 @@ import altharFace from '../../../../resources/faces/althar-ai.svg'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
 import { useServices } from '../../data/services'
-import { agentLineOf, brandOf } from '../../shared/agents'
+import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
@@ -50,7 +50,7 @@ import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
-import { AgentProblem, StartError } from '../start/StartView'
+import { AgentProblem, openGuide, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
@@ -194,13 +194,17 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     ...(brand === undefined ? {} : { brand }),
     ...(line === undefined ? {} : { line }),
     ...(needsYou(agent) ? { yours: true } : {}),
+    // Not on this computer: its tab quieter, after those that are.
+    ...(agent.installed ? {} : { away: true }),
   }
 }
 
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts }: { start: StartModel; accounts: AccountSignInModel }) {
   const [agentId, setAgentId] = useState<string | null>(null)
-  const agents = start.status?.agents ?? []
+  // Those on this computer first, then the others Althar runs, each in the registry's order.
+  const all = start.status?.agents ?? []
+  const agents = [...all.filter((agent) => agent.installed), ...all.filter((agent) => !agent.installed)]
   // The agent chosen, else the one signing in, else one that needs the person, else the first.
   const chosen =
     agents.find((agent) => agent.id === agentId) ??
@@ -217,9 +221,14 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
   const brand = brandOf(chosen.id)
   return (
     <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
-      <AgentTabList label={text.agents} agents={agents.map(tabOf)} />
+      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
       <StartError model={start} />
-      <AgentTabPanel agent={tabOf(chosen)} headingLevel={2} aside={<ModelsView key={chosen.id} agent={chosen} />}>
+      {/* What its work may use, beside its accounts, once it is on this computer and can say. */}
+      <AgentTabPanel
+        agent={tabOf(chosen)}
+        headingLevel={2}
+        {...(chosen.installed ? { aside: <ModelsView key={chosen.id} agent={chosen} /> } : {})}
+      >
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
         ) : chosen.installed && chosen.download?.installing !== true ? (
@@ -234,6 +243,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
             text={{ missing: text.agentHere }}
             {...(brand === undefined ? {} : { brand })}
             {...(chosen.download === null ? {} : { size: chosen.download.size })}
+            {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
             state={
               chosen.download?.installing === true
                 ? { kind: 'installing' }
@@ -242,6 +252,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
                   : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
             }
             onInstall={() => void start.install(chosen.id)}
+            {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
           />
         )}
       </AgentTabPanel>

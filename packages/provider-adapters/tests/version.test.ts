@@ -21,6 +21,14 @@ describe('an agent’s version', () => {
     expect(await Effect.runPromise(agentVersion(without))).toBeNull()
   })
 
+  it('asks it with its own environment, as an npm-installed one found off the PATH finds its Node by it', async () => {
+    const own = {
+      ...agents.opencode,
+      version: () => ({ command: 'sh', args: ['-c', 'echo "$ALTHAR_TEST_SAYS"'], env: { ALTHAR_TEST_SAYS: '2.0.1' } }),
+    }
+    expect(await Effect.runPromise(agentVersion(own))).toBe('2.0.1')
+  })
+
   it('reads a version’s major', () => {
     expect(majorOf('2.0.29')).toBe(2)
     expect(majorOf('1.19')).toBe(1)

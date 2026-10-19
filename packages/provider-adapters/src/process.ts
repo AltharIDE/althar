@@ -1,5 +1,8 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 
 import { Deferred, Duration, Effect, type Scope } from 'effect'
@@ -93,6 +96,20 @@ export interface OwnedProcess {
   readonly stopped: Deferred.Deferred<StopReport>
   /** The last few kilobytes the process wrote to stderr, for diagnostics. */
   readonly stderrTail: () => string
+  /** Its temporary folder, where its launch asked for one of its own (`privateTemp`). */
+  readonly temp?: string
+}
+
+/** A temporary folder of a process's own, as its launch asks (`privateTemp`), and the variables that name it. */
+export const privateTemp = (spec: LaunchSpec): { readonly folder: string; readonly env: Readonly<Record<string, string>> } | undefined => {
+  if (spec.privateTemp !== true) return undefined
+  const folder = mkdtempSync(join(tmpdir(), 'althar-agent-'))
+  return { folder, env: { TMPDIR: folder, TEMP: folder, TMP: folder } }
+}
+
+/** Removes a process's own temporary folder, once nothing of it runs. */
+export const removeTemp = (folder: string | undefined) => {
+  if (folder !== undefined) rmSync(folder, { recursive: true, force: true })
 }
 
 export interface SpawnOptions {
@@ -173,13 +190,17 @@ export const spawnOwned = (
     Effect.gen(function* () {
       const exited = yield* Deferred.make<ProcessExit>()
       const stopped = yield* Deferred.make<StopReport>()
-      const inherited = childEnvironment(spec)
+      const temp = privateTemp(spec)
+      const inherited = { ...childEnvironment(spec), ...temp?.env }
       // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled; what it runs may inherit more of Althar's environment, as reaching the device needs.
       const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
       const env = launched === spec ? inherited : childEnvironment(launched)
       const child = yield* Effect.try({
         try: () => spawn(launched.command, [...launched.args], { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'], env }),
-        catch: (cause) => new AgentStartFailed({ command: launched.command, reason: String(cause) }),
+        catch: (cause) => {
+          removeTemp(temp?.folder)
+          return new AgentStartFailed({ command: launched.command, reason: String(cause) })
+        },
       })
       let stderr = ''
       child.stderr.on('data', (chunk: Buffer) => {
@@ -196,7 +217,10 @@ export const spawnOwned = (
       child.once('exit', (code, signal) => Deferred.doneUnsafe(exited, Effect.succeed({ code, signal })))
       const pid = yield* Effect.callback<number, AgentStartFailed>((resume) => {
         child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
-        child.once('error', (error) => resume(Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message }))))
+        child.once('error', (error) => {
+          removeTemp(temp?.folder)
+          resume(Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message })))
+        })
       })
       const osStartedAt = yield* osStartTime(pid)
       return {
@@ -208,6 +232,7 @@ export const spawnOwned = (
         exited,
         stopped,
         stderrTail: () => stderr,
+        ...(temp === undefined ? {} : { temp: temp.folder }),
       } satisfies OwnedProcess
     }),
     (owned) =>
@@ -215,6 +240,8 @@ export const spawnOwned = (
         const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2))
         // The report waits until the OS has reaped the agent itself, so its pid is free when the report says so.
         yield* Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2)))
+        // Its own temporary folder goes once nothing of it is left to use it.
+        if (!stop.survivors) yield* Effect.sync(() => removeTemp(owned.temp))
         yield* Deferred.succeed(owned.stopped, stop)
       }),
   )
