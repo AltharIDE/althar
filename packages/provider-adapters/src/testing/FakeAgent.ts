@@ -229,9 +229,10 @@ export interface FakeAgentOptions {
   /**
    * How many of each session's first prompts end at once, having said nothing
    * and used no tokens, as Claude Code's do while another of its processes
-   * renews the sign-in they share. It reads them all the same.
+   * renews the sign-in they share, or which, by their number from 1. It reads
+   * them all the same.
    */
-  readonly blank?: number
+  readonly blank?: number | ReadonlyArray<number>
 }
 
 interface SessionState {
@@ -1197,7 +1198,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
       const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
       session.prompts += 1
-      if (session.prompts <= (options.blank ?? 0)) {
+      const blank = options.blank ?? 0
+      if (typeof blank === 'number' ? session.prompts <= blank : blank.includes(session.prompts)) {
         session.unread = `${prompted}\n\n`
         return { stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }
       }

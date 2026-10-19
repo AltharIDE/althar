@@ -16,6 +16,7 @@ import { Policies } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { fakeAgents, notices, repository, runtime, until } from './support'
 
 /*
@@ -236,6 +237,68 @@ describe('A step a restart stopped', () => {
         // Carried on, then told to carry on three times.
         assert.strictEqual((yield* turnsOf(task.threadId)).length, 4)
       }).pipe(Effect.provide(runtime(file, { blank: 10 }, { idle: { blank: Duration.millis(100) } })))
+    }),
+  )
+
+  it.live('counts the turns that did nothing only in a row: a turn that did something gives it its tries again', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file)
+      aDayLater(file)
+      yield* Effect.gen(function* () {
+        const sessions = yield* Sessions
+        // Its first three turns do nothing; told to carry on, the fourth works, until the person stops it.
+        yield* until(turnsOf(task.threadId), (rows) => rows.length === 4 && rows[3]?.state === 'delivered')
+        yield* sessions.interrupt(task.threadId)
+        yield* until(turnsOf(task.threadId), (rows) => rows[3]?.state === 'interrupted')
+        // What they say next does nothing at first; told to carry on, it works again.
+        const body = 'Go on.'
+        yield* sessions.send({
+          envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+          threadId: task.threadId,
+          body,
+        })
+        const turns = yield* until(turnsOf(task.threadId), (rows) => rows.length === 6)
+        assert.deepStrictEqual(
+          turns.slice(3, 5).map((turn) => [turn.state, turn.tokens]),
+          [
+            ['interrupted', null],
+            ['completed', 0],
+          ],
+        )
+        assert.isNull(turns[5]?.tokens)
+        assert.notInclude(
+          (yield* callsOf(task.taskId)).map((call) => call.why),
+          'stalled',
+        )
+      }).pipe(Effect.provide(runtime(file, { blank: [1, 2, 3, 5] }, { idle: { blank: Duration.millis(100) } })))
+    }),
+  )
+
+  it.live('isn’t told to carry on where another turn came while it waited, as one the person stopped', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file)
+      aDayLater(file)
+      yield* Effect.gen(function* () {
+        const sessions = yield* Sessions
+        yield* until(turnsOf(task.threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
+        // While Althar waits to tell it to carry on, the person says something, and stops the turn it starts.
+        const body = 'And the docs.'
+        yield* sessions.send({
+          envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+          threadId: task.threadId,
+          body,
+        })
+        yield* until(turnsOf(task.threadId), (rows) => rows.length === 2 && rows[1]?.state === 'delivered')
+        yield* sessions.interrupt(task.threadId)
+        yield* until(turnsOf(task.threadId), (rows) => rows[1]?.state === 'interrupted')
+        yield* Effect.sleep(Duration.seconds(2))
+        // The turn the person stopped is theirs to carry on.
+        assert.strictEqual((yield* turnsOf(task.threadId)).length, 2)
+        assert.strictEqual((yield* implement)[0]?.state, 'running')
+        assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+      }).pipe(Effect.provide(runtime(file, { blank: 1 }, { idle: { blank: Duration.seconds(1) } })))
     }),
   )
 
