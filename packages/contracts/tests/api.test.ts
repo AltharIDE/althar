@@ -183,6 +183,7 @@ describe('the API', () => {
         passed: null,
         failed: null,
         failing: [],
+        logs: [],
         url: null,
         outsider: false,
       },

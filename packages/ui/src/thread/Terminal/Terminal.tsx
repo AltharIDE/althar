@@ -34,9 +34,12 @@ export const terminalText: TerminalText = {
  */
 export const isTerminalError = (line: string) => line.trimStart().startsWith('✗') || /\berror\b/i.test(line)
 
-/* colour and cursor codes, as a program writes them to a terminal; shown as text they are noise */
+/*
+ * colour and cursor codes, as a program writes them to a terminal; shown as text they are noise. A title or link code
+ * (ESC ]) runs to its end without crossing another escape, so a log of unended ones is read once, not again from each.
+ */
 // eslint-disable-next-line no-control-regex
-const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007]*(\u0007|\u001b\\)/g
+const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)/g
 /** A line without its terminal escape codes. */
 export const plainTerminalLine = (line: string) => line.replace(ANSI, '')
 

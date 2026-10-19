@@ -15,7 +15,7 @@ import { record } from '../src/renderer/shared/dictation/recorder'
 import { changeSession, listeningIn } from '../src/renderer/shared/dictation/sessions'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
 import { fakeClient, fakeHost, items, snapshot } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 /*
  * What the person writes in a composer stays with its thread: they go to the
@@ -34,6 +34,7 @@ function Project({ room }: { room?: Room }) {
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
+      settings={useSettingsOf('p1')}
       onTask={vi.fn()}
       {...(room === undefined ? {} : { room })}
     />
@@ -345,7 +346,12 @@ describe('dictation carried from a task', () => {
     const card = await screen.findByRole('region', { name: 'To the lead · Add a retry' })
     await userEvent.click(within(card).getByRole('button', { name: 'Send to the lead' }))
     await waitFor(() =>
-      expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on with the tests.', disposition: 'after_current' }),
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Carry on with the tests.',
+        disposition: 'after_current',
+        dictated: true,
+      }),
     )
     await waitFor(() => expect(screen.queryByRole('region', { name: 'To the lead · Add a retry' })).toBeNull())
     expect((await coordinatorBox()).value).toBe('')
@@ -464,7 +470,12 @@ describe('dictation carried with the person', () => {
     await userEvent.type(field, ' On mobile.')
     await userEvent.click(within(card).getByRole('button', { name: 'Send to the coordinator' }))
     await waitFor(() =>
-      expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Why is checkout slow? On mobile.', disposition: 'after_current' }),
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'thc',
+        body: 'Why is checkout slow? On mobile.',
+        disposition: 'after_current',
+        dictated: true,
+      }),
     )
     await waitFor(() => expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull())
     // Nothing went to the task.

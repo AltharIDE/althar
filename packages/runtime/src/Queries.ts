@@ -7,6 +7,7 @@ import {
   AttentionRequest,
   type BoardSnapshot,
   type ChangeSummary,
+  CheckLogShown,
   ChecksSummary,
   type CoordinatorSnapshot,
   type HomeEvent,
@@ -157,6 +158,8 @@ interface ItemRow {
   readonly agentId: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
   readonly disposition: string | null
+  /** For a message the person said: some of it was dictated. */
+  readonly dictated?: number | null
   /** For a tool call that asked: what was decided, last. */
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
@@ -241,6 +244,10 @@ const number = (value: unknown, key: string): number | null => {
   const found = field(value, key)
   return typeof found === 'number' ? found : null
 }
+
+/** Failed checks' logs as an arrival kept them; one not of that shape, or from before they were kept, is left out. */
+const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
+  Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
 
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
@@ -354,7 +361,14 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
           pictures: picturesOf(field(content, 'pictures')),
         },
-        input: row.inputState === null ? null : { state: row.inputState, interrupting: row.disposition === 'interrupt_and_continue' },
+        input:
+          row.inputState === null
+            ? null
+            : {
+                state: row.inputState,
+                interrupting: row.disposition === 'interrupt_and_continue',
+                ...(row.dictated === 1 ? { dictated: true } : {}),
+              },
       }
     case 'agent_message':
     case 'agent_thought':
@@ -495,6 +509,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           passed: number(content, 'passed'),
           failed: number(content, 'failed'),
           failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
+          logs: logsShown(field(content, 'logs')),
           url: text(content, 'url') || null,
           outsider: field(content, 'outsider') === true,
         },
@@ -735,7 +750,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
-            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, i.created_at,
+            SELECT i.id, i.sequence, i.kind, i.content, s.agent_id, u.state AS input_state, u.disposition, u.dictated, i.created_at,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
@@ -1169,7 +1184,7 @@ export class Queries extends Context.Service<
             : diff
         })
 
-      /** A task's issue and pull requests, as their external links last saw them. */
+      /** A task's issue and pull requests, as their external links last saw them, and the connection its issue is read through. */
       const linksOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1181,8 +1196,10 @@ export class Queries extends Context.Service<
             url: string
             snapshot: string
             listening: number
+            connectionId: string | null
           }>`
-            SELECT kind, product, ref, key, url, snapshot, listening FROM external_links WHERE task_id = ${taskId} ORDER BY created_at`
+            SELECT kind, product, ref, key, url, snapshot, listening, connection_id FROM external_links WHERE task_id = ${taskId}
+            ORDER BY created_at`
           const issueRow = links.find((link) => link.kind === 'issue')
           const issue = ((): IssueSummary | null => {
             if (issueRow === undefined) return null
@@ -1254,7 +1271,7 @@ export class Queries extends Context.Service<
               ),
             { concurrency: 'unbounded' },
           )
-          return { issue, changes }
+          return { issue, issueConnection: issueRow?.connectionId ?? null, changes }
         })
 
       /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */
@@ -1394,7 +1411,14 @@ export class Queries extends Context.Service<
         })
 
       /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. Its links, where they are read already. */
-      const cardFor = (taskId: string, links?: { readonly issue: IssueSummary | null; readonly changes: ReadonlyArray<ChangeSummary> }) =>
+      const cardFor = (
+        taskId: string,
+        links?: {
+          readonly issue: IssueSummary | null
+          readonly issueConnection: string | null
+          readonly changes: ReadonlyArray<ChangeSummary>
+        },
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
@@ -1542,7 +1566,7 @@ export class Queries extends Context.Service<
           const implement = planned.find((step) => step.key === 'implement')
           const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
-          const { issue, changes } = links ?? (yield* linksOf(taskId))
+          const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // What it makes: its plan and its pull requests say so, whatever it wrote (a quick task stays plain until it is made a
           // change); for a review, git does too, by what is on its branch; for a task that settled, once, as nothing changes it
@@ -1574,7 +1598,16 @@ export class Queries extends Context.Service<
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                   },
-            issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
+            issue:
+              issue === null
+                ? null
+                : {
+                    product: issue.product,
+                    key: issue.key,
+                    title: issue.title,
+                    url: issue.url,
+                    ...(issueConnection === null ? {} : { connectionId: issueConnection }),
+                  },
             // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
             change: shown,
             earlier: changes.filter((candidate) => candidate !== shown).toReversed(),

@@ -25,9 +25,9 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
-  Panel,
   SettingList,
   SettingRow,
+  SettingsLayout,
   SettingsNav,
   SettingSwitch,
   UpdateReady,
@@ -100,9 +100,12 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
   }
   const open = sectionText[section]
   return (
-    <div className={s.page}>
-      <div className={s.columns}>
-        <aside className={s.side}>
+    <SettingsLayout
+      section={section}
+      title={open.title}
+      lede={open.lede}
+      side={
+        <>
           <QuickCards side preferences={preferences} sounds={sounds.list} onSection={onSection} />
           <Failed when={preferences.failed} />
           <SettingsNav
@@ -118,17 +121,11 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
             value={section}
             onChange={onSection}
           />
-        </aside>
-        <main className={s.main}>
-          {/* Another section is a sheet of its own: nothing half done in one carries over to the next. */}
-          <Panel key={section} title={open.title} lede={open.lede} headingLevel={1}>
-            <div className={s.body}>
-              <SectionBody section={section} start={start} accounts={accounts} connections={connections} looks={looks} />
-            </div>
-          </Panel>
-        </main>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <SectionBody section={section} start={start} accounts={accounts} connections={connections} looks={looks} />
+    </SettingsLayout>
   )
 }
 

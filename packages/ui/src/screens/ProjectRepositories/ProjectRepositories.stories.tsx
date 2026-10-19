@@ -9,13 +9,19 @@ const meta = {
   title: 'Screens/ProjectRepositories',
   component: ProjectRepositories,
   parameters: { layout: 'fullscreen' },
-  decorators: [(Story) => <div style={{ background: 'var(--n-2)', padding: '14px 48px 72px', minHeight: '100vh' }}>{Story()}</div>],
+  // On a section's sheet, at the width a project's settings give it.
+  decorators: [
+    (Story) => (
+      <div style={{ background: 'var(--n-2)', padding: '24px 48px 72px', minHeight: '100vh' }}>
+        <div style={{ maxWidth: 980, padding: '18px 22px', borderRadius: 12, background: 'var(--n-1)' }}>{Story()}</div>
+      </div>
+    ),
+  ],
   args: {
     project: 'Meridian',
     repositories: MAP_MERIDIAN,
     hosts: MAP_HOSTS,
     worktrees: '~/Althar/meridian',
-    onBack: fn(),
     onRoleChange: fn(),
     onTargetChange: fn(),
     onLeaveOut: fn(),
@@ -28,18 +34,15 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The page itself, which takes the drops: what holds its heading. */
-const pageOf = (canvasElement: HTMLElement) =>
-  within(canvasElement).getByRole('heading', { level: 1 }).closest('header')?.parentElement ?? canvasElement
+/** The repositories themselves, which take the drops. */
+const regionOf = (canvasElement: HTMLElement) => within(canvasElement).getByRole('region', { name: 'Repositories' })
 
-/** Meridian's three: where each is on this Mac, and where its work goes. */
+/** Meridian's three: where each is on this computer, and where its work goes. */
 export const Default: Story = {
-  play: async ({ args, canvasElement }) => {
+  play: async ({ canvasElement }) => {
     const page = within(canvasElement)
-    await expect(page.getByRole('heading', { level: 1, name: 'Repositories' })).toBeVisible()
-    await expect(page.getByText('What Meridian’s tasks may change, and where their work goes')).toBeVisible()
-    await userEvent.click(page.getByRole('button', { name: 'Back to Meridian' }))
-    await expect(args.onBack).toHaveBeenCalledOnce()
+    await expect(page.getByRole('heading', { level: 2, name: 'Repositories' })).toBeVisible()
+    await expect(page.getByText('Its folders on this computer, and where each one’s work goes.')).toBeVisible()
   },
 }
 
@@ -62,11 +65,11 @@ export const PickingAFolder: Story = {
   },
 }
 
-/** A folder held over the page says to let go, and dropped, adds it. */
+/** A folder held over them says to let go, and dropped, adds it. */
 export const DroppingAFolder: Story = {
   play: async ({ args, canvasElement }) => {
     const page = within(canvasElement)
-    const root = pageOf(canvasElement)
+    const root = regionOf(canvasElement)
     const folder = new File([], 'meridian-infra')
     const dataTransfer = { types: ['Files'], files: [folder] }
     await fireEvent.dragEnter(root, { dataTransfer })
@@ -78,11 +81,11 @@ export const DroppingAFolder: Story = {
   },
 }
 
-/** Something else held over the page, like text, isn't a folder, and a folder taken away again is let go. */
+/** Something else held over them, like text, isn't a folder, and a folder taken away again is let go. */
 export const DraggingSomethingElse: Story = {
   play: async ({ args, canvasElement }) => {
     const page = within(canvasElement)
-    const root = pageOf(canvasElement)
+    const root = regionOf(canvasElement)
     await fireEvent.dragEnter(root, { dataTransfer: { types: ['text/plain'], files: [] } })
     await expect(page.getByText('or drop a folder here')).toBeVisible()
     await fireEvent.dragEnter(root, { dataTransfer: { types: ['Files'], files: [] } })
@@ -104,9 +107,9 @@ export const NoAdding: Story = {
 /** The last change didn't happen, and says why. */
 export const Failed: Story = { args: { error: 'There’s no git repository in Downloads.' } }
 
-/** At the window's least width. */
+/** At the narrowest a project's settings give it. */
 export const Narrow: Story = {
-  decorators: [(Story) => <div style={{ width: 880 }}>{Story()}</div>],
+  decorators: [(Story) => <div style={{ width: 640 }}>{Story()}</div>],
 }
 
 export const AllStates: Story = {

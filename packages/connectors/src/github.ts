@@ -118,6 +118,13 @@ const CheckRuns = Schema.Struct({
   ),
 })
 
+/** One check run, with what it reported beyond its title. */
+const CheckRunAnswer = Schema.Struct({
+  output: Schema.optional(
+    Schema.Struct({ summary: Schema.optional(Schema.NullOr(Schema.String)), text: Schema.optional(Schema.NullOr(Schema.String)) }),
+  ),
+})
+
 const CombinedStatus = Schema.Struct({
   statuses: Schema.Array(
     Schema.Struct({
@@ -629,16 +636,20 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         return [...fromRuns, ...fromStatuses]
       }),
     checkLog: (repository, check, whole = false) => {
-      // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's.
+      // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's. GitHub answers with a redirect to the log in
+      // its storage, signed for a minute, which `text` follows without the token. Refused, or gone once kept long enough, it fails.
       const match = /^run:(\d+):github-actions$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
-      return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(
-        Effect.map((log) => (whole ? log : tail(log))),
-        Effect.catchIf(
-          (error) => error.reason === 'not_found' || error.reason === 'forbidden',
-          () => Effect.succeed(null),
-        ),
-      )
+      return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(Effect.map((log) => (whole ? log : tail(log))))
+    },
+    checkReport: (repository, check) => {
+      // A check run from another service (CodeQL, CircleCI's app) keeps its log there, but says what it found in its output.
+      const match = /^run:(\d+):/.exec(check.id)
+      if (match === null) return Effect.succeed(null)
+      return Effect.map(http.json(CheckRunAnswer, 'GET', `${repo(repository)}/check-runs/${match[1]}`), (run) => {
+        const said = [run.output?.summary, run.output?.text].filter((part) => part != null && part.trim() !== '').join('\n\n')
+        return said === '' ? null : tail(said)
+      })
     },
     rerun: (repository, check) => {
       // Only a GitHub Actions job runs again from here: its check run's id is the job's.

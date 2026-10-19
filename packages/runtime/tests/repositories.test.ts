@@ -5,12 +5,13 @@ import { basename, dirname, join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { coordinatorFolder } from '../src/coordinatorFolder'
+import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -352,10 +353,19 @@ describe('a task of several repositories', () => {
       bares[name] = mkdtempSync(join(tmpdir(), 'althar-remote-'))
       execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bares[name] })
     }
-    const github = makeFakeService({ pushUrl: (path) => bares[path.at(-1) ?? ''] ?? '' })
+    /** A pull request whose checks the host breaks on reading, where a test says. */
+    let breaks: number | null = null
+    const github = makeFakeService({
+      pushUrl: (path) => bares[path.at(-1) ?? ''] ?? '',
+      checksFor: (number) => {
+        if (number === breaks) throw new Error('The fake checks broke')
+        return undefined
+      },
+    })
     github.addRepository(['meridian', 'api'])
     github.addRepository(['meridian', 'web'])
     const folder = folderOf('api', 'web')
+    const reported: Array<Failure> = []
     for (const name of ['api', 'web']) git(join(folder, name), 'remote', 'add', 'origin', `${HOST}/meridian/${name}.git`)
     return Effect.gen(function* () {
       const connections = yield* Connections
@@ -426,6 +436,21 @@ describe('a task of several repositories', () => {
       assert.include(read, `PR #${web?.number ?? 0}`)
       // Numbers repeat across repositories, so the lead names one by its repository too.
       assert.include(read, `web#${web?.number ?? 0}: `)
+      // One that can't be read says so on its own, and the other is read as ever: the host's answer as it gave it.
+      github.failNext('change', 'forbidden')
+      const partly = yield* callTool(lead, 'read_pull_request', {})
+      assert.match(partly, new RegExp(`^api#${api?.number ?? 0}: Althar couldn’t read it \\(The code host said: .+\\)\\.\n\n`))
+      assert.include(partly, `web#${web?.number ?? 0}: PR #${web?.number ?? 0}, "`)
+      // What Althar didn't expect is in its words too, and reported; the host's own answer isn't.
+      breaks = web?.number ?? 0
+      const broken = yield* callTool(lead, 'read_pull_request', {})
+      breaks = null
+      assert.include(broken, `api#${api?.number ?? 0}: PR #${api?.number ?? 0}, "`)
+      assert.include(broken, `web#${web?.number ?? 0}: Althar couldn’t read it (The fake checks broke).`)
+      assert.deepStrictEqual(
+        reported.filter((failure) => failure.where === 'Changes.read').map((failure) => failure.message),
+        ['The fake checks broke'],
+      )
       assert.include(
         yield* callTool(lead, 'reply_on_pull_request', { body: 'Done.' }),
         `This task has several pull requests: api#${api?.number ?? 0}, web#${web?.number ?? 0}.`,
@@ -482,6 +507,12 @@ describe('a task of several repositories', () => {
       github.mergeByHand(web?.number ?? 0)
       yield* changes.refresh(task.taskId)
       yield* until(state, (rows) => rows[0]?.state === 'done')
-    }).pipe(Effect.provide(withQueries(':memory:', {}, { connectors: fakeConnectors({ github }) })))
+    }).pipe(
+      Effect.provide(withQueries(':memory:', {}, { connectors: fakeConnectors({ github }) })),
+      Effect.provideService(Failures, {
+        report: (cause, where, agent) => Effect.sync(() => void reported.push(failureOf(cause, where, agent ?? null))),
+        events: Stream.empty,
+      }),
+    )
   })
 })

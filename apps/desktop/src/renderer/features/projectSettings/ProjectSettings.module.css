@@ -1,0 +1,23 @@
+/* A switch's other way, on a line of its own in its note, named first. */
+.offLine {
+  display: block;
+  margin-top: 3px;
+}
+.off {
+  font-weight: 500;
+  color: var(--t-2);
+}
+/* why a switch didn't hold, under what it does */
+.failedLine {
+  display: block;
+  margin-top: 3px;
+  color: var(--danger);
+}
+
+/* a line on the section as a whole, after its parts */
+.quiet {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}

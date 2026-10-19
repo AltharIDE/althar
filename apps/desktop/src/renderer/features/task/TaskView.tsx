@@ -32,13 +32,14 @@ import {
   TitleBar,
 } from '@althar/ui'
 
+import { device } from '../../shared/device'
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, useDraft } from '../../shared/drafts'
+import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
@@ -554,6 +555,7 @@ export function TaskView({
     if (said === undefined || !images.fits(said.pictures)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
+      if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said.pictures)
     }
   }
@@ -935,6 +937,7 @@ export function TaskView({
       {host.lightbox}
       {abandoning && (
         <AbandonTask
+          text={{ branchHere: (name) => `Its branch ${name} stays on ${device.this}.` }}
           activity={can('stop') ? TaskActivity.Working : can('start') ? TaskActivity.Planned : TaskActivity.Still}
           worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
           branch={snapshot.task.branch}
