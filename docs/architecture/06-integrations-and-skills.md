@@ -491,6 +491,18 @@ now. Nothing reaches the tracker on its word:
   goes there (a container), its title, body and labels. The person files it,
   changes it first, or discards it. There is no countdown: a draft left
   alone files nothing.
+- **A task's lead can draft too**, with `draft_issue`, and look for what is
+  tracked already with `find_issues`: a bug or follow-up it comes across, or
+  several the person asks it to file. The card is in the task's thread, and
+  the task stands in Needs you while any wait (as a call does, though no
+  `attention_requests` row stands for it); a task with several offers File
+  all. Unnamed, a lead's draft goes beside the issue its task came from,
+  then where the project's issues come from. Once the person files or
+  discards one, the lead is told in its thread, with the key and link, as
+  the coordinator hears it as news (a lead's drafts aren't the
+  coordinator's news). Leads never file on their own: that is the one flag
+  `leadsNeedTheCard` in `IssueDrafts.ts`. A review's lead has no such tool,
+  and a reviewer only reads.
 - **Where it goes** is what the coordinator names, a tracker by its name and
   a container by its id, key or name; or, without them, where the project's
   issues already come from (the newest issue a task came from, or a draft
