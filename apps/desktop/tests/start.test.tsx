@@ -502,7 +502,7 @@ describe('the start', () => {
     expect(screen.getByText(/latest release from GitHub, about 45 MB/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Download' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
-    expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it')).toBeTruthy()
+    expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it…')).toBeTruthy()
     finish()
     expect((await screen.findByRole('alert')).textContent).toBe('GitHub couldn’t be reached to find OpenCode.')
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
