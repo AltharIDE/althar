@@ -112,8 +112,12 @@ export const relayOut = (
   facts: DeviceFacts,
 ): LaunchSpec => {
   const args = ['--watch-bus', '--host', '--clear-env']
+  // What the launch put first on its PATH, beyond the sandbox's own (an npm-installed agent's folder, where its Node is), stays first out there.
+  const sandboxPath = new Set((facts.ambient.PATH ?? '').split(':'))
+  const ownPath = (spec.env?.PATH ?? '').split(':').filter((part) => part !== '' && !sandboxPath.has(part))
   for (const name of FROM_THE_DEVICE) {
-    const value = facts.env[name]
+    const value =
+      name === 'PATH' && ownPath.length > 0 ? [...ownPath, facts.env.PATH].filter((part) => part !== undefined).join(':') : facts.env[name]
     if (value !== undefined) args.push(`--env=${name}=${value}`)
   }
   for (const name of FROM_THE_EXECUTOR) {

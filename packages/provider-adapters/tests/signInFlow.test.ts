@@ -63,7 +63,7 @@ process.stdin.once('data', (data) => {
  * page to open, as it does, on stdout or stderr, then answers as the browser
  * would have it. Its temporary folder is where it says.
  */
-const ACP_SERVER = (ending: 'success' | 'subscription', stream: 'stdout' | 'stderr') => `
+const ACP_SERVER = (ending: 'success' | 'subscription', stream: 'stdout' | 'stderr' | 'split') => `
 let buffer = ''
 const say = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
 process.stderr.write('temp ' + process.env.TMPDIR + '\\n')
@@ -75,14 +75,22 @@ process.stdin.on('data', (data) => {
     if (message.method === 'initialize') say({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1, authMethods: [{ id: message.params.clientInfo.name === 'althar' ? 'oauth-personal' : 'x', name: 'Log in with Google' }] } })
     if (message.method === 'authenticate') {
       if (message.params.methodId !== 'oauth-personal') return say({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'no such method' } })
-      process.${stream}.write('Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/v2/auth?state=s1\\n')
+      ${
+        stream === 'split'
+          ? // Its line in two writes, apart, as a pipe may hand it on.
+            "process.stderr.write('Open the following link to authenticate the ACP server: https://accounts.google.com/o/oau'); setTimeout(() => process.stderr.write('th2/v2/auth?state=s1\\n'), 20)"
+          : `process.${stream}.write('Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/v2/auth?state=s1\\n')`
+      }
       setTimeout(() => say(${ending === 'success' ? "{ jsonrpc: '2.0', id: message.id, result: {} }" : "{ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Internal error: SUBSCRIPTION_REQUIRED' } }"}), 30)
     }
   }
 })
 setInterval(() => {}, 1000)`
 
-const antigravity = (ending: 'success' | 'subscription' = 'success', stream: 'stdout' | 'stderr' = 'stderr'): AgentDefinition => ({
+const antigravity = (
+  ending: 'success' | 'subscription' = 'success',
+  stream: 'stdout' | 'stderr' | 'split' = 'stderr',
+): AgentDefinition => ({
   ...agents.antigravity,
   signIn: {
     ...agents.antigravity.signIn,
@@ -192,8 +200,8 @@ describe('signing in inside Althar', () => {
     expect(said.at(-1)?.kind).toBe('failed')
   })
 
-  it('signs Antigravity in over ACP: opens the page it prints, on either stream, and ends when it answers', async () => {
-    for (const stream of ['stderr', 'stdout'] as const) {
+  it('signs Antigravity in over ACP: opens the page it prints, on either stream and however its line arrives, and ends when it answers', async () => {
+    for (const stream of ['stderr', 'stdout', 'split'] as const) {
       const opened: string[] = []
       const said = await run(antigravity('success', stream), { way: 'browser', openUrl: (url) => void opened.push(url) })
       expect(opened).toEqual(['https://accounts.google.com/o/oauth2/v2/auth?state=s1'])

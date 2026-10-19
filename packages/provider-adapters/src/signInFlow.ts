@@ -320,16 +320,26 @@ const acpAuthenticate = (
     waiting.delete(message.id)
     then?.(message.error === undefined ? null : typeof message.error.message === 'string' ? message.error.message : 'It refused.')
   }
-  let buffer = ''
-  child.stdout.on('data', (chunk: Buffer) => {
-    buffer += String(chunk)
-    for (let at = buffer.indexOf('\n'); at >= 0; at = buffer.indexOf('\n')) {
-      const line = buffer.slice(0, at)
-      buffer = buffer.slice(at + 1)
-      heard(line)
-    }
-  })
-  child.stderr.on('data', (chunk: Buffer) => look(String(chunk)))
+  // Each stream a whole line at a time, as a pipe keeps no writes' bounds: the page is never read from half its line.
+  // A last line left unended counts once the stream ends.
+  const byLine = (stream: NodeJS.ReadableStream, each: (line: string) => void) => {
+    let buffer = ''
+    stream.setEncoding('utf8')
+    stream.on('data', (chunk: string) => {
+      buffer += chunk
+      for (let at = buffer.indexOf('\n'); at >= 0; at = buffer.indexOf('\n')) {
+        const line = buffer.slice(0, at)
+        buffer = buffer.slice(at + 1)
+        each(line)
+      }
+    })
+    stream.on('end', () => {
+      if (buffer !== '') each(buffer)
+      buffer = ''
+    })
+  }
+  byLine(child.stdout, heard)
+  byLine(child.stderr, look)
   child.on('exit', () => end({ kind: 'failed', message: `${agent.name} stopped signing in.` }))
   send('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'althar', version: '0' } }, (error) => {
     if (error !== null) return end({ kind: 'failed', message: error })
