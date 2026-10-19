@@ -877,6 +877,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
+    moveInLine: vi.fn(async () => {}),
+    lineOldestFirst: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),

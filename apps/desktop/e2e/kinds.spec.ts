@@ -13,7 +13,7 @@ import { launch, openFirstProject, planTask, say } from './support'
  * task whose lead asks the person, its question its card's why; a change at
  * work, its steps on its card; and a plain task, started with no plan, that
  * finished and waits in Needs you as Finished, opened or not, until the
- * person presses Done or Keep for later (ADR-049). No other card has
+ * person presses Done or Keep for later (ADR-050). No other card has
  * anything to press but itself. Kept, it waits behind Settled's tab; Done,
  * it settles; written to again, its round ends back in Needs you. Then ⌘K
  * finds a task by what it was about.

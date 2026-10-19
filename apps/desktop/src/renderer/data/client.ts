@@ -147,6 +147,10 @@ export interface Client {
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
+  /** Puts a task waiting for a free agent at a place in its project's line, from 0 the front; the line starts in that order. */
+  readonly moveInLine: (taskId: string, to: number) => Promise<void>
+  /** Puts a project's line back in the order its tasks began waiting. */
+  readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
@@ -497,6 +501,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
+    moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
+    lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),

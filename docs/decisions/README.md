@@ -56,4 +56,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [046](046-crash-reports-to-posthog-from-main.md) | Errors and crashes go to PostHog's error tracking from the main process, masked, behind a switch of their own; native minidumps stay on the computer |
 | [047](047-failures-kept-where-they-belong-and-reported-at-the-edge.md) | Failures are kept to what they belong to, and what Althar didn't expect is reported where it is kept |
 | [048](048-where-the-runtime-runs-and-who-may-reach-it.md) | The runtime stays in the app and runs headless too, and a client on the local socket can't answer for the person (proposed) |
-| [049](049-a-finished-task-waits-for-the-person-to-settle-it.md) | A finished task that isn't a change waits in Needs you until the person settles it |
+| [049](049-the-line-up-next-is-in-the-person-s-order.md) | The line up next is every task no agent has worked on yet, in the person's order |
+| [050](050-a-finished-task-waits-for-the-person-to-settle-it.md) | A finished task that isn't a change waits in Needs you until the person settles it |

@@ -1376,11 +1376,18 @@ export class Queries extends Context.Service<
         }
       })
 
-      /** A waiting task's place in the order what waits starts, among everything that waits: 1 starts first. */
+      /**
+       * A waiting task's place in its project's line, the tasks that wait for a place before any agent has worked on them, in
+       * the order they start (1 first), and whether the line is in the person's order; null where it isn't in the line.
+       */
       const placeOf = (taskId: string) =>
         Effect.gen(function* () {
-          const order = yield* (yield* Busy).order
-          return Math.max(1, order.findIndex((waiter) => waiter.taskId === taskId && waiter.review !== true) + 1)
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+          if (task === undefined) return null
+          const line = yield* (yield* Busy).line(task.projectId)
+          const at = line.tasks.indexOf(taskId)
+          return at < 0 ? null : { place: at + 1, reordered: line.reordered }
         })
 
       /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
@@ -1531,6 +1538,8 @@ export class Queries extends Context.Service<
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
+          // Waiting so before any agent has worked on it, whatever its kind: in its project's line, up next.
+          const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
           const unshipped =
             after.length === 0
               ? null
@@ -1554,7 +1563,7 @@ export class Queries extends Context.Service<
             if (task.waiting > 0) return 'waiting'
             if (busy || queued || resolving !== undefined) return 'running'
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
-            // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-049).
+            // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-050).
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
@@ -1655,7 +1664,8 @@ export class Queries extends Context.Service<
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
-            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true, place: yield* placeOf(taskId) } : {}),
+            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
@@ -2072,6 +2082,7 @@ export class Queries extends Context.Service<
               handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,
+              ...(card?.inLine === true && card.place !== undefined ? { place: card.place } : {}),
               steps: card?.plan?.steps ?? [],
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,

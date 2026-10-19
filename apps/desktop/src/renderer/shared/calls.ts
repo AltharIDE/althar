@@ -70,7 +70,7 @@ type Reviewing = { readonly posted: unknown; readonly waiting?: boolean | undefi
 
 /**
  * A review whose review was posted, written to again, that its lead answered
- * drafting nothing to post: finished, as a quick task is (ADR-049).
+ * drafting nothing to post: finished, as a quick task is (ADR-050).
  */
 export const isAnswered = (reviewing: Reviewing): boolean => reviewing != null && reviewing.posted != null && reviewing.waiting === false
 
