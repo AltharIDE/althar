@@ -125,7 +125,7 @@ const changing = fn()
 export const ChangingConflicts: Story = {
   args: { conflicts: { choice: 'project', project: true, onChange: changing } },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).queryByText('Auto-resolve conflicts: off')).toBeNull()
+    await expect(within(canvasElement).queryByText('Resolve conflicts automatically: off')).toBeNull()
     const page = await opened(canvasElement)
     await expect(await page.findByRole('menuitemradio', { name: /Use the project setting/ })).toHaveAttribute('aria-checked', 'true')
     await userEvent.click(await page.findByRole('menuitemradio', { name: /Off for this task/ }))

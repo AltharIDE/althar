@@ -15,15 +15,16 @@
 .button svg {
   color: var(--t-3);
 }
+/* washes of ink, which read on the task's bar and on the tabs' alike */
 .button:hover {
-  background: var(--n-3);
+  background: var(--line);
   color: var(--t-1);
 }
 .button:active {
-  background: var(--n-4);
+  background: var(--line-2);
 }
 .button[aria-expanded='true'] {
-  background: var(--n-4);
+  background: var(--line-2);
   color: var(--t-1);
 }
 .button[aria-expanded='true'] svg {
