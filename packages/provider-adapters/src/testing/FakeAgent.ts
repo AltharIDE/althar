@@ -234,6 +234,13 @@ export interface FakeAgentOptions {
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
+  /**
+   * How many of each session's first prompts end at once, having said nothing
+   * and used no tokens, as Claude Code's do while another of its processes
+   * renews the sign-in they share, or which, by their number from 1. It reads
+   * them all the same.
+   */
+  readonly blank?: number | ReadonlyArray<number>
   /** An option that would approve every request while on, as Copilot's `allow_all`, starting at this value. */
   readonly allowAll?: 'on' | 'off'
   /** Once it turns `allow_all` on itself, it won't be turned off again: setting it back fails. */
@@ -279,6 +286,10 @@ interface SessionState {
   leftForGood: boolean
   /** How large it last said its context is, in tokens. */
   contextSize: number
+  /** How many prompts it has been given. */
+  prompts: number
+  /** What the prompts it did nothing with said (`blank`). */
+  unread: string
 }
 
 /** What `bun dev` prints, coloured as Vite colours it. */
@@ -1155,6 +1166,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         runs: 0,
         background: new Map(),
         served: 0,
+        prompts: 0,
+        unread: '',
         allowAll: options.allowAll,
         allowAllStuck: false,
         leftForGood: false,
@@ -1230,7 +1243,15 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = false
-      const prompted = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
+      const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
+      session.prompts += 1
+      const blank = options.blank ?? 0
+      if (typeof blank === 'number' ? session.prompts <= blank : blank.includes(session.prompts)) {
+        session.unread = `${prompted}\n\n`
+        return { stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }
+      }
+      session.unread = ''
       // A prompt that ends `[context:85]` says its context is that full, in percent, before anything else; the rest plays as it
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.

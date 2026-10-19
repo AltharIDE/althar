@@ -188,6 +188,36 @@ describe('a plain task', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('tells a lead whose turn on a follow-up did nothing to carry on with what it was asked, and asks no report of it', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const tasks = yield* Tasks
+      const place = yield* opened
+      const task = yield* started(place, 'Check the partners', 'Look. [lead:finish] [lead:terse]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      yield* tasks.see({ taskId: task.id, finished: true })
+      const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
+      yield* until(state, (rows) => rows[0]?.state === 'done')
+      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task is done again.
+      yield* say(task.threadId, 'And the v2 ones?')
+      const [told] = yield* until(
+        sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual(told?.body, 'Your last turn ended before you could do anything. Carry on with what you were last asked.')
+      yield* until(
+        sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
+        (rows) => (rows[0]?.n ?? 0) === 1,
+        Duration.seconds(20),
+      )
+      yield* until(state, (rows) => rows[0]?.state === 'done')
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { blank: [2] }, { idle: { blank: Duration.millis(100) } }))),
+      ),
+    ),
+  )
+
   it.live('stays plain for what its lead throws away and the pictures it hands back', () =>
     Effect.gen(function* () {
       const place = yield* opened

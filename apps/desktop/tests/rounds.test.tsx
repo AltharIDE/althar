@@ -157,6 +157,39 @@ describe('a task’s thread in rounds', () => {
     expect(started?.work?.steps).toEqual([])
   })
 
+  it('times a turn that has said nothing yet after a restart from nothing before it, not from the round Althar stopped', () => {
+    // Stopped mid-round, started again the next day: the lead's turn runs, and hasn't said anything yet.
+    const day = 24 * 60
+    const blocks = read(
+      [
+        items.you('Go'),
+        when(items.tool({ toolKind: 'edit' }), 0),
+        when(items.says('Now the tests.'), 5),
+        when(items.notice({ source: 'runtime', title: 'Althar restarted; the step carried on from here.' }, null), day),
+      ],
+      true,
+      at(day + 1),
+    )
+    const stopped = roundOf(blocks)
+    expect(stopped?.live).toBe(false)
+    expect(stopped?.work?.took).toBe('5m 0s')
+    expect(blocks.some((block) => block.kind === 'round' && block.live)).toBe(false)
+    // Housekeeping of Althar's is part of the round, which goes on.
+    const aside = read(
+      [
+        items.you('Go'),
+        when(items.tool({}), 0),
+        when(items.notice({ source: 'runtime', role: 'aside', title: 'Its turn ended before it could do anything.' }, null), 1),
+      ],
+      true,
+      at(3),
+    )
+    expect(roundOf(aside)?.live).toBe(true)
+    // What the person said and the lead read starts the turn that runs now.
+    const answered = read([items.you('Go'), when(items.tool({}), 0), when(items.you('And the docs.'), 30)], true, at(31))
+    expect(roundOf(answered)?.live).toBe(false)
+  })
+
   it('holds the lead’s reply while it has said nothing since it was asked, and leaves the round before it over', () => {
     const asked = (thread: ReadonlyArray<ThreadItem>, extra: { openedAt?: string } = {}) =>
       roundsOf(

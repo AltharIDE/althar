@@ -85,6 +85,24 @@ const CONTINUES = 3
 /** What it is told when it was cut off so. */
 const CONTINUING = "Your last turn stopped at the agent's own limit on a turn's output or steps. Carry on from where you were."
 
+/**
+ * How often a step's agent whose turn ended having done nothing at all is
+ * told to carry on before the step needs the person, and how long it is
+ * given first: a minute, as Claude Code asks while another of its processes
+ * renews the sign-in they share, which an agent started as Althar starts,
+ * after a gap longer than the sign-in lasts, may find.
+ */
+const BLANKS = 3
+const BLANK_PAUSE = Duration.minutes(1)
+
+/** What it is told when its turn ended so: a quick task's round, which may only have been asked something, asks for no report (ADR-034). */
+const blankAgain = (step: StuckInfo['step'], round: boolean) =>
+  step === 'review'
+    ? "Your last turn ended before you could do anything. Carry on with the review; when it's done, call Althar's report_review tool with your verdict, a summary and your findings."
+    : round
+      ? 'Your last turn ended before you could do anything. Carry on with what you were last asked.'
+      : "Your last turn ended before you could do anything. Carry on with the task from where it stands. When it's done, call Althar's finish_step tool with your summary."
+
 export const PlanStep = Schema.Struct({
   key: Schema.Literals(['implement', 'review']),
   agentId: Schema.String,
@@ -489,6 +507,7 @@ export class Runs extends Context.Service<
       const policies = yield* Policies
       const busy = yield* Busy
       const scope = yield* Effect.scope
+      const blankPause = (yield* RuntimeConfig).idle?.blank ?? BLANK_PAUSE
       // Asked when a step is held for a reset, so the wait for it starts again.
       const holdsChanged = yield* Queue.sliding<void>(1)
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -1186,6 +1205,75 @@ export class Runs extends Context.Service<
         key === 'review' ? 'review' : key === 'settle' ? 'settle' : key === 'publish' ? 'publish' : 'implement'
 
       /**
+       * How many of the thread's latest turns, up to `turnId`, ended having
+       * done nothing at all, in a row: each completed having used no tokens, as
+       * its agent said, and said or did nothing. None where `turnId` isn't its
+       * latest, or didn't end so.
+       */
+      const blanks = (threadId: string, turnId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const turns = yield* sql<{ id: string; blank: number }>`
+            SELECT d.id, d.state = 'completed' AND d.error_class IS NULL AND json_extract(d.usage, '$.totalTokens') = 0
+              AND NOT EXISTS (SELECT 1 FROM thread_items i WHERE i.delivery_id = d.id AND i.kind <> 'user_message') AS blank
+            FROM turn_deliveries d WHERE d.thread_id = ${threadId} ORDER BY d.requested_at DESC, d.rowid DESC LIMIT ${BLANKS + 1}`
+          if (turns[0]?.id !== turnId) return 0
+          const worked = turns.findIndex((turn) => turn.blank !== 1)
+          return worked === -1 ? turns.length : worked
+        })
+
+      /**
+       * A step's agent whose turn ended having done nothing at all never
+       * reached its model: it hasn't stopped without reporting. A minute
+       * later, unless the person or Althar has said something to it since,
+       * it is told to carry on; told so BLANKS times in a row to no effect, it
+       * counts as stalled, and the step needs the person.
+       */
+      const blankTurn = (
+        threadId: string,
+        turnId: string,
+        on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>,
+        inARow: number,
+        info: (why: StuckWhy, detail: string | null) => StuckInfo,
+      ) =>
+        Effect.gen(function* () {
+          if (inARow > BLANKS) return yield* stuck(on.run, { id: on.attemptId }, { ...info('stalled', null), tried: ['carried_on'] })
+          yield* addItem({ projectId: on.run.projectId, threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'warning',
+            title: 'Its turn ended before it could do anything, so Althar tells it to carry on in a minute.',
+            about: 'stall',
+            role: 'aside',
+          })
+          const again = Effect.gen(function* () {
+            yield* Effect.sleep(blankPause)
+            const sql = yield* SqlClient.SqlClient
+            const [still] = yield* sql<{ id: string }>`SELECT id FROM node_attempts WHERE id = ${on.attemptId} AND state = 'running'`
+            // Moved on meanwhile: stopped or reported, or told something, which started another turn or waits for one.
+            if (still === undefined) return
+            const [latest] = yield* sql<{ id: string }>`
+              SELECT id FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+            if (latest?.id !== turnId) return
+            const [queued] = yield* sql<{ id: string }>`
+              SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued' LIMIT 1`
+            if (queued !== undefined) return
+            yield* sessions.send({
+              envelope: yield* envelope('thread.send', { threadId, blank: on.attemptId }),
+              threadId,
+              body: blankAgain(on.step, on.run.planId === null),
+              quiet: true,
+            })
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : stuck(on.run, { id: on.attemptId }, info('no_report', summarize(cause) || null)),
+            ),
+          )
+          yield* Effect.forkIn(provide(again), scope)
+        })
+
+      /**
        * Where a task's lead's turn ends, or its session goes, a quick task
        * whose lead changed the repository gets its branch (`firstWrite.ts`),
        * one thing at a time with publishing the task. Nothing for any other
@@ -1267,6 +1355,8 @@ export class Runs extends Context.Service<
           const [queued] = yield* sql<{ id: string }>`
             SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
           if (queued !== undefined) return
+          const inARow = event.state === 'completed' && event.errorClass === undefined ? yield* blanks(event.threadId, event.turnId) : 0
+          if (inARow > 0) return yield* blankTurn(event.threadId, event.turnId, on, inARow, info)
           // A round whose lead made nothing new, as for a question answered, ends there: the task is back where it was (ADR-034).
           if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
           const output = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number }
