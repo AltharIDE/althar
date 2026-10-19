@@ -22,7 +22,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { transcript } from '../src/threads'
 import { type ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, listTools, repository, runtime, turns, until } from './support'
 
 /*
  * Issues the coordinator drafts (docs/architecture/06, "Drafting issues"):
@@ -580,6 +580,115 @@ describe('issue drafts', () => {
         assert.strictEqual(card?.error, 'Althar closed while filing this. Look on Linear for it before you file it again.')
         assert.lengthOf(linear.created, 0)
       }).pipe(Effect.provide(withQueries({ linear }, database)))
+    })
+  })
+
+  describe('of a task’s lead', () => {
+    /** A task started with a lead at work, and the lead's tools as it is given them. */
+    const led = (title: string) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { projectId, access } = yield* project()
+        assert.match(yield* callTool(access, 'start_task', { title, description: 'Wait.', lead: { agent: 'claude-code' } }), /^Started /)
+        const [task] = yield* sql<{ id: string; threadId: string }>`
+          SELECT k.id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.title = ${title}`
+        const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task?.threadId ?? ''}`
+        const lead: ToolAccess = {
+          role: 'lead',
+          projectId,
+          threadId: task?.threadId ?? '',
+          sessionId: session?.id ?? '',
+          taskId: task?.id ?? null,
+        }
+        return { projectId, task: task ?? assert.fail('no task'), lead }
+      })
+
+    /** The issue drafts' cards in a thread, as the store has them. */
+    const cardsIn = (threadId: string) =>
+      Effect.map(items(threadId), (all) =>
+        all.flatMap((item) => (item.kind === 'issue_draft' ? [item.content as unknown as IssueDraftCard] : [])),
+      )
+
+    it.live('are a card in the task’s thread, put the task in Needs you, and tell the lead its key once filed', () => {
+      const linear = linearWith(MERIDIAN)
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const queries = yield* Queries
+        const drafts = yield* IssueDrafts
+        const instance = yield* Instance
+        const { projectId, task, lead } = yield* led('Add a retry')
+        // The lead can look for duplicates and draft; a reviewer only reads.
+        assert.includeMembers(yield* listTools(lead), ['draft_issue', 'find_issues', 'read_issue'])
+        const reviewer = yield* listTools({ ...lead, role: 'reviewer' })
+        assert.includeMembers(reviewer, ['read_issue'])
+        assert.notInclude(reviewer, 'draft_issue')
+        assert.notInclude(reviewer, 'find_issues')
+
+        assert.match(yield* callTool(lead, 'find_issues'), /^The person has no open issues/)
+        const said = yield* callTool(lead, 'draft_issue', { title: 'Refunds skip the limiter', description: 'Found while here.' })
+        assert.match(
+          said,
+          /^Drafted the issue “Refunds skip the limiter” on Linear, in Meridian\. Nothing is filed until the person files it/,
+        )
+        yield* callTool(lead, 'draft_issue', { title: 'Checkout logs no request ids' })
+
+        // The cards are in the task's thread, not the coordinator's; nothing reached the tracker.
+        const cards = yield* cardsIn(task.threadId)
+        assert.deepStrictEqual(
+          cards.map((card) => [card.title, card.state]),
+          [
+            ['Refunds skip the limiter', 'pending'],
+            ['Checkout logs no request ids', 'pending'],
+          ],
+        )
+        assert.lengthOf(yield* cardsOf(projectId), 0)
+        assert.lengthOf(linear.created, 0)
+        // The task waits on the person while drafts do, and the project counts it.
+        assert.strictEqual((yield* queries.card(task.id)).phase, 'waiting')
+        assert.strictEqual((yield* queries.projects).projects.find((one) => one.id === projectId)?.waiting, 2)
+
+        // The person files one, discards the other: the lead hears the key and link of the one filed.
+        const [first, second] = cards
+        const filed = yield* drafts.file(first?.draftId ?? '', instance.personId)
+        assert.strictEqual(filed.issue?.key, 'MER-1')
+        yield* drafts.discard(second?.draftId ?? '', instance.personId)
+        assert.notStrictEqual((yield* queries.card(task.id)).phase, 'waiting')
+        assert.strictEqual((yield* queries.projects).projects.find((one) => one.id === projectId)?.waiting, 0)
+        const prompts = yield* until(
+          turns(task.threadId),
+          (all) =>
+            all.some((turn) => turn.prompt?.includes('MER-1') === true) && all.some((turn) => turn.prompt?.includes('discarded') === true),
+        )
+        const heard = prompts.map((turn) => turn.prompt ?? '').join('\n')
+        assert.include(
+          heard,
+          `The person filed your issue “Refunds skip the limiter” on Linear, in Meridian, as MER-1: ${filed.issue?.url}`,
+        )
+        assert.include(heard, 'The person discarded your issue “Checkout logs no request ids”: nothing was filed')
+        // The coordinator doesn't hear of the lead's issues as if it had drafted them.
+        assert.notInclude((yield* coordinatorNews(task.threadId, projectId, yield* modelNamer)) ?? '', 'Refunds skip the limiter')
+        assert.notInclude(
+          (yield* coordinatorNews((yield* project(repository())).threadId, projectId, yield* modelNamer)) ?? '',
+          'Refunds skip the limiter',
+        )
+      }).pipe(Effect.provide(withQueries({ linear })))
+    })
+
+    it.live('go beside the issue the task came from, unless the lead names a place', () => {
+      const linear = linearWith(MERIDIAN, PLATFORM)
+      linear.addIssue({ ref: 'PLT-7', title: 'Queue stalls' })
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const { projectId, task, lead } = yield* led('Unstall the queue')
+        // With two teams and no issue behind the task, the lead is asked where.
+        assert.match(yield* callTool(lead, 'draft_issue', { title: 'Too early' }), /^Say where on Linear it goes, as container: /)
+        yield* (yield* Issues).attach({ projectId: projectId as ProjectId, taskId: task.id, issue: 'PLT-7' })
+        assert.match(yield* callTool(lead, 'draft_issue', { title: 'Retries are unbounded' }), /in Platform\./)
+        assert.match(yield* callTool(lead, 'draft_issue', { title: 'Dashboards are slow', container: 'MER' }), /in Meridian\./)
+        // A lead on a review of someone else's pull request has no such tool.
+        const reviewing = yield* callTool({ ...lead, role: 'reviewer' }, 'draft_issue', { title: 'Nope' })
+        assert.notMatch(reviewing, /^Drafted/)
+      }).pipe(Effect.provide(withQueries({ linear })))
     })
   })
 })
