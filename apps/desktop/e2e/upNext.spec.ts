@@ -68,7 +68,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(rows.nth(2)).toContainText('Rename the helper')
     await expect(rows.nth(3)).toContainText('Plan the release')
     await expect(rows.nth(4)).toContainText('Hold this plan')
-    await expect(running.getByRole('button')).toHaveCount(0)
+    await expect(running.getByRole('article')).toHaveCount(0)
 
     // The place frees: the first that waited starts by itself, and moves to Running.
     await page.getByRole('radio', { name: /^Conversation/ }).click()

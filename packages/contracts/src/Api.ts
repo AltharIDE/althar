@@ -777,6 +777,24 @@ export const ChangeSummary = Schema.Struct({
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
+/**
+ * What attaching a pull request to a task did (ADR-052): `attached`, the
+ * task follows it now, its branch `started` from its head or not, `kept` of
+ * its own commits on top; or `start`, where its branch isn't based on that
+ * head, what starting from it would keep (`own`), for the person to say.
+ */
+export const Attachment = Schema.Struct({
+  kind: Schema.Literals(['attached', 'start']),
+  /** As the host says it: PR #185. */
+  name: Schema.String,
+  /** Its branch on its host, which the task's work goes to. */
+  source: Schema.String,
+  started: Schema.Boolean,
+  kept: Schema.Number,
+  own: Schema.Number,
+})
+export type Attachment = typeof Attachment.Type
+
 /** What a task does when its steps are done: open a draft pull request, open one for review, or push its branch only. */
 export const TaskEnd = Schema.Literals(['draft', 'ready', 'none'])
 export type TaskEnd = typeof TaskEnd.Type
@@ -1072,6 +1090,8 @@ export const StepResultItem = Schema.Struct({
     evidence: Schema.Array(Evidence),
     /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
+    /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
+    descriptions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
   }),
@@ -1182,8 +1202,12 @@ export const Unshipped = Schema.Struct({
 })
 export type Unshipped = typeof Unshipped.Type
 
-/** Where a task stands, as the coordinator's thread shows it. */
-export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'stopped', 'settled'])
+/**
+ * Where a task stands, as the coordinator's thread shows it. `kept` is a
+ * finished task that isn't a change, which the person kept for later: out of
+ * Needs you as it is, not settled.
+ */
+export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'kept', 'stopped', 'settled'])
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
@@ -1237,6 +1261,12 @@ export const ReviewBrief = Schema.Struct({
   verdict: Schema.NullOr(ReviewVerdict),
   /** The review, once posted: its link and when. */
   posted: Schema.NullOr(Schema.Struct({ url: Schema.String, at: Schema.String })),
+  /**
+   * Whether a draft waits for the person to post it. None once its review
+   * was posted: written to again, its lead answered, it is finished, the
+   * person's to mark done or keep for later, as a quick task is (ADR-051).
+   */
+  waiting: Schema.optional(Schema.Boolean),
 })
 export type ReviewBrief = typeof ReviewBrief.Type
 
@@ -1344,6 +1374,8 @@ export const TaskCard = Schema.Struct({
    * so it's the person's: why, in a sentence. Without it, nothing is.
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+  /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
+  keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
@@ -1887,6 +1919,8 @@ export const ThreadSnapshot = Schema.Struct({
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+    /** When its lead made it a change, where it began as a quick task: what it showed before was a prototype's, not the change's. */
+    madeChangeAt: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
     waits: Schema.NullOr(HeldForLimit),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
@@ -2528,6 +2562,16 @@ export const Api = RpcGroup.make(
   command('LeaveOutCommits', { taskId: Schema.String }, Schema.Void),
   /** Settles a task without its change: its agents stop and its plan doesn't start; its worktree and branch stay as they are. */
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Settles a finished task that isn't a change, as Done: what its agents
+   * left running, such as a page, stops. Nothing for a change, or one at work.
+   */
+  command('MarkTaskDone', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Takes a finished task that isn't a change out of Needs you as it is,
+   * kept for later: nothing stops. Writing to it again brings it back.
+   */
+  command('KeepTaskForLater', { taskId: Schema.String }, Schema.Void),
   /** Gives a task another title, in any state. Its slug, branch, worktree folder, and the title of a pull request or issue already opened, stay as they are. */
   command('RenameTask', { taskId: Schema.String, title: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
@@ -2808,6 +2852,14 @@ export const Api = RpcGroup.make(
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */
   command('StopListening', { taskId: Schema.String, url: Schema.String }, Schema.Void),
+  /**
+   * Attaches the task to an open pull request it didn't open, by its link or
+   * number, and follows it from then on (ADR-052). Where the task's branch
+   * isn't based on its head, nothing changes, and it answers `start`, with
+   * how many commits of its own starting from the head keeps; `start` says
+   * to start it there.
+   */
+  command('AttachPullRequest', { taskId: Schema.String, pullRequest: Schema.String, start: Schema.optional(Schema.Boolean) }, Attachment),
   /** Stops a command the session on a thread left running; it goes from the list. */
   command('StopBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
   /** Clears one that ended by itself from the list. */

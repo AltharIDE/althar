@@ -24,7 +24,7 @@ import {
 import { majorOf } from '../src/version'
 
 /*
- * The contract of the usage read (ADR-051): every subscription has a source and a
+ * The contract of the usage read (ADR-053): every subscription has a source and a
  * way to be told from a key, every endpoint is on the allowlist, and the
  * reader does only what the ADR lets it, against a fake home, token and server.
  */

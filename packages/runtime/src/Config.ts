@@ -107,6 +107,8 @@ export interface IdleOptions {
   readonly wake?: Duration.Duration
   /** How long after its turn ends a lead is given to report what it left running: two seconds. */
   readonly reports?: Duration.Duration
+  /** How long a step's agent whose turn ended having done nothing at all is given before it is told to carry on: a minute. */
+  readonly blank?: Duration.Duration
 }
 
 export interface BusyOptions {
@@ -318,7 +320,7 @@ export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | nu
     execFile(
       tool,
       args,
-      { timeout: 10_000, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      { timeout: 10_000, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
       (error, stdout) => {
         const token = stdout.trim()
         if (error === null) return resume(Effect.succeed(/^\S{20,400}$/.test(token) ? token : null))

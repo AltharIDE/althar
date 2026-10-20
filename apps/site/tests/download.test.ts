@@ -5,7 +5,7 @@ import { type Asset, pickAsset } from '../src/lib/download'
 /*
  * Which of a release's files a system gets: the files as the release
  * workflow names them (.github/workflows/release.yml), with and without the
- * Windows installer it doesn't build yet. Then the lookup as a browser runs
+ * Windows installer, which the earlier releases don't have. Then the lookup as a browser runs
  * it, with the user agent, the chip and GitHub's API stubbed: the module is
  * loaded fresh each time, since it asks the API once for the page.
  */
@@ -26,7 +26,7 @@ const SHIPPED = [
   'latest-mac.yml',
 ].map(file)
 
-const WITH_WINDOWS = [...SHIPPED, file('Althar-Setup-0.2.0.exe')]
+const WITH_WINDOWS = [...SHIPPED, file('Althar-0.2.0-x64-setup.exe'), file('Althar-0.2.0-x64-setup.exe.blockmap'), file('latest.yml')]
 
 describe('pickAsset', () => {
   it('gives a Mac the dmg, not the zip or its blockmap', () => {
@@ -39,9 +39,11 @@ describe('pickAsset', () => {
     expect(pickAsset('linux', 'x86', SHIPPED)?.name).toBe('Althar-0.2.0.AppImage')
   })
 
-  it('gives Windows the exe once a release has one', () => {
-    expect(pickAsset('windows', null, WITH_WINDOWS)?.name).toBe('Althar-Setup-0.2.0.exe')
-    expect(pickAsset('windows', 'x86', WITH_WINDOWS)?.name).toBe('Althar-Setup-0.2.0.exe')
+  it('gives Windows the installer once a release has one, not its blockmap or feed', () => {
+    expect(pickAsset('windows', null, WITH_WINDOWS)?.name).toBe('Althar-0.2.0-x64-setup.exe')
+    expect(pickAsset('windows', 'x86', WITH_WINDOWS)?.name).toBe('Althar-0.2.0-x64-setup.exe')
+    // Windows on ARM runs the x64 build emulated.
+    expect(pickAsset('windows', 'arm', WITH_WINDOWS)?.name).toBe('Althar-0.2.0-x64-setup.exe')
   })
 
   it('gives Windows nothing while no release has an exe', () => {
@@ -180,7 +182,7 @@ describe('findDownload', () => {
     browse({ ua: UA.windows, arch: 'x86' })
     expect(await (await lookup())()).toBeNull()
     api({ assets: WITH_WINDOWS })
-    expect(await (await lookup())()).toEqual({ os: 'windows', href: url('Althar-Setup-0.2.0.exe') })
+    expect(await (await lookup())()).toEqual({ os: 'windows', href: url('Althar-0.2.0-x64-setup.exe') })
   })
 
   it('sends a phone or a desktop-mode iPad to the releases page without asking the API', async () => {

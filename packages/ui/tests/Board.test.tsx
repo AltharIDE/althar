@@ -27,6 +27,13 @@ describe('which lanes the board collapses', () => {
     expect(sorted(railsOf(lanes({ [BoardLane.Running]: 0 }), NO_FOLDS, 1008, 260))).toEqual([BoardLane.Running])
   })
 
+  it('counts Settled with only what was kept for later as filled, not empty', () => {
+    const kept = lanes({ [BoardLane.Running]: 0, [BoardLane.Settled]: 0 }).map((one) =>
+      one.lane === BoardLane.Settled ? { ...one, filled: true } : one,
+    )
+    expect(sorted(railsOf(kept, NO_FOLDS, 1008, 260))).toEqual([BoardLane.Running])
+  })
+
   it('never collapses Needs you while something waits in it, and lets the board scroll instead', () => {
     expect(sorted(railsOf(lanes(), NO_FOLDS, 200, 260))).toEqual([BoardLane.Next, BoardLane.Running, BoardLane.Settled].toSorted())
     expect(railsOf(lanes(), { collapsed: [BoardLane.Yours], opened: [] }, 4 * 260, 260).has(BoardLane.Yours)).toBe(false)
@@ -163,5 +170,33 @@ describe('a board that measures itself', () => {
     await act(async () => {})
     rerender(afternoon(1))
     expect(document.body).toHaveFocus()
+  })
+})
+
+describe('a lane holding two things', () => {
+  it('names both in its head, the one showing pressed, keeps its own name, and shows the other once pressed', () => {
+    const onChange = vi.fn()
+    render(
+      <BoardColumn
+        lane={BoardLane.Settled}
+        count={28}
+        shelves={{
+          label: 'Settled or kept for later',
+          value: 'settled',
+          onChange,
+          options: [
+            { value: 'settled', label: 'Settled', count: 28 },
+            { value: 'kept', label: 'Kept', count: 3, icon: 'pin' },
+          ],
+        }}
+      >
+        <p>The ledger</p>
+      </BoardColumn>,
+    )
+    expect(screen.getByRole('region', { name: 'Settled' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Settled or kept for later' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Settled 28', pressed: true })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Kept 3', pressed: false }))
+    expect(onChange).toHaveBeenCalledWith('kept')
   })
 })

@@ -58,4 +58,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [048](048-where-the-runtime-runs-and-who-may-reach-it.md) | The runtime stays in the app and runs headless too, and a client on the local socket can't answer for the person (proposed) |
 | [049](049-the-line-up-next-is-in-the-person-s-order.md) | The line up next is every task no agent has worked on yet, in the person's order |
 | [050](050-an-agent-joins-where-althar-can-hold-it-to-asking.md) | An ACP agent joins where Althar can hold it to asking, and the rest wait with their reasons |
-| [051](051-a-usage-read-may-use-an-accounts-token-once.md) | A usage read: an account's access token, in memory, for one call to its provider's usage URL |
+| [051](051-a-finished-task-waits-for-the-person-to-settle-it.md) | A finished task that isn't a change waits in Needs you until the person settles it |
+| [052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md) | A task can be attached to an open pull request it didn't open, and follows it as one it opened |
+| [053](053-a-usage-read-may-use-an-accounts-token-once.md) | A usage read: an account's access token, in memory, for one call to its provider's usage URL |

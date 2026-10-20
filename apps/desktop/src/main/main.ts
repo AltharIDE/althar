@@ -55,7 +55,7 @@ import {
 } from 'electron'
 
 import { appMenu, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
+import { keyringIsSafe, keyringUnavailable, passwordStore, sealWithPortal, sealsWithPortal, withPortalFeature } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -65,10 +65,11 @@ import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
  * runtime to stop its sessions before the app goes. Folders reach the runtime
  * from here, never from the window, which gets a grant for each: one the
  * person picked or dropped, or one of the repositories it found where people
- * keep code (repositories.ts), for the first screen and a new project to offer. It seals and
- * opens the runtime's secrets, such as a code host's token, with Electron's
- * safeStorage, whose key the keychain keeps for this app alone: the runtime
- * keeps them sealed and never holds the key. It gives the Dock the icon the
+ * keep code (repositories.ts), for the first screen and a new project to
+ * offer. It seals and opens the runtime's secrets, such as a code host's
+ * token, with Electron's safeStorage; in a Flatpak it prefers the app-specific
+ * Secret portal key and falls back only to a safe session keyring. The runtime keeps secrets sealed and never
+ * holds the key. It gives the Dock the icon the
  * person chose, and puts Althar at the edge of the screen (edgeWindows.ts):
  * round the notch, or in the menu bar. It keeps the app's own preferences
  * (appPreferences.ts) and acts on them: the Mac kept awake while work runs
@@ -138,6 +139,9 @@ if (process.platform !== 'darwin') app.on('browser-window-created', (_event, win
 // Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
 const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
+// In any Linux Flatpak, sign-ins prefer the app-specific Secret portal key (keyring.ts).
+const portal = sealsWithPortal(process.env.FLATPAK_ID !== undefined, process.platform)
+if (portal) app.commandLine.appendSwitch('enable-features', withPortalFeature(app.commandLine.getSwitchValue('enable-features')))
 
 /*
  * Where the window keeps what it remembers, its tabs and pinned models. A
@@ -415,6 +419,10 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
 const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
+  if (portal)
+    return void sealWithPortal(message.type === 'seal', value, safeStorage, process.platform).then((reply) =>
+      child.postMessage({ type: 'sealed', requestId, ...reply }),
+    )
   // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
   const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
   if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend)) {
@@ -448,7 +456,9 @@ const startRuntime = () => {
       ALTHAR_APP_VERSION: app.getVersion(),
       ALTHAR_LOGS: logs.dir,
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
-      ...(app.isPackaged ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', 'node') } : {}),
+      ...(app.isPackaged
+        ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
+        : {}),
     },
   })
   logs.keepOutput(child)
@@ -777,8 +787,11 @@ void ready.then(() => {
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   if (!noRuntime) startRuntime()
   // A packaged app looks for updates, and tells every window as one is ready.
-  // electron-updater supports the Linux AppImage feed; deb/rpm use their package managers.
-  if (app.isPackaged && (process.platform === 'darwin' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined)))
+  // electron-updater supports the Mac's zip, Windows' NSIS installer and the Linux AppImage; deb/rpm use their package managers.
+  if (
+    app.isPackaged &&
+    (process.platform === 'darwin' || process.platform === 'win32' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined))
+  )
     updates = startUpdates((glance: UpdateGlance) => {
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
     })

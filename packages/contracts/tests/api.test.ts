@@ -467,6 +467,8 @@ describe('the API', () => {
               ResumeTask: () => Effect.void,
               LeaveOutCommits: () => Effect.void,
               AbandonTask: () => Effect.void,
+              MarkTaskDone: () => Effect.void,
+              KeepTaskForLater: () => Effect.void,
               RenameTask: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
@@ -524,6 +526,8 @@ describe('the API', () => {
               SkipReview: () => Effect.void,
               RefreshTask: () => Effect.void,
               StopListening: () => Effect.void,
+              AttachPullRequest: () =>
+                Effect.succeed({ kind: 'attached' as const, name: 'PR #1', source: 'main', started: false, kept: 0, own: 0 }),
               StopBackground: () => Effect.void,
               ClearBackground: () => Effect.void,
               RunProject: () => Effect.die('unused'),

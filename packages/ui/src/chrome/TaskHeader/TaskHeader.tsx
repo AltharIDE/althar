@@ -50,6 +50,8 @@ export interface TaskHeaderProps<F extends string> {
   faces?: readonly SegmentedOption<F>[]
   face?: F
   onFace?: (face: F) => void
+  /** What the person does to it next, right beside where it stands, not in the far corner: a finished task's Done and Keep for later. */
+  beside?: ReactNode
   /** What else it opens, at the end: ChromeButtons. */
   actions?: ReactNode
   className?: string
@@ -70,6 +72,7 @@ export function TaskHeader<F extends string>({
   faces,
   face,
   onFace,
+  beside,
   actions,
   className,
   text,
@@ -85,6 +88,7 @@ export function TaskHeader<F extends string>({
           <VisuallyHidden>, {said}</VisuallyHidden>
         </span>
       </Tooltip>
+      {beside && <div className={s.beside}>{beside}</div>}
       {steps && steps.length > 0 && <StepTrack steps={steps} status={status} className={s.track} />}
       {faces && faces.length > 1 && face !== undefined && onFace && (
         <Segmented label={t.faces} options={[...faces]} value={face} onChange={onFace} className={s.faces} />
