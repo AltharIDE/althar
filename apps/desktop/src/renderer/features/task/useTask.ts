@@ -16,6 +16,7 @@ import {
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { keys, reads } from '../../data/reads'
+import { canPick } from '../../shared/agents'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
@@ -213,7 +214,7 @@ export const useTask = (threadId: string): TaskModel => {
   const thread = useQuery(read.thread(threadId))
   const snapshot = thread.data ?? null
   const status = useQuery(read.status()).data
-  const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
+  const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
   // What its commands have printed so far, while they run.
   const outputs = useOutputs(threadId, snapshot?.items ?? NO_ITEMS, snapshot?.session?.turnRunning ?? false)

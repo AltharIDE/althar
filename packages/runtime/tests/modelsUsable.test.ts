@@ -1,13 +1,14 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 
+import { Agents } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Models } from '../src/Models'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { usableModels } from '../src/usableModels'
-import { repository, runtime, until } from './support'
+import { fakeAgents, launches, repository, runtime, until } from './support'
 
 /*
  * The models work can go to now, as the coordinator lists them: on this
@@ -35,4 +36,29 @@ describe('the models usable now', () => {
       assert.deepStrictEqual(yield* agentsOf(project.projectId), ['claude-code', 'codex', 'opencode'])
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('leave out an agent that isn’t installed, which is not started to ask for its models', () =>
+    Effect.gen(function* () {
+      const models = yield* Models
+      // What earlier tests launched is not this one's.
+      launches.length = 0
+      yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      assert.deepStrictEqual(yield* agentsOf(), ['claude-code', 'codex'])
+      assert.isFalse(launches.some((launch) => launch.agentId === 'opencode'))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { agents: withoutOpenCode() }))),
+  )
 })
+
+/** The fake agents, but OpenCode's command is nowhere on this computer. */
+const withoutOpenCode = () =>
+  Layer.effect(
+    Agents,
+    Effect.gen(function* () {
+      const all = yield* Agents
+      const lack = (entry: (typeof all.list)[number]) =>
+        entry.definition.id === 'opencode'
+          ? { ...entry, definition: { ...entry.definition, cli: { name: 'althar-no-such-agent' } } }
+          : entry
+      return Agents.of({ list: all.list.map(lack), get: (agentId) => Effect.map(all.get(agentId), lack) })
+    }).pipe(Effect.provide(fakeAgents())),
+  )
