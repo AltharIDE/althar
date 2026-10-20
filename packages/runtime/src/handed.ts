@@ -125,9 +125,11 @@ const pathOf = (uri: string, folders: ReadonlyArray<string>): string | null => {
       return null
     }
   }
+  // A path from the root first, as Windows' (C:\…) begins like an address's scheme.
+  if (isAbsolute(uri)) return uri
   if (/^[a-z][a-z0-9+.-]*:/i.test(uri)) return null
   const [first] = folders
-  return isAbsolute(uri) ? uri : first === undefined ? null : resolve(first, uri)
+  return first === undefined ? null : resolve(first, uri)
 }
 
 /** Whether a file is inside one of the folders, links followed both sides, so none leads out of them. */

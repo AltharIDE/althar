@@ -1,7 +1,8 @@
 name: desktop
 
-# On a pull request, the fast part: checks and unit tests. The coverage gate, the end-to-end run and the packages run
-# after merge, in post-merge.yml.
+# On a pull request, the fast part: checks and unit tests, on Linux and on Windows, and on Windows one end-to-end smoke
+# test, since nothing else runs the app there. The coverage gate, the end-to-end run and the packages run after merge,
+# in post-merge.yml.
 on:
   pull_request:
     paths:
@@ -49,3 +50,96 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
       - run: bun run test
+
+  # Windows, where no one here works day to day: the checks and unit tests of the desktop app and everything it builds
+  # on, in three parts that take about as long as each other, so what breaks there shows on the pull request.
+  windows:
+    name: windows (${{ matrix.part }})
+    runs-on: windows-2025
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: desktop
+            packages: apps/desktop
+          - part: runtime
+            packages: packages/runtime
+          - part: packages
+            packages: packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/ui
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The runner's own temporary folder is under a short name (C:\Users\RUNNER~1), which git and Node's realpath give
+      # whole, and so differently from the paths the tests made; a person's is named whole. This one has no short name.
+      TEMP: ${{ runner.temp }}
+      TMP: ${{ runner.temp }}
+      # The runner's git checks text out with CRLF (core.autocrlf), which the repositories the tests make and read back
+      # don't expect: they write LF and compare it.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
+      - run: bun install --frozen-lockfile
+      # Each package's checks and tests, every one run even when one before it fails, so a run says all that broke.
+      - env:
+          PACKAGES: ${{ matrix.packages }}
+        run: |
+          failed=''
+          for package in $PACKAGES; do
+            echo "::group::$package"
+            (cd "$package" && bun run check && bun run test) || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed on Windows:$failed"
+            exit 1
+          fi
+
+  # The app itself on Windows: built unpackaged, started, and a project made of a repository (e2e/smoke.spec.ts).
+  windows-e2e:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run test:e2e e2e/smoke.spec.ts
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: windows-e2e
+          path: apps/desktop/test-results
+          retention-days: 7

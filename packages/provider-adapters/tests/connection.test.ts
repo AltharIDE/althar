@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber, Ref, Stream } from 'effect'
 
@@ -141,7 +143,7 @@ describe('AgentConnection', () => {
       assert.strictEqual(shot?.content?.[1]?._tag, 'Image')
       const wrote = find(events, 'ToolCall').find((event) => event.toolCallId === 'write-doc')
       assert.deepStrictEqual(wrote?.content, [
-        { _tag: 'Diff', path: '/tmp/docs/notes.md', created: true, change: changeOf(null, HANDED_DOCUMENT.body) },
+        { _tag: 'Diff', path: join('/tmp', 'docs', 'notes.md'), created: true, change: changeOf(null, HANDED_DOCUMENT.body) },
       ])
       const handed = find(events, 'AgentContent').map((event) => event.content._tag)
       assert.deepStrictEqual(handed, ['Link', 'Image'])

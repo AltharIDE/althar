@@ -8,6 +8,9 @@ import { cpuTimeOf, treeCpuOf, treeCpus, treeMembers, treeMembersOf, workedBetwe
 import { type Finished, makeStallWatch, repeated, spanOf, type StallAction, type StallLimits } from '../src/stallWatch'
 import { Effect } from 'effect'
 
+/** Windows, where what some tests stand on isn't (each says what). */
+const windows = process.platform === 'win32'
+
 const LIMITS: StallLimits = {
   quiet: 600,
   quietInTool: 1_200,
@@ -437,7 +440,8 @@ describe('the CPU an agent uses', () => {
     )
   })
 
-  it.effect('reads each process of the trees asked for, null for one that is gone, and nothing for none', () =>
+  // Not on Windows: a tree's processes are read with ps, which Windows hasn't: how busy an agent is there is still to come.
+  it.effect.skipIf(windows)('reads each process of the trees asked for, null for one that is gone, and nothing for none', () =>
     Effect.gen(function* () {
       const members = yield* treeMembers([process.pid, 2 ** 22 + 12_345])
       assert.isTrue((members.get(process.pid) ?? new Map()).has(process.pid))
@@ -457,7 +461,8 @@ describe('the CPU an agent uses', () => {
     )
   })
 
-  it.live('tells a server sitting idle from a busy loop and a runner of short-lived workers, in real processes', () =>
+  // Not on Windows: a tree's processes are read with ps, which Windows hasn't: how busy an agent is there is still to come.
+  it.live.skipIf(windows)('tells a server sitting idle from a busy loop and a runner of short-lived workers, in real processes', () =>
     Effect.gen(function* () {
       const start = (script: string) => spawn('sh', ['-c', script], { stdio: 'ignore' })
       // Each ends by itself once this worker is gone, so a run cut short leaves no loop spinning on the machine.
@@ -482,7 +487,8 @@ describe('the CPU an agent uses', () => {
     }),
   )
 
-  it.effect('reads every process asked for from the machine, in one listing', () =>
+  // Not on Windows: a tree's processes are read with ps, which Windows hasn't: how busy an agent is there is still to come.
+  it.effect.skipIf(windows)('reads every process asked for from the machine, in one listing', () =>
     Effect.gen(function* () {
       const used = yield* treeCpus([process.pid, 2 ** 22 + 12_345])
       assert.isNotNull(used.get(process.pid))

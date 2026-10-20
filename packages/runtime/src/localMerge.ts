@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 
 import { Effect } from 'effect'
 
@@ -56,7 +56,8 @@ export type MergePlan =
 export const checkedOut = (root: string, branch: string) =>
   Effect.map(gitExactly(root, 'for-each-ref', '--format=%(worktreepath)', `refs/heads/${branch}`), (said) => {
     const path = said.endsWith('\n') ? said.slice(0, -1) : said
-    return path === '' ? null : path
+    // Git on Windows writes it with `/` (C:/Users/…): written as Windows does, it is the path Althar knows the checkout by.
+    return path === '' ? null : process.platform === 'win32' ? win32.normalize(path) : path
   })
 
 const checkCheckout = (checkout: string) =>

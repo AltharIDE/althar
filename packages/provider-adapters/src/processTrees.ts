@@ -88,6 +88,8 @@ export interface WindowsDependencies {
   readonly startedAt: (keeper: string, pid: number) => Effect.Effect<string | undefined>
   /** Whether a file is there. */
   readonly exists: (path: string) => boolean
+  /** The folders a command named bare is looked for in: Windows' own, then the PATH's. */
+  readonly searched: () => ReadonlyArray<string>
   /** Whether a process runs. */
   readonly alive: (pid: number) => boolean
   /** Kills one process; one already gone is fine. */
@@ -117,21 +119,35 @@ const windowsDependencies: WindowsDependencies = {
   keeper: keeper(),
   startedAt: keeperStartedAt,
   exists: existsSync,
+  searched: () => {
+    const windows = process.env.SystemRoot ?? 'C:\\Windows'
+    return [win32.join(windows, 'System32'), windows, ...(process.env.PATH ?? process.env.Path ?? '').split(';')].filter(
+      (dir) => dir !== '',
+    )
+  },
   alive: running,
   kill: terminate,
+}
+
+/** Whether a command is there to start, as CreateProcess finds it: by its path, or named bare, in the folders searched, `.exe` added where it has no extension. */
+const startable = (command: string, dependencies: WindowsDependencies) => {
+  if (win32.isAbsolute(command)) return dependencies.exists(command)
+  if (/[\\/]/.test(command)) return true
+  const named = win32.extname(command) === '' ? `${command}.exe` : command
+  return dependencies.searched().some((dir) => dependencies.exists(win32.join(dir, named)))
 }
 
 /**
  * Windows: each tree under a keeper, whose job runs as long as the keeper
  * does, so the keeper running is the tree running, and killing it kills the
- * tree. A command named by its full path that isn't there fails as Node's
- * spawn would, where the keeper would only exit.
+ * tree. A command that isn't there fails as Node's spawn would, where the
+ * keeper would only exit.
  */
 export const windowsTrees = (dependencies: WindowsDependencies = windowsDependencies): ProcessTrees => ({
   launch: (command, args) =>
-    win32.isAbsolute(command) && !dependencies.exists(command)
-      ? Effect.fail(`spawn ${command} ENOENT`)
-      : Effect.map(dependencies.keeper, (path) => ({ command: path, args: ['run', command, ...args], detached: false })),
+    startable(command, dependencies)
+      ? Effect.map(dependencies.keeper, (path) => ({ command: path, args: ['run', command, ...args], detached: false }))
+      : Effect.fail(`spawn ${command} ENOENT`),
   asks: false,
   outlivesRoot: false,
   alive: (pid) => Effect.sync(() => dependencies.alive(pid)),

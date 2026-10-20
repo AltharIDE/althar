@@ -468,7 +468,8 @@ export class Launches extends Context.Service<
               const line = lineOf(run)
               const spec =
                 process.platform === 'win32'
-                  ? { command: 'cmd.exe', args: ['/d', '/s', '/c', line] }
+                  ? // The line as it is: cmd.exe takes off the outer quotes (/s).
+                    { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true as const }
                   : { command: '/bin/sh', args: ['-c', line] }
               const id = yield* newId(Ids.process)
               // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
