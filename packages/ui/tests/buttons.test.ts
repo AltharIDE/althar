@@ -28,6 +28,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview',
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
   'chrome/ProjectFront/ProjectFront.tsx': 'a repository’s or tracker’s mark and name, which opens it',
+  'thread/StepGraph/StepGraph.tsx': 'a step’s card, the whole of which opens its report; a round’s marker, a pill over the lanes',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
