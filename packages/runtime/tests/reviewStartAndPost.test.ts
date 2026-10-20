@@ -1,0 +1,106 @@
+import { execFileSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import type { ProjectId } from '@althar/domain'
+import { assert, describe, it } from '@effect/vitest'
+import { Effect, Layer } from 'effect'
+import { SqlClient } from 'effect/sql'
+
+import { Connections } from '../src/Connections'
+import { Instance } from '../src/Instance'
+import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
+import { Reviews } from '../src/Reviews'
+import * as Runtime from '../src/Runtime'
+import type { ToolAccess } from '../src/ToolServer'
+import { callTool, fakeConnectors, HOST, hosted, runtime, until } from './support'
+
+/*
+ * Reviews of someone else's pull request, at their edges: a lead started on
+ * the model and effort the person chose, and a review posted once the
+ * connection it would go through is gone.
+ */
+
+const withQueries = (github: FakeService) =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))
+
+const git = (cwd: string, ...args: Array<string>) =>
+  execFileSync('git', ['-c', 'user.name=Nine', '-c', 'user.email=nine@althar.test', ...args], { cwd })
+    .toString()
+    .trim()
+
+/** Someone else's pull request: a commit on main, on the host only as the pull request's head. */
+const pullRequest = (at: { readonly working: string; readonly bare: string }, github: FakeService) => {
+  git(at.working, 'checkout', '-q', '--detach', 'main')
+  writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
+  git(at.working, 'add', '.')
+  git(at.working, 'commit', '-q', '-m', 'Send back')
+  const head = git(at.working, 'rev-parse', 'HEAD')
+  git(at.working, 'checkout', '-q', 'main')
+  git(at.working, 'push', '-q', at.bare, `${head}:refs/pull/1/head`)
+  return github.addPullRequest({ path: ['meridian', 'api'], title: 'Send back', author: 'ninemate', headSha: head })
+}
+
+/** A connected GitHub and the repository opened as a project. */
+const opened = (working: string) =>
+  Effect.gen(function* () {
+    const connections = yield* Connections
+    const instance = yield* Instance
+    const connection = yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+    const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+    return { projectId: project.projectId as ProjectId, connectionId: connection.id, personId: instance.personId }
+  })
+
+describe('a review, at its edges', () => {
+  it.live('starts its lead on the model and effort the person chose', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const started = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: 'large', effort: 'high' },
+      })
+      const sql = yield* SqlClient.SqlClient
+      const [session] = yield* until(
+        sql<{
+          model: string | null
+          effort: string | null
+        }>`SELECT model, effort FROM provider_sessions WHERE thread_id = ${started.threadId}`,
+        (rows) => rows.length > 0,
+      )
+      assert.deepStrictEqual(session, { model: 'large', effort: 'high' })
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('isn’t posted once the connection it goes through is gone, and says so', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, connectionId, personId } = yield* opened(at.working)
+      const reviews = yield* Reviews
+      const started = yield* reviews.start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+      })
+      const lead: ToolAccess = { role: 'lead', projectId, threadId: started.threadId, sessionId: 'none', taskId: started.taskId }
+      assert.match(yield* callTool(lead, 'draft_review', { verdict: 'approve', summary: 'Fine.' }), /^Drafted/)
+      const sql = yield* SqlClient.SqlClient
+      const [draft] = yield* sql<{ id: string }>`SELECT id FROM review_drafts WHERE task_id = ${started.taskId}`
+      yield* (yield* Connections).remove(connectionId, personId)
+      const card = yield* reviews.post(draft?.id ?? '', personId)
+      assert.deepInclude(card, { state: 'failed', error: 'The connection to GitHub is gone. Connect it again, then try again.' })
+      assert.lengthOf(github.reviewsPosted, 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+})

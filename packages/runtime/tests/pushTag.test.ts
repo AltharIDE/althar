@@ -117,7 +117,7 @@ describe('push_tag', () => {
   )
 })
 
-describe('push_tag, where the tag can’t go up', () => {
+describe('push_tag, where the tag doesn’t go up at once', () => {
   /** A tag on a new commit in the worktree, by its name. */
   const tagged = (worktree: string, tag: string) => {
     writeFileSync(join(worktree, 'CHANGELOG.md'), `${tag}\n`)
@@ -133,6 +133,34 @@ describe('push_tag, where the tag can’t go up', () => {
       yield* answer((yield* card).id, 'allow')
       return yield* Fiber.join(pushing)
     })
+
+  it.live(
+    'returns while the person hasn’t answered, and tells the lead once they have',
+    () =>
+      Effect.gen(function* () {
+        const { access, worktree, remote } = yield* leadWithRemote()
+        tagged(worktree, 'v3.0.0')
+        const head = git(worktree, 'rev-parse', 'HEAD')
+        // Unanswered for as long as an agent waits for a tool: the call says so, and nothing has gone up.
+        assert.strictEqual(
+          yield* callTool(access, 'push_tag', { tag: 'v3.0.0' }),
+          "Asked the person to allow pushing v3.0.0 to origin. Nothing goes up until they do; you'll be told when it's pushed, or if it isn't.",
+        )
+        assert.strictEqual(git(remote, 'tag', '--list'), '')
+        yield* answer((yield* card).id, 'allow')
+        const sql = yield* SqlClient.SqlClient
+        yield* until(
+          sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${access.threadId} AND body LIKE 'Pushed v3.0.0%'`,
+          (rows) => rows.length === 1,
+        )
+        const [told] = yield* sql<{
+          body: string
+        }>`SELECT body FROM user_inputs WHERE thread_id = ${access.threadId} AND body LIKE 'Pushed v3.0.0%'`
+        assert.strictEqual(told?.body, `Pushed v3.0.0, on ${head.slice(0, 8)}, to origin.`)
+        assert.strictEqual(git(remote, 'rev-parse', 'v3.0.0^{commit}'), head)
+      }).pipe(Effect.provide(runtime())),
+    60_000,
+  )
 
   it.live('says there is nowhere to push it in a repository with no remote, and asks nothing', () =>
     Effect.gen(function* () {

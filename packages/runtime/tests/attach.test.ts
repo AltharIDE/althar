@@ -16,6 +16,7 @@ import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import * as Runtime from '../src/Runtime'
@@ -565,6 +566,82 @@ describe('attaching a task to a pull request, refused', () => {
       assert.strictEqual(git(task.worktree, 'branch', '--show-current'), task.branch)
       assert.strictEqual(git(task.worktree, 'status', '--porcelain'), '')
       assert.lengthOf(yield* (yield* Changes).ofTask(task.taskId), 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+})
+
+describe('attaching a task to a pull request its branch can follow as it is', () => {
+  it.live('follows one its worktree has already, a draft too, starting its branch there where it had none', () => {
+    const { bare, github, head, working } = forked()
+    // A draft from the same branch, as the person opened it to say it isn't ready.
+    const draft = github.addPullRequest({
+      path: ['meridian', 'api'],
+      title: 'Send back, not ready',
+      author: 'you',
+      source: 'fix-send-back',
+      headSha: head,
+      fork: ['you', 'api'],
+      draft: true,
+    })
+    return Effect.gen(function* () {
+      const { projectId, task, personId } = yield* project(working)
+      // On the head already, with no branch of its own yet, and none of its name left from before.
+      git(task.worktree, 'fetch', '-q', bare, 'fix-send-back')
+      git(task.worktree, 'checkout', '-q', '--detach', 'FETCH_HEAD')
+      git(task.worktree, 'branch', '-q', '-D', task.branch)
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE workspaces SET branched_at = NULL WHERE task_id = ${task.taskId}`
+      const changes = yield* Changes
+      // Nothing to start over: it follows at once, without being told to.
+      const attached = yield* changes.attach({ taskId: task.taskId, pullRequest: `#${draft.number}`, actorId: personId })
+      assert.deepInclude(attached, { kind: 'attached', started: false, kept: 0 })
+      assert.strictEqual(git(task.worktree, 'branch', '--show-current'), task.branch)
+      assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), head)
+      const [workspace] = yield* sql<{
+        branched: number
+      }>`SELECT branched_at IS NOT NULL AS branched FROM workspaces WHERE task_id = ${task.taskId}`
+      assert.strictEqual(workspace?.branched, 1)
+      const [card] = yield* until(cardOf(projectId, task.taskId), (all) => all[0]?.change != null)
+      assert.deepInclude(card?.change, { number: draft.number, draft: true })
+      const notice = (yield* items(task.threadId)).find((item) => item.kind === 'notice')
+      assert.strictEqual(notice?.content.title, `The task follows PR #${draft.number} now: Send back, not ready`)
+      assert.strictEqual(
+        notice?.content.description,
+        'Its work goes to PR #2’s branch, fix-send-back, on you/api, as a plain push: nothing opens another.',
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('follows one again that it stopped listening to', () => {
+    const { github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { task, personId } = yield* project(working)
+      const changes = yield* Changes
+      yield* changes.attach({ taskId: task.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId })
+      yield* changes.stopListening(task.taskId, 'https://github.com/meridian/api/pull/1')
+      assert.isFalse((yield* changes.ofTask(task.taskId))[0]?.listening)
+      const again = yield* changes.attach({ taskId: task.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId })
+      assert.strictEqual(again.kind, 'attached')
+      const followed = yield* changes.ofTask(task.taskId)
+      assert.lengthOf(followed, 1)
+      assert.isTrue(followed[0]?.listening)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('doesn’t start its branch over while its lead is at work in it', () => {
+    const { github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { task, personId } = yield* project(working)
+      const before = git(task.worktree, 'rev-parse', 'HEAD')
+      yield* (yield* Sessions).start({ threadId: task.threadId, agentId: 'codex' })
+      const refused = yield* Effect.flip(
+        (yield* Changes).attach({ taskId: task.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId }),
+      )
+      assert.strictEqual(
+        (refused as { message?: string }).message,
+        'Its lead is at work in its worktree. Stop it, or wait for its turn to end, then attach PR #1.',
+      )
+      assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), before)
     }).pipe(Effect.provide(withQueries(github)))
   })
 })
