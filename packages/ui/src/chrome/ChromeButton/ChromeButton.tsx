@@ -1,17 +1,19 @@
-import type { ComponentProps } from 'react'
+import { type ComponentProps, useId } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
-import { Kbd } from '../../primitives/Kbd/Kbd'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './ChromeButton.module.css'
 
 /*
  * A button in the window's chrome that opens something beside the work, or
  * over it: knowledge, artifacts, a task's graph. While what it opened is open
  * it says so (aria-expanded) and stays lit. In a narrow window it can drop its
- * label and keep only its glyph; the label and key then show in a tooltip,
- * and still name it for assistive technology.
+ * label and keep only its glyph; the label then shows in a tooltip, and still
+ * names it for assistive technology. Its key shows in the tooltip, never as a
+ * chip on the bar, as the project's rooms say theirs. Something worth knowing
+ * before it opens is a dot on it, said in the tooltip too.
  */
 
 export interface ChromeButtonProps extends Omit<ComponentProps<'button'>, 'children' | 'title'> {
@@ -21,27 +23,49 @@ export interface ChromeButtonProps extends Omit<ComponentProps<'button'>, 'child
   expanded?: boolean
   /** Only the glyph shows. */
   compact?: boolean
-  /** Its shortcut, shown after the label, or in the tooltip when compact. */
+  /** Its shortcut, in its tooltip; the consumer binds it. */
   kbd?: string
+  /**
+   * Something about what it opens worth knowing before it opens, such as a
+   * task's menu where the task goes otherwise than its project: a dot on the
+   * button, said under its name in the tooltip and as its description.
+   */
+  mark?: string
 }
 
-export function ChromeButton({ icon, label, expanded, compact, kbd, className, type = 'button', ...rest }: ChromeButtonProps) {
+export function ChromeButton({ icon, label, expanded, compact, kbd, mark, className, type = 'button', ...rest }: ChromeButtonProps) {
+  const markId = useId()
   const button = (
     <button
       type={type}
-      className={cx(s.button, compact && s.compact, className)}
+      className={cx(s.button, compact && s.compact, mark !== undefined && s.marked, className)}
       aria-expanded={expanded}
       aria-label={compact ? label : undefined}
+      aria-describedby={mark === undefined ? undefined : markId}
       {...rest}
     >
       <Icon name={icon} size={13} />
       {!compact && <span>{label}</span>}
-      {!compact && kbd && <Kbd>{kbd}</Kbd>}
+      {mark !== undefined && <VisuallyHidden id={markId}>{mark}</VisuallyHidden>}
     </button>
   )
-  if (!compact) return button
+  // Its words are on it, with nothing more to say: no tooltip.
+  if (!compact && kbd === undefined && mark === undefined) return button
   return (
-    <Tooltip label={label} kbd={kbd} placement="below">
+    <Tooltip
+      label={
+        mark === undefined ? (
+          label
+        ) : (
+          <span className={s.said}>
+            <span>{label}</span>
+            <span className={s.mark}>{mark}</span>
+          </span>
+        )
+      }
+      kbd={kbd}
+      placement="below"
+    >
       {button}
     </Tooltip>
   )
