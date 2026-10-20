@@ -2,6 +2,7 @@ import { isAgentDefault, knownModelName } from '@althar/contracts'
 import { Effect, Option } from 'effect'
 
 import { Agents } from './Config'
+import { Installs, isInstalled } from './Installs'
 import { Limits } from './Limits'
 import { type ModelFact, ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -70,12 +71,13 @@ export const usableModels = (projectId?: string) =>
     const models = yield* Models
     const facts = yield* ModelFacts
     const signIns = yield* SignIns
+    const installs = yield* Installs
     const limits = yield* Limits
     const catalog = yield* models.catalog
     const byKey = new Map<string, { name: string; maker: string | null; fact: ModelFact | null; routes: Route[] }>()
     for (const entry of agents.list) {
       const agent = { id: entry.definition.id, name: entry.definition.name }
-      if ((yield* signIns.of(agent.id)) === 'signed_out') continue
+      if (!isInstalled(installs, entry.definition) || (yield* signIns.of(agent.id)) === 'signed_out') continue
       if (Option.isSome(yield* limits.out(agent.id, projectId).pipe(Effect.orElseSucceed(() => Option.none())))) continue
       const offered = catalog.find((one) => one.agentId === agent.id)
       if (offered === undefined) continue
