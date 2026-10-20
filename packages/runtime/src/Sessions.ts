@@ -1738,7 +1738,7 @@ export class Sessions extends Context.Service<
                       taskBranch: thread.branch,
                     },
                   }
-                : { role: 'reader', ...(offline ? { offline } : {}) },
+                : { role: 'reader', cwd: cwdOf(thread), ...(offline ? { offline } : {}) },
           }
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
