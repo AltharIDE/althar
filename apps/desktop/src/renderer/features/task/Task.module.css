@@ -10,6 +10,13 @@
   min-height: 0;
 }
 
+/* the Graph face fills what is under the header, its canvas edge to edge */
+.graphFace {
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+}
+
 .loading {
   display: grid;
   flex: 1;

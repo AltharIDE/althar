@@ -9,8 +9,16 @@
   2026-10-12: the rules keep whether the project's leads resolve merge
   conflicts on their own ([ADR-030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md)),
   switched in the project's settings. Off unless the person turns it on.
+  2026-10-15 (DEV-69, [the safety pass](../plans/safety-pass.md)): reading
+  credentials covers the files people keep keys and sign-ins in under their
+  home folder (`~/.ssh`, `~/.aws`, `~/.npmrc` and the like), refused for
+  every role. Deleting a branch that isn't the task's counts locally too, as
+  does moving one by force; installing for the whole computer counts as
+  writing outside the worktree. What could lose work asks the person even
+  with everything allowed ([ADR-043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md)),
+  and is never the coordinator's to judge.
   2026-10-18: the rules keep the project's Repository files switches
-  ([ADR-055](055-skill-and-openspec-files-stay-off-the-repository.md)):
+  ([ADR-056](056-skill-and-openspec-files-stay-off-the-repository.md)):
   whether skill and OpenSpec files may be in its repository and be pushed.
   Each off unless the person turns it on.
 - **Owner:** Repository maintainers

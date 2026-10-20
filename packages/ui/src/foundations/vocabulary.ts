@@ -199,6 +199,12 @@ export enum GraphNodeState {
   Added = 'added',
   /** A stopped attempt, which stays, hollow. */
   Stopped = 'stopped',
+  /** It waits on you: a permission, a question, or a step that needs you. */
+  Waiting = 'waiting',
+  /** It waits for an agent: a free place on this machine, or one back from its usage limit. */
+  Held = 'held',
+  /** A change to the steps that waits for your say; dashed, in your colour, until you answer it. */
+  Proposed = 'proposed',
 }
 
 /** Your answer to a graph change that needs more than the run was given. */

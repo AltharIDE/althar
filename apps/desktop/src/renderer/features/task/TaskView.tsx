@@ -1,6 +1,6 @@
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
-import type { TaskAction, ThreadSnapshot } from '@althar/contracts'
+import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
   AbandonTask,
   AttachPullRequest,
@@ -21,6 +21,7 @@ import {
   Running,
   TaskFace,
   TaskHeader,
+  type TaskHeaderStep,
   ReachLine,
   type TaskConflicts,
   TaskMenu,
@@ -53,7 +54,7 @@ import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { stepNames, stepText, trackFor } from '../../shared/steps'
+import { stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
@@ -82,14 +83,18 @@ import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
 import { chosenFaces } from './chosenFaces'
+import { REQUEST, taskGraphOf } from './graph'
+import { GraphFace } from './GraphFace'
+import { reveal } from './reveal'
 
 /*
- * A task, with two faces under its header, as in the prototype: the
+ * A task, with its faces under its header, as in the prototype: the
  * conversation, its thread and the composer that talks to its lead, where
- * the person is while the work happens; and its outputs, what it changed,
- * where they decide whether to accept it. A ready task opens on its outputs,
+ * the person is while the work happens; its outputs, what it changed, where
+ * they decide whether to accept it; and its graph, the steps it went
+ * through, once it has any (ADR-054). A ready task opens on its outputs,
  * anything else on the conversation, and the person switches with the
- * header's switch, or c and o. The project's bar is over it, so the way
+ * header's switch, or c, o and g. The project's bar is over it, so the way
  * around the project is the one its own screen has. What the rules keep for
  * the person arrives as a call at the end of the thread. What it changed
  * opens over the whole window, file by file, from the header, its outputs,
@@ -97,8 +102,8 @@ import { chosenFaces } from './chosenFaces'
  * kit's; this view only arranges it.
  */
 
-/** The task's faces: its conversation, and what it made. */
-type Face = 'talk' | 'out'
+/** The task's faces: its conversation, what it made, and the steps it went through. */
+export type Face = 'talk' | 'out' | 'graph'
 
 export const text = {
   thread: 'Thread',
@@ -142,17 +147,8 @@ export const text = {
   abandoned: 'Abandoned',
   idle: 'Idle',
   stopped: 'Stopped',
-  faces: { talk: 'Conversation', out: 'Outputs' } satisfies Record<Face, string>,
-  facesKbd: { talk: 'c', out: 'o' } satisfies Record<Face, string>,
-  /** How long it has been on what it is doing now, or since it last changed. */
-  since: {
-    step: (step: string, took: string) => `${step} · ${took}`,
-    waiting: (took: string) => `waiting · ${took}`,
-    ready: (ago: string) => `ready · ${ago}`,
-    done: (ago: string) => `done · ${ago}`,
-    abandoned: (ago: string) => `abandoned · ${ago}`,
-    stopped: (ago: string) => `stopped · ${ago}`,
-  },
+  faces: { talk: 'Conversation', out: 'Outputs', graph: 'Graph' } satisfies Record<Face, string>,
+  facesKbd: { talk: 'c', out: 'o', graph: 'g' } satisfies Record<Face, string>,
   dismiss: 'Dismiss',
   earlier: 'Earlier in this task',
   showEarlier: 'Show',
@@ -221,37 +217,27 @@ export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null 
   return running(startedAt, last?.createdAt ?? now)
 }
 
+/** How long the step it is on has run, while it runs: what its header's card says beside that step. */
+export const tookOf = (snapshot: ThreadSnapshot, now: string): string | null => {
+  const { phase, step, stepAt } = snapshot.task
+  return phase === 'running' && step !== null && stepAt !== null ? running(stepAt, now) : null
+}
+
 /**
- * Since when a task has been where it stands, for its header's facts: on its
- * step, how long; waiting on the person, how long; ready, done or stopped,
- * how long ago. Nothing for a lead that is idle between steps, or held for a
- * usage limit, which its state already says.
+ * Its plan's steps, for its header, each with who does it: the work its lead,
+ * the one on it now or last, and each review the agent its plan names.
  */
-export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null => {
-  const { phase, step, stepAt, settledAt, waits } = snapshot.task
-  const [call] = snapshot.attention
-  if (call !== undefined) return text.since.waiting(running(call.createdAt, now))
-  if (waits !== null) return null
-  if (phase === 'settled')
-    return settledAt === null
-      ? null
-      : (snapshot.task.state === 'abandoned' ? text.since.abandoned : text.since.done)(ago(settledAt, new Date(now)))
-  if (phase === 'ready' && snapshot.task.handedBack != null) return null
-  if (phase === 'ready') {
-    const reported = snapshot.items.findLast((item) => item.kind === 'step_result')
-    return reported === undefined ? null : text.since.ready(ago(reported.createdAt, new Date(now)))
-  }
-  if (phase === 'stopped') {
-    const last = snapshot.items.at(-1)
-    return last === undefined ? null : text.since.stopped(ago(last.createdAt, new Date(now)))
-  }
-  if (step === null || stepAt === null) return null
-  // By the step's name, as its track says it: settling a review is part of the review.
-  const [name] = stepNames(
-    [{ key: step === 'implement' ? 'implement' : 'review', agentId: '', model: null, skipped: false }],
-    snapshot.task.followUp === true,
-  )
-  return name === undefined ? null : text.since.step(name.toLowerCase(), running(stepAt, now))
+export const stepsOf = (
+  snapshot: ThreadSnapshot,
+  lead: string,
+  named: (agentId: string, model: string | null) => string,
+): TaskHeaderStep[] => {
+  const { steps, step, phase, followUp } = snapshot.task
+  const planned = steps.filter((one) => !one.skipped)
+  return trackFor(steps, step, phase === 'ready' || phase === 'settled', followUp === true).map((item, at) => {
+    const one = planned[at]
+    return { ...item, who: one === undefined || one.key === 'implement' ? lead : named(one.agentId, one.model) }
+  })
 }
 
 /** Whether a key is meant for a field: one pressed in a text box, or with a modifier. */
@@ -409,20 +395,40 @@ export function TaskView({
     showed.current = { task: showsTask, outputs: showsOutputs, changes: showsChanges }
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
-  // c and o switch the faces, and Escape goes back to the project: never while typing, or with something else open.
+  // c, o and g switch the faces, and Escape goes back to the project: never while typing, or with something else open.
   const open = changes.open || abandoning || attaching !== null
+  const hasGraph = (model.snapshot?.task.graph?.length ?? 0) > 0
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || typing(event) || open) return
       if (event.key === 'Escape' && event.target === document.body) onBack()
       else if (event.key === text.facesKbd.talk) setFace('talk')
       else if (event.key === text.facesKbd.out) setFace('out')
+      else if (event.key === text.facesKbd.graph && hasGraph) setFace('graph')
       else return
       event.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onBack, open, setFace])
+  }, [onBack, open, setFace, hasGraph])
+  // The Graph face takes the person to a place in the conversation: earlier pages are read from the model as it is then.
+  const latest = useRef(model)
+  useLayoutEffect(() => {
+    latest.current = model
+  })
+  const showInThread = useCallback(
+    (itemId: string | undefined) => {
+      setFace('talk')
+      if (itemId === undefined) return
+      void reveal(itemId, async () => {
+        const now = latest.current
+        if (now.snapshot?.earlier !== true) return false
+        await now.loadEarlier()
+        return true
+      })
+    },
+    [setFace],
+  )
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
   const now = useNow(
     ticking(model.snapshot) ||
@@ -465,8 +471,10 @@ export function TaskView({
         : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
   const { status, state } = statusOf(snapshot, agentName)
   const elapsed = elapsedOf(snapshot, now)
-  const since = sinceOf(snapshot, now)
-  const shown: Face = face ?? 'talk'
+  const took = tookOf(snapshot, now)
+  // Its steps as a graph, where the runtime keeps rounds of work for it; without, its face isn't offered.
+  const graph = taskGraphOf(snapshot, named, now)
+  const shown: Face = face === null || (face === 'graph' && graph === null) ? 'talk' : face
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
@@ -481,7 +489,7 @@ export function TaskView({
       : [
           {
             kind: 'you' as const,
-            id: 'request',
+            id: REQUEST,
             text: snapshot.task.request,
             at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
             delivery: Delivery.Delivered,
@@ -680,6 +688,8 @@ export function TaskView({
               },
             }
           : {})}
+        // Held on by its project, allowing everything opens the project's rules, where it is turned off.
+        {...(onRules === undefined ? {} : { onRules })}
         // Its folder opens in the editor files open in, once it has a worktree: a plain task's has no branch, but is there.
         {...(snapshot.task.worktree === null || editor === undefined
           ? {}
@@ -769,6 +779,48 @@ export function TaskView({
     </div>
   )
 
+  // A stuck step's call, answered in the conversation or where the Graph face opens it.
+  const stuckCall = (request: AttentionRequest) =>
+    request.stuck === null ? null : (
+      <StuckCall
+        key={request.id}
+        request={request}
+        stuck={request.stuck}
+        agents={model.agents}
+        agentName={agentName}
+        onAnswer={model.answerStuck}
+        {...(reportProblem === undefined
+          ? {}
+          : {
+              onReport: (step: string) =>
+                reportProblem({
+                  kind: 'failed',
+                  taskId: snapshot.task.id,
+                  projectId: snapshot.project.id,
+                  threadId: snapshot.threadId,
+                  what: reportText.stuck(step),
+                }),
+            })}
+      />
+    )
+  // Permissions waiting, as one stack with Allow all, in the conversation or where the Graph face opens the step asking:
+  // there, opened to be answered, it takes focus, so Enter answers it.
+  const permissionCalls = (requests: ReadonlyArray<AttentionRequest>, opened = false) => (
+    <PermissionCalls
+      requests={requests}
+      project={snapshot.project.name}
+      focusOnMount={opened || permitting || 'idle'}
+      onAnswer={model.answer}
+      // Out of what the project always asks about: everything on this task allowed, where it isn't yet; or the rules.
+      wayOut={{
+        ...(snapshot.task.allowEverything.task || snapshot.task.phase === 'settled'
+          ? {}
+          : { onAllowEverything: () => void model.setAllowEverything(true) }),
+        ...(onRules === undefined ? {} : { onRules }),
+      }}
+    />
+  )
+
   return (
     <div className={s.window}>
       {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
@@ -779,24 +831,18 @@ export function TaskView({
             title={snapshot.task.title}
             status={status}
             state={state}
-            lead={lead}
-            {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
-            {...(since === null ? {} : { since })}
+            // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
+            steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
+            {...(took === null ? {} : { took })}
             {...(elapsed === null ? {} : { elapsed })}
-            // Finished and the person's to settle, its steps are all done: Done says the rest, with no bar beside it.
-            {...(settle === null
-              ? {
-                  steps: trackFor(
-                    snapshot.task.steps,
-                    snapshot.task.step,
-                    snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled',
-                    snapshot.task.followUp === true,
-                  ),
-                }
-              : {})}
-            faces={(['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] }))}
+            faces={(graph === null ? (['talk', 'out'] as const) : (['talk', 'out', 'graph'] as const)).map((value) => ({
+              value,
+              label: text.faces[value],
+              kbd: text.facesKbd[value],
+            }))}
             face={shown}
             onFace={setFace}
+            // Finished and the person's to settle: Done and Keep for later, inside where it stands.
             {...(settle === null ? {} : { beside: settle })}
             actions={actions}
           />
@@ -818,7 +864,18 @@ export function TaskView({
       {snapshot.task.review != null && (
         <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
       )}
-      {shown === 'out' && !hasOutputsToShow(snapshot) ? (
+      {shown === 'graph' && graph !== null ? (
+        <GraphFace
+          className={s.graphFace}
+          graph={graph}
+          stuck={stuckCall}
+          permissions={(requests) => permissionCalls(requests, true)}
+          onShow={showInThread}
+          // The composer that says what went wrong is the conversation's: here, the face says it.
+          error={model.error}
+          onDismissError={model.dismissError}
+        />
+      ) : shown === 'out' && !hasOutputsToShow(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
         <div
@@ -980,30 +1037,7 @@ export function TaskView({
                 </Button>
               </div>
             )}
-            {snapshot.attention.map((request) =>
-              request.kind === 'stuck' && request.stuck !== null ? (
-                <StuckCall
-                  key={request.id}
-                  request={request}
-                  stuck={request.stuck}
-                  agents={model.agents}
-                  agentName={agentName}
-                  onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
-                  {...(reportProblem === undefined
-                    ? {}
-                    : {
-                        onReport: (step: string) =>
-                          reportProblem({
-                            kind: 'failed',
-                            taskId: snapshot.task.id,
-                            projectId: snapshot.project.id,
-                            threadId: snapshot.threadId,
-                            what: reportText.stuck(step),
-                          }),
-                      })}
-                />
-              ) : null,
-            )}
+            {snapshot.attention.map((request) => (request.kind === 'stuck' && request.stuck !== null ? stuckCall(request) : null))}
             {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
             {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
               <HeldLimit
@@ -1016,19 +1050,7 @@ export function TaskView({
                 {...(snapshot.task.step === 'review' ? { onSkip: () => void model.skipReview() } : {})}
               />
             )}
-            <PermissionCalls
-              requests={snapshot.attention.filter((request) => request.kind === 'permission')}
-              project={snapshot.project.name}
-              focusOnMount={permitting || 'idle'}
-              onAnswer={model.answer}
-              // Out of what the project always asks about: everything on this task allowed, where it isn't yet; or the rules.
-              wayOut={{
-                ...(snapshot.task.allowEverything.task || snapshot.task.phase === 'settled'
-                  ? {}
-                  : { onAllowEverything: () => void model.setAllowEverything(true) }),
-                ...(onRules === undefined ? {} : { onRules }),
-              }}
-            />
+            {permissionCalls(snapshot.attention.filter((request) => request.kind === 'permission'))}
           </Thread>
         </TaskFace>
       )}

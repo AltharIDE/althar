@@ -39,7 +39,8 @@ import { statements as dictatedInput } from './0034_dictated_input'
 import { statements as line } from './0035_line'
 import { statements as taskKept } from './0036_task_kept'
 import { statements as attachedChangeSets } from './0037_attached_change_sets'
-import { statements as skills } from './0038_skills'
+import { statements as roundOpeners } from './0038_round_openers'
+import { statements as skills } from './0039_skills'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -96,7 +97,8 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0035_line', statements: line },
   { key: '0036_task_kept', statements: taskKept },
   { key: '0037_attached_change_sets', statements: attachedChangeSets },
-  { key: '0038_skills', statements: skills },
+  { key: '0038_round_openers', statements: roundOpeners },
+  { key: '0039_skills', statements: skills },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

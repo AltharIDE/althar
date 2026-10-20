@@ -347,9 +347,13 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   Until then such a project's setup command runs outside the agent.
 - [ ] **A sandbox for agents' shells.** The environment keeps the person's
   ambient sign-ins from agents, and the rules refuse the keychain and git's
-  helpers, but a shell can still read what the person keeps in plain files
-  under their home folder (`~/.git-credentials`, an unencrypted SSH key, a
-  cloud CLI's config). Only running agents in a sandbox closes that:
+  helpers, and since DEV-69 any request that names where people keep keys
+  and sign-ins (`~/.git-credentials`, `~/.ssh`, a cloud CLI's config), and
+  Claude Code's sandbox is given those places as denied reads. But a command
+  an agent's sandbox runs without asking never reaches the rules, Codex's
+  sandbox reads anywhere, and a command can find such a file without naming
+  it ([the safety pass](plans/safety-pass.md)). Only running agents in a
+  sandbox of Althar's own closes that:
   macOS's sandbox profiles, a container, or a separate user. Also: agents'
   own API keys (03, "API keys and OAuth") should be sealed the way code hosts' tokens
   are, not kept where `security` reads them.
