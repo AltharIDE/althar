@@ -1067,6 +1067,12 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // A repository with no packages, on no host: only what every lead runs outside its sandbox.
+          sandbox: {
+            commands: ['ps', 'env -i'],
+            hosts: [],
+            edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
+          },
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
@@ -1107,6 +1113,19 @@ describe('project rules, through the API', () => {
             { codex: ['acc_x'] },
           ],
         )
+        // What leads' sandboxes let through, changed in part: a list given is kept whole, tidied, and the other stays.
+        const reached = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          sandbox: { hosts: { added: ['https://Registry.Acme.dev/npm', 'not a host'], removed: [] } },
+        })
+        assert.deepStrictEqual(reached.sandbox.hosts, ['registry.acme.dev'])
+        const trimmed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          sandbox: { commands: { added: ['bunx  playwright *'], removed: ['env -i'] } },
+        })
+        assert.deepStrictEqual([trimmed.sandbox.commands, trimmed.sandbox.hosts], [['ps', 'bunx playwright'], ['registry.acme.dev']])
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(

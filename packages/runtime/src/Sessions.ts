@@ -1740,6 +1740,13 @@ export class Sessions extends Context.Service<
                   }
                 : { role: 'reader', cwd: cwdOf(thread), ...(offline ? { offline } : {}) },
           }
+          // What a lead's sandbox lets through from the start, as the rules stand now; nothing for a role that only reads.
+          const upFront =
+            requestContext.rules.role === 'task' && definition.sessionMeta !== undefined
+              ? yield* permissions
+                  .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
+                  .pipe(Effect.orElseSucceed(() => undefined))
+              : undefined
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
             role: toolRoleOf(thread),
@@ -1780,7 +1787,11 @@ export class Sessions extends Context.Service<
                   : {
                       meta: definition.sessionMeta(
                         reads ? 'reader' : 'lead',
-                        untrusted ? { untrusted, ...(offline ? { offline } : {}) } : undefined,
+                        untrusted
+                          ? { untrusted, ...(offline ? { offline } : {}) }
+                          : upFront === undefined
+                            ? undefined
+                            : { sandbox: upFront },
                       ),
                     }),
               })

@@ -254,12 +254,34 @@ export interface AgentDefinition {
  * How a session is started beyond its role: `untrusted`, it leads a review of
  * someone else's pull request, whose repository's settings and hooks are the
  * pull request's to write; `offline`, it has no network where the agent lets
- * Althar take it away.
+ * Althar take it away; `sandbox`, for a lead, what its sandbox lets through
+ * from the start, where the agent's settings can say it.
  */
 export interface SessionOptions {
   readonly offline?: boolean
   readonly untrusted?: boolean
+  readonly sandbox?: UpFront
 }
+
+/**
+ * What a lead's sandbox lets through from the start, which the project's
+ * rules work out: commands it runs outside the sandbox rather than failing
+ * inside it first, by how they start, which still ask and meet Althar's
+ * rules; and hosts it reaches without asking, only those the rules would let
+ * through without anyone.
+ */
+export interface UpFront {
+  readonly commands: ReadonlyArray<string>
+  readonly hosts: ReadonlyArray<string>
+}
+
+/**
+ * Claude Code's `sandbox.excludedCommands` for commands by how they start:
+ * each as the whole command, and followed by ` *` for what comes after it,
+ * as its settings take a command's start.
+ */
+export const excludedCommandsOf = (commands: ReadonlyArray<string>): ReadonlyArray<string> =>
+  commands.flatMap((command) => [command, `${command} *`])
 
 export interface AgentCli {
   /** The command by name, as on the person's PATH; `.exe` is added on Windows. */
@@ -505,7 +527,18 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * checked against a real session (docs/plans/safety-pass.md). Althar's rules
  * refuse what reaches them.
  */
-const claudeAsks = {
+/*
+ * A project's known commands run outside the sandbox from the start
+ * (`excludedCommands`), so a browser, Electron or a test runner, which its
+ * sandbox stops on a Mac, doesn't fail once first: Claude Code's settings
+ * say an excluded command still goes through its permission flow, so it
+ * asks, and meets Althar's rules, as it would on its second try. Known hosts
+ * (`network.allowedDomains`) a command in the sandbox reaches without
+ * asking: the project's code hosts, registries and trackers, only where its
+ * rules would let them through anyway. Both are settings Claude Code takes
+ * only from trusted sources, which these, given as the session's own, are.
+ */
+const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
@@ -518,12 +551,13 @@ const claudeAsks = {
           autoAllowBashIfSandboxed: true,
           allowUnsandboxedCommands: true,
           failIfUnavailable: false,
-          network: { allowLocalBinding: true },
+          ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
+          network: { allowLocalBinding: true, ...(sandbox.hosts.length === 0 ? {} : { allowedDomains: [...sandbox.hosts] }) },
         },
       },
     },
   },
-}
+})
 
 /**
  * Claude Code for a role that only reads: its edit tools denied, which also
@@ -622,7 +656,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     sessionMeta: (role = 'lead', options = {}) =>
       role === 'reader'
         ? claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true)
-        : claudeAsks,
+        : claudeAsks(options.sandbox),
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
@@ -702,8 +736,17 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       rejectAndStop: ['cancel'],
       allowScopes: { allow_once: 'once', allow_permissions_turn: 'turn', allow_permissions_turn_strict_auto_review: 'turn' },
     },
+    /*
+     * A project's known commands and hosts (`UpFront`) aren't passed: its
+     * `workspace-write` sandbox has no list of commands that run outside it,
+     * and its network is one switch (`sandbox_workspace_write.network_access`).
+     * Codex 0.160's list of allowed domains belongs to its permission
+     * profiles' network proxy, experimental, which codex-acp's modes don't
+     * use. So each of those still asks first, and meets Althar's rules.
+     */
     knownGaps: [
       'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
+      "A project's known commands and hosts aren't passed to it: its sandbox has no list of commands to run outside it, and no list of hosts in the mode Althar starts it in, so each asks first.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
     ],
@@ -726,7 +769,9 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     }),
     /*
      * It has no sandbox: a reader, offline or not, is held by Althar's
-     * rules alone. Every command asks (`bash: 'ask'`), and its web fetches
+     * rules alone, and a lead's known commands and hosts (`UpFront`) have
+     * nothing to be passed to, as every command already asks and none
+     * fails inside a sandbox first. Every command asks (`bash: 'ask'`), and its web fetches
      * do (`webfetch: 'ask'`), so an offline reader's are refused there. As a
      * review's lead it loads nothing of the repository's own config, plugins
      * or language servers, and its web search asks too (openCodeReviewing),

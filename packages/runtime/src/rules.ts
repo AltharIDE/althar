@@ -444,8 +444,9 @@ const COMMAND_KEPT = 4_000
 
 /**
  * What of a tool call's input the store keeps (docs/architecture/07: no file
- * contents, and so no secrets, in the record): the command, the paths, and
- * which files a patch touches, without what it writes. What is left out is
+ * contents, and so no secrets, in the record): the command, the paths, the
+ * host a network request is for, and which files a patch touches, without
+ * what it writes. What is left out is
  * named, so the record says it was cut. The rules decide on the whole input;
  * this is only what is written down.
  */
@@ -465,6 +466,8 @@ export const essentials = (
       } else if (whole !== undefined) input[key] = whole
       else cut.push(key)
     } else if (PATH_KEYS.includes(key) && typeof value === 'string') input[key] = value
+    // The host a network request is for (Claude Code's sandbox asks by it): a name, never a secret.
+    else if (key === 'host' && typeof value === 'string') input.host = value.slice(0, 253)
     else if (key === 'changes' && typeof value === 'object' && value !== null) {
       // A patch's files, without their contents.
       input.changes = Array.isArray(value)
