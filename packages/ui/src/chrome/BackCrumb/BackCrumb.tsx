@@ -3,7 +3,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Field } from '../../primitives/Field/Field'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
-import { Kbd } from '../../primitives/Kbd/Kbd'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './BackCrumb.module.css'
 
@@ -36,7 +36,7 @@ export interface BackCrumbProps {
   /** Where back goes: the project's name. */
   to: string
   onBack: () => void
-  /** The key that goes back, shown; the consumer binds it. */
+  /** The key that goes back, said in the way back's tooltip; the consumer binds it. */
   kbd?: string
   /** Where you are now: the task's number. */
   task?: string
@@ -114,13 +114,22 @@ export function BackCrumb({
         {inside}
       </Heading>
     )
+  // Back to the project, by its name; its key says itself in a tooltip, not as a chip on the bar.
+  const back = (
+    <button type="button" className={s.back} onClick={onBack} aria-label={t.back(to)}>
+      <Icon name="arrow" size={12} className={s.arrow} />
+      {to}
+    </button>
+  )
   return (
     <nav className={s.crumb} aria-label={t.label}>
-      <button type="button" className={s.back} onClick={onBack} aria-label={t.back(to)}>
-        <Icon name="arrow" size={12} className={s.arrow} />
-        {to}
-        {kbd && <Kbd>{kbd}</Kbd>}
-      </button>
+      {kbd === undefined ? (
+        back
+      ) : (
+        <Tooltip label={t.back(to)} kbd={kbd} placement="below">
+          {back}
+        </Tooltip>
+      )}
       {(task || title) && (
         <>
           <span className={s.sep} aria-hidden="true">

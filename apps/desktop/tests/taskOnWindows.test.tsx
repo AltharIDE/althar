@@ -35,7 +35,9 @@ describe('a task on Windows', () => {
     }
     const { client } = fakeClient({ getThread: vi.fn(async () => running) })
     withServices(<Task />, client)
-    expect((await screen.findByRole('button', { name: /1 file/ })).textContent).toContain('Ctrl+D')
+    // Its key is said in its tooltip, not as a chip on the bar.
+    await userEvent.hover(await screen.findByRole('button', { name: /1 file/ }))
+    expect((await screen.findByRole('tooltip')).textContent).toContain('Ctrl+D')
     // Sending now, over the turn under way.
     await userEvent.type(await screen.findByRole('textbox', { name: /^Add to the queue/ }), 'Stop there')
     expect(screen.getByRole('button', { name: /Send now/ }).textContent).toContain('Ctrl+Enter')

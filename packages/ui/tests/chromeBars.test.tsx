@@ -120,7 +120,8 @@ describe('renaming a task from its crumb', () => {
     render(<BackCrumb to="Meridian" onBack={vi.fn()} title="Add a retry" editing kbd="⌘[" />)
     expect(screen.queryByRole('textbox')).toBeNull()
     expect(screen.queryByRole('button', { name: /Rename/ })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Back to Meridian' })).toHaveTextContent('Meridian⌘[')
+    // Its key is in the way back's tooltip, not a chip on the bar.
+    expect(screen.getByRole('button', { name: 'Back to Meridian' })).toHaveTextContent(/^Meridian$/)
   })
 })
 

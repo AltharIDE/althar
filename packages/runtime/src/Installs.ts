@@ -200,6 +200,10 @@ const findIn = (dir: string, name: string, depth = 3): string | null => {
   return null
 }
 
+/** Whether the agent can be started here: one with no command of its own always can, any other where its command is found. */
+export const isInstalled = (installs: Pick<Installs['Service'], 'locate'>, definition: AgentDefinition): boolean =>
+  definition.cli === undefined || installs.locate(definition) !== null
+
 export class Installs extends Context.Service<
   Installs,
   {

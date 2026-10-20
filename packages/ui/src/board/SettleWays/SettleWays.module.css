@@ -1,6 +1,55 @@
-/* On a card, in its corner; in the task's header, beside where it stands. */
+/* On a card, in its corner. */
 .ways {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+
+/* In the task's header, segments of the chip that says where it stands, in its colour, each set off by a hairline of it. */
+.parts {
+  display: inline-flex;
+  align-items: center;
+}
+.part {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+/* the last one rounds off the chip's end */
+.part:last-child {
+  padding-right: 10px;
+  border-radius: 0 99px 99px 0;
+}
+.part:hover:not(:disabled, [aria-busy='true']) {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.part:active:not(:disabled, [aria-busy='true']) {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.part:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.part:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.part[aria-busy='true'] {
+  cursor: progress;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .part {
+    transition: none;
+  }
 }

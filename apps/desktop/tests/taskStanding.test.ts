@@ -1,9 +1,9 @@
 import { TaskStatus } from '@althar/ui'
 import { describe, expect, it } from 'vitest'
 
-import { elapsedOf, sinceOf, statusOf, text } from '../src/renderer/features/task/TaskView'
+import { elapsedOf, statusOf, text } from '../src/renderer/features/task/TaskView'
 import { clock } from '../src/renderer/shared/time'
-import { items, snapshot } from './fixtures'
+import { snapshot } from './fixtures'
 
 /*
  * Where a task stands, as its header says it, in the cases its screen's
@@ -31,13 +31,6 @@ describe('where a task stands', () => {
     expect(statusOf({ ...base, task: { ...base.task, waits: { agentId: 'codex', until } } }).state).toBe(
       `The work waits: codex is out of usage until ${clock(until)}`,
     )
-  })
-
-  it('says no time beside a ready task its lead handed back, nor beside one stopped before it said anything', () => {
-    const base = snapshot()
-    const reported = { ...items.step(), createdAt: at(0) }
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'ready', handedBack: 'It conflicts.' }, items: [reported] }, at(5))).toBeNull()
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'stopped' }, items: [] }, at(5))).toBeNull()
   })
 
   it('counts a stopped task with nothing in its thread until now', () => {

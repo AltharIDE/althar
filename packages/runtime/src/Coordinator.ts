@@ -23,6 +23,7 @@ import { Issues } from './Issues'
 import { answeredIn, quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
+import { Installs } from './Installs'
 import { Models } from './Models'
 import { Plans } from './Plans'
 import { findPullRequests } from './pullRequestList'
@@ -87,6 +88,7 @@ type Store =
   | IssueDrafts
   | Policies
   | Models
+  | Installs
   | ModelFacts
   | Limits
   | Busy
