@@ -5,6 +5,8 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { NotFound, ProjectRefused } from '../src/errors'
+import { Instance } from '../src/Instance'
+import { Policies } from '../src/Policies'
 import { Projects, readFolder } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { HOST, hosted, repository, runtime } from './support'
@@ -100,5 +102,21 @@ describe('a project’s repositories, as its page lists them', () => {
         assert.deepInclude(elsewhere, { path: null, branch: null, fork: null })
         assert.isNotNull(elsewhere?.remote)
       }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('a project’s first command rule', () => {
+  it.live('is kept where its rules name no command yet', () =>
+    Effect.gen(function* () {
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const project = yield* open
+      const kept = yield* policies.set(
+        project.projectId,
+        { commands: [{ pattern: '  npm   test ', decision: 'allow' }] },
+        instance.personId,
+      )
+      assert.deepStrictEqual(kept.commands, [{ pattern: 'npm test', decision: 'allow' }])
+    }).pipe(Effect.provide(runtime())),
   )
 })

@@ -13,6 +13,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, turns, until } from './support'
@@ -76,6 +77,20 @@ describe('a lead settling its task as the person says', () => {
       assert.strictEqual(yield* settle('done'), 'It is done already: it is in Settled.')
       assert.strictEqual(yield* settle('keep'), 'It is done already: it is in Settled, so there is nothing to keep.')
       assert.strictEqual(yield* settle('discard'), 'It is done already: it is in Settled, so there is nothing to discard.')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('settles it done when the person says so after its lead has stopped, with nothing left running to stop', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const tasks = yield* Tasks
+      const project = yield* open
+      const task = yield* quick(project.projectId, 'Check the partners')
+      yield* sessions.stop(task.threadId)
+      assert.isTrue(
+        yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.taskId }), taskId: task.taskId }),
+      )
+      assert.strictEqual((yield* stateOf(task.taskId))[0]?.state, 'done')
     }).pipe(Effect.provide(runtime())),
   )
 
