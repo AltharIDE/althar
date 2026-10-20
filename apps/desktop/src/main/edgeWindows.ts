@@ -248,12 +248,19 @@ export const startEdge = (host: EdgeHost): Edge => {
     return sheetBounds({ mark, workArea, size: { width: SHEET.width, height }, gap: SHEET.gap, mac: process.platform === 'darwin' })
   }
 
+  /** The sheet's paper, light or dark as the app's appearance makes the scheme. */
+  const sheetPaper = () => (nativeTheme.shouldUseDarkColors ? '#222225' : '#fcfbf8')
+  // Changed while it is made, its paper follows, as its page does.
+  nativeTheme.on('updated', () => {
+    if (sheet !== undefined && !sheet.isDestroyed()) sheet.setBackgroundColor(sheetPaper())
+  })
+
   const makeSheet = (): BrowserWindow => {
     const made = new BrowserWindow({
       ...shared(host.preload),
       ...sheetPlace(SHEET.height),
       // Paper, with the system's own corners and shadow, as a menu has; the kit's raised shade (--n-1) in the theme's scheme.
-      backgroundColor: nativeTheme.shouldUseDarkColors ? '#222225' : '#fcfbf8',
+      backgroundColor: sheetPaper(),
       hasShadow: true,
       roundedCorners: true,
     })
