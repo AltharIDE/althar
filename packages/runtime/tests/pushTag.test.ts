@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,12 +27,12 @@ const git = (cwd: string, ...args: Array<string>) =>
     .trim()
 
 /** A task in a repository whose work goes to a bare remote here, with its lead running: the lead's access, its worktree and the remote. */
-const leadWithRemote = () =>
+const leadWithRemote = (origin: 'bare' | 'none' = 'bare') =>
   Effect.gen(function* () {
     const root = repository()
     const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
     git(remote, 'init', '-q', '--bare', '-b', 'main')
-    git(root, 'remote', 'add', 'origin', remote)
+    if (origin === 'bare') git(root, 'remote', 'add', 'origin', remote)
     const projects = yield* Projects
     const sql = yield* SqlClient.SqlClient
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
@@ -44,7 +46,7 @@ const leadWithRemote = () =>
     const sessionId = yield* sessions.start({ threadId: task.threadId, agentId: 'codex' })
     yield* until(turns(task.threadId), (rows) => rows.length >= 1 && rows.every((row) => !['pending', 'delivered'].includes(row.state)))
     const access = { role: 'lead' as const, projectId: project.projectId, threadId: task.threadId, sessionId, taskId: task.taskId }
-    return { access, worktree: worktree?.path ?? '', remote }
+    return { access, worktree: worktree?.path ?? '', remote, root }
   })
 
 /** The one card waiting on the person: its id and what it shows. */
@@ -113,4 +115,70 @@ describe('push_tag', () => {
       assert.strictEqual(git(remote, 'tag', '--list'), 'v1.0.0')
     }).pipe(Effect.provide(runtime())),
   )
+})
+
+describe('push_tag, where the tag can’t go up', () => {
+  /** A tag on a new commit in the worktree, by its name. */
+  const tagged = (worktree: string, tag: string) => {
+    writeFileSync(join(worktree, 'CHANGELOG.md'), `${tag}\n`)
+    git(worktree, 'add', '.')
+    git(worktree, 'commit', '-q', '-m', `Release ${tag}`)
+    git(worktree, 'tag', tag)
+  }
+
+  /** Pushes the tag as the lead asks, the person allowing it: what the lead is told. */
+  const allowed = (access: Parameters<typeof callTool>[0], tag: string) =>
+    Effect.gen(function* () {
+      const pushing = yield* Effect.forkChild(callTool(access, 'push_tag', { tag }))
+      yield* answer((yield* card).id, 'allow')
+      return yield* Fiber.join(pushing)
+    })
+
+  it.live('says there is nowhere to push it in a repository with no remote, and asks nothing', () =>
+    Effect.gen(function* () {
+      const { access, worktree } = yield* leadWithRemote('none')
+      tagged(worktree, 'v2.0.0')
+      assert.match(yield* callTool(access, 'push_tag', { tag: 'v2.0.0' }), /^althar-repo-\w+ has no remote to push v2\.0\.0 to\.$/)
+      const sql = yield* SqlClient.SqlClient
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'permission'`, 0)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('tells the lead what the remote said where it refuses the tag, and what git said where the push failed otherwise', () =>
+    Effect.gen(function* () {
+      const { access, worktree, remote } = yield* leadWithRemote()
+      // The remote turns tags down, as a protected one does.
+      const hook = join(remote, 'hooks', 'pre-receive')
+      writeFileSync(hook, '#!/bin/sh\necho "Tags are made by the release job" >&2\nexit 1\n')
+      chmodSync(hook, 0o755)
+      tagged(worktree, 'v2.0.0')
+      assert.strictEqual(yield* allowed(access, 'v2.0.0'), 'origin refused v2.0.0: pre-receive hook declined. Tell the person.')
+      assert.strictEqual(git(remote, 'tag', '--list'), '')
+      // The remote gone: git's own last word.
+      rmSync(remote, { recursive: true, force: true })
+      tagged(worktree, 'v2.0.1')
+      assert.strictEqual(yield* allowed(access, 'v2.0.1'), 'Pushing v2.0.1 failed: and the repository exists.')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('says the remote didn’t take the person’s sign-in, where it asks for one git can’t give', () => {
+    // A remote that wants a sign-in, as a host's does: git, never prompting, can't give one.
+    const server = createServer((_request, response) => {
+      response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="tags"' })
+      response.end()
+    })
+    return Effect.gen(function* () {
+      yield* Effect.promise(() => new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve)))
+      const { port } = server.address() as AddressInfo
+      const { access, worktree, root } = yield* leadWithRemote('none')
+      git(root, 'remote', 'add', 'origin', `http://127.0.0.1:${port}/meridian/api.git`)
+      // No helper of the person's answers for it.
+      git(root, 'config', 'credential.helper', '')
+      tagged(worktree, 'v2.0.0')
+      assert.strictEqual(
+        yield* allowed(access, 'v2.0.0'),
+        "origin didn't take the person's sign-in, so v2.0.0 wasn't pushed. Tell the person.",
+      )
+    }).pipe(Effect.ensuring(Effect.sync(() => server.close())), Effect.provide(runtime()))
+  })
 })
