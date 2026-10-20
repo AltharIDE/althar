@@ -59,7 +59,8 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `reading.ts` | What the window reads past an item: a command's output from the store, and a markdown document from the task's worktree as it is now |
 | `Live.ts` | What is happening now, for clients that watch, with each message's text as far as it has come |
 | `Search.ts` | Finding a task by what it was about (ADR-035): its row in the store's full-text index, written where what it is found by changes (`indexTask`), the rows of tasks made before the index, filled as the runtime starts, and the search itself, for `SearchTasks` and the coordinator's `find_tasks` |
-| `Queries.ts` | What a client's screens show, read from the store: projects, tasks, a task's thread with its live session and the calls waiting, and the coordinator's thread with its task cards; and what git says of a task's worktrees, kept while each looks the same |
+| `Queries.ts` | What a client's screens show, read from the store: projects, tasks, a task's thread with its live session, the calls waiting, its steps' reports and its rounds of work as its graph had them, and the coordinator's thread with its task cards; and what git says of a task's worktrees, kept while each looks the same |
+| `graph.ts` | A task's rounds of work for its Graph face (ADR-054), from its runs', steps' and tries' rows: each step where its last try stands and who made it, then what its plan still has to come; never stored |
 | `Api.ts` | The API of `@althar/contracts`, served over a port: handlers, and the change feed and streaming text as one `Watch` stream |
 | `Folders.ts` | Folders the person chose, by grant: the app's main process allows them, and the window opens them by grant |
 | `words.ts` | What went wrong, in the words the window shows |
