@@ -26,15 +26,18 @@ import { text as stuckText } from './StuckCall'
 
 type Step = StuckStep['step']
 
-/** The step a usage limit stopped, in a sentence: while it was at it, and the work that waits. */
-const stepWords: Readonly<Record<Step, { readonly during: string; readonly work: string }>> = {
+/** The step a usage limit stopped, in a sentence: while it was at it, and the work that waits, which may be plural. */
+const stepWords: Readonly<Record<Step, { readonly during: string; readonly work: string; readonly plural?: true }>> = {
   implement: { during: ' while working on the task', work: 'the work' },
-  settle: { during: ' while fixing what the review found', work: 'the fixes' },
+  settle: { during: ' while fixing what the review found', work: 'the fixes', plural: true },
   review: { during: ' during the review', work: 'the review' },
   publish: { during: '', work: 'the step' },
 }
 
 const capital = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
+
+/** The step's work with its verb agreeing: "the review waits", "the fixes wait". */
+const workThat = (step: Step, one: string, many: string) => `${stepWords[step].work} ${stepWords[step].plural === true ? many : one}`
 
 export const limitText = {
   /** The call: whose limit, on which step, until when, and the ways on; the same words wherever the call shows. */
@@ -48,22 +51,25 @@ export const limitText = {
   },
   /** Held for the reset on its own: whose limit, on which step, why it waits rather than moving on, until when, and that it can move now. */
   held: (agent: string, at: string, step: Step, why: HeldForLimit['why']) => {
-    const { during, work } = stepWords[step]
+    const { during } = stepWords[step]
+    const waits = workThat(step, 'waits', 'wait')
     const now = step === 'review' ? 'To carry on now, pick another model, or skip the review.' : 'To carry on now, pick another model.'
     const out = `${agent} ran out of usage${during}.`
     switch (why) {
       case 'nothing_free':
-        return `${out} No other model was free, so ${work} waits until ${at}, when it's back. ${now}`
+        return `${out} No other model was free, so ${waits} until ${at}, when it's back. ${now}`
       case 'waits':
-        return `${out} This project waits for usage to reset, so ${work} waits until ${at}. ${now}`
+        return `${out} This project waits for usage to reset, so ${waits} until ${at}. ${now}`
       case 'asked':
-        return `${out} ${capital(work)} waits until ${at}, as you said. ${now}`
+        return `${out} ${capital(waits)} until ${at}, as you said. ${now}`
       default:
-        return `${out} ${capital(work)} waits until ${at}, when it's back. ${now}`
+        return `${out} ${capital(waits)} until ${at}, when it's back. ${now}`
     }
   },
   /** Kept waiting from the card: it folds, and the step runs again at the reset. */
-  waitingNote: (step: Step) => `${stepWords[step].work} runs again then`,
+  waitingNote: (step: Step) => `${workThat(step, 'runs', 'run')} again then`,
+  /** Moved to another model from the card: the step carries on with it. */
+  movedNote: (step: Step) => `${workThat(step, 'carries', 'carry')} on there`,
   out: (at: string) => `out until ${at}`,
   perUse: 'paid per use',
 }
@@ -233,7 +239,7 @@ export function HeldLimit({
       text={{
         what: (runtime) => limitText.held(runtime, at, step, waits.why),
         waitingNote: limitText.waitingNote(step),
-        movedNote: `${stepWords[step].work} carries on there`,
+        movedNote: limitText.movedNote(step),
       }}
       options={options}
       onSwap={(id) => {
