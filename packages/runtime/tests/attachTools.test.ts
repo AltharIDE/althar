@@ -10,6 +10,7 @@ import { Api, clientProtocol, emitterPort } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
+import { SqlClient } from 'effect/sql'
 
 import { connection, services } from '../src/Api'
 import { Connections } from '../src/Connections'
@@ -21,7 +22,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeAgents, fakeConnectors, HOST, hosted, ROOMY, runtime } from './support'
+import { callTool, fakeAgents, fakeConnectors, HOST, hosted, ROOMY, runtime, until } from './support'
 
 /*
  * A task attached to a pull request it didn't open (ADR-052), by the
@@ -143,6 +144,50 @@ describe('the coordinator attaching a task to a pull request', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('follows a pull request its branch is on already, starting nothing over', () => {
+    const { github, head, working } = forked()
+    return Effect.gen(function* () {
+      const { task, coordinator } = yield* project(working)
+      // Its branch is at the pull request's head already, as one made from it is.
+      git(task.worktree, 'reset', '-q', '--hard', head)
+      const done = yield* callTool(coordinator, 'attach_pull_request', { task: task.slug, pull_request: '#1' })
+      assert.match(done, new RegExp(`^${task.slug} follows PR #1 now: its reviews`))
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('has a quick task’s lead make it a change with no review, opening its pull request next', () => {
+    const { github, working } = forked()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { coordinator } = yield* project(working)
+      assert.match(
+        yield* callTool(coordinator, 'start_task', { title: 'Sketch the retry', description: '[lead:finish]', lead: { agent: 'codex' } }),
+        /^Started /,
+      )
+      const [quick] = yield* sql<{ taskId: string; threadId: string }>`
+        SELECT k.id AS task_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+        WHERE k.title = 'Sketch the retry'`
+      // Its lead's first round over, as the person asks it to make what it did a change.
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${quick?.taskId ?? ''}`,
+        (rows) => rows.length > 0 && rows.every((row) => row.state !== 'running'),
+        Duration.seconds(20),
+      )
+      const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${quick?.threadId ?? ''}`
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: coordinator.projectId,
+        threadId: quick?.threadId ?? '',
+        sessionId: session?.id ?? '',
+        taskId: quick?.taskId ?? null,
+      }
+      assert.strictEqual(
+        yield* callTool(lead, 'make_it_a_change', { title: 'Retry the send-back', review: null, output: 'draft' }),
+        "The task is a change now, called “Retry the send-back”. Commit your work, and call finish_step when it's ready, with what it built, your evidence and its pull request's description. Then Althar opens its pull request as a draft. Don't push or open it yourself.",
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
   it.live('says why a closed pull request can’t be attached', () => {
     const { github, working } = forked('closed')
     return Effect.gen(function* () {
@@ -184,6 +229,9 @@ describe('attaching a task to a pull request, from the window', () => {
         yield* client.ConnectToken({ commandId: commandId(), product: 'github', token: 't', webUrl: HOST })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* Context.get(context, Folders).allow(working) })
         const [repository] = yield* client.GetRepositories({ projectId: project.id })
+        // On a GitHub instance of its own, signed in to there.
+        assert.deepInclude(repository?.host, { product: 'github', instance: 'github.test', path: 'you/api' })
+        assert.deepInclude(repository?.host?.account, { state: 'ready' })
         yield* client.SetRepository({
           commandId: commandId(),
           projectId: project.id,
