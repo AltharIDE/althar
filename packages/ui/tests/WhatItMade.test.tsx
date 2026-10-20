@@ -1,26 +1,40 @@
-import { render, screen } from '@testing-library/react'
-import { userEvent } from 'storybook/test'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { SHOT_NOT_KEPT } from '../src/fixtures/shots'
+import { SHOT_AFTER, SHOT_UNSIZED } from '../src/fixtures/shots'
 import { WhatItMade } from '../src/outputs/WhatItMade/WhatItMade'
 
-describe('what it made', () => {
-  it('reads all of its story at the deepest heading, and shows a picture it has no size of, and nothing to open, as it is', async () => {
+/* What a task made, on the Outputs page: its story, and its pictures. */
+
+describe('what a task made', () => {
+  it('keeps the rest of its story at the deepest heading level when it sits that deep', () => {
     render(
       <WhatItMade
-        story={{ lede: 'Refunds are limited per partner.', rest: '### Why\n\nPartners asked.' }}
-        shots={[{ ...SHOT_NOT_KEPT, caption: 'The refunds page' }]}
+        story={{ lede: 'Refunds retry with backoff.', rest: '## Why\n\nThe processor rate-limits bursts.' }}
+        shots={[]}
         checked={[]}
         unverified={[]}
         headingLevel={6}
       />,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Read all of it' }))
-    expect(screen.getByText('Partners asked.')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy()
-    // Outside a thread there is nothing to open it in, and one not kept opens to nothing anyway.
-    expect(screen.getByText('The refunds page')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /full size/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Read all of it' }))
+    expect(screen.getByRole('heading', { level: 6, name: 'Why' })).toBeInTheDocument()
+  })
+
+  it('shows its pictures without a way to open them where nothing opens pictures, sized as they were taken or as they load', () => {
+    render(
+      <WhatItMade
+        story={null}
+        shots={[
+          { ...SHOT_AFTER, caption: 'After' },
+          { ...SHOT_UNSIZED, caption: 'Wide' },
+        ]}
+        checked={[]}
+        unverified={[]}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /View .* full size/ })).not.toBeInTheDocument()
+    const frames = [...document.querySelectorAll<HTMLElement>('figure [class~="frame"]')]
+    expect(frames.map((frame) => frame.style.aspectRatio)).toEqual(['1440 / 900', ''])
   })
 })

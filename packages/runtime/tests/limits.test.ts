@@ -927,6 +927,15 @@ describe('limits', () => {
       outWords({ from: 'Codex', resetsAt: later.toISOString(), step: 'implement', waits: 'step', nothingFree: true }),
       `Codex ran out of usage while working on the task. No other model was free, so the work waits until ${whenWords(later.toISOString())}, when Codex is back. Pick one on the task to carry on now.`,
     )
+    // The fixes are many, so they wait.
+    assert.strictEqual(
+      outWords({ from: 'Codex', resetsAt: null, step: 'settle', waits: 'step' }),
+      'Codex ran out of usage while fixing what the review found. The fixes wait until Codex is back. To carry on now, pick another model on the task.',
+    )
+    assert.strictEqual(
+      outWords({ from: 'Codex', resetsAt: null, step: 'settle', waits: 'step', nothingFree: true }),
+      'Codex ran out of usage while fixing what the review found. No other model was free, so the fixes wait until Codex is back. Pick one on the task to carry on now.',
+    )
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, step: 'settle', to: { agent: 'Claude Code', model: null } }),
       'Codex ran out of usage while fixing what the review found. Claude Code takes the fixes over.',
