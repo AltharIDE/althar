@@ -117,7 +117,7 @@
   color: var(--t-2);
 }
 .on .key {
-  background: var(--signal);
+  background: var(--signal-fill);
   color: var(--on-signal);
 }
 /* what the option is, and under it what it means, as the agent explains it */

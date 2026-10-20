@@ -34,7 +34,7 @@ a.issue:hover .pixels {
   width: 36px;
   height: 36px;
   border-radius: 9px;
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 .linear .logo {

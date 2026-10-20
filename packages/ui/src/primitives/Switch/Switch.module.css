@@ -14,7 +14,7 @@
   background: var(--line-3);
 }
 .switch[aria-checked='true'] {
-  background: var(--t-1);
+  background: var(--ink-fill);
 }
 /* on, a hover keeps it dark: the off hover's grey would read as off */
 .switch[aria-checked='true']:hover:not(:disabled) {

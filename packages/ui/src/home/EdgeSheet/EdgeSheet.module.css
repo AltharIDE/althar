@@ -50,6 +50,7 @@
  */
 .ink {
   --t-1: var(--term-t1);
+  --ink-fill: var(--term-t1);
   --t-2: var(--term-t2);
   --t-3: var(--term-t4);
   --t-4: #6e6d72;
@@ -66,6 +67,9 @@
   --signal: var(--signal-on-ink);
   --signal-bright: var(--signal-on-ink-hover);
   --signal-pressed: var(--signal-on-ink-pressed);
+  --signal-fill: var(--signal-on-ink);
+  --signal-fill-hover: var(--signal-on-ink-hover);
+  --signal-fill-pressed: var(--signal-on-ink-pressed);
   --on-signal: #141417;
   --danger: var(--term-danger);
   color-scheme: dark;

@@ -20,6 +20,7 @@
   --n-5: #d6d1c6; /* strong fill, borders that must read */
   --chrome: #ebe8e0; /* the window's own bars */
   --paper: #ffffff; /* the lightest: fields, cards and chosen options that sit on a raised sheet */
+  --paper-plain: var(--paper); /* the paper, where a sheet rebinds --paper for what it holds */
 
   /* ---- Ink ---------------------------------------------------------------*/
   --t-1: #141417; /* primary */
@@ -42,8 +43,15 @@
   --signal-line: rgba(122, 63, 240, 0.32);
   --signal-hover: rgba(122, 63, 240, 0.16);
   --signal-paper: #f6f1ff; /* a sheet that is asking you something */
+  --signal-raised: #ffffff; /* what sits on that sheet: its options, its command */
   --signal-pressed: #5b26bd;
   --on-signal: #ffffff;
+  /* violet as a fill that carries words (a button, a chosen key): the
+     signal itself on paper; on dark, where the signal lightens to read as
+     text, the fill keeps a deeper violet so its words stay white */
+  --signal-fill: #7a3ff0;
+  --signal-fill-hover: #6a2fd6;
+  --signal-fill-pressed: #5b26bd;
 
   /* ---- Cobalt ------------------------------------------------------------
      Althar's own colour: the work it is running right now.               */
@@ -93,6 +101,12 @@
   --lift-frost:
     0 0 0 0.5px rgba(20, 16, 10, 0.2), inset 0 0.5px 0 rgba(255, 255, 255, 0.9), 0 18px 48px -14px rgba(40, 32, 20, 0.34),
     0 4px 12px -6px rgba(40, 32, 20, 0.16);
+
+  /* ---- Ink as a fill -------------------------------------------------------
+     The ink itself where it fills (a primary button, a switch that is on, a
+     chosen option's ring): the same as --t-1 on paper; on dark a shade
+     softer than the brightest words, so a fill never glares.               */
+  --ink-fill: #141417;
 
   /* ---- On ink -------------------------------------------------------------
      What sits on an ink fill (--t-1) or a dark terminal. Washes on ink are

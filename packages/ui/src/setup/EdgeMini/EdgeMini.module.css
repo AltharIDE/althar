@@ -160,3 +160,16 @@
   border-radius: 2px;
   background: rgba(20, 20, 28, 0.55);
 }
+
+/* In dark, Windows' own taskbar is dark too, so the mark (in the theme's ink) still shows on it. */
+:global([data-theme='dark']) .taskbar {
+  background: rgba(36, 36, 40, 0.92);
+  box-shadow: 0 -0.5px 0 rgba(255, 255, 255, 0.1);
+}
+:global([data-theme='dark']) .caret {
+  border-color: rgba(255, 255, 255, 0.6);
+}
+:global([data-theme='dark']) .taskbar .glyph,
+:global([data-theme='dark']) .date i {
+  background: rgba(255, 255, 255, 0.55);
+}

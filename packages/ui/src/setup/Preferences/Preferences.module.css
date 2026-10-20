@@ -72,7 +72,7 @@
   width: 30px;
   height: 30px;
   border-radius: 99px;
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 /* a mark with its own colours, in the glyph's place, as it is */
@@ -187,7 +187,7 @@
   height: 16px;
   margin-left: -1px;
   border-radius: 2px;
-  background: var(--t-1);
+  background: var(--ink-fill);
 }
 .thumb {
   position: absolute;
@@ -212,7 +212,7 @@
 }
 /* it clicks into the default */
 .clicked {
-  border-color: var(--t-1);
+  border-color: var(--ink-fill);
   animation: click 280ms ease-out;
 }
 @keyframes click {
@@ -421,7 +421,7 @@
 }
 .place:has(:checked),
 .place:has(:checked):hover {
-  box-shadow: 0 0 0 2px var(--t-1);
+  box-shadow: 0 0 0 2px var(--ink-fill);
 }
 .place:has(:focus-visible) {
   outline: 1.5px solid var(--signal);
@@ -466,7 +466,7 @@
   box-shadow: inset 0 0 0 1.5px var(--t-3);
 }
 .place:has(:checked) .radio {
-  box-shadow: inset 0 0 0 4px var(--t-1);
+  box-shadow: inset 0 0 0 4px var(--ink-fill);
 }
 
 /* ---- where it shows, with nothing to choose: the screen beside the words, or over them where there isn't room ---- */

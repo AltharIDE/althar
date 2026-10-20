@@ -177,7 +177,7 @@
   object-fit: cover;
 }
 .mark {
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 .ghost {

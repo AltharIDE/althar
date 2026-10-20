@@ -11,8 +11,9 @@
   font: 500 10px/15px var(--font);
   color: var(--t-3);
 }
+/* on a filled button, in its words' own colour: white on violet, and on ink whichever way the theme turns it */
 .onFill {
   border-color: transparent;
-  background: color-mix(in srgb, var(--on-ink) 18%, transparent);
-  color: var(--on-ink);
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  color: inherit;
 }

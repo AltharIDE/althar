@@ -71,21 +71,21 @@
 }
 
 .signal {
-  background: var(--signal);
+  background: var(--signal-fill);
   color: var(--on-signal);
 }
 .signal:hover:not(:disabled, .busy) {
-  background: var(--signal-bright);
+  background: var(--signal-fill-hover);
 }
 .signal:active:not(:disabled, .busy) {
-  background: var(--signal-pressed);
+  background: var(--signal-fill-pressed);
 }
 .signal:focus-visible {
   outline-offset: 2px;
 }
 
 .ink {
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 .ink:hover:not(:disabled, .busy) {
@@ -114,5 +114,5 @@
   cursor: progress;
 }
 .signal.busy {
-  background: var(--signal-bright);
+  background: var(--signal-fill-hover);
 }

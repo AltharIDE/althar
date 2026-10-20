@@ -45,7 +45,12 @@
   --signal-hover: rgba(166, 138, 255, 0.22);
   --signal-paper: color-mix(in oklab, #a68aff 10%, var(--n-1));
   --signal-peek: color-mix(in oklab, #a68aff 18%, var(--n-1));
-  --on-signal: #17131f;
+  /* on an asking sheet, its options lift in the sheet's own violet, not in the page's paper */
+  --signal-raised: color-mix(in oklab, #a68aff 8%, var(--paper));
+  --on-signal: #ffffff;
+  --signal-fill: #7350ec;
+  --signal-fill-hover: #7c5cf0;
+  --signal-fill-pressed: #6844e0;
 
   --live: #7f8bff;
   --live-dim: rgba(127, 139, 255, 0.16);
@@ -94,8 +99,9 @@
   --on-ink: var(--n-0);
   --on-ink-2: color-mix(in oklab, var(--n-0) 70%, var(--t-1));
   --on-ink-focus: #6b3fe0;
-  --ink-hover: color-mix(in oklab, var(--t-1) 88%, var(--n-2));
-  --ink-pressed: color-mix(in oklab, var(--t-1) 76%, var(--n-2));
+  --ink-fill: #d9d9de;
+  --ink-hover: color-mix(in oklab, var(--ink-fill) 90%, var(--n-2));
+  --ink-pressed: color-mix(in oklab, var(--ink-fill) 78%, var(--n-2));
 
   /* ---- A dark terminal: darker than the page, so it still reads as its own sheet ---- */
   --term: #111113;
@@ -156,6 +162,7 @@
   --n-5: #443f38;
 
   --t-1: #efeae1;
+  --ink-fill: #ddd7cc;
   --t-2: #bcb5a9;
   --t-3: #a09a8d;
   --t-4: #6e695f;
@@ -195,6 +202,7 @@
   --n-5: #323236;
 
   --t-1: #f3f3f4;
+  --ink-fill: #dcdcdf;
   --t-2: #bababf;
   --t-3: #95959c;
   --t-4: #606067;

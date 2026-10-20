@@ -35,6 +35,6 @@
   box-shadow: inset 1px 0 0 color-mix(in srgb, var(--on-signal) 28%, transparent);
 }
 .signal .more[aria-expanded='true'] {
-  background: var(--signal-pressed);
+  background: var(--signal-fill-pressed);
   color: var(--on-signal);
 }

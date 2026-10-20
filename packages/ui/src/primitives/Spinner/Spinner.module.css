@@ -27,7 +27,8 @@
     animation: none;
   }
 }
+/* on a filled button, in its words' own colour */
 .onFill {
-  border-color: color-mix(in srgb, var(--on-ink) 30%, transparent);
-  border-top-color: var(--on-ink);
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
 }

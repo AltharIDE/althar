@@ -59,7 +59,7 @@
   box-shadow: inset 0 0 0 1.5px var(--t-3);
 }
 .box[data-state='checked'] {
-  background: var(--t-1);
+  background: var(--ink-fill);
   box-shadow: none;
   color: var(--on-ink);
 }

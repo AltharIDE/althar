@@ -36,7 +36,7 @@
 
 .fill {
   border-radius: 8px;
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 .fill:hover:not(:disabled) {

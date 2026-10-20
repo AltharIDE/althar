@@ -255,7 +255,7 @@
 .here {
   width: 2px;
   height: 16px;
-  background: var(--t-1);
+  background: var(--ink-fill);
 }
 .cell {
   display: flex;

@@ -133,7 +133,7 @@ button.module:active {
 }
 .circleOn,
 .circleOn:hover {
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 .toggleWords {
