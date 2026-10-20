@@ -27,6 +27,9 @@ import {
   type FoundServer,
   type FoundTasks,
   type CoordinatorSnapshot,
+  type CodeFound,
+  type CodePlace,
+  type CodeText,
   type DocumentText,
   type DomMessagePort,
   domPort,
@@ -124,6 +127,13 @@ export interface Client {
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** One file a task changed, as a diff from its base to its worktree. */
   readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
+  /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
+  readonly findCode: (
+    threadId: string,
+    messages: ReadonlyArray<{ readonly itemId?: string; readonly names: ReadonlyArray<string> }>,
+  ) => Promise<{ readonly place: CodePlace; readonly messages: ReadonlyArray<{ readonly found: ReadonlyArray<CodeFound> }> }>
+  /** A file a thread's agent named, by its path as findCode named it: as it is now, or at the commit it was when a message was said. */
+  readonly readCode: (threadId: string, path: string, at?: { readonly commit?: string; readonly line?: number }) => Promise<CodeText>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
@@ -363,6 +373,13 @@ export interface Client {
     readonly path?: string
     readonly line?: number
   }) => Promise<boolean>
+  /** Opens a file a thread's agent named in an editor, at a line where given: a task's in its folder, the coordinator's in the person's checkout. */
+  readonly openCode: (input: {
+    readonly threadId: string
+    readonly editor: string
+    readonly path: string
+    readonly line?: number
+  }) => Promise<boolean>
   /** Pushes the task's branch to its pull request, up to the commit the person saw; in a task of several repositories, the one at `url`. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Replaces the commits on the task's pull request with its branch, up to the commit the person saw, only while it is still at `replaces`: a force push they confirmed. */
@@ -519,6 +536,16 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
+    findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
+    readCode: (threadId, path, at = {}) =>
+      settle(
+        api.ReadCode({
+          threadId,
+          path,
+          ...(at.commit === undefined ? {} : { commit: at.commit }),
+          ...(at.line === undefined ? {} : { line: at.line }),
+        }),
+      ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
@@ -633,6 +660,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
     acknowledgeUsageWarnings: (warnings) => command((commandId) => api.AcknowledgeUsageWarnings({ commandId, warnings })),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
+    openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     replacePullRequest: (taskId, head, replaces, url) =>

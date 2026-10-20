@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react'
 
 import type { TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
@@ -382,8 +382,8 @@ export function TaskView({
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
   const editor = editors.main
-  // What the thread's parts open: a picture in the lightbox, a document beside the thread.
-  const host = useThreadHost()
+  // What the thread's parts open: a picture in the lightbox, a document or a file the lead names beside the thread.
+  const host = useThreadHost(true, { threadId: model.snapshot?.threadId ?? null, taskId: model.snapshot?.task.id ?? null })
   // Report this, on a stuck step: Report a problem, with this task (DEV-61).
   const { reportProblem } = useServices().host
   const files = model.snapshot?.task.files ?? []
@@ -824,7 +824,10 @@ export function TaskView({
       {shown === 'out' && !hasOutputsToShow(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
-        <div className={connecting ? s.withPanel : s.outputsFace}>
+        <div
+          className={connecting || host.code !== null ? s.withPanel : s.outputsFace}
+          style={host.code !== null && !connecting ? ({ '--panel-width': `${host.bench.width}px` } as CSSProperties) : undefined}
+        >
           {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
           <ThreadShellProvider value={host.shell}>
             <Outputs
@@ -857,16 +860,19 @@ export function TaskView({
               }}
             />
           </ThreadShellProvider>
-          {connecting && snapshot.host !== null && (
+          {connecting && snapshot.host !== null ? (
             <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
+          ) : (
+            // A file a lead's report names, beside it, as beside the thread.
+            host.workbench(null)
           )}
         </div>
       ) : (
         <TaskFace
           className={s.face}
           composer={composer}
-          // A document the lead wrote opens beside the thread, where the kit puts one, and follows its edits.
-          panel={
+          // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
+          panel={host.workbench(
             host.doc && (
               <DocumentPanel
                 key={host.doc.source ?? host.doc.path ?? host.doc.title}
@@ -876,8 +882,9 @@ export function TaskView({
                 onClose={host.closeDoc}
                 {...(openFile === undefined || docInEditor === null ? {} : { onOpen: () => openFile(docInEditor) })}
               />
-            )
-          }
+            ),
+          )}
+          panelWidth={host.bench.width}
         >
           <Thread label={text.thread} busy={busy}>
             {issue !== null && !snapshot.earlier && (

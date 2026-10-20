@@ -897,6 +897,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getPlanUsage: vi.fn(async () => ({ accounts: [], warnings: [] })),
     acknowledgeUsageWarnings: vi.fn(async () => {}),
     openInEditor: vi.fn(async () => true),
+    openCode: vi.fn(async () => true),
+    // Names no code, unless a test says what they name.
+    findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<unknown>) => ({
+      place: { kind: 'task' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'althar/retry-the-checkout' }] },
+      messages: messages.map(() => ({ found: [] })),
+    })),
+    readCode: vi.fn(async (_threadId: string, path: string) => ({ path, text: 'const tries = 5\n', from: 1, total: 1, cut: false })),
     installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
