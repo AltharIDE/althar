@@ -3,7 +3,7 @@ import { Effect, Option } from 'effect'
 
 import { Agents } from './Config'
 import { Installs, isInstalled } from './Installs'
-import { Limits } from './Limits'
+import { Limits, NEARLY_OUT, type Room, roomWords } from './Limits'
 import { type ModelFact, ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
@@ -13,7 +13,9 @@ import { SignIns } from './SignIns'
  * every agent that is signed in and not out of usage, but the ones the
  * person switched off, each once, however many agents offer it. An agent is
  * only a route to a model: a step names the model, and Althar takes it the
- * best way, on a plan before a key.
+ * best way, on a plan with room before one nearly out, and a plan before a
+ * key. Each way says how much room its plan has, as last read, so the
+ * coordinator can pick with that in mind.
  */
 
 /** One way to a model: the agent that runs it, its id for it there, whether a plan pays, and how hard it can think there. */
@@ -28,6 +30,8 @@ export interface Route {
   readonly effort: string | null
   /** The person's default effort for it there; null where they set none. */
   readonly defaultEffort: string | null
+  /** How much room the plan it runs on has for it, its tightest window as last read; null where none is read, or it is a key. */
+  readonly room: Room | null
 }
 
 export interface UsableModel {
@@ -91,6 +95,8 @@ export const usableModels = (projectId?: string) =>
       for (const model of offered.models) {
         if (isAgentDefault(model) || offered.blocked.includes(model.id)) continue
         const name = knownModelName(agent, model)
+        // A model's own window (Opus's weekly) counts beside the plan's, by its id or its name.
+        const room = plan ? Option.getOrNull(yield* limits.room(starts.value.id, `${model.id} ${name}`)) : null
         const fact = facts.of(agent, model)
         const key = fact?.slug ?? name.toLowerCase()
         const route: Route = {
@@ -101,6 +107,7 @@ export const usableModels = (projectId?: string) =>
           efforts: model.efforts,
           effort: model.effort,
           defaultEffort: offered.defaults.find((chosen) => chosen.model === model.id)?.effort ?? null,
+          room,
         }
         const found = byKey.get(key)
         if (found === undefined) byKey.set(key, { name, maker: makerOf(fact, agent.id), fact, routes: [route] })
@@ -109,8 +116,8 @@ export const usableModels = (projectId?: string) =>
     }
     const usable: UsableModel[] = [...byKey.values()].map((model) => ({
       ...model,
-      // A plan before a key; else in the agents' order.
-      routes: model.routes.toSorted((a, b) => Number(b.plan) - Number(a.plan)),
+      // A plan with room before one nearly out, a plan before a key; else in the agents' order.
+      routes: model.routes.toSorted((a, b) => Number(b.plan) - Number(a.plan) || Number(nearlyOut(a)) - Number(nearlyOut(b))),
     }))
     return usable.toSorted(
       (a, b) =>
@@ -119,6 +126,8 @@ export const usableModels = (projectId?: string) =>
         a.name.localeCompare(b.name),
     )
   })
+
+const nearlyOut = (route: Route) => route.room !== null && route.room.leftPercent < NEARLY_OUT
 
 const score = (value: number | null) => (value === null ? 'unknown' : String(value))
 
@@ -150,6 +159,7 @@ export const describeModels = (
     return 'No model can be used now: no agent is signed in, every one is out of usage, or the person switched them all off.'
   const lines: string[] = [
     `The models you can give work to now, by who makes them. Name one as it is written here, for ${use}, and, where you set one, an effort it lists. Without an effort, a step starts at the person's default for its model, or else at the model's own. The scores are Artificial Analysis's indices, higher is better: intelligence, coding, agentic.`,
+    `Where a plan's usage is read, each says how much of its tightest limit is left and until when. A step on a plan with under ${NEARLY_OUT}% left goes elsewhere or waits, as the project's rule for usage limits says, so give work to one with room where you can.`,
   ]
   let maker: string | null | undefined
   for (const model of usable) {
@@ -165,7 +175,9 @@ export const describeModels = (
     const best = model.routes[0]
     const paid =
       best?.plan === true
-        ? 'on a plan'
+        ? best.room === null
+          ? 'on a plan'
+          : `on a plan, ${nearlyOut(best) ? 'nearly out, ' : ''}${roomWords(best.room)}`
         : fact?.price == null
           ? 'per use'
           : `per use, $${fact.price.input.toFixed(2)} in and $${fact.price.output.toFixed(2)} out per million tokens`

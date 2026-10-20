@@ -1304,6 +1304,8 @@ export const HeldForLimit = Schema.Struct({
   accountId: Schema.optional(Schema.NullOr(Schema.String)),
   why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
   choices: Schema.optional(Schema.Array(LimitChoice)),
+  /** Held before it ran out, as a new step on an agent nearly out: the share of its tightest limit left, 0 to 100. */
+  left: Schema.optional(Schema.Number),
 })
 export type HeldForLimit = typeof HeldForLimit.Type
 
@@ -1725,6 +1727,8 @@ export const LimitCall = Schema.Struct({
   accountId: Schema.NullOr(Schema.String),
   resetsAt: Schema.NullOr(Schema.String),
   choices: Schema.Array(LimitChoice),
+  /** Asked before it ran out, as a new step on an agent nearly out: the share of its tightest limit left, 0 to 100. */
+  left: Schema.optional(Schema.Number),
 })
 export type LimitCall = typeof LimitCall.Type
 

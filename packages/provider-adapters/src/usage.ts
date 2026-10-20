@@ -27,6 +27,10 @@ export interface UsageWindow {
   readonly usedPercent: number
   /** When it resets, ISO 8601 in UTC. */
   readonly resetsAt?: string
+  /** The models it limits, by a word of their ids or names (`opus`); none where it limits every model. */
+  readonly model?: string
+  /** Money spent past the plan (Claude's extra usage), not room in it: never a plan's tightest limit. */
+  readonly spend?: boolean
 }
 
 export interface AccountUsage {
@@ -47,6 +51,27 @@ export const windowKind = (minutes: number | null | undefined): WindowKind => {
   if (near(minutes, 7 * 24 * 60)) return 'weekly'
   if (minutes >= 28 * 24 * 60 && minutes <= 31 * 24 * 60) return 'monthly'
   return 'other'
+}
+
+/** How much of the window is left, 0 to 100. */
+export const leftOf = (window: UsageWindow) => Math.max(0, Math.min(100, 100 - window.usedPercent))
+
+/**
+ * The window with the least left, of those that limit a model (only those
+ * that limit every model, where none is named): one whose reset has passed
+ * has started again, and money spent past the plan is no room in it, so
+ * neither counts. Undefined where none is left to go by.
+ */
+export const tightestWindow = (windows: ReadonlyArray<UsageWindow>, now: number, model?: string): UsageWindow | undefined => {
+  const named = model?.toLowerCase()
+  return windows
+    .filter((window) => window.spend !== true)
+    .filter((window) => window.resetsAt === undefined || Date.parse(window.resetsAt) > now)
+    .filter((window) => window.model === undefined || (named !== undefined && named.includes(window.model)))
+    .reduce<UsageWindow | undefined>(
+      (tightest, window) => (tightest === undefined || leftOf(window) < leftOf(tightest) ? window : tightest),
+      undefined,
+    )
 }
 
 /* Warnings. Percent of the plan left when each fires, highest first. */
@@ -125,6 +150,8 @@ const codexWindow = (raw: unknown, label: string | undefined): UsageWindow | nul
     ...(minutes === undefined ? {} : { minutes }),
     usedPercent: window.usedPercent,
     ...(resetsAt === undefined ? {} : { resetsAt }),
+    // A bucket other than the ordinary one is a model's, named by its limit: it limits that model alone.
+    ...(label === undefined ? {} : { model: label.toLowerCase() }),
   }
 }
 
@@ -281,13 +308,15 @@ export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions
 
 /* Claude Code: the Agent SDK's `rate_limit_event`, which claude-agent-acp puts in `usage_update` `_meta["_claude/rateLimit"]`. */
 
-const CLAUDE_WINDOWS: Readonly<Record<string, { readonly kind: WindowKind; readonly label?: string }>> = {
+const CLAUDE_WINDOWS: Readonly<
+  Record<string, { readonly kind: WindowKind; readonly label?: string; readonly model?: string; readonly spend?: boolean }>
+> = {
   five_hour: { kind: 'five_hour' },
   seven_day: { kind: 'weekly' },
-  seven_day_opus: { kind: 'weekly', label: 'Opus' },
-  seven_day_sonnet: { kind: 'weekly', label: 'Sonnet' },
+  seven_day_opus: { kind: 'weekly', label: 'Opus', model: 'opus' },
+  seven_day_sonnet: { kind: 'weekly', label: 'Sonnet', model: 'sonnet' },
   seven_day_overage_included: { kind: 'weekly', label: 'With extra usage' },
-  overage: { kind: 'other', label: 'Extra usage' },
+  overage: { kind: 'other', label: 'Extra usage', spend: true },
 }
 
 /**
@@ -313,5 +342,7 @@ export const claudeRateLimitWindow = (info: unknown): UsageWindow | null => {
     ...(named.label === undefined ? {} : { label: named.label }),
     usedPercent: Math.min(100, Math.max(0, Math.round(event.utilization * 1000) / 10)),
     ...(resetsAt === undefined ? {} : { resetsAt }),
+    ...(named.model === undefined ? {} : { model: named.model }),
+    ...(named.spend === true ? { spend: true } : {}),
   }
 }
