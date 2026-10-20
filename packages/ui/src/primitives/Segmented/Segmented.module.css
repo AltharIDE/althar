@@ -53,3 +53,7 @@
 .kbd {
   margin-right: -3px;
 }
+/* on dark the chosen one is the lighter, and its key's word a step brighter to read on it */
+:global([data-theme='dark']) .option[aria-checked='true'] .kbd {
+  color: var(--t-2);
+}

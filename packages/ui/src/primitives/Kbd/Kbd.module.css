@@ -17,3 +17,8 @@
   background: color-mix(in srgb, currentColor 18%, transparent);
   color: inherit;
 }
+/* on dark a wash on violet lifts the key's ground and dims its glyph: a ring instead, the glyph on the fill itself */
+:global([data-theme='dark']) .onFill {
+  background: transparent;
+  border-color: color-mix(in srgb, currentColor 35%, transparent);
+}

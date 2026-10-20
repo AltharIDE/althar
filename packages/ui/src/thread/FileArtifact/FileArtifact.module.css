@@ -21,7 +21,7 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: var(--n-2);
+  background: var(--tile);
   color: var(--t-2);
 }
 .main {

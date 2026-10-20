@@ -75,6 +75,12 @@
   --segment-track: var(--n-2); /* behind a segmented control's choices */
   --segment-on: var(--paper); /* the chosen one */
   --knob: var(--paper); /* a slider's thumb */
+  --knob-off: #ffffff; /* a switch's knob while it is off (on, it takes --on-ink) */
+  --tile: var(--n-2); /* a small square or pill that holds a glyph or a word on a sheet */
+  --tile-hover: var(--paper); /* that tile, its row hovered */
+  --ring-track: var(--n-4); /* what is left of a ring that fills */
+  --scroll-thumb: var(--n-5); /* a scrollbar's thumb */
+  --float: var(--paper); /* a tooltip, raised over whatever sheet it opens on */
   --live-step: color-mix(in srgb, var(--live) 78%, var(--n-1)); /* the step that runs now, on a track */
   --you-lane: color-mix(in srgb, var(--signal) 3.5%, var(--n-2)); /* the lane of calls only you can make */
 

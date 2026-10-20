@@ -106,6 +106,9 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
   const finished = useEffectEvent(() => onDone?.())
 
   const theme = useTheme()
+  // On dark the grain's light specks read as static: the frames draw it a third as strong.
+  const grainStrength = useRef(theme.startsWith('dark') ? 0.4 : 1)
+  useEffect(() => void (grainStrength.current = theme.startsWith('dark') ? 0.4 : 1), [theme])
   // The light's columns, each drawn once and soft already, and its grain; again in another theme, whose cobalt differs.
   useLayoutEffect(() => {
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
@@ -221,7 +224,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
         if (element) element.style.transform = `translateX(${column.drift.toFixed(2)}px) scaleY(${column.height.toFixed(4)})`
       })
       if (light.current !== null) light.current.style.opacity = String(l.strength)
-      if (grain.current !== null) grain.current.style.opacity = String(l.grain)
+      if (grain.current !== null) grain.current.style.opacity = String(l.grain * grainStrength.current)
       drawMark(t, width, height)
       if (open !== null && t - open >= AT.through) return end()
       frame = requestAnimationFrame(tick)

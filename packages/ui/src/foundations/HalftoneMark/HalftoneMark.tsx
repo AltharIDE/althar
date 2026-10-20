@@ -69,7 +69,8 @@ export function HalftoneMark({ size = 136, rise = true, className, style, ...res
     const context = element?.getContext('2d')
     if (!element || !context) return
     const css = getComputedStyle(element)
-    const ink = css.getPropertyValue('--t-1').trim() || '#141417'
+    // The ink as a fill: the words' own black on paper, a softer light on dark, so the mark never glares.
+    const ink = css.getPropertyValue('--ink-fill').trim() || '#141417'
     const live = css.getPropertyValue('--live').trim() || '#2b3bff'
     const ratio = window.devicePixelRatio || 1
     element.width = Math.round(size * ratio)

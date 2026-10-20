@@ -24,3 +24,8 @@
   background-size: 128px 128px;
   mask-image: radial-gradient(ellipse 52% 40% at 50% 100%, #000 25%, transparent 78%);
 }
+
+/* on dark the grain's light specks read as static: a third as strong */
+:global([data-theme='dark']) .grain {
+  opacity: 0.35;
+}

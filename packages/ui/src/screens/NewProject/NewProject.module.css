@@ -21,7 +21,11 @@
 /* on dark the ink's wash is light, not a stain */
 :global([data-theme='dark']) .who {
   background:
-    radial-gradient(ellipse 70% 55% at 50% 30%, color-mix(in srgb, color-mix(in oklab, var(--ink) 70%, var(--t-1)) 10%, transparent), transparent 72%),
+    radial-gradient(
+      ellipse 70% 55% at 50% 30%,
+      color-mix(in srgb, color-mix(in oklab, var(--ink) 70%, var(--t-1)) 10%, transparent),
+      transparent 72%
+    ),
     var(--n-2);
 }
 .whoInner {

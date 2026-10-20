@@ -53,8 +53,8 @@
   --signal-fill-hover: #7c5cf0;
   --signal-fill-pressed: #6844e0;
 
-  --live: #7f8bff;
-  --live-dim: rgba(127, 139, 255, 0.16);
+  --live: #8a95ff;
+  --live-dim: rgba(138, 149, 255, 0.15);
   --warm: #e2a457;
   --danger: #f2816f;
   --danger-dim: rgba(242, 129, 111, 0.11);
@@ -64,11 +64,18 @@
   /* ---- Roles on paper: washes lighter than the sheet, as dark surfaces hover ---- */
   --hover-paper: color-mix(in oklab, var(--paper), var(--t-1) 6%);
   --pressed-paper: color-mix(in oklab, var(--paper), var(--t-1) 11%);
-  --chip: rgba(255, 255, 255, 0.08);
+  --chip: rgba(255, 255, 255, 0.07);
   --well: color-mix(in oklab, var(--paper), var(--n-2) 50%);
   --segment-track: rgba(255, 255, 255, 0.055);
   --segment-on: color-mix(in oklab, var(--paper), var(--t-1) 10%);
   --knob: color-mix(in oklab, var(--paper), var(--t-1) 18%);
+  --knob-off: color-mix(in oklab, var(--t-1) 80%, var(--n-2));
+  --tile: rgba(255, 255, 255, 0.06);
+  --tile-hover: rgba(255, 255, 255, 0.11);
+  --ring-track: rgba(255, 255, 255, 0.16);
+  --scroll-thumb: rgba(255, 255, 255, 0.2);
+  /* a tooltip a step lighter than any sheet, since its shadow is lost on dark */
+  --float: color-mix(in oklab, var(--paper), var(--t-1) 7%);
   --live-step: color-mix(in srgb, var(--live) 92%, var(--n-1));
   --you-lane: color-mix(in oklab, var(--signal) 5%, var(--n-2));
 
@@ -151,6 +158,12 @@
   --linear: #8790ec;
   --linear-ink: #a2a9f2;
 
+  /* a project's mark, its depths the same way round as on paper (ProjectMark) */
+  --mark-ground: 26%;
+  --mark-deep: var(--n-0);
+  --mark-light-tint: 22%;
+  --mark-light: var(--t-1);
+  --mark-quiet: 0.6;
   /* a project's ink, a step lighter, so its mark still reads on dark */
   --project-clay: #d4774f;
   --project-ochre: #c3a259;
@@ -199,7 +212,10 @@
     0 4px 12px -6px rgba(0, 0, 0, 0.5);
   --lift-pop: 0 0 0 0.5px rgba(255, 240, 215, 0.1), 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 24px -12px var(--shadow);
   --lift-dialog: 0 0 0 0.5px rgba(255, 240, 215, 0.09), 0 1px 2px rgba(0, 0, 0, 0.4), 0 24px 48px -20px rgba(0, 0, 0, 0.75);
-  --chip: rgba(255, 240, 215, 0.08);
+  --chip: rgba(255, 240, 215, 0.07);
+  --tile: rgba(255, 240, 215, 0.06);
+  --tile-hover: rgba(255, 240, 215, 0.11);
+  --ring-track: rgba(255, 240, 215, 0.16);
   --segment-track: rgba(255, 240, 215, 0.055);
   /* violet over brown goes dusty in srgb; mixed in oklab it stays a tint */
   --you-lane: color-mix(in oklab, var(--signal) 4%, var(--n-2));

@@ -35,17 +35,19 @@
   --mark-ink: var(--project-umber);
 }
 
+/* Its depths come from the theme (--mark-*, themes.css): on dark the deep
+   cells are still darker than the ink and the light cell the lightest. */
 .ground {
-  fill: color-mix(in srgb, var(--mark-ink) 22%, var(--paper));
+  fill: color-mix(in srgb, var(--mark-ink) var(--mark-ground, 22%), var(--paper));
 }
 .ink {
   fill: var(--mark-ink);
 }
 .deep {
-  fill: color-mix(in srgb, var(--mark-ink) 62%, var(--t-1));
+  fill: color-mix(in srgb, var(--mark-ink) 62%, var(--mark-deep, var(--t-1)));
 }
 .paper {
-  fill: var(--n-1);
+  fill: color-mix(in srgb, var(--mark-ink) var(--mark-light-tint, 0%), var(--mark-light, var(--n-1)));
 }
 .edge {
   fill: none;
@@ -54,24 +56,8 @@
 
 /* nothing going on: the mark steps back */
 .quiet .tile {
-  opacity: 0.45;
+  opacity: var(--mark-quiet, 0.45);
   filter: saturate(0.6);
-}
-
-/* On dark the mark keeps its depths the same way round: its deep cells
-   darker than its ink, its light cell the lightest, on a tint of the ink
-   lifted off the page. Stepping back, it stays a little more present. */
-:global([data-theme='dark']) .ground {
-  fill: color-mix(in srgb, var(--mark-ink) 26%, var(--paper));
-}
-:global([data-theme='dark']) .deep {
-  fill: color-mix(in srgb, var(--mark-ink) 62%, var(--n-0));
-}
-:global([data-theme='dark']) .paper {
-  fill: color-mix(in srgb, var(--mark-ink) 22%, var(--t-1));
-}
-:global([data-theme='dark']) .quiet .tile {
-  opacity: 0.6;
 }
 
 /* work runs: an arc goes round, on a faint track */

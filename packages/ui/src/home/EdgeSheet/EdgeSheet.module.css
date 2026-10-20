@@ -68,6 +68,24 @@
   --segment-track: rgba(255, 255, 255, 0.06);
   --segment-on: rgba(255, 255, 255, 0.14);
   --knob: rgba(255, 255, 255, 0.85);
+  --tile: rgba(255, 255, 255, 0.06);
+  --tile-hover: rgba(255, 255, 255, 0.11);
+  --ring-track: rgba(255, 255, 255, 0.16);
+  --selection: rgba(167, 123, 255, 0.38);
+  /* marks as they are on dark, in every theme, since the island is black in every theme */
+  --mark-ground: 26%;
+  --mark-deep: #000000;
+  --mark-light-tint: 22%;
+  --mark-light: var(--term-t1);
+  --mark-quiet: 0.6;
+  --project-clay: #d4774f;
+  --project-ochre: #c3a259;
+  --project-olive: #a3ab5a;
+  --project-moss: #82b07c;
+  --project-teal: #5fa8b4;
+  --project-slate: #95a0ae;
+  --project-rose: #d27d8e;
+  --project-umber: #b48b77;
   --sunk: rgba(255, 255, 255, 0.08);
   --lift: none;
   --live: var(--live-on-ink);

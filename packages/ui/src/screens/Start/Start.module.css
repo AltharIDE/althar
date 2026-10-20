@@ -108,6 +108,13 @@
 .gatherOff {
   opacity: 0.2;
 }
+/* on dark a white glow is a grey halo over the names: a hint of it */
+:global([data-theme='dark']) .gather {
+  opacity: 0.22;
+}
+:global([data-theme='dark']) .gatherOff {
+  opacity: 0.08;
+}
 .agent {
   position: absolute;
   display: grid;

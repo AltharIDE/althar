@@ -30,7 +30,7 @@
   color: var(--t-1);
 }
 .filled {
-  background: var(--n-2);
+  background: var(--tile);
   box-shadow: inset 0 0 0 1px var(--line-2);
   font-weight: 500;
 }
@@ -129,7 +129,7 @@
   cursor: pointer;
 }
 .options .item[data-active] {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .options .item[aria-selected='true'] {
   font-weight: 550;

@@ -115,11 +115,11 @@
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: var(--n-2);
+  background: var(--tile);
   color: var(--t-1);
 }
 .row:hover .rowGlyph {
-  background: var(--paper);
+  background: var(--tile-hover);
 }
 .rowMain {
   flex: 1;
