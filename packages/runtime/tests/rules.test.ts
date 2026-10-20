@@ -152,6 +152,10 @@ describe('a code host, reached only through Althar', () => {
     ['git-credential-osxkeychain get', "don't read the person's credentials"],
     ['git config --get credential.helper', undefined],
     ['git commit -m credential', undefined],
+    // A redirect first, or between the words, still runs the same program: the shell reads it out of the command.
+    ['> /dev/null security find-generic-password -s Althar -w', "don't read the person's credentials"],
+    ['2>/dev/null gh pr merge 12 --squash', "Merging is the person's to do"],
+    ['gh > /dev/null pr merge 12', "Merging is the person's to do"],
   ])('%s: %s', (command, refused) => {
     const verdict = run(command)
     if (refused === undefined) assert.notStrictEqual(verdict.verdict, 'deny')
@@ -184,6 +188,17 @@ describe('reading commands', () => {
     assert.isTrue(parseCommandLine('sh -c "echo $(whoami)"').opaque)
     assert.isTrue(parseCommandLine('eval "$CMD"').opaque)
     assert.deepStrictEqual(parseCommandLine("echo 'unclosed").commands, [['echo', 'unclosed']])
+  })
+
+  it('reads a redirect wherever it stands, after the words of the command it belongs to', () => {
+    // The shell takes redirects out of a command before it runs it: each of these runs `git push`.
+    assert.deepStrictEqual(parseCommandLine('> /dev/null git push --force origin main').commands, [
+      ['git', 'push', '--force', 'origin', 'main', '>', '/dev/null'],
+    ])
+    assert.deepStrictEqual(parseCommandLine('git 2>&1 > out.log push').commands, [['git', 'push', '2>', '&1', '>', 'out.log']])
+    assert.deepStrictEqual(parseCommandLine('sudo < /dev/null FOO=1 git status').commands, [['git', 'status', '<', '/dev/null']])
+    // A quoted `>` is a word like any other.
+    assert.deepStrictEqual(parseCommandLine("echo '>' git push").commands, [['echo', '>', 'git', 'push']])
   })
 
   it('reads a comment and a C-quoted word as the shell does, so neither hides a command after it', () => {
@@ -249,6 +264,7 @@ describe('the always-ask list', () => {
     'npm test 2>/dev/null',
     "sed -i '' 's/a/b/' src/app.ts",
     'git clone https://github.com/meridian/lib vendor/lib',
+    "echo '>' git push origin main",
   ])('allows %s', (command) => {
     assert.deepStrictEqual(run(command), { verdict: 'allow' })
   })
@@ -291,6 +307,15 @@ describe('the always-ask list', () => {
     ['cp .env /Users/someone/leak.env', "Writing outside the task's worktree always asks: /Users/someone/leak.env"],
     ['dd if=/dev/zero of=/etc/x', "Writing outside the task's worktree always asks: /etc/x"],
     ['git worktree add ../elsewhere', "Writing outside the task's worktree always asks: ../elsewhere"],
+    // Wherever a redirect stands, the command is what it runs.
+    ['> /dev/null git push --force origin main', 'A force push always asks.'],
+    ['git > /dev/null push origin main', 'A push to main always asks.'],
+    ['2>&1 git push origin main', 'A push to main always asks.'],
+    ['FOO=1 > out.log git push origin main', 'A push to main always asks.'],
+    ['sudo > /dev/null git push origin main', 'A push to main always asks.'],
+    ['bash -lc "> /dev/null git push origin main"', 'A push to main always asks.'],
+    ['>/dev/null npm publish', 'Deploying or publishing always asks.'],
+    ['> ~/.zshrc echo x', "Writing outside the task's worktree always asks: ~/.zshrc"],
   ])('asks about %s', (command, reason) => {
     const verdict = run(command)
     assert.strictEqual(verdict.verdict, 'ask')
@@ -426,6 +451,18 @@ describe('a role that only reads', () => {
       assert.strictEqual(verdict({ kind: 'other', title }), 'allow', title)
     assert.isFalse(ALTHAR_TOOL.test('mcp__github__create_issue'))
     assert.strictEqual(verdict({ kind: 'other', title: 'mcp__github__create_issue' }), 'deny')
+  })
+
+  it('reads what a command runs past a redirect before it, or between its words', () => {
+    const reason = (command: string) => {
+      const decided = decideReader(request({ kind: 'execute', title: command }))
+      return decided.verdict === 'deny' ? decided.reason : 'allowed'
+    }
+    assert.include(reason('> /dev/null security find-generic-password -s Althar -w'), "don't read the person's credentials")
+    assert.include(reason('git > /dev/null push origin main'), '`git push` can change the repository')
+    assert.include(reason('> /dev/null rm -rf src'), 'It would write to src')
+    assert.include(reason('2>/dev/null bash -c "rm -rf src"'), 'It would write to src')
+    assert.strictEqual(reason('2>/dev/null rg -n retry src'), 'allowed')
   })
 
   it('offline, as the lead of a review from outside, fetches nothing, and still reads, searches and runs what only looks', () => {

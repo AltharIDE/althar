@@ -327,10 +327,42 @@ export interface Parsed {
 const SEPARATORS = ['&&', '||', ';', '|', '&', '\n']
 const REDIRECTS = ['>>', '&>', '2>', '>', '<']
 
-/** Splits a command line into commands and words, as a POSIX shell would for plain words, quotes and escapes. */
+/**
+ * Splits a command line into commands and words, as a POSIX shell would for plain words, quotes and escapes. Each
+ * command's redirects come after its other words (`redirectsLast`), so its first word is what it runs.
+ */
 export const parseCommandLine = (text: string): Parsed => {
-  const { commands, opaque } = splitCommandLine(text)
-  return expandShells(commands, opaque)
+  const { commands, operators, opaque } = splitCommandLine(text)
+  return expandShells(
+    commands.map((words, index) => redirectsLast(words, operators[index] ?? new Set()).words),
+    opaque,
+  )
+}
+
+/**
+ * A command's words with its redirects after the rest, as the shell reads them wherever they stand: `> /dev/null git
+ * push` and `git > /dev/null push` both run `git push`, so every rule that reads what a command runs from its first
+ * words reads it there. Only what the shell takes for a redirect moves, with the file or stream it names (`2>&1`), not
+ * a quoted `'>'`. `at` says where each word went.
+ */
+const redirectsLast = (words: ReadonlyArray<string>, operators: ReadonlySet<number>) => {
+  const rest: Array<number> = []
+  const moved: Array<number> = []
+  for (let index = 0; index < words.length; index += 1) {
+    if (!operators.has(index) || !REDIRECTS.includes(words[index] ?? '')) {
+      rest.push(index)
+      continue
+    }
+    moved.push(index)
+    // What it reads or writes: a stream it names (`&1`), else the next word, unless that is a redirect of its own (`<<`).
+    const next = index + 1
+    if (next < words.length && (!operators.has(next) || (words[next] ?? '').startsWith('&'))) {
+      moved.push(next)
+      index = next
+    }
+  }
+  const order = [...rest, ...moved]
+  return { words: order.map((from) => words[from] ?? ''), at: new Map(order.map((from, to) => [from, to])) }
 }
 
 /**
@@ -1840,13 +1872,15 @@ const readerLaunchReason = (words: ReadonlyArray<string>): string | undefined =>
  */
 const readerCommandReason = (text: string): string | undefined => {
   if (/[<>]\(/.test(text)) return 'A process substitution, `<(…)`, runs a command of its own, and this role only reads.'
-  const { commands, expanded, opaque, grouped, evaluated } = splitCommandLine(text)
+  const { commands, operators, expanded, opaque, grouped, evaluated } = splitCommandLine(text)
   if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
   if (grouped)
     return 'Parentheses start a subshell, define a function or qualify a pattern, any of which can run a command of its own; quote them where they are text, as this role only reads.'
   if (evaluated)
     return 'An expansion such as `${X:=…}`, `$[…]` or `$a[…]` can set a variable or work out arithmetic, which changes what runs; name a variable plainly, as `$X`, as this role only reads.'
-  for (const [index, words] of commands.entries()) {
+  for (const [index, written] of commands.entries()) {
+    // Redirects after the rest, as the shell reads them: `> /dev/null security …` runs `security`.
+    const { words, at: movedTo } = redirectsLast(written, operators[index] ?? new Set())
     const launched = readerLaunchReason(words)
     if (launched !== undefined) return launched
     // A wrapper alone runs nothing else: `env` prints the environment.
@@ -1872,7 +1906,7 @@ const readerCommandReason = (text: string): string | undefined => {
     if (reads !== undefined && reads !== 'any') {
       const ends = inner.indexOf('--')
       const at = [...(expanded[index] ?? [])]
-        .map((each) => each - dropped)
+        .map((each) => (movedTo.get(each) ?? each) - dropped)
         .find((each) => each >= 1 && (ends === -1 || each < ends) && !REDIRECTS.includes(inner[each - 1] ?? ''))
       if (at !== undefined)
         return `The shell would expand \`${inner[at]}\`, which \`${program}\` could take for a flag where a file's name starts with a dash; quote it or name the files, as this role only reads.`
