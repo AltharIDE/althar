@@ -156,6 +156,38 @@ describe('a task of several repositories, through the API', () => {
   )
 })
 
+describe('a file moved in one of a task’s several repositories, through the API', () => {
+  it.live('is listed and read under its repository, with where it was', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folderWith(['api', 'web'])) })
+        const task = yield* client.CreateTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Move the docs',
+          repositories: ['api', 'web'],
+        })
+        const holder = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
+        const web = [join(holder, 'web'), join(dirname(holder), 'web')].find((path) => {
+          try {
+            execFileSync('git', ['rev-parse'], { cwd: path, stdio: 'ignore' })
+            return true
+          } catch {
+            return false
+          }
+        })
+        execFileSync('git', ['mv', 'README.md', 'DOCS.md'], { cwd: web ?? '' })
+        const files = (yield* client.GetThread({ threadId: task.threadId, fresh: true })).task.files
+        const moved = files.find((file) => file.status === 'renamed')
+        assert.deepInclude(moved, { path: 'web/DOCS.md', from: 'web/README.md' })
+        const diff = yield* client.GetFileDiff({ taskId: task.id, path: 'web/DOCS.md' })
+        assert.deepInclude(diff.file, { path: 'web/DOCS.md', from: 'web/README.md', status: 'renamed' })
+      }),
+    ),
+  )
+})
+
 describe('the coordinator’s question, through the API', () => {
   it.live('is answered from the window, and the coordinator that asked hears it', () =>
     Effect.scoped(
