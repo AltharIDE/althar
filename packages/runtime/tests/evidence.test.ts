@@ -113,6 +113,9 @@ describe('the evidence a lead hands', () => {
         /what it printed in `output`/,
       )
       assert.match(yield* finish([{ kind: 'response', caption: '200' }]), /is a response: give what it said/)
+      // A folder named as a picture is no picture.
+      mkdirSync(join(worktree, 'shots.png'))
+      assert.match(yield* finish([{ kind: 'screenshot', caption: 'After', path: 'shots.png' }]), /^shots\.png isn’t a file\.$/)
       // Not a picture the window draws.
       writeFileSync(join(worktree, 'clip.mp4'), 'not a picture')
       assert.match(yield* finish([{ kind: 'recording', caption: 'Clip', path: 'clip.mp4' }]), /isn’t a picture Althar shows/)
@@ -170,7 +173,7 @@ describe('the evidence a reviewer reads', () => {
           evidence: [
             { kind: 'screenshot', caption: 'After', path: 'after shot!.png' },
             { kind: 'test_run', caption: 'Tests', command: ' bun test ', exit_code: 1, output },
-            { kind: 'log', caption: 'Server log', text: 'listening on 5173' },
+            { kind: 'log', caption: 'Server log', command: 'tail -n 1 server.log', text: 'listening on 5173' },
             { kind: 'screenshot', caption: 'Huge', path: join(worktree, 'huge.png') },
             { kind: 'note', caption: 'Looked the same on dark' },
           ],
@@ -186,7 +189,7 @@ describe('the evidence a reviewer reads', () => {
           "The lead's evidence, each picture and output where you can read it:",
           `- screenshot: After: ${join(folder, '1-after-shot-.png')}`,
           `- test run: Tests (\`bun test\`, exit 1): ${join(folder, '2-test_run.txt')}`,
-          `- log: Server log: ${join(folder, '3-log.txt')}`,
+          `- log: Server log (\`tail -n 1 server.log\`): ${join(folder, '3-log.txt')}`,
           '- screenshot: Huge (not kept)',
           '- note: Looked the same on dark',
           '',
@@ -199,7 +202,7 @@ describe('the evidence a reviewer reads', () => {
       assert.match(run[1] ?? '', /^\(\d+ earlier lines weren't kept\)$/)
       assert.strictEqual(run.at(-2), 'test 1999 ok')
       assert.strictEqual(run.at(-1), '(exit 1)')
-      assert.strictEqual(readFileSync(join(folder, '3-log.txt'), 'utf8'), 'listening on 5173')
+      assert.strictEqual(readFileSync(join(folder, '3-log.txt'), 'utf8'), '$ tail -n 1 server.log\nlistening on 5173')
     }).pipe(Effect.provide(runtime())),
   )
 

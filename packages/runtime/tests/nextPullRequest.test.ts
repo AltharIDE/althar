@@ -112,7 +112,7 @@ describe('a task’s next pull request, from its worktree as it is', () => {
   )
 
   it.live(
-    'goes on a branch from the task’s own where the lead brought what merged in already, and counts a binary file as no lines',
+    'goes on a branch from the task’s own, by the next free name, where the lead brought what merged in already, and counts a binary file as no lines',
     () => {
       const { working, bare, github } = onGitHub()
       return Effect.gen(function* () {
@@ -126,15 +126,17 @@ describe('a task’s next pull request, from its worktree as it is', () => {
         const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
         // Main as this Mac has it hasn't the squash yet, so it counts too; the binary file counts no lines.
         assert.deepStrictEqual(ready?.unshipped, { commits: 2, add: 1, del: 0 })
+        // A branch of the next one's name is here already, from before: it takes the next free one.
+        git(task.path, 'branch', 'althar/add-a-retry-2', 'HEAD~1')
         yield* (yield* Runs).publish(task.taskId)
         yield* until(
           Effect.sync(() => github.changes),
           (all) => all.length === 2,
         )
         // Its new branch is the task's as it was, nothing picked onto main again.
-        assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry-2')
+        assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry-3')
         assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), head)
-        assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-2')
+        assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-3')
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,
@@ -151,6 +153,31 @@ describe('a task’s next pull request, from its worktree as it is', () => {
         assert.lengthOf(yield* (yield* Changes).unshipped(task.taskId), 1)
         rmSync(task.path, { recursive: true, force: true })
         assert.deepStrictEqual(yield* (yield* Changes).unshipped(task.taskId), [])
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'opens nothing where main has taken the commit after it meanwhile, its change picked there by someone else',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const task = yield* merged(working, bare, github)
+        const mine = commitIn(task.path, 'slider.txt', 'Slider')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
+        // Someone picks the same change onto main on the host, after Althar last fetched it.
+        const clone = mkdtempSync(join(tmpdir(), 'althar-other-'))
+        execFileSync('git', ['clone', '-q', bare, clone])
+        git(clone, 'fetch', '-q', task.path, mine)
+        git(clone, 'cherry-pick', 'FETCH_HEAD')
+        git(clone, 'push', '-q', 'origin', 'main')
+        const main = git(clone, 'rev-parse', 'HEAD')
+        yield* (yield* Runs).publish(task.taskId)
+        // Nothing new for a pull request: none opens, and the commit stays on the task's first branch.
+        assert.lengthOf(github.changes, 1)
+        assert.strictEqual(git(task.path, 'rev-parse', 'althar/add-a-retry'), mine)
+        assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), main)
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,

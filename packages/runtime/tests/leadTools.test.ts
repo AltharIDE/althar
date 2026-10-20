@@ -7,6 +7,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
@@ -20,7 +21,8 @@ import { callTool, fakeConnectors, HOST, hosted, runtime, until } from './suppor
  * A lead's tools for its task's pull request, where what it asks for isn't
  * there to be had: a pull request it names that the task hasn't, a check
  * with a short log or none at all, a reply whose earlier answer was lost, and
- * a push from a worktree that isn't on this computer.
+ * a push from a worktree that isn't on this computer. And the person's own
+ * acts on it: merging it here, its branch gone, a merge the host made first.
  */
 
 /** Listening waits an hour, so nothing but the tools asks the fake meanwhile. */
@@ -65,7 +67,7 @@ const withPullRequest = (working: string) =>
     }
     const sql = yield* SqlClient.SqlClient
     const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${taskId}`
-    return { lead, worktree: workspace?.path ?? '' }
+    return { lead, worktree: workspace?.path ?? '', taskId }
   })
 
 describe('a lead’s pull request tools, where what it asks for isn’t there', () => {
@@ -128,6 +130,39 @@ describe('a lead’s pull request tools, where what it asks for isn’t there', 
         yield* callTool(lead, 'push_to_pull_request', {}),
         "The task's worktree isn't on this computer, so Althar can't see what is on its branch. Tell the person.",
       )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('a task’s pull request, as the person acts on it', () => {
+  it.live('isn’t merged here, says where its branch can’t be fetched, and settles once merged on the host before Merge was pressed', () => {
+    const { working, bare } = hosted()
+    const tip = tipOf(bare)
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tip })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { worktree, taskId } = yield* withPullRequest(working)
+      const changes = yield* Changes
+      const sql = yield* SqlClient.SqlClient
+      const [binding] = yield* sql<{ slug: string }>`
+        SELECT b.slug FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${taskId}`
+      const head = tip() ?? ''
+      // It merges through its pull request, not here.
+      const here = yield* Effect.flip(changes.mergeHere(taskId, [{ repository: binding?.slug ?? '', head }]))
+      assert.deepStrictEqual([(here as { _tag?: string })._tag, (here as { why?: string }).why], ['CantMerge', 'pull_request'])
+      // Its branch gone from the host, there's nothing to fetch to merge into it.
+      const kept = execFileSync('git', ['rev-parse', 'althar/add-a-retry'], { cwd: bare }).toString().trim()
+      execFileSync('git', ['update-ref', '-d', 'refs/heads/althar/add-a-retry'], { cwd: bare })
+      const unfetched = yield* Effect.flip(changes.mergeNote(taskId))
+      assert.strictEqual((unfetched as { stderr?: string }).stderr, "Couldn't fetch althar/add-a-retry from the host.")
+      execFileSync('git', ['update-ref', 'refs/heads/althar/add-a-retry', kept], { cwd: bare })
+      // Someone merged it on the host before the person pressed Merge: nothing is merged twice, and the task settles.
+      github.mergeByHand(1)
+      yield* changes.merge(taskId, head)
+      assert.notInclude(github.calls, 'merge')
+      const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${taskId}`
+      assert.strictEqual(task?.state, 'done')
+      assert.strictEqual(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree }).toString().trim(), kept)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

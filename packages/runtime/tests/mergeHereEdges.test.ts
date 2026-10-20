@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
@@ -99,6 +100,24 @@ describe('merging a task here, with nothing to merge into', () => {
       ])
       const sql = yield* SqlClient.SqlClient
       assert.lengthOf(yield* sql`SELECT id FROM conflict_resolutions WHERE task_id = ${task.taskId}`, 0)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('pushes nothing of a repository the person didn’t see, nor of work that isn’t merged here', () =>
+    Effect.gen(function* () {
+      const changes = yield* Changes
+      const { root, task, worktree } = yield* plainTask
+      const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+      git(remote, 'init', '-q', '--bare', '-b', 'main')
+      git(root, 'remote', 'add', 'origin', remote)
+      git(root, 'push', '-q', '-u', 'origin', 'main')
+      commit(worktree, 'retry.ts', 'retry\n')
+      // Asked without the head the person saw in it: nothing goes, so there's nowhere it went.
+      const nowhere = yield* Effect.flip(changes.pushBranch(task.taskId, []))
+      assert.deepInclude(nowhere, { _tag: 'NotFound', kind: 'remote' })
+      // Pushing what merged here: the task's work isn't merged, so nothing is pushed.
+      assert.deepStrictEqual(yield* changes.pushHere(task.taskId), [])
+      assert.strictEqual(git(remote, 'branch', '--list'), '* main')
     }).pipe(Effect.provide(runtime())),
   )
 })

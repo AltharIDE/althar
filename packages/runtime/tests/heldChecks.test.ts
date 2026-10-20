@@ -9,13 +9,14 @@ import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import { fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
  * A change whose checks Althar sees through before the person has it
  * (ADR-041), where its host won't show them: the change is the person's,
- * said once.
+ * said once; one the person has already is only said to be unread.
  */
 
 const runtimeWith = (github: FakeService) =>
@@ -76,6 +77,33 @@ describe('checks Althar sees through, that its host won’t show', () => {
         ([calls = 0]) => calls >= before + 2,
       )
       assert.lengthOf(said(yield* notices(taskThread)), 1)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('say only that Althar can’t read them once the person has the change', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: 'passed' }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const threadId = yield* coordinator.thread(project.projectId)
+      const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
+      yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      // The person has opened it: the change is theirs already.
+      yield* (yield* Tasks).see({ taskId: ready?.taskId ?? '' })
+      github.failNext('checks', 'forbidden')
+      const said = (all: ReadonlyArray<string>) => all.filter((title) => title.startsWith("Althar can't read the checks on PR #1"))
+      const [refused] = said(yield* until(notices(ready?.threadId ?? ''), (all) => said(all).length > 0, Duration.seconds(10)))
+      assert.strictEqual(
+        refused,
+        "Althar can't read the checks on PR #1: its host refused them (The fake checks failed (forbidden)). It still listens for what people say on it.",
+      )
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
