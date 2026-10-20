@@ -39,7 +39,7 @@ export interface Handover {
 export interface ModelChoiceProps {
   /** Whose pick it is: Lead, Coordinator, Review. */
   owner: string
-  /** The agents it offers: signed in, or that don't say. */
+  /** The agents it offers: installed, and signed in or not saying (see `canPick`). */
   agents: ReadonlyArray<AgentStatus>
   value: Choice
   onChange: (choice: Choice) => void
