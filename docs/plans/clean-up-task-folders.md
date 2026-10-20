@@ -163,12 +163,18 @@ folder is held back when:
 How Althar tells:
 
 - **No notification and no Needs you.** It is housekeeping.
-- **The bar's legend opens what goes and what is held back**, apart:
-  "Goes with Clean up", with each folder's size; then, on a sunk well,
-  "Held back", each with why in a word and a glyph ("Never pushed", "Not
-  committed", "Open in VS Code", "Running") and its own Remove. There is
-  no dialog: Clean up loses nothing for good, and a Remove that would lose
-  something asks first, in place.
+- **The bar's legend opens a list of the folders**, in the load meter's
+  manner. Each folder is a row: a round glyph, its name over a quieter
+  line, its size on the right.
+  - **Goes with Clean up:** the glyph says how the task ended (merged in
+    green), and the line says when.
+  - **Held back,** below a hairline: the glyph is the reason, in warm,
+    and the line starts with it ("Never pushed", "Not committed", "Open
+    in VS Code", "Running").
+  - **Remove** takes the size's place on the row the pointer is on. It
+    asks first, in a strip under the row: "Remove anyway" in red where
+    work would be lost.
+  - **No dialog:** Clean up loses nothing for good.
 - **A folder left alone is tried again the next day.**
 - **Each removed task's thread marks it with a divider**, the thin line
   the thread already uses for a change of scene: "Folder removed 3 days
