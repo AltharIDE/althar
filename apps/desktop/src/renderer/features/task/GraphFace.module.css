@@ -1,0 +1,16 @@
+/* A step's popover on the Graph face: what it holds, one under another, and the way to it in the conversation last. */
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.show {
+  align-self: flex-start;
+}
