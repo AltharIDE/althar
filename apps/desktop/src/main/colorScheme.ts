@@ -1,5 +1,7 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
 
+import type { Appearance } from './appPreferences'
+
 /** The XDG Settings portal's `org.freedesktop.appearance` `color-scheme`: 0 is no preference, 1 dark, 2 light. */
 export type Scheme = 0 | 1 | 2
 
@@ -105,6 +107,47 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
     clearTimeout(restart)
     monitor?.kill()
   }
+}
+
+/**
+ * One watch of the desktop's scheme for everything that follows it (the windows' theme, the tray's mark), started with
+ * the first who asks and stopped with the last; a late one hears the last scheme at once. `watch` is the watcher,
+ * watchColorScheme where it isn't a test's.
+ */
+export const desktopScheme = (watch: typeof watchColorScheme = watchColorScheme) => {
+  const listeners = new Set<(scheme: Scheme | undefined) => void>()
+  let stop: (() => void) | undefined
+  let heard = false
+  let last: Scheme | undefined
+  return (listener: (scheme: Scheme | undefined) => void): (() => void) => {
+    listeners.add(listener)
+    if (heard) listener(last)
+    stop ??= watch((scheme) => {
+      heard = true
+      last = scheme
+      for (const one of listeners) one(scheme)
+    })
+    return () => {
+      listeners.delete(listener)
+      if (listeners.size > 0 || stop === undefined) return
+      stop()
+      stop = undefined
+      heard = false
+    }
+  }
+}
+
+/** The desktop's scheme, on Linux, watched once for all who follow it. */
+export const followDesktopScheme = desktopScheme()
+
+/**
+ * What Electron's nativeTheme should follow for Settings › Appearance. Light and dark are themselves. As the system is,
+ * a Mac's and Windows' own setting is what nativeTheme already follows; Linux's isn't, where Electron has no word from
+ * the desktop, so the Settings portal's says it: dark or light where it names one, Chromium's own guess where it doesn't.
+ */
+export const themeSourceFor = (appearance: Appearance, platform: NodeJS.Platform, scheme: Scheme | undefined): Appearance => {
+  if (appearance !== 'system' || platform !== 'linux') return appearance
+  return scheme === 1 ? 'dark' : scheme === 2 ? 'light' : 'system'
 }
 
 const PERSONALIZE = String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`

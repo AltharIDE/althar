@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { desktopScheme, type Scheme, themeSourceFor } from '../src/main/colorScheme'
 import { PAGE, RAISED, windowOptions } from '../src/main/windowOptions'
 import { followScheme } from '../src/renderer/shared/scheme'
 
@@ -75,5 +76,59 @@ describe('the paper under the window', () => {
     const icon = {} as Parameters<typeof windowOptions>[1]
     expect(windowOptions('darwin', icon, true).backgroundColor).toBe(PAGE.dark)
     expect(windowOptions('win32', icon).backgroundColor).toBe(PAGE.light)
+  })
+})
+
+describe('what Electron is told to follow, by system', () => {
+  it('is light or dark as chosen, on every system', () => {
+    for (const platform of ['darwin', 'win32', 'linux'] as const) {
+      expect(themeSourceFor('light', platform, 1)).toBe('light')
+      expect(themeSourceFor('dark', platform, 2)).toBe('dark')
+    }
+  })
+
+  it('is the system’s own on a Mac and on Windows, which nativeTheme follows by itself', () => {
+    expect(themeSourceFor('system', 'darwin', undefined)).toBe('system')
+    expect(themeSourceFor('system', 'win32', 1)).toBe('system')
+  })
+
+  it('is the Linux desktop’s, from its Settings portal, where Electron has no word of it', () => {
+    expect(themeSourceFor('system', 'linux', 1)).toBe('dark')
+    expect(themeSourceFor('system', 'linux', 2)).toBe('light')
+    // no preference, or no portal: Chromium's own guess
+    expect(themeSourceFor('system', 'linux', 0)).toBe('system')
+    expect(themeSourceFor('system', 'linux', undefined)).toBe('system')
+  })
+})
+
+describe('the Linux desktop’s scheme, watched once', () => {
+  it('starts one watch for all who follow it, tells a late one at once, and stops with the last', () => {
+    let tell: (scheme: Scheme | undefined) => void = () => {}
+    const stop = vi.fn()
+    const watch = vi.fn((changed: (scheme: Scheme | undefined) => void) => {
+      tell = changed
+      return stop
+    })
+    const follow = desktopScheme(watch)
+    const windows = vi.fn()
+    const tray = vi.fn()
+    const leaveWindows = follow(windows)
+    tell(1)
+    const leaveTray = follow(tray)
+    expect(watch).toHaveBeenCalledOnce()
+    expect(windows).toHaveBeenLastCalledWith(1)
+    expect(tray).toHaveBeenLastCalledWith(1)
+    tell(2)
+    expect(windows).toHaveBeenLastCalledWith(2)
+    expect(tray).toHaveBeenLastCalledWith(2)
+    leaveWindows()
+    expect(stop).not.toHaveBeenCalled()
+    leaveTray()
+    expect(stop).toHaveBeenCalledOnce()
+    // asked again, it watches afresh, and tells nothing it heard before
+    const again = vi.fn()
+    follow(again)
+    expect(watch).toHaveBeenCalledTimes(2)
+    expect(again).not.toHaveBeenCalled()
   })
 })

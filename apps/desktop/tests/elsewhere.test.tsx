@@ -63,6 +63,22 @@ describe('settings on Windows', () => {
     await waitFor(() => expect(within(panel).getByRole('button', { name: /^Sound\s*System sound/ })).toBeTruthy())
   })
 
+  it('offers light, dark or as the PC is, in the PC’s words', async () => {
+    const host = fakeHost({ platform: 'win32', appIcon: vi.fn(async () => null) })
+    withServices(<Settings at="appearance" />, fakeClient().client, host)
+    const choice = await screen.findByRole('radiogroup', { name: 'Light or dark' })
+    expect(
+      within(choice)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Light', 'Dark', 'Match the PC'])
+    expect(screen.getByText('Match the PC turns dark when the PC does.')).toBeTruthy()
+    await userEvent.click(within(choice).getByRole('radio', { name: 'Match the PC' }))
+    // already as the system is: nothing to keep
+    await userEvent.click(within(choice).getByRole('radio', { name: 'Light' }))
+    await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'light'))
+  })
+
   it('says Althar is in the system tray, where Windows may tuck it away, with nothing to choose', async () => {
     const host = fakeHost({
       platform: 'win32',

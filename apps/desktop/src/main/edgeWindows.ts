@@ -2,7 +2,7 @@ import { join } from 'node:path'
 
 import { BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
 
-import { darkPanel, readSystemUsesLightTheme, type Scheme, watchColorScheme } from './colorScheme'
+import { darkPanel, followDesktopScheme, readSystemUsesLightTheme, type Scheme } from './colorScheme'
 import { RAISED } from './windowOptions'
 import {
   DEFAULT_EDGE,
@@ -368,7 +368,7 @@ export const startEdge = (host: EdgeHost): Edge => {
 
   // On Linux the portal tells when the desktop's light/dark setting changes, and the mark is drawn again.
   if (process.platform === 'linux') {
-    const stop = watchColorScheme((next) => {
+    const stop = followDesktopScheme((next) => {
       scheme = next
       redraw()
     })

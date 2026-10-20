@@ -30,7 +30,7 @@ const editor: Kind<string | null> = {
   holds: (value): value is string | null => value === null || (typeof value === 'string' && /^[a-z0-9-]{1,40}$/.test(value)),
 }
 
-/** Light or dark, or as the system is: what Settings › Appearance offers as Light, Dark and Match the Mac. */
+/** Light or dark, or as the system is: what Settings › Appearance offers as Light, Dark and Match the Mac, the PC or the computer. */
 export type Appearance = 'light' | 'dark' | 'system'
 
 const appearance: Kind<Appearance> = {

@@ -7,6 +7,7 @@ import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
+import { followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { keepingAwake } from './awake'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
@@ -247,11 +248,29 @@ let waiting = 0
  * as kept. A change waits for that read, so the read can't undo it.
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
+
+/*
+ * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
+ * follows the scheme that gives, and its paper with it (paintPaper). On Linux, where Electron has no word of the
+ * desktop's own setting, the Settings portal's is followed while Appearance is as the system is (themeSourceFor).
+ */
+let linuxScheme: Scheme | undefined
+const applyAppearance = () => {
+  nativeTheme.themeSource = themeSourceFor(preferences.appearance, process.platform, linuxScheme)
+}
+if (process.platform === 'linux') {
+  const stop = followDesktopScheme((scheme) => {
+    linuxScheme = scheme
+    applyAppearance()
+  })
+  // On the process's exit, as the tray's watch: quitting ends in app.exit, which skips will-quit.
+  process.once('exit', stop)
+}
+
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
   awake.wants(kept)
-  // Light, dark or as the system is: the windows' pages follow the scheme this gives, and their paper below (paintPaper).
-  nativeTheme.themeSource = kept.appearance
+  applyAppearance()
   // A count the runtime gave before the file was read is shown again as the person has it.
   if (waiting > 0) app.setBadgeCount(dockCount(waiting, kept))
 })
@@ -727,7 +746,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
   awake.wants(preferences)
-  if (key === 'appearance') nativeTheme.themeSource = preferences.appearance
+  if (key === 'appearance') applyAppearance()
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })
