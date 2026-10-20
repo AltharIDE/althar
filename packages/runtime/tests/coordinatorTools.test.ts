@@ -168,6 +168,30 @@ describe('the coordinator’s tools, at their other turns', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('reads a task with what its lead built and what it couldn’t show working', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const project = yield* open
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Retry refunds',
+      })
+      yield* addItem({ projectId: project.projectId as ProjectId, threadId: task.threadId }, 'step_result', {
+        step: 'implement',
+        summary: 'Retried refunds once.',
+        built: 'Refunds retry once on a failed call.',
+        unverified: ['The retry under the payment provider’s rate limit', ''],
+      })
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
+      const read = yield* callTool(coordinator, 'read_task', { task: task.slug })
+      assert.include(read, 'What it built, as its lead says it now stands:\nRefunds retry once on a failed call.')
+      assert.include(read, "What its lead couldn't show working:\n- The retry under the payment provider’s rate limit")
+      assert.include(read, 'implement: Retried refunds once.')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('reads a long conversation from its latest part, saying how to read further back', () =>
     Effect.gen(function* () {
       const project = yield* open

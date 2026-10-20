@@ -86,7 +86,10 @@ describe('what the coordinator hears of issues and plans', () => {
     const linear = tracker()
     linear.failNext('start', 'forbidden')
     return Effect.gen(function* () {
-      const { task, news } = yield* spoken
+      const { projectId, threadId, task, news } = yield* spoken
+      // Before its task started, the coordinator reads its issue as it stands.
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'coordinator-session', taskId: null }
+      assert.include(yield* callTool(access, 'read_task', { task: task.slug }), 'Issue: MER-231, Todo, https://linear.app/')
       yield* (yield* Issues).started(task.taskId)
       yield* until(outcome(task.taskId), (rows) => rows.length === 1)
       assert.strictEqual(

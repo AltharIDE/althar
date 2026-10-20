@@ -68,6 +68,43 @@ describe('a run’s card, as its thread shows it', () => {
   })
 })
 
+describe('a tool call, as its thread shows it', () => {
+  it('reads its command, and says it at a glance where that is shorter', () => {
+    assert.deepInclude(
+      contentOf('tool_call', { title: 'Run tests', kind: 'execute', rawInput: { command: 'cd web && npm test 2>&1 | tail -5' } }),
+      {
+        command: 'cd web && npm test 2>&1 | tail -5',
+        label: 'npm test',
+        status: 'pending',
+      },
+    )
+    assert.notProperty(contentOf('tool_call', { title: 'Run tests', kind: 'execute', rawInput: { command: 'npm test' } }), 'label')
+    assert.deepInclude(contentOf('tool_call', { title: 'Think' }), { toolKind: 'other', command: null })
+  })
+})
+
+describe('a question, as its thread shows it', () => {
+  it('reads one whose call has gone as taken back with its task, and one answered with what was said', () => {
+    assert.deepInclude(contentOf('question', { attentionId: 'att_1', message: 'Which?', fields: [] }), {
+      state: 'withdrawn',
+      withdrawn: 'task',
+      toolCallId: null,
+      answers: null,
+    })
+    const answered = itemOf({
+      ...row('question', { attentionId: 'att_2', message: 'Which?', fields: [], toolCallId: 'ask-1' }),
+      questionState: 'answered',
+      questionPayload: JSON.stringify({ answers: { database: { values: ['redis'] } } }),
+    })
+    assert.deepInclude(answered?.kind === 'question' ? answered.content : undefined, {
+      state: 'answered',
+      toolCallId: 'ask-1',
+      answers: { database: { values: ['redis'] } },
+      withdrawn: null,
+    })
+  })
+})
+
 describe('a call for a step that needs the person', () => {
   it('keeps only the ways it was tried that it knows', () => {
     assert.deepInclude(stuckOf({ step: 'implement', why: 'stalled', tried: ['carried_on', 'restarted', 'redirected', 'shouted', 3] }), {
