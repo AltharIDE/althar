@@ -108,7 +108,7 @@
   font-weight: 600;
 }
 
-/* syntax: muted inks, none of them the product's signal colours */
+/* syntax: the kit's inks (tokens.css), none of them the product's signal colours */
 .keyword {
   color: var(--syn-keyword);
 }
@@ -123,9 +123,9 @@
   color: var(--t-1);
 }
 .comment {
-  color: var(--t-3);
+  color: var(--syn-comment);
   font-style: italic;
 }
 .punct {
-  color: var(--t-3);
+  color: var(--syn-punct);
 }
