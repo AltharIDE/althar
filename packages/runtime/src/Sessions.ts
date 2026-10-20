@@ -69,6 +69,7 @@ import { git, PUSHED } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
+import { bringBackFor } from './bringBack'
 import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
@@ -574,6 +575,12 @@ export class Sessions extends Context.Service<
     stopBackground(threadId: string, id: string): Effect.Effect<void, AgentRequestFailed | AgentExited>
     /** Clears one that ended by itself from the list. */
     clearBackground(threadId: string, id: string): Effect.Effect<void>
+    /**
+     * Runs `effect` while no agent is on the thread, and none can start on it
+     * meanwhile: a finished task's folders go so (ADR-055). Null, and nothing
+     * run, where one is on it.
+     */
+    quiet<A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A | null, E, R>
     /** The session running on a thread, if there is one. */
     running(threadId: string): Effect.Effect<
       Option.Option<{
@@ -861,6 +868,11 @@ export class Sessions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [kind] = yield* sql<{ kind: string; projectId: ProjectId; projectName: string }>`
             SELECT t.kind, t.project_id, p.name AS project_name FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ${threadId}`
+          // A finished task's folder that was removed comes back before an agent starts in it, and is set up again (ADR-055).
+          if (kind !== undefined && kind.kind !== 'coordinator') {
+            const back = yield* bringBackFor(threadId, instance.systemId)
+            if (back !== null) yield* setups.begin(back)
+          }
           if (kind?.kind === 'coordinator')
             return {
               role: 'coordinator',
@@ -2755,6 +2767,11 @@ export class Sessions extends Context.Service<
               const running = threads.get(threadId)
               return running === undefined ? Effect.fail(new NoSession({ threadId })) : stopRunning(running, { state: 'completed' })
             }),
+          ),
+        quiet: (threadId, effect) =>
+          exclusive(
+            threadId,
+            Effect.suspend(() => (threads.has(threadId) ? Effect.succeed(null) : effect)),
           ),
         running: (threadId) =>
           Effect.sync(() => {

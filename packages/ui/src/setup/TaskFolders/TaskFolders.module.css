@@ -1,0 +1,283 @@
+/* ---- this Mac's disk as one bar, and its legend ---- */
+
+.space {
+  display: grid;
+  gap: 9px;
+}
+
+.bar {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--track);
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  transition: width 700ms var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar i {
+    transition: none;
+  }
+}
+
+/* the rest of the Mac: ink, faint */
+.others {
+  background: var(--track-done);
+  opacity: 0.55;
+}
+
+/* held back: Althar's, its wait up, but kept: a paler cobalt */
+.heldPart,
+.pale {
+  background: rgba(43, 59, 255, 0.32);
+}
+
+/* what could go now: cobalt, hatched */
+.goesPart {
+  background: repeating-linear-gradient(-45deg, var(--live) 0 2px, rgba(43, 59, 255, 0.28) 2px 5px);
+}
+
+.hatch {
+  background: repeating-linear-gradient(-45deg, var(--live) 0 1.5px, rgba(43, 59, 255, 0.28) 1.5px 3.5px);
+}
+
+.hatch,
+.pale {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 28px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key b {
+  font-weight: 500;
+  color: var(--t-2);
+}
+
+/* the legend's keys: one button, opening the list */
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.keys:hover,
+.keys[data-state='open'] {
+  background: var(--sunk);
+}
+
+.keys:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 1px;
+}
+
+.grow {
+  flex: 1;
+}
+
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* ---- the list the legend opens: one line a folder ---- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  padding: 10px 6px 6px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* held back, apart from what goes */
+.apart {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 8px 2px;
+}
+
+.eyebrow {
+  margin: 0;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+
+.total {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto 52px;
+  align-items: center;
+  column-gap: 9px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background var(--fast) var(--ease);
+}
+
+.item:hover,
+.item:focus-within,
+.asking {
+  background: var(--n-2);
+}
+
+.opens {
+  cursor: pointer;
+}
+
+.opens:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: -2px;
+}
+
+/* how it ended, or why it is held back */
+.mark {
+  grid-row: 1;
+  grid-column: 1;
+  color: var(--t-4);
+}
+
+.merged {
+  color: var(--ok);
+}
+
+/* it needs a hand, but nothing is lost yet: warm, never red */
+.warm {
+  color: var(--warm);
+}
+
+.title,
+.meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title {
+  grid-row: 1;
+  grid-column: 2;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+
+.meta {
+  grid-row: 1;
+  grid-column: 3;
+  justify-self: end;
+  font-size: 11.5px;
+  color: var(--t-3);
+  transition: opacity var(--fast) var(--ease);
+}
+
+.why {
+  color: var(--t-2);
+}
+
+.size {
+  grid-row: 1;
+  grid-column: 4;
+  justify-self: end;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+  white-space: nowrap;
+  transition: opacity var(--fast) var(--ease);
+}
+
+/* Remove, in the place of its words and size on the row the pointer or focus is on; as tall as the line */
+.act {
+  grid-row: 1;
+  grid-column: 3 / 5;
+  justify-self: end;
+  margin: -5px 0;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+
+.item:hover .act,
+.item:focus-within .act {
+  opacity: 1;
+}
+
+.removable:hover .meta,
+.removable:focus-within .meta,
+.removable:hover .size,
+.removable:focus-within .size {
+  opacity: 0;
+}
+
+/* asking first: what goes or stays, under the row */
+.ask {
+  grid-row: 2;
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--t-2);
+}
+
+.askWords {
+  flex: 1;
+  min-width: 0;
+}

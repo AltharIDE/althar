@@ -9,6 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { freshCopy } from './coordinatorFolder'
+import { bringBack } from './bringBack'
 import { Instance } from './Instance'
 import { printedMore, servingAt, uncoloured } from './leftRunning'
 import { addItem, updateItem } from './threads'
@@ -16,6 +17,7 @@ import { Live } from './Live'
 import { change, fact, timestamp } from './records'
 import { shortCommand } from './rules'
 import { lineOf, type RunCommand, runOf, type Script, scriptsIn, setupIn } from './runCommand'
+import { Setups } from './Setups'
 import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
 /*
@@ -184,12 +186,13 @@ export class Launches extends Context.Service<
     scripts(projectId: string): Effect.Effect<ReadonlyArray<Script & { readonly repository: string }>, unknown>
   }
 >()('@althar/runtime/Launches') {
-  static readonly layer: Layer.Layer<Launches, never, Store | ToolServer> = Layer.effect(
+  static readonly layer: Layer.Layer<Launches, never, Store | ToolServer | Setups> = Layer.effect(
     Launches,
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const instance = yield* Instance
+      const setups = yield* Setups
       const live = yield* Live
       const config = yield* RuntimeConfig
       const toolServer = yield* ToolServer
@@ -413,6 +416,8 @@ export class Launches extends Context.Service<
             `${input.projectId}:${input.taskId ?? ''}`,
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
+              // A finished task's folder that was removed comes back first, and is set up again before it runs (ADR-055).
+              if (input.taskId !== null && (yield* bringBack(input.taskId, instance.personId))) yield* setups.ready(input.taskId)
               const places = yield* placesOf(input.projectId, input.taskId, input.repository)
               if (places.length === 0)
                 return yield* new LaunchRefused({

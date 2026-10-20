@@ -30,6 +30,8 @@ import {
   domPort,
   type FileDiff,
   type FolderReading,
+  type FoldersFreed,
+  type FolderWait,
   type IssueList,
   type Load,
   type OutputText,
@@ -48,6 +50,7 @@ import {
   type Status,
   type SentImage,
   type TaskEnd,
+  type TaskFolders,
   type TaskList,
   type TaskSummary,
   type ThreadItem,
@@ -158,6 +161,14 @@ export interface Client {
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
+  /** When finished tasks' folders go from now on (ADR-055). */
+  readonly setFolderWait: (wait: FolderWait) => Promise<void>
+  /** Finished tasks' folders on this Mac, with the disk they are on. */
+  readonly getTaskFolders: () => Promise<TaskFolders>
+  /** Removes every finished task's folder nothing holds; what it freed, measured after. */
+  readonly cleanUpFolders: () => Promise<FoldersFreed>
+  /** Removes one finished task's folder by hand, though something holds it. */
+  readonly removeTaskFolder: (taskId: string) => Promise<FoldersFreed>
   /** Puts a task waiting for a free agent at a place in its project's line, from 0 the front; the line starts in that order. */
   readonly moveInLine: (taskId: string, to: number) => Promise<void>
   /** Puts a project's line back in the order its tasks began waiting. */
@@ -540,6 +551,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
+    setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
+    getTaskFolders: () => settle(api.GetTaskFolders({})),
+    cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
+    removeTaskFolder: (taskId) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId })),
     moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
     lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
