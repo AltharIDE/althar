@@ -9,7 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 
 import { Connectors } from '../src/Config'
-import { Connections } from '../src/Connections'
+import { Connections, SignInUnavailable } from '../src/Connections'
 import { Instance } from '../src/Instance'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
@@ -97,9 +97,19 @@ describe('a connection to a product no longer offered', () => {
           const check = yield* connections.check(made.id)
           assert.deepStrictEqual(check.lines, [{ need: 'account', state: 'no', fact: null, count: null, reason: { kind: 'refused' } }])
           assert.strictEqual(check.settings, made.webUrl)
-          // Nor is it a tracker anything can file on.
+          // Nor is it a tracker anything can file on, nor signed in to in the browser here.
           assert.deepStrictEqual(yield* connections.trackers, [])
-        }).pipe(Effect.provide(launch(database, secrets, [products.github]))),
+          const instance = yield* Instance
+          assert.instanceOf(
+            yield* Effect.flip(connections.startSignIn({ product: 'trello', actorId: instance.personId })),
+            SignInUnavailable,
+          )
+          // A product with no hosted address of its own needs the site's address to sign in to.
+          assert.instanceOf(
+            yield* Effect.flip(connections.startSignIn({ product: 'jira_cloud', actorId: instance.personId })),
+            SignInUnavailable,
+          )
+        }).pipe(Effect.provide(launch(database, secrets, [products.github, products.jira_cloud]))),
       )
     })
   })

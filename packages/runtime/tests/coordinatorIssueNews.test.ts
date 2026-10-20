@@ -107,12 +107,20 @@ describe('what the coordinator hears of issues and plans', () => {
     const linear = tracker({ name: 'In Review', category: 'started' })
     return Effect.gen(function* () {
       const plans = yield* Plans
-      const { task, planId, news, instance } = yield* spoken
+      const { projectId, task, planId, news, instance } = yield* spoken
       yield* (yield* Issues).started(task.taskId)
       yield* until(outcome(task.taskId), (rows) => rows.length === 1)
       assert.isNull(yield* news)
       // Changed by the coordinator itself, still counting down: nothing it doesn't know.
       yield* plans.change(planId, [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }], instance.coordinatorId)
+      assert.isNull(yield* news)
+      // An issue a task's lead drafted, and the person discarded, is the lead's to hear of, not the coordinator's.
+      const drafts = yield* IssueDrafts
+      const sql = yield* SqlClient.SqlClient
+      const lead: ToolAccess = { role: 'lead', projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      yield* callTool(lead, 'draft_issue', { title: 'Retry webhooks too' })
+      const [draft] = yield* sql<{ id: string }>`SELECT id FROM issue_drafts WHERE title = 'Retry webhooks too'`
+      yield* drafts.discard(draft?.id ?? '', instance.personId)
       assert.isNull(yield* news)
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear }) })))
   })
