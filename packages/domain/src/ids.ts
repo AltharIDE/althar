@@ -61,6 +61,8 @@ export const Ids = {
   issueDraft: kind('idr', 'IssueDraftId'),
   conflictResolution: kind('cres', 'ConflictResolutionId'),
   reviewDraft: kind('rdr', 'ReviewDraftId'),
+  automation: kind('auto', 'AutomationId'),
+  automationOccurrence: kind('occ', 'AutomationOccurrenceId'),
 } as const
 
 export type IdKind = keyof typeof Ids
@@ -155,6 +157,10 @@ export const ConflictResolutionId = Ids.conflictResolution.schema
 export type ConflictResolutionId = typeof ConflictResolutionId.Type
 export const ReviewDraftId = Ids.reviewDraft.schema
 export type ReviewDraftId = typeof ReviewDraftId.Type
+export const AutomationId = Ids.automation.schema
+export type AutomationId = typeof AutomationId.Type
+export const AutomationOccurrenceId = Ids.automationOccurrence.schema
+export type AutomationOccurrenceId = typeof AutomationOccurrenceId.Type
 
 interface IdDefinition<S> {
   readonly prefix: string

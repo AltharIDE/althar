@@ -37,4 +37,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0031_branch_on_first_write': '6f74ce130bd700d9f703fa1b3d0e98532d37b9557e91b8ebe1b2d6a017540c87',
   '0032_task_allow_everything': '8309781094a686d53ac3ea6149d527ffa9d697cf460c55a937e85e6bfcfa949b',
   '0033_runnables': 'b4d5103100101a8c571902d51ecb9c8395bdf109d31ffb4f555ef94cf8f2e6a9',
+  '0034_automations': '207a84892700ff0f764cf6adeb1bd6d438d117cb59b2892cba7062747db4f0e8',
 }
