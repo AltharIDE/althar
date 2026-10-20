@@ -108,6 +108,14 @@ describe('a task’s graph', () => {
           )
         assert.isTrue(changes.some((change) => change.aggregateType === 'run' && change.threadId === card.threadId))
 
+        // The lead is switched to another model: what it did before stays on the model it ran on, and the follow-up runs on the new one.
+        const ran = new Map(round.steps.map((step) => [`${step.key}${step.iteration}`, step.model]))
+        const was = ran.get('implement0') ?? assert.fail('no model for its work')
+        const other = was === 'large' ? 'small' : 'large'
+        yield* (yield* Sessions).setModel({ threadId: card.threadId, model: other })
+        const [switched] = yield* graphOf(card.threadId)
+        assert.deepStrictEqual(new Map(switched?.steps.map((step) => [`${step.key}${step.iteration}`, step.model])), ran)
+
         // The person writes to its lead: a follow-up, started by what they said, reviewed as its plan was.
         const followUp = 'Also log each retry. [lead:finish] [lead:edit] [review:pass]'
         yield* (yield* Sessions).send({
@@ -120,6 +128,8 @@ describe('a task’s graph', () => {
         assert.isTrue(after.followUp)
         assert.deepStrictEqual([after.said?.text, after.said?.relayed], [followUp, false])
         assert.strictEqual(after.steps[0]?.key, 'implement')
+        assert.strictEqual(after.steps[0]?.model, other)
+        assert.strictEqual(rounds[0]?.steps[0]?.model, was)
         assert.isTrue(after.steps.every((step) => step.state === 'done'))
       }).pipe(Effect.provide(runtimeWith(github)))
     },

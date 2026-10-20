@@ -2196,7 +2196,15 @@ export class Queries extends Context.Service<
                 startedAt: string | null
                 endedAt: string | null
               }>`
-                SELECT n.id, n.execution_id, n.node_key, n.iteration, n.state, a.state AS try_state, a.hold_reason, s.agent_id, s.model,
+                SELECT n.id, n.execution_id, n.node_key, n.iteration, n.state, a.state AS try_state, a.hold_reason, s.agent_id,
+                  -- The model it ran on, as its session's last turn in it was given: a session's own is what it is on now, and
+                  -- a switch would move what it did before to the new one; else that, as for a try not given a turn yet.
+                  COALESCE((
+                    SELECT t.model FROM turn_deliveries t
+                    WHERE t.provider_session_id = a.provider_session_id AND t.model IS NOT NULL AND t.requested_at >= a.admitted_at
+                      AND (a.ended_at IS NULL OR t.requested_at <= a.ended_at)
+                    ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1
+                  ), s.model) AS model,
                   a.started_at, a.ended_at
                 FROM nodes n LEFT JOIN node_attempts a ON a.node_id = n.id LEFT JOIN provider_sessions s ON s.id = a.provider_session_id
                 WHERE ${sql.in('n.execution_id', executions)}
