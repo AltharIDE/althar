@@ -12,6 +12,7 @@ import {
   commitRecord,
   commitsOf,
   defaultBranch,
+  fetchInto,
   git,
   gitIn,
   gitOutcome,
@@ -249,6 +250,20 @@ describe('a git command whose failure says something', () => {
       assert.strictEqual((yield* gitOutcome(path, 'merge-base', '--is-ancestor', head, '0'.repeat(40))).code, 128)
       assert.strictEqual((yield* gitOutcome(path, 'config', '--get', 'no.such')).code, 1)
       assert.strictEqual((yield* gitOutcome(join(path, 'gone'), 'status')).code, 128)
+    }),
+  )
+})
+
+describe('a branch fetched from a remote by its URL', () => {
+  effect.live('is fetched into a ref here, signed in or not, and is nothing where the remote hasn’t it', () =>
+    Effect.gen(function* () {
+      const remote = repository()
+      const { path } = repository()
+      const signed = { url: remote.path, header: 'Authorization: Basic eDp5' }
+      assert.strictEqual(yield* fetchInto(path, signed, 'main', 'refs/althar/base/main'), remote.head)
+      assert.strictEqual(run(path, 'rev-parse', 'refs/althar/base/main'), remote.head)
+      assert.strictEqual(yield* fetchInto(path, { url: remote.path, header: null }, 'main', 'refs/althar/other'), remote.head)
+      assert.isNull(yield* fetchInto(path, signed, 'nope', 'refs/althar/nope'))
     }),
   )
 })

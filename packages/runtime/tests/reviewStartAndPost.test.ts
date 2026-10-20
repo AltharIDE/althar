@@ -175,4 +175,33 @@ describe('a review, at its edges', () => {
       assert.notInclude(found, 'reviews it already')
     }).pipe(Effect.provide(withQueries(github)))
   })
+
+  it.live('reads a pull request whose history never meets its base from where the base is', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    // A head with a history of its own, as an import of another repository is.
+    git(at.working, 'checkout', '-q', '--orphan', 'imported')
+    writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
+    git(at.working, 'add', '.')
+    git(at.working, 'commit', '-q', '-m', 'Import')
+    const head = git(at.working, 'rev-parse', 'HEAD')
+    git(at.working, 'checkout', '-q', '-f', 'main')
+    git(at.working, 'push', '-q', at.bare, `${head}:refs/pull/1/head`)
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'Import', author: 'ninemate', headSha: head })
+    const main = git(at.working, 'rev-parse', 'main')
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const started = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+      })
+      const sql = yield* SqlClient.SqlClient
+      const [copy] = yield* sql<{ state: string; baseCommit: string | null }>`
+        SELECT state, base_commit FROM workspaces WHERE task_id = ${started.taskId}`
+      assert.deepStrictEqual(copy, { state: 'ready', baseCommit: main })
+    }).pipe(Effect.provide(withQueries(github)))
+  })
 })

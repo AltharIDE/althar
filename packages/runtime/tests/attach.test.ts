@@ -651,3 +651,97 @@ describe('attaching a task to a pull request its branch can follow as it is', ()
     }).pipe(Effect.provide(withQueries(github)))
   })
 })
+
+describe('attaching a task to a pull request from its own repository', () => {
+  it.live('follows one opened from a branch of the repository itself, which isn’t a fork', () => {
+    const { working, bare } = hosted()
+    git(working, 'checkout', '-q', '-b', 'fix-send-back')
+    const head = commit(working, 'send.ts', 'export const sendBack = () => 1\n')
+    git(working, 'push', '-q', bare, 'fix-send-back')
+    git(working, 'checkout', '-q', 'main')
+    git(working, 'branch', '-q', '-D', 'fix-send-back')
+    const github = makeFakeService({ pushUrl: () => bare, headOf: () => tipOf(bare, 'fix-send-back') })
+    github.addRepository(['meridian', 'api'])
+    const pull = github.addPullRequest({
+      path: ['meridian', 'api'],
+      title: 'Send back',
+      author: 'you',
+      source: 'fix-send-back',
+      headSha: head,
+    })
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const projects = yield* Projects
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Answer the review',
+      })
+      const changes = yield* Changes
+      const attached = yield* changes.attach({
+        taskId: task.taskId,
+        pullRequest: `#${pull.number}`,
+        start: true,
+        actorId: instance.personId,
+      })
+      assert.deepInclude(attached, { kind: 'attached', started: true })
+      assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), head)
+      // Its work goes to that branch of the repository itself.
+      const notice = (yield* items(task.threadId)).find((item) => item.kind === 'notice')
+      assert.include(
+        String(notice?.content.description),
+        'Its work goes to PR #1’s branch, fix-send-back, on meridian/api, as a plain push',
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+})
+
+describe('attaching a task to a pull request, refused before anything moves', () => {
+  it.live(
+    'refuses a task that is done, and starts no branch over one of its name left from before or where its own commits conflict',
+    () => {
+      const { github, pull, working } = forked()
+      return Effect.gen(function* () {
+        const { projectId, task, personId } = yield* project(working)
+        const changes = yield* Changes
+        const sql = yield* SqlClient.SqlClient
+        const refused = (taskId: string) =>
+          Effect.map(
+            Effect.flip(changes.attach({ taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId })),
+            (error) => (error as { message?: string }).message,
+          )
+        // A worktree with no branch yet, off the head, with one of its name left from before.
+        git(task.worktree, 'checkout', '-q', '--detach', 'HEAD')
+        yield* sql`UPDATE workspaces SET branched_at = NULL WHERE task_id = ${task.taskId}`
+        assert.strictEqual(
+          yield* refused(task.taskId),
+          `A branch called ${task.branch} is in its repository already, from before. Delete or rename it, then attach PR #1.`,
+        )
+        // With none of its name, its own commit conflicts with the head: it is left on no branch, as it was.
+        git(task.worktree, 'branch', '-q', '-D', task.branch)
+        const mine = commit(task.worktree, 'send.ts', 'export const sendBack = () => 2\n')
+        assert.strictEqual(
+          yield* refused(task.taskId),
+          'The task’s own commits conflict with PR #1’s head in send.ts, so its branch stays as it was.',
+        )
+        assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), mine)
+        assert.strictEqual(git(task.worktree, 'branch', '--show-current'), '')
+        assert.notInclude(git(task.worktree, 'branch', '--list'), task.branch)
+        // A task merged here is done: it follows nothing.
+        const other = yield* (yield* Projects).createTask({
+          envelope: yield* Runtime.envelope('task.create', { title: 'Done already' }),
+          projectId,
+          title: 'Done already',
+        })
+        const [binding] = yield* sql<{ slug: string }>`
+        SELECT b.slug FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${other.taskId}`
+        const head = commit(other.worktree, 'done.md', 'Done.\n')
+        yield* changes.mergeHere(other.taskId, [{ repository: binding?.slug ?? '', head }])
+        assert.strictEqual(yield* refused(other.taskId), 'The task is done: only an open one follows a pull request.')
+      }).pipe(Effect.provide(withQueries(github)))
+    },
+  )
+})
