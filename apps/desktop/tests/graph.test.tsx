@@ -353,3 +353,107 @@ describe('taking the person to a place in the conversation', () => {
     root.remove()
   })
 })
+
+describe('a step’s popover on the Graph face', () => {
+  it('says where a step without a report stands, in a line, and answers a permission there', async () => {
+    const { GraphFace, graphFaceText } = await import('../src/renderer/features/task/GraphFace')
+    const user = userEvent.setup()
+    const graph = graphOf({
+      attention: [permission],
+      rounds: [
+        round([
+          step('implement', 0, 'done'),
+          step('review', 0, 'held', { hold: 'usage_limit' }),
+          step('settle', 0, 'held', { hold: 'machine_busy' }),
+          step('review', 1, 'cancelled', { endedAt: at(9) }),
+          step('implement', 1, 'running'),
+          step('review', 2, 'next'),
+          step('publish', 0, 'next', { added: true }),
+        ]),
+      ],
+    })
+    const permissions = vi.fn((calls: ReadonlyArray<AttentionRequest>) => <p>{`${calls.length} to allow`}</p>)
+    const onShow = vi.fn()
+    if (graph === null) throw new Error('no graph')
+    const { client } = fakeClient()
+    withServices(<GraphFace graph={graph} stuck={() => null} permissions={permissions} onShow={onShow} />, client)
+    const said = async (name: RegExp) => {
+      await user.click(screen.getByRole('button', { name }))
+      const panel = await screen.findByRole('dialog')
+      const words = panel.textContent
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      return words
+    }
+    expect(await said(/^Implement, done/)).toBe(graphFaceText.done)
+    expect(await said(/^Review 1/)).toBe(graphFaceText.limit)
+    expect(await said(/^Settle/)).toBe(graphFaceText.held)
+    expect(await said(/^Review 2/)).toBe(graphFaceText.stopped)
+    // The step at work asks to run a command: the permission is answered where it opens.
+    expect(await said(/^Implement, waits on you/)).toBe('1 to allow')
+    expect(permissions).toHaveBeenCalledWith([permission])
+    expect(await said(/^Review 3/)).toBe(graphFaceText.next)
+    expect(await said(/^Pull request/)).toBe(graphFaceText.added)
+    expect(onShow).not.toHaveBeenCalled()
+  })
+
+  it('says a step waits on the person in the conversation, where nothing it can answer is open by it', async () => {
+    const { GraphFace, graphFaceText } = await import('../src/renderer/features/task/GraphFace')
+    const user = userEvent.setup()
+    const question: AttentionRequest = { ...permission, id: 'q1', kind: 'question', command: null }
+    const graph = graphOf({ attention: [question], rounds: [round([step('implement', 0, 'waiting'), step('review', 0, 'next')])] })
+    if (graph === null) throw new Error('no graph')
+    const { client } = fakeClient()
+    withServices(<GraphFace graph={graph} stuck={() => null} permissions={() => null} onShow={vi.fn()} />, client)
+    await user.click(screen.getByRole('button', { name: /^Implement/ }))
+    expect((await screen.findByRole('dialog')).textContent).toBe(graphFaceText.question)
+    await user.keyboard('{Escape}')
+    // Waiting with no call the window has: it says so in a line.
+    const alone = graphOf({ rounds: [round([step('implement', 0, 'waiting')])] })
+    expect(alone?.facts.get('implement0')?.state).toBe(GraphNodeState.Waiting)
+  })
+})
+
+describe('a step’s report on the Graph face', () => {
+  it('opens a pull request’s, a lead’s and a proposal’s where their cards are, and goes to a report in the conversation', async () => {
+    const { GraphFace, graphFaceText } = await import('../src/renderer/features/task/GraphFace')
+    const user = userEvent.setup()
+    const opened = report({ step: 'publish', round: 0, summary: 'Opened the draft.', change: change({ number: 229 }) }, 30)
+    const built = report({ step: 'implement', round: 0, summary: 'Added the retry.', built: 'A retry on the checkout call.' }, 5)
+    const graph = graphOf({
+      reports: [built, opened],
+      attention: [stuck('round_limit', 'review', 3)],
+      rounds: [
+        round([
+          step('implement', 0, 'done'),
+          step('review', 0, 'done'),
+          step('settle', 0, 'done'),
+          step('publish', 0, 'done'),
+          step('implement', 1, 'waiting'),
+        ]),
+      ],
+    })
+    if (graph === null) throw new Error('no graph')
+    const stuckCall = vi.fn(() => <p>Review again?</p>)
+    const onShow = vi.fn()
+    const { client } = fakeClient()
+    withServices(<GraphFace graph={graph} stuck={stuckCall} permissions={() => null} onShow={onShow} />, client)
+    const open = async (name: RegExp) => {
+      await user.click(screen.getByRole('button', { name }))
+      return screen.findByRole('dialog')
+    }
+    const pull = await open(/^Pull request/)
+    expect(pull.textContent).toContain('Opened the draft.')
+    expect(pull.textContent).toContain('PR #229')
+    await user.click(within(pull).getByRole('button', { name: graphFaceText.show }))
+    expect(onShow).toHaveBeenCalledWith(opened.id)
+    await user.keyboard('{Escape}')
+    expect((await open(/^Implement, done/)).textContent).toContain('A retry on the checkout call.')
+    await user.keyboard('{Escape}')
+    // The fourth review the person's say would add: its call, answered there.
+    expect((await open(/^Review 4/)).textContent).toContain('Review again?')
+    await user.keyboard('{Escape}')
+    // A step that waits on the person with no call the window has: it says so.
+    expect((await open(/^Implement, waits on you/)).textContent).toBe(graphFaceText.waiting)
+  })
+})
