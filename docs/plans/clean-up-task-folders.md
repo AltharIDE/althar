@@ -139,12 +139,14 @@ A folder is left alone, and listed with why, when:
 How Althar tells:
 
 - **No notification and no Needs you.** It is housekeeping.
-- **The Clean up now dialog lists each folder it leaves alone, with why**,
-  and on request the folders it removes, with their sizes.
+- **Clean up now names each folder it leaves alone, with why** in a word
+  or two and a glyph ("Not committed", "Running", "Open in VS Code"),
+  before anything goes. There is no dialog: nothing it does is lost for
+  good.
 - **A folder left alone is tried again the next day.**
-- **Each removed task's thread says what went:** "Removed its folder a week
-  after it merged, to free 2.3 GB. It comes back when you write here, open
-  it or run it."
+- **Each removed task's thread marks it with a divider**, the thin line
+  the thread already uses for a change of scene: "Folder removed after a
+  week · 2.3 GB".
 - **Settled rows don't change.** There is nothing for the person to do
   about a folder that is gone.
 
@@ -164,8 +166,9 @@ can go too.
   3. else the PR's head or merge commit.
 
   Then it runs setup again, and only then does what was asked.
-- **What the thread shows.** "Bringing its folder back from althar/…",
-  then the setup line it already has, then the lead's turn.
+- **What the person sees.** The header's one chip turns blue, "Bringing its
+  folder back", while the thread shows the setup line it already has; then
+  the lead's turn.
 - **Code to reuse.** Reopening an abandoned task already restores a folder
   (`Tasks.reopen`). Two places need extending:
   - **Done tasks.** `Tasks.ts` refuses to reopen one today.
@@ -173,7 +176,7 @@ can go too.
     workspace and never puts one back.
 - **Meanwhile, reading needs nothing.** The conversation, Outputs, the
   diff, the screenshots and the documents all read without the folder
-  (§3). The task view looks as it did; only the thread's line says the
+  (§3). The task view looks as it did; only the thread's divider says the
   folder went.
 - **No Restore button.** The composer, Open in and Run are already the
   ways in.
@@ -191,8 +194,8 @@ example, an APFS clone of the main checkout's `node_modules`, as Orca's
 coming back. It isn't needed for this.
 
 **Disk sizes need an honest figure.** bun clones files on APFS. So `du`
-overstates a folder, and removing one frees less than `du` said. The
-dialog says "about"; after removal, Althar measures the volume's free
+overstates a folder, and removing one frees less than `du` said. Before
+removal the figure is `du`'s; after it, Althar measures the volume's free
 space and says what was really freed.
 
 ## 7. How others do it
@@ -231,14 +234,17 @@ docs.
 ## 8. Where the setting lives, and the docs
 
 **App-wide, in Settings › Work on this Mac.** The disk is the Mac's, and
-the setting sits beside keep awake and agents at once. It is one switch,
-"Remove finished tasks' folders", on. Under it, set in, "Settled this week
-· 6 folders take 14 GB · Clean up now".
+the setting sits beside keep awake and agents at once. It is one switch:
+"Remove finished tasks' folders", with "A week after they settle. Their
+branches stay." Under it is one bar of this Mac's disk, with Althar's task
+folders in cobalt and the part that could go now hatched. Beside the bar:
+"3 stay", which opens the list of what stays and why, and Clean up.
+Cleaning up shrinks the hatched part away and says what it freed.
 
 **No setting per project.** The research put it in the project's Running
 ("Where its work goes"). But nobody makes this choice per project, and
 each project would add a setting. The project's Worktrees row could show
-its size later (prototype B), but that isn't needed now.
+its size later (first round's B), but that isn't needed now.
 
 **The docs:**
 
@@ -252,18 +258,22 @@ its size later (prototype B), but that isn't needed now.
 
 ## The prototype
 
-`.althar/scratch/folders`, at http://localhost:5393/. The bar at the
-bottom switches the direction (keys 1–4, ←/→) and goes to each place.
+`.althar/scratch/folders`, at http://localhost:5393/?d=E&p=settings. The bar
+at the bottom switches the direction (keys 1–4, ←/→) and goes to each
+place. Every direction does what this doc recommends; they differ in how
+it looks. The first round's A, B and C, which also varied when folders go,
+were too wordy and are gone from the page. What B and C would do is still
+in §2.
 
 | Direction | The setting and Clean up now | A folder that went | Coming back |
 | --- | --- | --- | --- |
 | Today | Nothing | Never goes | n/a |
-| **A · After a week** | Switch in Work on this Mac; Clean up now set in under it | Thread line; card unchanged | Automatic, shown in the thread |
-| B · When you ask | None; Clean up in the project's Running › Worktrees, and at the head of the Settled lane | Thread line; settled row says "folder removed" | Same |
-| C · When space runs low | Switch in Work on this Mac; the load meter's peek gets a Disk line with the task folders' part and Clean up | Thread line | Same |
+| D · In place | The switch; "14 GB could go now · Clean up now" opens under it: the figure, what stays and why, Clean up | A divider in the thread | Dividers: "Folder back from its branch", then setup |
+| **E · A bar** | The switch, with this Mac's disk as one bar; "3 stay" opens a list; Clean up shrinks the bar | A divider in the thread | The header's chip, blue: "Bringing its folder back" |
+| F · In the meter | Only the switch; the disk, Clean up and what stays are in the CPU · MEM meter's peek | A divider in the thread | Dividers, as D |
 
-**Pick: A.** C's disk line in the load meter is worth keeping in mind
-as a later addition.
+**Pick: E.** The bar says why it matters without words, the reasons are
+one click away, and coming back shows where the eye already is.
 
 ## Open
 
