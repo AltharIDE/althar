@@ -41,7 +41,7 @@ import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy } from './Busy'
-import { planWaits } from './Runs'
+import { PlanParameters, planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
 import { Changes } from './Changes'
@@ -49,6 +49,7 @@ import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
+import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueDraftsWaiting, kindOf } from './kinds'
 import { documentText, outputText } from './reading'
@@ -89,6 +90,37 @@ const AT_ONCE = 8
 
 /** How many of the lead's reports a thread reads beside its page, newest first: far more than a task's rounds. */
 const REPORTS = 200
+
+/** How many of a task's rounds of work its graph reads, newest: far more than a task has. */
+const GRAPH_ROUNDS = 100
+
+/** What a revision of a run's graph keeps of its steps, by key. */
+const GraphSteps = Schema.fromJsonString(
+  Schema.Struct({ steps: Schema.optional(Schema.Array(Schema.Struct({ key: Schema.String, skipped: Schema.optional(Schema.Boolean) }))) }),
+)
+
+/** A step of a run, as `nodes` names it. */
+const NodeKey = Schema.Literals(['implement', 'review', 'settle', 'publish'])
+
+/** What a follow-up's message or relayed notice says, from its stored content. */
+const SaidContent = Schema.fromJsonString(
+  Schema.Struct({
+    text: Schema.optional(Schema.String),
+    title: Schema.optional(Schema.String),
+    description: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+)
+
+/** What started a follow-up, in the words its thread shows: the person's message, or what the coordinator passed on. */
+const saidOf = (item: { readonly id: string; readonly kind: string; readonly content: string }) =>
+  Option.match(Schema.decodeUnknownOption(SaidContent)(item.content), {
+    onNone: () => null,
+    onSome: (content) => {
+      const relayed = item.kind === 'notice'
+      const text = relayed ? (content.description ?? content.title) : content.text
+      return text === undefined ? null : { itemId: item.id, text, relayed }
+    },
+  })
 
 /** How many items further back, at most, a page of a task's thread reaches for the start of its first round: one enormous round loads in pages. */
 const ROUND_REACH = 2_000
@@ -2126,6 +2158,122 @@ export class Queries extends Context.Service<
           return { items: shown.flatMap((item) => (item === undefined ? [] : [item])), earlier }
         })
 
+      /**
+       * A task's rounds of work as its graph had them (`graph.ts`): its newest runs, their steps and each step's tries with the
+       * agent each ran on, what each began with and when a change added to it, what started each follow-up, and whether the
+       * run under way ends in publishing, as `conclude` would decide it now.
+       */
+      const graphFor = (projectId: string, taskId: string, threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const runs = yield* sql<{
+            id: string
+            planId: string | null
+            createdAt: string
+            endedAt: string | null
+            parameters: string
+            executionId: string
+          }>`
+            SELECT * FROM (
+              SELECT r.id, r.plan_id, r.created_at, r.ended_at, r.parameters, e.id AS execution_id, r.rowid AS n
+              FROM runs r JOIN workflow_executions e ON e.run_id = r.id WHERE r.task_id = ${taskId}
+              ORDER BY r.created_at DESC, r.rowid DESC LIMIT ${GRAPH_ROUNDS}
+            ) ORDER BY created_at, n`
+          if (runs.length === 0) return []
+          const executions = runs.map((one) => one.executionId)
+          const [tries, revisions] = yield* Effect.all(
+            [
+              sql<{
+                id: string
+                executionId: string
+                nodeKey: string
+                iteration: number
+                state: string
+                tryState: string | null
+                holdReason: string | null
+                agentId: string | null
+                model: string | null
+                startedAt: string | null
+                endedAt: string | null
+              }>`
+                SELECT n.id, n.execution_id, n.node_key, n.iteration, n.state, a.state AS try_state, a.hold_reason, s.agent_id, s.model,
+                  a.started_at, a.ended_at
+                FROM nodes n LEFT JOIN node_attempts a ON a.node_id = n.id LEFT JOIN provider_sessions s ON s.id = a.provider_session_id
+                WHERE ${sql.in('n.execution_id', executions)}
+                ORDER BY n.created_at, n.iteration, n.rowid, a.attempt_number`,
+              sql<{ executionId: string; cause: string; graph: string; createdAt: string }>`
+                SELECT execution_id, cause, graph, created_at FROM execution_graph_revisions
+                WHERE ${sql.in('execution_id', executions)} ORDER BY revision`,
+            ],
+            { concurrency: 'unbounded' },
+          )
+          const decodeSteps = Schema.decodeUnknownOption(GraphSteps)
+          const isKey = Schema.is(NodeKey)
+          const shaped = yield* Effect.forEach(runs, (run, index) =>
+            Effect.gen(function* () {
+              const parameters = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(run.parameters).pipe(
+                Effect.orElseSucceed(() => null),
+              )
+              const mine = revisions.filter((one) => one.executionId === run.executionId)
+              const began = Option.match(decodeSteps(mine[0]?.graph), {
+                onNone: () => [],
+                onSome: (graph) => (graph.steps ?? []).filter((one) => one.skipped !== true).map((one) => one.key),
+              })
+              // A run under way publishes as `conclude` would decide now: a follow-up only where it was made a change in.
+              const here = parameters?.here === true
+              const publishes =
+                run.endedAt === null &&
+                parameters !== null &&
+                (run.planId !== null || parameters.publishes === true) &&
+                (parameters.end ??
+                  (here ? null : yield* (yield* Changes).endFor(projectId, taskId).pipe(Effect.orElseSucceed(() => null)))) !== null
+              // What started a follow-up: the person's message, or what the coordinator passed on, after the round before began.
+              const before = runs[index - 1]?.createdAt ?? ''
+              const [said] =
+                run.planId === null
+                  ? yield* sql<{ id: string; kind: string; content: string }>`
+                      SELECT id, kind, content FROM thread_items
+                      WHERE thread_id = ${threadId} AND created_at <= ${run.createdAt} AND created_at > ${before}
+                        AND (kind = 'user_message' OR (kind = 'notice' AND json_extract(content, '$.role') = 'relayed'))
+                      ORDER BY sequence DESC LIMIT 1`
+                  : []
+              const steps: StepRow[] = []
+              for (const row of tries) {
+                if (row.executionId !== run.executionId || !isKey(row.nodeKey)) continue
+                const one =
+                  row.tryState === null
+                    ? []
+                    : [
+                        {
+                          state: row.tryState,
+                          hold: row.holdReason,
+                          agentId: row.agentId,
+                          model: row.model,
+                          startedAt: row.startedAt,
+                          endedAt: row.endedAt,
+                        },
+                      ]
+                const had = steps.at(-1)
+                if (had?.id === row.id) steps[steps.length - 1] = { ...had, tries: [...had.tries, ...one] }
+                else steps.push({ id: row.id, key: row.nodeKey, iteration: row.iteration, state: row.state, tries: one })
+              }
+              return {
+                id: run.id,
+                planId: run.planId,
+                createdAt: run.createdAt,
+                endedAt: run.endedAt,
+                planned: parameters?.steps ?? [],
+                publishes,
+                began,
+                changedAt: mine.find((one) => one.cause === 'patch')?.createdAt ?? null,
+                said: said === undefined ? null : saidOf(said),
+                steps,
+              } satisfies RunRows
+            }),
+          )
+          return graphOf(shaped)
+        })
+
       /** A task's thread: its head, and a page of its items; `fresh` reads the files it changed from git, whatever is kept. */
       const thread = (threadId: string, page: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean } = {}) =>
         Effect.gen(function* () {
@@ -2200,6 +2348,7 @@ export class Queries extends Context.Service<
             SELECT count(*) AS left FROM runs r, json_each(r.parameters, '$.steps') s
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
               AND r.state = 'running' AND json_extract(s.value, '$.key') = 'review' AND NOT json_extract(s.value, '$.skipped')`
+          const graph = yield* Effect.option(graphFor(head.projectId, head.taskId, threadId))
           // What git says of its worktrees, and its host, read at the same time.
           const [said, host] = yield* Effect.all(
             [gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
@@ -2230,6 +2379,8 @@ export class Queries extends Context.Service<
               queued: card?.queued ?? null,
               ...(card?.inLine === true && card.place !== undefined ? { place: card.place } : {}),
               steps: card?.plan?.steps ?? [],
+              // Its graph is a part of its own: one that can't be read leaves the face out, not the thread.
+              ...Option.match(graph, { onNone: () => ({}), onSome: (rounds) => ({ graph: rounds }) }),
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,
               startedAt: card?.startedAt ?? null,
@@ -2342,6 +2493,12 @@ export class Queries extends Context.Service<
                   JOIN threads t ON t.task_id = x.task_id AND t.kind = 'task' WHERE x.id = c.aggregate_id)
                 WHEN 'issue_draft' THEN (SELECT thread_id FROM issue_drafts WHERE id = c.aggregate_id)
                 WHEN 'review_draft' THEN (SELECT thread_id FROM review_drafts WHERE id = c.aggregate_id)
+                -- A run and a try at one of its steps belong to their task's thread, whose graph they change.
+                WHEN 'run' THEN (SELECT t.id FROM runs r
+                  JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task' WHERE r.id = c.aggregate_id)
+                WHEN 'node_attempt' THEN (SELECT t.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+                  JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
+                  JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task' WHERE a.id = c.aggregate_id)
               END AS thread_id
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
