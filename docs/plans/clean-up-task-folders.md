@@ -20,9 +20,11 @@ writes them.
 
 ## The decision in one line
 
-A week after a task settles, Althar removes its folder. This is on by
-default, with one switch in Settings › Work on this Mac and a Clean up now
-beside it. The branch stays. The folder comes back by itself when the task
+After a wait that suits how a task ended, Althar removes its folder:
+reviews right away, merged changes after 3 days, done after a week,
+abandoned after 2 weeks, and sooner when space runs low. This "Smart"
+choice is on by default and can be changed in Settings › Work on this Mac,
+beside a bar of the disk and Clean up. The branch stays. The folder comes back by itself when the task
 needs it. A folder holding work that exists nowhere else is never removed.
 
 ## 1. What counts as finished
@@ -71,20 +73,33 @@ The project's own `.coordinator` and `.run` folders are never touched.
 | When the disk runs low | Good as a safety net, but on its own it acts at the worst moment and surprises (prototype C) |
 | Only when the person asks | Nobody remembers until the disk is full (prototype B) |
 
-**Recommendation:**
+**Recommendation:** automatic, after a wait that depends on how the task
+ended, with smart defaults the person can change.
 
-- **Automatic, a week after the task settles.** The week runs from the
-  latest of three moments: it settled, the person opened its task, or they
-  opened its folder in an editor.
-- **Clean up now, for the rest.** For when space is needed today.
+| How it ended | Smart wait | Why |
+| --- | --- | --- |
+| Review | Right away | A read-only copy of someone's pull request: nothing of yours is in it |
+| Merged | After 3 days | Its work is on main; a follow-up usually comes within days |
+| Done (prototypes, research, chats) | After a week | You said it's done; its scratch goes with it |
+| Abandoned | After 2 weeks | You may reopen it |
+| Any, when space runs low | Sooner | Below 10% free, the oldest go first, whatever their wait |
+
+- **The wait runs from the latest of three moments:** it settled, the
+  person opened its task, or they opened its folder in an editor.
+- **Configurable, with one choice to start.** Settings offers "Smart"
+  (the table), "After a day", "After a week", "After a month" and "Only
+  when I clean up". Prototype H shows the other way: each kind's wait as a
+  row of its own, set to the smart ones. One choice is calmer; the rows
+  suit someone who wants merged folders kept a month and reviews gone at
+  once.
+- **Clean up, for the rest.** It takes the finished folders whose wait
+  isn't up yet, for when space is needed today.
 - **On by default, existing installs included.** The protections in §4
   are what make that safe. Off by default would mean it is never turned
   on, which is how the disk got here. The customizability research had it
   off; I'd turn it on.
 - **The first sweep is the big one.** On this Mac it would take most of the
   132 folders, so the release notes say so.
-- **No setting for the number of days.** Nobody needs to tune it, and Clean
-  up now covers "I need room today".
 
 ## 3. What is removed
 
@@ -118,18 +133,27 @@ gets one Althar line.
 
 ## 4. What is never touched, and how Althar tells
 
-A folder is left alone, and listed with why, when:
+A folder whose wait is up is **held back** when Althar shouldn't remove it
+by itself. It is listed apart, with why, and the person can still remove
+it by hand. Remove first says what goes with it, or what stays. A
+folder is held back when:
 
-- **It holds work that exists only there:** changes not committed, or new
-  files not ignored (`uncommittedFiles`, `git.ts`). Commits not pushed are
-  *not* a reason to skip it: they are on the branch, which stays.
+- **It holds changes not committed**, or new files not ignored
+  (`uncommittedFiles`, `git.ts`). Removing it by hand loses them, and
+  Remove says so ("3 changed files go with it", in red).
+- **It is a change whose commits were never pushed.** Removing it by hand
+  keeps them on the local branch, and Remove says so ("Its 4 commits stay
+  on its branch, on this Mac"). Quick tasks (prototypes, research) are
+  never pushed by design, so this doesn't hold them: their branch keeps
+  their commits.
 - **Something runs from it:** a run (`Launches`), an agent's session or
-  the commands it left running, or a setup under way.
+  the commands it left running, or a setup under way. This one has no
+  Remove: stop it first.
 - **It is kept for later, or going back to work.** Neither is settled. A
   round that opens while a removal runs waits for it, through a lock per
   task.
-- **It was opened recently:** within the week (§2). Opening a task's
-  folder in an editor isn't recorded today (`OpenInEditor` writes
+- **It is open in an editor**, or was opened within its wait (§2).
+  Opening a task's folder in an editor isn't recorded today (`OpenInEditor` writes
   nothing), so it needs an `opened_at` beside `seen_at`.
 - **Git can't say what is in it.** If the status read fails, the folder is
   left alone (Orca and Superset do the same).
@@ -139,14 +163,16 @@ A folder is left alone, and listed with why, when:
 How Althar tells:
 
 - **No notification and no Needs you.** It is housekeeping.
-- **Clean up now names each folder it leaves alone, with why** in a word
-  or two and a glyph ("Not committed", "Running", "Open in VS Code"),
-  before anything goes. There is no dialog: nothing it does is lost for
-  good.
+- **The bar's legend opens what goes and what is held back**, apart:
+  "Goes with Clean up", with each folder's size; then, on a sunk well,
+  "Held back", each with why in a word and a glyph ("Never pushed", "Not
+  committed", "Open in VS Code", "Running") and its own Remove. There is
+  no dialog: Clean up loses nothing for good, and a Remove that would lose
+  something asks first, in place.
 - **A folder left alone is tried again the next day.**
 - **Each removed task's thread marks it with a divider**, the thin line
-  the thread already uses for a change of scene: "Folder removed after a
-  week · 2.3 GB".
+  the thread already uses for a change of scene: "Folder removed 3 days
+  after it merged · 2.3 GB".
 - **Settled rows don't change.** There is nothing for the person to do
   about a folder that is gone.
 
@@ -234,12 +260,17 @@ docs.
 ## 8. Where the setting lives, and the docs
 
 **App-wide, in Settings › Work on this Mac.** The disk is the Mac's, and
-the setting sits beside keep awake and agents at once. It is one switch:
-"Remove finished tasks' folders", with "A week after they settle. Their
-branches stay." Under it is one bar of this Mac's disk, with Althar's task
-folders in cobalt and the part that could go now hatched. Beside the bar:
-"3 stay", which opens the list of what stays and why, and Clean up.
-Cleaning up shrinks the hatched part away and says what it freed.
+the setting sits beside keep awake and agents at once:
+
+- **One row:** "Remove finished tasks' folders", with a choice of when
+  (Smart to start), and a line saying what the choice does.
+- **Under it, one bar of this Mac's disk:** Althar's task folders in
+  cobalt, what is held back in a paler cobalt, and what could go now
+  hatched.
+- **The legend** says each in GB and opens what goes and what is held
+  back (§4).
+- **Clean up** takes what could go now; the hatched part shrinks away, and
+  the row says what was freed.
 
 **No setting per project.** The research put it in the project's Running
 ("Where its work goes"). But nobody makes this choice per project, and
@@ -258,22 +289,22 @@ its size later (first round's B), but that isn't needed now.
 
 ## The prototype
 
-`.althar/scratch/folders`, at http://localhost:5393/?d=E&p=settings. The bar
-at the bottom switches the direction (keys 1–4, ←/→) and goes to each
-place. Every direction does what this doc recommends; they differ in how
-it looks. The first round's A, B and C, which also varied when folders go,
-were too wordy and are gone from the page. What B and C would do is still
-in §2.
+`.althar/scratch/folders`, at http://localhost:5393/?d=G&p=settings. The bar
+at the bottom switches the direction (keys 1–3, ←/→) and goes to each
+place. Both directions keep the second round's E (the person liked its
+bar): this Mac's disk as a bar, a divider in the thread where a folder
+went, and the header's chip turning blue, "Bringing its folder back",
+while it comes back. The legend now opens what goes and, apart, what is
+held back, each removable by hand. Earlier rounds are gone from the page.
 
-| Direction | The setting and Clean up now | A folder that went | Coming back |
-| --- | --- | --- | --- |
-| Today | Nothing | Never goes | n/a |
-| D · In place | The switch; "14 GB could go now · Clean up now" opens under it: the figure, what stays and why, Clean up | A divider in the thread | Dividers: "Folder back from its branch", then setup |
-| **E · A bar** | The switch, with this Mac's disk as one bar; "3 stay" opens a list; Clean up shrinks the bar | A divider in the thread | The header's chip, blue: "Bringing its folder back" |
-| F · In the meter | Only the switch; the disk, Clean up and what stays are in the CPU · MEM meter's peek | A divider in the thread | Dividers, as D |
+| Direction | When folders go |
+| --- | --- |
+| Today | Never |
+| **G · One choice** | One picker: Smart (by kind, sooner when space runs low), after a day, a week or a month, or only when I clean up |
+| H · Per kind | A switch, then each kind's wait as its own row (the smart ones to start), and "Sooner when space runs low" |
 
-**Pick: E.** The bar says why it matters without words, the reasons are
-one click away, and coming back shows where the eye already is.
+**Pick: G.** It is one setting with the smart choice already made;
+someone who cares can still pick another.
 
 ## Open
 
