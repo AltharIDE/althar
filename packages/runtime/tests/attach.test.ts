@@ -618,6 +618,35 @@ describe('attaching a task to a pull request its branch can follow as it is', ()
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('pushes its work to one closed on the host since, and listens to it no more', () => {
+    const { bare, github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { projectId, task, personId } = yield* project(working)
+      const changes = yield* Changes
+      yield* changes.attach({ taskId: task.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId })
+      // Once Althar has looked at it as it attached, the person's work goes on, and it is closed on the host before Althar hears.
+      yield* until(
+        Effect.sync(() => github.calls.filter((call) => call === 'activity')),
+        (calls) => calls.length > 0,
+      )
+      const mine = commit(task.worktree, 'why.md', 'It restarts.\n')
+      github.close(pull.number)
+      const [published] = yield* changes.publish({ projectId, taskId: task.taskId, runId: 'run_none', end: 'draft' })
+      assert.deepInclude(published, { kind: 'opened', attached: true })
+      assert.strictEqual(tipOf(bare, 'fix-send-back'), git(task.worktree, 'rev-parse', 'HEAD'))
+      assert.strictEqual(git(task.worktree, 'log', '-1', '--format=%s'), git(task.worktree, 'log', '-1', '--format=%s', mine))
+      const [followed] = yield* changes.ofTask(task.taskId)
+      assert.deepInclude(followed, { state: 'closed', listening: false })
+    }).pipe(
+      // Listening waits an hour, so Althar hears of the close only from publishing.
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
+        ),
+      ),
+    )
+  })
+
   it.live('follows one again that it stopped listening to', () => {
     const { github, pull, working } = forked()
     return Effect.gen(function* () {
