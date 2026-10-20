@@ -118,6 +118,39 @@ mode, as the keychain already was.
 ADR-043 (amended) says Allow everything stops short of it; ADR-013 and
 ADR-019 are amended to match.
 
+### On Windows
+
+Since Windows support (#285) a lead's command may be cmd's or PowerShell's,
+with drive letters and backslashes, which the rules first read as a POSIX
+shell would: `rd /s /q C:\code\app` was no command they knew, and
+`C:\code\app` unquoted lost its backslashes. Now (`rules.ts`, "Windows"):
+
+- each command is read also as the POSIX command that does the same:
+  `rd /s`, `rmdir /s`, `del`, `erase`, `Remove-Item` and its aliases (`-Path`,
+  `-LiteralPath`, `-Path:x`, lists with commas) as `rm`; `Move-Item`, `move`,
+  `Rename-Item`, `ren` as `mv`; `Copy-Item`, `copy`, `xcopy` as `cp`;
+  `robocopy` as `rsync`, `/MIR` and `/PURGE` deleting where it copies to,
+  `/MOV` and `/MOVE` from where it copies from; `Set-Content`, `Out-File`,
+  `New-Item` and the like as writes; `Set-Location`, `pushd` as `cd`; a
+  program by its name in any case, without its folder or `.exe` (`git.exe`,
+  `GIT`, `& "C:\Program Files\Git\cmd\git.exe"`);
+- `cmd /c …` and `powershell -Command …` (and `pwsh -c`, and Windows
+  PowerShell's bare `powershell Remove-Item …`) are read as the commands
+  they run, with backslashes as separators;
+- on Windows a line is read also with its backslashes as separators, and
+  paths with Windows's own rules: drive letters, either slash, any case;
+- the home folder as `~`, `$HOME`, `$env:USERPROFILE` or `%USERPROFILE%`,
+  for keys and sign-ins too (`type %USERPROFILE%\.npmrc` is refused);
+- `winget`, `choco`, `scoop` and PowerShell's `Install-Module` and the like
+  install for the whole computer.
+
+A second reading only adds what a command is. Covered by tests with Windows
+paths ("on Windows (DEV-69)"). Not covered: `-EncodedCommand`, like `eval`,
+is read as what the rules can't tell only where its line names a push, a
+deploy, a publish or a merge; and a reader (the coordinator, a review) runs
+only what its allowlist names, which has no Windows command on it, so it is
+refused the rest.
+
 ## What Althar's own git does to the person's checkout
 
 | Operation | Where | Can it lose work? |

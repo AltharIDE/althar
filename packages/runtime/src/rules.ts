@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { posix, win32 } from 'node:path'
 
 import { type PermissionRequest, SECRET_PLACES } from '@althar/provider-adapters'
 
@@ -162,8 +162,24 @@ export interface RuleContext {
   readonly realPath?: (path: string) => string
   /** Folders anything may write to, such as the temp folder. */
   readonly scratch?: ReadonlyArray<string>
+  /** The system the agent works on, whose paths and commands it names: this computer's unless a test gives one. */
+  readonly platform?: NodeJS.Platform
+  /** The person's home folder: this computer's unless a test gives one. */
+  readonly home?: string
   /** The project's rules; the MVP's without them. */
   readonly project?: ProjectRuleSet
+}
+
+/** How the system an agent works on reads a path: its path functions, and the person's home folder. */
+interface System {
+  readonly paths: typeof posix
+  readonly home: string
+  readonly windows: boolean
+}
+
+const systemOf = (context: Pick<RuleContext, 'platform' | 'home'> = {}): System => {
+  const windows = (context.platform ?? process.platform) === 'win32'
+  return { paths: windows ? win32 : posix, home: context.home ?? homedir(), windows }
 }
 
 const ALLOW: Verdict = { verdict: 'allow' }
@@ -220,26 +236,26 @@ const SECRETS_REFUSED =
   "Agents don't read the person's keys, tokens or sign-ins, such as ~/.ssh, ~/.aws or ~/.npmrc. Tell the person what's needed."
 
 /** Whether a place, as a path from the home folder, is where a secret is kept. */
-const secretFromHome = (fromHome: string): boolean => {
-  if (fromHome === '' || fromHome === '..' || fromHome.startsWith(`..${sep}`) || isAbsolute(fromHome)) return false
-  const path = fromHome.split(sep).join('/')
+const secretFromHome = (fromHome: string, { paths }: System): boolean => {
+  if (fromHome === '' || fromHome === '..' || fromHome.startsWith(`..${paths.sep}`) || paths.isAbsolute(fromHome)) return false
+  const path = fromHome.split(paths.sep).join('/')
   return !SSH_PUBLIC.test(path) && SECRET_PLACES.some((place) => path === place || path.startsWith(`${place}/`))
 }
 
-/** The home folder, as a command may name it at the start of a path. */
-const HOME_WORD = /^(~|\$HOME|\$\{HOME\})(?=$|\/)/
+/** The home folder, as a command may name it at the start of a path: in a POSIX shell, PowerShell or cmd. */
+const HOME_WORD = /^(~|\$HOME|\$\{HOME\}|\$env:(USERPROFILE|HOME)|%USERPROFILE%)(?=$|[/\\])/i
 
 /** The real path of a place that may not exist yet: its nearest existing folder, with symlinks followed, and the rest. */
 const realFrom =
-  (follow: (path: string) => string) =>
+  (follow: (path: string) => string, paths: typeof posix) =>
   (path: string): string => {
     let existing = path
     const rest: Array<string> = []
     for (;;) {
       try {
-        return resolve(follow(existing), ...rest.toReversed())
+        return paths.resolve(follow(existing), ...rest.toReversed())
       } catch {
-        const parent = dirname(existing)
+        const parent = paths.dirname(existing)
         if (parent === existing) return path
         rest.push(existing.slice(parent.length).replace(/^[/\\]/, ''))
         existing = parent
@@ -248,26 +264,30 @@ const realFrom =
   }
 
 /** Whether a path, named from a folder, is where a secret is kept: as written, and with symlinks followed, to a file not there yet too. */
-const secretPath = (path: string, cwd: string, follow: (path: string) => string = realpathSync): boolean => {
-  const home = homedir()
-  const full = resolve(cwd, path.replace(HOME_WORD, home))
-  const real = realFrom(follow)
-  return secretFromHome(relative(home, full)) || secretFromHome(relative(real(home), real(full)))
+const secretPath = (path: string, cwd: string, system: System, follow: (path: string) => string = realpathSync): boolean => {
+  const { paths, home } = system
+  const full = paths.resolve(cwd, path.replace(HOME_WORD, home))
+  const real = realFrom(follow, paths)
+  return secretFromHome(paths.relative(home, full), system) || secretFromHome(paths.relative(real(home), real(full)), system)
 }
 
 /** The paths a command's word may name: itself, and what follows an `@` or an `=` (`curl -d @file`, `--key-file=path`). */
 const pathsInWord = (word: string): ReadonlyArray<string> =>
   [...new Set([word, word.slice(word.lastIndexOf('@') + 1), word.slice(word.indexOf('=') + 1)])].filter(
-    (part) => part !== '' && (HOME_WORD.test(part) || part.startsWith('/') || part.startsWith('.') || part.includes('/')),
+    (part) =>
+      part !== '' &&
+      (HOME_WORD.test(part) || part.startsWith('/') || part.startsWith('.') || /[/\\]/.test(part) || /^[A-Za-z]:/.test(part)),
   )
 
 /** The home folder named anywhere in a line, quoted or inside `$(…)` too, with the path that follows it. */
-const homeMentions = (text: string): ReadonlyArray<string> => {
-  const home = homedir()
-  // A home folder at the root would match every absolute path; then only `~` and `$HOME` name it.
-  const named = home === '/' ? '' : `|${literal(home)}`
-  const mentions = new RegExp(`(?:~|\\$HOME|\\$\\{HOME\\}${named})(/[^\\s'"\`;|&<>()]*)`, 'g')
-  return [...text.matchAll(mentions)].map((match) => (match[1] ?? '').replace(/^\//, ''))
+const homeMentions = (text: string, { home }: System): ReadonlyArray<string> => {
+  // A home folder at the root would match every absolute path; then only `~` and `$HOME` name it. Windows's either way round.
+  const named = home === '/' ? '' : `|${literal(home)}|${literal(home.replaceAll('\\', '/'))}`
+  const mentions = new RegExp(
+    `(?:~|\\$HOME|\\$\\{HOME\\}|\\$env:(?:USERPROFILE|HOME)|%USERPROFILE%${named})([/\\\\][^\\s'"\`;|&<>()]*)`,
+    'gi',
+  )
+  return [...text.matchAll(mentions)].map((match) => (match[1] ?? '').replace(/^[/\\]/, ''))
 }
 
 /**
@@ -277,34 +297,44 @@ const homeMentions = (text: string): ReadonlyArray<string> => {
  * named from the home folder or the root count. A line read whole too, so a
  * path inside quotes or `$(…)` counts.
  */
-const secretCommandReason = (text: string, cwd?: string): string | undefined => {
-  if (homeMentions(text).some((fromHome) => secretFromHome(fromHome.split('/').join(sep)))) return SECRETS_REFUSED
-  let at = cwd
-  for (const words of parseCommandLine(text).commands) {
-    if (words[0] === 'cd') {
-      const target = (words[1] ?? '~').replace(HOME_WORD, homedir())
-      at = target.startsWith('/') ? target : at === undefined ? undefined : resolve(at, target)
-      continue
+const secretCommandReason = (text: string, cwd?: string, system: System = systemOf()): string | undefined => {
+  const { paths, home } = system
+  if (homeMentions(text, system).some((fromHome) => secretFromHome(fromHome.split(/[/\\]/).join(paths.sep), system))) return SECRETS_REFUSED
+  for (const { commands } of lineReadings(text, system)) {
+    let at = cwd
+    for (const each of commands) {
+      const read = readings(each)
+      const cd = read.findLast((words) => words[0] === 'cd')
+      if (cd !== undefined) {
+        const target = (cd[1] ?? '~').replace(HOME_WORD, home)
+        at = paths.isAbsolute(target) ? target : at === undefined ? undefined : paths.resolve(at, target)
+        continue
+      }
+      for (const words of read)
+        for (const word of words.slice(1))
+          for (const path of pathsInWord(word))
+            if ((at !== undefined || HOME_WORD.test(path) || paths.isAbsolute(path)) && secretPath(path, at ?? paths.sep, system))
+              return SECRETS_REFUSED
     }
-    for (const word of words.slice(1))
-      for (const path of pathsInWord(word))
-        if ((at !== undefined || HOME_WORD.test(path) || path.startsWith('/')) && secretPath(path, at ?? '/')) return SECRETS_REFUSED
   }
   return undefined
 }
 
 /** Why a request may not go ahead because it reads or writes where the person keeps a secret, or nothing. */
-const secretReason = (request: PermissionRequest, cwd?: string): string | undefined => {
+const secretReason = (request: PermissionRequest, cwd?: string, system: System = systemOf()): string | undefined => {
   const command = request.kind === 'execute' || request.kind === 'other' ? (commandIn(request.rawInput) ?? request.title) : undefined
-  if (command !== undefined && secretCommandReason(command, cwd) !== undefined) return SECRETS_REFUSED
-  return pathsOf(request).some((path) => (cwd !== undefined || HOME_WORD.test(path) || isAbsolute(path)) && secretPath(path, cwd ?? '/'))
+  if (command !== undefined && secretCommandReason(command, cwd, system) !== undefined) return SECRETS_REFUSED
+  const { paths } = system
+  return pathsOf(request).some(
+    (path) => (cwd !== undefined || HOME_WORD.test(path) || paths.isAbsolute(path)) && secretPath(path, cwd ?? paths.sep, system),
+  )
     ? SECRETS_REFUSED
     : undefined
 }
 
 /** A `.env` file, which holds a project's secrets; not one that only shows what goes in it (`.env.example`). */
 const envFile = (path: string) => {
-  const name = path.split('/').at(-1) ?? ''
+  const name = path.split(/[/\\]/).at(-1) ?? ''
   return /^\.env(\.[\w.-]+)?$/.test(name) && !/\.(example|sample|template|dist|defaults?)$/.test(name)
 }
 
@@ -646,8 +676,13 @@ const expandShells = (commands: ReadonlyArray<ReadonlyArray<string>>, opaqueBefo
     const inner = unwrap(command)
     const [program, ...args] = inner
     const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg))
-    if (program !== undefined && /^(ba|z|da|k)?sh$/.test(program.split('/').at(-1) ?? '') && flag !== -1 && args[flag + 1] !== undefined) {
-      const script = parseCommandLine(args[flag + 1] ?? '')
+    const windows = windowsScript(inner)
+    if (windows === null) opaque = true
+    const posixScript =
+      program !== undefined && /^(ba|z|da|k)?sh$/.test(program.split('/').at(-1) ?? '') && flag !== -1 ? args[flag + 1] : undefined
+    if (posixScript !== undefined || typeof windows === 'string') {
+      // cmd's and PowerShell's backslashes separate folders: read as POSIX, they would escape the next letter.
+      const script = parseCommandLine(posixScript ?? (windows ?? '').replaceAll('\\', '/'))
       if (script.opaque) opaque = true
       // Where the shell's own output goes stays a command of its own, made of its redirects alone: `sh -c '…' > ~/.zshrc`.
       const redirected = inner.flatMap((word, index) =>
@@ -753,34 +788,246 @@ export const shortCommand = (text: string): string => {
   return said === '' ? whole : said
 }
 
+// ---- Windows ---------------------------------------------------------------
+
+/*
+ * On Windows an agent's command may be cmd's or PowerShell's rather than a
+ * POSIX shell's: `rd /s /q C:\code\app`, `Remove-Item -Recurse -Force
+ * $env:USERPROFILE\code`, `git.exe push --force`. The rules read each command
+ * also as the POSIX command that does the same (`rm -rf …`), so every rule
+ * below holds for it; a line handed to cmd or PowerShell (`cmd /c …`,
+ * `powershell -Command …`) as the commands it runs; and, on Windows, a line
+ * also with its backslashes as the folder separators they are there. A second
+ * reading only ever adds what a command is, never takes away.
+ */
+
+/** A program's name as Windows finds it: without its folder or `.exe`, in any case. */
+const windowsName = (word: string) => (word.split(/[/\\]/).at(-1) ?? '').replace(/\.(exe|cmd|bat|com)$/i, '').toLowerCase()
+
+/** One of cmd's switches: `/s`, `/Q`, `/a:h`, `/-y`. */
+const CMD_SWITCH = /^\/-?[A-Za-z?](:\S*)?$/
+
+/** Whether a word names a PowerShell parameter by the start of its name, as PowerShell takes it: `-fo` for `-Force`. */
+const isParameter = (word: string, name: string, shortest = 1) => {
+  const given = /^-([A-Za-z]+)(?::|$)/.exec(word)?.[1]?.toLowerCase()
+  return given !== undefined && given.length >= shortest && name.startsWith(given)
+}
+
+/**
+ * A PowerShell command's arguments: the values of the parameters among
+ * `valued` (`-Path x`, `-Path:x`, `-LiteralPath x,y`), and the rest by
+ * position. Other parameters are switches; cmd's switches are left out.
+ */
+const powershellArgs = (args: ReadonlyArray<string>, valued: ReadonlyArray<string>) => {
+  const named = new Map<string, Array<string>>()
+  const positional: Array<string> = []
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? ''
+    if (REDIRECTS.includes(arg)) {
+      index += 1
+      continue
+    }
+    if (CMD_SWITCH.test(arg)) continue
+    const parameter = /^-([A-Za-z]+)(?::(.*))?$/.exec(arg)
+    if (parameter === null) {
+      positional.push(...arg.split(','))
+      continue
+    }
+    const name = valued.find((each) => each.startsWith((parameter[1] ?? '').toLowerCase()))
+    if (name === undefined) continue
+    const value = parameter[2] ?? args[(index += 1)]
+    if (value !== undefined) named.set(name, [...(named.get(name) ?? []), ...value.split(',')])
+  }
+  const of = (...names: ReadonlyArray<string>) => names.flatMap((name) => named.get(name) ?? [])
+  return { of, positional }
+}
+
+const ITEM_PATHS = ['path', 'literalpath', 'pspath', 'filter', 'include', 'exclude', 'credential', 'stream']
+const COPY_PATHS = [...ITEM_PATHS, 'destination', 'tosession', 'fromsession']
+const WRITE_PATHS = [
+  'path',
+  'literalpath',
+  'filepath',
+  'value',
+  'encoding',
+  'itemtype',
+  'type',
+  'name',
+  'credential',
+  'stream',
+  'inputobject',
+]
+
+/** Where a copy or move goes and what it takes, PowerShell's way or cmd's: `-Path` and `-Destination`, or by position. */
+const fromTo = (args: ReadonlyArray<string>): { readonly sources: ReadonlyArray<string>; readonly target: string | undefined } => {
+  const { of, positional } = powershellArgs(args, COPY_PATHS)
+  const rest = [...positional]
+  const sources = of('path', 'literalpath', 'pspath')
+  if (sources.length === 0) sources.push(...rest.splice(0, Math.max(1, rest.length - (of('destination').length > 0 ? 0 : 1))))
+  return { sources, target: of('destination')[0] ?? rest.at(-1) }
+}
+
+/** The POSIX command that does what a cmd or PowerShell command does, as far as the rules read it; none where it's the same. */
+const fromWindows = (words: ReadonlyArray<string>): ReadonlyArray<string> | undefined => {
+  const [first = '', ...args] = words
+  const name = windowsName(first)
+  const has = (cmd: ReadonlyArray<string>, parameter: string, shortest = 1) =>
+    args.some((arg) => cmd.includes(arg.toLowerCase()) || isParameter(arg, parameter, shortest))
+  switch (name) {
+    case 'remove-item':
+    case 'ri':
+    case 'del':
+    case 'erase':
+    case 'rd':
+    case 'rmdir':
+    case 'rm': {
+      const { of, positional } = powershellArgs(args, ITEM_PATHS)
+      const flags = `${has(['/s', '-r'], 'recurse') ? 'r' : ''}${has(['/q', '/f', '-f'], 'force', 2) ? 'f' : ''}`
+      return ['rm', ...(flags === '' ? [] : [`-${flags}`]), ...of('path', 'literalpath', 'pspath'), ...positional]
+    }
+    case 'move-item':
+    case 'mi':
+    case 'move':
+    case 'mv': {
+      const { sources, target } = fromTo(args)
+      return ['mv', ...sources, target ?? '.']
+    }
+    case 'rename-item':
+    case 'rni':
+    case 'ren':
+    case 'rename': {
+      const { of, positional } = powershellArgs(args, ['path', 'literalpath', 'newname', 'credential'])
+      return ['mv', ...[...of('path', 'literalpath'), ...positional].slice(0, 1), of('newname')[0] ?? positional.at(-1) ?? '.']
+    }
+    case 'copy-item':
+    case 'cpi':
+    case 'copy':
+    case 'xcopy':
+    case 'cp': {
+      const { sources, target } = fromTo(args)
+      return ['cp', ...sources, target ?? '.']
+    }
+    case 'robocopy': {
+      // `robocopy <from> <to> [files] [/options]`: /MIR and /PURGE delete in where it copies to, /MOV and /MOVE from where it copies from.
+      const [from = '.', to = '.'] = args.filter((arg) => !arg.startsWith('/'))
+      const options = args.map((arg) => arg.toLowerCase())
+      return [
+        'rsync',
+        ...(options.includes('/mir') || options.includes('/purge') ? ['--delete'] : []),
+        ...(options.includes('/mov') || options.includes('/move') ? ['--remove-source-files'] : []),
+        from,
+        to,
+      ]
+    }
+    case 'set-content':
+    case 'sc':
+    case 'add-content':
+    case 'ac':
+    case 'clear-content':
+    case 'clc':
+    case 'out-file':
+    case 'new-item':
+    case 'ni':
+    case 'md':
+    case 'mkdir':
+    case 'tee-object': {
+      const { of, positional } = powershellArgs(args, WRITE_PATHS)
+      const named = of('path', 'literalpath', 'filepath')
+      return ['touch', ...(named.length > 0 ? named : positional.slice(0, 1))]
+    }
+    case 'set-location':
+    case 'sl':
+    case 'chdir':
+    case 'pushd':
+    case 'cd': {
+      const { of, positional } = powershellArgs(args, ['path', 'literalpath', 'stackname'])
+      return ['cd', ...[...of('path', 'literalpath'), ...positional].slice(0, 1)]
+    }
+    default:
+      return name === first ? undefined : [name, ...args]
+  }
+}
+
+/** A command as written, and as the POSIX command that does what it does on Windows, where that differs. */
+const readings = (words: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> => {
+  const read = fromWindows(words)
+  return read === undefined || read.join('\0') === words.join('\0') ? [words] : [words, read]
+}
+
+/** A line as a POSIX shell reads it and, on Windows, with its backslashes as folders' separators, first, so a reason names the path as written. */
+const lineReadings = (text: string, system: System): ReadonlyArray<Parsed> =>
+  system.windows && text.includes('\\') ? [parseCommandLine(text.replaceAll('\\', '/')), parseCommandLine(text)] : [parseCommandLine(text)]
+
+/** The PowerShell options that take a value, so what follows one isn't its command. */
+const POWERSHELL_VALUED =
+  /^-(executionpolicy|ep|ex|windowstyle|w|version|v|outputformat|o|of|inputformat|if|configurationname|psconsolefile|workingdirectory|wd|settingsfile|custompipename)$/i
+
+/**
+ * The script a line hands to cmd (`cmd /c …`) or PowerShell (`powershell
+ * -Command …`, and Windows PowerShell's bare `powershell Remove-Item …`);
+ * `null` for one Althar can't read (`-EncodedCommand`, or from its input);
+ * none where it hands neither one.
+ */
+const windowsScript = (words: ReadonlyArray<string>): string | null | undefined => {
+  const [first = '', ...args] = words
+  const name = windowsName(first)
+  if (name === 'cmd') {
+    const at = args.findIndex((arg) => /^\/[ck]$/i.test(arg))
+    return at === -1 ? undefined : args.slice(at + 1).join(' ')
+  }
+  if (name !== 'powershell' && name !== 'pwsh') return undefined
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? ''
+    const option = arg.startsWith('-') ? arg.slice(1).toLowerCase() : undefined
+    if (option !== undefined && (option === 'e' || option === 'ec' || (option.length >= 2 && 'encodedcommand'.startsWith(option))))
+      return null
+    if (option !== undefined && option !== '' && 'command'.startsWith(option)) {
+      const script = args.slice(index + 1).join(' ')
+      return script === '-' || script === '' ? null : script
+    }
+    if (option !== undefined && option.length >= 1 && 'file'.startsWith(option)) return undefined
+    if (option !== undefined) {
+      if (POWERSHELL_VALUED.test(arg)) index += 1
+      continue
+    }
+    return args.slice(index).join(' ')
+  }
+  return undefined
+}
+
 // ---- Places ----------------------------------------------------------------
 
 interface Places {
+  readonly system: System
   readonly real: (path: string) => string
   readonly worktrees: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
 }
 
 const places = (context: RuleContext): Places => {
-  const real = realFrom(context.realPath ?? realpathSync)
+  const system = systemOf(context)
+  const real = realFrom(context.realPath ?? realpathSync, system.paths)
   return {
+    system,
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
-    scratch: [...(context.scratch ?? [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])].map(real),
+    scratch: [...(context.scratch ?? (system.windows ? [tmpdir()] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr']))].map(
+      real,
+    ),
   }
 }
 
-const within = (root: string, path: string) => {
-  const inner = relative(root, path)
-  return inner === '' || (!inner.startsWith(`..${sep}`) && inner !== '..' && !isAbsolute(inner))
+const within = ({ paths }: System, root: string, path: string) => {
+  const inner = paths.relative(root, path)
+  return inner === '' || (!inner.startsWith(`..${paths.sep}`) && inner !== '..' && !paths.isAbsolute(inner))
 }
 
 /** Where a path a command names really is, from the folder the command runs in. */
 const locate = (where: Places, cwd: string, path: string) =>
-  where.real(resolve(cwd, path.replace(/^~(?=$|\/)/, homedir()).replace(/^\$HOME(?=$|\/)/, homedir())))
+  where.real(where.system.paths.resolve(cwd, path.replace(HOME_WORD, where.system.home)))
 
 const outside = (where: Places, path: string) =>
-  !where.worktrees.some((root) => within(root, path)) && !where.scratch.some((root) => within(root, path))
+  !where.worktrees.some((root) => within(where.system, root, path)) && !where.scratch.some((root) => within(where.system, root, path))
 
 // ---- Git -------------------------------------------------------------------
 
@@ -795,7 +1042,7 @@ interface GitCall {
 
 const GIT_OPTIONS_WITH_VALUE = ['-c', '--namespace', '--exec-path', '--super-prefix', '--config-env', '--list-cmds']
 
-const gitCall = (words: ReadonlyArray<string>, cwd: string): GitCall | undefined => {
+const gitCall = (words: ReadonlyArray<string>, cwd: string, paths = systemOf().paths): GitCall | undefined => {
   if ((words[0] ?? '').split('/').at(-1) !== 'git') return undefined
   let at = cwd
   const elsewhere: Array<string> = []
@@ -803,13 +1050,13 @@ const gitCall = (words: ReadonlyArray<string>, cwd: string): GitCall | undefined
   while (index < words.length) {
     const word = words[index] ?? ''
     if (word === '-C') {
-      at = resolve(at, words[index + 1] ?? '.')
+      at = paths.resolve(at, words[index + 1] ?? '.')
       index += 2
     } else if (word === '--git-dir' || word === '--work-tree') {
-      elsewhere.push(resolve(at, words[index + 1] ?? '.'))
+      elsewhere.push(paths.resolve(at, words[index + 1] ?? '.'))
       index += 2
     } else if (word.startsWith('--git-dir=') || word.startsWith('--work-tree=')) {
-      elsewhere.push(resolve(at, word.slice(word.indexOf('=') + 1)))
+      elsewhere.push(paths.resolve(at, word.slice(word.indexOf('=') + 1)))
       index += 1
     } else if (GIT_OPTIONS_WITH_VALUE.includes(word)) {
       index += 2
@@ -1052,9 +1299,7 @@ const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
     if (word.startsWith('of=')) targets.push(word.slice(3))
   })
   const program = (words[0] ?? '').split('/').at(-1) ?? ''
-  const operands = words
-    .slice(1)
-    .filter((word, index, all) => !word.startsWith('-') && !REDIRECTS.includes(word) && !REDIRECTS.includes(all[index - 1] ?? ''))
+  const operands = operandsOf(words)
   if (WRITES_ALL.includes(program)) targets.push(...operands)
   const { target } = copied(words)
   if (WRITES_LAST.includes(program) && target !== undefined) targets.push(target)
@@ -1062,11 +1307,16 @@ const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   return targets
 }
 
-/** A command's operands: its words that aren't flags, redirects or where a redirect goes. */
+/**
+ * A command's operands: its words that aren't flags, redirects or where a
+ * redirect goes. cmd's `rmdir /s /q` takes switches, not folders at the
+ * root, which a POSIX `rmdir` would only remove empty.
+ */
 const operandsOf = (words: ReadonlyArray<string>) =>
   words
     .slice(1)
     .filter((word, index, all) => !word.startsWith('-') && !REDIRECTS.includes(word) && !REDIRECTS.includes(all[index - 1] ?? ''))
+    .filter((word) => !(/^\/[sq]$/i.test(word) && (words[0] ?? '').split('/').at(-1) === 'rmdir'))
 
 /**
  * The places a command deletes or moves away, as its words say: what `rm`
@@ -1113,6 +1363,9 @@ const INSTALLERS: Readonly<Record<string, RegExp>> = {
   apk: /^(add|del|upgrade)$/,
   port: /^(install|uninstall|upgrade|activate|deactivate)$/,
   snap: /^(install|remove|refresh)$/,
+  winget: /^(install|add|uninstall|remove|rm|upgrade|update|import)$/,
+  choco: /^(install|uninstall|upgrade)$/,
+  scoop: /^(install|uninstall|update|reset|bucket)$/,
 }
 
 /** What a JavaScript package manager does to installed packages: with `-g`, it does it for the whole computer. */
@@ -1130,6 +1383,8 @@ const installsGlobally = (words: ReadonlyArray<string>): boolean => {
   if (program === 'yarn') return sub === 'global'
   if (program === 'uv')
     return (sub === 'tool' && /^(install|uninstall|upgrade)$/.test(next)) || (sub === 'pip' && rest.includes('--system'))
+  // PowerShell's modules and packages, for every session of the person's.
+  if (/^(install|uninstall|update)-(module|package|script|psresource)$/i.test(program)) return true
   if (/^pip(3(\.\d+)?)?$/.test(program))
     return /^(install|uninstall)$/.test(sub) && rest.some((word) => word === '--user' || word === '--break-system-packages')
   return false
@@ -1281,87 +1536,106 @@ interface CommandKinds {
 
 /** Each command of a line, as the shell would run them, with every kind each one is. */
 const eachCommand = (text: string, context: RuleContext): { readonly opaque: boolean; readonly commands: ReadonlyArray<CommandKinds> } => {
-  const { commands, opaque } = parseCommandLine(text)
   const where = places(context)
-  const follow = context.realPath ?? realpathSync
-  let cwd = context.worktree
+  const lines = lineReadings(text, where.system)
   const each: Array<CommandKinds> = []
-  for (const words of commands) {
-    // Where its output goes, whatever the command: `git status > ~/.zshrc`, `cd . > ~/.zshrc`, from where it runs.
-    const redirected = redirects(words)
-      .filter((path) => outside(where, locate(where, cwd, path)))
-      .slice(0, 1)
-      .map((path) => kept(`Writing outside the task's worktree always asks: ${path}`, 'outside'))
-    const kinds: Array<Kept> = [...redirected]
-    each.push({ words, kinds, redirected })
-    if (commandsIn(words).some(deploys)) kinds.push(kept('Deploying or publishing always asks.', 'deploy'))
-    if (words[0] === 'cd') {
-      cwd = locate(
+  for (const { commands } of lines) {
+    let cwd = context.worktree
+    for (const written of commands) {
+      const kinds: Array<Kept> = []
+      const redirected: Array<Kept> = []
+      let next = cwd
+      for (const words of readings(written)) {
+        const found = kindsOf(words, cwd, where, context)
+        kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+        redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+        if (found.cwd !== undefined) next = found.cwd
+      }
+      cwd = next
+      each.push({ words: written, kinds, redirected })
+    }
+  }
+  return { opaque: lines.some((line) => line.opaque), commands: each }
+}
+
+/** Every kind one command is, read one way, from the folder it runs in; and, for a `cd`, where it goes. */
+const kindsOf = (
+  words: ReadonlyArray<string>,
+  cwd: string,
+  where: Places,
+  context: RuleContext,
+): { readonly kinds: ReadonlyArray<Kept>; readonly redirected: ReadonlyArray<Kept>; readonly cwd?: string } => {
+  const follow = context.realPath ?? realpathSync
+  // Where its output goes, whatever the command: `git status > ~/.zshrc`, `cd . > ~/.zshrc`, from where it runs.
+  const redirected = redirects(words)
+    .filter((path) => outside(where, locate(where, cwd, path)))
+    .slice(0, 1)
+    .map((path) => kept(`Writing outside the task's worktree always asks: ${path}`, 'outside'))
+  const kinds: Array<Kept> = [...redirected]
+  const done = (moved?: string) => ({ kinds, redirected, ...(moved === undefined ? {} : { cwd: moved }) })
+  if (commandsIn(words).some(deploys)) kinds.push(kept('Deploying or publishing always asks.', 'deploy'))
+  if (words[0] === 'cd')
+    return done(
+      locate(
         where,
         cwd,
         words.find((word, index) => index > 0 && !REDIRECTS.includes(word) && !REDIRECTS.includes(words[index - 1] ?? '')) ?? '~',
-      )
-      continue
+      ),
+    )
+  const git = gitCall(words, cwd, where.system.paths)
+  if (git !== undefined) {
+    const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
+    const elsewhere = repository.find((path) => outside(where, path))
+    if (elsewhere !== undefined) {
+      kinds.push(kept(`Git in another folder always asks: ${elsewhere}`, 'outside'))
+      // The person's own checkout, say: what they haven't committed there is nowhere else.
+      const isPath = (name: string) =>
+        repository.some((folder) => {
+          try {
+            follow(where.system.paths.resolve(folder, name))
+            return true
+          } catch {
+            return false
+          }
+        })
+      if (discards(git, isPath))
+        kinds.push(
+          kept(`\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`, 'outside', true),
+        )
     }
-    const git = gitCall(words, cwd)
-    if (git !== undefined) {
-      const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
-      const elsewhere = repository.find((path) => outside(where, path))
-      if (elsewhere !== undefined) {
-        kinds.push(kept(`Git in another folder always asks: ${elsewhere}`, 'outside'))
-        // The person's own checkout, say: what they haven't committed there is nowhere else.
-        const isPath = (name: string) =>
-          repository.some((folder) => {
-            try {
-              follow(resolve(folder, name))
-              return true
-            } catch {
-              return false
-            }
-          })
-        if (discards(git, isPath))
-          kinds.push(
-            kept(
-              `\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`,
-              'outside',
-              true,
-            ),
-          )
-      }
-      kinds.push(...(git.subcommand === 'push' ? pushKinds(git.args, context) : gitKinds(git, context)))
-      if (git.subcommand === 'worktree' || git.subcommand === 'clone') {
-        const target = writes([
-          'touch',
-          ...git.args.filter((arg) => !['add', 'remove', 'prune', 'move', 'lock', 'unlock'].includes(arg)),
-        ]).find((path) => outside(where, locate(where, cwd, path)))
-        if (target !== undefined)
-          kinds.push(
-            git.subcommand === 'worktree' && git.args.includes('remove')
-              ? kept(`Removing a worktree that isn't the task's always asks: ${target}`, 'outside', true)
-              : kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'),
-          )
-      }
-      continue
+    kinds.push(...(git.subcommand === 'push' ? pushKinds(git.args, context) : gitKinds(git, context)))
+    if (git.subcommand === 'worktree' || git.subcommand === 'clone') {
+      const target = writes([
+        'touch',
+        ...git.args.filter((arg) => !['add', 'remove', 'prune', 'move', 'lock', 'unlock'].includes(arg)),
+      ]).find((path) => outside(where, locate(where, cwd, path)))
+      if (target !== undefined)
+        kinds.push(
+          git.subcommand === 'worktree' && git.args.includes('remove')
+            ? kept(`Removing a worktree that isn't the task's always asks: ${target}`, 'outside', true)
+            : kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'),
+        )
     }
-    if (commandsIn(words).some(installsGlobally)) kinds.push(kept('Installing on this computer, outside the task, always asks.', 'outside'))
-    // What it deletes or moves away outside the worktree could be anyone's work: the person's own checkout, their documents.
-    const gone = commandsIn(words)
-      .flatMap(removes)
-      .find((path) => outside(where, locate(where, cwd, path)))
-    const target = writes(words)
-      .filter((path) => !redirects(words).includes(path))
-      .find((path) => outside(where, locate(where, cwd, path)))
-    if (gone !== undefined)
-      kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${gone}`, 'outside', true))
-    else if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
-    // A project's secrets, in a `.env` file the task doesn't own: the person's checkout's, say.
-    const env = words
-      .slice(1)
-      .flatMap(pathsInWord)
-      .find((path) => envFile(path) && outside(where, locate(where, cwd, path)))
-    if (env !== undefined) kinds.push(envKept(env))
+    return done()
   }
-  return { opaque, commands: each }
+  if (commandsIn(words).some(installsGlobally)) kinds.push(kept('Installing on this computer, outside the task, always asks.', 'outside'))
+  // What it deletes or moves away outside the worktree could be anyone's work: the person's own checkout, their documents.
+  const gone = commandsIn(words)
+    .flatMap(removes)
+    .find((path) => outside(where, locate(where, cwd, path)))
+  const target = writes(words)
+    .filter((path) => !redirects(words).includes(path))
+    .find((path) => outside(where, locate(where, cwd, path)))
+  if (gone !== undefined)
+    kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${gone}`, 'outside', true))
+  else if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
+  // A project's secrets, in a `.env` file the task doesn't own: the person's checkout's, say.
+  const env = words
+    .slice(1)
+    .flatMap(pathsInWord)
+    .find((path) => envFile(path) && outside(where, locate(where, cwd, path)))
+  if (env !== undefined) kinds.push(envKept(env))
+  return done()
 }
 
 /** What a command line does that the rules keep for the person: every kind, in every command of it. */
@@ -1411,8 +1685,10 @@ const startsAs = (pattern: string, words: ReadonlyArray<string>) => commandsIn(w
  * whose commands only show when it runs, that names a pattern's program,
  * meets that pattern.
  */
-const commandRule = (text: string, rules: ProjectRuleSet['commands']) => {
-  const { commands, opaque } = parseCommandLine(text)
+const commandRule = (text: string, rules: ProjectRuleSet['commands'], system: System) => {
+  const lines = lineReadings(text, system)
+  const commands = lines.flatMap((line) => line.commands.flatMap(readings))
+  const opaque = lines.some((line) => line.opaque)
   const met = rules.filter((rule) =>
     rule.decision === 'allow'
       ? false
@@ -1544,16 +1820,19 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  */
 export const decide = (request: PermissionRequest, context: RuleContext): Verdict => {
   const project = context.project ?? MVP_RULES
-  const named = request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands) : undefined
+  const system = systemOf(context)
+  const named =
+    request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands, system) : undefined
   if (request.kind === 'execute' || request.kind === 'other') {
     // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
-    const refused = parseCommandLine(commandOf(request))
-      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
+    const refused = lineReadings(commandOf(request), system)
+      .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
+      .map((words) => credentialReason(words) ?? hostReason(words) ?? deviceBridgeReason(words))
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
   }
   // Nor the files people keep keys and sign-ins in, whatever the request does with them.
-  const secret = secretReason(request, context.worktree)
+  const secret = secretReason(request, context.worktree, system)
   if (secret !== undefined) return { verdict: 'deny', reason: secret }
   if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   const found = keptOf(request, context)

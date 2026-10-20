@@ -68,7 +68,7 @@ export const Sentences: Story = {
   render: () => (
     <Charter>
       <Clause label="Always" headingLevel={2} fixed>
-        No agent, in any project, reads your credentials or reaches the code host except through Althar.
+        No agent, in any project, reads your credentials or keys, or reaches the code host except through Althar.
       </Clause>
       <Clause label="Never" headingLevel={2}>
         Agents never <RuleWord>force push</RuleWord>, and never run <CommandToken pattern="aws s3 rm" onRemove={fn()} /> or{' '}
