@@ -2,13 +2,17 @@ import { assert, describe, it } from '@effect/vitest'
 
 import { databaseIn, defaultProfile, defaultWorktrees } from '../src/locations'
 
+/** Windows, where what some tests stand on isn't (each says what). */
+const windows = process.platform === 'win32'
+
 /** A machine where only these paths are there. */
 const only =
   (...paths: ReadonlyArray<string>) =>
   (path: string) =>
     paths.includes(path)
 
-describe('where Althar keeps things', () => {
+// Not on Windows: these are a Mac's and Linux's paths, and on Windows the desktop app names the profile and worktrees.
+describe.skipIf(windows)('where Althar keeps things', () => {
   it('keeps the profile and worktrees in Althar’s folders, unless told otherwise', () => {
     const none = only()
     assert.strictEqual(defaultProfile({}, 'darwin', '/Users/ada', none), '/Users/ada/Library/Application Support/Althar')

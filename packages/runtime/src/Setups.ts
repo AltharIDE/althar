@@ -70,7 +70,7 @@ const POSIX = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh'])
  * sh. On Windows, cmd.
  */
 export const shellFor = (line: string, platform: NodeJS.Platform, shell: string | undefined): LaunchSpec => {
-  if (platform === 'win32') return { command: 'cmd.exe', args: ['/d', '/s', '/c', `(${line}) 2>&1`] }
+  if (platform === 'win32') return { command: 'cmd.exe', args: ['/d', '/s', '/c', `"(${line}) 2>&1"`], verbatim: true }
   const own = shell !== undefined && isAbsolute(shell) && POSIX.has(basename(shell)) ? shell : undefined
   return { command: own ?? (platform === 'darwin' ? '/bin/zsh' : '/bin/sh'), args: ['-i', '-l', '-c', `exec 2>&1\n(\n${line}\n)`] }
 }

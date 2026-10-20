@@ -57,7 +57,8 @@ describe('agents as processes', () => {
       const stopped = yield* records(sessionId)
       assert.strictEqual(stopped.session, 'completed')
       assert.strictEqual(stopped.processes[0]?.state, 'killed')
-      assert.strictEqual(stopped.processes[0]?.signal, 'SIGTERM')
+      // Asked to stop where it can be (TERM); on Windows, where nothing can ask, killed once its grace is up.
+      assert.strictEqual(stopped.processes[0]?.signal, globalThis.process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM')
       assert.isFalse(alive(process?.pid ?? 0))
     }).pipe(Effect.provide(runtime())),
   )

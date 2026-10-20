@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { basename, isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, posix, win32 } from 'node:path'
 
 import { type EventMessage, PostHog, type PostHogOptions } from 'posthog-node'
 
@@ -161,7 +161,10 @@ type Mask = (text: string) => string
  * again first. A URL, Node's own (`node:`) and `<anonymous>` stay as they are.
  */
 export const wholePath = (file: string, cwd: string): string =>
-  /^(?:[a-z][\w+.-]*:|<)/i.test(file) || isAbsolute(file) || !/[\\/]/.test(file) ? file : resolve(cwd, file)
+  /^(?:[a-z][\w+.-]*:|<)/i.test(file) || isAbsolute(file) || !/[\\/]/.test(file)
+    ? file
+    : // A Mac's or Linux's place, or Windows', by the form of where Althar started.
+      (cwd.startsWith('/') ? posix : win32).resolve(cwd, file)
 
 /** A frame's place, masked, and nothing else: no lines of source, no variables, no module path. */
 const frameOf = (frame: unknown, mask: Mask, cwd: string): Record<string, unknown> | null => {

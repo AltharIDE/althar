@@ -9,6 +9,9 @@ import { Effect } from 'effect'
 import { baseOf, changedFiles, changedStretch, fileDiff, parseDiff } from '../src/diffs'
 import { NotFound } from '../src/errors'
 
+/** Windows, where what some tests stand on isn't (each says what). */
+const windows = process.platform === 'win32'
+
 /** A repository whose task changed a file, moved one, deleted one, added two (one not yet added to git), and a picture. */
 const changed = () => {
   const root = mkdtempSync(join(tmpdir(), 'althar-diffs-'))
@@ -169,24 +172,27 @@ const started = () => {
 }
 
 describe('what a task changed, carefully', () => {
-  it.effect('shows a new link as git would add it, its target, never what it points at; and reads nothing that isn’t a file', () =>
-    Effect.gen(function* () {
-      const { root, base } = started()
-      const outside = join(mkdtempSync(join(tmpdir(), 'althar-secret-')), 'secrets.env')
-      writeFileSync(outside, 'AWS_SECRET=abc123\n')
-      symlinkSync(outside, join(root, 'notes.txt'))
-      execFileSync('mkfifo', [join(root, 'pipe')])
-      const files = yield* changedFiles(root, base)
-      assert.deepStrictEqual(
-        files.map((file) => [file.path, file.add]),
-        [['notes.txt', 1]],
-      )
-      const link = yield* fileDiff(root, base, 'notes.txt')
-      assert.deepStrictEqual(link.lines.slice(1), [{ kind: 'added', new: 1, text: outside }])
-      assert.notInclude(JSON.stringify(link), 'abc123')
-      // Asked for anyway, the pipe is nothing the task changed, and isn't waited on.
-      assert.instanceOf(yield* Effect.flip(fileDiff(root, base, 'pipe')), NotFound)
-    }),
+  // Not on Windows: it makes a named pipe (mkfifo) and a symbolic link, which Windows has neither of as git sees them.
+  it.effect.skipIf(windows)(
+    'shows a new link as git would add it, its target, never what it points at; and reads nothing that isn’t a file',
+    () =>
+      Effect.gen(function* () {
+        const { root, base } = started()
+        const outside = join(mkdtempSync(join(tmpdir(), 'althar-secret-')), 'secrets.env')
+        writeFileSync(outside, 'AWS_SECRET=abc123\n')
+        symlinkSync(outside, join(root, 'notes.txt'))
+        execFileSync('mkfifo', [join(root, 'pipe')])
+        const files = yield* changedFiles(root, base)
+        assert.deepStrictEqual(
+          files.map((file) => [file.path, file.add]),
+          [['notes.txt', 1]],
+        )
+        const link = yield* fileDiff(root, base, 'notes.txt')
+        assert.deepStrictEqual(link.lines.slice(1), [{ kind: 'added', new: 1, text: outside }])
+        assert.notInclude(JSON.stringify(link), 'abc123')
+        // Asked for anyway, the pipe is nothing the task changed, and isn't waited on.
+        assert.instanceOf(yield* Effect.flip(fileDiff(root, base, 'pipe')), NotFound)
+      }),
   )
 
   it.effect('counts from where the branch meets its default branch, so upstream work merged in isn’t the task’s', () =>

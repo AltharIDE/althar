@@ -70,6 +70,12 @@ export interface LaunchSpec {
    * (Antigravity's server, about 1 GB), which a stopped one would leave behind.
    */
   readonly privateTemp?: true
+  /**
+   * On Windows, its arguments as they are, unquoted, as cmd.exe takes a line
+   * (`/s /c "…"`): Node would quote one with quotes in it as a C program
+   * reads it (`\"`), which cmd doesn't. Elsewhere it changes nothing.
+   */
+  readonly verbatim?: true
 }
 
 /**

@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, win32 } from 'node:path'
+import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
@@ -215,7 +215,7 @@ describe('the API', () => {
         assert.deepInclude(shot?.content.pictures[0], { mediaType: 'image/png', width: 480, height: 300, unkept: null })
         const wrote = tools.find((item) => item.content.files.some((file) => file.how === 'wrote'))
         const path = wrote?.content.files[0]?.path ?? ''
-        assert.isTrue(path.endsWith('/docs/notes.md'))
+        assert.match(path, /[/\\]docs[/\\]notes\.md$/)
         const document = yield* client.ReadDocument({ threadId: task.threadId, path })
         assert.deepStrictEqual([document.lines, document.body.startsWith('# Notes')], [8, true])
         assert.deepStrictEqual((yield* client.ReadDocument({ threadId: task.threadId, path: 'docs/notes.md' })).body, document.body)
@@ -1471,7 +1471,7 @@ describe('a project’s menu, through the API', () => {
         assert.lengthOf(yield* client.GetRepositories({ projectId: project.id }), 3)
         // Its tasks' worktrees are in a folder named for it, as it was made.
         assert.strictEqual(
-          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`/${named?.slug}`),
+          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`${sep}${named?.slug}`),
           true,
         )
         assert.isNull(named?.worktrees)

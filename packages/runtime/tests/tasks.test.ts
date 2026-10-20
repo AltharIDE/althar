@@ -22,6 +22,9 @@ import { Sessions } from '../src/Sessions'
 import { actionsOf, Tasks } from '../src/Tasks'
 import { fakeConnectors, HOST, hosted, repository, runtime, turns, until } from './support'
 
+/** Windows, where what some tests stand on isn't (each says what). */
+const windows = process.platform === 'win32'
+
 /*
  * A task's course as the person steers it (docs/architecture/05, "Task and
  * run lifecycle"): stopping it suspends its run and every agent on it;
@@ -756,7 +759,8 @@ describe('a task’s course', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('drops a step’s report that arrives after its task was stopped and resumed, and starts nothing from it', () =>
+  // Not on Windows: git is held back by a shell script standing in for it on the PATH.
+  it.live.skipIf(windows)('drops a step’s report that arrives after its task was stopped and resumed, and starts nothing from it', () =>
     Effect.gen(function* () {
       const plans = yield* Plans
       const tasks = yield* Tasks
@@ -798,7 +802,8 @@ describe('a task’s course', () => {
     }).pipe(Effect.scoped, Effect.provide(withQueries({ stopGrace: Duration.millis(500) }))),
   )
 
-  it.live(
+  // Not on Windows: git is held back by a shell script standing in for it on the PATH.
+  it.live.skipIf(windows)(
     'admits no next step for a report read before its task was stopped and resumed',
     () =>
       Effect.gen(function* () {

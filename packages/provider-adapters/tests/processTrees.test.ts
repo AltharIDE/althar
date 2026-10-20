@@ -39,7 +39,8 @@ const fakeWindows = (
         asked.push({ keeper, pid })
         return running.has(pid) ? '2026-10-19T10:00:00.000Z' : undefined
       }),
-    exists: (path) => path !== 'C:\\Gone\\agent.exe',
+    exists: (path) => path !== 'C:\\Gone\\agent.exe' && !path.endsWith('\\gone.exe'),
+    searched: () => ['C:\\Windows\\System32', 'C:\\Tools'],
     alive: (pid) => running.has(pid),
     kill: (pid) => {
       killed.push(pid)
@@ -74,6 +75,8 @@ describe('a process tree on Windows', () => {
       let built = false
       const { trees } = fakeWindows([], { keeper: Effect.sync(() => (built = true)).pipe(Effect.as('keeper.exe')) })
       assert.strictEqual(yield* Effect.flip(trees.launch('C:\\Gone\\agent.exe', [])), 'spawn C:\\Gone\\agent.exe ENOENT')
+      // Named bare, it is looked for as CreateProcess would, with `.exe` added.
+      assert.strictEqual(yield* Effect.flip(trees.launch('gone', [])), 'spawn gone ENOENT')
       assert.isFalse(built)
     }),
   )
@@ -189,6 +192,7 @@ describe('a process tree on Windows', () => {
           keeper: Effect.succeed(keeper),
           startedAt: () => Effect.succeed(undefined),
           exists: () => true,
+          searched: () => [],
           alive: isAlive,
           kill: (pid) => process.kill(pid, 'SIGTERM'),
         })
@@ -232,9 +236,13 @@ describe('a process tree on macOS and Linux', () => {
   )
 })
 
-/** Starts a node that runs `code`, as a provider would start a tool: not asking to be hidden. */
-const node = (code: string) =>
-  `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(code)}], { stdio: ['ignore', 'pipe', 'ignore'] })`
+/**
+ * Starts a node that runs `code`, as a provider would start a tool: not asking
+ * to be hidden. Detached, it outlives the node that started it, as what a
+ * shell starts does; Node on Windows otherwise ends a child with its parent.
+ */
+const node = (code: string, detached = false) =>
+  `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(code)}], { stdio: ['ignore', 'pipe', 'ignore'], detached: ${detached} })`
 
 /** PowerShell saying whether it has a console window, and whether that window shows: `<handle> <visible>`. */
 const consoleWindow = [
@@ -264,7 +272,7 @@ describe.runIf(process.platform === 'win32')('a real process tree on Windows', (
       Effect.gen(function* () {
         // An agent starts a shell, which starts a server, says its pid and exits; the agent says both pids.
         const server = 'setInterval(() => {}, 1000)'
-        const shell = `const s = ${node(server)}; s.unref(); process.stdout.write(s.pid + '\\n', () => process.exit(0))`
+        const shell = `const s = ${node(server, true)}; s.unref(); process.stdout.write(s.pid + '\\n', () => process.exit(0))`
         const agent = `const c = ${node(shell)}; c.stdout.once('data', (d) => console.log(c.pid + ' ' + String(d).trim())); setInterval(() => {}, 1000)`
         const { trees, root, said } = yield* started(agent)
         const [shellPid = 0, serverPid = 0] = said
