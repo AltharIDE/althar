@@ -6,7 +6,8 @@
  *
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
- * item that was missed. Topped up on 19 October with 9 to 19 October; pure
+ * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
+ * Copilot removals that landed on the 19th; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -54,6 +55,18 @@ export interface Upcoming extends Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'copilot-six-models-left',
+    date: '2026-10-19',
+    kind: ShiftKind.Access,
+    who: 'GitHub',
+    title: 'Six models leave Copilot, GPT-5.5 and GPT-5.4 among them',
+    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-5.6 Sol and Luna, Gemini 3.8 Flash and Grok 4.6; admins may need to enable them.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-09-18-upcoming-deprecation-of-selected-github-copilot-models-in-mid-october',
+    },
+  },
   {
     id: 'gpt-5-5-retired',
     date: '2026-10-14',
@@ -359,19 +372,6 @@ export const SHIFTS: readonly Shift[] = [
  * passed; move it into SHIFTS then, with what actually happened.
  */
 export const UPCOMING: readonly Upcoming[] = [
-  {
-    id: 'copilot-six-models-leave',
-    date: '2026-10-19',
-    announced: '2026-09-18',
-    kind: ShiftKind.Access,
-    who: 'GitHub',
-    title: 'Six models leave Copilot, GPT-5.5 and GPT-5.4 among them',
-    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-5.6 Sol and Luna, Gemini 3.8 Flash and Grok 4.6; admins may need to enable them.',
-    source: {
-      name: 'GitHub Changelog',
-      url: 'https://github.blog/changelog/2026-09-18-upcoming-deprecation-of-selected-github-copilot-models-in-mid-october',
-    },
-  },
   {
     id: 'openai-legacy-models-leave',
     date: '2026-10-23',
