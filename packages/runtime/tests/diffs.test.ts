@@ -278,5 +278,7 @@ describe('reading a diff', () => {
     assert.deepStrictEqual(changedStretch('items', 'items.sort()'), [[], ['.sort()']])
     // What only spaces tell apart isn't marked.
     assert.deepStrictEqual(changedStretch('foo  ', 'foo'), [[], []])
+    // A number that grows a digit in front is marked whole, not its last digit kept apart.
+    assert.deepStrictEqual(changedStretch('const wait = 0', 'const wait = 10'), [['0'], ['10']])
   })
 })

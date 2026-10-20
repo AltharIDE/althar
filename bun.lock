@@ -34,7 +34,7 @@
     },
     "apps/desktop": {
       "name": "@althar/desktop",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "dependencies": {
         "@agentclientprotocol/claude-agent-acp": "0.93.0",
         "@agentclientprotocol/codex-acp": "2.2.2",

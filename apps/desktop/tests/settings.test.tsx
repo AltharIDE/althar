@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '@althar/contracts'
 import { EdgeSpot } from '@althar/ui'
 
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
@@ -461,6 +462,55 @@ describe('the Settings tab', () => {
     expect(within(install).getByText(/from GitHub, about 45 MB, check it against the release/)).toBeTruthy()
     await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
+  })
+
+  it('downloads an agent in its tab, says why a download stopped, and opens the page of one only its maker installs', async () => {
+    let installing = false
+    let finish: () => void = () => {}
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    const aider = {
+      ...codex,
+      id: 'aider',
+      name: 'Aider',
+      installed: false,
+      accounts: [],
+      download: null,
+      guide: 'https://aider.chat/docs/install.html',
+    }
+    const { client } = fakeClient({
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: [
+          ...withoutOpenCode.map((agent) =>
+            agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing, pinned: null } } : agent,
+          ),
+          aider,
+        ],
+      })),
+      // The download runs until the test lets it end, so its tab is seen downloading however slow the machine.
+      installAgent: vi.fn(async () => {
+        installing = true
+        await new Promise<void>((resolve) => (finish = resolve))
+        installing = false
+        throw new ApiError({ reason: 'InstallFailed', message: 'GitHub couldn’t be reached to find OpenCode.' })
+      }),
+    })
+    withServices(<Settings />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('tab', { name: /OpenCode/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Download OpenCode' }))
+    expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it…')).toBeTruthy()
+    finish()
+    expect(await alert()).toBe('GitHub couldn’t be reached to find OpenCode.')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    // One with no mark and nothing to download: only its maker's page.
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    await userEvent.click(screen.getByRole('tab', { name: /Aider/ }))
+    expect(screen.queryByRole('button', { name: 'Download Aider' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Install it yourself' }))
+    expect(open).toHaveBeenCalledWith('https://aider.chat/docs/install.html', '_blank')
+    open.mockRestore()
   })
 
   it('says on its tab alone why an agent couldn’t be checked, the others as they are, and checks again', async () => {

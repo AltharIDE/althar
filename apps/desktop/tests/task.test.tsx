@@ -513,7 +513,7 @@ describe('a task', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => at(stands)) })
     const view = withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(outputs.getByText('Not merged yet')).toBeTruthy()
+    expect(outputs.getByRole('button', { name: 'Merge into main' })).toBeTruthy()
     expect(outputs.getByText('Not on origin yet')).toBeTruthy()
     // Nothing to connect for, before anything is pushed.
     expect(screen.queryByText(/Connected to GitHub, Althar would/)).toBeNull()
@@ -544,6 +544,8 @@ describe('a task', () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => ({
         ...base,
+        // Not connected: a push is the person's own git; connected, opening its pull request pushes it.
+        host: { product: 'github' as const, name: 'GitHub', webUrl: 'https://github.com', connected: false },
         task: {
           ...base.task,
           phase: 'ready' as const,
@@ -685,7 +687,7 @@ describe('a task', () => {
     withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
     expect(outputs.getByText('Into main on this Mac. origin doesn’t have it yet.')).toBeTruthy()
-    expect(outputs.getByText('Repository')).toBeTruthy()
+    expect(outputs.getByText('Merged')).toBeTruthy()
     await userEvent.click(outputs.getByRole('button', { name: 'Push main to origin' }))
     await waitFor(() => expect(client.pushHere).toHaveBeenCalledWith('t1'))
     expect(outputs.queryByRole('button', { name: /^Merge into/ })).toBeNull()
@@ -767,7 +769,6 @@ describe('a task', () => {
     })
     const view = withServices(<Task />, client)
     expect(await screen.findByText('Into main and develop on this Mac. origin and upstream don’t have it yet.')).toBeTruthy()
-    expect(screen.getByText('Repositories')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Push main to origin' }))
     await waitFor(() => expect(client.pushHere).toHaveBeenCalledWith('t1'))
     view.unmount()
@@ -831,7 +832,7 @@ describe('a task', () => {
     expect(screen.queryByRole('article', { name: 'Add a retry' })).toBeNull()
   })
 
-  it('accepts a ready pull request at the head it showed, or sends it back as a note to its lead', async () => {
+  it('accepts a ready pull request at the head it showed; what should change is said to its lead in the conversation', async () => {
     const base = thread()
     const { client } = fakeClient({
       getThread: vi.fn(async () => ({
@@ -842,10 +843,7 @@ describe('a task', () => {
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12'))
-    await userEvent.click(screen.getByRole('button', { name: 'Ask for changes' }))
-    await userEvent.type(screen.getByRole('textbox', { name: /What should change/ }), 'Name the retry')
-    await userEvent.click(screen.getByRole('button', { name: 'Send to the lead' }))
-    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Name the retry' })))
+    expect(screen.queryByRole('button', { name: 'Ask for changes' })).toBeNull()
   })
 
   it('counts what is left to push as soon as a push ends, its button busy until the card read since is shown', async () => {
@@ -865,8 +863,7 @@ describe('a task', () => {
       }),
     })
     withServices(<Task />, client)
-    expect(await screen.findByText('10 commits aren’t on the pull request yet.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Push 10 commits' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 10 commits' }))
     await waitFor(() => expect(client.push).toHaveBeenCalledWith('t1', 'def456', url))
     const busy = () => screen.getByRole('button', { name: 'Push 10 commits' }).getAttribute('aria-busy')
     // The push's own read of the card, then another as the runtime's word of the push arrives, before the first answers.
@@ -880,7 +877,6 @@ describe('a task', () => {
     act(() => rereads[1]?.(ready(0)))
     // Read again, nothing is left: no second press.
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Push \d+ commits?$/ })).toBeNull())
-    expect(screen.queryByText('10 commits aren’t on the pull request yet.')).toBeNull()
     expect(client.push).toHaveBeenCalledTimes(1)
   })
 
