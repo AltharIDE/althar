@@ -175,11 +175,14 @@ interface System {
   readonly paths: typeof posix
   readonly home: string
   readonly windows: boolean
+  /** Its files' names are the same in any case, as on Windows and macOS: `~/.SSH` is `~/.ssh`. */
+  readonly caseless: boolean
 }
 
 const systemOf = (context: Pick<RuleContext, 'platform' | 'home'> = {}): System => {
-  const windows = (context.platform ?? process.platform) === 'win32'
-  return { paths: windows ? win32 : posix, home: context.home ?? homedir(), windows }
+  const platform = context.platform ?? process.platform
+  const windows = platform === 'win32'
+  return { paths: windows ? win32 : posix, home: context.home ?? homedir(), windows, caseless: windows || platform === 'darwin' }
 }
 
 const ALLOW: Verdict = { verdict: 'allow' }
@@ -236,10 +239,11 @@ const SECRETS_REFUSED =
   "Agents don't read the person's keys, tokens or sign-ins, such as ~/.ssh, ~/.aws or ~/.npmrc. Tell the person what's needed."
 
 /** Whether a place, as a path from the home folder, is where a secret is kept. */
-const secretFromHome = (fromHome: string, { paths }: System): boolean => {
+const secretFromHome = (fromHome: string, { paths, caseless }: System): boolean => {
   if (fromHome === '' || fromHome === '..' || fromHome.startsWith(`..${paths.sep}`) || paths.isAbsolute(fromHome)) return false
-  const path = fromHome.split(paths.sep).join('/')
-  return !SSH_PUBLIC.test(path) && SECRET_PLACES.some((place) => path === place || path.startsWith(`${place}/`))
+  const fold = (path: string) => (caseless ? path.toLowerCase() : path)
+  const path = fold(fromHome.split(paths.sep).join('/'))
+  return !SSH_PUBLIC.test(path) && SECRET_PLACES.map(fold).some((place) => path === place || path.startsWith(`${place}/`))
 }
 
 /** The home folder, as a command may name it at the start of a path: in a POSIX shell, PowerShell or cmd. */
@@ -265,10 +269,12 @@ const realFrom =
 
 /** Whether a path, named from a folder, is where a secret is kept: as written, and with symlinks followed, to a file not there yet too. */
 const secretPath = (path: string, cwd: string, system: System, follow: (path: string) => string = realpathSync): boolean => {
-  const { paths, home } = system
+  const { paths, home, caseless } = system
   const full = paths.resolve(cwd, path.replace(HOME_WORD, home))
   const real = realFrom(follow, paths)
-  return secretFromHome(paths.relative(home, full), system) || secretFromHome(paths.relative(real(home), real(full)), system)
+  const fromHome = (from: string, to: string) =>
+    caseless ? paths.relative(from.toLowerCase(), to.toLowerCase()) : paths.relative(from, to)
+  return secretFromHome(fromHome(home, full), system) || secretFromHome(fromHome(real(home), real(full)), system)
 }
 
 /** The paths a command's word may name: itself, and what follows an `@` or an `=` (`curl -d @file`, `--key-file=path`). */
@@ -308,6 +314,8 @@ const secretCommandReason = (text: string, cwd?: string, system: System = system
       if (cd !== undefined) {
         const target = (cd[1] ?? '~').replace(HOME_WORD, home)
         at = paths.isAbsolute(target) ? target : at === undefined ? undefined : paths.resolve(at, target)
+        // There a file's bare name is a secret's (`cd / && cd home/alice/.ssh && cat id_ed25519`), as `cd ~/.ssh` says.
+        if (at !== undefined && secretPath(at, paths.sep, system)) return SECRETS_REFUSED
         continue
       }
       for (const words of read)
@@ -696,8 +704,19 @@ const expandShells = (commands: ReadonlyArray<ReadonlyArray<string>>, opaqueBefo
   return { commands: expanded, opaque }
 }
 
-/** A command without the words that only run it: variable assignments, `sudo`, `env`, `command`, `time`… */
-const unwrap = (command: ReadonlyArray<string>): ReadonlyArray<string> => {
+/** The words a shell reads before a command it runs: `then rm …`. */
+const SHELL_KEYWORDS = ['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{']
+
+/** A command without the words that only run it: shell keywords, a subshell's parentheses, variable assignments, `sudo`, `env`, `command`, `time`… */
+const unwrap = (written: ReadonlyArray<string>): ReadonlyArray<string> => {
+  // A subshell's or a group's command, and one a shell keyword starts: `(rm …)`, `{ rm …; }`, `do rm …`, `then rm …`, `! rm …`.
+  let command = written
+  while (SHELL_KEYWORDS.includes(command[0] ?? '') || /^\(+[^(]/.test(command[0] ?? '')) {
+    const [first = '', ...rest] = command
+    command = SHELL_KEYWORDS.includes(first) ? rest : [first.replace(/^\(+/, ''), ...rest]
+  }
+  if (/[^)]\)+$/.test(command.at(-1) ?? '') && written[0]?.startsWith('(') === true)
+    command = [...command.slice(0, -1), (command.at(-1) ?? '').replace(/\)+$/, '')]
   let index = 0
   while (index < command.length) {
     const word = command[index] ?? ''
@@ -933,7 +952,12 @@ const fromWindows = (words: ReadonlyArray<string>): ReadonlyArray<string> | unde
     case 'tee-object': {
       const { of, positional } = powershellArgs(args, WRITE_PATHS)
       const named = of('path', 'literalpath', 'filepath')
-      return ['touch', ...(named.length > 0 ? named : positional.slice(0, 1))]
+      // What replaces a file's content, as `truncate` does; adding to it or making it keeps what's there.
+      const replaces =
+        ['set-content', 'sc', 'clear-content', 'clc'].includes(name) ||
+        (['out-file', 'tee-object'].includes(name) && !has([], 'append')) ||
+        (['new-item', 'ni'].includes(name) && has([], 'force'))
+      return [replaces ? 'truncate' : 'touch', ...(named.length > 0 ? named : positional.slice(0, 1))]
     }
     case 'set-location':
     case 'sl':
@@ -999,6 +1023,8 @@ const windowsScript = (words: ReadonlyArray<string>): string | null | undefined 
 
 interface Places {
   readonly system: System
+  /** Whether something is at a path. */
+  readonly exists: (path: string) => boolean
   readonly real: (path: string) => string
   readonly worktrees: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
@@ -1006,9 +1032,19 @@ interface Places {
 
 const places = (context: RuleContext): Places => {
   const system = systemOf(context)
-  const real = realFrom(context.realPath ?? realpathSync, system.paths)
+  const follow = context.realPath ?? realpathSync
+  const real = realFrom(follow, system.paths)
+  const exists = (path: string) => {
+    try {
+      follow(path)
+      return true
+    } catch {
+      return false
+    }
+  }
   return {
     system,
+    exists,
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
     scratch: [...(context.scratch ?? (system.windows ? [tmpdir()] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr']))].map(
@@ -1028,6 +1064,33 @@ const locate = (where: Places, cwd: string, path: string) =>
 
 const outside = (where: Places, path: string) =>
   !where.worktrees.some((root) => within(where.system, root, path)) && !where.scratch.some((root) => within(where.system, root, path))
+
+/**
+ * The git checkout an existing file outside the task is in: the person's
+ * own, another task's. What isn't committed there is nowhere else, so
+ * changing it could throw that away. None for a file that isn't there yet.
+ */
+const checkoutOf = (where: Places, path: string): string | undefined => {
+  const { paths } = where.system
+  if (!where.exists(path)) return undefined
+  for (let folder = paths.dirname(path); ; folder = paths.dirname(folder)) {
+    if (where.exists(paths.join(folder, '.git'))) return folder
+    if (paths.dirname(folder) === folder) return undefined
+  }
+}
+
+const changesCheckout = (path: string) =>
+  kept(`Changing ${path}, in another checkout, always asks: what isn't committed there is nowhere else.`, 'outside', true)
+
+/**
+ * A variable a path may start with that the rules can read: the temp folder,
+ * or where the command runs. Any other `$…`, `%…%` or backtick is worked out
+ * only when the command runs.
+ */
+const KNOWN_START = /^(\$TMPDIR|\$\{TMPDIR\}|\$TMP|\$TEMP|\$env:(TEMP|TMP)|%TEMP%|%TMP%|\$PWD|\$\{PWD\})(?=$|[/\\])/i
+
+/** Whether a word is worked out only when the command runs: `$DIR`, `"$(git rev-parse --show-toplevel)/dist"`, `%APP%`. */
+const unsettled = (word: string) => /[$`]|%\w+%/.test(word.replace(HOME_WORD, '').replace(KNOWN_START, ''))
 
 // ---- Git -------------------------------------------------------------------
 
@@ -1240,9 +1303,45 @@ const scriptRuns = (words: ReadonlyArray<string>): ReadonlyArray<string> | undef
   return at === -1 ? undefined : rest.slice(at)
 }
 
-/** A command as itself, and as what a package runner or an interpreter runs for it. */
+/** `xargs`'s options that take the next word. */
+const XARGS_VALUED = [
+  '-a',
+  '-d',
+  '-E',
+  '-e',
+  '-I',
+  '-L',
+  '-l',
+  '-n',
+  '-P',
+  '-s',
+  '--arg-file',
+  '--delimiter',
+  '--max-args',
+  '--max-procs',
+  '--max-chars',
+  '--max-lines',
+  '--process-slot-var',
+]
+
+/** The command `xargs` runs, with the words its input adds left out; none where it isn't `xargs`. */
+const xargsRuns = (words: ReadonlyArray<string>): ReadonlyArray<string> | undefined => {
+  if ((words[0] ?? '').split('/').at(-1) !== 'xargs') return undefined
+  let index = 1
+  while ((words[index] ?? '').startsWith('-') && words[index] !== '--') index += XARGS_VALUED.includes(words[index] ?? '') ? 2 : 1
+  if (words[index] === '--') index += 1
+  return words.slice(index)
+}
+
+/** The commands `eval` runs, read again as the shell would; none where it isn't `eval`. */
+const evalRuns = (words: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> =>
+  words[0] === 'eval' ? parseCommandLine(words.slice(1).join(' ')).commands : []
+
+/** A command as itself, and as what a package runner, an interpreter, `xargs` or `eval` runs for it. */
 const commandsIn = (words: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> =>
-  [words, runnerRuns(words), scriptRuns(words)].filter((each): each is ReadonlyArray<string> => each !== undefined && each.length > 0)
+  [words, runnerRuns(words), scriptRuns(words), xargsRuns(words), ...evalRuns(words)].filter(
+    (each): each is ReadonlyArray<string> => each !== undefined && each.length > 0,
+  )
 
 /** Programs whose arguments are places they write: all of them, or the last. */
 const WRITES_ALL = ['touch', 'mkdir', 'rm', 'rmdir', 'tee', 'truncate', 'chmod', 'chown', 'chgrp', 'unlink', 'shred']
@@ -1290,6 +1389,28 @@ const copied = (words: ReadonlyArray<string>): { readonly sources: ReadonlyArray
   return folder === undefined
     ? { sources: operands.slice(0, -1), target: operands.length > 1 ? operands.at(-1) : undefined }
     : { sources: operands, target: folder }
+}
+
+/**
+ * The places a command replaces what's there, as far as its words say: a
+ * `>` redirect, where a copy or move goes, `tee`, `truncate`, `sed -i`,
+ * `dd of=`. Not `>>`, `touch`, `mkdir` or `chmod`, which keep it.
+ */
+const overwrites = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+  const operands = operandsOf(words)
+  const { target } = copied(words)
+  return [
+    ...words.flatMap((word, index) =>
+      ['>', '&>', '2>'].includes(word) && words[index + 1] !== undefined && !(words[index + 1] ?? '').startsWith('&')
+        ? [words[index + 1] ?? '']
+        : [],
+    ),
+    ...words.flatMap((word) => (word.startsWith('of=') ? [word.slice(3)] : [])),
+    ...(program === 'truncate' || (program === 'tee' && !hasFlag(words.slice(1), '-a', '--append')) ? operands : []),
+    ...(WRITES_LAST.includes(program) && target !== undefined ? [target] : []),
+    ...(program === 'sed' && words.some((word) => word.startsWith('-i') || word === '--in-place') ? operands.slice(1) : []),
+  ]
 }
 
 /** The places a command writes, as far as its words say. */
@@ -1450,10 +1571,13 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
       if (!ref.startsWith('refs/heads/')) return []
       return branchKept(git.args.includes('-d') ? 'Deleting the branch' : 'Moving the branch', [ref.slice('refs/heads/'.length)])
     }
-    case 'stash':
-      return git.args[0] === 'clear'
-        ? [kept("Clearing git's stash always asks: every checkout of the repository shares it, the person's too.", 'outside', true)]
-        : []
+    case 'stash': {
+      // Every checkout shares the stash, and an entry may be the person's or another task's: `stash@{0}` is whoever stashed last.
+      const how = { clear: "Clearing git's stash", drop: 'Dropping a stash entry', pop: 'Popping a stash entry' }[git.args[0] ?? '']
+      return how === undefined
+        ? []
+        : [kept(`${how} always asks: every checkout of the repository shares the stash, the person's too.`, 'outside', true)]
+    }
     case 'reflog':
     case 'gc':
     case 'prune': {
@@ -1541,6 +1665,8 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
   const each: Array<CommandKinds> = []
   for (const { commands } of lines) {
     let cwd = context.worktree
+    // After `cd "$DIR"` the folder shows only when it runs: what follows is read from the root of the disk, the worst it could be.
+    let blind = false
     for (const written of commands) {
       const kinds: Array<Kept> = []
       const redirected: Array<Kept> = []
@@ -1549,14 +1675,24 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
         const found = kindsOf(words, cwd, where, context)
         kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
         redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
-        if (found.cwd !== undefined) next = found.cwd
+        if (found.cwd !== undefined) {
+          const target = cdTarget(words)
+          next = target !== undefined && unsettled(target) ? where.system.paths.parse(where.system.home).root : found.cwd
+          blind = target !== undefined && (unsettled(target) || (blind && !where.system.paths.isAbsolute(target.replace(HOME_WORD, '/'))))
+        }
       }
+      if (blind && kinds.some((each) => each.floor === true))
+        kinds.unshift(kept("Althar can't tell which folder `cd` goes to until it runs, so it asks.", 'unclear', true))
       cwd = next
       each.push({ words: written, kinds, redirected })
     }
   }
   return { opaque: lines.some((line) => line.opaque), commands: each }
 }
+
+/** Where a `cd` goes, as its words say; none for home. */
+const cdTarget = (words: ReadonlyArray<string>) =>
+  words.find((word, index) => index > 0 && !REDIRECTS.includes(word) && !REDIRECTS.includes(words[index - 1] ?? ''))
 
 /** Every kind one command is, read one way, from the folder it runs in; and, for a `cd`, where it goes. */
 const kindsOf = (
@@ -1572,16 +1708,16 @@ const kindsOf = (
     .slice(0, 1)
     .map((path) => kept(`Writing outside the task's worktree always asks: ${path}`, 'outside'))
   const kinds: Array<Kept> = [...redirected]
-  const done = (moved?: string) => ({ kinds, redirected, ...(moved === undefined ? {} : { cwd: moved }) })
+  const done = (moved?: string) => {
+    if (!kinds.some((each) => each.floor === true)) {
+      const hidden = unseenReadings(words, where, context)
+      if (hidden.some((each) => kindsOf(each, cwd, where, context).kinds.some((found) => found.floor === true)))
+        kinds.push(kept(`Althar can't tell what \`${programNamed(words)}\` acts on until it runs, so it asks.`, 'unclear', true))
+    }
+    return { kinds, redirected, ...(moved === undefined ? {} : { cwd: moved }) }
+  }
   if (commandsIn(words).some(deploys)) kinds.push(kept('Deploying or publishing always asks.', 'deploy'))
-  if (words[0] === 'cd')
-    return done(
-      locate(
-        where,
-        cwd,
-        words.find((word, index) => index > 0 && !REDIRECTS.includes(word) && !REDIRECTS.includes(words[index - 1] ?? '')) ?? '~',
-      ),
-    )
+  if (words[0] === 'cd') return done(locate(where, cwd, cdTarget(words) ?? '~'))
   const git = gitCall(words, cwd, where.system.paths)
   if (git !== undefined) {
     const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
@@ -1626,8 +1762,12 @@ const kindsOf = (
   const target = writes(words)
     .filter((path) => !redirects(words).includes(path))
     .find((path) => outside(where, locate(where, cwd, path)))
+  const replaced = commandsIn(words)
+    .flatMap(overwrites)
+    .find((path) => outside(where, locate(where, cwd, path)) && checkoutOf(where, locate(where, cwd, path)) !== undefined)
   if (gone !== undefined)
     kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${gone}`, 'outside', true))
+  else if (replaced !== undefined) kinds.push(changesCheckout(replaced))
   else if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
   // A project's secrets, in a `.env` file the task doesn't own: the person's checkout's, say.
   const env = words
@@ -1636,6 +1776,31 @@ const kindsOf = (
     .find((path) => envFile(path) && outside(where, locate(where, cwd, path)))
   if (env !== undefined) kinds.push(envKept(env))
   return done()
+}
+
+/** A command's program by name, and what `xargs` runs: `xargs rm`. */
+const programNamed = (words: ReadonlyArray<string>) => {
+  const [program = ''] = unwrap(words)
+  const xargs = xargsRuns(unwrap(words))?.[0]
+  return [program, xargs]
+    .filter((each) => each !== undefined)
+    .map((each) => each.split('/').at(-1))
+    .join(' ')
+}
+
+/**
+ * A command as it could run where its words are worked out only then: what
+ * `xargs` adds from its input, and each such word, standing for the root of
+ * the disk or the default branch, the worst each could be. None where the
+ * rules can read all of it.
+ */
+const unseenReadings = (words: ReadonlyArray<string>, where: Places, context: RuleContext): ReadonlyArray<ReadonlyArray<string>> => {
+  const xargs = xargsRuns(unwrap(words))
+  if (!words.some(unsettled) && xargs === undefined) return []
+  return [where.system.paths.parse(where.system.home).root, context.defaultBranch].map((worst) => {
+    const read = words.map((word) => (unsettled(word) ? worst : word))
+    return xargs === undefined ? read : [...(xargsRuns(unwrap(read)) ?? []), worst]
+  })
 }
 
 /** What a command line does that the rules keep for the person: every kind, in every command of it. */
@@ -1779,13 +1944,18 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
       return [
         ...secrets,
         // Deleting or moving away what's outside could be anyone's work; an edit there only writes.
-        request.kind === 'edit'
-          ? kept(`Writing outside the task's worktree always asks: ${escaping}`, 'outside')
-          : kept(`Deleting or moving away what's outside the task's worktree always asks: ${escaping}`, 'outside', true),
+        request.kind !== 'edit'
+          ? kept(`Deleting or moving away what's outside the task's worktree always asks: ${escaping}`, 'outside', true)
+          : checkoutOf(where, locate(where, context.worktree, escaping)) !== undefined
+            ? changesCheckout(escaping)
+            : kept(`Writing outside the task's worktree always asks: ${escaping}`, 'outside'),
       ]
   }
   return secrets
 }
+
+/** Kinds whose floor is only part of them, so a choice about the kind isn't one about what could lose work: writes outside are mostly harmless. */
+const BROADER_THAN_FLOOR: ReadonlyArray<Kept['rule']> = ['outside', 'unclear']
 
 /** Kinds of request that only look, which even a project that asks about everything lets through. */
 const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'think']
@@ -1858,9 +2028,16 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
     return ask(asked.reason, true)
   if (named !== undefined) return ask(asked?.reason ?? `The project's rules ask before \`${named.pattern.trim()}\`.`, true)
   // What could lose work or a secret is the person's to answer, not the coordinator's, unless they always allow its kind; where
-  // the project lets the rest through ("Allowed"), a kind taken off the always-ask list is the person's own choice.
-  const floor = found.find((each) => each.floor === true && each.rule !== 'unclear' && !project.allow.includes(each.rule))
-  if (floor !== undefined && project.mode !== 'rules') return ask(floor.reason, false)
+  // the project lets the rest through ("Allowed"), a kind taken off the always-ask list is the person's own choice. Not for a
+  // kind that is more than that: allowing writes outside the worktree isn't allowing `rm -rf` of the person's checkout.
+  const floor = found.find(
+    (each) =>
+      each.floor === true &&
+      (each.rule === 'unclear' ||
+        BROADER_THAN_FLOOR.includes(each.rule) ||
+        (project.mode !== 'rules' && !project.allow.includes(each.rule))),
+  )
+  if (floor !== undefined) return ask(floor.reason, false)
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
   const routine = LOOKS.includes(request.kind) || ownFiles

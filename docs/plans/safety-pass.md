@@ -60,21 +60,22 @@ Line numbers are `main` before this change unless they say otherwise.
 | --- | --- | --- | --- | --- | --- |
 | An agent's edit tool writing outside the worktree | Waits for the person (`outside`) | Allowed | `rules.ts:1059-1068`, `1114-1123` | Fine: a write is what allowing everything is for | Kept. A **delete or move** by the agent's tool outside the worktree now asks even with everything allowed |
 | A shell command deleting outside the worktree (`rm -rf ~/code/app`, `rm -rf ~`) | Claude Code's and Codex's sandboxes block it; a retry outside the sandbox reaches Althar, whose rules read `rm`'s operands: waits for the person | **Allowed** | `rules.ts:853-880`, `1114-1123` | Gap | **Fixed**: deleting or moving away outside the worktree asks whatever the mode (`rm`, `rmdir`, `unlink`, `shred`, `rimraf`, `trash`, `mv`'s sources, every operand where `-t` names the folder, `find -delete` and `-exec rm`, `rsync --delete` and `--remove-source-files`) |
-| A shell command overwriting outside the worktree (`cp x ~/code/app/main.ts`, `> file`) | Waits for the person | Allowed | as above | Accepted: Allow everything means writes go ahead | Recommendation: say so on the switch (done in the copy) |
+| A shell command or the agent's edit overwriting outside the worktree (`cp x ~/code/app/main.ts`, `> file`, an Edit there) | Waits for the person | Allowed | as above | Gap where it's a git checkout: what isn't committed there is nowhere else, as `git checkout -- .` there already counted | **Decided and fixed**: replacing a file that's there, in another git checkout (the person's, another task's), asks whatever the mode: an edit, a `>` redirect, where a copy or move goes, `tee`, `truncate`, `sed -i`, `dd of=`, `Set-Content`, `Out-File`. Adding a file there, appending (`>>`, `tee -a`, `Add-Content`), and writes anywhere else outside (`~/Desktop`, dotfiles) still go ahead with everything allowed: that's what the switch is for. **Open for the person**: whether overwriting a file outside any checkout (a dotfile, a document) should ask too |
 | A script writing outside (`node scripts/clean.js`) | Sandboxed: blocked; unsandboxed: the rules read only the words, so allowed | Allowed | `rules.ts:21-28` | Known limit (ADR-013's sandbox gap) | Recommendation: OpenCode in the same sandbox runtime as Claude Code (03 says it's next) |
 | `git push --force` | Waits for the person | **Allowed**, pushed with the person's SSH key where one signs in | `rules.ts:703-704`, `1114-1123` | Gap | **Fixed**: asks even with everything allowed; the coordinator never judges it |
 | Pushing to the default branch, or deleting it | Waits for the person | **Allowed** | `rules.ts:753-756` | Gap | **Fixed**, as above |
 | Deleting remote branches (`push --delete`, `:branch`, `--prune`) | Waits for the person | **Allowed** | `rules.ts:708-709`, `751-756` | Gap | **Fixed**, as above. `--mirror` counted only as many branches; it now counts as a force push and a deletion too |
 | **Deleting a local branch** (`git branch -D feature`, `update-ref -d`, `branch -f`, `-M`, `checkout -B`, `switch -C`) | **Allowed**: no kind; in Claude Code's sandbox it runs without asking at all | **Allowed** | `rules.ts:913-926` (only `push` is read); `registry.ts:387-391` | **Severe**: a worktree shares the person's branches, so this deletes or moves *their* branch, unpushed commits and all | **Fixed** in the rules: deleting, or moving, renaming or resetting by force, a branch that isn't the task's is `delete-branch`, and asks whatever the mode; `update-ref --stdin`, whose refs come in on its input, asks whatever the mode as what the rules can't tell. **Open**: what Claude Code's sandbox runs without asking never reaches the rules (below) |
 | `reset --hard`, `clean -fdx`, `checkout -- .`, `restore`, `stash` in the person's own checkout | `git -C <checkout>` or `cd <checkout> && git …` is "git in another folder": waits for the person | **Allowed** | `rules.ts:913-917` | Gap | **Fixed**: git that throws away work in another checkout asks whatever the mode; there a `checkout` counts unless it only switches to a branch, by a name that can't be a file there (`checkout README.md` counts) |
-| Shared repository state from inside the worktree: `git stash clear`, `reflog expire`, `gc --prune=now`, `prune` | **Allowed**; runs without asking in Claude Code's sandbox | **Allowed** | `rules.ts:913-926` | Gap: every checkout shares the stash and the reflog | **Fixed** in the rules (`outside`, asks whatever the mode). Same sandbox caveat |
+| Shared repository state from inside the worktree: `git stash clear`, `stash drop`, `stash pop`, `reflog expire`, `gc --prune=now`, `prune` | **Allowed**; runs without asking in Claude Code's sandbox | **Allowed** | `rules.ts:913-926` | Gap: every checkout shares the stash and the reflog, and `stash@{0}` is whoever stashed last, the person or another task | **Fixed** in the rules (`outside`, asks whatever the mode); `git stash` and `stash apply` keep every entry and go ahead. Same sandbox caveat |
+| A delete or git command whose target shows only when it runs (`… \| xargs rm -rf`, `rm -rf $DIR`, `"$(…)"/dist`, `git push origin $BRANCH`, `eval rm …`, `cd "$DIR" && git reset --hard`), or in a loop, a branch or a subshell (`do rm …`, `then rm …`, `(rm …)`, `{ rm …; }`) | Allowed: `xargs`'s input and a variable read as a name in the worktree; a command after `do`, `then` or `(` wasn't read at all | **Allowed** | `rules.ts` (`expandShells`, `unwrap`) | Gap, found in review | **Fixed**: what `xargs` and `eval` run is read as a command; shell keywords and a subshell's parentheses are taken off; a command whose target shows only when it runs is read again with it standing for the root of the disk and for the default branch, and after a `cd` to such a folder what follows is read from the root, and where that could lose work, it asks whatever the mode, as what the rules can't tell. `$HOME`, `$TMPDIR` and `$PWD` are read as what they are. **Limit**: `find … \| xargs rm` asks too, as the rules don't follow a pipe |
 | `reset --hard` or `clean -fdx` in the task's own worktree | Allowed | Allowed | | Fine: the task's own work, which the record and its branch keep | None |
 | Rewriting already-pushed history | An agent's force push: as above. Althar's own: only when the person presses Push on a rewritten branch, with `--force-with-lease`, never where Never lists force pushes | same | `Changes.ts:1458-1475`, `git.ts:485-510` | Fine for Althar's own; agents' covered by the force-push row | None |
 | Tags (#212): `push_tag` and `git push --tags` | Waits for the person (`many-branches`, held) | **Allowed**: Althar pushes the tag with the person's own git | `Changes.ts:1849-1905`, `rules.ts:706-707` | As designed in #212 and ADR-043, but a tag often starts a release | **Recommendation** (debatable, not built): count a tag as something that leaves the machine for good, and ask even with everything allowed, or give tags a kind of their own |
 | A tag pushed by its bare name (`git push origin v1.0.0`) | Read as a push to a branch named `v1.0.0`: **allowed**, and goes up where an SSH key signs in | Allowed | `rules.ts:729-751`; #212's "Not in this PR" | Gap, open: the words alone can't tell a tag from a branch | Recommendation: have `Permissions.ts` look the name up in the worktree (`refs/tags/…`) before deciding, as it does the current branch |
 | Deploying and publishing | Waits for the person | Allowed | `rules.ts:768-813` | As designed (ADR-043's own example) | None |
 | Reading the keychain or git's credential helpers | Refused, every role | Refused | `rules.ts:182-191` | Fine | None |
-| **Reading key and sign-in files** (`~/.ssh/id_*`, `~/.aws/credentials`, `~/.npmrc`, `~/.config/gh/hosts.yml`, `~/.kube/config`) | **Allowed** where it reaches Althar; the coordinator, a reader, "may read anything"; in both sandboxes a `cat` runs without asking | **Allowed** | `rules.ts:170-175`, `1897-1903`; `docs/open-questions.md` ("A sandbox for agents' shells") | **Severe**: ADR-013 says no project can let agents read credentials, and only the keychain was covered | **Fixed**: a request that names one of these places (a path, a command's word, `@file`, `--key=file`, inside quotes or `$(…)`, after a `cd`, through a symlink in the worktree to a file not there yet, from the folder a reader works in) is refused for every role, whatever the mode. Claude Code sessions are given the same places as denied reads, which its documentation says its sandbox applies to shell commands too (to verify). **Open**: Codex's sandbox reads anywhere, and a command that finds a file itself (`grep -r token ~`) names none |
+| **Reading key and sign-in files** (`~/.ssh/id_*`, `~/.aws/credentials`, `~/.npmrc`, `~/.config/gh/hosts.yml`, `~/.kube/config`) | **Allowed** where it reaches Althar; the coordinator, a reader, "may read anything"; in both sandboxes a `cat` runs without asking | **Allowed** | `rules.ts:170-175`, `1897-1903`; `docs/open-questions.md` ("A sandbox for agents' shells") | **Severe**: ADR-013 says no project can let agents read credentials, and only the keychain was covered | **Fixed**: a request that names one of these places (a path, a command's word, `@file`, `--key=file`, inside quotes or `$(…)`, after a `cd`, through a symlink in the worktree to a file not there yet, from the folder a reader works in, in any case on Windows and macOS, whose disks don't tell `~/.SSH` from `~/.ssh`; and a `cd` into one of them, wherever it starts, since there a key's bare name is enough) is refused for every role, whatever the mode. Claude Code sessions are given the same places as denied reads, which its documentation says its sandbox applies to shell commands too (to verify). **Open**: Codex's sandbox reads anywhere, and a command that finds a file itself (`grep -r token ~`) names none |
 | `.env` files | None in a worktree (not copied, ADR-006). The person's checkout's: **allowed** to read | **Allowed** | `rules.ts:1059-1070` | Gap | **Fixed**: reading a `.env` outside the task's worktree asks whatever the mode (`.env.example` and the like don't). A `.env` in the worktree is the task's |
 | Sending things off the machine (`curl -d @file`, `scp`, a web fetch with data in its URL) | Allowed where it reaches Althar: no rule reads the network. Claude Code's sandbox asks per host, and Althar allows it | Allowed | `rules.ts:1073`, `1124-1139`; `registry.ts:387-398` | **Gap, open** | Partly: uploading a key file is refused (above), and the judge is told to ask before any upload. **Recommendation**: a network rule, hosts beyond package registries asking, or a host allowlist in the agents' sandboxes (ADR-007 and ADR-019 both say "when network policy arrives") |
 | Global installs (`npm i -g`, `brew install`, `pip install --user`, `cargo install`, `apt-get install`) | Sandboxed: the write fails; the retry reaches Althar and was **allowed** (no kind) | Allowed | `rules.ts:853-880` | Gap | **Fixed**: counted as writing outside the worktree, so it waits for the person by default; allowed with everything allowed. **Open**: `curl … \| sh` installers aren't read as installs |
@@ -92,8 +93,12 @@ Line numbers are `main` before this change unless they say otherwise.
   can't read;
 - deleting, or moving, renaming or resetting by force, a local branch that
   isn't the task's;
-- clearing the stash, `reflog expire`, `gc --prune=now`, `prune`;
-- git that throws away work in another checkout;
+- clearing the stash, dropping or popping an entry of it, `reflog expire`,
+  `gc --prune=now`, `prune`;
+- git that throws away work in another checkout, and replacing a file that's
+  there in one;
+- a delete or git command whose target shows only when it runs, where it
+  could be one of these;
 - deleting or moving away anything outside the task's worktree (a shell
   command, or the agent's own delete and move tools), and removing a
   worktree that isn't the task's;
@@ -104,16 +109,25 @@ What it does:
 | Where | Before | Now |
 | --- | --- | --- |
 | Default rules | Waits for the person, held (its kind always asks) | Unchanged |
-| A kind moved to "The rest", rules "Allowed" | Allowed | Unchanged: that's the person's choice about that kind |
-| A kind moved to "The rest", the coordinator decides | The coordinator judged it | Waits for the person, with "always allow" for its kind |
+| A kind moved to "The rest", rules "Allowed" | Allowed | Force pushes, the default branch, deleting branches: unchanged, that's the person's choice about that kind. Writing outside: waits for the person (below) |
+| A kind moved to "The rest", the coordinator decides | The coordinator judged it | Waits for the person, with "always allow" for its kind but writing outside's |
 | A kind moved to "The rest", "Ask me", a read | Allowed as a routine read | Waits for the person |
-| A kind on "Always allowed" (switch off) | Allowed | Unchanged |
+| A kind on "Always allowed" (switch off) | Allowed | Force pushes, the default branch, deleting branches: unchanged. Writing outside: waits for the person |
 | Allow everything | Allowed | Waits for the person, its reason ending "even with everything allowed"; no "always allow" holds |
 | Never | Refused | Unchanged |
 
 Reading where the person keeps keys and sign-ins (`SECRET_PLACES`,
 `provider-adapters/src/secrets.ts`) is refused outright, for every role and
 mode, as the keychain already was.
+
+Writing outside the worktree is a kind broader than what could lose work
+there: most such writes are harmless (a report on the Desktop, a global
+install), so a person who always allows it, or takes it off the always-ask
+list, means those, not `rm -rf` of their checkout. What could lose work of
+that kind, and what the rules can't tell, asks the person whatever they
+chose about the kind, and its card offers no "always allow" that wouldn't
+hold. A force push, the default branch and deleting branches are kinds that
+are only what could lose work, so a choice about them is one about that.
 
 ADR-043 (amended) says Allow everything stops short of it; ADR-013 and
 ADR-019 are amended to match.
@@ -166,7 +180,8 @@ refused the rest.
 
 ## Left for a person with real agents
 
-Each of these needs a real session, which this audit couldn't run:
+Each of these needs a real session, which this audit couldn't run; until
+then each holds only as far as unit tests of the rules' verdicts show it:
 
 1. **Claude Code: does a sandboxed command ask?** The session's ask rule for
    `Bash` sits beside `autoAllowBashIfSandboxed: true`; the code and 03 say a
@@ -179,7 +194,13 @@ Each of these needs a real session, which this audit couldn't run:
 2. **Claude Code: do the denied reads hold in its sandbox?** In a lead, ask
    for `cat ~/.ssh/id_ed25519` (or any file under `~/.aws`): it should fail
    inside the sandbox, and its retry outside should be refused by Althar.
-   Check the session still starts and works with the 56 deny rules.
+   Check the session still starts and works with the 56 deny rules. They deny
+   all of `~/.ssh`, `config` and `known_hosts` too, which Althar's own rules
+   let through, so inside the sandbox ssh reads neither; the sandbox has no
+   network for it anyway, and its retry outside the sandbox, which Althar
+   answers, isn't bound by those denies. Confirm that `git fetch` and `git
+   push` over SSH still work from a lead that way, and that a host alias in
+   `~/.ssh/config` is used.
 3. **Claude Code: how a sandboxed command's network ask arrives** over ACP,
    and that Althar sees the host.
 4. **Codex: escalations.** In `workspace-write`, check that `git branch -D
