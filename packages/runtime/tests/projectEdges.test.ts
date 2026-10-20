@@ -7,7 +7,7 @@ import { SqlClient } from 'effect/sql'
 import { NotFound, ProjectRefused } from '../src/errors'
 import { Projects, readFolder } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
-import { repository, runtime } from './support'
+import { HOST, hosted, repository, runtime } from './support'
 
 /*
  * A project's repositories and names at their edges: a clone with no branch
@@ -71,5 +71,34 @@ describe('a project renamed or inked by Althar itself', () => {
         { type: 'project.ink_set', commandId: null },
       ])
     }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('a project’s repositories, as its page lists them', () => {
+  it.live(
+    'says a clone not on this computer by the remote it was added with, a detached one on no branch, and a role it doesn’t know as other',
+    () =>
+      Effect.gen(function* () {
+        const projects = yield* Projects
+        const sql = yield* SqlClient.SqlClient
+        const { working } = hosted()
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+        const [repository] = yield* projects.repositories(project.projectId)
+        const bindingId = repository?.id ?? ''
+
+        // Checked out at no branch, here.
+        execFileSync('git', ['checkout', '-q', '--detach'], { cwd: working })
+        assert.deepInclude((yield* projects.repositories(project.projectId))[0], { branch: null, remote: `${HOST}/meridian/api.git` })
+
+        // A role a later Althar wrote, read as other.
+        yield* sql`UPDATE repository_bindings SET role = 'mascot' WHERE id = ${bindingId}`
+        assert.strictEqual((yield* projects.repositories(project.projectId))[0]?.role, 'other')
+
+        // Its clone on another computer only, as a project opened there has it.
+        yield* sql`DELETE FROM repository_locations WHERE binding_id = ${bindingId}`
+        const [elsewhere] = yield* projects.repositories(project.projectId)
+        assert.deepInclude(elsewhere, { path: null, branch: null, fork: null })
+        assert.isNotNull(elsewhere?.remote)
+      }).pipe(Effect.provide(runtime())),
   )
 })

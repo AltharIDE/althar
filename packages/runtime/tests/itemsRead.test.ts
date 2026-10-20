@@ -115,11 +115,13 @@ describe('a call for a step that needs the person', () => {
 })
 
 describe('a task a screen asks for that isn’t there', () => {
-  it.live('is not found, as a summary or as a card', () =>
+  it.live('is not found, as a summary, as a card, or by a file it changed', () =>
     Effect.gen(function* () {
       const queries = yield* Queries
       assert.instanceOf(yield* Effect.flip(queries.task('task_gone')), NotFound)
       assert.instanceOf(yield* Effect.flip(queries.card('task_gone')), NotFound)
+      // Nor is a file it changed, with no worktree to read it in.
+      assert.instanceOf(yield* Effect.flip(queries.fileDiff('task_gone', 'README.md')), NotFound)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })
