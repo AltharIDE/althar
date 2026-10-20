@@ -67,9 +67,12 @@ export interface RequestContext {
   /**
    * A task's lead works under the project rules; a role that only reads,
    * under the reader's rules, which never ask: `offline`, as the lead of a
-   * review of a pull request from outside is, with no fetch allowed either.
+   * review of a pull request from outside is, with no fetch allowed either;
+   * `cwd`, the folder a reader works in, which the paths it names are read from.
    */
-  readonly rules: { readonly role: 'task'; readonly context: RuleContext } | { readonly role: 'reader'; readonly offline?: boolean }
+  readonly rules:
+    | { readonly role: 'task'; readonly context: RuleContext }
+    | { readonly role: 'reader'; readonly offline?: boolean; readonly cwd?: string }
 }
 
 interface Waiting {
@@ -502,7 +505,8 @@ export class Permissions extends Context.Service<
             )
             // A role that only reads is answered at once: allowed, or refused with a reason it reads.
             if (requestContext.rules.role === 'reader') {
-              const read = decideReader(request, { offline: requestContext.rules.offline === true })
+              const { offline, cwd } = requestContext.rules
+              const read = decideReader(request, { offline: offline === true, ...(cwd === undefined ? {} : { cwd }) })
               const decision: PermissionDecision =
                 read.verdict === 'allow'
                   ? { decision: 'allow', reason: 'This role may do this.' }

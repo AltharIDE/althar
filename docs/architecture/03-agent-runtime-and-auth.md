@@ -838,7 +838,22 @@ the rules read it as a shell would, into commands and words. They ask about:
   tags, and deleting a branch other than the task's;
 - merges, and deploy and publish commands;
 - git pointed at another repository;
-- a write whose words name a place outside the worktree, following symlinks.
+- a write whose words name a place outside the worktree, following symlinks,
+  installing for the whole computer (`npm i -g`, `brew install`) among them;
+- deleting or forcing a local branch that isn't the task's, clearing the
+  stash, and throwing away what git keeps to recover lost work, since a
+  worktree shares these with the person's checkout;
+- reading a `.env` file outside the worktree.
+
+They refuse, for every role, a request that names where the person keeps
+keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.npmrc` and the like), and Claude
+Code sessions are given those places as denied reads. What could lose work
+(a force push, a push to the default branch, deleting outside the worktree,
+git throwing away work in another checkout or replacing a file there,
+dropping a stash entry, a delete whose target shows only when it runs) asks
+even with everything allowed, and the coordinator never judges it; always
+allowing writes outside the worktree doesn't cover it
+([the safety pass](../plans/safety-pass.md)).
 
 Where they can't tell where a push goes or where an edit writes, they ask.
 

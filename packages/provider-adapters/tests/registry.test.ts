@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { assert, describe, it } from '@effect/vitest'
 
 import { agents } from '../src/registry'
+import { SECRET_PLACES, secretReadRules } from '../src/secrets'
 
 describe('the agent registry', () => {
   it('ships every bundled adapter where it says', () => {
@@ -115,6 +116,23 @@ describe('the agent registry', () => {
     assert.isTrue((meta.claudeCode.options as unknown as { strictMcpConfig: boolean }).strictMcpConfig)
     assert.isTrue((meta.claudeCode.options.settings as unknown as { sandbox: { enabled: boolean } }).sandbox.enabled)
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash', 'Edit', 'Write'])
+  })
+
+  it('denies every Claude Code session reading where the person keeps keys and sign-ins', () => {
+    type Meta = { claudeCode: { options: { settings: { permissions: { deny?: Array<string> } } } } }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    for (const [role, options] of [
+      ['lead', {}],
+      ['reader', {}],
+      ['reader', { offline: true }],
+      ['reader', { untrusted: true }],
+    ] as const) {
+      const deny = (metaOf(role, options) as Meta).claudeCode.options.settings.permissions.deny ?? []
+      assert.includeMembers(deny, ['Read(~/.ssh/**)', 'Read(~/.aws/**)', 'Read(~/.npmrc)'], role)
+      assert.includeMembers(deny, secretReadRules() as Array<string>, role)
+    }
+    assert.lengthOf(secretReadRules(), SECRET_PLACES.length * 2)
   })
 
   it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {

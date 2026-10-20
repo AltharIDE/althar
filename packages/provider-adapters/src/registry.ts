@@ -2,6 +2,7 @@ import type { InAppSignIn } from './signInFlow'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
+import { secretReadRules } from './secrets'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -497,6 +498,12 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  *
  * Only the MCP servers Althar gives a session are loaded, not the user's
  * or the repository's own, whose tools the ask list doesn't cover.
+ *
+ * Where the person keeps keys and sign-ins (`SECRET_PLACES`) is denied as
+ * reads, which Claude Code's sandbox also applies to the shell commands it
+ * runs without asking: so Claude Code's documentation describes it, not yet
+ * checked against a real session (docs/plans/safety-pass.md). Althar's rules
+ * refuse what reaches them.
  */
 const claudeAsks = {
   claudeCode: {
@@ -505,7 +512,7 @@ const claudeAsks = {
       strictMcpConfig: true,
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
-        permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
+        permissions: { deny: secretReadRules(), ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
         sandbox: {
           enabled: true,
           autoAllowBashIfSandboxed: true,
@@ -547,8 +554,8 @@ const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => 
       ...(untrusted ? { settingSources: [] } : {}),
       settings: {
         permissions: offline
-          ? { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch'], ask: ['Bash'] }
-          : { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
+          ? { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch', ...secretReadRules()], ask: ['Bash'] }
+          : { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['Bash', 'WebFetch'] },
         sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: flatpak, failIfUnavailable: false },
         ...(untrusted ? { disableAllHooks: true } : {}),
       },

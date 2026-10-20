@@ -2,6 +2,7 @@
 
 - **Date:** 2026-10-10
 - **Status:** Accepted
+- **Amended:** 2026-10-15 (DEV-69, [the safety pass](../plans/safety-pass.md)): what could lose work (a force push, deleting a branch that isn't the task's, deleting outside the worktree, git throwing away work in another checkout) is never judged, even where the person moved its kind to "The rest": it goes to the person, with "always allow" for its kind. 2026-10-20: not for writing outside the worktree, a kind broader than what could lose work there (deleting the person's checkout is one write outside, a report on the Desktop another), whose "always allow" no longer covers it. The prompt also tells the judge never to allow losing work, reading secrets or uploading anything, and to ask instead.
 - **Owner:** Repository maintainers
 - **Context:** Long tasks stop for requests a person would readily approve. The task's lead is blocked awaiting the permission response. The project's coordinator already represents the project across tasks, and is the chosen agent for this judgment (DEV-22).
 
