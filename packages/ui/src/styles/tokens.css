@@ -69,6 +69,9 @@
      of the page; on dark a step down from paper reads as a hole, so there
      each is its own lighter wash (themes.css).                              */
   --hover-paper: var(--n-2); /* a row the pointer or the keys are on, in a menu or list */
+  --hover-faint: var(--n-1); /* the faintest hover, under a stronger chosen row */
+  --chosen: var(--n-1); /* the chosen row of a list down a side */
+  --inset: var(--frost-well); /* a well under a row, holding what depends on it */
   --pressed-paper: var(--n-4); /* that row, pressed */
   --chip: var(--n-4); /* a small fill that holds words: inline code, a key, a kbd */
   --well: var(--n-2); /* a recess in a card: a pull request's row, a thumbnail */

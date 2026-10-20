@@ -73,6 +73,10 @@
   box-shadow: var(--frost-ring);
   animation: in var(--base) var(--ease-fold);
 }
+/* on dark a white wash over the panel is a lighter slab; the chosen agent's sheet is the paper its tab is */
+:global([data-theme='dark']) .panel {
+  background: var(--paper);
+}
 .panel:focus-visible {
   outline: 1.5px solid var(--signal);
   outline-offset: 2px;

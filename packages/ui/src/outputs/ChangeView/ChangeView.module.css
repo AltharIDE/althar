@@ -126,7 +126,7 @@ div.made {
   cursor: pointer;
 }
 .file:hover {
-  background: var(--n-1);
+  background: var(--hover-faint);
 }
 .on,
 .on:hover {

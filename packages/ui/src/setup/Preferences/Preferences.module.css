@@ -263,7 +263,7 @@
 .well {
   padding: 0 12px;
   border-radius: 10px;
-  background: var(--frost-well);
+  background: var(--inset);
   transition: opacity var(--base) var(--ease);
 }
 .well .row {
@@ -295,6 +295,10 @@
   width: 44px;
   height: 44px;
   object-fit: contain;
+}
+/* on dark a dark app's icon (Cursor's black tile) loses its edge: a faint outline round its own shape */
+:global([data-theme='dark']) .editors img {
+  filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.35));
 }
 .letter {
   display: grid;
