@@ -16,10 +16,11 @@ For anything bigger than a bug fix, open an issue first so we can agree on the s
 
 Read, in this order:
 
-1. [DEVELOPMENT.md](DEVELOPMENT.md): setting up, the commands, and how the repository is laid out.
-2. [ARCHITECTURE.md](ARCHITECTURE.md): the standards every app and package holds to.
-3. The `README.md` and `ARCHITECTURE.md` of the app or package you're changing.
-4. [The glossary](docs/glossary.md), before you put a word on screen.
+1. [PRINCIPLES.md](PRINCIPLES.md): what Althar is, and the test every change to it has to pass.
+2. [DEVELOPMENT.md](DEVELOPMENT.md): setting up, the commands, and how the repository is laid out.
+3. [ARCHITECTURE.md](ARCHITECTURE.md): the standards every app and package holds to.
+4. The `README.md` and `ARCHITECTURE.md` of the app or package you're changing.
+5. [The glossary](docs/glossary.md), before you put a word on screen.
 
 ## Making a change
 

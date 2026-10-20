@@ -318,6 +318,7 @@ Althar comes out of a broader hypothesis: what happens to software engineering o
 
 | | |
 | --- | --- |
+| [Principles](PRINCIPLES.md) | What Althar is, and stays, whatever else changes |
 | [Development](DEVELOPMENT.md) | Set up, run, test and change the code |
 | [Engineering standards](ARCHITECTURE.md) | What every app and package in the repository holds to |
 | [Architecture](docs/architecture/README.md) | How Althar is built: a local-first desktop app, with seams for a later cloud |
