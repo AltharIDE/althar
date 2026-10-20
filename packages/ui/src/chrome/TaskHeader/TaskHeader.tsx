@@ -1,56 +1,66 @@
 import type { ReactNode } from 'react'
 
-import type { TaskStatus } from '../../foundations/vocabulary'
+import { Icon } from '../../foundations/Icon/Icon'
+import { TaskStatus, TrackStep } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
-import type { ModelInfo } from '../../primitives/Model/Model'
-import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
-import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './TaskHeader.module.css'
 
 /*
  * The head of a task that has the window, as it sits in the window's bar,
- * after the way back and the task's title (BackCrumb): where it stands, its
- * steps as a small track, the switch between its faces, the conversation and
- * what it made, and what else it opens, the consumer's buttons. Who leads
- * it, its branch, how long it has run and what it cost are on hover over
- * where it stands, and said to a screen reader with it.
+ * after the way back and the task's title (BackCrumb): where it stands, the
+ * switch between its faces, the conversation and what it made, and what else
+ * it opens, the consumer's buttons.
+ *
+ * Where it stands is one soft chip, the only thing in the bar in colour:
+ * violet when it waits on you, blue while it runs, grey otherwise. What you
+ * do about it sits inside it, a finished task's Done and Keep for later
+ * (SettleWays in the header); while its plan runs, so do its steps' bars.
+ *
+ * Only then, while a plan of two steps or more is under way, does pointing
+ * at or focusing where it stands open a card: who does each step, the one it
+ * is on and for how long, and how long it has run in all. That is the one
+ * thing the bar doesn't otherwise say: during a review, the reviewer is not
+ * the lead the composer names. Anywhere else the chip's words say it all.
  */
 
 export interface TaskHeaderText {
   faces: string
-  noBranch: string
+  /** How long it has run in all, under its steps. */
+  inAll: (took: string) => string
 }
 
 export const taskHeaderText: TaskHeaderText = {
   faces: 'Face',
-  noBranch: 'no branch',
+  inAll: (took) => `${took} in all`,
+}
+
+/** A step of its plan: its name, where it is, and who does it. */
+export interface TaskHeaderStep extends TrackItem {
+  /** The agent and model that does it, by name: Claude Opus. */
+  who: string
 }
 
 export interface TaskHeaderProps<F extends string> {
   /** Which task, for a screen reader: the bar shows it beside the way back. */
   title: string
   status: TaskStatus
-  /** Where it stands, in words: Security review, Ready for you. */
+  /** Where it stands, in words: Reviewing, Ready for you. */
   state: string
-  /** What kind of work, in a word. */
-  kind?: string
-  lead: ModelInfo
-  branch?: string
-  /** How long ago the step it is on started, or when it settled: security review · 6m. */
-  since?: string
+  /** Its plan's steps, each with who does it: bars inside where it stands while it runs, and the card of who does each. */
+  steps?: readonly TaskHeaderStep[]
+  /** How long the step it is on has run: 4m. */
+  took?: string
   /** How long it has run in all. */
   elapsed?: string
-  /** What it cost at API prices, subscription or not: $4.10. */
-  cost?: string
-  steps?: readonly TrackItem[]
   /** Its faces, with their keys: always both, so the switch is always where it is. */
   faces?: readonly SegmentedOption<F>[]
   face?: F
   onFace?: (face: F) => void
-  /** What the person does to it next, right beside where it stands, not in the far corner: a finished task's Done and Keep for later. */
+  /** What the person does to it next, inside where it stands: a finished task's Done and Keep for later (SettleWays, place="header"). */
   beside?: ReactNode
   /** What else it opens, at the end: ChromeButtons. */
   actions?: ReactNode
@@ -62,13 +72,9 @@ export function TaskHeader<F extends string>({
   title,
   status,
   state,
-  kind,
-  lead,
-  branch,
-  since,
-  elapsed,
-  cost,
   steps,
+  took,
+  elapsed,
   faces,
   face,
   onFace,
@@ -78,22 +84,70 @@ export function TaskHeader<F extends string>({
   text,
 }: TaskHeaderProps<F>) {
   const t = { ...taskHeaderText, ...text }
-  const said = [kind, lead.name, branch ?? t.noBranch, since, elapsed, cost].filter(Boolean).join(' · ')
+  // Its plan under way: the only time there is more to say than the chip's words.
+  const plan = status === TaskStatus.Running && steps !== undefined && steps.length > 1 ? steps : null
+  const said = (
+    <span className={s.state} {...(plan === null ? {} : { tabIndex: 0 })}>
+      <TaskGlyph status={status} />
+      <span>{state}</span>
+    </span>
+  )
   return (
-    <header className={cx(s.header, s[status], className)} aria-label={title}>
-      <Tooltip label={said}>
-        <span className={s.state}>
-          <TaskGlyph status={status} />
-          <span>{state}</span>
-          <VisuallyHidden>, {said}</VisuallyHidden>
-        </span>
-      </Tooltip>
-      {beside && <div className={s.beside}>{beside}</div>}
-      {steps && steps.length > 0 && <StepTrack steps={steps} status={status} className={s.track} />}
+    <header className={cx(s.header, className)} aria-label={title}>
+      <span className={cx(s.chip, (plan !== null || beside != null) && s.parted)} data-status={status}>
+        {plan === null ? (
+          said
+        ) : (
+          <HoverCard placement="below" width={280} card={<Plan steps={plan} status={status} took={took} elapsed={elapsed} text={t} />}>
+            {said}
+          </HoverCard>
+        )}
+        {plan !== null && <StepTrack steps={plan} status={status} className={s.track} />}
+        {beside}
+      </span>
       {faces && faces.length > 1 && face !== undefined && onFace && (
         <Segmented label={t.faces} options={[...faces]} value={face} onChange={onFace} className={s.faces} />
       )}
       {actions && <div className={s.actions}>{actions}</div>}
     </header>
+  )
+}
+
+/** Who does each step, the one it is on timed, then how long in all where that says more. */
+function Plan({
+  steps,
+  status,
+  took,
+  elapsed,
+  text,
+}: {
+  steps: readonly TaskHeaderStep[]
+  status: TaskStatus
+  took: string | undefined
+  elapsed: string | undefined
+  text: TaskHeaderText
+}) {
+  return (
+    <span className={s.plan}>
+      <span className={s.steps}>
+        {steps.map((step, at) => (
+          <span key={`${step.label}${at}`} className={s.step} data-state={step.state}>
+            <span className={s.mark} aria-hidden="true">
+              {step.state === TrackStep.Done ? (
+                <Icon name="check" size={11} />
+              ) : step.state === TrackStep.Now ? (
+                <TaskGlyph status={status} />
+              ) : (
+                <i />
+              )}
+            </span>
+            <span className={s.stepName}>{step.label}</span>
+            <span className={s.who}>{step.who}</span>
+            <span className={s.took}>{step.state === TrackStep.Now ? took : null}</span>
+          </span>
+        ))}
+      </span>
+      {elapsed !== undefined && elapsed !== took && <span className={s.inAll}>{text.inAll(elapsed)}</span>}
+    </span>
   )
 }

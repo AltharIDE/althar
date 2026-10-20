@@ -366,11 +366,12 @@ own, switched by "Resolve conflicts automatically" in its settings. Off, a confl
 for the person, as above.
 
 - **A task can say otherwise.** Its ⋯ menu offers "Resolve conflicts
-  automatically": use the project setting, on for this task, or off for it. It is
-  kept on the task; where it differs from the project's, a quiet word beside
-  the menu says so, and otherwise nothing shows. Each conflict found goes by
-  what the task and its project say then, and the lead's brief by what they
-  said as it started.
+  automatically" as three choices side by side, changed in place: as the
+  project (on or off), on for this task, or off for it. It is kept on the
+  task; where it differs from the project's, a dot on the menu's button says
+  so, and its tooltip how, and otherwise nothing shows. Each conflict found
+  goes by what the task and its project say then, and the lead's brief by
+  what they said as it started.
 - **Turned on, it acts at once.** The project's switch going on, or a task's
   menu where the task wasn't resolving its conflicts, has Althar look at
   each open task with a branch here, rather than waiting for a new

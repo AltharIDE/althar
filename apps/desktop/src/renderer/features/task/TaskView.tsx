@@ -21,6 +21,7 @@ import {
   Running,
   TaskFace,
   TaskHeader,
+  type TaskHeaderStep,
   ReachLine,
   type TaskConflicts,
   TaskMenu,
@@ -53,7 +54,7 @@ import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { stepNames, stepText, trackFor } from '../../shared/steps'
+import { stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
@@ -144,15 +145,6 @@ export const text = {
   stopped: 'Stopped',
   faces: { talk: 'Conversation', out: 'Outputs' } satisfies Record<Face, string>,
   facesKbd: { talk: 'c', out: 'o' } satisfies Record<Face, string>,
-  /** How long it has been on what it is doing now, or since it last changed. */
-  since: {
-    step: (step: string, took: string) => `${step} · ${took}`,
-    waiting: (took: string) => `waiting · ${took}`,
-    ready: (ago: string) => `ready · ${ago}`,
-    done: (ago: string) => `done · ${ago}`,
-    abandoned: (ago: string) => `abandoned · ${ago}`,
-    stopped: (ago: string) => `stopped · ${ago}`,
-  },
   dismiss: 'Dismiss',
   earlier: 'Earlier in this task',
   showEarlier: 'Show',
@@ -221,37 +213,27 @@ export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null 
   return running(startedAt, last?.createdAt ?? now)
 }
 
+/** How long the step it is on has run, while it runs: what its header's card says beside that step. */
+export const tookOf = (snapshot: ThreadSnapshot, now: string): string | null => {
+  const { phase, step, stepAt } = snapshot.task
+  return phase === 'running' && step !== null && stepAt !== null ? running(stepAt, now) : null
+}
+
 /**
- * Since when a task has been where it stands, for its header's facts: on its
- * step, how long; waiting on the person, how long; ready, done or stopped,
- * how long ago. Nothing for a lead that is idle between steps, or held for a
- * usage limit, which its state already says.
+ * Its plan's steps, for its header, each with who does it: the work its lead,
+ * the one on it now or last, and each review the agent its plan names.
  */
-export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null => {
-  const { phase, step, stepAt, settledAt, waits } = snapshot.task
-  const [call] = snapshot.attention
-  if (call !== undefined) return text.since.waiting(running(call.createdAt, now))
-  if (waits !== null) return null
-  if (phase === 'settled')
-    return settledAt === null
-      ? null
-      : (snapshot.task.state === 'abandoned' ? text.since.abandoned : text.since.done)(ago(settledAt, new Date(now)))
-  if (phase === 'ready' && snapshot.task.handedBack != null) return null
-  if (phase === 'ready') {
-    const reported = snapshot.items.findLast((item) => item.kind === 'step_result')
-    return reported === undefined ? null : text.since.ready(ago(reported.createdAt, new Date(now)))
-  }
-  if (phase === 'stopped') {
-    const last = snapshot.items.at(-1)
-    return last === undefined ? null : text.since.stopped(ago(last.createdAt, new Date(now)))
-  }
-  if (step === null || stepAt === null) return null
-  // By the step's name, as its track says it: settling a review is part of the review.
-  const [name] = stepNames(
-    [{ key: step === 'implement' ? 'implement' : 'review', agentId: '', model: null, skipped: false }],
-    snapshot.task.followUp === true,
-  )
-  return name === undefined ? null : text.since.step(name.toLowerCase(), running(stepAt, now))
+export const stepsOf = (
+  snapshot: ThreadSnapshot,
+  lead: string,
+  named: (agentId: string, model: string | null) => string,
+): TaskHeaderStep[] => {
+  const { steps, step, phase, followUp } = snapshot.task
+  const planned = steps.filter((one) => !one.skipped)
+  return trackFor(steps, step, phase === 'ready' || phase === 'settled', followUp === true).map((item, at) => {
+    const one = planned[at]
+    return { ...item, who: one === undefined || one.key === 'implement' ? lead : named(one.agentId, one.model) }
+  })
 }
 
 /** Whether a key is meant for a field: one pressed in a text box, or with a modifier. */
@@ -465,7 +447,7 @@ export function TaskView({
         : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
   const { status, state } = statusOf(snapshot, agentName)
   const elapsed = elapsedOf(snapshot, now)
-  const since = sinceOf(snapshot, now)
+  const took = tookOf(snapshot, now)
   const shown: Face = face ?? 'talk'
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
@@ -680,6 +662,8 @@ export function TaskView({
               },
             }
           : {})}
+        // Held on by its project, allowing everything opens the project's rules, where it is turned off.
+        {...(onRules === undefined ? {} : { onRules })}
         // Its folder opens in the editor files open in, once it has a worktree: a plain task's has no branch, but is there.
         {...(snapshot.task.worktree === null || editor === undefined
           ? {}
@@ -779,24 +763,14 @@ export function TaskView({
             title={snapshot.task.title}
             status={status}
             state={state}
-            lead={lead}
-            {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
-            {...(since === null ? {} : { since })}
+            // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
+            steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
+            {...(took === null ? {} : { took })}
             {...(elapsed === null ? {} : { elapsed })}
-            // Finished and the person's to settle, its steps are all done: Done says the rest, with no bar beside it.
-            {...(settle === null
-              ? {
-                  steps: trackFor(
-                    snapshot.task.steps,
-                    snapshot.task.step,
-                    snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled',
-                    snapshot.task.followUp === true,
-                  ),
-                }
-              : {})}
             faces={(['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] }))}
             face={shown}
             onFace={setFace}
+            // Finished and the person's to settle: Done and Keep for later, inside where it stands.
             {...(settle === null ? {} : { beside: settle })}
             actions={actions}
           />

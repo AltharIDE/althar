@@ -152,3 +152,80 @@
 .danger > .lead {
   color: inherit;
 }
+/* the highlighted item's description, at the foot of a menu of one-line rows */
+.said {
+  padding-top: 7px;
+  padding-bottom: 5px;
+}
+/* ends something too, but among others that do: grey like them until highlighted, then red */
+.quietDanger {
+  color: var(--t-2);
+}
+.quietDanger[data-highlighted] {
+  color: var(--danger);
+}
+.quietDanger[data-highlighted] > .lead {
+  color: inherit;
+}
+
+/* a setting changed in place: its name, then its choices side by side */
+.setting {
+  display: grid;
+  gap: 6px;
+  padding: 6px 9px 7px;
+}
+.settingLabel {
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.segments:focus-visible {
+  outline: none;
+}
+.segment {
+  height: 24px;
+  cursor: default;
+  outline: none;
+}
+.segment[data-highlighted]:not([aria-checked='true']) {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+.segment:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.segment[aria-checked='true']:focus-visible {
+  box-shadow:
+    var(--lift),
+    inset 0 0 0 1.5px var(--signal);
+}
+
+/* a switch at the row's end; a line under the label where something holds it */
+.switchRow {
+  gap: 12px;
+}
+.switchText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.switchNote {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--t-3);
+}
+.switch {
+  pointer-events: none;
+}
+.tall > .switch {
+  margin-top: 1px;
+}
+/* held on from above: on, and faint, as a disabled switch */
+.held {
+  opacity: 0.45;
+}
+/* a switch says it is on; its label stays as it is */
+.switchRow[data-state='checked'] {
+  font-weight: inherit;
+}
