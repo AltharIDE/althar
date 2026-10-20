@@ -1820,6 +1820,52 @@ export const TaskRepositoryMerged = Schema.Struct({
 })
 export type TaskRepositoryMerged = typeof TaskRepositoryMerged.Type
 
+/**
+ * Where a step of a task's graph stands: done; running (an agent on it); waiting (on a call of the person's); held (until an
+ * agent is free or back from its usage limit); failed; cancelled (cut short, as a stop does); next (still to come).
+ */
+export const GraphStepState = Schema.Literals(['done', 'running', 'waiting', 'held', 'failed', 'cancelled', 'next'])
+export type GraphStepState = typeof GraphStepState.Type
+
+/** A step of a round of work, as the runtime's graph has it: one node, however many times it was tried. */
+export const GraphStep = Schema.Struct({
+  /** Its node's id, or, for a step still to come, its round's id with its key and iteration. */
+  id: Schema.String,
+  key: Schema.Literals(['implement', 'review', 'settle', 'publish']),
+  /** The how-manyth review, or the settling of the how-manyth review, from 0, as a step's report counts it. */
+  iteration: Schema.Int,
+  state: GraphStepState,
+  /** What it is held for, while it is. */
+  hold: Schema.NullOr(Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy'])),
+  /** The agent on its last try, on which model; the one its plan names for a step to come; none for Althar's own (publishing). */
+  agentId: Schema.NullOr(Schema.String),
+  model: Schema.NullOr(Schema.String),
+  /** When its first try started, and its last ended. */
+  startedAt: Schema.NullOr(Schema.String),
+  endedAt: Schema.NullOr(Schema.String),
+  /** A change to the steps put it in after its round began, as making a quick task a change does. */
+  added: Schema.Boolean,
+})
+export type GraphStep = typeof GraphStep.Type
+
+/**
+ * A round of work of a task: its plan's run, or a follow-up (ADR-034), with its steps in the order they ran, then those
+ * still to come.
+ */
+export const GraphRound = Schema.Struct({
+  /** Its run's id. */
+  id: Schema.String,
+  followUp: Schema.Boolean,
+  createdAt: Schema.String,
+  endedAt: Schema.NullOr(Schema.String),
+  /** What the person said that started it, for a follow-up: their message, or what the coordinator passed on. */
+  said: Schema.NullOr(Schema.Struct({ itemId: Schema.String, text: Schema.String, relayed: Schema.Boolean })),
+  /** When a change to its steps added to them, if one did. */
+  changedAt: Schema.NullOr(Schema.String),
+  steps: Schema.Array(GraphStep),
+})
+export type GraphRound = typeof GraphRound.Type
+
 /** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
@@ -1854,6 +1900,8 @@ export const ThreadSnapshot = Schema.Struct({
     place: Schema.optional(Schema.Int),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
+    /** Its rounds of work as its graph had them, oldest first: what its Graph face draws. Absent from a runtime before it. */
+    graph: Schema.optional(Schema.Array(GraphRound)),
     /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */
     lead: Schema.NullOr(
       Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), account: Schema.NullOr(Schema.String) }),
@@ -1910,7 +1958,7 @@ export const ThreadSnapshot = Schema.Struct({
   items: Schema.Array(ThreadItem),
   /** There are items before these. */
   earlier: Schema.Boolean,
-  /** The lead's step reports, on this page or not: the task's finished view, what it built and showed, is read from them. */
+  /** Its steps' reports, on this page or not, newest two hundred: its finished view is read from the lead's, its graph from all. */
   reports: Schema.Array(ThreadItem),
 })
 export type ThreadSnapshot = typeof ThreadSnapshot.Type

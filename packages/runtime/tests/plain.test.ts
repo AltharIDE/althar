@@ -871,6 +871,16 @@ describe('making a quick task a change', () => {
         SELECT g.graph FROM execution_graph_revisions g JOIN workflow_executions e ON e.id = g.execution_id
         JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND g.cause = 'patch'`
       assert.include(patched?.graph, '"review"')
+      // Its graph says the change came, and that it put the review in: the work was the quick task's own.
+      const [round] = (yield* (yield* Queries).thread(task.threadId)).task.graph ?? []
+      assert.isNotNull(round?.changedAt)
+      assert.deepStrictEqual(
+        round?.steps.map((step) => [step.key, step.state, step.added]),
+        [
+          ['implement', 'done', false],
+          ['review', 'done', true],
+        ],
+      )
       // With no host Althar knows, it ends on its branch, and says so.
       const said = (yield* notices(task.threadId)).map((notice) => notice.title)
       assert.include(

@@ -443,6 +443,7 @@ export function ThreadBlocks({
         return (
           <You
             key={block.id}
+            data-item={block.id}
             at={block.at}
             delivery={block.delivery}
             {...(queued === undefined ? {} : { text: { queued } })}
