@@ -29,16 +29,27 @@ export interface GraphNode {
   state: GraphNodeState
 }
 
-function Mark({ state }: { state: GraphNodeState }) {
+/**
+ * A step's mark, wherever a task's steps are drawn: done, a check; at work, a cobalt dot; waiting on you, a violet one;
+ * waiting for an agent, held; added or proposed by a change, a plus, in your colour where it waits for your say; a stopped
+ * attempt, hollow; to come, nothing.
+ */
+export function GraphMark({ state, className }: { state: GraphNodeState; className?: string }) {
   switch (state) {
     case GraphNodeState.Done:
-      return <Icon name="check" size={9} />
+      return <Icon name="check" size={9} className={className} />
     case GraphNodeState.Now:
-      return <span className={s.dot} aria-hidden="true" />
+      return <span className={cx(s.dot, className)} aria-hidden="true" />
+    case GraphNodeState.Waiting:
+      return <span className={cx(s.dot, s.dotYou, className)} aria-hidden="true" />
+    case GraphNodeState.Held:
+      return <Icon name="hold" size={9} className={className} />
     case GraphNodeState.Stopped:
-      return <Icon name="square" size={8} />
+      return <Icon name="square" size={8} className={className} />
     case GraphNodeState.Added:
-      return <Icon name="plus" size={9} />
+      return <Icon name="plus" size={9} className={className} />
+    case GraphNodeState.Proposed:
+      return <Icon name="plus" size={9} className={cx(s.you, className)} />
     case GraphNodeState.Next:
       return null
     default:
@@ -59,6 +70,9 @@ export const graphStripText: GraphStripText = {
     [GraphNodeState.Next]: 'next',
     [GraphNodeState.Added]: 'added',
     [GraphNodeState.Stopped]: 'stopped',
+    [GraphNodeState.Waiting]: 'waits on you',
+    [GraphNodeState.Held]: 'waits for an agent',
+    [GraphNodeState.Proposed]: 'waits for your say',
   },
   label: 'The task’s steps',
 }
@@ -72,7 +86,7 @@ export function GraphStrip({ nodes, text }: { nodes: readonly GraphNode[]; text?
         <li key={node.id} className={s.item}>
           {i > 0 && <i className={s.edge} aria-hidden="true" />}
           <span className={cx(s.node, s[node.state])}>
-            <Mark state={node.state} />
+            <GraphMark state={node.state} />
             {node.label}
             <VisuallyHidden>, {t.state[node.state]}</VisuallyHidden>
           </span>

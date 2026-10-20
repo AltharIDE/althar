@@ -35,6 +35,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Lead | the task's primary agent (the docs sometimes say worker) | The agent that owns a task: it implements, runs the steps and answers them. Never "worker" on screen. |
 | Step | workflow node | One stage of a task: Implement, Review, Verify. Steps report back to the lead. |
 | Steps, the plan | workflow graph | A task's steps before it starts (the plan) and while it runs. |
+| Graph | a task's runs, their nodes and tries (`ThreadSnapshot.task.graph`, the kit's `StepGraph`, ADR-054) | A task's face beside Conversation and Outputs (g): what it went through, a lane for each agent and model, its steps as cards in the order they ran, and a marker where each round of work starts (You asked, You followed up, From the coordinator). A card opens its report; a step that needs you is answered there. Not "graph" for the plan, which is its steps. |
 | Tried three ways | run attempts, the repair ladder | What Althar already did before asking you: a retry, a repair, another agent. |
 
 ## You and the work

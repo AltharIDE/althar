@@ -184,6 +184,20 @@ Subscriptions come and go. Your projects stay. Althar, stays.
 
 Everything runs on your machine. The project's tasks, threads and history are kept in a local database you can read.
 
+## What agents may do on your computer
+
+Each task works in a git worktree of its own, under `~/Althar`, never in your checkout. What an agent asks to do beyond its sandbox comes to Althar, which answers by the project's rules (Rules, in each project):
+
+- **By default,** what stays in the task goes ahead. These wait for you: pushing to the default branch, force pushes, pushing every branch or tags, deleting branches that aren't the task's, deploying and publishing, and writing outside the task's worktree, installing software for the whole computer among it.
+- **If the coordinator decides,** it answers the rest for you, never what waits for you or what could lose work.
+- **Allow everything,** for a project or one task, lets everything go ahead but what's under Never and what could lose work. These still wait for you: a force push, pushing to or deleting the default branch, deleting or moving by force a branch that isn't the task's, dropping or clearing git's stash, git throwing away work in another checkout or replacing a file there, deleting anything outside the task's worktree, a delete whose target Althar can't read until it runs (`xargs rm`, `rm -rf $DIR`), and reading a `.env` file outside it. Always allowing writes outside the worktree doesn't let these through either.
+- **On Windows,** the same holds for cmd's and PowerShell's commands, such as `rd /s`, `del` and `Remove-Item -Recurse`, and for paths with drive letters.
+- **Never, in any project:** reading your keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.npmrc`, the keychain and the like), or changing anything on GitHub or GitLab except through Althar. Agents run without your SSH agent, git's credential helpers and `gh`'s sign-in.
+
+Althar's own git never force pushes unless you press Push on rewritten commits, merges into your checkout only as a fast-forward with nothing uncommitted there, and never deletes your branches or worktrees.
+
+The rules see what reaches Althar. A command an agent's sandbox runs without asking (Claude Code and Codex run what stays in the worktree), and what a script does beyond its words, they don't. Keep work you care about committed and pushed.
+
 ## Your agents
 
 <table>
