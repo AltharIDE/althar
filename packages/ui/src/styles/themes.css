@@ -29,7 +29,7 @@
 
   --t-1: #ececee;
   --t-2: #b7b7bd;
-  --t-3: #909098;
+  --t-3: #9a9aa2;
   --t-4: #6a6a72;
 
   --line: rgba(255, 255, 255, 0.075);
@@ -106,7 +106,7 @@
   --syn-string: #eca66c;
   --syn-fn: #85b5ff;
   --syn-type: #62cfc5;
-  --syn-comment: #8b8b92;
+  --syn-comment: #9a9aa1;
   --syn-punct: #a5a5ac;
   --named-line: color-mix(in oklab, #d6a72a 15%, var(--n-1));
   --named-gutter: color-mix(in oklab, #d6a72a 26%, var(--n-1));
@@ -156,7 +156,7 @@
 
   --t-1: #efeae1;
   --t-2: #bcb5a9;
-  --t-3: #969083;
+  --t-3: #a09a8d;
   --t-4: #6e695f;
 
   --line: rgba(255, 240, 215, 0.075);
@@ -178,7 +178,7 @@
   --term: #12110f;
   --term-raised: #1c1a17;
   --term-paper-ink: #e2ddd2;
-  --syn-comment: #8f897e;
+  --syn-comment: #9f998d;
   --syn-punct: #aaa398;
 }
 
@@ -195,7 +195,7 @@
 
   --t-1: #f3f3f4;
   --t-2: #bababf;
-  --t-3: #8e8e95;
+  --t-3: #95959c;
   --t-4: #606067;
 
   --line: rgba(255, 255, 255, 0.085);

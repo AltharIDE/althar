@@ -347,3 +347,8 @@
     display: none;
   }
 }
+
+/* on dark the wash lightens, as a hover there does */
+:global([data-theme='dark']) .wash {
+  mix-blend-mode: screen;
+}
