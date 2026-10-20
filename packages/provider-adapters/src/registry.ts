@@ -208,16 +208,17 @@ export interface AgentDefinition {
    * the account's home, the person's own folders or a repository. `capabilities`, what it can do that a skill may
    * need: one needing more is left out and reported. `via`, how the session finds the folder: `meta`, its
    * `sessionMeta` (given `skills` in its options); `directory`, as a directory added to the session; `env`, what its
-   * environment adds over its own. Without it, its sessions get none.
+   * environment adds over its own. `null`, its sessions get none: each agent says which, so one added is never given
+   * none by leaving it out.
    */
-  readonly skills?: {
+  readonly skills: {
     readonly layout: 'claude-plugin' | 'agents' | 'plain'
     readonly capabilities: ReadonlyArray<string>
     readonly via:
       | { readonly kind: 'meta' }
       | { readonly kind: 'directory' }
       | { readonly kind: 'env'; readonly env: (folder: string, own: Readonly<Record<string, string>>) => Readonly<Record<string, string>> }
-  }
+  } | null
   /**
    * How it is held as the lead of a review of someone else's pull request
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
@@ -833,6 +834,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   copilot: {
     id: 'copilot',
+    skills: null,
     name: 'GitHub Copilot',
     source: 'user_installed',
     /*
@@ -919,6 +921,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   junie: {
     id: 'junie',
+    skills: null,
     name: 'Junie',
     source: 'user_installed',
     /* No config of its own or the repository's (`.junie/config.json` can turn brave mode on), and no MCP servers but Althar's. */
@@ -971,6 +974,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   grok: {
     id: 'grok',
+    skills: null,
     name: 'Grok Build',
     source: 'user_installed',
     /*
@@ -1034,6 +1038,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   kimi: {
     id: 'kimi',
+    skills: null,
     name: 'Kimi Code',
     source: 'user_installed',
     launch: () => ({ command: 'kimi', args: ['acp'], env: { KIMI_CODE_NO_AUTO_UPDATE: '1' }, inheritEnv: ['KIMI_CODE_HOME'] }),
@@ -1080,6 +1085,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   'mistral-vibe': {
     id: 'mistral-vibe',
+    skills: null,
     name: 'Mistral Vibe',
     source: 'user_installed',
     /* Its settings from the environment win over the person's and the repository's: asking, with no model judging what is safe. */
@@ -1133,6 +1139,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   'qwen-code': {
     id: 'qwen-code',
+    skills: null,
     name: 'Qwen Code',
     source: 'user_installed',
     launch: () => ({ command: 'qwen', args: ['--acp', '--approval-mode', 'default'], inheritEnv: ['QWEN_HOME'] }),
@@ -1175,6 +1182,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   antigravity: {
     id: 'antigravity',
+    skills: null,
     name: 'Google Antigravity',
     source: 'user_installed',
     /*

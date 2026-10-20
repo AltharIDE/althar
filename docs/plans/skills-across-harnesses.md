@@ -679,6 +679,11 @@ checks and the harness permission rules remain the enforcement.
 - A catalog update channel between app releases (`althar-skills`).
 - Refusing OpenCode 2.x (per the OpenCode 2 plan, which is not in this tree).
 - A logged-in Claude Code, Codex or OpenCode session using a skill end to end.
+- Skills for the agents that came over ACP after this plan: Copilot, Junie,
+  Grok, Kimi, Mistral Vibe, Qwen Code and Antigravity. Each reads a skills
+  folder in its home, but that is the person's own, and none has a known way
+  to load a folder for one session alone, so each entry says `skills: null`
+  and its sessions get none. Each needs the probe Codex and OpenCode had.
 - OpenSpec (section 5).
 - The user guide and the maintainer runbook for curating the catalog
   (stage 7).

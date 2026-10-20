@@ -119,15 +119,25 @@ describe('the agent registry', () => {
     assert.isUndefined(reader.claudeCode.options.plugins)
   })
 
-  it('says how each agent is given the run’s skills: Claude Code in its session, Codex as an added directory, OpenCode in its config', () => {
-    const given = Object.values(agents).filter((agent) => agent.skills !== undefined)
-    assert.deepStrictEqual(Object.fromEntries(given.map((agent) => [agent.id, [agent.skills?.layout, agent.skills?.via.kind]])), {
-      'claude-code': ['claude-plugin', 'meta'],
-      codex: ['agents', 'directory'],
-      opencode: ['plain', 'env'],
-    })
-    // The rest are given none until each has a way in.
-    assert.isAbove(Object.values(agents).length, given.length)
+  it('says how each agent is given the run’s skills: Claude Code in its session, Codex as an added directory, OpenCode in its config, the rest none', () => {
+    // Every agent says, so one added is named here, with how it is given them or that it is given none.
+    assert.deepStrictEqual(
+      Object.fromEntries(
+        Object.values(agents).map((agent) => [agent.id, agent.skills === null ? 'none' : [agent.skills.layout, agent.skills.via.kind]]),
+      ),
+      {
+        'claude-code': ['claude-plugin', 'meta'],
+        codex: ['agents', 'directory'],
+        opencode: ['plain', 'env'],
+        copilot: 'none',
+        junie: 'none',
+        grok: 'none',
+        kimi: 'none',
+        'mistral-vibe': 'none',
+        'qwen-code': 'none',
+        antigravity: 'none',
+      },
+    )
     const via = agents.opencode.skills?.via
     assert.strictEqual(via?.kind, 'env')
     if (via?.kind !== 'env') return

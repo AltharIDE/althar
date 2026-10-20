@@ -55,7 +55,7 @@ export const runSkills = (
 ): Effect.Effect<RunSkills | undefined, SkillStoreFailed> =>
   Effect.gen(function* () {
     const { skills } = definition
-    if (skills === undefined) return undefined
+    if (skills === null) return undefined
     // A catalog that can't be installed, as when one record in installs.json doesn't read and the store is not written
     // over it, costs the run no skill the person already has: it is only read, for what each skill needs.
     const catalog = yield* installLocalCatalog(config.root, config.catalog).pipe(

@@ -1697,7 +1697,7 @@ export class Sessions extends Context.Service<
           // the person's own folders. A failure here costs the session its skills, not its start: the thread says so once it has
           // started, and what Althar didn't expect is reported, by the agent (ADR-047).
           const setUp: { readonly skills: RunSkills | undefined; readonly failed?: string } =
-            !reads && skillsConfig !== undefined && definition.skills !== undefined
+            !reads && skillsConfig !== undefined && definition.skills !== null
               ? yield* runSkills(skillsConfig, definition, sessionId, foldersOf(thread)).pipe(
                   Effect.tap((run) => (run === undefined ? Effect.void : Scope.addFinalizer(scope, run.release.pipe(Effect.ignore)))),
                   Effect.map((run) => ({ skills: run })),
