@@ -11,6 +11,7 @@ import {
   AtOnceCount,
   CommandId,
   FOUND_MOST,
+  GraphRound,
   Load,
   NewProjectId,
   PAGE,
@@ -323,6 +324,30 @@ describe('the API', () => {
       Schema.decodeUnknownSync(WatchEvent)({ _tag: 'Changed', aggregateType: 'task', aggregateId: 't', projectId: null, threadId: null }),
     )
     assert.strictEqual(PAGE, 100)
+  })
+
+  it('takes a task’s rounds of work only with steps of the graph’s kinds and states', () => {
+    const decode = Schema.decodeUnknownSync(GraphRound)
+    const step = {
+      id: 'node_1',
+      key: 'review',
+      iteration: 1,
+      state: 'held',
+      hold: 'machine_busy',
+      agentId: 'codex',
+      model: 'gpt-5.2',
+      startedAt: null,
+      endedAt: null,
+      added: false,
+    }
+    const round = { id: 'run_1', followUp: true, createdAt: at, endedAt: null, said: null, changedAt: null, steps: [step] }
+    assert.strictEqual(decode(round).steps[0]?.hold, 'machine_busy')
+    // What started a follow-up: the person's message, or what the coordinator passed on.
+    assert.isTrue(decode({ ...round, said: { itemId: 'i1', text: 'One more thing', relayed: true } }).said?.relayed)
+    assert.throws(() => decode({ ...round, steps: [{ ...step, key: 'verify' }] }))
+    assert.throws(() => decode({ ...round, steps: [{ ...step, state: 'stuck' }] }))
+    assert.throws(() => decode({ ...round, steps: [{ ...step, iteration: 0.5 }] }))
+    assert.throws(() => decode({ ...round, steps: [{ ...step, hold: 'tired' }] }))
   })
 
   it('takes a load only as parts of the whole and bytes', () => {
