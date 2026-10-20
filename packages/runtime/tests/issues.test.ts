@@ -16,7 +16,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, until } from './support'
 
 /*
  * Issues (docs/plans/integrations.md): a link to one, pasted to the
@@ -328,6 +328,24 @@ describe('an issue', () => {
         ['#13', '#12'],
       )
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker, trello }) })))
+  })
+
+  it.live('are listed for a project on no code host from its trackers alone, none of a code host’s other repositories', () => {
+    const github = makeFakeService()
+    github.addRepository(['meridian', 'api'])
+    github.addIssue({ ref: 'meridian/api#12', title: 'Refunds ignore the limit' })
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      yield* connect('linear')
+      // A repository with no remote: its issues aren't GitHub's.
+      const { projectId } = yield* opened(repository())
+      assert.deepStrictEqual(
+        (yield* (yield* Issues).mine(projectId)).map((issue) => issue.key),
+        ['MER-231'],
+      )
+      assert.notInclude(github.calls, 'mine')
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) })))
   })
 
   it.live('ties a task to it, once, and the coordinator reads and finds them', () => {

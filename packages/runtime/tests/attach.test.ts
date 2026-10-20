@@ -555,6 +555,12 @@ describe('attaching a task to a pull request, refused', () => {
         'What isn’t committed in its worktree would be lost: notes.md. Commit it or drop it, then attach PR #1.',
       )
       assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), before)
+      // Many, it names the first few.
+      for (const name of ['a', 'b', 'c', 'd', 'e', 'f']) writeFileSync(join(task.worktree, `${name}.md`), 'not committed\n')
+      assert.strictEqual(
+        yield* refusalOf(task.taskId, '#1', personId),
+        'What isn’t committed in its worktree would be lost: a.md, b.md, c.md, d.md, e.md and 2 more. Commit it or drop it, then attach PR #1.',
+      )
       // Its own commit changes the head's file otherwise: they conflict.
       git(task.worktree, 'clean', '-q', '-f')
       const mine = commit(task.worktree, 'send.ts', 'export const sendBack = () => 2\n')

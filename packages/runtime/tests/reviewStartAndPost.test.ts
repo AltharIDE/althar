@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { chmodSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
@@ -13,9 +13,10 @@ import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Reviews } from '../src/Reviews'
+import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, notices, runtime, until } from './support'
 
 /*
  * Reviews of someone else's pull request, at their edges: a lead started on
@@ -94,13 +95,52 @@ describe('a review, at its edges', () => {
         lead: { agentId: 'claude-code', model: null },
       })
       const lead: ToolAccess = { role: 'lead', projectId, threadId: started.threadId, sessionId: 'none', taskId: started.taskId }
+      // Its lead stopped, the draft is nobody's in particular.
+      yield* (yield* Sessions).stop(started.threadId)
       assert.match(yield* callTool(lead, 'draft_review', { verdict: 'approve', summary: 'Fine.' }), /^Drafted/)
+      // Called from no task, it says it is a review's.
+      assert.strictEqual(
+        yield* callTool({ ...lead, taskId: null }, 'draft_review', { verdict: 'approve', summary: 'Fine.' }),
+        'This task doesn’t review someone else’s pull request: draft_review is for one that does.',
+      )
       const sql = yield* SqlClient.SqlClient
       const [draft] = yield* sql<{ id: string }>`SELECT id FROM review_drafts WHERE task_id = ${started.taskId}`
       yield* (yield* Connections).remove(connectionId, personId)
       const card = yield* reviews.post(draft?.id ?? '', personId)
       assert.deepInclude(card, { state: 'failed', error: 'The connection to GitHub is gone. Connect it again, then try again.' })
       assert.lengthOf(github.reviewsPosted, 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('says it couldn’t make a copy of the code to read where its folder can’t be written, and starts no lead', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      // The project's folder of worktrees, where the copy would go, as one that can't be written.
+      const other = yield* (yield* Projects).createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Other' })
+      const sql = yield* SqlClient.SqlClient
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${other.taskId}`
+      const folder = dirname(dirname(workspace?.path ?? ''))
+      chmodSync(folder, 0o555)
+      const started = yield* (yield* Reviews)
+        .start({
+          envelope: yield* Runtime.envelope('review.start', {}),
+          projectId,
+          pullRequest: '#1',
+          lead: { agentId: 'claude-code', model: null },
+        })
+        .pipe(Effect.ensuring(Effect.sync(() => chmodSync(folder, 0o755))))
+      assert.deepInclude(started, { already: false, leading: false })
+      assert.include(
+        (yield* notices(started.threadId)).map((notice) => notice.title),
+        'Althar couldn’t make a copy of the pull request #1’s code to read.',
+      )
+      const [copy] = yield* sql<{ state: string }>`SELECT state FROM workspaces WHERE task_id = ${started.taskId}`
+      assert.strictEqual(copy?.state, 'failed')
+      assert.lengthOf(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${started.threadId}`, 0)
     }).pipe(Effect.provide(withQueries(github)))
   })
 })

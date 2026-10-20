@@ -527,6 +527,33 @@ describe('issue drafts', () => {
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 
+  it.live('are filed once when the person presses File twice at once', () => {
+    const fake = linearWith(MERIDIAN)
+    // A tracker that takes a moment to file one, as a real one does.
+    const linear: FakeService = {
+      ...fake,
+      create: (container, issue) => Effect.andThen(Effect.sleep('300 millis'), fake.create(container, issue)),
+    }
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
+      const [card] = yield* cardsOf(projectId)
+      const both = yield* Effect.all(
+        [drafts.file(card?.draftId ?? '', instance.personId), drafts.file(card?.draftId ?? '', instance.personId)],
+        { concurrency: 'unbounded' },
+      )
+      assert.sameMembers(
+        both.map((one) => one.state),
+        ['filing', 'filed'],
+      )
+      assert.lengthOf(fake.created, 1)
+      assert.strictEqual((yield* cardsOf(projectId))[0]?.state, 'filed')
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
   it.live('that aren’t there can’t be filed or discarded', () => {
     const linear = linearWith(MERIDIAN)
     return Effect.gen(function* () {
