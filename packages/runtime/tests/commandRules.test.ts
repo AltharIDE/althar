@@ -50,6 +50,23 @@ describe('lines that run nothing', () => {
   })
 })
 
+describe('a wrapper with nothing after it, where the project asks about everything', () => {
+  const project: ProjectRuleSet = { mode: 'ask', ask: [], never: [], allow: [], commands: [{ pattern: 'npm test', decision: 'allow' }] }
+
+  it('asks, as no rule covers it, and offers no rule by how it starts, as it starts as nothing', () => {
+    assert.deepStrictEqual(run('timeout', { project }), {
+      verdict: 'ask',
+      reason: "This project asks you before anything an agent does beyond the task's own files.",
+      held: false,
+    })
+    assert.deepInclude(alwaysOf(request({ title: 'timeout' }), { ...context, project }), { command: 'timeout', prefix: null, kind: null })
+  })
+
+  it('sees through `sudo` and its options to what it runs', () => {
+    assert.deepStrictEqual(run('sudo -E npm publish'), { verdict: 'ask', reason: 'Deploying or publishing always asks.', held: true })
+  })
+})
+
 describe('a code host, without a subcommand', () => {
   it('refuses `gh pr` alone as it would any change to the pull request, with how to reach it instead', () => {
     const said = run('gh pr')
