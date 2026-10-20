@@ -291,6 +291,24 @@ describe('a task’s graph on screen', () => {
     expect(world.style.transform).toBe(theirs)
   })
 
+  it('holds a round’s marker at the strip’s edge while its start is panned off and the rest of it shows', () => {
+    // A canvas of a real size: jsdom measures every element at nothing.
+    const sized = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1200)
+    const tall = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+    render(<StepGraph lanes={lanes} rounds={rounds} steps={steps} />)
+    sized.mockRestore()
+    tall.mockRestore()
+    const canvas = screen.getByRole('region', { name: 'The task’s steps' })
+    const marker = screen.getByText('You asked').closest('li') as HTMLElement
+    // Panned so its line is left of the agents, a card of it still in view.
+    expect(Number.parseFloat(marker.style.left)).toBeGreaterThan(0)
+    act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { deltaX: 400, bubbles: true, cancelable: true })))
+    expect(marker.style.left).toBe('0px')
+    // Panned past all of it, it goes with it.
+    act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { deltaX: 4000, bubbles: true, cancelable: true })))
+    expect(Number.parseFloat(marker.style.left)).toBeLessThan(0)
+  })
+
   it('brings a card it tabs to into view', () => {
     render(<StepGraph lanes={lanes} rounds={rounds} steps={steps} detail={(id) => <p>{id}</p>} />)
     const world = screen.getByRole('region', { name: 'The task’s steps' }).querySelector('[class*="world"]') as HTMLElement

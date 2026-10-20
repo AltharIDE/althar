@@ -1,8 +1,10 @@
 /* A task's steps as a graph: a dotted canvas of lanes, the agents held at its left and the markers at its top. */
 
+/* it fills the box it is given: a canvas has no height of its own */
 .graph {
   position: relative;
   display: flex;
+  height: 100%;
   min-height: 0;
 }
 
@@ -298,7 +300,8 @@ button.card:focus-visible {
   padding-left: 10px;
   border-left: 1px dashed var(--line-3);
 }
-.markerAt:first-child {
+.markerAt:first-child,
+.pinned {
   border-left-color: transparent;
 }
 .marker {

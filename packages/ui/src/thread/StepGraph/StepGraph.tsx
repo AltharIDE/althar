@@ -381,8 +381,11 @@ export function StepGraph({ lanes, rounds, steps, detail, open, onOpenChange, on
               {rounds.map((round) => {
                 const span = placedRounds.get(round.id)
                 if (span === undefined) return null
+                // Its start panned off to the left while the rest of it shows, its marker holds at the strip's edge.
+                const from = at(span.x) - GUTTER
+                const held = from < 0 && at(span.x + span.w) - GUTTER > 0
                 return (
-                  <li key={round.id} className={s.markerAt} style={{ left: at(span.x) - GUTTER }}>
+                  <li key={round.id} className={cx(s.markerAt, held && s.pinned)} style={{ left: held ? 0 : from }}>
                     <Marker round={round} onRound={onRound} toSaid={t.toSaid} />
                   </li>
                 )
