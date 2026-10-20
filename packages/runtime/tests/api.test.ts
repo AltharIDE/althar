@@ -2405,6 +2405,13 @@ describe('words', () => {
     assert.isUndefined(agentSaid('nothing'))
     assert.strictEqual(summarize(Cause.fail(new AgentExited({ code: 1, signal: null, stderr: '' }))), 'The agent stopped.')
     assert.strictEqual(summarize(Cause.die(new Error('It broke'))), 'It broke.')
+    // An agent that couldn't start says why, as Althar put it then, and nothing more where it had nothing to say.
+    const unstarted = (summary: string) => new SessionFailed({ agentId: 'codex', reason: 'spawn codex ENOENT', summary })
+    assert.strictEqual(
+      summarize(Cause.fail(unstarted("codex isn't installed, or isn't on this computer's PATH."))),
+      "codex isn't installed, or isn't on this computer's PATH.",
+    )
+    assert.strictEqual(summarize(Cause.fail(unstarted(''))), '')
     assert.strictEqual(summarize(Cause.empty), '')
     // A command the sandbox could not take out to the device says what to put right, not that it is missing.
     assert.include(

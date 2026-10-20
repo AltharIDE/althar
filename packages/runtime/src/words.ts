@@ -82,6 +82,9 @@ export const agentSaid = (error: unknown): string | undefined => {
       return `The agent doesn't offer ${text(error, 'value')}.`
     case 'TurnInProgress':
       return 'The lead is still on its last turn.'
+    // An agent that couldn't start: the sentence Althar wrote when it failed, or nothing where there was none to say.
+    case 'SessionFailed':
+      return text(error, 'summary')
     default:
       return undefined
   }
