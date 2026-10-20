@@ -196,19 +196,6 @@ const windowAt = (path: string, usage: PlanUsage, host: Host = fakeHost()) => {
 const usageDialog = () => screen.queryByRole('dialog', { name: 'Plan usage' })
 
 describe('opening plan usage', () => {
-  it('opens on Control-U off a Mac, and closes on the same key', async () => {
-    windowAt('/projects/p1', planUsage(), fakeHost({ platform: 'linux' }))
-    await screen.findByRole('navigation', { name: 'Projects' })
-    // ⌘ is not the key there, and neither is Control with Shift.
-    fireEvent.keyDown(window, { key: 'u', metaKey: true })
-    fireEvent.keyDown(window, { key: 'u', ctrlKey: true, shiftKey: true })
-    expect(usageDialog()).toBeNull()
-    fireEvent.keyDown(window, { key: 'u', ctrlKey: true })
-    await screen.findByRole('dialog', { name: 'Plan usage' })
-    fireEvent.keyDown(window, { key: 'U', ctrlKey: true })
-    await waitFor(() => expect(usageDialog()).toBeNull())
-  })
-
   it('opens on ⌘U on a Mac, and not on Control-U', async () => {
     windowAt('/', planUsage(), fakeHost({ platform: 'darwin' }))
     await screen.findByRole('navigation', { name: 'Projects' })

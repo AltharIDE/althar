@@ -25,6 +25,9 @@ import { useSettingsOf, withServices } from './render'
  * Ctrl in place of ⌘, and those keys do what they say.
  */
 
+// The kit reads the system once, as it loads, from what the preload gives (foundations/device.ts, keys.ts), so it is given first.
+vi.hoisted(() => Object.assign(window, { althar: { platform: 'linux' } }))
+
 vi.mock('../src/renderer/shared/device', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/renderer/shared/device')>()
   return { ...actual, platform: 'linux', device: actual.deviceWords('linux') }
