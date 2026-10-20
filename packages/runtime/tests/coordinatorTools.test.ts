@@ -67,6 +67,10 @@ describe('a lead settling its task as the person says', () => {
       assert.match(yield* settle('keep'), /^Kept it for later: it is out of Needs you as it is/)
       assert.isNotNull((yield* stateOf(task.taskId))[0]?.keptAt)
       assert.strictEqual(yield* settle('keep'), 'It is kept for later already.')
+      // The coordinator finds it as kept for later.
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
+      assert.include(yield* callTool(coordinator, 'find_tasks', { text: 'partners' }), '(kept for later; id ')
       assert.match(yield* settle('done'), /^Marked it done: it is in Settled/)
       assert.strictEqual((yield* stateOf(task.taskId))[0]?.state, 'done')
       assert.strictEqual(yield* settle('done'), 'It is done already: it is in Settled.')
