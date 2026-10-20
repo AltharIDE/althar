@@ -163,15 +163,15 @@ folder is held back when:
 How Althar tells:
 
 - **No notification and no Needs you.** It is housekeeping.
-- **The bar's legend opens a list of the folders**, in the load meter's
-  manner. Each folder is a row: a round glyph, its name over a quieter
-  line, its size on the right.
+- **The bar's legend opens a compact list of the folders**, one line
+  each: a glyph, the name, a word or two on the right, and the size.
   - **Goes with Clean up:** the glyph says how the task ended (merged in
-    green), and the line says when.
+    green), and the words say when ("2 days ago").
   - **Held back,** below a hairline: the glyph is the reason, in warm,
-    and the line starts with it ("Never pushed", "Not committed", "Open
-    in VS Code", "Running").
-  - **Remove** takes the size's place on the row the pointer is on. It
+    and the words say it ("Never pushed", "Not committed", "Open in VS
+    Code", "Running").
+  - **Remove** takes the words' and size's place on the row the pointer
+    is on. It
     asks first, in a strip under the row: "Remove anyway" in red where
     work would be lost.
   - **No dialog:** Clean up loses nothing for good.
