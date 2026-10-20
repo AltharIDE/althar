@@ -29,7 +29,7 @@
 
   --t-1: #ececee;
   --t-2: #b7b7bd;
-  --t-3: #a3a3ab;
+  --t-3: #a8a8b0;
   --t-4: #6a6a72;
 
   --line: rgba(255, 255, 255, 0.075);
@@ -68,7 +68,7 @@
   --inset: rgba(255, 255, 255, 0.05);
   --pressed-paper: color-mix(in oklab, var(--paper), var(--t-1) 11%);
   --chip: rgba(255, 255, 255, 0.07);
-  --well: color-mix(in oklab, var(--paper), var(--n-2) 50%);
+  --well: rgba(0, 0, 0, 0.2);
   --segment-track: rgba(255, 255, 255, 0.055);
   --segment-on: color-mix(in oklab, var(--paper), var(--t-1) 10%);
   --knob: color-mix(in oklab, var(--paper), var(--t-1) 18%);
@@ -161,13 +161,7 @@
   --linear: #8790ec;
   --linear-ink: #a2a9f2;
 
-  /* a project's mark, its depths the same way round as on paper (ProjectMark) */
-  --mark-ground: 26%;
-  --mark-deep: var(--n-0);
-  --mark-light-tint: 22%;
-  --mark-light: var(--t-1);
-  --mark-quiet: 0.6;
-  /* a project's ink, a step lighter, so its mark still reads on dark */
+  /* a project's ink, a step lighter, for its swatch and the glow of its page (its mark keeps its own, --mark-*) */
   --project-clay: #d4774f;
   --project-ochre: #c3a259;
   --project-olive: #a3ab5a;
@@ -192,7 +186,7 @@
   --t-1: #efeae1;
   --ink-fill: #ddd7cc;
   --t-2: #bcb5a9;
-  --t-3: #a9a396;
+  --t-3: #aca699;
   --t-4: #6e695f;
 
   --line: rgba(255, 240, 215, 0.075);
@@ -250,7 +244,7 @@
   --t-1: #f3f3f4;
   --ink-fill: #dcdcdf;
   --t-2: #bababf;
-  --t-3: #95959c;
+  --t-3: #9b9ba2;
   --t-4: #606067;
 
   --line: rgba(255, 255, 255, 0.085);
@@ -259,6 +253,7 @@
 
   --lift-card: 0 0 0 0.5px rgba(255, 255, 255, 0.04);
   --you-lane: color-mix(in oklab, var(--signal) 7%, var(--n-2));
+  --well: rgba(0, 0, 0, 0.32);
   --traffic: #3c3c41;
 
   /* the page is darker than any terminal could be: the terminal lifts instead */

@@ -11,43 +11,44 @@
 }
 
 .clay {
-  --mark-ink: var(--project-clay);
+  --mark-ink: var(--mark-clay);
 }
 .ochre {
-  --mark-ink: var(--project-ochre);
+  --mark-ink: var(--mark-ochre);
 }
 .olive {
-  --mark-ink: var(--project-olive);
+  --mark-ink: var(--mark-olive);
 }
 .moss {
-  --mark-ink: var(--project-moss);
+  --mark-ink: var(--mark-moss);
 }
 .teal {
-  --mark-ink: var(--project-teal);
+  --mark-ink: var(--mark-teal);
 }
 .slate {
-  --mark-ink: var(--project-slate);
+  --mark-ink: var(--mark-slate);
 }
 .rose {
-  --mark-ink: var(--project-rose);
+  --mark-ink: var(--mark-rose);
 }
 .umber {
-  --mark-ink: var(--project-umber);
+  --mark-ink: var(--mark-umber);
 }
 
-/* Its depths come from the theme (--mark-*, themes.css): on dark the deep
-   cells are still darker than the ink and the light cell the lightest. */
+/* A project's mark is its picture, as an app's icon is: drawn in its own
+   colours on its own paper in every theme, so it is the same mark on a
+   dark page, on the island's black, and on paper. */
 .ground {
-  fill: color-mix(in srgb, var(--mark-ink) var(--mark-ground, 22%), var(--paper));
+  fill: color-mix(in srgb, var(--mark-ink) 22%, #ffffff);
 }
 .ink {
   fill: var(--mark-ink);
 }
 .deep {
-  fill: color-mix(in srgb, var(--mark-ink) 62%, var(--mark-deep, var(--t-1)));
+  fill: color-mix(in srgb, var(--mark-ink) 62%, #141417);
 }
 .paper {
-  fill: color-mix(in srgb, var(--mark-ink) var(--mark-light-tint, 0%), var(--mark-light, var(--n-1)));
+  fill: #fcfbf8;
 }
 .edge {
   fill: none;
@@ -56,7 +57,7 @@
 
 /* nothing going on: the mark steps back */
 .quiet .tile {
-  opacity: var(--mark-quiet, 0.45);
+  opacity: 0.45;
   filter: saturate(0.6);
 }
 
