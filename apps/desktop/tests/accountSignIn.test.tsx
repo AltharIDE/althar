@@ -283,6 +283,28 @@ function Settings() {
   return <SettingsPage start={useStart()} section={section} onSection={setSection} />
 }
 
+describe('an agent’s accounts in Settings', () => {
+  const work = { ...usual('acc_work', 'signed_in'), name: 'work', home: '/Users/me/work' }
+
+  it('moves one down, and says why one couldn’t be removed where it isn’t its sign-out', async () => {
+    const { client } = fakeClient({
+      status: vi.fn(async () => codexWith([], usualCodex, work)),
+      removeAccount: vi.fn(async () => {
+        throw new ApiError({ reason: 'AccountFailed', message: 'That account is working on a task.' })
+      }),
+    })
+    withServices(<Settings />, client)
+    const accounts = await screen.findByRole('list', { name: 'Codex accounts' })
+    await userEvent.click(within(accounts).getByRole('button', { name: 'More for main' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Move down' }))
+    await waitFor(() => expect(client.orderAccounts).toHaveBeenCalledWith('codex', ['acc_work', 'acc_usual']))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'More for work' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Remove/ }))
+    expect((await screen.findByRole('alert')).textContent).toContain('That account is working on a task.')
+    expect(screen.queryByRole('button', { name: 'Remove anyway' })).toBeNull()
+  })
+})
+
 describe('an agent whose maker warns about signing in from another app', () => {
   it('says so as a new account starts signing in', async () => {
     const antigravity: AgentStatus = {
