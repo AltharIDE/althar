@@ -1,0 +1,51 @@
+/* Scrappy: the page's own bar, under the app: the direction and the screen, then the scenario and the project's rule. */
+
+.frame {
+  height: calc(100% - 82px);
+}
+
+.bare {
+  height: 100%;
+}
+
+.bar {
+  display: grid;
+  gap: 0;
+  height: 82px;
+  border-top: 1px solid var(--line-2);
+  background: var(--chrome);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 12px;
+  overflow-x: auto;
+}
+
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+
+.grow {
+  flex: 1;
+  min-width: 8px;
+}
+
+.name {
+  flex: none;
+  white-space: nowrap;
+}
+
+.toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  color: var(--t-2);
+}
