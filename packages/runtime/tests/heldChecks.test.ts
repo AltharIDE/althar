@@ -106,4 +106,44 @@ describe('checks Althar sees through, that its host won’t show', () => {
       )
     }).pipe(Effect.provide(runtimeWith(github)))
   })
+
+  it.live('that run too long aren’t said to make the change the person’s once it is theirs already', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: 'running' }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const threadId = yield* coordinator.thread(project.projectId)
+      const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
+      yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+      const [running] = yield* until(cards(project.projectId), (all) => all[0]?.step === 'checks_running', Duration.seconds(20))
+      // The person opens it while its checks run: it is theirs from here.
+      yield* (yield* Tasks).see({ taskId: running?.taskId ?? '' })
+      const asked = () => github.calls.filter((call) => call === 'checks').length
+      const before = asked()
+      // Well past how long checks may run, they are looked at again, and nothing is said of it.
+      yield* until(
+        Effect.sync(() => [asked()]),
+        ([calls = 0]) => calls >= before + 5,
+      )
+      assert.isFalse((yield* notices(running?.threadId ?? '')).some((title) => title.includes('have run for')))
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(
+              ':memory:',
+              {},
+              { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100), checksStuck: Duration.millis(200) },
+            ),
+          ),
+        ),
+      ),
+    )
+  })
 })

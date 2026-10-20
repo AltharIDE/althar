@@ -20,7 +20,8 @@ import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
- * A lead's tools for its task's pull request, where what it asks for isn't
+ * A lead's tools for its task's pull request, at their edges: what people
+ * said read in the order they said it; and where what it asks for isn't
  * there to be had: a pull request it names that the task hasn't, a check
  * with a short log or none at all, a reply whose earlier answer was lost, and
  * a push from a worktree that isn't on this computer. And the person's own
@@ -72,7 +73,7 @@ const withPullRequest = (working: string) =>
     return { lead, worktree: workspace?.path ?? '', taskId }
   })
 
-describe('a lead’s pull request tools, where what it asks for isn’t there', () => {
+describe('a lead’s pull request tools, at their edges', () => {
   it.live('read a check’s log on the pull request named, a short one whole, and say where there are no checks', () => {
     const { working, bare } = hosted()
     let checks: Parameters<FakeService['setChecks']>[1] = []
@@ -93,6 +94,22 @@ describe('a lead’s pull request tools, where what it asks for isn’t there', 
       assert.strictEqual(yield* callTool(lead, 'read_check_log', { check: 'test', pull_request: 'api#1' }), whole)
       assert.strictEqual(yield* callTool(lead, 'read_check_log', { check: 'test', pull_request: 'Meridian/API#1' }), whole)
       assert.strictEqual(yield* callTool(lead, 'read_check_log', { check: 'test', pull_request: 1 }), whole)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('read what people said in the order they said it, a comment before a review', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { lead } = yield* withPullRequest(working)
+      github.commentAs(1, 'dana', 'Is it seconds?')
+      github.reviewAs(1, 'dana', 'changes_requested', 'Make it seconds.')
+      const read = yield* callTool(lead, 'read_pull_request', {})
+      const comment = read.indexOf('Is it seconds?')
+      const review = read.indexOf('Make it seconds.')
+      assert.isAbove(comment, -1)
+      assert.isAbove(review, comment)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

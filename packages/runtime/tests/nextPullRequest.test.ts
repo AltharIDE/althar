@@ -17,13 +17,14 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
-import { fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { fakeConnectors, HOST, hosted, notices, runtime, until } from './support'
 
 /*
  * A task's next pull request, after its last merged (ADR-034), where the
  * worktree isn't as a plain round leaves it: what the lead changed and didn't
  * commit, the default branch it brought in itself, a binary file, or a
- * worktree that is gone.
+ * worktree that is gone. And a pull request that merges with commits after
+ * it, whose task isn't done yet.
  */
 
 const runtimeWith = (github: FakeService) =>
@@ -90,6 +91,48 @@ const merged = (working: string, bare: string, github: FakeService) =>
     const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${card.taskId}`
     return { projectId: project.projectId, taskId: card.taskId, path: workspace?.path ?? '' }
   })
+
+describe('a task whose pull request merges with commits after it', () => {
+  it.live(
+    'isn’t done yet, and says how many commits aren’t in a pull request',
+    () => {
+      const { working, github } = onGitHub()
+      return Effect.gen(function* () {
+        const connections = yield* Connections
+        const instance = yield* Instance
+        yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+        const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+        const coordinator = yield* Coordinator
+        const threadId = yield* coordinator.thread(project.projectId)
+        const body = 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]'
+        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+        const [ready] = yield* until(
+          cards(project.projectId),
+          (all) => all[0]?.phase === 'ready' && all[0].change !== null,
+          Duration.seconds(30),
+        )
+        const sql = yield* SqlClient.SqlClient
+        const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+        // Two more commits on the task's branch, then the host merges what it had.
+        commitIn(workspace?.path ?? '', 'slider.txt', 'Slider')
+        commitIn(workspace?.path ?? '', 'slider.txt', 'Slider, warmer')
+        github.mergeByHand(1)
+        yield* (yield* Changes).refresh(ready?.taskId ?? '')
+        const said = yield* until(
+          notices(ready?.threadId ?? ''),
+          (all) => all.some((notice) => notice.title?.startsWith('Not done yet') === true),
+          Duration.seconds(10),
+        )
+        const notDone = said.find((notice) => notice.title?.startsWith('Not done yet') === true)
+        assert.strictEqual(notDone?.title, "Not done yet: 2 commits after PR #1 aren't in a pull request.")
+        assert.strictEqual(notDone?.description, 'Open a new pull request for them from the task.')
+        const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${ready?.taskId ?? ''}`
+        assert.strictEqual(task?.state, 'open')
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+})
 
 describe('a task’s next pull request, from its worktree as it is', () => {
   it.live(
