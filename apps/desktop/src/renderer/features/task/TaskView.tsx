@@ -804,7 +804,7 @@ export function TaskView({
         stuck={request.stuck}
         agents={model.agents}
         agentName={agentName}
-        onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
+        onAnswer={model.answerStuck}
         {...(reportProblem === undefined
           ? {}
           : {
@@ -890,7 +890,16 @@ export function TaskView({
         <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
       )}
       {shown === 'graph' && graph !== null ? (
-        <GraphFace className={s.graphFace} graph={graph} stuck={stuckCall} permissions={permissionCalls} onShow={showInThread} />
+        <GraphFace
+          className={s.graphFace}
+          graph={graph}
+          stuck={stuckCall}
+          permissions={permissionCalls}
+          onShow={showInThread}
+          // The composer that says what went wrong is the conversation's: here, the face says it.
+          error={model.error}
+          onDismissError={model.dismissError}
+        />
       ) : shown === 'out' && !hasOutputsToShow(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (

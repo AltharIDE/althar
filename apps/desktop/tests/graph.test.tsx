@@ -326,6 +326,54 @@ describe('a task’s Graph face', () => {
     const opened = await screen.findByRole('dialog', { name: 'Review 2' })
     expect(within(opened).getAllByRole('button').length).toBeGreaterThan(1)
   })
+
+  it('says where it was answered that a stuck step’s answer didn’t go through, answerable again, and on the face once closed', async () => {
+    const user = userEvent.setup()
+    const call = stuck('no_report', 'review')
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...graphSnapshot({ attention: [call] }) })),
+      answerStuck: vi.fn(async () => {
+        throw new Error('The runtime is restarting.')
+      }),
+    })
+    withServices(<Task />, client)
+    await user.click(await screen.findByRole('radio', { name: /Graph/ }))
+    await user.click(await screen.findByRole('button', { name: /Review 2/ }))
+    const opened = await screen.findByRole('dialog', { name: 'Review 2' })
+    await user.click(within(opened).getByRole('button', { name: 'Skip the review' }))
+    expect((await within(opened).findByRole('alert')).textContent).toMatch(/runtime didn.t answer/)
+    // Still the face it was answered on, its card as it was before, to answer again.
+    expect(screen.getByRole('radio', { name: /Graph/ }).getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(within(opened).getByRole('button', { name: 'Skip the review' })).toBeTruthy())
+    expect(within(opened).queryByText('Skipped the review')).toBeNull()
+    // Closed, the face says it, until it is put away.
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const said = screen.getByRole('alert')
+    expect(said.textContent).toMatch(/runtime didn.t answer/)
+    await user.click(within(said).getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('says where it was answered that a permission’s answer didn’t go through, answerable again', async () => {
+    const user = userEvent.setup()
+    const graph = graphSnapshot({ attention: [permission] })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...graph, task: { ...graph.task, graph: [round([step('implement', 0, 'waiting')])] } })),
+      answer: vi.fn(async () => {
+        throw new Error('The runtime is restarting.')
+      }),
+    })
+    withServices(<Task />, client)
+    await user.click(await screen.findByRole('radio', { name: /Graph/ }))
+    await user.click(await screen.findByRole('button', { name: /^Implement/ }))
+    const opened = await screen.findByRole('dialog')
+    await user.click(within(opened).getByRole('button', { name: /^Allow/ }))
+    expect((await within(opened).findByRole('alert')).textContent).toMatch(/runtime didn.t answer/)
+    expect(client.answer).toHaveBeenCalledOnce()
+    await user.click(within(opened).getByRole('button', { name: /^Allow/ }))
+    await waitFor(() => expect(client.answer).toHaveBeenCalledTimes(2))
+  })
 })
 
 describe('taking the person to a place in the conversation', () => {

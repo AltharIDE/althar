@@ -1,5 +1,5 @@
 import type { AttentionRequest } from '@althar/contracts'
-import { ActionButton, GraphNodeState, Markdown, StepGraph, unreachable } from '@althar/ui'
+import { ActionButton, GraphNodeState, LinkButton, Markdown, StepGraph, unreachable } from '@althar/ui'
 import { type ReactNode, useState } from 'react'
 
 import type { StepFacts, TaskGraph } from './graph'
@@ -11,7 +11,8 @@ import { PublishedReport, ReviewReport } from './Reports'
  * a card opening its step's report in a popover by it, or, where the step
  * waits on the person, the call to answer there, as the conversation has it.
  * A marker, and a report's way to it, take the person to that place in the
- * conversation.
+ * conversation. An answer given here that didn't go through says so where it
+ * was given, or on the face once its popover is closed.
  */
 
 export const graphFaceText = {
@@ -26,6 +27,7 @@ export const graphFaceText = {
   proposed: 'A change to its steps, waiting for your say.',
   waiting: 'It waits for you in the conversation.',
   done: 'Done.',
+  dismiss: 'Dismiss',
 }
 
 export interface GraphFaceProps {
@@ -36,28 +38,45 @@ export interface GraphFaceProps {
   permissions: (calls: ReadonlyArray<AttentionRequest>) => ReactNode
   /** Goes to an item of the conversation by its id; with none, to the conversation as it is. */
   onShow: (itemId: string | undefined) => void
+  /** What went wrong with the last thing done in the window, an answer given here among them; and its dismissal. */
+  error?: string | null
+  onDismissError?: () => void
   className?: string
 }
 
-export function GraphFace({ graph, stuck, permissions, onShow, className }: GraphFaceProps) {
+export function GraphFace({ graph, stuck, permissions, onShow, error = null, onDismissError, className }: GraphFaceProps) {
   const [open, setOpen] = useState<string | null>(null)
+  const failure = error === null ? null : <Failure error={error} {...(onDismissError === undefined ? {} : { onDismiss: onDismissError })} />
+  // Where a step's popover is open, it says so there, by what was answered; else on the face.
+  const inPopover = open !== null && graph.facts.has(open)
   return (
-    <StepGraph
-      className={className}
-      lanes={graph.lanes}
-      rounds={graph.rounds}
-      steps={graph.steps}
-      open={open}
-      onOpenChange={setOpen}
-      onRound={(id) => onShow(graph.saidAt.get(id))}
-      detail={(id) => {
-        const facts = graph.facts.get(id)
-        const card = graph.steps.find((step) => step.id === id)
-        return facts === undefined ? null : (
-          <StepDetail facts={facts} took={card?.corner} stuck={stuck} permissions={permissions} onShow={onShow} />
-        )
-      }}
-    />
+    <div className={className === undefined ? s.face : `${s.face} ${className}`}>
+      <StepGraph
+        lanes={graph.lanes}
+        rounds={graph.rounds}
+        steps={graph.steps}
+        open={open}
+        onOpenChange={setOpen}
+        onRound={(id) => onShow(graph.saidAt.get(id))}
+        detail={(id) => {
+          const facts = graph.facts.get(id)
+          const card = graph.steps.find((step) => step.id === id)
+          return facts === undefined ? null : (
+            <StepDetail facts={facts} took={card?.corner} stuck={stuck} permissions={permissions} onShow={onShow} failure={failure} />
+          )
+        }}
+      />
+      {!inPopover && failure !== null && <div className={s.floating}>{failure}</div>}
+    </div>
+  )
+}
+
+/** What went wrong, in a line, with the way to put it away. */
+function Failure({ error, onDismiss }: { error: string; onDismiss?: () => void }) {
+  return (
+    <p className={s.failure} role="alert">
+      {error} {onDismiss !== undefined && <LinkButton onClick={onDismiss}>{graphFaceText.dismiss}</LinkButton>}
+    </p>
   )
 }
 
@@ -68,12 +87,14 @@ function StepDetail({
   stuck,
   permissions,
   onShow,
+  failure,
 }: {
   facts: StepFacts
   took: string | undefined
   stuck: GraphFaceProps['stuck']
   permissions: GraphFaceProps['permissions']
   onShow: GraphFaceProps['onShow']
+  failure: ReactNode
 }) {
   const { report, calls, step } = facts
   const asking = calls.filter((call) => call.kind === 'permission')
@@ -103,6 +124,7 @@ function StepDetail({
   })()
   return (
     <div className={s.detail}>
+      {failure}
       {body}
       {report !== null && (
         <ActionButton size="small" trailingIcon="arrow" className={s.show} onClick={() => onShow(report.id)}>
