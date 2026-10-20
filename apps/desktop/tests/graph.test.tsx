@@ -140,6 +140,25 @@ describe('a task’s graph, from its snapshot', () => {
     ])
   })
 
+  it('counts what a settling settled from the review of its own round, not a later round’s', () => {
+    const graph = graphOf({
+      reports: [
+        report({ step: 'review', round: 0, verdict: 'changes_requested', findings: [finding()] }, 10),
+        report({ step: 'settle', round: 0 }, 20),
+        report({ step: 'review', round: 0, verdict: 'pass', findings: [] }, 50),
+      ],
+      rounds: [
+        round([step('implement', 0, 'done'), step('review', 0, 'done'), step('settle', 0, 'done')], { endedAt: at(30) }),
+        round([step('implement', 0, 'done', { id: 'f1' }), step('review', 0, 'done', { id: 'f2' })], {
+          id: 'run2',
+          followUp: true,
+          createdAt: at(40),
+        }),
+      ],
+    })
+    expect(graph?.steps.map((one) => one.outcome)).toEqual([undefined, '1 finding', '1 settled', undefined, 'Passed'])
+  })
+
   it('says a review passed, with its notes, and a pull request that merged since', () => {
     const graph = graphOf({
       reports: [

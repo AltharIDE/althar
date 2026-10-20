@@ -87,6 +87,12 @@ describe('a task’s graph', () => {
           assert.isFalse(step.added, step.key)
         }
 
+        // Its thread carries every step's report beside its page, the reviews' and Althar's own too, for the graph to read.
+        const { reports } = yield* Effect.orDie((yield* Queries).thread(card.threadId, { limit: 0 }))
+        assert.deepStrictEqual(
+          reports.flatMap((item) => (item.kind === 'step_result' ? [`${item.content.step}${item.content.round}`] : [])),
+          ['implement0', 'review0', 'settle0', 'review1', 'publish0'],
+        )
         // Every try at its steps reached its thread as it changed.
         const sql = yield* SqlClient.SqlClient
         const tries = yield* sql<{ id: string }>`

@@ -58,6 +58,8 @@ export interface StepFacts {
   readonly step: GraphStep
   readonly round: GraphRound
   readonly report: Report | null
+  /** For a settling, the report of the review it settled, in its own round. */
+  readonly reviewed: Report | null
   readonly calls: ReadonlyArray<AttentionRequest>
   readonly state: GraphNodeState
 }
@@ -121,7 +123,7 @@ const labelOf = (step: GraphStep, round: GraphRound): string => {
 }
 
 /** What it came to: a review's verdict, how many findings a settling settled, the pull request it opened. */
-const outcomeOf = (snapshot: ThreadSnapshot, facts: StepFacts, reports: ReadonlyArray<Report>): Pick<StepGraphStep, 'outcome' | 'warn'> => {
+const outcomeOf = (snapshot: ThreadSnapshot, facts: StepFacts): Pick<StepGraphStep, 'outcome' | 'warn'> => {
   const waiting = facts.calls[0]
   if (waiting !== undefined)
     return {
@@ -140,10 +142,8 @@ const outcomeOf = (snapshot: ThreadSnapshot, facts: StepFacts, reports: Readonly
       return content.verdict === 'changes_requested'
         ? { outcome: graphText.outcome.findings(content.findings.length), warn: true }
         : { outcome: graphText.outcome.passed(content.findings.length) }
-    case 'settle': {
-      const reviewed = reportOf(reports, { ...facts.step, key: 'review' }, facts.round, undefined)
-      return reviewed === null ? {} : { outcome: graphText.outcome.settled(reviewed.content.findings.length) }
-    }
+    case 'settle':
+      return facts.reviewed === null ? {} : { outcome: graphText.outcome.settled(facts.reviewed.content.findings.length) }
     case 'publish': {
       const change = content.change
       if (change === null) return {}
@@ -230,7 +230,10 @@ const callsOf = (snapshot: ThreadSnapshot, round: GraphRound) => {
 export function taskGraphOf(snapshot: ThreadSnapshot, named: NameModel, now: string): TaskGraph | null {
   const rounds = snapshot.task.graph ?? []
   if (rounds.length === 0) return null
-  const reports = snapshot.reports.filter((item): item is Report => item.kind === 'step_result')
+  // Its steps' reports, whatever page they're on, and any that came since.
+  const reports = [...new Map([...snapshot.reports, ...snapshot.items].map((item) => [item.id, item])).values()]
+    .filter((item): item is Report => item.kind === 'step_result')
+    .sort((one, other) => one.sequence - other.sequence)
   const { lanes, laneOf } = lanesOf(snapshot, rounds, named)
   const facts = new Map<string, StepFacts>()
   const steps: StepGraphStep[] = []
@@ -263,7 +266,15 @@ export function taskGraphOf(snapshot: ThreadSnapshot, named: NameModel, now: str
       const calls = on.get(step.id) ?? []
       const proposed = step.id === `${round.id}:proposed`
       const state = proposed ? GraphNodeState.Proposed : calls.length > 0 ? GraphNodeState.Waiting : stateOf(step)
-      const one: StepFacts = { step, round, report: reportOf(reports, step, round, rounds[index + 1]), calls, state }
+      const next = rounds[index + 1]
+      const one: StepFacts = {
+        step,
+        round,
+        report: reportOf(reports, step, round, next),
+        reviewed: step.key === 'settle' ? reportOf(reports, { ...step, key: 'review' }, round, next) : null,
+        calls,
+        state,
+      }
       facts.set(step.id, one)
       const corner = cornerOf(step, state, calls, now)
       steps.push({
@@ -273,7 +284,7 @@ export function taskGraphOf(snapshot: ThreadSnapshot, named: NameModel, now: str
         label: labelOf(step, round),
         state,
         ...(corner === undefined ? {} : { corner }),
-        ...outcomeOf(snapshot, one, reports),
+        ...outcomeOf(snapshot, one),
       })
     }
 

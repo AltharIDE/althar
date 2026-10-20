@@ -88,7 +88,7 @@ const PROJECT_ALLOWS = (projectId: string) =>
 /** How many tasks, or cards, a screen reads at once: each may start git. */
 const AT_ONCE = 8
 
-/** How many of the lead's reports a thread reads beside its page, newest first: far more than a task's rounds. */
+/** How many of its steps' reports a thread reads beside its page, newest first: far more than a task's rounds have. */
 const REPORTS = 200
 
 /** How many of a task's rounds of work its graph reads, newest: far more than a task has. */
@@ -848,7 +848,7 @@ export class Queries extends Context.Service<
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
               AND ${where.from === undefined ? sql`1 = 1` : sql`i.sequence >= ${where.from}`}
-              AND ${where.reports === true ? sql`i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('implement', 'settle')` : sql`1 = 1`}
+              AND ${where.reports === true ? sql`i.kind = 'step_result'` : sql`1 = 1`}
             ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
           // One more than asked for says whether there are earlier ones.
           return { items: rows.slice(0, where.limit).toReversed(), earlier: rows.length > where.limit }
@@ -2312,7 +2312,7 @@ export class Queries extends Context.Service<
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier } = yield* pageOf(threadId, page, true)
-          // The lead's reports, whatever page they're on: the task's finished view is read from them.
+          // Its steps' reports, whatever page they're on: the task's finished view is read from the lead's, its graph from all.
           const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
           const attention = yield* sql<{
             id: string
