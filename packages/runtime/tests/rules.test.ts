@@ -176,6 +176,13 @@ describe('reading commands', () => {
         ['tee', 'x', '2>', '&1'],
       ],
       opaque: false,
+      // Each side of the pipe runs in a subshell; its last, in zsh, may not.
+      scopes: [
+        { opens: 0, closes: 0 },
+        { opens: 0, closes: 0 },
+        { opens: 1, closes: 1 },
+        { opens: 1, closes: 1, keeps: true },
+      ],
     })
     assert.deepStrictEqual(parseCommandLine(`bash -lc "git add . && git push"`).commands, [
       ['git', 'add', '.'],
@@ -1854,6 +1861,59 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
       assert.deepInclude(decide(runs(command), windows), { verdict: 'ask', held: false }, command)
     for (const command of ['Add-Content C:\\Users\\alice\\code\\app\\main.ts x', 'Out-File -Append C:\\Users\\alice\\code\\app\\main.ts'])
       assert.strictEqual(decide(runs(command), windows).verdict, 'allow', command)
+  })
+  it('reads a subshell however its parentheses are written, and a `cd` in it, or in a script or a pipe, as ending with it', () => {
+    for (const command of [
+      '( rm -rf /Users/someone/code/app )',
+      'if true; then ( rm -rf /Users/someone/code/app ); fi',
+      '( ( rm -rf /Users/someone/code/app ) )',
+      `cd /Users/someone/code/app; (cd ${worktree}); rm -rf src`,
+      `cd /Users/someone/code/app; ( cd ${worktree} && ls ); git reset --hard`,
+      `cd /Users/someone/code/app; sh -c "cd ${worktree}"; rm -rf src`,
+      // zsh runs a pipe's last side in the shell itself, bash in a subshell: either folder.
+      `cd /Users/someone/code/app; ls | cd ${worktree}; rm -rf src`,
+      `cd /Users/someone/code/app; cd ${worktree} & rm -rf src`,
+    ])
+      assert.deepInclude(decide(runs(command), rules(allow)), { verdict: 'ask', held: false }, command)
+    for (const command of [
+      '( npm test )',
+      `cd /Users/someone/code/app; eval "cd ${worktree}"; rm -rf src`,
+      '(cd /tmp && ls); rm -rf dist',
+      'cd src && (cd sub && ls) && rm -rf generated',
+    ])
+      assert.strictEqual(decide(runs(command), rules(allow)).verdict, 'allow', command)
+  })
+
+  it('reads what `eval` runs as git reads it: dropping the stash asks however it’s wrapped', () => {
+    for (const command of ['eval git stash drop', 'eval "git stash pop"', 'eval "cd /Users/someone/code/app && git reset --hard"'])
+      assert.deepInclude(decide(runs(command), rules(allow)), { verdict: 'ask', held: false }, command)
+    assert.strictEqual(decide(runs('eval git status'), rules(allow)).verdict, 'allow')
+  })
+
+  it('asks before a copy or move into a checkout’s folder replaces what’s there, and before an edit of many files does', () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-checkout-'))
+    const app = join(root, 'code', 'app')
+    mkdirSync(join(app, '.git'), { recursive: true })
+    mkdirSync(join(app, 'src'))
+    writeFileSync(join(app, 'main.ts'), 'work\n')
+    const here = rules(allow, { scratch: [] })
+    for (const command of [
+      `cp main.ts ${app}`,
+      `cp main.ts ${app}/`,
+      `cp -t ${app} main.ts`,
+      `mv main.ts ${app}`,
+      `cp -r src ${app}`,
+      `cp -r ./. ${app}`,
+      `cp -r out/* ${app}`,
+      `rsync -a out/ ${app}`,
+    ])
+      assert.deepInclude(decide(runs(command), here), { verdict: 'ask', held: false }, command)
+    for (const command of [`cp new.ts ${app}`, `cp new.ts ${join(app, 'src')}`])
+      assert.strictEqual(decide(runs(command), here).verdict, 'allow', command)
+    const edit = (paths: Array<string>) => decide(request({ kind: 'edit', title: 'Edit', paths }), here)
+    assert.deepInclude(edit([join(root, 'new.txt'), join(app, 'main.ts')]), { verdict: 'ask', held: false })
+    assert.include(reasonOf(edit([join(root, 'new.txt'), join(app, 'main.ts')])), 'main.ts')
+    assert.strictEqual(edit([join(root, 'new.txt'), join(app, 'new.ts')]).verdict, 'allow')
   })
 })
 

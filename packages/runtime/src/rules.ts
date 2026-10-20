@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { posix, win32 } from 'node:path'
 
@@ -482,7 +482,54 @@ export interface Parsed {
   readonly commands: ReadonlyArray<ReadonlyArray<string>>
   /** The text has parts the shell works out only when it runs: `$(…)`, backticks, `eval`. */
   readonly opaque: boolean
+  /** For each command, the subshells it starts before it and ends after it, where a `cd` holds only inside. */
+  readonly scopes?: ReadonlyArray<Scope>
 }
+
+/**
+ * The subshells a command starts and ends: `(cd x`, `ls)`, a script handed
+ * to a shell, a side of a pipe. One that `keeps` may keep its `cd` or not:
+ * zsh runs a pipe's last side in the shell itself, bash in a subshell.
+ */
+interface Scope {
+  readonly opens: number
+  readonly closes: number
+  readonly keeps?: boolean
+}
+
+const NO_SCOPE: Scope = { opens: 0, closes: 0 }
+
+/** The subshells a command as written starts and ends with its parentheses: `( cd x`, `then (rm`, `ls )`, `(ls)`. */
+const scopeOf = (words: ReadonlyArray<string>): Scope => {
+  let opens = 0
+  for (const word of words) {
+    if (SHELL_KEYWORDS.includes(word)) continue
+    const leading = /^\(*/.exec(word)?.[0].length ?? 0
+    opens += leading
+    if (leading === 0 || leading < word.length) break
+  }
+  let closes = 0
+  for (const word of [...words].reverse()) {
+    const trailing = /\)*$/.exec(word)?.[0].length ?? 0
+    // `"$(pwd))"`: a parenthesis the word opens itself takes one of its own.
+    const own =
+      word
+        .slice(0, word.length - trailing)
+        .replace(/^\(+/, '')
+        .split('(').length - 1
+    closes += Math.max(0, trailing - own)
+    if (trailing === 0 || trailing < word.length) break
+  }
+  return { opens, closes }
+}
+
+/** Scopes for commands run inside one more of them, with a command's own around them all. */
+const wrapped = (scopes: ReadonlyArray<Scope>, own: Scope, extra: number): Array<Scope> =>
+  scopes.map((scope, index) => ({
+    opens: scope.opens + (index === 0 ? own.opens + extra : 0),
+    closes: scope.closes + (index === scopes.length - 1 ? own.closes + extra : 0),
+    ...(scope.keeps === true || (index === scopes.length - 1 && own.keeps === true) ? { keeps: true } : {}),
+  }))
 
 const SEPARATORS = ['&&', '||', ';', '|', '&', '\n']
 const REDIRECTS = ['>>', '&>', '2>', '>', '<']
@@ -492,10 +539,18 @@ const REDIRECTS = ['>>', '&>', '2>', '>', '<']
  * command's redirects come after its other words (`redirectsLast`), so its first word is what it runs.
  */
 export const parseCommandLine = (text: string): Parsed => {
-  const { commands, operators, opaque } = splitCommandLine(text)
+  const { commands, operators, opaque, ends } = splitCommandLine(text)
+  const scopes = commands.map((words, index): Scope => {
+    const scope = scopeOf(words)
+    // Every side of a pipe but the last, and what runs in the background, runs in a subshell; zsh runs a pipe's last side in its own shell.
+    if (ends[index] === '|' || ends[index] === '&') return { opens: scope.opens + 1, closes: scope.closes + 1 }
+    if (ends[index - 1] === '|') return { opens: scope.opens + 1, closes: scope.closes + 1, keeps: true }
+    return scope
+  })
   return expandShells(
     commands.map((words, index) => redirectsLast(words, operators[index] ?? new Set()).words),
     opaque,
+    scopes,
   )
 }
 
@@ -678,9 +733,15 @@ const splitCommandLine = (text: string) => {
 }
 
 /** Commands as the shell runs them: a script handed to a shell is read as commands of its own. */
-const expandShells = (commands: ReadonlyArray<ReadonlyArray<string>>, opaqueBefore: boolean): Parsed => {
+const expandShells = (
+  commands: ReadonlyArray<ReadonlyArray<string>>,
+  opaqueBefore: boolean,
+  scopesOf: ReadonlyArray<Scope> = [],
+): Parsed => {
   let opaque = opaqueBefore
-  const expanded = commands.flatMap((command): Array<ReadonlyArray<string>> => {
+  const scopes: Array<Scope> = []
+  const expanded = commands.flatMap((command, at): Array<ReadonlyArray<string>> => {
+    const own = scopesOf[at] ?? NO_SCOPE
     const inner = unwrap(command)
     const [program, ...args] = inner
     const flag = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg))
@@ -696,12 +757,24 @@ const expandShells = (commands: ReadonlyArray<ReadonlyArray<string>>, opaqueBefo
       const redirected = inner.flatMap((word, index) =>
         REDIRECTS.includes(word) ? [word, ...(inner[index + 1] === undefined ? [] : [inner[index + 1] ?? ''])] : [],
       )
-      return [...script.commands, ...(redirected.length === 0 ? [] : [redirected])]
+      const ran = [...script.commands, ...(redirected.length === 0 ? [] : [redirected])]
+      // The script runs in a shell of its own: a `cd` in it doesn't hold after.
+      const inside = wrapped(script.scopes ?? script.commands.map(() => NO_SCOPE), NO_SCOPE, 1)
+      scopes.push(...wrapped([...inside, ...(redirected.length === 0 ? [] : [NO_SCOPE])], own, 0))
+      return ran
     }
     if (program === 'eval' || program === 'xargs' || program === 'source' || program === '.') opaque = true
+    // What `eval` runs, as commands of their own, so git and the rest read them as they would written out: `eval git stash drop`.
+    // It runs in the shell itself, so its `cd` holds.
+    if (program === 'eval') {
+      const ran = parseCommandLine(args.join(' '))
+      scopes.push(...wrapped([NO_SCOPE, ...(ran.scopes ?? ran.commands.map(() => NO_SCOPE))], own, 0))
+      return [inner, ...ran.commands]
+    }
+    scopes.push(own)
     return [inner]
   })
-  return { commands: expanded, opaque }
+  return { commands: expanded, opaque, scopes }
 }
 
 /** The words a shell reads before a command it runs: `then rm …`. */
@@ -711,10 +784,12 @@ const SHELL_KEYWORDS = ['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!
 const unwrap = (written: ReadonlyArray<string>): ReadonlyArray<string> => {
   // A subshell's or a group's command, and one a shell keyword starts: `(rm …)`, `{ rm …; }`, `do rm …`, `then rm …`, `! rm …`.
   let command = written
-  while (SHELL_KEYWORDS.includes(command[0] ?? '') || /^\(+[^(]/.test(command[0] ?? '')) {
+  // A parenthesis may stand as a word of its own: `( rm … )`, `( ( rm … ) )`.
+  while (SHELL_KEYWORDS.includes(command[0] ?? '') || /^\(+$/.test(command[0] ?? '') || /^\(+[^(]/.test(command[0] ?? '')) {
     const [first = '', ...rest] = command
-    command = SHELL_KEYWORDS.includes(first) ? rest : [first.replace(/^\(+/, ''), ...rest]
+    command = SHELL_KEYWORDS.includes(first) || /^\(+$/.test(first) ? rest : [first.replace(/^\(+/, ''), ...rest]
   }
+  while (command.length > 1 && /^\)+$/.test(command.at(-1) ?? '')) command = command.slice(0, -1)
   if (/[^)]\)+$/.test(command.at(-1) ?? '') && written[0]?.startsWith('(') === true)
     command = [...command.slice(0, -1), (command.at(-1) ?? '').replace(/\)+$/, '')]
   let index = 0
@@ -1025,6 +1100,8 @@ interface Places {
   readonly system: System
   /** Whether something is at a path. */
   readonly exists: (path: string) => boolean
+  /** Whether a path is a folder that's there. */
+  readonly folder: (path: string) => boolean
   readonly real: (path: string) => string
   readonly worktrees: ReadonlyArray<string>
   readonly scratch: ReadonlyArray<string>
@@ -1042,9 +1119,17 @@ const places = (context: RuleContext): Places => {
       return false
     }
   }
+  const folder = (path: string) => {
+    try {
+      return statSync(follow(path)).isDirectory()
+    } catch {
+      return false
+    }
+  }
   return {
     system,
     exists,
+    folder,
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
     scratch: [...(context.scratch ?? (system.windows ? [tmpdir()] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr']))].map(
@@ -1073,7 +1158,8 @@ const outside = (where: Places, path: string) =>
 const checkoutOf = (where: Places, path: string): string | undefined => {
   const { paths } = where.system
   if (!where.exists(path)) return undefined
-  for (let folder = paths.dirname(path); ; folder = paths.dirname(folder)) {
+  // A folder of its own may be the checkout: copying a folder over `~/code/app`.
+  for (let folder = where.folder(path) ? path : paths.dirname(path); ; folder = paths.dirname(folder)) {
     if (where.exists(paths.join(folder, '.git'))) return folder
     if (paths.dirname(folder) === folder) return undefined
   }
@@ -1396,10 +1482,20 @@ const copied = (words: ReadonlyArray<string>): { readonly sources: ReadonlyArray
  * `>` redirect, where a copy or move goes, `tee`, `truncate`, `sed -i`,
  * `dd of=`. Not `>>`, `touch`, `mkdir` or `chmod`, which keep it.
  */
-const overwrites = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
+const overwrites = (words: ReadonlyArray<string>, where: Places, cwd: string): ReadonlyArray<string> => {
   const program = (words[0] ?? '').split('/').at(-1) ?? ''
   const operands = operandsOf(words)
-  const { target } = copied(words)
+  const { sources, target } = copied(words)
+  const { paths } = where.system
+  // Into a folder that's there, a copy or move lands on what has its source's name in it: `cp main.ts ~/code/app`, `cp -r src ~/code/app`.
+  // A folder's contents (`src/.`, `src/*`, rsync's `src/`) land on the folder itself.
+  const contents = (source: string) => /(^|[/\\])\.$|[*?[][^/\\]*$/.test(source) || (program === 'rsync' && /[/\\]$/.test(source))
+  const landing = (into: string) =>
+    where.folder(locate(where, cwd, into))
+      ? sources.map((source) =>
+          contents(source) ? locate(where, cwd, into) : paths.join(locate(where, cwd, into), paths.basename(locate(where, cwd, source))),
+        )
+      : [into]
   return [
     ...words.flatMap((word, index) =>
       ['>', '&>', '2>'].includes(word) && words[index + 1] !== undefined && !(words[index + 1] ?? '').startsWith('&')
@@ -1408,7 +1504,7 @@ const overwrites = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
     ),
     ...words.flatMap((word) => (word.startsWith('of=') ? [word.slice(3)] : [])),
     ...(program === 'truncate' || (program === 'tee' && !hasFlag(words.slice(1), '-a', '--append')) ? operands : []),
-    ...(WRITES_LAST.includes(program) && target !== undefined ? [target] : []),
+    ...(WRITES_LAST.includes(program) && target !== undefined ? landing(target) : []),
     ...(program === 'sed' && words.some((word) => word.startsWith('-i') || word === '--in-place') ? operands.slice(1) : []),
   ]
 }
@@ -1663,29 +1759,47 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
   const where = places(context)
   const lines = lineReadings(text, where.system)
   const each: Array<CommandKinds> = []
-  for (const { commands } of lines) {
-    let cwd = context.worktree
+  for (const { commands, scopes } of lines) {
+    // Every folder a command could run in: after a pipe's last side, the one before its `cd` and the one after.
+    let cwds: ReadonlyArray<string> = [context.worktree]
     // After `cd "$DIR"` the folder shows only when it runs: what follows is read from the root of the disk, the worst it could be.
     let blind = false
-    for (const written of commands) {
+    // Where each subshell started, to go back to when it ends: `(cd x); rm -rf src` deletes where it was before.
+    const started: Array<{ readonly cwds: ReadonlyArray<string>; readonly blind: boolean }> = []
+    commands.forEach((written, index) => {
+      const scope = scopes?.[index] ?? NO_SCOPE
+      for (let opened = 0; opened < scope.opens; opened += 1) started.push({ cwds, blind })
       const kinds: Array<Kept> = []
       const redirected: Array<Kept> = []
-      let next = cwd
-      for (const words of readings(written)) {
-        const found = kindsOf(words, cwd, where, context)
-        kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
-        redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
-        if (found.cwd !== undefined) {
-          const target = cdTarget(words)
-          next = target !== undefined && unsettled(target) ? where.system.paths.parse(where.system.home).root : found.cwd
-          blind = target !== undefined && (unsettled(target) || (blind && !where.system.paths.isAbsolute(target.replace(HOME_WORD, '/'))))
+      const nexts: Array<string> = []
+      let moved = blind
+      for (const cwd of cwds) {
+        let next = cwd
+        for (const words of readings(written)) {
+          const found = kindsOf(words, cwd, where, context)
+          kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+          redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
+          if (found.cwd !== undefined) {
+            const target = cdTarget(words)
+            next = target !== undefined && unsettled(target) ? where.system.paths.parse(where.system.home).root : found.cwd
+            moved = target !== undefined && (unsettled(target) || (blind && !where.system.paths.isAbsolute(target.replace(HOME_WORD, '/'))))
+          }
         }
+        nexts.push(next)
       }
+      blind = moved
       if (blind && kinds.some((each) => each.floor === true))
         kinds.unshift(kept("Althar can't tell which folder `cd` goes to until it runs, so it asks.", 'unclear', true))
-      cwd = next
+      cwds = [...new Set(nexts)]
+      for (let closed = 0; closed < scope.closes; closed += 1) {
+        const before = started.pop()
+        if (before === undefined) break
+        const kept = scope.keeps === true && closed === scope.closes - 1
+        cwds = kept ? [...new Set([...before.cwds, ...cwds])] : before.cwds
+        blind = kept ? before.blind || blind : before.blind
+      }
       each.push({ words: written, kinds, redirected })
-    }
+    })
   }
   return { opaque: lines.some((line) => line.opaque), commands: each }
 }
@@ -1763,7 +1877,7 @@ const kindsOf = (
     .filter((path) => !redirects(words).includes(path))
     .find((path) => outside(where, locate(where, cwd, path)))
   const replaced = commandsIn(words)
-    .flatMap(overwrites)
+    .flatMap((each) => overwrites(each, where, cwd))
     .find((path) => outside(where, locate(where, cwd, path)) && checkoutOf(where, locate(where, cwd, path)) !== undefined)
   if (gone !== undefined)
     kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${gone}`, 'outside', true))
@@ -1939,16 +2053,19 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
     if (paths.length === 0)
       return [kept(`Althar can't tell where this ${request.kind === 'edit' ? 'edit writes' : 'change goes'}, so it asks.`, 'unclear')]
     const where = places(context)
-    const escaping = paths.find((path) => outside(where, locate(where, context.worktree, path)))
-    if (escaping !== undefined)
+    const escaping = paths.filter((path) => outside(where, locate(where, context.worktree, path)))
+    // Any of them in another checkout, wherever it comes in the edit: a new file first doesn't hide it.
+    const replaced = escaping.find((path) => checkoutOf(where, locate(where, context.worktree, path)) !== undefined)
+    const [first] = escaping
+    if (first !== undefined)
       return [
         ...secrets,
         // Deleting or moving away what's outside could be anyone's work; an edit there only writes.
         request.kind !== 'edit'
-          ? kept(`Deleting or moving away what's outside the task's worktree always asks: ${escaping}`, 'outside', true)
-          : checkoutOf(where, locate(where, context.worktree, escaping)) !== undefined
-            ? changesCheckout(escaping)
-            : kept(`Writing outside the task's worktree always asks: ${escaping}`, 'outside'),
+          ? kept(`Deleting or moving away what's outside the task's worktree always asks: ${first}`, 'outside', true)
+          : replaced !== undefined
+            ? changesCheckout(replaced)
+            : kept(`Writing outside the task's worktree always asks: ${first}`, 'outside'),
       ]
   }
   return secrets
