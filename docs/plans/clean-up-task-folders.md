@@ -69,9 +69,9 @@ The project's own `.coordinator` and `.run` folders are never touched.
 | Option | Verdict |
 | --- | --- |
 | Right away, as it settles | Too eager: a merged task is often run, checked or followed up in the next days, and each of those would pay a setup |
-| **A week after it settles** | **Recommended, on by default** |
-| When the disk runs low | Good as a safety net, but on its own it acts at the worst moment and surprises (prototype C) |
-| Only when the person asks | Nobody remembers until the disk is full (prototype B) |
+| **After a wait that suits how it ended** | **Recommended, on by default, with smart waits (below)** |
+| When the disk runs low | Good as a safety net, so Smart includes it; on its own it acts at the worst moment and surprises |
+| Only when the person asks | Nobody remembers until the disk is full; still one of the choices |
 
 **Recommendation:** automatic, after a wait that depends on how the task
 ended, with smart defaults the person can change.
@@ -211,7 +211,7 @@ can go too.
 
 **Coming back reruns setup.** For `althar` that is the checkout plus
 `bun install` from a warm cache, probably 30–60 seconds (not measured
-yet). That is acceptable because a week's grace makes it rare, and the
+yet). That is acceptable because the waits make it rare, and the
 thread shows it happening.
 
 **Reusing installs between folders is worth doing, but separately.** For
@@ -275,12 +275,12 @@ the setting sits beside keep awake and agents at once:
 **No setting per project.** The research put it in the project's Running
 ("Where its work goes"). But nobody makes this choice per project, and
 each project would add a setting. The project's Worktrees row could show
-its size later (first round's B), but that isn't needed now.
+its size later, but that isn't needed now.
 
 **The docs:**
 
-- **A new ADR:** "A finished task's folder goes a week after it settles;
-  its branch brings it back".
+- **A new ADR:** "A finished task's folder goes after a wait that suits how
+  it ended; its branch brings it back".
 - **ADR-006 and architecture 01.** Their "never removes" passages change.
 - **ADR-020.** Documents no longer go with the worktree.
 - **The comment in `Tasks.ts`.**
