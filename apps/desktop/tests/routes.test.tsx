@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChangedFile, ThreadSnapshot } from '@althar/contracts'
 
+import { settingsRoute } from '../src/renderer/features/settings/route'
 import { taskRoute } from '../src/renderer/features/task/route'
 import { keptFrom } from '../src/renderer/features/tabs/tabs'
+import { keys } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { rootRoute } from '../src/renderer/root'
 import { fakeClient, project, snapshot } from './fixtures'
@@ -101,5 +103,29 @@ describe('a coordinator’s thread', () => {
     )
     expect(await screen.findByText(`project ${project.id} talk`)).toBeTruthy()
     expect(getThread).not.toHaveBeenCalled()
+  })
+})
+
+describe('opening the settings', () => {
+  const settingsAt = (path: string) => {
+    const { client } = fakeClient()
+    const services = servicesFor(client)
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([settingsRoute]),
+      history: createMemoryHistory({ initialEntries: [path] }),
+      context: { client, cache: services.cache },
+    })
+    return { client, cache: services.cache, router }
+  }
+
+  it('reads the skills before their section shows, and only for it', async () => {
+    const skills = settingsAt('/settings/skills')
+    await skills.router.load()
+    expect(skills.client.listSkills).toHaveBeenCalledTimes(1)
+    expect(skills.cache.getQueryData(keys.skills)).toEqual(await skills.client.listSkills())
+
+    const agents = settingsAt('/settings/agents')
+    await agents.router.load()
+    expect(agents.client.listSkills).not.toHaveBeenCalled()
   })
 })

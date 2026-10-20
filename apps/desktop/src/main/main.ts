@@ -56,6 +56,7 @@ import {
 
 import { appMenu, windowOptions } from './windowOptions'
 import { keyringIsSafe, keyringUnavailable, passwordStore, sealWithPortal, sealsWithPortal, withPortalFeature } from './keyring'
+import { skillsCatalog } from './skillsCatalog'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -454,6 +455,7 @@ const startRuntime = () => {
       ALTHAR_PROFILE: profile,
       ALTHAR_WORKTREES: worktrees,
       ALTHAR_APP_VERSION: app.getVersion(),
+      ALTHAR_SKILLS_CATALOG: skillsCatalog(here, app.isPackaged),
       ALTHAR_LOGS: logs.dir,
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
       ...(app.isPackaged

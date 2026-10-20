@@ -74,5 +74,14 @@ export const text = {
   noEditors: `No editor found on ${device.this}. Files open in ${device.files}.`,
   /* What couldn't be kept. */
   failed: 'That couldn’t be kept. Try again.',
+  skillsOff: 'Skills aren’t set up in this copy of Althar, so each lead starts without them.',
+  skillsFromAlthar: 'Althar',
+  skillsFromFolder: 'A folder you imported',
+  skillsCheck: 'Check for updates',
+  skillsCurrent: 'Every skill from GitHub is up to date.',
+  skillsUpdate: (id: string) => `Review the update to ${id}`,
+  skillsUnchecked: (id: string, why: string) => `${id} couldn’t be checked: ${why}`,
+  skillsCatalog: (revision: string) =>
+    `Althar’s skills come from agent-skills (Addy Osmani) and superpowers (Jesse Vincent), both MIT, catalog ${revision}. They’re off until you turn them on, and one you turn on is given to every task’s lead. A change reaches each lead the next time it starts, in a task under way too.`,
   iconFailed: 'That icon couldn’t be kept. Try again.',
 }

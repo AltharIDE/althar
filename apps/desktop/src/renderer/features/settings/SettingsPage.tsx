@@ -9,6 +9,7 @@ import {
   AgentTabPanel,
   AgentTabs,
   AppVersion,
+  Button,
   Choices,
   CoAuthor,
   CoAuthorFace,
@@ -30,6 +31,9 @@ import {
   SettingsLayout,
   SettingsNav,
   SettingSwitch,
+  SkillInstall,
+  SkillList,
+  SkillReview,
   UpdateReady,
   UsageData,
 } from '@althar/ui'
@@ -64,6 +68,7 @@ import { useCoAuthor } from './useCoAuthor'
 import { useEdgeGlance } from './useEdgeGlance'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
+import { useSkills } from './useSkills'
 
 /*
  * Althar's settings, as a tab of the window beside the home's. Down the
@@ -151,6 +156,8 @@ function SectionBody({
   switch (section) {
     case 'agents':
       return <AgentsSection start={start} accounts={accounts} />
+    case 'skills':
+      return <SkillsSection />
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
@@ -249,6 +256,49 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
         )}
       </AgentTabPanel>
     </AgentTabs>
+  )
+}
+
+/* ---- skills ----------------------------------------------------------------------- */
+
+/** The skills every lead is given, the one review open, and installing from GitHub. */
+function SkillsSection() {
+  const skills = useSkills()
+  if (skills.rows === undefined) return <Failed when={skills.loadFailed} />
+  if (!skills.enabled) return <p className={s.quiet}>{text.skillsOff}</p>
+  return (
+    <div className={s.skills}>
+      {skills.card !== null ? (
+        <SkillReview card={skills.card} busy={skills.busy} onInstall={skills.install} onCancel={skills.cancel} />
+      ) : (
+        <SkillInstall found={skills.found} busy={skills.busy} error={skills.error} onFind={skills.find} onReview={skills.review} />
+      )}
+      {skills.card !== null && skills.error !== null && (
+        <p role="alert" className={s.failed}>
+          {skills.error}
+        </p>
+      )}
+      <div className={s.skillUpdates}>
+        <Button size="small" variant="quiet" disabled={skills.busy} onClick={skills.checkUpdates}>
+          {text.skillsCheck}
+        </Button>
+        {skills.checked && skills.available.length === 0 && skills.unchecked.length === 0 && (
+          <span className={s.quiet}>{text.skillsCurrent}</span>
+        )}
+        {skills.available.map((id) => (
+          <Button key={id} size="small" disabled={skills.busy} onClick={() => skills.reviewUpdate(id)}>
+            {text.skillsUpdate(id)}
+          </Button>
+        ))}
+        {skills.unchecked.map((one) => (
+          <span key={one.id} className={s.quiet}>
+            {text.skillsUnchecked(one.id, one.error)}
+          </span>
+        ))}
+      </div>
+      <SkillList skills={skills.rows} onToggle={skills.toggle} onRollBack={skills.rollBack} onRemove={skills.remove} />
+      {skills.catalogRevision !== null && <p className={s.quiet}>{text.skillsCatalog(skills.catalogRevision)}</p>}
+    </div>
   )
 }
 

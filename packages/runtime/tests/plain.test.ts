@@ -202,7 +202,7 @@ describe('a plain task', () => {
       const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
       yield* until(markDone, ([done]) => done === true)
       yield* until(state, (rows) => rows[0]?.state === 'done')
-      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task is done again.
+      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task is finished again.
       yield* say(task.threadId, 'And the v2 ones?')
       const [told] = yield* until(
         sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,

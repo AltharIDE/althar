@@ -172,11 +172,13 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['behind', 'denied', 'refused', 'moved', 'never']),
+  why: Schema.Literals(['behind', 'denied', 'refused', 'moved', 'never', 'protected']),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
-  /** What the remote said, for one it refused. */
+  /** What the remote said, for one it refused; for `protected`, the skill or OpenSpec paths that were held back. */
   said: Schema.optional(Schema.String),
+  /** For `protected`, the project's Repository files switches that are off and would let them go. */
+  needs: Schema.optional(Schema.Array(Schema.Literals(['writeSkills', 'writeOpenSpec', 'pushProtected']))),
 }) {}
 
 /**
@@ -245,3 +247,6 @@ export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnans
   tool: Schema.String,
   message: Schema.String,
 }) {}
+
+/** A skills store operation that couldn't be done, in words for the person, is `@althar/skills`' own `SkillRefused`. */
+export { SkillRefused } from '@althar/skills'

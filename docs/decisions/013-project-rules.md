@@ -9,6 +9,10 @@
   2026-10-12: the rules keep whether the project's leads resolve merge
   conflicts on their own ([ADR-030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md)),
   switched in the project's settings. Off unless the person turns it on.
+  2026-10-18: the rules keep the project's Repository files switches
+  ([ADR-054](054-skill-and-openspec-files-stay-off-the-repository.md)):
+  whether skill and OpenSpec files may be in its repository and be pushed.
+  Each off unless the person turns it on.
 - **Owner:** Repository maintainers
 - **Context:** Every permission request reaches Althar
   ([ADR-007](007-permission-requests-reach-althar.md)), which answers it

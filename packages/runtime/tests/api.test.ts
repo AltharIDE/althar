@@ -20,6 +20,7 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from '
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
+import { fakeGitHub, writeCatalog } from '../../skills/tests/support'
 import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
@@ -67,6 +68,9 @@ const connected = (
     readonly editors?: RuntimeOptions['editors']
     /** The machine how many agents are at work at once comes from: a large one unless a test says. */
     readonly machine?: { readonly cores: number; readonly memory: number }
+    /** A skills store and the catalog it is seeded from, and how GitHub is reached. */
+    readonly skills?: RuntimeOptions['skills']
+    readonly fetch?: RuntimeOptions['fetch']
     /** The agents, where a test changes one: the fake ones otherwise. */
     readonly agents?: Layer.Layer<Agents>
   } = {},
@@ -90,6 +94,8 @@ const connected = (
           : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
+        ...(options.skills === undefined ? {} : { skills: options.skills }),
+        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
         busy: { machine: options.machine ?? ROOMY },
         // A pull request with no checks has none: no test waits for a host to show them.
         checksAppear: Duration.zero,
@@ -1044,6 +1050,25 @@ describe('this computer’s load, through the API', () => {
 })
 
 describe('project rules, through the API', () => {
+  it.live('turns each repository-files setting on alone, and keeps the others off', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const one = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: false },
+        })
+        assert.deepStrictEqual(one.repositoryFiles, { writeSkills: true, writeOpenSpec: false, pushProtected: false })
+        // An unrelated change leaves them as they are.
+        const other = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, moveIssues: false })
+        assert.deepStrictEqual(other.repositoryFiles, { writeSkills: true, writeOpenSpec: false, pushProtected: false })
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).repositoryFiles, other.repositoryFiles)
+      }),
+    ),
+  )
+
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1067,6 +1092,8 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
+          repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
@@ -2609,4 +2636,139 @@ describe('thread items', () => {
       },
     )
   })
+})
+
+describe('the skills page', () => {
+  const A = 'a'.repeat(40)
+  const B = 'b'.repeat(40)
+  const skill = (name: string, body: string) => `---\nname: ${name}\ndescription: Use when testing ${name}.\nlicense: MIT\n---\n${body}`
+  const store = async () => {
+    const catalog = mkdtempSync(join(tmpdir(), 'althar-skills-catalog-'))
+    await writeCatalog(catalog, { alpha: { 'SKILL.md': skill('alpha', 'Default.\n') } }, { alpha: ['subagents'] })
+    return { root: mkdtempSync(join(tmpdir(), 'althar-skills-store-')), catalog }
+  }
+  /** What the record keeps of the person's changes to skills, in order: each skill's revision, the act, its payload and command. */
+  const skillActs = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ id: string; revision: number; type: string; payload: string; command: string | null }>`
+      SELECT aggregate_id AS id, aggregate_revision AS revision, type, payload, command_id AS command
+      FROM record_events WHERE aggregate_type = 'skill' ORDER BY sequence`
+    return rows.map(({ payload, command, ...row }) => ({
+      ...row,
+      payload: JSON.parse(payload) as Record<string, unknown>,
+      commandId: command,
+    }))
+  })
+
+  it.live('says skills are off where the runtime has no store', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.deepStrictEqual(yield* client.ListSkills({}), { enabled: false, catalogRevision: null, skills: [] })
+        assert.strictEqual((yield* Effect.flip(client.CheckSkillUpdates({}))).message, 'Skills are off in this runtime.')
+      }),
+    ),
+  )
+
+  it.live('lists the catalog’s skills off, turns one on and off, and keeps one Althar ships from being removed', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store: record } = yield* connected({ skills: yield* Effect.promise(store) })
+        const listed = yield* client.ListSkills({})
+        assert.deepStrictEqual(
+          [listed.enabled, listed.catalogRevision, listed.skills.map((one) => [one.id, one.source, one.active, one.needs, one.license])],
+          [true, 'fixture-1', [['alpha', 'althar-default', false, ['subagents'], 'MIT']]],
+        )
+        assert.strictEqual(listed.skills[0]?.description, 'Use when testing alpha.')
+        const on = commandId()
+        const alpha = yield* client.SetSkillActive({ commandId: on, id: 'alpha', active: true })
+        assert.isTrue(alpha.active)
+        const off = yield* client.SetSkillActive({ commandId: commandId(), id: 'alpha', active: false })
+        assert.isFalse(off.active)
+        // Each switch is the person's act, recorded under the window's command with the version it was at.
+        const acts = yield* record(skillActs)
+        assert.deepStrictEqual(
+          acts.map(({ id, revision, type, payload }) => [id, revision, type, payload]),
+          [
+            ['alpha', 1, 'skill.turned_on', { treeHash: alpha.treeHash }],
+            ['alpha', 2, 'skill.turned_off', { treeHash: alpha.treeHash }],
+          ],
+        )
+        assert.strictEqual(acts[0]?.commandId, on)
+        const refused = yield* Effect.flip(client.UninstallSkill({ commandId: commandId(), id: 'alpha' }))
+        assert.deepStrictEqual([refused.reason, refused.message], ['SkillRefused', 'alpha comes with Althar; turn it off instead.'])
+        // A refused change records nothing.
+        assert.lengthOf(yield* record(skillActs), 2)
+      }),
+    ),
+  )
+
+  it.live('finds, reviews and installs a skill from GitHub, offers its update, and rolls it back', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const repos = {
+          'o/r': {
+            refs: { main: A, HEAD: A, 'feature/x': A } as Record<string, string>,
+            commits: { [A]: { 'skills/beta/SKILL.md': skill('beta', 'One.\n'), 'hooks/start.sh': 'x' } } as Record<
+              string,
+              Record<string, string>
+            >,
+          },
+        }
+        const { access } = fakeGitHub(repos)
+        const { client, store: record } = yield* connected({
+          skills: yield* Effect.promise(store),
+          ...(access.fetch === undefined ? {} : { fetch: access.fetch }),
+        })
+        const found = yield* client.FindSkills({ source: 'https://github.com/o/r' })
+        assert.deepStrictEqual(found, { repo: 'o/r', ref: 'HEAD', sha: A, paths: ['skills/beta'] })
+        assert.deepStrictEqual(yield* client.FindSkills({ source: 'https://github.com/o/r/tree/feature/x/skills/beta' }), {
+          repo: 'o/r',
+          ref: 'feature/x',
+          sha: A,
+          paths: ['skills/beta'],
+        })
+        const card = yield* client.StageSkill({ repo: 'o/r', ref: 'main', subpath: 'skills/beta' })
+        assert.deepStrictEqual(
+          [card.id, card.installable, card.installed, card.files.map((file) => file.path)],
+          ['beta', true, null, ['SKILL.md']],
+        )
+        // Staging installs nothing.
+        assert.deepStrictEqual(
+          (yield* client.ListSkills({})).skills.map((one) => one.id),
+          ['alpha'],
+        )
+        const installed = yield* client.ApproveSkill({ commandId: commandId(), id: card.id, ...card.source, treeHash: card.treeHash })
+        assert.deepStrictEqual(
+          [installed.source, installed.repo, installed.sha, installed.review, installed.active],
+          ['github', 'o/r', A, 'reviewed', true],
+        )
+
+        repos['o/r'].commits[B] = { 'skills/beta/SKILL.md': skill('beta', 'Two.\n') }
+        repos['o/r'].refs.main = B
+        const [update] = yield* client.CheckSkillUpdates({})
+        assert.strictEqual(update?.state, 'available')
+        if (update?.state !== 'available') return
+        yield* client.ApproveSkill({ commandId: commandId(), id: 'beta', ...update.card.source, treeHash: update.card.treeHash })
+        const back = yield* client.RollBackSkill({ commandId: commandId(), id: 'beta' })
+        assert.deepStrictEqual([back.sha, back.canRollBack], [A, false])
+        yield* client.UninstallSkill({ commandId: commandId(), id: 'beta' })
+        // What the person approved, rolled back and removed, each with the version it concerned.
+        const from = { source: 'github', repo: 'o/r', subpath: 'skills/beta', ref: 'main' }
+        assert.deepStrictEqual(
+          (yield* record(skillActs)).map(({ id, revision, type, payload }) => [id, revision, type, payload]),
+          [
+            ['beta', 1, 'skill.approved', { ...from, sha: A, treeHash: card.treeHash, active: true }],
+            ['beta', 2, 'skill.approved', { ...from, sha: B, treeHash: update.card.treeHash, active: true }],
+            ['beta', 3, 'skill.rolled_back', { ...from, sha: A, treeHash: card.treeHash }],
+            ['beta', 4, 'skill.removed', { ...from, sha: A, treeHash: card.treeHash }],
+          ],
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(client.FindSkills({ source: 'https://gitlab.com/o/r' }))).message,
+          "https://gitlab.com/o/r isn't a GitHub repository; paste its address or owner/name.",
+        )
+      }),
+    ),
+  )
 })

@@ -1,0 +1,212 @@
+/* ---- the list ---- */
+.skills {
+  display: grid;
+  gap: 10px;
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.find {
+  flex: 1;
+}
+.count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  align-items: start;
+  padding: 10px 0;
+}
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+.words {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.description {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-2);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.action {
+  font-size: inherit;
+}
+.problem {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+.quiet {
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+/* ---- installing ---- */
+.install {
+  display: grid;
+  gap: 10px;
+}
+.ask {
+  display: flex;
+  gap: 8px;
+}
+.ask > :first-child {
+  flex: 1;
+}
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+.found {
+  display: grid;
+  gap: 6px;
+}
+.label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-3);
+}
+.paths,
+.files {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.paths li,
+.files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+.found code,
+.files code,
+.facts code,
+.changePath code,
+.findings code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+/* ---- the review card ---- */
+.card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+}
+.head {
+  display: grid;
+  gap: 6px;
+}
+.title {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--t-1);
+}
+.facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+.facts dt {
+  color: var(--t-3);
+}
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--t-2);
+}
+.part {
+  display: grid;
+  gap: 6px;
+}
+.findings ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.refused {
+  color: var(--danger);
+}
+.noted {
+  color: var(--t-1);
+}
+.instructions,
+.diff {
+  max-height: 260px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--r);
+  background: var(--n-1);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--t-2);
+}
+.change {
+  display: grid;
+  gap: 4px;
+}
+.changePath {
+  font-size: 12px;
+}
+.line {
+  display: block;
+}
+.plus {
+  color: var(--ok);
+}
+.minus {
+  color: var(--danger);
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

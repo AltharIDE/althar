@@ -26,7 +26,23 @@ import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
 import { Changes } from './Changes'
+import {
+  approve,
+  checkUpdates,
+  findSkills,
+  type GitHubAccess,
+  type Install,
+  parseGitHubSource,
+  resolveRef,
+  resolveTree,
+  rollBack,
+  setActive,
+  SkillRefused,
+  stageFromGitHub,
+  uninstall,
+} from '@althar/skills'
 import { NotFound } from './errors'
+
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
@@ -47,6 +63,7 @@ import {
   movesIssues,
   Policies,
   type ProjectRules,
+  repositoryFilesOf,
   resolvesConflicts,
   ruleSetOf,
   usageLimitOf,
@@ -73,6 +90,7 @@ import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
+import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
 
 /*
@@ -214,6 +232,53 @@ export const handlers = Api.toLayer(
      * the first one's result from here. One interrupted before it finished
      * may run again.
      */
+    /* GitHub as the skills page reaches it: over the app's own network, unauthenticated, for public repositories. */
+    const github: GitHubAccess = config.fetch === undefined ? {} : { fetch: config.fetch }
+    /**
+     * A skills store operation as the window gets it, through `api()` (ADR-047): a refusal in the person's words, never
+     * reported; anything else (a store that failed, a defect) in the log and reported by the call. Refused where the
+     * runtime has no store.
+     */
+    const skills = <A, E>(work: (store: SkillsConfig) => Effect.Effect<A, E>): Effect.Effect<A, ApiError> => {
+      const store = config.skills
+      const effect: Effect.Effect<A, E | SkillRefused> =
+        store === undefined ? Effect.fail(new SkillRefused({ message: 'Skills are off in this runtime' })) : work(store)
+      return api(effect)
+    }
+    /**
+     * A change the person made to what is installed, recorded as their own act under the window's command id (as a
+     * rule's revision is): the store's installs.json says what is installed now, the record who changed it and to
+     * what. Recording it tells the window's feed that the skill changed.
+     */
+    const skillAct = (commandId: string, id: string, act: string, payload: Readonly<Record<string, unknown>>) =>
+      Effect.gen(function* () {
+        const type = `skill.${act}`
+        const said = yield* envelope(type, { id, ...payload }, commandId)
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const [last] = yield* sql<{ revision: number | null }>`
+              SELECT max(aggregate_revision) AS revision FROM record_events WHERE aggregate_type = 'skill' AND aggregate_id = ${id}`
+            yield* ledger.record({
+              aggregateType: 'skill',
+              aggregateId: id,
+              aggregateRevision: (last?.revision ?? 0) + 1,
+              type,
+              payload,
+              actorId: said.actorId,
+              commandId: said.commandId,
+            })
+          }),
+        )
+      })
+    /** What the record keeps of a version: where it is from and which files, by their tree hash. */
+    const versionSaid = (install: Install) => ({
+      source: install.source,
+      treeHash: install.treeHash,
+      ...(install.repo === undefined ? {} : { repo: install.repo }),
+      ...(install.subpath === undefined ? {} : { subpath: install.subpath }),
+      ...(install.ref === undefined ? {} : { ref: install.ref }),
+      ...(install.sha === undefined ? {} : { sha: install.sha }),
+    })
     const recent = new Map<string, Deferred.Deferred<unknown, ApiError>>()
     const once = <A>(commandId: string, effect: Effect.Effect<A, ApiError>): Effect.Effect<A, ApiError> =>
       Effect.suspend(() => {
@@ -305,6 +370,7 @@ export const handlers = Api.toLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        repositoryFiles: repositoryFilesOf(rules),
       }
     }
 
@@ -1281,6 +1347,92 @@ export const handlers = Api.toLayer(
       OrderRunnables: ({ commandId, projectId, ids }) =>
         once(commandId, api(launches.orderRunnables({ projectId, ids, actorId: instance.personId }))),
       GetRepositoryScripts: ({ projectId }) => api(launches.scripts(projectId)),
+      ListSkills: () =>
+        config.skills === undefined
+          ? Effect.succeed({ enabled: false, catalogRevision: null, skills: [] })
+          : skills((store) => listSkills(store)),
+      FindSkills: ({ source, ref }) =>
+        skills(() =>
+          Effect.gen(function* () {
+            const parsed = parseGitHubSource(source)
+            if (parsed === null)
+              return yield* new SkillRefused({ message: `${source} isn't a GitHub repository; paste its address or owner/name` })
+            // A pasted `/tree/` address names its ref and path; GitHub splits them.
+            const at =
+              parsed.tree === undefined
+                ? { ref: ref ?? 'HEAD', sha: yield* resolveRef(github, parsed.repo, ref ?? 'HEAD') }
+                : yield* resolveTree(github, parsed.repo, parsed.tree)
+            const paths = at.subpath === undefined ? yield* findSkills(github, parsed.repo, at.sha) : [at.subpath]
+            return { repo: parsed.repo, ref: at.ref, sha: at.sha, paths }
+          }),
+        ),
+      StageSkill: ({ repo, ref, subpath }) => skills((store) => stageFromGitHub(store.root, github, { repo, ref, subpath })),
+      ApproveSkill: ({ commandId, ...approval }) =>
+        once(
+          commandId,
+          skills((store) =>
+            Effect.gen(function* () {
+              const installed = yield* approve(store.root, approval)
+              yield* skillAct(commandId, installed.id, 'approved', {
+                ...versionSaid(installed),
+                active: installed.active,
+                ...(approval.replace === true ? { replaced: true } : {}),
+              })
+              return yield* describe(store.root, installed)
+            }),
+          ),
+        ),
+      // One that can't be checked says why on its own; one that failed for no reason of the person's or GitHub's is reported too.
+      CheckSkillUpdates: () =>
+        skills((store) =>
+          Effect.gen(function* () {
+            const checks = []
+            for (const check of yield* checkUpdates(store.root, github)) {
+              if (check.state !== 'failed') {
+                checks.push(check)
+                continue
+              }
+              if (check.unexpected !== undefined) {
+                yield* Effect.logWarning('A skill update check did not succeed', check.unexpected)
+                yield* failures.report(check.unexpected, 'CheckSkillUpdates')
+              }
+              checks.push({ id: check.id, state: check.state, error: check.error })
+            }
+            return checks
+          }),
+        ),
+      RollBackSkill: ({ commandId, id }) =>
+        once(
+          commandId,
+          skills((store) =>
+            Effect.gen(function* () {
+              const restored = yield* rollBack(store.root, id)
+              yield* skillAct(commandId, id, 'rolled_back', versionSaid(restored))
+              return yield* describe(store.root, restored)
+            }),
+          ),
+        ),
+      SetSkillActive: ({ commandId, id, active }) =>
+        once(
+          commandId,
+          skills((store) =>
+            Effect.gen(function* () {
+              const install = yield* setActive(store.root, id, active)
+              yield* skillAct(commandId, id, active ? 'turned_on' : 'turned_off', { treeHash: install.treeHash })
+              return yield* describe(store.root, install)
+            }),
+          ),
+        ),
+      UninstallSkill: ({ commandId, id }) =>
+        once(
+          commandId,
+          skills((store) =>
+            Effect.gen(function* () {
+              const removed = yield* uninstall(store.root, id)
+              if (removed !== undefined) yield* skillAct(commandId, id, 'removed', versionSaid(removed))
+            }),
+          ),
+        ),
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),

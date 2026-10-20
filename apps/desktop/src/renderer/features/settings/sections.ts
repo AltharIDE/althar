@@ -5,13 +5,13 @@ import { device } from '../../shared/device'
 /*
  * Althar's settings, by what each is about, as the Settings tab lists them
  * down its side and its address names them: the agents and the code hosts
- * Althar works with; then its own ways (work on this computer, reviews and
+ * Althar works with, and the skills the agents are given; then its own ways (work on this computer, reviews and
  * pull requests, notifications, how it looks, the editor); then which
  * Althar this is. A setting to come goes in the section it is about, and a
  * section to come between those it sits among.
  */
 
-export const SECTIONS = ['agents', 'code-hosts', 'this-mac', 'reviews', 'notifications', 'appearance', 'editor', 'about'] as const
+export const SECTIONS = ['agents', 'skills', 'code-hosts', 'this-mac', 'reviews', 'notifications', 'appearance', 'editor', 'about'] as const
 
 export type Section = (typeof SECTIONS)[number]
 
@@ -23,7 +23,7 @@ export const FIRST_SECTION: Section = 'agents'
 
 /** The sections in their groups, a little apart down the side. */
 export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [
-  ['agents', 'code-hosts'],
+  ['agents', 'skills', 'code-hosts'],
   ['this-mac', 'reviews', 'notifications', 'appearance', 'editor'],
   ['about'],
 ]
@@ -33,6 +33,11 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
     title: 'Agents',
     lede: `The agents on ${device.this}, the accounts each signs in with, and the models their work may use.`,
     icon: 'agents',
+  },
+  skills: {
+    title: 'Skills',
+    lede: 'What each task’s lead is given as it starts, whichever agent leads it: the skills Althar ships and any you install from GitHub.',
+    icon: 'knowledge',
   },
   'code-hosts': {
     title: 'Code hosts and trackers',

@@ -132,6 +132,20 @@ export const definition = (
         },
       }
     : {}),
+  // Given a run's skills as the registry's agents of the same id are: in its session, as an added directory, in its environment; the rest none.
+  ...(id === 'claude-code'
+    ? { skills: { layout: 'claude-plugin' as const, capabilities: ['subagents'], via: { kind: 'meta' as const } } }
+    : id === 'codex'
+      ? { skills: { layout: 'agents' as const, capabilities: [], via: { kind: 'directory' as const } } }
+      : id === 'opencode'
+        ? {
+            skills: {
+              layout: 'plain' as const,
+              capabilities: ['subagents'],
+              via: { kind: 'env' as const, env: (folder: string) => ({ FAKE_SKILLS: folder }) },
+            },
+          }
+        : { skills: null }),
   // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
   reviewing: { outside: id !== 'codex' },
   knownGaps: [],
@@ -251,6 +265,8 @@ export const runtime = (
     readonly idle?: IdleOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
+    /** The skills store and local catalog; no run has Althar-selected skills without it. */
+    readonly skills?: RuntimeOptions['skills']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
   } = {},
@@ -280,6 +296,7 @@ export const runtime = (
     ...(more.load === undefined ? {} : { load: more.load }),
     ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
+    ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, ...more.busy },
   })
 

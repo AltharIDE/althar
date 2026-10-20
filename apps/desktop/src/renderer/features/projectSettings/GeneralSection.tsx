@@ -1,5 +1,15 @@
 import type { ProjectInk as Inks } from '@althar/contracts'
-import { ProjectIdentity, type ProjectInk, SettingGroup, SettingList, SettingSwitch } from '@althar/ui'
+import {
+  ProjectIdentity,
+  type ProjectInk,
+  RepositoryFiles,
+  repositoryFilesWords,
+  SettingGroup,
+  SettingList,
+  SettingSwitch,
+} from '@althar/ui'
+
+import { device } from '../../shared/device'
 
 import { contractInk, kitInk } from '../../shared/inks'
 import s from './ProjectSettings.module.css'
@@ -10,7 +20,9 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
  * What a project is, and how its tasks work: its name and the ink its mark
  * is drawn in, changed in place; then the switches every task follows, each
  * with one line on when it acts. One that didn't hold says why under it.
- * Allowing everything is a rule, so it is with the rules.
+ * Whether skill and OpenSpec files a task commits may stay in its
+ * repositories' commits, and be pushed, are three switches below, each off
+ * until turned on. Allowing everything is a rule, so it is with the rules.
  */
 
 export const text = {
@@ -23,7 +35,11 @@ export const text = {
     title: 'Move issues to In Progress',
     line: 'When a task starts from a Linear, Jira or Trello issue.',
   },
+  repositoryFiles: 'Repository files',
 }
+
+/** The repository files' words, with this device named as the rest of the window names it. */
+const filesText = repositoryFilesWords(device.this)
 
 /** A switch's note: when it acts, and why it didn't hold where it didn't. */
 function SwitchNote({ line, failed }: { line: string; failed: string | null }) {
@@ -85,6 +101,16 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
               />
             ))}
           </SettingList>
+        </SettingGroup>
+      )}
+      {rules !== null && (
+        <SettingGroup title={text.repositoryFiles} headingLevel={HEADING.part}>
+          <RepositoryFiles
+            value={rules.repositoryFiles}
+            onChange={model.setRepositoryFile}
+            text={filesText}
+            {...(model.ruleFailed?.rule === 'repositoryFiles' ? { error: model.ruleFailed.message } : {})}
+          />
         </SettingGroup>
       )}
     </>
