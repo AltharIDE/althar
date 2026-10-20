@@ -489,6 +489,31 @@ describe('issue drafts', () => {
     }).pipe(Effect.provide(withQueries({ linear, trello })))
   })
 
+  it.live('go where the one tracker that has the place named is, though another couldn’t say where its issues go', () => {
+    const linear = linearWith(MERIDIAN, PLATFORM)
+    const trello = makeFakeService({ product: 'trello' })
+    trello.addContainer({ id: 'board-1', name: 'Roadmap' })
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      yield* connect('trello')
+      const { projectId, access } = yield* project()
+      trello.failNext('containers', 'unreachable')
+      assert.match(
+        yield* callTool(access, 'draft_issue', { title: 'On Platform', container: 'PLT' }),
+        /^Drafted the issue “On Platform” on Linear, in Platform\./,
+      )
+      // Asked of one tracker alone, its failure to say stands.
+      trello.failNext('containers', 'unreachable')
+      assert.match(
+        yield* callTool(access, 'draft_issue', { title: 'On the roadmap', tracker: 'trello', container: 'Roadmap' }),
+        /^Althar couldn't ask the tracker where issues go/,
+      )
+      const [card] = yield* cardsOf(projectId)
+      assert.deepInclude(card, { tracker: 'Linear', container: 'Platform', title: 'On Platform' })
+      assert.lengthOf(yield* cardsOf(projectId), 1)
+    }).pipe(Effect.provide(withQueries({ linear, trello })))
+  })
+
   it.live('tell the coordinator what the person did with them', () => {
     const linear = linearWith(MERIDIAN)
     return Effect.gen(function* () {

@@ -234,6 +234,39 @@ describe('an issue', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
   })
 
+  it.live('is left as it is, without a word, on a tracker with no In Progress of its own', () => {
+    const { working } = hosted()
+    const fake = linear()
+    // As GitHub's and GitLab's issues are: open or closed, with nothing in between.
+    const tracker = { ...fake, capabilities: { ...fake.capabilities, starts: false } }
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { taskId, threadId } = yield* fromIssue(working)
+      yield* (yield* Issues).started(taskId)
+      yield* Effect.sleep(Duration.millis(300))
+      assert.notInclude(fake.calls, 'start')
+      assert.lengthOf(yield* outcomes(taskId), 0)
+      assert.deepStrictEqual(yield* notices(threadId), [])
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
+  })
+
+  it.live('says it couldn’t be moved once its tracker’s connection is gone, and stays as it was', () => {
+    const { working } = hosted()
+    const tracker = linear()
+    return Effect.gen(function* () {
+      const connection = yield* connect('linear')
+      const { taskId, threadId } = yield* fromIssue(working)
+      yield* (yield* Connections).remove(connection.id, (yield* Instance).personId)
+      yield* (yield* Issues).started(taskId)
+      const [failed] = yield* until(outcomes(taskId), (rows) => rows.length > 0)
+      assert.strictEqual(failed?.type, 'external_link.issue_start_failed')
+      const [said] = yield* notices(threadId)
+      assert.match(said ?? '', /^Couldn’t move MER-231 to In Progress: /)
+      assert.notInclude(tracker.calls, 'start')
+      assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'todo')
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
+  })
+
   it.live('stays where it is when the project’s rules say not to move issues', () => {
     const { working } = hosted()
     const tracker = linear()
