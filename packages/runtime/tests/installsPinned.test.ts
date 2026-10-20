@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,7 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit } from 'effect'
 import { zipSync } from 'fflate'
 
-import { Installs } from '../src/Installs'
+import { Installs, type InstallsOptions } from '../src/Installs'
 
 /*
  * A pinned agent's download (Antigravity's server, here a stand-in) where
@@ -82,5 +83,101 @@ describe('a pinned download that can’t be kept', () => {
     const spoiled = whole.slice()
     for (let at = 60; at < 120; at += 1) spoiled[at] = 0xff
     await refused(spoiled, { 'agy_acp_server.par': sum(text(SERVER.repeat(400))) }, "couldn't be unpacked")
+  })
+})
+
+describe('a pinned download that isn’t what it should hold', () => {
+  const refused = async (zip: Uint8Array, files: Readonly<Record<string, string>>, says: string) => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+    const exit = await install(root, 'linux', pinnedTo('linux-x64', zip, files))
+    assert.isTrue(Exit.isFailure(exit))
+    assert.include(JSON.stringify(exit), says)
+    assert.isFalse(existsSync(join(root, 'antigravity', 'current')))
+  }
+
+  it('keeps nothing of what isn’t a zip at all: it holds none of the files pinned', async () => {
+    await refused(
+      text('not a zip at all, though it is what was pinned'.repeat(20)),
+      { 'agy_acp_server.par': sum(text(SERVER)) },
+      "didn't hold what it was pinned with",
+    )
+  })
+
+  it('stops at the first file it shouldn’t hold, whatever follows', async () => {
+    const zip = zipSync({ 'planted.sh': text('echo one'), 'also.sh': text('echo two'), 'agy_acp_server.par': text(SERVER) })
+    await refused(zip, { 'agy_acp_server.par': sum(text(SERVER)) }, "couldn't be unpacked")
+  })
+})
+
+describe('where an agent’s command is', () => {
+  const opencode = agents.opencode
+
+  it('finds the program a level or two down in its release, as archives nest it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'althar-release-'))
+    mkdirSync(join(dir, 'release', 'bin'), { recursive: true })
+    writeFileSync(join(dir, 'release', 'README'), 'OpenCode\n')
+    writeFileSync(join(dir, 'release', 'bin', 'opencode'), '#!/bin/sh\necho 9.9.9\n', { mode: 0o755 })
+    const file = join(dir, 'opencode-linux-x64.tar.gz')
+    execFileSync('tar', ['-czf', file, '-C', dir, 'release'])
+    const bytes = readFileSync(file)
+    const fetch = async (url: string) =>
+      url.endsWith('/releases/latest')
+        ? Response.json({
+            tag_name: 'v1.18.35',
+            assets: [
+              {
+                name: 'opencode-linux-x64.tar.gz',
+                browser_download_url: 'https://github.example/download',
+                digest: `sha256:${sum(bytes)}`,
+              },
+            ],
+          })
+        : new Response(new Uint8Array(bytes))
+    const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
+    const layer = Installs.layer({ root, platform: 'linux', arch: 'x64', musl: false, fetch, search: { env: { PATH: '' }, dirs: [] } })
+    const done = await Effect.runPromiseExit(
+      Effect.provide(
+        Effect.flatMap(Installs, (installs) => installs.install(opencode)),
+        layer,
+      ),
+    )
+    assert.isTrue(Exit.isSuccess(done), JSON.stringify(done))
+    assert.strictEqual(execFileSync(join(root, 'opencode', 'current', 'opencode'), { encoding: 'utf8' }).trim(), '9.9.9')
+  })
+
+  it('takes the build for this computer where there is no musl one, and keeps none with nowhere to keep it', async () => {
+    const state = (options: Partial<InstallsOptions>) =>
+      Effect.runPromise(
+        Effect.provide(
+          Effect.flatMap(Installs, (installs) => installs.state(opencode)),
+          Installs.layer({ platform: 'darwin', arch: 'x64', musl: true, search: { env: { PATH: '' }, dirs: [] }, ...options }),
+        ),
+      )
+    assert.isTrue((await state({ root: mkdtempSync(join(tmpdir(), 'althar-agents-')) })).downloadable)
+    const nowhere = await state({})
+    assert.isFalse(nowhere.downloadable)
+    assert.isNull(nowhere.located)
+  })
+
+  it('looks where the person’s own commands are where it isn’t told where to look', () =>
+    Effect.runPromise(
+      Effect.provide(
+        Effect.map(Installs, (installs) =>
+          installs.locate({ ...opencode, cli: { name: 'althar-no-such-command', guide: 'https://althar.test' } }),
+        ),
+        Installs.layer({}),
+      ),
+    ).then((located) => assert.isNull(located)))
+
+  it('runs here an agent with nothing to download, where the device has none of its own', async () => {
+    const onDevice = { reachable: true, where: () => null, run: () => ({ command: 'flatpak-spawn', args: [] }) }
+    const located = await Effect.runPromise(
+      Effect.provide(
+        Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])),
+        Installs.layer({ onDevice, search: { env: { PATH: '' }, dirs: [] } }),
+      ),
+    )
+    assert.strictEqual(located?.whose, 'bundled')
+    assert.isUndefined(located?.out)
   })
 })
