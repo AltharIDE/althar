@@ -124,7 +124,13 @@ describe('the home', () => {
 
         // Asks the rules answered are counted, not listed; the person's own aren't the loop's.
         const asker = yield* planned(busy.projectId, 'Write it down', 'Nothing to say.')
-        yield* until(turns(asker.threadId), (rows) => rows.length > 0, Duration.seconds(40))
+        // Its first turn ends without the step finished, so Althar nudges it with a turn of its own; said before that, the words
+        // are folded into the nudge and the agent no longer hears them as itself.
+        yield* until(
+          turns(asker.threadId),
+          (rows) => rows.length > 1 && rows.every((row) => row.state === 'completed'),
+          Duration.seconds(40),
+        )
         yield* sessions.send({
           envelope: yield* Runtime.envelope('thread.send', {}),
           threadId: asker.threadId,

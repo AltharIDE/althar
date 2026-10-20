@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, realpathSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -164,10 +164,22 @@ describe('the process transport', () => {
 
   it.live('removes the temporary folder of a command that never started', () =>
     Effect.gen(function* () {
-      const before = readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length
+      // Counted in a system temporary folder of its own: other test files make folders like it in the shared one meanwhile.
+      const own = mkdtempSync(join(tmpdir(), 'althar-own-temp-'))
+      const was = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP }
+      process.env.TMPDIR = process.env.TEMP = process.env.TMP = own
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          for (const [name, value] of Object.entries(was)) {
+            if (value === undefined) delete process.env[name]
+            else process.env[name] = value
+          }
+          rmSync(own, { recursive: true, force: true })
+        }),
+      )
       yield* Effect.flip(Effect.scoped(spawnOwned({ command: 'althar-no-such-agent', args: [], privateTemp: true }, here)))
-      assert.isAtMost(readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length, before)
-    }),
+      assert.deepStrictEqual(readdirSync(own), [])
+    }).pipe(Effect.scoped),
   )
 
   it.live('fails to start a command that does not exist', () =>
