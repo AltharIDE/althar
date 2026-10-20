@@ -270,4 +270,11 @@ describe('how a task’s pull request is told to the coordinator', () => {
       /Possibly out of date: GitHub is not connected, so this is as last seen\./,
     )
   })
+
+  it('says several commits after a merged pull request as several, for the person to open a new pull request for them', () => {
+    assert.include(
+      sectionWords(facts([change({ state: 'merged', draft: false })], { unshipped: 3 })),
+      "3 commits on the task's branch are after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for them from the task, or leaves them out.",
+    )
+  })
 })

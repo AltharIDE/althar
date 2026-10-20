@@ -1,6 +1,6 @@
 import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, dirname, isAbsolute, join, win32 } from 'node:path'
+import { delimiter, dirname, isAbsolute, posix, win32 } from 'node:path'
 
 import type { AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
 
@@ -32,14 +32,15 @@ export const usualDirs = (
       ...(env.APPDATA === undefined ? [] : [at(env.APPDATA, 'npm')]),
     ]
   }
+  const at = (...parts: ReadonlyArray<string>) => posix.join(...parts)
   return [
     ...(platform === 'darwin' ? ['/opt/homebrew/bin'] : ['/home/linuxbrew/.linuxbrew/bin']),
     '/usr/local/bin',
-    join(home, '.local', 'bin'),
-    join(home, '.opencode', 'bin'),
-    join(home, '.grok', 'bin'),
-    join(home, '.kimi-code', 'bin'),
-    join(home, '.bun', 'bin'),
+    at(home, '.local', 'bin'),
+    at(home, '.opencode', 'bin'),
+    at(home, '.grok', 'bin'),
+    at(home, '.kimi-code', 'bin'),
+    at(home, '.bun', 'bin'),
   ]
 }
 
@@ -112,11 +113,11 @@ export const locate = (
   const env = options.env ?? process.env
   const isExecutable = options.isExecutable ?? executable
   const names = namesOf(command, platform, env, options.scripts === true)
-  const separator = platform === 'win32' ? ';' : delimiter
-  const at = (dir: string, name: string) => (platform === 'win32' ? win32.join(dir, name) : join(dir, name))
+  // Each system's own: the one asked about, not necessarily this one.
+  const paths = platform === 'win32' ? win32 : posix
   const inDirs = (dirs: ReadonlyArray<string>) =>
-    dirs.flatMap((dir) => (dir === '' ? [] : names.map((name) => at(dir, name)))).find(isExecutable)
-  const onPath = inDirs((env.PATH ?? env.Path ?? '').split(separator))
+    dirs.flatMap((dir) => (dir === '' ? [] : names.map((name) => paths.join(dir, name)))).find(isExecutable)
+  const onPath = inDirs((env.PATH ?? env.Path ?? '').split(paths.delimiter))
   if (onPath !== undefined) return { command: platform === 'win32' ? onPath : command, whose: 'theirs' }
   const usual = inDirs(options.dirs ?? usualDirs(platform, homedir(), env))
   if (usual !== undefined) return { command: usual, whose: 'theirs' }

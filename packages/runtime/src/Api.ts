@@ -26,6 +26,7 @@ import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
 import { Changes } from './Changes'
+import { codeRootOf } from './code'
 import { NotFound } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
@@ -634,6 +635,8 @@ export const handlers = Api.toLayer(
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
+      FindCode: ({ threadId, messages }) => api(queries.findCode(threadId, messages)),
+      ReadCode: ({ threadId, path, commit, line }) => api(queries.readCode(threadId, path, commit, line)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
@@ -1237,6 +1240,24 @@ export const handlers = Api.toLayer(
             const file = path === undefined ? null : yield* Effect.sync(() => realOf(resolve(folder, path)))
             if (file !== null && !isInside(folder, file)) return false
             return yield* open(editor, folder, file, line ?? null)
+          }),
+        ),
+      // A file an agent named: a task's in its folder, as OpenInEditor opens it; the coordinator's in the person's own checkout.
+      OpenCode: ({ threadId, editor, path, line }) =>
+        api(
+          Effect.gen(function* () {
+            const open = config.editors?.open
+            if (open === undefined) return false
+            const place = yield* queries.codeRoots(threadId)
+            const found = codeRootOf(place, path)
+            if (found === null) return false
+            // A task's folder as OpenInEditor opens it, with several worktrees the one that holds them; else the repository's.
+            const whole = place.kind === 'task' && place.roots.length > 1
+            const folder = yield* Effect.sync(() => realOf(whole ? dirname(found.root.editor) : found.root.editor))
+            // Never a path that leaves the folder, by `..` or by a link; the folder alone where the file isn't there, as on another branch.
+            const file = yield* Effect.sync(() => realOf(resolve(folder, whole ? path : found.path)))
+            if (!isInside(folder, file)) return false
+            return yield* open(editor, folder, isThere(file) ? file : null, isThere(file) ? (line ?? null) : null)
           }),
         ),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),

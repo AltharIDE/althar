@@ -183,14 +183,14 @@ describe('finding an agent’s command', () => {
   })
 
   it('finds the Claude Code the Agent SDK ships for this computer, and none for one it has no build for', () => {
-    expect(bundledClaude()).toMatch(/claude-agent-sdk-[a-z0-9-]+\/claude(\.exe)?$/)
+    expect(bundledClaude()).toMatch(/claude-agent-sdk-[a-z0-9-]+[/\\]claude(\.exe)?$/)
     expect(bundledClaude('plan9', 'mips')).toBeNull()
     expect(isMusl('darwin')).toBe(false)
   })
 
   it('finds the Codex its adapter ships as its own program, which needs no Node on the PATH', () => {
     const codex = bundledCodex()
-    expect(codex).toMatch(/\/vendor\/[a-z0-9_-]+\/bin\/codex(\.exe)?$/)
+    expect(codex).toMatch(/[/\\]vendor[/\\][a-z0-9_-]+[/\\]bin[/\\]codex(\.exe)?$/)
     expect(existsSync(codex ?? '')).toBe(true)
     expect(bundledCodex('plan9', 'mips')).toBeNull()
   })

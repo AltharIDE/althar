@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
 
 import { Effect } from 'effect'
 
@@ -35,7 +35,7 @@ const PORTAL = '/run/flatpak/doc'
  */
 export const gitIn = (cwd: string, args: ReadonlyArray<string>): { readonly args: ReadonlyArray<string>; readonly cwd?: string } =>
   cwd === PORTAL || cwd.startsWith(`${PORTAL}/`)
-    ? { args: ['--git-dir', join(cwd, '.git'), '--work-tree', cwd, ...args], cwd: homedir() }
+    ? { args: ['--git-dir', posix.join(cwd, '.git'), '--work-tree', cwd, ...args], cwd: homedir() }
     : { args, cwd }
 
 /** What marks a copy made to read someone else's code, in its git folder (`addReadCopy`). */

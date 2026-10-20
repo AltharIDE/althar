@@ -38,6 +38,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Document/Document.tsx': 'the fold at the foot of a document',
   'thread/Step/Step.tsx': 'the caret that opens a step',
   'thread/Diff/Diff.tsx': 'a folded stretch of unchanged lines, which opens in place',
+  'thread/Code/CodeLines.tsx': 'a gap in a file’s lines, stretched across them, which shows more of them in place',
   'thread/Evidence/Evidence.tsx': 'the row of a run or a response, which folds what it printed',
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
   /* an option in a list or a rail */
@@ -54,6 +55,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
   'thread/Gallery/Gallery.tsx': 'a screenshot, large, which opens full size',
   'thread/Inline/Inline.tsx': 'a reference or citation inside prose',
+  'thread/Code/CodeRef.tsx': 'a name that names code inside prose, as a chip or as its underlined words',
+  'thread/Code/CodeView.tsx': 'a file to open instead, as a path’s chip; the way to the other version, a word at the end of a note',
   'thread/You/You.tsx': 'an attachment’s chip',
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',
   'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',

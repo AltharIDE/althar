@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
@@ -107,16 +109,16 @@ describe('an agent’s homes', () => {
     const usual = (env: Record<string, string>) =>
       Object.values(agents).map((agent) => [agent.home.variable, agent.home.usual(env, '/Users/me')])
     assert.deepStrictEqual(usual({}), [
-      ['CLAUDE_CONFIG_DIR', '/Users/me/.claude'],
-      ['CODEX_HOME', '/Users/me/.codex'],
-      ['XDG_DATA_HOME', '/Users/me/.local/share'],
-      ['COPILOT_HOME', '/Users/me/.copilot'],
-      ['JUNIE_HOME', '/Users/me/.junie'],
-      ['GROK_HOME', '/Users/me/.grok'],
-      ['KIMI_CODE_HOME', '/Users/me/.kimi-code'],
-      ['VIBE_HOME', '/Users/me/.vibe'],
-      ['QWEN_HOME', '/Users/me/.qwen'],
-      ['GEMINI_HOME', '/Users/me/.gemini'],
+      ['CLAUDE_CONFIG_DIR', join('/Users/me', '.claude')],
+      ['CODEX_HOME', join('/Users/me', '.codex')],
+      ['XDG_DATA_HOME', join('/Users/me', '.local', 'share')],
+      ['COPILOT_HOME', join('/Users/me', '.copilot')],
+      ['JUNIE_HOME', join('/Users/me', '.junie')],
+      ['GROK_HOME', join('/Users/me', '.grok')],
+      ['KIMI_CODE_HOME', join('/Users/me', '.kimi-code')],
+      ['VIBE_HOME', join('/Users/me', '.vibe')],
+      ['QWEN_HOME', join('/Users/me', '.qwen')],
+      ['GEMINI_HOME', join('/Users/me', '.gemini')],
     ])
     assert.deepStrictEqual(
       usual({

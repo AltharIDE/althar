@@ -12,7 +12,14 @@ import { agents } from '../src/registry'
 import { fakeAgentMain, scenarios } from '../src/testing'
 import { text } from './contract'
 
-const fakeProcess = { _tag: 'Process' as const, spec: { command: 'bun', args: [fakeAgentMain] }, cwd: '/tmp' }
+/** Where the processes run: the system's temporary folder, which every system has, as `/tmp` isn't on Windows. */
+const here = tmpdir()
+/** Stopping a process group is POSIX's: Windows has none, and how Althar stops an agent there is still to come. */
+const windows = process.platform === 'win32'
+/** A command for any system: Node, running `script`. */
+const onNode = (script: string) => ({ command: process.execPath, args: ['-e', script] })
+
+const fakeProcess = { _tag: 'Process' as const, spec: { command: 'bun', args: [fakeAgentMain] }, cwd: here }
 const reject = () => Effect.succeed({ decision: 'reject' as const })
 
 const isAlive = (pid: number) => {
@@ -38,8 +45,9 @@ describe('the process transport', () => {
         const connection = yield* connect({ transport: fakeProcess, onPermission: reject })
         assert.isAbove(connection.process?.pid ?? 0, 0)
         assert.match(connection.process?.environmentDigest ?? '', /^[0-9a-f]{64}$/)
-        assert.isFalse(Number.isNaN(Date.parse(connection.process?.osStartedAt ?? '')))
-        const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+        // `ps` says when it started; Windows has no `ps`.
+        if (!windows) assert.isFalse(Number.isNaN(Date.parse(connection.process?.osStartedAt ?? '')))
+        const session = yield* connection.newSession({ cwd: here, mode: 'ask' })
         assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
       }),
     ),
@@ -51,7 +59,7 @@ describe('the process transport', () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* connect({ transport: { ...fakeProcess, capture: (frame) => frames.push(frame) }, onPermission: reject })
-          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          const session = yield* connection.newSession({ cwd: here, mode: 'ask' })
           yield* Stream.runCollect(session.prompt(scenarios.hello))
         }),
       )
@@ -69,7 +77,7 @@ describe('the process transport', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const connection = yield* connect({ transport: fakeProcess, onPermission: reject })
-        const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+        const session = yield* connection.newSession({ cwd: here, mode: 'ask' })
         const error = yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.exit)))
         assert.instanceOf(error, AgentExited)
         assert.strictEqual((error as AgentExited).code, 3)
@@ -94,7 +102,7 @@ describe('the process transport', () => {
               Effect.onInterrupt(() => Effect.sync(() => (dropped = true))),
             ),
         })
-        const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+        const session = yield* connection.newSession({ cwd: here, mode: 'ask' })
         const turn = yield* Effect.forkChild(Effect.flip(Stream.runCollect(session.prompt(scenarios.question))))
         yield* Deferred.await(asked)
         process.kill(connection.process?.pid ?? 0, 'SIGKILL')
@@ -108,7 +116,7 @@ describe('the process transport', () => {
     ),
   )
 
-  it.live('stops the whole process group when the scope closes, and says how', () =>
+  it.live.skipIf(windows)('stops the whole process group when the scope closes, and says how', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
       const connection = yield* Scope.provide(scope)(connect({ transport: fakeProcess, onPermission: reject }))
@@ -124,7 +132,7 @@ describe('the process transport', () => {
     Effect.scoped(
       Effect.gen(function* () {
         for (let n = 0; n < 20; n += 1) {
-          const owned = yield* spawnOwned({ command: '/bin/sh', args: ['-c', 'echo done; exit 3'] }, '/tmp')
+          const owned = yield* spawnOwned(onNode("process.stdout.write('done\\n'); process.exitCode = 3"), here)
           assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
           const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
           assert.strictEqual(printed, 'done\n')
@@ -133,7 +141,7 @@ describe('the process transport', () => {
     ),
   )
 
-  it.live('gives a process that asks a temporary folder of its own, and removes it once it has stopped', () =>
+  it.live.skipIf(windows)('gives a process that asks a temporary folder of its own, and removes it once it has stopped', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
       const owned = yield* Scope.provide(scope)(
@@ -157,7 +165,7 @@ describe('the process transport', () => {
   it.live('removes the temporary folder of a command that never started', () =>
     Effect.gen(function* () {
       const before = readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length
-      yield* Effect.flip(Effect.scoped(spawnOwned({ command: 'althar-no-such-agent', args: [], privateTemp: true }, '/tmp')))
+      yield* Effect.flip(Effect.scoped(spawnOwned({ command: 'althar-no-such-agent', args: [], privateTemp: true }, here)))
       assert.isAtMost(readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length, before)
     }),
   )
@@ -165,17 +173,17 @@ describe('the process transport', () => {
   it.live('fails to start a command that does not exist', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const error = yield* Effect.flip(spawnOwned({ command: 'althar-no-such-agent', args: [] }, '/tmp'))
+        const error = yield* Effect.flip(spawnOwned({ command: 'althar-no-such-agent', args: [] }, here))
         assert.instanceOf(error, AgentStartFailed)
       }),
     ),
   )
 
-  it.live('kills a process that ignores TERM once the grace period ends', () =>
+  it.live.skipIf(windows)('kills a process that ignores TERM once the grace period ends', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
       const owned = yield* Scope.provide(scope)(
-        spawnOwned({ command: 'bun', args: ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"] }, '/tmp', {
+        spawnOwned({ command: 'bun', args: ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"] }, here, {
           grace: '200 millis',
         }),
       )
@@ -187,7 +195,7 @@ describe('the process transport', () => {
     }),
   )
 
-  it.live('stops what an agent left running after it exited', () =>
+  it.live.skipIf(windows)('stops what an agent left running after it exited', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
       const owned = yield* Scope.provide(scope)(spawnOwned({ command: '/bin/sh', args: ['-c', 'sleep 30 & echo $! >&2'] }, '/tmp'))
@@ -206,7 +214,7 @@ describe('the process transport', () => {
       const heard: Array<readonly [string, number]> = []
       const scope = yield* Scope.make()
       const owned = yield* Scope.provide(scope)(
-        spawnOwned({ command: '/bin/sh', args: ['-c', 'echo one >&2; echo two >&2'] }, '/tmp', {
+        spawnOwned(onNode("process.stderr.write('one\\n'); process.stderr.write('two\\n')"), here, {
           stderr: (chunk, pid) => heard.push([chunk, pid]),
         }),
       )
@@ -220,7 +228,7 @@ describe('the process transport', () => {
     }),
   )
 
-  it.live('stops an adapter on a Node of its own, and all it started, though it ignores TERM', () =>
+  it.live.skipIf(windows)('stops an adapter on a Node of its own, and all it started, though it ignores TERM', () =>
     Effect.gen(function* () {
       // A Node at a path of its own, as the app ships one: not the binary the runtime runs on.
       const node = join(mkdtempSync(join(tmpdir(), 'althar-node-')), 'node')
@@ -234,7 +242,7 @@ describe('the process transport', () => {
       ].join(';')
       const scope = yield* Scope.make()
       const owned = yield* Scope.provide(scope)(
-        spawnOwned({ command: node, args: ['-e', adapter], env: { ALTHAR_NODE: node } }, '/tmp', { grace: '200 millis' }),
+        spawnOwned({ command: node, args: ['-e', adapter], env: { ALTHAR_NODE: node } }, here, { grace: '200 millis' }),
       )
       const reader = owned.stdout.getReader()
       const said = new TextDecoder().decode((yield* Effect.promise(() => reader.read())).value)
@@ -254,7 +262,7 @@ describe('the process transport', () => {
   it.live('has nothing to stop when the group has already gone', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
-      const owned = yield* Scope.provide(scope)(spawnOwned({ command: '/usr/bin/true', args: [] }, '/tmp'))
+      const owned = yield* Scope.provide(scope)(spawnOwned(onNode(''), here))
       yield* Deferred.await(owned.exited)
       yield* Effect.sleep('50 millis')
       yield* Scope.close(scope, Exit.void)
@@ -271,15 +279,16 @@ describe('the process transport', () => {
         onDevice: (at: { cwd?: string; env: Readonly<Record<string, string | undefined>> }) => {
           said.push(at)
           return {
-            command: '/bin/sh',
-            args: ['-c', 'sleep 0.1; printf %s "$PWD|$SMOKE"'],
+            ...onNode(
+              "setTimeout(() => process.stdout.write(`${require('node:fs').realpathSync(process.cwd())}|${process.env.SMOKE}`), 100)",
+            ),
             env: { SMOKE: 'yes' },
             inheritEnv: ['DBUS_SESSION_BUS_ADDRESS'],
           }
         },
       }
       const scope = yield* Scope.make()
-      const owned = yield* Scope.provide(scope)(spawnOwned(spec, '/tmp'))
+      const owned = yield* Scope.provide(scope)(spawnOwned(spec, here))
       const reader = owned.stdout.getReader()
       let text = ''
       for (;;) {
@@ -288,8 +297,8 @@ describe('the process transport', () => {
         text += new TextDecoder().decode(value)
       }
       yield* Scope.close(scope, Exit.void)
-      assert.strictEqual(text, `${realpathSync('/tmp')}|yes`)
-      assert.strictEqual(said[0]?.cwd, '/tmp')
+      assert.strictEqual(text, `${realpathSync(here)}|yes`)
+      assert.strictEqual(said[0]?.cwd, here)
       assert.strictEqual(said[0]?.env.SMOKE, undefined)
     }),
   )

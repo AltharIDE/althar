@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { IssueDraftCard } from '@althar/contracts'
-import { makeLinear, products } from '@althar/connectors'
+import { ConnectorFailed, makeLinear, products } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
@@ -14,8 +14,9 @@ import { Connectors } from '../src/Config'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
+import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
-import { DraftClosed, DraftUntitled, IssueDrafts } from '../src/IssueDrafts'
+import { DraftClosed, DraftUntitled, IssueDrafts, refusedDraft } from '../src/IssueDrafts'
 import { Issues } from '../src/Issues'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -487,6 +488,106 @@ describe('issue drafts', () => {
         "This account can't file issues anywhere on Trello.",
       )
     }).pipe(Effect.provide(withQueries({ linear, trello })))
+  })
+
+  it.live('go where the one tracker that has the place named is, though another couldn’t say where its issues go', () => {
+    const linear = linearWith(MERIDIAN, PLATFORM)
+    const trello = makeFakeService({ product: 'trello' })
+    trello.addContainer({ id: 'board-1', name: 'Roadmap' })
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      yield* connect('trello')
+      const { projectId, access } = yield* project()
+      trello.failNext('containers', 'unreachable')
+      assert.match(
+        yield* callTool(access, 'draft_issue', { title: 'On Platform', container: 'PLT' }),
+        /^Drafted the issue “On Platform” on Linear, in Platform\./,
+      )
+      // Asked of one tracker alone, its failure to say stands.
+      trello.failNext('containers', 'unreachable')
+      assert.match(
+        yield* callTool(access, 'draft_issue', { title: 'On the roadmap', tracker: 'trello', container: 'Roadmap' }),
+        /^Althar couldn't ask the tracker where issues go/,
+      )
+      const [card] = yield* cardsOf(projectId)
+      assert.deepInclude(card, { tracker: 'Linear', container: 'Platform', title: 'On Platform' })
+      assert.lengthOf(yield* cardsOf(projectId), 1)
+    }).pipe(Effect.provide(withQueries({ linear, trello })))
+  })
+
+  it.live('take a tracker or a place named as nothing as not named, and list the first twenty places where there are more', () => {
+    const many = Array.from({ length: 25 }, (_, index) => ({ id: `team-${index + 1}`, key: `T${index + 1}`, name: `Team ${index + 1}` }))
+    const linear = linearWith(...many)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { access } = yield* project()
+      const asked = yield* callTool(access, 'draft_issue', { title: 'Somewhere', tracker: ' ', container: '' })
+      assert.isTrue(asked.startsWith('Say where on Linear it goes, as container: T1 (Team 1), T2 (Team 2), '), asked)
+      assert.isTrue(asked.endsWith('T20 (Team 20), and 5 more.'), asked)
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('say a tracker’s refusal in Althar’s words where the tracker gave none of its own', () => {
+    const fake = linearWith(MERIDIAN)
+    const refusals: Array<ConnectorFailed['reason']> = ['forbidden', 'rejected']
+    // A tracker that refuses without a word, as some answer a 403 or a 422.
+    const linear: FakeService = {
+      ...fake,
+      create: () => Effect.fail(new ConnectorFailed({ product: 'linear', reason: refusals.shift() ?? 'rejected', message: '' })),
+    }
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
+      const [card] = yield* cardsOf(projectId)
+      assert.deepInclude(yield* drafts.file(card?.draftId ?? '', instance.personId), {
+        state: 'failed',
+        error: 'Linear says this account may not file issues there',
+      })
+      assert.deepInclude(yield* drafts.file(card?.draftId ?? '', instance.personId), { state: 'failed', error: 'Linear refused it.' })
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('are filed once when the person presses File twice at once', () => {
+    const fake = linearWith(MERIDIAN)
+    // A tracker that takes a moment to file one, as a real one does.
+    const linear: FakeService = {
+      ...fake,
+      create: (container, issue) => Effect.andThen(Effect.sleep('300 millis'), fake.create(container, issue)),
+    }
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
+      const [card] = yield* cardsOf(projectId)
+      const both = yield* Effect.all(
+        [drafts.file(card?.draftId ?? '', instance.personId), drafts.file(card?.draftId ?? '', instance.personId)],
+        { concurrency: 'unbounded' },
+      )
+      assert.sameMembers(
+        both.map((one) => one.state),
+        ['filing', 'filed'],
+      )
+      assert.lengthOf(fake.created, 1)
+      assert.strictEqual((yield* cardsOf(projectId))[0]?.state, 'filed')
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('that aren’t there can’t be filed or discarded', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      assert.instanceOf(yield* Effect.flip(drafts.file('draft_none', instance.personId)), NotFound)
+      assert.instanceOf(yield* Effect.flip(drafts.discard('draft_none', instance.personId)), NotFound)
+      // A failure that isn't about where it goes reaches the tool as it is.
+      const other = new Error('The store is busy')
+      assert.strictEqual(refusedDraft(other), other)
+    }).pipe(Effect.provide(withQueries({ linear })))
   })
 
   it.live('tell the coordinator what the person did with them', () => {

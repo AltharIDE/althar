@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, win32 } from 'node:path'
+import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
@@ -215,7 +215,7 @@ describe('the API', () => {
         assert.deepInclude(shot?.content.pictures[0], { mediaType: 'image/png', width: 480, height: 300, unkept: null })
         const wrote = tools.find((item) => item.content.files.some((file) => file.how === 'wrote'))
         const path = wrote?.content.files[0]?.path ?? ''
-        assert.isTrue(path.endsWith('/docs/notes.md'))
+        assert.match(path, /[/\\]docs[/\\]notes\.md$/)
         const document = yield* client.ReadDocument({ threadId: task.threadId, path })
         assert.deepStrictEqual([document.lines, document.body.startsWith('# Notes')], [8, true])
         assert.deepStrictEqual((yield* client.ReadDocument({ threadId: task.threadId, path: 'docs/notes.md' })).body, document.body)
@@ -1297,6 +1297,77 @@ describe('editors, through the API', () => {
       }),
     ),
   )
+
+  it.live('finds, reads and opens the code an agent names: a task’s in its worktree, the coordinator’s on the default branch', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<[string, string, string | null, number | null]> = []
+        const { client, grant } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (editor, folder, file, line) => Effect.sync(() => void opens.push([editor, folder, file, line])).pipe(Effect.as(true)),
+          },
+        })
+        const folder = realpathSync(repository())
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry later' })
+        const worktree = realpathSync((yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? '')
+        mkdirSync(join(worktree, 'src'))
+        writeFileSync(join(worktree, 'src', 'retry.ts'), 'export function retryLater() {\n  return 1\n}\n')
+
+        // The lead's names, in its worktree as it is: what it hasn't committed, and a name in code it declared there.
+        const named = yield* client.FindCode({
+          threadId: task.threadId,
+          messages: [{ names: ['src/retry.ts:2', 'retry.ts', 'README.md', 'retryLater', 'npm test'] }],
+        })
+        assert.deepStrictEqual(
+          [named.place.kind, named.place.repositories.length, named.place.repositories[0]?.branch.startsWith('althar/')],
+          ['task', 1, true],
+        )
+        assert.deepStrictEqual(
+          named.messages[0]?.found.map((found) => (found.kind === 'file' ? [found.path, found.line, found.changed] : [found.kind])),
+          [
+            ['src/retry.ts', 2, { add: 3, del: 0 }],
+            ['src/retry.ts', undefined, { add: 3, del: 0 }],
+            ['README.md', undefined, null],
+            ['src/retry.ts', 1, { add: 3, del: 0 }],
+          ],
+        )
+        assert.deepInclude(yield* client.ReadCode({ threadId: task.threadId, path: 'src/retry.ts' }), { from: 1, total: 3, cut: false })
+        assert.strictEqual(
+          (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path: '../outside.ts' }))).message,
+          "That file isn't there any more.",
+        )
+        assert.isTrue(
+          yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: 'src/retry.ts', line: 2 }),
+        )
+        // A file that isn't there opens its folder alone; one out of it, nothing.
+        assert.isTrue(
+          yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: 'src/gone.ts', line: 4 }),
+        )
+        assert.isFalse(yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: '../x.ts' }))
+
+        // The coordinator's, on the default branch: what the task wrote isn't there, and opens in the person's own checkout.
+        const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
+        const said = yield* client.FindCode({ threadId, messages: [{ names: ['README.md:1', 'src/retry.ts'] }] })
+        assert.deepStrictEqual([said.place.kind, said.place.repositories[0]?.branch], ['default', 'main'])
+        assert.deepStrictEqual(
+          said.messages[0]?.found.map((found) => [found.kind, found.name]),
+          [
+            ['file', 'README.md:1'],
+            ['missing', 'src/retry.ts'],
+          ],
+        )
+        assert.deepInclude(yield* client.ReadCode({ threadId, path: 'README.md' }), { text: '# Meridian\n', total: 1 })
+        assert.isTrue(yield* client.OpenCode({ commandId: commandId(), threadId, editor: 'zed', path: 'README.md', line: 1 }))
+        assert.deepStrictEqual(opens, [
+          ['zed', worktree, join(worktree, 'src/retry.ts'), 2],
+          ['zed', worktree, null, null],
+          ['zed', folder, join(folder, 'README.md'), 1],
+        ])
+      }),
+    ),
+  )
 })
 
 describe('a project’s menu, through the API', () => {
@@ -1429,7 +1500,7 @@ describe('a project’s menu, through the API', () => {
         assert.lengthOf(yield* client.GetRepositories({ projectId: project.id }), 3)
         // Its tasks' worktrees are in a folder named for it, as it was made.
         assert.strictEqual(
-          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`/${named?.slug}`),
+          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`${sep}${named?.slug}`),
           true,
         )
         assert.isNull(named?.worktrees)
@@ -2434,6 +2505,13 @@ describe('words', () => {
     assert.isUndefined(agentSaid('nothing'))
     assert.strictEqual(summarize(Cause.fail(new AgentExited({ code: 1, signal: null, stderr: '' }))), 'The agent stopped.')
     assert.strictEqual(summarize(Cause.die(new Error('It broke'))), 'It broke.')
+    // An agent that couldn't start says why, as Althar put it then, and nothing more where it had nothing to say.
+    const unstarted = (summary: string) => new SessionFailed({ agentId: 'codex', reason: 'spawn codex ENOENT', summary })
+    assert.strictEqual(
+      summarize(Cause.fail(unstarted("codex isn't installed, or isn't on this computer's PATH."))),
+      "codex isn't installed, or isn't on this computer's PATH.",
+    )
+    assert.strictEqual(summarize(Cause.fail(unstarted(''))), '')
     assert.strictEqual(summarize(Cause.empty), '')
     // A command the sandbox could not take out to the device says what to put right, not that it is missing.
     assert.include(

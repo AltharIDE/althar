@@ -11,6 +11,9 @@ import { zipSync } from 'fflate'
 
 import { Installs, type InstallsOptions } from '../src/Installs'
 
+/** Windows, where what some tests stand on isn't (each says what). */
+const windows = process.platform === 'win32'
+
 /*
  * Downloading an agent for a person who has none: its latest release's file
  * for this computer, kept only when it is exactly what the release says,
@@ -20,15 +23,19 @@ import { Installs, type InstallsOptions } from '../src/Installs'
 const opencode = agents.opencode
 const ASSET = 'opencode-linux-x64.tar.gz'
 
+/** Packs files in a folder as a release's gzipped tar, there: by relative names, which GNU tar on Windows would read a drive (C:) in as a host. */
+const pack = (dir: string, ...names: ReadonlyArray<string>) => {
+  execFileSync('tar', ['-czf', ASSET, ...names], { cwd: dir })
+  return join(dir, ASSET)
+}
+
 /** A release archive with an `opencode` in it that says its version. */
 const archive = (version = '9.9.9') => {
   const dir = mkdtempSync(join(tmpdir(), 'althar-release-'))
   const bin = join(dir, 'opencode')
   writeFileSync(bin, `#!/bin/sh\necho ${version}\n`)
   chmodSync(bin, 0o755)
-  const file = join(dir, ASSET)
-  execFileSync('tar', ['-czf', file, '-C', dir, 'opencode'])
-  return readFileSync(file)
+  return readFileSync(pack(dir, 'opencode'))
 }
 
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
@@ -55,7 +62,8 @@ const using = (options: Partial<InstallsOptions>) => {
 }
 
 describe('downloading an agent', () => {
-  it('keeps its latest release, checked, and runs it where the person has none', async () => {
+  // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
+  it.skipIf(windows)('keeps its latest release, checked, and runs it where the person has none', async () => {
     const { fetch, asked } = github(archive())
     const { root, run } = using({ fetch })
     const before = await run(Effect.flatMap(Installs, (installs) => installs.state(opencode)))
@@ -78,7 +86,8 @@ describe('downloading an agent', () => {
     })
   })
 
-  it('replaces the version before, leaving nothing of the download behind', async () => {
+  // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
+  it.skipIf(windows)('replaces the version before, leaving nothing of the download behind', async () => {
     const first = github(archive('1.0.0'), { tag: 'v1.0.0' })
     const { root, run } = using({ fetch: first.fetch })
     await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
@@ -97,13 +106,7 @@ describe('downloading an agent', () => {
         again,
       ),
     )
-    assert.deepStrictEqual(
-      execFileSync('ls', ['-A', join(root, 'opencode')], { encoding: 'utf8' })
-        .trim()
-        .split('\n')
-        .toSorted(),
-      ['current', 'v2.0.0'],
-    )
+    assert.deepStrictEqual(readdirSync(join(root, 'opencode')).toSorted(), ['current', 'v2.0.0'])
   })
 
   it('keeps nothing that isn’t exactly the release’s file, or that its release gives no digest for', async () => {
@@ -136,7 +139,8 @@ describe('downloading an agent', () => {
     assert.isTrue(Exit.isSuccess(bundled) && !bundled.value.downloadable)
   })
 
-  it('runs the person’s own copy over Althar’s: on their PATH, or where an installer put it', async () => {
+  // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
+  it.skipIf(windows)('runs the person’s own copy over Althar’s: on their PATH, or where an installer put it', async () => {
     const { fetch } = github(archive())
     const theirs = mkdtempSync(join(tmpdir(), 'althar-theirs-'))
     mkdirSync(join(theirs, 'bin'))
@@ -183,7 +187,8 @@ describe('downloading an agent', () => {
     assert.isTrue(Exit.isSuccess(theirs) && theirs.value?.command === 'opencode' && typeof theirs.value.out === 'function')
   })
 
-  it('keeps a copy downloaded at the person’s asking in the sandbox, even where the device has its own', async () => {
+  // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
+  it.skipIf(windows)('keeps a copy downloaded at the person’s asking in the sandbox, even where the device has its own', async () => {
     const { fetch } = github(archive())
     const onDevice = {
       reachable: true,
@@ -199,7 +204,8 @@ describe('downloading an agent', () => {
     })
   })
 
-  it('says what stopped it at each step, and lets only one download of an agent run at a time', async () => {
+  // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
+  it.skipIf(windows)('says what stopped it at each step, and lets only one download of an agent run at a time', async () => {
     const said = async (fetch: (url: string) => Promise<Response>, options: Partial<InstallsOptions> = {}) =>
       JSON.stringify(await using({ fetch, ...options }).run(Effect.flatMap(Installs, (installs) => installs.install(opencode))))
     const bytes = archive()
@@ -217,19 +223,19 @@ describe('downloading an agent', () => {
     // An archive without the command, and one whose command won't run here.
     const empty = mkdtempSync(join(tmpdir(), 'althar-empty-'))
     writeFileSync(join(empty, 'README'), 'nothing')
-    execFileSync('tar', ['-czf', join(empty, ASSET), '-C', empty, 'README'])
+    pack(empty, 'README')
     expect(await said(github(readFileSync(join(empty, ASSET))).fetch)).toContain('has no opencode in it')
     // A link in the archive is never followed: what it points at was never checked.
     const linked = mkdtempSync(join(tmpdir(), 'althar-linked-'))
     writeFileSync(join(linked, 'payload'), '#!/bin/sh\necho outside\n')
     chmodSync(join(linked, 'payload'), 0o755)
     symlinkSync(join(linked, 'payload'), join(linked, 'opencode'))
-    execFileSync('tar', ['-czf', join(linked, ASSET), '-C', linked, 'opencode'])
+    pack(linked, 'opencode')
     expect(await said(github(readFileSync(join(linked, ASSET))).fetch)).toContain('has no opencode in it')
     const broken = mkdtempSync(join(tmpdir(), 'althar-broken-'))
     writeFileSync(join(broken, 'opencode'), '#!/bin/sh\nexit 3\n')
     chmodSync(join(broken, 'opencode'), 0o755)
-    execFileSync('tar', ['-czf', join(broken, ASSET), '-C', broken, 'opencode'])
+    pack(broken, 'opencode')
     expect(await said(github(readFileSync(join(broken, ASSET))).fetch)).toContain("wouldn't run on this computer")
     expect(await said(github(Buffer.from('not an archive')).fetch)).toContain("couldn't be unpacked")
     // A second download while the first runs is refused; the first finishes.
@@ -265,20 +271,27 @@ describe('downloading an agent', () => {
     const { run } = using({ platform: process.platform, arch: process.arch })
     const shipped = await run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
     assert.isTrue(
-      Exit.isSuccess(shipped) && shipped.value?.whose === 'bundled' && shipped.value.command.endsWith('/claude'),
+      Exit.isSuccess(shipped) && shipped.value?.whose === 'bundled' && /[/\\]claude(\.exe)?$/.test(shipped.value.command),
       JSON.stringify(shipped),
     )
     const state = await run(Effect.flatMap(Installs, (installs) => installs.state(agents['claude-code'])))
     assert.isTrue(Exit.isSuccess(state) && !state.value.downloadable)
     const theirs = mkdtempSync(join(tmpdir(), 'althar-claude-'))
-    writeFileSync(join(theirs, 'claude'), '#!/bin/sh\necho mine\n')
-    chmodSync(join(theirs, 'claude'), 0o755)
+    // A program, as Windows names one.
+    const mine = join(theirs, process.platform === 'win32' ? 'claude.exe' : 'claude')
+    writeFileSync(mine, '#!/bin/sh\necho mine\n')
+    chmodSync(mine, 0o755)
     const own = using({ platform: process.platform, arch: process.arch, search: { env: { PATH: theirs }, dirs: [] } })
     const found = await own.run(Effect.map(Installs, (installs) => installs.locate(agents['claude-code'])))
-    assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, { command: 'claude', whose: 'theirs' })
+    // Named bare, as the shell finds it; on Windows by the path it was found at, as a launch there needs.
+    assert.deepStrictEqual(Exit.isSuccess(found) ? found.value : null, {
+      command: process.platform === 'win32' ? mine : 'claude',
+      whose: 'theirs',
+    })
   })
 
-  it('takes the release’s musl build on a musl Linux, as Alpine is', async () => {
+  // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
+  it.skipIf(windows)('takes the release’s musl build on a musl Linux, as Alpine is', async () => {
     const bytes = archive()
     const { fetch, asked } = github(bytes, { asset: 'opencode-linux-x64-musl.tar.gz' })
     const { run } = using({ fetch, musl: true })
@@ -332,7 +345,8 @@ describe('downloading a pinned agent', () => {
   }
   const whole = { 'agy_acp_server.par': SERVER, localharness_external: HARNESS }
 
-  it('keeps the version it is pinned at, whole and checked, from its maker’s address alone', async () => {
+  // Not on Windows: the pinned release's programs are shell scripts, which it runs.
+  it.skipIf(windows)('keeps the version it is pinned at, whole and checked, from its maker’s address alone', async () => {
     const { agent, fetch, asked } = pinnedTo(whole)
     const { root, run } = using({ fetch })
     const before = await run(Effect.flatMap(Installs, (installs) => installs.state(agent)))

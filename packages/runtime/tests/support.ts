@@ -52,6 +52,9 @@ export const repository = () => {
         },
       })
     run('init', '-q', '-b', 'main')
+    // A commit starts `git maintenance run --auto --detach`, which can take and drop a lock in .git/objects after the
+    // commit returns, so a copy made then fails on the lock that went. Off here, it is off in every copy too.
+    run('config', 'maintenance.auto', 'false')
     writeFileSync(join(template, 'README.md'), '# Meridian\n')
     run('add', '.')
     run('commit', '-q', '-m', 'Start')

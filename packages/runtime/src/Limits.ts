@@ -47,9 +47,9 @@ export const whenWords = (iso: string, now: Date = new Date()): string => {
 
 /** A step a usage limit stopped, as a thread says it: while it was at it, and the work that waits or moves. */
 export const outStep = {
-  implement: { during: 'while working on the task', work: 'the work' },
-  settle: { during: 'while fixing what the review found', work: 'the fixes' },
-  review: { during: 'during the review', work: 'the review' },
+  implement: { during: 'while working on the task', work: 'the work', waits: 'waits' },
+  settle: { during: 'while fixing what the review found', work: 'the fixes', waits: 'wait' },
+  review: { during: 'during the review', work: 'the review', waits: 'waits' },
 } as const
 
 /**
@@ -78,10 +78,10 @@ export const outWords = (input: {
   if (input.waits === undefined) return `${out}${back === null ? '' : `, until ${back}`}.`
   const until = back === null ? `until ${input.from} is back` : `until ${back}, when ${input.from} is back`
   if (input.waits === 'message') return `${out}. Your message waits ${until}.`
-  const work = step?.work ?? 'the step'
+  const waits = `${step?.work ?? 'the step'} ${step?.waits ?? 'waits'}`
   return input.nothingFree === true
-    ? `${out}. No other model was free, so ${work} waits ${until}. Pick one on the task to carry on now.`
-    : `${out}. ${capitalized(work)} waits ${until}. To carry on now, pick another model on the task.`
+    ? `${out}. No other model was free, so ${waits} ${until}. Pick one on the task to carry on now.`
+    : `${out}. ${capitalized(waits)} ${until}. To carry on now, pick another model on the task.`
 }
 
 /** Words that open a sentence. */

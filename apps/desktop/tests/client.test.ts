@@ -122,7 +122,8 @@ describe('the client', () => {
 
   it('reads a folder, opens the repositories kept in it, and names a pull request by its address', async () => {
     const { client, grant } = await connected()
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+    // The native call, which on Windows expands a short name (RUNNER~1) as git gives it whole.
+    const folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'althar-folder-')))
     const root = repository(folder)
     const chosen = await grant(folder)
     const reading = await client.readFolder(chosen)
@@ -239,6 +240,9 @@ describe('the client', () => {
           GetThreadItem: () => Effect.die('unused'),
           ReadOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
+          FindCode: () => Effect.die('unused'),
+          ReadCode: () => Effect.die('unused'),
+          OpenCode: () => Effect.die('unused'),
           // The first try gets no answer the client can read; the second works.
           StartSession: ({ commandId }) => {
             commands.push(commandId)
