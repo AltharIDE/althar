@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
@@ -16,6 +16,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Reviews } from '../src/Reviews'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, notices, repository, runtime, turns, until } from './support'
 
@@ -23,7 +24,7 @@ import { callTool, fakeConnectors, HOST, hosted, notices, repository, runtime, t
  * A lead's and the coordinator's tools where a task can't do what was
  * asked: a review's lead settling it before its draft is posted; a review
  * started whose lead couldn't; and a quick task that can't be done while
- * something on it waits on the person.
+ * something on it waits on the person, or what it left running won't stop.
  */
 
 const withQueries = (connectors: Parameters<typeof fakeConnectors>[0]) =>
@@ -169,4 +170,49 @@ describe('a quick task', () => {
       assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'open' }])
     }).pipe(Effect.provide(withQueries({ linear })))
   })
+
+  it.live('isn’t marked done while what its lead left running won’t stop, and says so', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
+      assert.match(
+        yield* callTool(coordinator, 'start_task', {
+          title: 'Sketch the settings page',
+          description: 'Serve it. [lead:serve] [lead:finish]',
+          lead: { agent: 'codex' },
+        }),
+        /^Started /,
+      )
+      const [task] = yield* sql<{ taskId: string; threadId: string }>`
+        SELECT k.id AS task_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+        WHERE k.project_id = ${project.projectId}`
+      // Its page is up, and its agent won't stop it.
+      yield* until(
+        Effect.map(sessions.running(task?.threadId ?? ''), (session) =>
+          Option.match(session, { onNone: () => [], onSome: (one) => one.background.filter((left) => left.ended === null) }),
+        ),
+        (left) => left.length === 1,
+        Duration.seconds(20),
+      )
+      yield* until(
+        turns(task?.threadId ?? ''),
+        (rows) => rows.length >= 1 && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
+      )
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: project.projectId,
+        threadId: task?.threadId ?? '',
+        sessionId: 'none',
+        taskId: task?.taskId ?? '',
+      }
+      assert.strictEqual(
+        yield* callTool(lead, 'settle_task', { how: 'done' }),
+        'Althar couldn’t stop what it left running, such as a page, so it isn’t done: it still waits in Needs you. Tell the person, so they can try Done again or keep it for later.',
+      )
+      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'open' }])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { refusesStop: () => true }))))),
+  )
 })
