@@ -2100,6 +2100,46 @@ describe('a quoted heredoc is text, not a command', () => {
       assert.include(withoutQuotedHeredocs(line), 'git push --force', line)
   })
 
+  it('keeps the body where a name may not be the program it seems: compact git options, shadowing functions, PATH', () => {
+    const script = "<<'EOF'\ngit push --force origin althar/retry\nEOF"
+    for (const head of [
+      "git -calias.run='!sh' run ",
+      "git -c alias.run='!sh' run ",
+      "git -C . -calias.run='!sh' run ",
+      'git run ',
+      'gh run ',
+      'cat() { sh; }; cat ',
+      'cat () { sh; }; cat ',
+      'function cat { sh; }; cat ',
+      'git() { sh; }\ngit commit -F - ',
+      'alias cat=sh; cat ',
+      'PATH=/tmp/evil cat ',
+      'PATH=/tmp/evil; cat ',
+      'export PATH=/tmp/evil && cat ',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.run GIT_CONFIG_VALUE_0="!sh" git run ',
+    ])
+      assert.include(withoutQuotedHeredocs(`${head}${script}`), 'git push --force', head)
+  })
+
+  it('refuses what a project never rule names, behind a compact git option or a shadowing function', () => {
+    const project: ProjectRuleSet = { mode: 'allow', ask: [], never: ['force-push'], allow: [], commands: [] }
+    for (const head of ["git -calias.run='!sh' run ", 'cat() { sh; }; cat ', 'PATH=/tmp/evil cat '])
+      assert.strictEqual(run(`${head}<<'EOF'\ngit push --force origin main\nEOF`, { project }).verdict, 'deny', head)
+  })
+
+  it('still drops the body of the built-in subcommands and the text readers, with a $(…) beside them', () => {
+    const body = '\npush `merge`\nEOF'
+    for (const line of [
+      `git commit -F - <<'EOF'${body}`,
+      `git tag -F - v1 <<'EOF'${body}`,
+      `gh pr create --body-file - <<'EOF'${body}`,
+      `gh issue comment 3 -F - <<'EOF'${body}`,
+      `x=$(date) && git commit -F - <<'EOF'${body}`,
+      `GIT_AUTHOR_NAME=x; FOO=1 cat <<'EOF'${body}`.replace('GIT_AUTHOR_NAME=x; ', ''),
+    ])
+      assert.notInclude(withoutQuotedHeredocs(line), '`merge`', line)
+  })
+
   it('still drops the body of a text reader beside a shell in another command', () => {
     const body = '\npush `merge`\nEOF'
     for (const line of [

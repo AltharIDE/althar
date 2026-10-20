@@ -740,31 +740,60 @@ const evaluates = (text: string, at: number) => {
 }
 
 /** Programs that take what they read as text, never as a script they run (and none of them runs a program of their own from it). */
-const readsTextOnly = new Set([
-  'git',
-  'gh',
-  'glab',
-  'cat',
-  'tee',
-  'head',
-  'tail',
-  'sort',
-  'uniq',
-  'wc',
-  'tr',
-  'cut',
-  'grep',
-  'rg',
-  'jq',
-  'diff',
-  'patch',
-  'base64',
+const readsTextOnly = new Set(['cat', 'tee', 'head', 'tail', 'sort', 'uniq', 'wc', 'tr', 'cut', 'grep', 'jq', 'diff', 'base64'])
+
+/**
+ * Programs with subcommands, and the built-in ones that take text: a configured alias (`git -calias.run='!sh' run`) can
+ * run anything but can never shadow a built-in, so only these are text. Anything else, or an option before the
+ * subcommand, is not known to be.
+ */
+const textSubcommands: Readonly<Record<string, ReadonlySet<string>>> = {
+  git: new Set(['commit', 'tag', 'notes', 'merge', 'stash', 'am', 'apply', 'commit-tree', 'hash-object', 'mktag']),
+  gh: new Set(['pr', 'issue', 'release', 'gist', 'api', 'discussion']),
+  glab: new Set(['mr', 'issue', 'release', 'api']),
+}
+
+/** Variables that change which program, or which configuration, a later command runs with. */
+const changesWhatRuns = /^(?:PATH|IFS|ENV|BASH_ENV|BASH_FUNC_.*|SHELL|LD_.*|DYLD_.*|GIT_.*|GH_.*|GLAB_.*|XDG_CONFIG_HOME|HOME)$/
+
+/** Builtins that redefine, or may redefine, what a name runs for the commands after them. */
+const redefinesNames = new Set([
+  'alias',
+  'function',
+  'export',
+  'declare',
+  'typeset',
+  'readonly',
+  'unalias',
+  'hash',
+  'set',
+  'shopt',
+  'enable',
+  'source',
+  '.',
+  'eval',
+  'exec',
 ])
 
-/** Whether a command's input is text to it: nothing to run but assignments, or a bare name from the list (not `-c`, which hands git a command to run). */
+const assignment = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/
+
+/** Whether a command (as words) changes what a name runs afterwards, or what it runs with: a variable such as PATH, or a builtin that defines names. */
+const changesNames = (words: ReadonlyArray<string>): boolean => {
+  const at = words.findIndex((word) => !assignment.test(word))
+  return (
+    words.slice(0, at === -1 ? words.length : at).some((word) => changesWhatRuns.test(assignment.exec(word)?.[1] ?? '')) ||
+    (at !== -1 && redefinesNames.has(words[at] ?? ''))
+  )
+}
+
+/** Whether a command's input is text to it: nothing to run, or a bare name from the list, or a built-in subcommand that takes text. */
 const takesText = (words: ReadonlyArray<string>): boolean => {
-  const at = words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word))
-  return at === -1 || (readsTextOnly.has(words[at] ?? '') && !words.includes('-c'))
+  if (changesNames(words)) return false
+  const at = words.findIndex((word) => !assignment.test(word))
+  if (at === -1) return true
+  const name = words[at] ?? ''
+  const subcommands = textSubcommands[name]
+  return subcommands === undefined ? readsTextOnly.has(name) : subcommands.has(words[at + 1] ?? '')
 }
 
 /**
@@ -790,6 +819,8 @@ export const withoutQuotedHeredocs = (text: string): string => {
     readonly tabs: boolean
     readonly quoted: boolean
     readonly group: Group
+    /** An earlier command defined a function or alias or changed PATH or the like, so a bare name may not be the program it seems. */
+    readonly shadowed: boolean
   }
   /** A body and its closing line, dropped at the end if its heredoc is quoted and only text readers are in its group. */
   interface Held {
@@ -808,6 +839,8 @@ export const withoutQuotedHeredocs = (text: string): string => {
   let depth = 0
   /** A `|` ended the last command, so a newline goes on with the same pipeline. */
   let piped = false
+  /** Some command so far may have changed what a name runs. */
+  let shadowed = false
   const endWord = () => {
     if (inWord) {
       command.push(word)
@@ -819,6 +852,7 @@ export const withoutQuotedHeredocs = (text: string): string => {
   const endCommand = () => {
     endWord()
     group.commands.push(command)
+    if (changesNames(command)) shadowed = true
     command = []
   }
   const endGroup = () => {
@@ -880,6 +914,7 @@ export const withoutQuotedHeredocs = (text: string): string => {
           tabs: opener[1] === '-',
           quoted: /['"\\]/.test(written),
           group,
+          shadowed,
         })
         out += opener[0]
         index += opener[0].length
@@ -908,6 +943,9 @@ export const withoutQuotedHeredocs = (text: string): string => {
         piped = true
       }
     } else if (char === '(') {
+      // A word right before `(` that is not `$(` or `<(` is a function being defined (`cat() { sh; }`).
+      if (inWord && !word.endsWith('$') && command.length === 0) shadowed = true
+      if (!inWord && command.length === 1 && text.slice(index).trimStart().startsWith(')')) shadowed = true
       endCommand()
       depth++
     } else if (char === ')') {
@@ -950,7 +988,11 @@ export const withoutQuotedHeredocs = (text: string): string => {
   chunks.push(out)
   return chunks
     .map((chunk) =>
-      typeof chunk === 'string' || !chunk.closed || !chunk.heredoc.quoted || !chunk.heredoc.group.commands.every(takesText)
+      typeof chunk === 'string' ||
+      !chunk.closed ||
+      !chunk.heredoc.quoted ||
+      chunk.heredoc.shadowed ||
+      !chunk.heredoc.group.commands.every(takesText)
         ? typeof chunk === 'string'
           ? chunk
           : chunk.text
