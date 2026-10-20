@@ -14,8 +14,9 @@ import { Connectors } from '../src/Config'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
+import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
-import { DraftClosed, DraftUntitled, IssueDrafts } from '../src/IssueDrafts'
+import { DraftClosed, DraftUntitled, IssueDrafts, refusedDraft } from '../src/IssueDrafts'
 import { Issues } from '../src/Issues'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -512,6 +513,31 @@ describe('issue drafts', () => {
       assert.deepInclude(card, { tracker: 'Linear', container: 'Platform', title: 'On Platform' })
       assert.lengthOf(yield* cardsOf(projectId), 1)
     }).pipe(Effect.provide(withQueries({ linear, trello })))
+  })
+
+  it.live('take a tracker or a place named as nothing as not named, and list the first twenty places where there are more', () => {
+    const many = Array.from({ length: 25 }, (_, index) => ({ id: `team-${index + 1}`, key: `T${index + 1}`, name: `Team ${index + 1}` }))
+    const linear = linearWith(...many)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { access } = yield* project()
+      const asked = yield* callTool(access, 'draft_issue', { title: 'Somewhere', tracker: ' ', container: '' })
+      assert.isTrue(asked.startsWith('Say where on Linear it goes, as container: T1 (Team 1), T2 (Team 2), '), asked)
+      assert.isTrue(asked.endsWith('T20 (Team 20), and 5 more.'), asked)
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('that aren’t there can’t be filed or discarded', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      assert.instanceOf(yield* Effect.flip(drafts.file('draft_none', instance.personId)), NotFound)
+      assert.instanceOf(yield* Effect.flip(drafts.discard('draft_none', instance.personId)), NotFound)
+      // A failure that isn't about where it goes reaches the tool as it is.
+      const other = new Error('The store is busy')
+      assert.strictEqual(refusedDraft(other), other)
+    }).pipe(Effect.provide(withQueries({ linear })))
   })
 
   it.live('tell the coordinator what the person did with them', () => {
