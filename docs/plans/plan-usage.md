@@ -7,12 +7,14 @@
 > Delete this file when the last step ships, and move anything that lasted
 > into the architecture docs.
 
-Researched on 15 October 2026 against upstream `main` (`af3023a`). Built
-(see Stages): the Codex and Claude sources, the usage-source registry, the
-warnings, the notices and the usage tab. Not built: step (4), a provider's
-usage endpoint, and the exception to rule 3 it needs; they come with
-[#221](https://github.com/AltharIDE/althar/issues/221) once a spike has seen a
-real source (below).
+Researched on 15 October 2026 against upstream `main` (`af3023a`), and again
+on 21 October for the agents #266 added. Built (see Stages): every source in
+the table below, the usage read and its exception to rule 3
+([ADR-055](../decisions/055-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+the warnings, the notices and the usage view, the limits recognised in each
+agent's own words, and new work steered by the windows. Which design the
+window shows them in is being chosen on a prototype
+(`apps/desktop/prototypes/plan-usage`).
 
 ## Goal
 
@@ -29,9 +31,10 @@ From the person (15 October 2026):
 
 ## Decision
 
-**Usage data is required for every agent and every subscription account that
-is added** (the person, 15 October 2026). "No usage data" is a defect to fix,
-not a state to show calmly. So the rule below ends in a provider endpoint,
+**Usage data is wanted for every agent and every subscription account that
+is added** (the person, 15 October 2026). Where an agent gives it to no other
+app, it says why, calmly, and its limits are still recognised when they hit
+(the person, 21 October 2026). So the rule below ends in a provider endpoint,
 not in errors, and ACP stays the preferred source.
 
 > An account's usage comes from the first of these that works for its
@@ -41,7 +44,7 @@ not in errors, and ACP stays the preferred source.
 > agent's own documented control channel, which Althar starts with the
 > account's home (Codex's app-server; Claude's Agent SDK); (4) **the
 > provider's usage endpoint**, read-only, called by Althar with the account's
-> sign-in under the narrow exception below, once it is decided (#221). Errors (`failures.ts`) are the
+> sign-in under the narrow exception below (ADR-055). Errors (`failures.ts`) are the
 > floor under all four: they say a limit was *reached*, never how much is
 > left, so they are never a substitute for a source.
 
@@ -49,67 +52,35 @@ Per agent and provider, today:
 
 | Agent / provider | Source today | Gives | Moves up when |
 |---|---|---|---|
-| Claude Code, plan | (2) `_meta["_claude/rateLimit"]` from sessions Althar runs (patched); (3) Agent SDK `usage_EXPERIMENTAL…()`, or a probe session, for an account with no session. **Not (4): see the Claude risk below** | 5 hours, 1 week, per model | `claude-agent-acp` advertises ACP `quota` |
-| Codex, plan | (3) `codex app-server` with the account's `CODEX_HOME`: `account/rateLimits/read` and `…/updated`. (4) `wham/usage` only if (3) fails | 5 hours, 1 week, credits | `codex-acp` ships #524 or `quota` |
-| OpenCode, ChatGPT plan | (4) `chatgpt.com/backend-api/wham/usage` with the token OpenCode holds for that provider (unverified that the token has the same form as Codex's) | 5 hours, 1 week (as Codex) | OpenCode reports plan usage over ACP (#49693) |
-| OpenCode, Go or Zen | (4) OpenCode's console API (claim: issue text) | Whatever it returns, possibly the 1-month window | the same |
-| OpenCode, GitHub Copilot or Gemini sign-in | (4) the provider's own endpoint (each to be confirmed by a spike) | to be confirmed | the same |
-| Any agent, API key | No plan window exists. Show what the provider documents about the key (credit left, per-minute headers) and say it is a key | credit or per-minute | n/a |
+| Claude Code, plan | (2) `_meta["_claude/rateLimit"]` from sessions Althar runs (patched); (4) `api.anthropic.com/api/oauth/usage` with Claude Code's sign-in (its keychain item for the folder on a Mac, else `.credentials.json`), for any account, at most every 5 minutes | 5 hours, 1 week, a model's week, extra usage | `claude-agent-acp` advertises ACP `quota` |
+| Codex, plan | (3) `codex app-server` with the account's `CODEX_HOME`: `account/rateLimits/read` and `…/updated`. (4) `chatgpt.com/backend-api/wham/usage` only if (3) fails | 5 hours, 1 week, a model's bucket, a spend limit | `codex-acp` ships #524 or `quota` |
+| Kimi Code, plan | (4) `api.kimi.com/coding/v1/usages` with `credentials/kimi-code.json` | 1 week, 5 hours | Kimi reports it over ACP |
+| Grok Build, plan | (4) `cli-chat-proxy.grok.com/v1/billing?format=credits` with xAI's entry in `auth.json` | a week of credits, a month of spend | Grok reports it over ACP |
+| Copilot | none: its sign-in is a keychain item another app reading would ask about; its SDK's `account.getQuota` (`copilot --headless --stdio`) wasn't confirmed | premium requests, monthly | `account.getQuota` is tried for real |
+| Junie | none: its credits only in its own `/stats` | AI credits | an endpoint is confirmed |
+| Mistral Vibe | none: usage only in Mistral's console, behind a browser session | % of the month | Mistral gives keys a usage read |
+| Qwen Code | none: its quota said only when it runs out (Qwen OAuth's free tier ended 15 April 2026) | n/a | Qwen gives a usage read |
+| Antigravity | none: Althar runs its ACP server, not the `agy` CLI whose `/usage` Orca reads | 5 hours, 1 week | the server reports it |
+| OpenCode, any plan sign-in | none: OpenCode keeps them in its own database | as the provider | OpenCode reports plan usage over ACP (#49693) |
+| Any agent, API key | No plan window exists: it says it is a key | n/a | n/a |
 
 ### The exception to rule 3
 
-**Not decided; with [#221](https://github.com/AltharIDE/althar/issues/221).**
-A first draft (an ADR, an allowlisted reader, the one credential-store
-module and their contract test) was built, then taken out of #218 on review:
-no source could run it. Its only consumer, OpenCode's ChatGPT sign-in, was
-for OpenCode 1, which can't list plans apart from keys, and OpenCode 2 keeps
-its credentials in `opencode.db`; Codex is read through its app-server. So
-the exception waits for a spike that shows a real source, and is decided
-with that source in view. The draft is kept in commit `59955fe` of [#218](https://github.com/AltharIDE/althar/pull/218):
-`docs/decisions/050-a-usage-read-may-use-an-accounts-token-once.md`,
-`packages/provider-adapters/src/usageRead.ts` and `credentialStore.ts`, the
-endpoint parts of `usageSources.ts`, and their tests in
-`tests/usageSources.test.ts`. Until then an OpenCode plan sign-in shows a
-fault, not quiet "no data".
-
-What the draft set out:
-
-Architecture 03 rule 3 says Althar never reads an agent's credential cache,
-and the provider endpoints need that token. Required coverage cannot be met
-without it, so the plan amends the rule (an architecture change, stage 0,
-for the person's word) with a narrow **usage read**:
-
-- Althar may read the access token of an account from the agent's own store,
-  **in memory, for one call to that provider's usage URL, and for nothing
-  else**.
-- It never writes, refreshes, copies, persists, logs or sends the token
-  anywhere but that URL, and never off the device. An expired token is not
-  refreshed by Althar, and a status command is not assumed to refresh it
-  (OpenCode's `auth list` only lists saved credentials). The source shows a
-  fault, "sign in again", with the agent's own login flow
-  (`signIn.login`) as the action. Where the agent refreshes by itself while
-  it runs (a Codex app-server or a Claude session), the next read picks the
-  new token up.
-- One call per account at most every 60 seconds or the provider's stated
-  interval, cached and shared across sessions, with backoff on a 429.
-- Each (agent, provider) source is its own adapter, enabled only after a
-  spike confirms the response and a read of that provider's current terms.
-  The response is parsed defensively (windows classified by duration, unknown
-  shapes become a visible "usage source changed" fault, not zeros).
+Decided in [ADR-055](../decisions/055-a-usage-read-may-use-an-account-s-own-sign-in-once.md)
+(21 October 2026), from ninemate's draft in #218 (`59955fe`), with Anthropic's
+endpoint on the allowlist, as the person decided: Orca reads it the same way.
+The reader is `packages/provider-adapters/src/usageRead.ts`; the one module
+that opens a credential store is `credentialStore.ts`; the sources and the
+allowlist are in `usageSources.ts`, with their contract test.
 
 ### The Claude risk
 
 Anthropic's terms say OAuth is "intended exclusively" for Claude Code and
-native Anthropic apps and forbid intermediating Claude.ai credentials
-([legal and compliance](https://code.claude.com/docs/en/legal-and-compliance),
-acc. 15 Oct), so step (4) is **not** used for Claude. Coverage for Claude
-then rests on step (3): the SDK's `usage_EXPERIMENTAL…()` run in a process
-with the account's `CLAUDE_CONFIG_DIR`, or failing that a small probe
-session through the adapter (which is Claude Code, so within its terms, but
-costs a little plan usage). Both are unverified. If neither works, Claude
-accounts with no session cannot be covered until Anthropic clears the
-endpoint in writing or adds an official read. This is the one place the
-requirement may not be met today, and the first Claude spike settles it.
+native Anthropic apps ([legal and compliance](https://code.claude.com/docs/en/legal-and-compliance),
+acc. 15 Oct). The person weighed that and decided on 21 October 2026 that
+Althar reads Anthropic's usage endpoint with Claude Code's own sign-in, as
+Orca does: read-only, at most every five minutes, waiting as long as a 429
+asks (ADR-055).
 
 ### What counts as a subscription
 
@@ -184,9 +155,37 @@ returns, so it shows when a source reports it; nothing else is built for it.
   coordinator the person opens, unless the window has reset by then.
 - **Always findable**: the usage tab shows the same state, so a missed notice
   is not lost.
-- **Left for later**: telling the coordinator *agent* (so it plans around a
-  nearly empty account), and an operating-system notification when the
-  window is not focused. Both are additions on the same notice.
+- **The coordinator agent** reads each model's room in `list_models`, and
+  new steps steer by it (below).
+- **Left for later**: an operating-system notification when the window is
+  not focused.
+
+## Steering new work
+
+Built in `Limits.ts`, `usableModels.ts` and `Runs.ts` (architecture 05,
+Usage limits). An account's room is its tightest window left, as last read;
+under 5% it is nearly out. Work starts on the account with the most room
+where the project rotates; a new step on an agent nearly out on every
+account goes by the project's rule as if out (moved to an agent with room,
+or started on what is left; held until the reset; or asked, with the agent
+itself a way on), and the thread says why. A running step is never stopped.
+
+## Limits when they hit
+
+Each agent's own words, as `failures.ts` reads them (its tests hold them):
+
+| Agent | Says | Reset |
+|---|---|---|
+| Claude Code | "You've hit your session limit · resets 3pm (Europe/Budapest)", "… weekly / Opus limit", "You're out of usage credits" | a clock time in a named zone, or a day and time |
+| Codex | "You’ve hit your usage limit. … try again at 3:05 PM.", "… out of credits", "… spend cap" | this computer's clock, or a date |
+| Copilot | "Error: You've hit your rate limit. Please wait for your limit to reset in 3 hours 20 minutes …" as a message, the turn ending as if done; "You've run out of your included AI credits"; a session's spend limit starts a new session | a length, "under a minute", or a date |
+| Junie | -32010, "Insufficient account balance." | none |
+| Grok Build | "You hit your weekly limit.", "You’ve hit the credit limit for your plan.", "spending cap" | none |
+| Kimi Code | "You've reached your 5-hour / weekly (7-day) / monthly usage limit"; its concurrent-request limit is a short retry | none |
+| Mistral Vibe | -31001 (after its own retries), 402 Payment Required | none |
+| Qwen Code | "Your token-plan 1-week quota has been exhausted. The quota will reset at 07-27 09:25:00 UTC."; its ended free tier asks for another sign-in | a UTC date and time |
+| Antigravity, Gemini's | RESOURCE_EXHAUSTED, "You have exhausted your capacity on this model. Your quota will reset after 19h14m47s.", "Access resets at 3:05 PM PDT" | a length, or a clock time in US zones |
+| OpenCode | `provider.quota` / `provider.free-limit` in the error's data, "… usage limit reached. It will reset in 3 hours 20 minutes." | a length |
 
 ## The usage tab
 
@@ -300,12 +299,12 @@ before building on it):
 | Context and cost `usage_update` | `used`, `size`, `cost` | `used`, `size` | `used`, `size`, `cost` |
 | ACP version | v1 (v2 opt-in) | v1 and v2 on `main` | v1 |
 | Native channel | Agent SDK `rate_limit_event`; `usage_EXPERIMENTAL…()`; statusline `rate_limits` ([docs](https://code.claude.com/docs/en/statusline), acc.) | App-server `account/rateLimits/read` and `…/updated` ([docs](https://learn.chatgpt.com/docs/app-server), acc.) | None |
-| Provider endpoint (step 4) | Not used: Anthropic's terms | `wham/usage`, undocumented; fallback only | Needed: `wham/usage` for a ChatGPT sign-in, the console API for Go or Zen, others by spike |
+| Provider endpoint (step 4) | `api/oauth/usage`, for any account (ADR-055) | `wham/usage`, undocumented; fallback only | Not read: its sign-ins are in its own database |
 | Windows | 5 hours, 1 week, per model | 5 hours, 1 week | as the provider returns |
 
 ## Stages
 
-**Built so far (15 October):**
+**Built so far (21 October):**
 
 - `packages/provider-adapters`: the usage model, warning rule and Codex
   reader (`usage.ts`); Claude Code's window from the usage update's `_meta`
@@ -320,13 +319,13 @@ before building on it):
   listing), raises the 50/25/10/5 warnings once
   per reset, and tells the window; the API has `GetPlanUsage`,
   `AcknowledgeUsageWarnings` and a `PlanUsage` watch event.
-- **No OpenCode plan provider has a source yet**: each needs a spike, and
-  the endpoint ones the exception to rule 3 (#221). Until then an OpenCode
-  account on a plan shows a fault, not a number.
-- **The agents run over ACP** (#266: Copilot, Junie, Grok Build, Kimi Code,
-  Mistral Vibe, Qwen Code, Antigravity) send no plan windows yet. Each is a
-  gap waiting for its own spike; an account on a plan says it has no source,
-  and a key, where the agent tells one, shows none.
+- **The usage read** (ADR-055): Claude Code's idle accounts, Codex's
+  fallback, Kimi Code and Grok Build, through `usageRead.ts`.
+- **No reading**, said calmly with why: OpenCode's plan sign-ins, Copilot,
+  Junie, Mistral Vibe, Qwen Code and Antigravity (the table above).
+- **Limits in each agent's own words**, with their reset times (above).
+- **Steering new work** by the windows, and `list_models` saying each
+  model's room (above).
 - **Claude Code's adapter drops a window that arrives before a turn's first
   usage figure** (#1127): Althar carries a patch for it (`patches/`, applied
   by bun to the pinned 0.94.0; a test fails if it is not applied, and a bump
@@ -342,9 +341,7 @@ notice) is built in `apps/desktop` and `packages/ui`.
 One pull request each. Stages 0 to 5 are Althar's; 6 to 8 are upstream and
 run in parallel.
 
-0. **Amend rule 3** (with #221): the narrow usage read, decided once a spike
-   has shown a real source. Its draft ADR, reader, allowlist and contract
-   test are in commit `59955fe` of [#218](https://github.com/AltharIDE/althar/pull/218).
+0. **Amend rule 3**: the narrow usage read, ADR-055. Done.
 1. **Model and Codex source.** `AccountStatus` with its `windows`
    (`provider-adapters`), a Codex source (app-server with the account's
    home), the threshold rule above as a pure function with tests (each
@@ -381,13 +378,14 @@ run in parallel.
 
 - Everything upstream moves weekly; re-check a claim before building on it.
 - `_claude/rateLimit` is a private key and may change when #2316 lands.
-- The Claude side query (stage 2) may be refused or cost usage, and the
-  endpoint is barred by Anthropic's terms: idle Claude accounts may stay
-  uncovered until Anthropic clears a read. The requirement is not met for
-  them until then.
-- The endpoint exception (#221) reads agents' tokens. It is the largest security
-  change in this plan: keep it in one module, with tests that nothing is
+- Anthropic's endpoint 429s under frequent polling and may answer "wait an
+  hour": Althar asks it at most every five minutes, not while a session has
+  just said its windows, and waits as long as it asks.
+- The usage read (ADR-055) reads agents' tokens. It is the largest security
+  change in this plan: it is kept in one module, with tests that nothing is
   written, logged or sent elsewhere.
+- None of the endpoint reads was tried against a real account here: each
+  follows Orca's working code (stablyai/orca `ef950401`).
 - OpenCode's stored token for a provider may differ from the agent-native
   one (scope, expiry); each provider source needs its own spike.
 - A Codex app-server started for a read must not refresh or write tokens

@@ -419,7 +419,13 @@ accounts, below). ACP does not report plan windows yet. Althar detects limits
 in two layers:
 
 1. **From errors, on every agent.** Each adapter classifies a failed turn as
-   `usage_limit`, with the reset time when the error carries one. Claude's
+   `usage_limit`, with the reset time when the error carries one, from each
+   agent's own words (`failures.ts`): a length ("reset after 19h14m47s"), a
+   time on a clock in a named zone or this computer's ("resets 3pm
+   (Europe/Budapest)", "try again at 3:05 PM"), or a date. Some agents give
+   it as a code (Junie's -32010, Mistral Vibe's -31001) or in the error's
+   data (OpenCode's `provider.quota`), and Copilot says it as a message and
+   ends its turn as if done (the registry's `failsInText`). Claude's
    adapter also reports failures in structured form when the client asks (the
    JetBrains AIR `sessionFailure` extension, in `_meta`): its category and the
    actions it suggests tell an exhausted quota from a short rate limit and a
@@ -438,24 +444,27 @@ in two layers:
       leaves it unchanged);
    2. an extension the adapter ships in ACP;
    3. the agent's own control channel, started with the account's home;
-   4. the provider's usage endpoint, read with the account's token: not
-      built. Rule 3 bars it, and an exception waits until a spike has seen
-      a real endpoint ([#221](https://github.com/AltharIDE/althar/issues/221)).
+   4. the provider's usage endpoint, read with the account's own sign-in:
+      the usage read, rule 3's one exception
+      ([ADR-055](../decisions/055-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
 
-   Today:
-   - Claude Code: `claude-agent-acp` forwards one window per event in
+   Today (`usageSources.ts` declares each pair's sources, or why it has none):
+   - Claude Code: live, `claude-agent-acp` forwards one window per event in
      `usage_update` `_meta["_claude/rateLimit"]` (the Agent SDK's
      `rate_limit_event`), and drops it if it arrives before a turn's first
      usage figure ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
-     so Althar carries a patch for that (`patches/`, on the pinned version). An account with no session is read
-     through the SDK's usage report, or a probe session; both are
-     unverified. Step 4 is not used: Anthropic's terms bar it.
+     so Althar carries a patch for that (`patches/`, on the pinned version).
+     Any account, idle ones too: Anthropic's `/api/oauth/usage`, at most
+     every five minutes, and not while a session has just said.
    - Codex: app-server's `account/rateLimits/read` and
-     `account/rateLimits/updated` (`usage.ts`), started in the account's home.
-   - OpenCode: no channel. Plan or key is told per provider from its own
-     `opencode auth list --standalone --format json` (2.x; 1.x can't say).
-     No plan provider has a source yet, so a plan sign-in shows a fault
-     rather than windows ([#221](https://github.com/AltharIDE/althar/issues/221)).
+     `account/rateLimits/updated` (`usage.ts`), started in the account's
+     home; ChatGPT's `wham/usage` where it can't answer.
+   - Kimi Code and Grok Build: their providers' usage URLs.
+   - OpenCode: plan or key is told per provider from its own
+     `opencode auth list --standalone --format json` (2.x; 1.x can't say);
+     its plan sign-ins are kept in its own database, and not read.
+   - Copilot, Junie, Mistral Vibe, Qwen Code and Antigravity give their usage
+     to no other app; each says why, calmly, rather than as a fault.
 
    Errors (layer 1) stay under all of it: they say a limit was reached, not
    how much is left.
@@ -466,15 +475,18 @@ type AccountStatus = {
   state: "ok" | "warning" | "limited" | "fault"
   windows: Array<{ kind: "five_hour" | "weekly" | "monthly" | "other"; label?: string; usedPercent: number; resetsAt?: string }>
   source: "acp" | "acp_extension" | "agent" | "endpoint" | "error"
-  fault?: "sign_in_again" | "source_changed" | "unreachable" | "no_source" | "no_data_yet" | "cannot_classify"
+  fault?: "sign_in_again" | "expired" | "source_changed" | "unreachable" | "no_source" | "no_data_yet" | "cannot_classify"
+  noReading?: string // why the agent's usage can't be read, said calmly
   observedAt: string
 }
 ```
 
-With account status, the scheduler can hold or move work before the limit is
-reached rather than after, and warnings fire at 50, 25, 10 and 5% remaining
-(once per account, window and reset), shown in the open coordinator's Talk
-room and on the usage tab.
+With the windows, the scheduler moves or holds new work before the limit is
+reached rather than after ([05](05-workflow-engine.md), Usage limits): an
+account's room is its tightest window left, as last read (a window past its
+reset has started again; a model's own window counts for that model; money
+spent past the plan doesn't), and under 5% it is nearly out. Warnings fire at
+50, 25, 10 and 5% remaining (once per account, window and reset).
 
 ## Provider session lifecycle
 
@@ -595,7 +607,10 @@ Rules:
 2. Althar may invoke documented status/login commands or react to a
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
-   synchronizes the CLI's credential cache.
+   synchronizes the CLI's credential cache, but for one exception: the
+   usage read ([ADR-055](../decisions/055-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+   an account's access token read into memory for one allowlisted `GET` to
+   its provider's usage URL, and dropped.
 4. It never asks for a provider password or browser session cookie.
 5. Subscription-backed execution runs on the user's device and only where the
    provider's current documentation and terms permit that use.
