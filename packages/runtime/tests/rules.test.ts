@@ -2057,7 +2057,7 @@ describe('a quoted heredoc is text, not a command', () => {
   })
 
   it('still opens a heredoc after a # that is not a comment', () => {
-    assert.strictEqual(run("echo a#b <<'EOF'\npush `merge`\nEOF").verdict, 'allow')
+    assert.strictEqual(run("cat a#b <<'EOF'\npush `merge`\nEOF").verdict, 'allow')
   })
 
   it('keeps the body of a heredoc a shell or interpreter reads, as that is a script it runs', () => {
@@ -2076,10 +2076,48 @@ describe('a quoted heredoc is text, not a command', () => {
     }
   })
 
+  it('keeps the body wherever the reader is not known to take only text, across lines, pipes and groups', () => {
+    const script = '\ngit push --force origin althar/retry\nEOF'
+    for (const head of [
+      'sh \\\n',
+      'sh \\\n  -s \\\n',
+      '{ sh; } ',
+      '(sh; git status) ',
+      'f() { sh; }; f ',
+      './run.sh ',
+      'FOO=1 bash ',
+      'cat 2>&1 | sh ',
+    ]) {
+      const line = `${head}<<'EOF'${script}`
+      assert.include(withoutQuotedHeredocs(line), 'git push --force', line)
+    }
+    for (const line of [
+      `cat <<'EOF' 2>&1 | sh${script}`,
+      `cat <<'EOF' |${script}\nsh`,
+      `cat <<'EOF' | tee out |& bash${script}`,
+      `cat <<'EOF' >| out | sh${script}`,
+    ])
+      assert.include(withoutQuotedHeredocs(line), 'git push --force', line)
+  })
+
+  it('still drops the body of a text reader beside a shell in another command', () => {
+    const body = '\npush `merge`\nEOF'
+    for (const line of [
+      `bash build.sh && git commit -F - <<'EOF'${body}`,
+      `sh -c true; cat > notes.md <<'EOF'${body}`,
+      `cd app && FOO=1 git commit -F - <<'EOF' 2>&1 | tee log${body}`,
+      `x=$(git commit -F - <<'EOF'${body}\n)`,
+    ])
+      assert.notInclude(withoutQuotedHeredocs(line), '`merge`', line)
+  })
+
   it('refuses what a project never rule names, in the script a shell reads', () => {
     const project: ProjectRuleSet = { mode: 'allow', ask: [], never: ['force-push'], allow: [], commands: [] }
-    for (const line of ["sh <<'EOF'\ngit push --force origin althar/retry\nEOF", "# <<'EOF'\ngit push --force origin althar/retry"])
-      assert.strictEqual(run(line, { project }).verdict, 'deny', line)
+    const script = "<<'EOF'\ngit push --force origin althar/retry\nEOF"
+    for (const head of ['sh ', 'sh \\\n', 'bash \\\n  -s \\\n', '(sh; git status) ', '{ sh; } '])
+      assert.strictEqual(run(`${head}${script}`, { project }).verdict, 'deny', head)
+    assert.strictEqual(run("cat <<'EOF' |\ngit push --force origin althar/retry\nEOF\nsh", { project }).verdict, 'deny')
+    assert.strictEqual(run("# <<'EOF'\ngit push --force origin althar/retry", { project }).verdict, 'deny')
     assert.strictEqual(run("git commit -F - <<'EOF'\nnever `git push --force` it\nEOF", { project }).verdict, 'allow')
   })
 
