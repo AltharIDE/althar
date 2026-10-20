@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -454,6 +454,49 @@ describe('a connection’s check', () => {
         { kind: 'not_installed', owner: 'northwind', url: 'https://github.com/apps/althar/installations/new' },
       )
     }).pipe(Effect.provide(withGitHub(fetch, { appSlug: 'althar' })))
+  })
+})
+
+describe('the guide to connecting a code host', () => {
+  it.live('lists a repository on GitHub as a place for GitHub, and none for GitLab', () => {
+    const { fetch } = stub([])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      const path = repository()
+      execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/meridian/api.git'], { cwd: path })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      assert.deepStrictEqual(
+        (yield* connections.guide('github')).places.map((place) => [place.product, place.repositories]),
+        [['github', ['meridian/api']]],
+      )
+      assert.deepStrictEqual((yield* connections.guide('gitlab')).places, [])
+    }).pipe(Effect.provide(withGitHub(fetch, { more: [products.gitlab] })))
+  })
+
+  it.live('takes git’s own email for a token that needs one where a project’s repository says one that isn’t an address', () => {
+    const { fetch } = stub([])
+    const bitbucket = makeFakeService({ product: 'bitbucket_cloud' })
+    const global = join(mkdtempSync(join(tmpdir(), 'althar-gitconfig-')), 'config')
+    const was = process.env.GIT_CONFIG_GLOBAL
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      process.env.GIT_CONFIG_GLOBAL = global
+      writeFileSync(global, '[user]\n\temail = me@home.test\n')
+      const path = repository()
+      execFileSync('git', ['config', 'user.email', 'build-bot'], { cwd: path })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+      assert.deepStrictEqual((yield* connections.guide('bitbucket')).email, { address: 'me@home.test', project: null })
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (was === undefined) delete process.env.GIT_CONFIG_GLOBAL
+          else process.env.GIT_CONFIG_GLOBAL = was
+        }),
+      ),
+      Effect.provide(withGitHub(fetch, { more: [{ ...products.bitbucket_cloud, make: () => ({ host: bitbucket }), access: null }] })),
+    )
   })
 })
 
