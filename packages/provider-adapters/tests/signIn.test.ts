@@ -215,6 +215,13 @@ describe('signInStatus', () => {
     assert.isUndefined(read('Default model: grok-4.6', 0))
     assert.strictEqual(paidBy?.('You are logged in with dana@example.com.'), 'plan')
     assert.strictEqual(paidBy?.('You are using XAI_API_KEY.'), 'key')
+    assert.isUndefined(paidBy?.('Default model: grok-4.6'))
+  })
+
+  it('reads Kimi Code as signed out only where it lists no provider', () => {
+    const { read } = agents.kimi.signIn
+    assert.isFalse(read('No providers configured. Run `kimi login`.', 0))
+    assert.isUndefined(read('kimi-code  https://api.kimi.com', 0))
   })
 
   it.live('says unknown when the command is missing', () =>

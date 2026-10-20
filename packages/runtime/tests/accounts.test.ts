@@ -9,7 +9,7 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts, SignOutFailed } from '../src/Accounts'
-import { Agents, RuntimeConfig, type RuntimeOptions } from '../src/Config'
+import { type AgentEntry, Agents, RuntimeConfig, type RuntimeOptions } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
 import { Models } from '../src/Models'
@@ -88,6 +88,20 @@ const ranOnCodex = (projectId?: string) =>
     return { projectId: project, threadId: task.threadId, said: said.join('\n') }
   })
 
+/** The fake agents, with one that signs in only inside Althar: no command of its own to run in a terminal. */
+const insideOnly = (agentId: string) =>
+  Layer.effect(
+    Agents,
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const inside = (entry: AgentEntry): AgentEntry =>
+        entry.definition.id === agentId
+          ? { ...entry, definition: { ...entry.definition, signIn: { ...entry.definition.signIn, login: '' } } }
+          : entry
+      return Agents.of({ list: agents.list.map(inside), get: (id) => Effect.map(agents.get(id), inside) })
+    }),
+  ).pipe(Layer.provide(fakeAgents()))
+
 describe('accounts', () => {
   it.effect('keep an agent whose sign-in every folder shares to its usual account, and the window offers no other', () =>
     Effect.gen(function* () {
@@ -101,6 +115,19 @@ describe('accounts', () => {
       // Another agent adds accounts as before.
       assert.isNotNull((yield* accounts.add({ agentId: 'codex', name: 'Work' })).home)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { oneAccount: ['opencode'] }))))),
+  )
+
+  it.effect('opens no terminal to sign in an agent that signs in only inside Althar, as Antigravity does', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const [usual] = yield* accounts.of('codex')
+      if (usual === undefined) throw new Error('Codex has its usual account')
+      assert.deepInclude(yield* Effect.flip(accounts.login(usual.id)), { _tag: 'AccountRefused', reason: 'no_terminal' })
+      // Another still signs in in a terminal.
+      const [claude] = yield* accounts.of('claude-code')
+      if (claude === undefined) throw new Error('Claude Code has its usual account')
+      assert.include(yield* accounts.login(claude.id), 'fake-login claude-code')
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents: insideOnly('codex') }))))),
   )
 
   it.effect('gives the usual Claude account one persistent home when sessions run in a Flatpak', () =>

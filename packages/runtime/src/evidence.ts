@@ -236,6 +236,13 @@ export const unverifiedIn = (value: unknown): ReadonlyArray<string> | null =>
 /** What a step result says the task built, as it stood then; null where it didn't say, as a round that changed nothing needn't. */
 export const builtIn = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null)
 
+/** The descriptions a step result gave its pull requests, by the slug of the repository each is for; nothing where it gave none. */
+export const descriptionsIn = (value: unknown): { readonly descriptions?: Readonly<Record<string, string>> } => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const given = Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim() !== '')
+  return given.length === 0 ? {} : { descriptions: Object.fromEntries(given) }
+}
+
 /** What the lead is told when it finishes without saying what the task built; or, settling, when its round changed the work. */
 export const builtAsk = (changed: boolean) =>
   `${changed ? 'Settling changed the work, so say again' : 'Say'} what the task has built, as it stands now, in \`built\`: what it does for the person now, the main changes and where they are, anything left open or decided along the way, and what they should do next. A few lines or a short list, about where it ended, not how it got there. Then call finish_step again.`
