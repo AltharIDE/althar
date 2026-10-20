@@ -306,26 +306,41 @@ const homeMentions = (text: string, { home }: System): ReadonlyArray<string> => 
 const secretCommandReason = (text: string, cwd?: string, system: System = systemOf()): string | undefined => {
   const { paths, home } = system
   if (homeMentions(text, system).some((fromHome) => secretFromHome(fromHome.split(/[/\\]/).join(paths.sep), system))) return SECRETS_REFUSED
-  for (const { commands } of lineReadings(text, system)) {
-    let at = cwd
-    for (const each of commands) {
-      const read = readings(each)
-      const cd = read.findLast((words) => words[0] === 'cd')
-      if (cd !== undefined) {
-        const target = (cd[1] ?? '~').replace(HOME_WORD, home)
-        at = paths.isAbsolute(target) ? target : at === undefined ? undefined : paths.resolve(at, target)
-        // There a file's bare name is a secret's (`cd / && cd home/alice/.ssh && cat id_ed25519`), as `cd ~/.ssh` says.
-        if (at !== undefined && secretPath(at, paths.sep, system)) return SECRETS_REFUSED
-        continue
-      }
-      for (const words of read)
+  const following: Following = {
+    resolve: (from, path) => {
+      const target = path.replace(HOME_WORD, home)
+      return paths.isAbsolute(target) ? paths.resolve(target) : from === undefined ? undefined : paths.resolve(from, target)
+    },
+    paths,
+    folder: isFolder,
+    unknown: paths.parse(home).root,
+  }
+  // There a file's bare name is a secret's (`cd / && cd home/alice/.ssh && cat id_ed25519`), as `cd ~/.ssh` says.
+  const inSecret = (folders: ReadonlyArray<Folder>) => folders.some(({ at }) => at !== undefined && secretPath(at, paths.sep, system))
+  // Where Althar can't read a `cd`, a path could be from anywhere, the home folder too.
+  const names = ({ at, blind }: Folder, path: string) =>
+    ((at !== undefined || HOME_WORD.test(path) || paths.isAbsolute(path)) && secretPath(path, at ?? paths.sep, system)) ||
+    (blind && secretPath(path, home, system))
+  let refused = false
+  for (const line of lineReadings(text, system)) {
+    const last = walkFolders(line, cwd, following, (written, folders) => {
+      if (!refused && inSecret(folders)) refused = true
+      for (const words of refused ? [] : readings(written))
         for (const word of words.slice(1))
-          for (const path of pathsInWord(word))
-            if ((at !== undefined || HOME_WORD.test(path) || paths.isAbsolute(path)) && secretPath(path, at ?? paths.sep, system))
-              return SECRETS_REFUSED
-    }
+          for (const path of pathsInWord(word)) if (folders.some((folder) => names(folder, path))) refused = true
+    })
+    if (refused || inSecret(last)) return SECRETS_REFUSED
   }
   return undefined
+}
+
+/** Whether a path is a folder that's there. */
+const isFolder = (path: string) => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 /** Why a request may not go ahead because it reads or writes where the person keeps a secret, or nothing. */
@@ -487,14 +502,23 @@ export interface Parsed {
 }
 
 /**
- * The subshells a command starts and ends: `(cd x`, `ls)`, a script handed
- * to a shell, a side of a pipe. One that `keeps` may keep its `cd` or not:
- * zsh runs a pipe's last side in the shell itself, bash in a subshell.
+ * How a command runs: the subshells it starts and ends (`(cd x`, `ls)`, a
+ * script handed to a shell, a side of a pipe), and whether it runs at all.
+ * One that `keeps` may keep its `cd` or not: zsh runs a pipe's last side in
+ * the shell itself, bash in a subshell.
  */
 interface Scope {
   readonly opens: number
   readonly closes: number
   readonly keeps?: boolean
+  /** It runs only where the one before succeeded (`&&`) or failed (`||`). */
+  readonly joined?: '&&' | '||'
+  /** It's inside an `if`, a loop, a `case` or a function: it may never run. */
+  readonly maybe?: boolean
+  /** It's inside a loop or a function: it may run many times. */
+  readonly repeats?: boolean
+  /** It's inside a function, which may run whenever it's called, later in the line. */
+  readonly called?: boolean
 }
 
 const NO_SCOPE: Scope = { opens: 0, closes: 0 }
@@ -523,15 +547,116 @@ const scopeOf = (words: ReadonlyArray<string>): Scope => {
   return { opens, closes }
 }
 
-/** Scopes for commands run inside one more of them, with a command's own around them all. */
+/** Scopes for commands run inside one more of them, with a command's own around them all: what runs them runs only as it does. */
 const wrapped = (scopes: ReadonlyArray<Scope>, own: Scope, extra: number): Array<Scope> =>
   scopes.map((scope, index) => ({
+    ...scope,
     opens: scope.opens + (index === 0 ? own.opens + extra : 0),
     closes: scope.closes + (index === scopes.length - 1 ? own.closes + extra : 0),
     ...(scope.keeps === true || (index === scopes.length - 1 && own.keeps === true) ? { keeps: true } : {}),
+    ...(index === 0 && own.joined !== undefined ? { joined: own.joined } : {}),
+    ...(own.maybe === true ? { maybe: true } : {}),
+    ...(own.repeats === true ? { repeats: true } : {}),
+    ...(own.called === true ? { called: true } : {}),
   }))
 
-const SEPARATORS = ['&&', '||', ';', '|', '&', '\n']
+/** What opens and closes a compound command, which may run what's in it never, once or many times. */
+const OPENS = ['if', 'while', 'until', 'for', 'select', 'case']
+const CLOSES = ['fi', 'done', 'esac', '}']
+const LOOPS = ['while', 'until', 'for', 'select', 'function']
+
+/** Where a command stands among the compound commands of its line. */
+interface Block {
+  /** Where what it runs starts, past a function's name or a `case`'s pattern, which aren't commands: `f() { rm …`, `a) rm …`. */
+  readonly start: number
+  readonly maybe: boolean
+  readonly repeats: boolean
+  readonly called: boolean
+  /** It's a part of a `case`'s pattern, `a|b)`, whose `|` is no pipe. */
+  readonly pattern: boolean
+}
+
+/** Each command's place among the `if`s, loops, `case`s, groups and functions of its line, by the words that open and close them. */
+const blocksOf = (commands: ReadonlyArray<ReadonlyArray<string>>, ends: ReadonlyArray<string>): Array<Block> => {
+  const open: Array<string> = []
+  // A `case`'s pattern comes after its `in`, after `;;`, and after a `|` in a pattern.
+  let patternNext = false
+  return commands.map((words, at) => {
+    let index = 0
+    let start = 0
+    let pattern = false
+    let atPattern = patternNext || [';;', ';;&'].includes(ends[at - 1] ?? '')
+    patternNext = false
+    // After a function's name, its `{` is its body's.
+    let named = false
+    while (index < words.length) {
+      const word = (words[index] ?? '').replace(/^\(+/, '')
+      if (atPattern && open.at(-1) === 'case' && word.replace(/\)+$/, '') !== 'esac') {
+        atPattern = false
+        const taken = word.endsWith(')') ? 1 : words[index + 1] === ')' ? 2 : 0
+        if (taken > 0) {
+          index += taken
+          start = index
+          continue
+        }
+        if (ends[at] === '|') {
+          pattern = true
+          patternNext = true
+          break
+        }
+      }
+      if (CLOSES.includes(word.replace(/\)+$/, ''))) {
+        open.pop()
+        index += 1
+        continue
+      }
+      if (OPENS.includes(word)) {
+        open.push(word)
+        index += 1
+        if (word === 'case') {
+          // `case x in`, then a pattern.
+          index += 2
+          start = index
+          atPattern = true
+          continue
+        }
+        if (word === 'for' || word === 'select') break
+        continue
+      }
+      const head =
+        word === 'function' ? 2 + (words[index + 2] === '()' ? 1 : 0) : /^[\w.:-]+\(\)$/.test(word) ? 1 : words[index + 1] === '()' ? 2 : 0
+      if (head > 0) {
+        open.push('function')
+        index += head
+        start = index
+        named = true
+        continue
+      }
+      if (word === '{') {
+        if (!named) open.push('{')
+        named = false
+        index += 1
+        continue
+      }
+      if (SHELL_KEYWORDS.includes(word)) {
+        index += 1
+        continue
+      }
+      break
+    }
+    // `case x in` at the end of a line: the pattern is on the next.
+    if (atPattern) patternNext = true
+    return {
+      start,
+      maybe: open.some((each) => each !== '{'),
+      repeats: open.some((each) => LOOPS.includes(each)),
+      called: open.includes('function'),
+      pattern,
+    }
+  })
+}
+
+const SEPARATORS = [';;&', ';;', '&&', '||', ';', '|', '&', '\n']
 const REDIRECTS = ['>>', '&>', '2>', '>', '<']
 
 /**
@@ -539,16 +664,38 @@ const REDIRECTS = ['>>', '&>', '2>', '>', '<']
  * command's redirects come after its other words (`redirectsLast`), so its first word is what it runs.
  */
 export const parseCommandLine = (text: string): Parsed => {
-  const { commands, operators, opaque, ends } = splitCommandLine(text)
-  const scopes = commands.map((words, index): Scope => {
-    const scope = scopeOf(words)
+  const { commands: written, operators: operating, opaque, ends } = splitCommandLine(text)
+  const blocks = blocksOf(written, ends)
+  // Without a function's name or a `case`'s pattern, keeping the parentheses before them: `(case x in a) rm …`.
+  const commands = written.map((words, index) => {
+    const start = blocks[index]?.start ?? 0
+    if (start === 0 || start >= words.length) return { words, operators: operating[index] ?? new Set<number>() }
+    const parens = scopeOf(words.slice(0, start)).opens
+    const shift = (parens > 0 ? 1 : 0) - start
+    return {
+      words: [...(parens > 0 ? ['('.repeat(parens)] : []), ...words.slice(start)],
+      operators: new Set([...(operating[index] ?? [])].filter((at) => at >= start).map((at) => at + shift)),
+    }
+  })
+  const scopes = commands.map(({ words }, index): Scope => {
+    const block = blocks[index]
+    const before = ends[index - 1]
+    const how: Scope = {
+      // A line of only a `case`'s head or a pattern (`b)`) closes no subshell.
+      ...(words === written[index] && (block?.start ?? 0) > 0 ? { opens: scopeOf(words).opens, closes: 0 } : scopeOf(words)),
+      ...(before === '&&' || before === '||' ? { joined: before } : {}),
+      ...(block?.maybe === true ? { maybe: true } : {}),
+      ...(block?.repeats === true ? { repeats: true } : {}),
+      ...(block?.called === true ? { called: true } : {}),
+    }
     // Every side of a pipe but the last, and what runs in the background, runs in a subshell; zsh runs a pipe's last side in its own shell.
-    if (ends[index] === '|' || ends[index] === '&') return { opens: scope.opens + 1, closes: scope.closes + 1 }
-    if (ends[index - 1] === '|') return { opens: scope.opens + 1, closes: scope.closes + 1, keeps: true }
-    return scope
+    if ((ends[index] === '|' && block?.pattern !== true) || ends[index] === '&')
+      return { ...how, opens: how.opens + 1, closes: how.closes + 1 }
+    if (before === '|' && blocks[index - 1]?.pattern !== true) return { ...how, opens: how.opens + 1, closes: how.closes + 1, keeps: true }
+    return how
   })
   return expandShells(
-    commands.map((words, index) => redirectsLast(words, operators[index] ?? new Set()).words),
+    commands.map(({ words, operators }) => redirectsLast(words, operators).words),
     opaque,
     scopes,
   )
@@ -803,7 +950,10 @@ const unwrap = (written: ReadonlyArray<string>): ReadonlyArray<string> => {
       index += 1
       continue
     }
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) || ['sudo', 'command', 'exec', 'env', 'nice', 'time', 'nohup', 'caffeinate'].includes(word)) {
+    if (
+      /^[A-Za-z_][A-Za-z0-9_]*=/.test(word) ||
+      ['sudo', 'command', 'builtin', 'exec', 'env', 'nice', 'time', 'nohup', 'caffeinate'].includes(word)
+    ) {
       index += 1
       // `sudo -u x`, `env -i`, `nice -n 5`: their options too.
       while ((command[index] ?? '').startsWith('-')) index += ['-u', '-n', '-g'].includes(command[index] ?? '') ? 2 : 1
@@ -1759,54 +1909,139 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
   const where = places(context)
   const lines = lineReadings(text, where.system)
   const each: Array<CommandKinds> = []
-  for (const { commands, scopes } of lines) {
-    // Every folder a command could run in: after a pipe's last side, the one before its `cd` and the one after.
-    let cwds: ReadonlyArray<string> = [context.worktree]
-    // After `cd "$DIR"` the folder shows only when it runs: what follows is read from the root of the disk, the worst it could be.
-    let blind = false
-    // Where each subshell started, to go back to when it ends: `(cd x); rm -rf src` deletes where it was before.
-    const started: Array<{ readonly cwds: ReadonlyArray<string>; readonly blind: boolean }> = []
-    commands.forEach((written, index) => {
-      const scope = scopes?.[index] ?? NO_SCOPE
-      for (let opened = 0; opened < scope.opens; opened += 1) started.push({ cwds, blind })
+  const following: Following = {
+    resolve: (from, path) => locate(where, from ?? context.worktree, path),
+    paths: where.system.paths,
+    folder: where.folder,
+    unknown: where.system.paths.parse(where.system.home).root,
+  }
+  for (const line of lines)
+    walkFolders(line, context.worktree, following, (written, folders) => {
       const kinds: Array<Kept> = []
       const redirected: Array<Kept> = []
-      const nexts: Array<string> = []
-      let moved = blind
-      for (const cwd of cwds) {
-        let next = cwd
+      let blind = false
+      for (const { at = context.worktree, blind: unseen } of folders)
         for (const words of readings(written)) {
-          const found = kindsOf(words, cwd, where, context)
+          const found = kindsOf(words, at, where, context)
           kinds.push(...found.kinds.filter((one) => !kinds.some((other) => JSON.stringify(other) === JSON.stringify(one))))
           redirected.push(...found.redirected.filter((one) => !redirected.some((other) => JSON.stringify(other) === JSON.stringify(one))))
-          if (found.cwd !== undefined) {
-            const target = cdTarget(words)
-            next = target !== undefined && unsettled(target) ? where.system.paths.parse(where.system.home).root : found.cwd
-            moved = target !== undefined && (unsettled(target) || (blind && !where.system.paths.isAbsolute(target.replace(HOME_WORD, '/'))))
-          }
+          if (unseen && found.kinds.some((each) => each.floor === true)) blind = true
         }
-        nexts.push(next)
-      }
-      blind = moved
-      if (blind && kinds.some((each) => each.floor === true))
-        kinds.unshift(kept("Althar can't tell which folder `cd` goes to until it runs, so it asks.", 'unclear', true))
-      cwds = [...new Set(nexts)]
-      for (let closed = 0; closed < scope.closes; closed += 1) {
-        const before = started.pop()
-        if (before === undefined) break
-        const kept = scope.keeps === true && closed === scope.closes - 1
-        cwds = kept ? [...new Set([...before.cwds, ...cwds])] : before.cwds
-        blind = kept ? before.blind || blind : before.blind
-      }
+      if (blind) kinds.unshift(kept("Althar can't tell which folder `cd` goes to until it runs, so it asks.", 'unclear', true))
       each.push({ words: written, kinds, redirected })
     })
-  }
   return { opaque: lines.some((line) => line.opaque), commands: each }
 }
 
-/** Where a `cd` goes, as its words say; none for home. */
-const cdTarget = (words: ReadonlyArray<string>) =>
-  words.find((word, index) => index > 0 && !REDIRECTS.includes(word) && !REDIRECTS.includes(words[index - 1] ?? ''))
+/** Where a `cd` goes, as its words say, past its options (`cd -P x`, cmd's `cd /d D:\\x`); none for home. */
+const cdTarget = (words: ReadonlyArray<string>): string | undefined => {
+  const [first, ...rest] = words.filter(
+    (word, index) => index > 0 && !REDIRECTS.includes(word) && !REDIRECTS.includes(words[index - 1] ?? ''),
+  )
+  return first !== undefined && (/^-[PLe@]+$|^--$/.test(first) || (/^\/d$/i.test(first) && rest.length > 0))
+    ? cdTarget(['cd', ...rest])
+    : first
+}
+
+/** A folder a command could run in, and whether it got there by a `cd` Althar can't read until it runs. */
+interface Folder {
+  /** None where the folder the line started in isn't known. */
+  readonly at: string | undefined
+  readonly blind: boolean
+}
+
+/** How to follow a line's `cd`s. */
+interface Following {
+  /** Where a `cd` to a path goes from a folder; none where that isn't known. */
+  readonly resolve: (from: string | undefined, path: string) => string | undefined
+  readonly paths: System['paths']
+  /** Whether a folder is there, so a `cd` to it can't fail and leave the shell where it was. */
+  readonly folder: (path: string) => boolean
+  /** Where a `cd` that shows only when it runs is read as going: the root of the disk, the worst it could be. */
+  readonly unknown: string
+}
+
+const distinct = (folders: ReadonlyArray<Folder>): Array<Folder> => [
+  ...new Map(folders.map((one) => [`${one.blind}\0${one.at}`, one])).values(),
+]
+
+/**
+ * Walks a line's commands with every folder each could run in, so a `cd`
+ * the shell may skip doesn't hide where what follows runs: one after `&&`
+ * or `||`, in an `if`, a loop, a `case` or a function, to a folder that
+ * isn't there; one in a subshell holds only there; `cd -` and `popd` go
+ * back to any folder it was in; a function's or an alias's may come back
+ * whenever it's called.
+ */
+const walkFolders = (
+  { commands, scopes }: Parsed,
+  start: string | undefined,
+  following: Following,
+  visit: (written: ReadonlyArray<string>, folders: ReadonlyArray<Folder>) => void,
+): ReadonlyArray<Folder> => {
+  const unknown: Folder = { at: following.unknown, blind: true }
+  // Where the command before succeeded and where it failed, which `&&` and `||` pick between.
+  let ok: ReadonlyArray<Folder> = [{ at: start, blind: false }]
+  let failed: ReadonlyArray<Folder> = []
+  // Every folder the line has been in, where `cd -` and `popd` go back to.
+  let seen: ReadonlyArray<Folder> = ok
+  // Where a function or an alias with a `cd` may go whenever it's called.
+  let called: ReadonlyArray<Folder> = []
+  const started: Array<ReadonlyArray<Folder>> = []
+  commands.forEach((written, index) => {
+    const scope = scopes?.[index] ?? NO_SCOPE
+    const all = distinct([...ok, ...failed, ...called])
+    for (let opened = 0; opened < scope.opens; opened += 1) started.push(all)
+    const picked = distinct([...(scope.joined === '&&' ? ok : scope.joined === '||' ? failed : all), ...called])
+    const folders = picked.length > 0 ? picked : all
+    visit(written, folders)
+    const program = (written[0] ?? '').toLowerCase()
+    const back = ['popd', 'pop-location'].includes(program)
+    const aliased = program === 'alias' && /\b(cd|pushd|popd|chdir)\b/.test(written.join(' '))
+    const cds = readings(written).filter((words) => words[0] === 'cd')
+    let landed: ReadonlyArray<Folder> = folders
+    let certain = !back && !aliased
+    if (back) landed = seen
+    else if (aliased) landed = [unknown]
+    else if (cds.length > 0)
+      landed = distinct(
+        cds.flatMap((words) => {
+          const target = cdTarget(words)
+          if (target !== undefined && /^(-|[-+]\d+)$/.test(target)) {
+            certain = false
+            return seen
+          }
+          if (target !== undefined && unsettled(target)) {
+            certain = false
+            return [unknown]
+          }
+          const path = target ?? '~'
+          const relative = !following.paths.isAbsolute(path.replace(HOME_WORD, '/'))
+          const went = folders.map(({ at, blind }) => ({ at: following.resolve(at, path), blind: blind && relative }))
+          if (!went.every(({ at }) => at !== undefined && following.folder(at))) certain = false
+          // A loop or a function may take a relative `cd` many times: `cd ..` again and again.
+          return [...went, ...(scope.repeats === true && relative ? [unknown] : [])]
+        }),
+      )
+    const moves = back || aliased || cds.length > 0
+    const may = scope.maybe === true || aliased
+    if (moves && (scope.called === true || aliased)) called = distinct([...called, ...landed])
+    const succeeded = moves ? distinct([...landed, ...(may ? folders : [])]) : folders
+    const failing = moves && certain && !may ? [] : folders
+    ok = scope.joined === '||' ? distinct([...ok, ...succeeded]) : succeeded
+    failed = scope.joined === '&&' ? distinct([...failed, ...failing]) : failing
+    for (let closed = 0; closed < scope.closes; closed += 1) {
+      const before = started.pop()
+      if (before === undefined) break
+      // A subshell's `cd` ends with it; a pipe's last side may keep it.
+      const keeps = scope.keeps === true && closed === scope.closes - 1
+      ok = keeps ? distinct([...before, ...ok, ...failed]) : before
+      failed = ok
+    }
+    seen = distinct([...seen, ...ok, ...failed])
+  })
+  return distinct([...ok, ...failed, ...called])
+}
 
 /** Every kind one command is, read one way, from the folder it runs in; and, for a `cd`, where it goes. */
 const kindsOf = (
