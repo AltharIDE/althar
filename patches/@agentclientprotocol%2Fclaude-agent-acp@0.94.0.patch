@@ -1,5 +1,5 @@
 diff --git a/dist/acp-agent.js b/dist/acp-agent.js
-index 67f4a1d7bc9564a94c5bfa7c86061b7969314f90..2abf0112735d76329d6531c9f36b95852f042d26 100644
+index 430a45f09e13465e06e4e7a0a2163b889697b2b5..86d98214dfa4b43f3730373cc945b8b6df25a65c 100644
 --- a/dist/acp-agent.js
 +++ b/dist/acp-agent.js
 @@ -5959,17 +5959,16 @@ export class ClaudeAcpAgent {
