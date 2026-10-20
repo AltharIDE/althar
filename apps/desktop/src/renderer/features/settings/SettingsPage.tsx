@@ -12,6 +12,7 @@ import {
   Choices,
   CoAuthor,
   CoAuthorFace,
+  CrashReports,
   DockPreview,
   EdgeHere,
   EdgeMini,
@@ -24,9 +25,9 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
-  Panel,
   SettingList,
   SettingRow,
+  SettingsLayout,
   SettingsNav,
   SettingSwitch,
   UpdateReady,
@@ -37,7 +38,7 @@ import altharFace from '../../../../resources/faces/althar-ai.svg'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
 import { useServices } from '../../data/services'
-import { agentLineOf, brandOf } from '../../shared/agents'
+import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
@@ -49,7 +50,7 @@ import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
-import { StartError } from '../start/StartView'
+import { AgentProblem, openGuide, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
@@ -99,9 +100,12 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
   }
   const open = sectionText[section]
   return (
-    <div className={s.page}>
-      <div className={s.columns}>
-        <aside className={s.side}>
+    <SettingsLayout
+      section={section}
+      title={open.title}
+      lede={open.lede}
+      side={
+        <>
           <QuickCards side preferences={preferences} sounds={sounds.list} onSection={onSection} />
           <Failed when={preferences.failed} />
           <SettingsNav
@@ -117,17 +121,11 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
             value={section}
             onChange={onSection}
           />
-        </aside>
-        <main className={s.main}>
-          {/* Another section is a sheet of its own: nothing half done in one carries over to the next. */}
-          <Panel key={section} title={open.title} lede={open.lede} headingLevel={1}>
-            <div className={s.body}>
-              <SectionBody section={section} start={start} accounts={accounts} connections={connections} looks={looks} />
-            </div>
-          </Panel>
-        </main>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <SectionBody section={section} start={start} accounts={accounts} connections={connections} looks={looks} />
+    </SettingsLayout>
   )
 }
 
@@ -192,13 +190,17 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     ...(brand === undefined ? {} : { brand }),
     ...(line === undefined ? {} : { line }),
     ...(agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
+    // Not on this computer: its tab quieter, after those that are.
+    ...(agent.installed ? {} : { away: true }),
   }
 }
 
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts }: { start: StartModel; accounts: AccountSignInModel }) {
   const [agentId, setAgentId] = useState<string | null>(null)
-  const agents = start.status?.agents ?? []
+  // Those on this computer first, then the others Althar runs, each in the registry's order.
+  const all = start.status?.agents ?? []
+  const agents = [...all.filter((agent) => agent.installed), ...all.filter((agent) => !agent.installed)]
   // The agent chosen, else the one signing in, else one that needs the person, else the first.
   const chosen =
     agents.find((agent) => agent.id === agentId) ??
@@ -215,10 +217,17 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
   const brand = brandOf(chosen.id)
   return (
     <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
-      <AgentTabList label={text.agents} agents={agents.map(tabOf)} />
+      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
       <StartError model={start} />
-      <AgentTabPanel agent={tabOf(chosen)} headingLevel={2} aside={<ModelsView key={chosen.id} agent={chosen} />}>
-        {chosen.installed && chosen.download?.installing !== true ? (
+      {/* What its work may use, beside its accounts, once it is on this computer and can say. */}
+      <AgentTabPanel
+        agent={tabOf(chosen)}
+        headingLevel={2}
+        {...(chosen.installed ? { aside: <ModelsView key={chosen.id} agent={chosen} /> } : {})}
+      >
+        {chosen.problem !== null ? (
+          <AgentProblem why={chosen.problem} model={start} />
+        ) : chosen.installed && chosen.download?.installing !== true ? (
           <AgentAccounts agent={chosen} start={start} signIn={accounts} />
         ) : (
           <AgentInstall
@@ -226,6 +235,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
             text={{ missing: text.agentHere }}
             {...(brand === undefined ? {} : { brand })}
             {...(chosen.download === null ? {} : { size: chosen.download.size })}
+            {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
             state={
               chosen.download?.installing === true
                 ? { kind: 'installing' }
@@ -234,6 +244,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
                   : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
             }
             onInstall={() => void start.install(chosen.id)}
+            {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
           />
         )}
       </AgentTabPanel>
@@ -469,8 +480,9 @@ function EditorSection() {
 /**
  * Which Althar this is, with its release's notes; a newer one, once it is
  * ready to install; Report a problem (DEV-61), where the app can report;
- * and whether it sends anonymous usage data, which is off, and stays off
- * here, while DO_NOT_TRACK is set where it started.
+ * and whether it sends anonymous usage data, and crash reports (DEV-66),
+ * each with a switch of its own, both off, and staying off here, while
+ * DO_NOT_TRACK is set where it started.
  */
 function AboutSection({ start }: { start: StartModel }) {
   const update = useUpdate()
@@ -488,6 +500,7 @@ function AboutSection({ start }: { start: StartModel }) {
       </div>
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
+        <CrashReports on={preferences.crashReports} onChange={(on) => set('crashReports', on)} doNotTrack={host.doNotTrack === true} />
       </SettingList>
       <Failed when={failed} />
     </>

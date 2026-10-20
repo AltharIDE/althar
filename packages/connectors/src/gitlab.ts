@@ -24,7 +24,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { lacking, leftAsItIs, noReviews } from './model'
+import { lacking, leftAsItIs, noReviews, stillOpen } from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -79,6 +79,8 @@ const MergeAnswer = Schema.Struct({
   target_branch: Schema.String,
   /** The project the branch is on: a fork's, for a merge request from one. */
   source_project_id: Schema.optional(Schema.Number),
+  /** The project it goes into. */
+  target_project_id: Schema.optional(Schema.Number),
   sha: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(User)),
   // A string, and "1000+" past a thousand files; said only when one merge request is read.
@@ -214,6 +216,8 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
     : request.detailed_merge_status === undefined || CHECKING.has(request.detailed_merge_status)
       ? {}
       : { conflicts: request.has_conflicts === true }),
+  // A branch of the project's own; one from a fork's, `change` reads where it is.
+  ...(request.source_project_id !== undefined && request.source_project_id === request.target_project_id ? { headRepository: null } : {}),
 })
 
 /** GitLab's state for each a list can ask for. */
@@ -344,6 +348,16 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     )
 
   const read = (repository: Repository, number: number) => http.json(MergeAnswer, 'GET', `${project(repository)}/merge_requests/${number}`)
+  /** 401 is GitLab's word for an account that may not do something here, while its token still works: forbidden, where it does. */
+  const mayNot = <A>(effect: Effect.Effect<A, ConnectorFailed>) =>
+    Effect.catchIf(
+      effect,
+      (error) => error.status === 401,
+      (error) =>
+        Effect.flatMap(account, () =>
+          Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', status: 401, message: error.message })),
+        ),
+    )
 
   /** Each merge request's size at the head it was counted at: counted again only when the head moves. */
   const sizes = new Map<
@@ -478,9 +492,19 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       Effect.gen(function* () {
         const request = yield* http.cached(MergeAnswer, `${project(repository)}/merge_requests/${number}`)
         const size = yield* sizeOf(repository, request)
-        return size === null
-          ? changeOf(request)
-          : { ...changeOf(request), additions: size.additions, deletions: size.deletions, changedFiles: size.files }
+        // The fork its branch is on, by its path; none where it is gone.
+        const fork =
+          request.source_project_id === undefined || request.source_project_id === request.target_project_id
+            ? undefined
+            : yield* http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
+                Effect.map((answer) => answer.path_with_namespace.split('/')),
+                Effect.catchIf(
+                  (error) => error.reason === 'not_found',
+                  () => Effect.succeed([]),
+                ),
+              )
+        const change = fork === undefined ? changeOf(request) : { ...changeOf(request), headRepository: fork }
+        return size === null ? change : { ...change, additions: size.additions, deletions: size.deletions, changedFiles: size.files }
       }),
     listChanges: (repository, query) =>
       Effect.gen(function* () {
@@ -536,6 +560,27 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
               }),
           ),
         ),
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* read(repository, change.number)
+        if (now.state !== 'opened') return changeOf(now)
+        return changeOf(
+          yield* mayNot(http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { state_event: 'close' })),
+        )
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* read(repository, change.number)
+        if (now.state === 'opened') return yield* stillOpen(product, { noun: 'merge request', short: 'MR', prefix: '!' }, change.number)
+        // Its branch is in the project it came from: a fork's, for one from a fork.
+        const on = now.source_project_id === undefined ? project(repository) : `${api}/projects/${now.source_project_id}`
+        yield* mayNot(http.json(Schema.Unknown, 'DELETE', `${on}/repository/branches/${encodeURIComponent(now.source_branch)}`)).pipe(
+          Effect.catchIf(
+            (error) => error.status === 404,
+            () => Effect.void,
+          ),
+        )
+      }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
         const pipelines = yield* http.cached(Schema.Array(Pipeline), `${project(repository)}/pipelines?sha=${sha}&per_page=20`)
@@ -577,13 +622,8 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     checkLog: (repository, check, whole = false) => {
       const match = /^job:(\d+):(\d+)$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
-      return http.text(`${api}/projects/${match[1]}/jobs/${match[2]}/trace`).pipe(
-        Effect.map((log) => (whole ? log : tail(log))),
-        Effect.catchIf(
-          (error) => error.reason === 'not_found' || error.reason === 'forbidden',
-          () => Effect.succeed(null),
-        ),
-      )
+      // An archived trace may be sent from object storage, by a redirect `text` follows without the token. Refused or gone, it fails.
+      return http.text(`${api}/projects/${match[1]}/jobs/${match[2]}/trace`).pipe(Effect.map((log) => (whole ? log : tail(log))))
     },
     rerun: (_repository, check) => {
       // A pipeline's job runs again as a new job, on the same commit.

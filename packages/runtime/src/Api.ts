@@ -9,6 +9,7 @@ import {
   Api,
   ApiError,
   type AgentStatus,
+  type Attachment,
   type PortLike,
   serverProtocol,
   type WatchEvent,
@@ -25,7 +26,9 @@ import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
 import { Changes } from './Changes'
+import { codeRootOf } from './code'
 import { NotFound } from './errors'
+import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
@@ -52,7 +55,7 @@ import {
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
-import { dropNote, notesOf } from './notes'
+import { dropNote, editNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
@@ -179,17 +182,31 @@ export const handlers = Api.toLayer(
     /** What a message's command says of its images: their digests, in order, where it has any; nothing where it has none, as before images. */
     const imagesSaid = (kept: ReadonlyArray<InputImage>) => (kept.length === 0 ? {} : { images: kept.map((image) => image.sha256) })
 
-    /** A call's failure as the window gets it: in words, and in the log when it isn't the person's to put right. */
+    const failures = yield* Failures
+    /** The call being answered, by the name the RPC server gives its span: `Status`, `ListProjects`. */
+    const callName = Effect.currentSpan.pipe(
+      Effect.map((span) => span.name.replace(/^RpcServer\./, '')),
+      Effect.map((name) => (/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name) ? name : 'call')),
+      Effect.orElseSucceed(() => 'call'),
+    )
+
+    /**
+     * A call's failure as the window gets it: in words; and, when it isn't
+     * the person's to put right, in the log and reported, by the call's name.
+     */
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
       Effect.catchCause(effect, (cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
         const error = Cause.findErrorOption(cause)
         const said = words(Option.getOrUndefined(error), agentName)
-        const log =
+        const told =
           Option.isSome(error) && expected.has(said.reason)
             ? Effect.void
-            : Effect.logWarning('A call from the window did not succeed', cause)
-        return Effect.andThen(log, Effect.fail(new ApiError(said)))
+            : Effect.andThen(
+                Effect.logWarning('A call from the window did not succeed', cause),
+                Effect.flatMap(callName, (call) => failures.report(cause, call)),
+              )
+        return Effect.andThen(told, Effect.fail(new ApiError(said)))
       })
 
     /*
@@ -292,7 +309,7 @@ export const handlers = Api.toLayer(
       }
     }
 
-    /* An account as the window shows it: signed in, checked at most once a minute, paid for how, and out until when. */
+    /* An account as the window shows it: signed in, checked at most once a minute, paid for how, and out until when. One whose check failed shows as unknown; the others are shown as they are. */
     const accountStatus = (account: Account, recheck: boolean) =>
       Effect.gen(function* () {
         const check = yield* signIns.account(account, recheck)
@@ -306,16 +323,38 @@ export const handlers = Api.toLayer(
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
         } satisfies AccountStatus
-      })
+      }).pipe(
+        contained(
+          'Status.account',
+          (): AccountStatus => ({
+            id: account.id,
+            name: account.name,
+            home: account.home,
+            signIn: 'unknown',
+            paidBy: 'unknown',
+            outUntil: null,
+            adoptedFrom: account.adoptedFrom,
+          }),
+          account.agentId,
+        ),
+      )
 
     /* Each agent's version, asked of its CLI once a launch. */
     const versions = new Map<string, string | null>()
     const versionOf = (entry: AgentEntry) =>
       versions.has(entry.definition.id)
         ? Effect.succeed(versions.get(entry.definition.id) ?? null)
-        : agentVersion(entry.definition).pipe(Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))))
+        : agentVersion(entry.definition).pipe(
+            Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))),
+            // Asked again next time: one that failed says no version, not a wrong one.
+            contained('Status.version', () => null, entry.definition.id),
+          )
 
-    /* An agent, with its accounts: each check starts the agent's own status command, in the account's home. */
+    /*
+     * An agent, with its accounts: each check starts the agent's own status
+     * command, in the account's home. An agent that couldn't be looked at
+     * says so on its own, and every other agent is shown as it is.
+     */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
         const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
@@ -327,14 +366,41 @@ export const handlers = Api.toLayer(
           name: entry.definition.name,
           installed: entry.definition.cli === undefined || install.located !== null,
           kept: install.located?.whose === 'althar',
-          download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
+          download:
+            install.downloadable && install.size !== null
+              ? { size: install.size, installing: install.installing, pinned: install.pinned }
+              : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
           version: yield* versionOf(entry),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
+          addsAccounts: entry.definition.home.accounts !== 'one',
+          guide: entry.definition.cli?.guide ?? null,
+          problem: null,
         } satisfies AgentStatus
-      })
+      }).pipe(
+        contained(
+          'Status.agent',
+          (): AgentStatus => ({
+            id: entry.definition.id,
+            name: entry.definition.name,
+            installed: true,
+            kept: false,
+            download: null,
+            signIn: 'unknown',
+            login: entry.definition.signIn.login,
+            version: null,
+            ways: entry.definition.signIn.inApp?.ways ?? [],
+            accounts: [],
+            addsAccounts: entry.definition.home.accounts !== 'one',
+            // Nothing that might be what failed: its command is read no more here.
+            guide: null,
+            problem: `Althar couldn't check ${entry.definition.name}. Its log has the details.`,
+          }),
+          entry.definition.id,
+        ),
+      )
 
     /*
      * Changes from the store's feed after `since`, or from now: the window
@@ -565,6 +631,8 @@ export const handlers = Api.toLayer(
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
+      FindCode: ({ threadId, messages }) => api(queries.findCode(threadId, messages)),
+      ReadCode: ({ threadId, path, commit, line }) => api(queries.readCode(threadId, path, commit, line)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
@@ -576,14 +644,8 @@ export const handlers = Api.toLayer(
             yield* sql`UPDATE devices SET home_looked_at = ${yield* timestamp} WHERE id = ${instance.deviceId}`
           }),
         ),
-      // The person opened a task: a plain task that finished is done once seen.
-      SeeTask: ({ taskId }) =>
-        api(
-          Effect.gen(function* () {
-            const card = yield* queries.card(taskId)
-            yield* tasks.see({ taskId, finished: card.kind === 'plain' && card.phase === 'ready' })
-          }),
-        ),
+      // The person opened a task: when, kept. It moves nothing: a finished task waits for them to settle it.
+      SeeTask: ({ taskId }) => api(tasks.see({ taskId })),
       StartSession: ({ commandId, threadId, agentId, model, effort }) =>
         once(
           commandId,
@@ -591,7 +653,7 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, dictated }) =>
         once(
           commandId,
           api(
@@ -606,12 +668,18 @@ export const handlers = Api.toLayer(
                       // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
                       envelope: yield* envelope(
                         'thread.send',
-                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept) },
+                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
                       ...(kept.length === 0 ? {} : { images: kept }),
+                      ...(dictated === true ? { dictated: true } : {}),
                     }
+              // Written to again with the switch, a task kept for later is back, as when it is sent on its own.
+              if (message !== undefined) {
+                const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId} AND kind = 'task'`
+                if (thread?.taskId != null) yield* tasks.bringBack(thread.taskId)
+              }
               const sessionId = yield* sessions.switchAgent({
                 threadId,
                 agentId,
@@ -652,6 +720,8 @@ export const handlers = Api.toLayer(
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
+      MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
+      LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
@@ -708,10 +778,31 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
+      LeaveOutCommits: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.leave_out', { taskId }, commandId), (said) => tasks.leaveOut({ envelope: said, taskId }))),
+        ),
       AbandonTask: ({ commandId, taskId }) =>
         once(
           commandId,
           api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
+        ),
+      MarkTaskDone: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(
+            Effect.asVoid(
+              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) => tasks.markDone({ envelope: said, taskId })),
+            ),
+          ),
+        ),
+      KeepTaskForLater: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(
+            Effect.asVoid(Effect.flatMap(envelope('task.keep', { taskId }, commandId), (said) => tasks.keep({ envelope: said, taskId }))),
+          ),
         ),
       RenameTask: ({ commandId, taskId, title }) =>
         once(
@@ -727,23 +818,32 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images }) =>
+      Send: ({ commandId, threadId, body, disposition, images, dictated }) =>
         api(
           Effect.gen(function* () {
             // Its images are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
             const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
             const message = {
               // The command says its images by their digests, never their bytes.
-              envelope: yield* envelope('thread.send', { threadId, body, disposition, ...imagesSaid(kept) }, commandId),
+              envelope: yield* envelope(
+                'thread.send',
+                { threadId, body, disposition, ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
+                commandId,
+              ),
               threadId,
               body,
               disposition,
               ...(kept.length === 0 ? {} : { images: kept }),
+              ...(dictated === true ? { dictated } : {}),
             }
             // What the person says to the coordinator starts it, if it isn't running.
-            const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`
+            const [thread] = yield* sql<{ kind: string; taskId: string | null }>`SELECT kind, task_id FROM threads WHERE id = ${threadId}`
             if (thread?.kind === 'coordinator') yield* coordinator.say(message)
-            else yield* sessions.send(message)
+            else {
+              // Written to again, a task kept for later is back: what its lead does next ends in Needs you.
+              if (thread?.kind === 'task' && thread.taskId !== null) yield* tasks.bringBack(thread.taskId)
+              yield* sessions.send(message)
+            }
             // Links in what the person said unfurl on their message, without holding up the reply.
             yield* Effect.forkDetach(issues.unfurlInput(commandId))
           }),
@@ -825,6 +925,22 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      HandOverHeld: ({ commandId, taskId, agentId, accountId, model }) => {
+        const answer = {
+          kind: 'retry' as const,
+          agentId,
+          ...(accountId === undefined ? {} : { accountId }),
+          ...(model === undefined ? {} : { model }),
+        }
+        return once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.hand_over_held', { taskId, answer }, commandId), (said) =>
+              runs.handOverHeld({ envelope: said, taskId, answer }),
+            ),
+          ),
+        )
+      },
       AnswerQuestion: ({ commandId, attentionId, answers }) =>
         once(
           commandId,
@@ -1020,6 +1136,16 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      EditProjectNote: ({ commandId, projectId, noteId, body }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.note.edit', { projectId, noteId, body }, commandId)
+              yield* Effect.provideContext(editNote({ envelope: said, projectId, noteId, body }), store)
+            }),
+          ),
+        ),
       GetVocabulary: ({ projectId }) =>
         api(
           Effect.gen(function* () {
@@ -1071,6 +1197,8 @@ export const handlers = Api.toLayer(
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
       Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
+      ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>
+        once(commandId, api(Effect.map(pullRequests.close(taskId, url, { deleteBranch }), ({ branch }) => ({ branch })))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
       ReplacePullRequest: ({ commandId, taskId, head, replaces, url }) =>
@@ -1108,8 +1236,46 @@ export const handlers = Api.toLayer(
             return yield* open(editor, folder, file, line ?? null)
           }),
         ),
+      // A file an agent named: a task's in its folder, as OpenInEditor opens it; the coordinator's in the person's own checkout.
+      OpenCode: ({ threadId, editor, path, line }) =>
+        api(
+          Effect.gen(function* () {
+            const open = config.editors?.open
+            if (open === undefined) return false
+            const place = yield* queries.codeRoots(threadId)
+            const found = codeRootOf(place, path)
+            if (found === null) return false
+            // A task's folder as OpenInEditor opens it, with several worktrees the one that holds them; else the repository's.
+            const whole = place.kind === 'task' && place.roots.length > 1
+            const folder = yield* Effect.sync(() => realOf(whole ? dirname(found.root.editor) : found.root.editor))
+            // Never a path that leaves the folder, by `..` or by a link; the folder alone where the file isn't there, as on another branch.
+            const file = yield* Effect.sync(() => realOf(resolve(folder, whole ? path : found.path)))
+            if (!isInside(folder, file)) return false
+            return yield* open(editor, folder, isThere(file) ? file : null, isThere(file) ? (line ?? null) : null)
+          }),
+        ),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
       StopListening: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.stopListening(taskId, url))),
+      AttachPullRequest: ({ commandId, taskId, pullRequest, start }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              pullRequests.attach({ taskId, pullRequest, start: start === true, actorId: instance.personId }),
+              (done): Attachment =>
+                done.kind === 'start'
+                  ? { kind: 'start', name: done.name, source: done.source, started: false, kept: 0, own: done.own }
+                  : {
+                      kind: 'attached',
+                      name: `${done.change.words.short} ${done.change.words.prefix}${done.change.number}`,
+                      source: done.change.source ?? '',
+                      started: done.started,
+                      kept: done.kept,
+                      own: done.kept,
+                    },
+            ),
+          ),
+        ),
       StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
       ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
       RunProject: ({ commandId, projectId, taskId, threadId, runnableId }) =>
@@ -1158,6 +1324,8 @@ export const services = (options: Runtime.RuntimeLayerOptions) =>
   Layer.mergeAll(Nudges.layer, UsageData.layer, Folders.layer).pipe(
     Layer.provideMerge(Queries.layer),
     Layer.provideMerge(Runtime.layer(options)),
+    // Below everything, so a failure kept anywhere is said through the one listener.
+    Layer.provideMerge(failuresLayer),
   )
 
 /** One client's connection: the API served over its port, until the port closes. Each window gets one. */

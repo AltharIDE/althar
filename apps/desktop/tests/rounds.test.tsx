@@ -157,6 +157,68 @@ describe('a task’s thread in rounds', () => {
     expect(started?.work?.steps).toEqual([])
   })
 
+  it('times a turn that has said nothing yet after a restart from nothing before it, not from the round Althar stopped', () => {
+    // Stopped mid-round, started again the next day: the lead's turn runs, and hasn't said anything yet.
+    const day = 24 * 60
+    const blocks = read(
+      [
+        items.you('Go'),
+        when(items.tool({ toolKind: 'edit' }), 0),
+        when(items.says('Now the tests.'), 5),
+        when(items.notice({ source: 'runtime', title: 'Althar restarted; the step carried on from here.' }, null), day),
+      ],
+      true,
+      at(day + 1),
+    )
+    const stopped = roundOf(blocks)
+    expect(stopped?.live).toBe(false)
+    expect(stopped?.work?.took).toBe('5m 0s')
+    expect(blocks.some((block) => block.kind === 'round' && block.live)).toBe(false)
+    // Housekeeping of Althar's is part of the round, which goes on.
+    const aside = read(
+      [
+        items.you('Go'),
+        when(items.tool({}), 0),
+        when(items.notice({ source: 'runtime', role: 'aside', title: 'Its turn ended before it could do anything.' }, null), 1),
+      ],
+      true,
+      at(3),
+    )
+    expect(roundOf(aside)?.live).toBe(true)
+    // What the person said and the lead read starts the turn that runs now.
+    const answered = read([items.you('Go'), when(items.tool({}), 0), when(items.you('And the docs.'), 30)], true, at(31))
+    expect(roundOf(answered)?.live).toBe(false)
+  })
+
+  it('holds the lead’s reply while it has said nothing since it was asked, and leaves the round before it over', () => {
+    const asked = (thread: ReadonlyArray<ThreadItem>, extra: { openedAt?: string } = {}) =>
+      roundsOf(
+        { items: thread, turnRunning: true, turnStarted: at(50), worktree: '/w/meridian', ...extra },
+        new Map(),
+        () => 'just now',
+        new Date(Date.parse(at(50)) + 12_000).toISOString(),
+      )
+    const answered = [when(items.you('Go'), 0), when(items.tool(), 1), when(items.says('Done.'), 2)]
+    const again = asked([...answered, when(items.you('And the docs?'), 50)])
+    expect(again.map((block) => block.kind)).toEqual(['you', 'round', 'you', 'waiting'])
+    expect(roundOf(again)).toMatchObject({ live: false, result: { text: 'Done.' }, work: { live: false, took: '1m 0s' } })
+    expect(again.at(-1)).toMatchObject({ took: '12s', slow: false })
+    // What the coordinator passed on is waited on as well, after a report too.
+    const passed = items.notice({ source: 'runtime', title: 'From the coordinator:', description: 'Ship it.', role: 'relayed' }, null)
+    expect(asked([...answered, items.step(), when(passed, 50)]).map((block) => block.kind)).toEqual(['you', 'round', 'relayed', 'waiting'])
+    // Writing on after its report, the lead's round is at work, with nothing waited for.
+    const reported = asked([...answered, items.step()])
+    expect(reported.some((block) => block.kind === 'waiting')).toBe(false)
+    expect(roundOf(reported)).toMatchObject({ live: true })
+    // The task's request, above its items, is what its first turn answers; once a report is in, it has been answered.
+    expect(
+      asked([when(items.notice({ source: 'runtime', title: 'On a branch of its own' }, null), 0)], { openedAt: at(50) }).at(-1),
+    ).toMatchObject({
+      kind: 'waiting',
+    })
+    expect(asked([items.step()], { openedAt: at(50) }).map((block) => block.kind)).toEqual(['round'])
+  })
+
   it('places what the coordinator passed on as an ask, by its role or, before roles, its title', () => {
     const blocks = read([
       items.notice(
@@ -386,5 +448,21 @@ describe('a task’s thread in rounds, on its screen', () => {
     const quiet = await screen.findByRole('button', { name: /worked 0s/ })
     expect(within(quiet).getByText('Claude Opus')).toBeTruthy()
     await waitFor(() => expect(screen.getByText(/^Working · /)).toBeTruthy())
+  })
+
+  it('shows the lead thinking under its name before its first word, with the round before it as it was', async () => {
+    const asked = { ...items.you('And the docs?'), createdAt: new Date().toISOString() }
+    const base = snapshot({ items: [items.you('Go'), items.says('Done.'), asked] })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        session: base.session === null ? null : { ...base.session, turnRunning: true, turnStartedAt: asked.createdAt },
+      })),
+    })
+    withServices(<Task />, client)
+    const thinking = await screen.findByText('Thinking')
+    expect(thinking.closest('article')?.getAttribute('aria-label')).toBe('Claude Opus')
+    expect(screen.getByText('Done.')).toBeTruthy()
+    expect(screen.queryByText(/^Working · /)).toBeNull()
   })
 })

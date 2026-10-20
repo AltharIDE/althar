@@ -206,10 +206,12 @@ Tasks, evidence, and decisions remain readable when a source is unavailable.
 
 ### Changing a project after it is made
 
-A project's settings, opened from the top of its screen, rename it and change
-the ink its mark is drawn in, open its repositories and its rules, connect
-its code host, and remove it. Each change is recorded as a fact of the
-project, so every window reads the project again.
+A project's settings, a view of the project beside its conversation and its
+board, rename it and change the ink its mark is drawn in, switch how its
+tasks work, add and leave out its repositories, connect its code host and
+trackers, change its rules and what it runs, show its notes, and remove it.
+Each change is recorded as a fact of the project, so every window reads the
+project again.
 
 - **Renaming** changes its name only. Its slug, and so the folders its tasks'
   worktrees are in, stays, and so does its mark, drawn from its id.
@@ -225,13 +227,13 @@ project, so every window reads the project again.
   as whom, from the connections on this device. Nothing is asked of the
   host. A host Althar doesn't know is named by its address; a repository
   with no remote, or one that is a folder, keeps its work on this device.
-  The Repositories screen draws each folder wired to where its work goes,
+  Its settings draw each folder wired to where its work goes,
   and reads it again when a connection is made or stops working.
 - **Leaving a repository out** sets its binding's `detached_at`. New tasks
   can't require it and the coordinator stops reading it; tasks made with it
   keep their requirement and their worktree. The last binding stays, since a
   task needs one.
-- **A role** is one of the roles the Repositories screen offers, suggested
+- **A role** is one of the roles its settings offer, suggested
   from the repository's name. Tasks and the coordinator are told it.
 - **A fork** is known from its clone's remotes, an `upstream` beside
   `origin` on the same host. Its binding says where tasks open pull requests:

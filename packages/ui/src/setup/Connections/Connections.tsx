@@ -115,7 +115,7 @@ export function Connections({
               )}
               {mine.length > 0 && service.selfHosted === true && onAddServer !== undefined && (
                 <span className={s.actions}>
-                  <ActionButton icon="plus" onClick={() => onAddServer(service.id)}>
+                  <ActionButton icon="plus" flush="end" onClick={() => onAddServer(service.id)}>
                     {t.addServer}
                   </ActionButton>
                 </span>
@@ -131,7 +131,9 @@ export function Connections({
                   </span>
                 </span>
                 <span className={s.actions}>
-                  <ActionButton onClick={() => onDisconnect(connection.id)}>{t.disconnect}</ActionButton>
+                  <ActionButton {...(connection.needsSignIn ? {} : { flush: 'end' as const })} onClick={() => onDisconnect(connection.id)}>
+                    {t.disconnect}
+                  </ActionButton>
                   {connection.needsSignIn && (
                     <Button variant="signal" onClick={() => onSignInAgain(connection.id)}>
                       {t.signInAgain}

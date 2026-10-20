@@ -124,10 +124,23 @@
   --term-paper-ink: #2a2a30; /* command text on the paper terminal */
 
   /* ---- Syntax and diff inks ----------------------------------------------
-     Muted, and none of them the product's signal colours.                    */
-  --syn-keyword: #8b3d6b;
-  --syn-string: #82540f;
-  --syn-fn: #2c5f7c;
+     Each kind of code its own ink, told apart at a glance; none of them the
+     product's signal colours nor a change's green or red, and each readable
+     on paper and on the yellow of the lines an agent named.                  */
+  --syn-keyword: #a3217b; /* magenta: what the language says */
+  --syn-string: #a34b08; /* burnt orange: what is written out, strings, numbers, true, null, constants */
+  --syn-fn: #1a56a6; /* blue: what is called or declared, and a property's or an attribute's name */
+  --syn-type: #0b6f73; /* teal: types, classes, components */
+  --syn-comment: #696970;
+  --syn-punct: #5f5f68;
+  /* the lines an agent named: a reader's highlight, not a change's green nor the product's violet */
+  --named-line: #fcf1cb;
+  --named-gutter: #f5e2a0;
+  --named-edge: #d6a72a;
+  --named-ink: #5c4300;
+  /* a word over a file's lines about what they are: as they were, past the end, cut */
+  --note-paper: #fdf7e3;
+  --note-line: #efe2b6;
   --add-ink: #14391f;
   --add-ink-2: #2f6a40;
   --del-ink: #5b1d15;

@@ -3,13 +3,14 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Agents } from '../src/Config'
 import { Coordinator } from '../src/Coordinator'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { COMPACT, compactedWords, Sessions } from '../src/Sessions'
-import { notices, repository, runtime, until } from './support'
+import { fakeAgents, notices, repository, runtime, until } from './support'
 
 /*
  * The person can have an agent compact its context (`CompactContext`): its
@@ -23,6 +24,31 @@ const GB = 1024 ** 3
 
 /** The runtime on a machine that runs one task's agents at a time. */
 const oneAtOnce = () => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { busy: { machine: { cores: 3, memory: 7 * GB } } })))
+
+/** The same, with agents that take only Althar's own commands, as the registry's Copilot does (`commands`). */
+const takingOnlyAlthars = () =>
+  Queries.layer.pipe(
+    Layer.provideMerge(
+      runtime(
+        ':memory:',
+        {},
+        {
+          busy: { machine: { cores: 3, memory: 7 * GB } },
+          agents: Layer.effect(
+            Agents,
+            Effect.gen(function* () {
+              const agents = yield* Agents
+              const changed = <E extends { readonly definition: object }>(entry: E): E => ({
+                ...entry,
+                definition: { ...entry.definition, commands: 'althar' as const },
+              })
+              return Agents.of({ list: agents.list.map(changed), get: (id) => Effect.map(agents.get(id), changed) })
+            }),
+          ).pipe(Layer.provide(fakeAgents())),
+        },
+      ),
+    ),
+  )
 
 const opened = Effect.gen(function* () {
   const projects = yield* Projects
@@ -206,6 +232,24 @@ describe('compacting an agent’s context', () => {
       assert.match(rows[1]?.prompt ?? '', /^You are the coordinator of the project /)
       assert.match(rows[1]?.prompt ?? '', /Hello\.$/)
     }).pipe(Effect.provide(oneAtOnce())),
+  )
+
+  it.live('sends the person’s own command to an agent that takes only Althar’s as words, and Althar’s bare', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const threadId = yield* coordinator.thread(project.projectId)
+      // The first goes with the brief; each after it is a turn of its own.
+      for (const [at, body] of ['Hello.', ' /yolo', COMPACT].entries()) {
+        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+        yield* until(prompts(threadId), (all) => all.length === at + 1 && all.every((row) => row.state === 'completed'))
+      }
+      const [, yolo, compacted] = yield* prompts(threadId)
+      assert.isFalse(yolo?.prompt.trimStart().startsWith('/'))
+      assert.match(yolo?.prompt ?? '', /^The person wrote this, which Althar passes on as words, not as one of your commands:\n\n \/yolo$/)
+      assert.strictEqual(compacted?.prompt, COMPACT)
+    }).pipe(Effect.provide(takingOnlyAlthars())),
   )
 
   it.live('is refused where no agent is on the thread', () =>

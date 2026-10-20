@@ -1,8 +1,10 @@
-import { basename, isAbsolute } from 'node:path'
+import { basename, isAbsolute, sep } from 'node:path'
 
 import type { FoundPart, FoundTask, TaskPhase } from '@althar/contracts'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+
+import { issueDraftsWaiting } from './kinds'
 
 /*
  * Finding a task by what it was about (ADR-035). Each task has one row of
@@ -48,9 +50,14 @@ const keep = (parts: ReadonlyArray<string>) => parts.join('\n').slice(0, KEPT)
 /** A file a tool call names, as the task knows it: inside one of its worktrees, from there; with several, under its folder's name. */
 export const fileOf = (path: string, worktrees: ReadonlyArray<string>): string | null => {
   if (!isAbsolute(path)) return path
-  const within = worktrees.find((worktree) => path.startsWith(`${worktree.replace(/\/+$/, '')}/`))
+  // A worktree's own folder ends at `/`, or at this system's separator (`\` on Windows); what follows is written with `/`.
+  const rootOf = (worktree: string) => worktree.replace(/[\\/]+$/, '')
+  const within = worktrees.find((worktree) => [`${rootOf(worktree)}/`, `${rootOf(worktree)}${sep}`].some((root) => path.startsWith(root)))
   if (within === undefined) return null
-  const relative = path.slice(within.replace(/\/+$/, '').length + 1)
+  const relative = path
+    .slice(rootOf(within).length + 1)
+    .split(sep)
+    .join('/')
   return worktrees.length > 1 ? `${basename(within)}/${relative}` : relative
 }
 
@@ -216,6 +223,8 @@ interface Found {
   readonly title: string
   readonly slug: string
   readonly state: string
+  /** When the person kept it for later, while it is. */
+  readonly keptAt?: string | null
   readonly changedAt: string
   readonly planState: string | null
   readonly startsAt: string | null
@@ -238,6 +247,16 @@ interface Found {
  * read for a search.
  */
 export const phaseOf = (
+  task: Pick<Found, 'taskId' | 'state' | 'planState' | 'startsAt' | 'waiting' | 'runState' | 'held'> &
+    Partial<Pick<Found, 'drafted' | 'keptAt'>>,
+  working: ReadonlySet<string>,
+): TaskPhase => {
+  const phase = readyOrNot(task, working)
+  // Finished and kept for later by the person, as its card says.
+  return phase === 'ready' && task.keptAt != null ? 'kept' : phase
+}
+
+const readyOrNot = (
   task: Pick<Found, 'taskId' | 'state' | 'planState' | 'startsAt' | 'waiting' | 'runState' | 'held'> & Partial<Pick<Found, 'drafted'>>,
   working: ReadonlySet<string>,
 ): TaskPhase => {
@@ -292,9 +311,9 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
   const ids = ranked.map((row) => row.id)
   // Where each stands, read as its card does; its latest pull request; and what matched, marked.
   const standing = sql`
-    r.id AS row_id, t.id AS thread_id, k.id AS task_id, k.project_id, k.title, k.slug, k.state, ${recency} AS changed_at,
+    r.id AS row_id, t.id AS thread_id, k.id AS task_id, k.project_id, k.title, k.slug, k.state, k.kept_at, ${recency} AS changed_at,
     p.state AS plan_state, p.starts_at,
-    (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
+    (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueDraftsWaiting('k'))} AS waiting,
     (SELECT count(*) FROM review_drafts v WHERE v.task_id = k.id AND v.state IN ('pending', 'failed', 'uncertain')) AS drafted,
     n.state AS run_state,
     (SELECT count(*) FROM node_attempts a JOIN nodes d ON d.id = a.node_id JOIN workflow_executions e ON e.id = d.execution_id
@@ -358,6 +377,8 @@ const standingWords = (task: FoundTask) => {
       return 'waiting on the person'
     case 'ready':
       return 'ready'
+    case 'kept':
+      return 'kept for later'
     case 'stopped':
       return 'stopped'
     case 'settled':

@@ -25,7 +25,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { lacking, leftAsItIs } from './model'
+import { branchPath, lacking, leftAsItIs, stillOpen } from './model'
 import {
   type Answer,
   answered,
@@ -118,6 +118,13 @@ const CheckRuns = Schema.Struct({
   ),
 })
 
+/** One check run, with what it reported beyond its title. */
+const CheckRunAnswer = Schema.Struct({
+  output: Schema.optional(
+    Schema.Struct({ summary: Schema.optional(Schema.NullOr(Schema.String)), text: Schema.optional(Schema.NullOr(Schema.String)) }),
+  ),
+})
+
 const CombinedStatus = Schema.Struct({
   statuses: Schema.Array(
     Schema.Struct({
@@ -180,6 +187,13 @@ const personOf = (user: User | null | undefined): Person =>
     ? { id: 'ghost', login: 'ghost', name: null, bot: false }
     : { id: String(user.id), login: user.login, name: user.name ?? null, bot: user.type === 'Bot' || user.login.endsWith('[bot]') }
 
+/** The repository a pull request's branch is on, as `headRepository` says it; undefined where GitHub doesn't say. */
+const headRepositoryOf = (pull: PullAnswer): ReadonlyArray<string> | null | undefined => {
+  const head = pull.head.repo
+  const base = pull.base.repo?.full_name.toLowerCase()
+  return head === undefined ? undefined : head?.full_name.toLowerCase() === base ? null : head === null ? [] : head.full_name.split('/')
+}
+
 const changeOf = (pull: PullAnswer): ChangeRequest => ({
   id: pull.node_id,
   number: pull.number,
@@ -196,6 +210,7 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   deletions: pull.deletions ?? null,
   changedFiles: pull.changed_files ?? null,
   updatedAt: pull.updated_at,
+  ...(headRepositoryOf(pull) === undefined ? {} : { headRepository: headRepositoryOf(pull) }),
   // Not mergeable, or `dirty`, is GitHub's way of saying the merge conflicts.
   ...(pull.mergeable === false || pull.mergeable_state === 'dirty'
     ? { conflicts: true }
@@ -209,16 +224,12 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
  * author one of the repository's people, and the fork its branch is on (one
  * GitHub no longer has is a fork all the same, with no path).
  */
-const toReviewOf = (pull: PullAnswer): ChangeToReview => {
-  const head = pull.head.repo
-  const base = pull.base.repo?.full_name.toLowerCase()
-  return {
-    ...changeOf(pull),
-    member: memberOf(pull.author_association),
-    fork: head === undefined || head?.full_name.toLowerCase() === base ? null : head === null ? [] : head.full_name.split('/'),
-    baseSha: pull.base.sha ?? null,
-  }
-}
+const toReviewOf = (pull: PullAnswer): ChangeToReview => ({
+  ...changeOf(pull),
+  member: memberOf(pull.author_association),
+  fork: headRepositoryOf(pull) ?? null,
+  baseSha: pull.base.sha ?? null,
+})
 
 /**
  * A pull request as GitHub's search lists it, over GraphQL: REST's list
@@ -572,6 +583,36 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ...(change.headSha === null ? {} : { sha: change.headSha }),
         })
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
+        if (now.state !== 'open') return changeOf(now)
+        return changeOf(yield* http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, { state: 'closed' }))
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
+        if (now.state === 'open') return yield* stillOpen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        // Its branch is where its head is: a fork's, for one from a fork; a fork that is gone took it along.
+        const on = now.head.repo?.full_name
+        if (on == null) return
+        const branch = branchPath(now.head.ref)
+        yield* http.json(Schema.Unknown, 'DELETE', `${repo(on.split('/'))}/git/refs/heads/${branch}`).pipe(
+          // GitHub answers 422 for a branch already gone, but for the default branch, a validation or throttling too: only one
+          // GitHub then says isn't there is gone, and any other refusal is said.
+          Effect.catchIf(
+            (error) => error.status === 422,
+            (refused) =>
+              http.json(Schema.Unknown, 'GET', `${repo(on.split('/'))}/git/ref/heads/${branch}`).pipe(
+                Effect.andThen(Effect.fail(refused)),
+                Effect.catchIf(
+                  (error) => error.reason === 'not_found',
+                  () => Effect.void,
+                ),
+              ),
+          ),
+        )
+      }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
@@ -599,16 +640,20 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         return [...fromRuns, ...fromStatuses]
       }),
     checkLog: (repository, check, whole = false) => {
-      // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's.
+      // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's. GitHub answers with a redirect to the log in
+      // its storage, signed for a minute, which `text` follows without the token. Refused, or gone once kept long enough, it fails.
       const match = /^run:(\d+):github-actions$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
-      return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(
-        Effect.map((log) => (whole ? log : tail(log))),
-        Effect.catchIf(
-          (error) => error.reason === 'not_found' || error.reason === 'forbidden',
-          () => Effect.succeed(null),
-        ),
-      )
+      return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(Effect.map((log) => (whole ? log : tail(log))))
+    },
+    checkReport: (repository, check) => {
+      // A check run from another service (CodeQL, CircleCI's app) keeps its log there, but says what it found in its output.
+      const match = /^run:(\d+):/.exec(check.id)
+      if (match === null) return Effect.succeed(null)
+      return Effect.map(http.json(CheckRunAnswer, 'GET', `${repo(repository)}/check-runs/${match[1]}`), (run) => {
+        const said = [run.output?.summary, run.output?.text].filter((part) => part != null && part.trim() !== '').join('\n\n')
+        return said === '' ? null : tail(said)
+      })
     },
     rerun: (repository, check) => {
       // Only a GitHub Actions job runs again from here: its check run's id is the job's.

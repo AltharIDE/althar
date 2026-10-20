@@ -10,7 +10,13 @@ import { useMaximized } from '../../shared/useWindowChrome'
  * this system's file manager to show the copy in, and Report this once the
  * app can send a report (`Host.reportProblem`), with what stopped the update.
  */
-export function UpdateStoppedView({ failure, host }: { readonly failure: StoreFailure; readonly host: Host }) {
+export function UpdateStoppedView({
+  failure,
+  host,
+}: {
+  readonly failure: Exclude<StoreFailure, { readonly stopped: 'held' }>
+  readonly host: Host
+}) {
   const { reportProblem } = host
   const maximized = useMaximized(host)
   const darwin = host.platform === 'darwin'

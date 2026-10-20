@@ -14,15 +14,18 @@
   padding: 0 8px;
   margin-left: -4px;
   border-radius: var(--r);
-  font-weight: 550;
-  color: var(--t-1);
-  transition: background var(--fast) var(--ease);
+  font-weight: 500;
+  color: var(--t-2);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 .back:hover {
-  background: var(--n-3);
+  color: var(--t-1);
+  background: var(--line);
 }
 .back:active {
-  background: var(--n-4);
+  background: var(--line-2);
 }
 .arrow {
   transform: scaleX(-1);
@@ -42,18 +45,22 @@
   font: 500 11.5px/1 var(--mono);
   color: var(--t-3);
 }
+/* the task's title is the page's heading: in ink, a step above the way back */
 .title {
   min-width: 0;
   margin: 0;
   font: inherit;
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--t-2);
+  color: var(--t-1);
 }
-/* the title as a button that edits it where it stands: it reads as the title until the pointer is on it */
+/* the title as a button that edits it where it stands: it reads as the title until the pointer is on it;
+   pulled out by its padding, so it may be as much wider than the heading round it, or the title is cut short */
 .rename {
-  max-width: 100%;
+  max-width: calc(100% + 12px);
   margin: 0 -6px;
   padding: 2px 6px;
   border-radius: var(--r);
@@ -67,7 +74,7 @@
   transition: background var(--fast) var(--ease);
 }
 .rename:hover {
-  background: var(--n-3);
+  background: var(--line);
 }
 .edit {
   display: block;

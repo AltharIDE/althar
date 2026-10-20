@@ -144,9 +144,13 @@ export function Gallery({ shots, retaken = [], text, className, ...rest }: Galle
           {retaken.map((shot, index) => (
             <span key={shot.id}>
               {index > 0 && (index === retaken.length - 1 ? t.and : ', ')}
-              <LinkButton className={s.retake} onClick={() => openImage?.(shot, retaken)} aria-label={t.view(shot.caption)}>
-                {shotName(shot.caption) ?? shot.name}
-              </LinkButton>
+              {openImage === undefined || shot.status === 'failed' ? (
+                <span>{shotName(shot.caption) ?? shot.name}</span>
+              ) : (
+                <LinkButton className={s.retake} onClick={() => openImage(shot, retaken)} aria-label={t.view(shot.caption)}>
+                  {shotName(shot.caption) ?? shot.name}
+                </LinkButton>
+              )}
             </span>
           ))}
           {t.shownEarlier}

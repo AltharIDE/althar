@@ -62,6 +62,12 @@ export const scenarios = {
    * person's own words; repeats the answer.
    */
   questions: 'questions',
+  /**
+   * Asks the person to choose as Antigravity does: a permission request on an
+   * `interaction_` tool call, one `allow_once` option for each answer, with
+   * the question in its call's title only; says what was chosen.
+   */
+  choice: 'choice',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
   /** Claude's structured report of a full context. */
@@ -70,6 +76,8 @@ export const scenarios = {
   rateWarning: 'rate-warning',
   /** The agent leaves the mode it was put in, as a plan session does on leaving plan mode. */
   leaveMode: 'leave-mode',
+  /** The agent turns its own approve-everything option on, as Copilot does on `/yolo` (only with `allowAll`). */
+  allowAll: 'allow-all',
   /** Ends the turn, then sends an update between turns. */
   afterTurn: 'after-turn',
   /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
@@ -137,6 +145,9 @@ export const HANDED_DOCUMENT = {
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
 
+/** What Claude Code says when Anthropic's API fails and it gives up: no class Althar tries again. */
+export const API_ERROR_MESSAGE = 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'
+
 /** How many tokens its context holds, as it says when a prompt ends `[context:…]`. */
 export const CONTEXT_SIZE = 200_000
 
@@ -171,6 +182,10 @@ export const codexLikeMeanings = {
 }
 
 export interface FakeAgentOptions {
+  /** Hold `session/new` open to exercise startup timeout cleanup. */
+  readonly beforeNewSession?: () => Promise<void>
+  /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
+  readonly beforeInitialize?: () => Promise<void>
   /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
   readonly judgment?: (input: {
     readonly prompt: string
@@ -195,6 +210,8 @@ export interface FakeAgentOptions {
   readonly closed?: (sessionId: string) => void
   /** Called when something a session left running is stopped, with its task's id. */
   readonly stoppedBackground?: (id: string) => void
+  /** Whether to refuse to stop what a session left running, as an agent that can't: asked as each stop is. */
+  readonly refusesStop?: () => boolean
   /** Called with what the client says it can do, as it initializes. */
   readonly initialized?: (capabilities: acp.ClientCapabilities | undefined) => void
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
@@ -219,6 +236,21 @@ export interface FakeAgentOptions {
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
+  /**
+   * How many of each session's first prompts end at once, having said nothing
+   * and used no tokens, as Claude Code's do while another of its processes
+   * renews the sign-in they share, or which, by their number from 1. It reads
+   * them all the same.
+   */
+  readonly blank?: number | ReadonlyArray<number>
+  /** An option that would approve every request while on, as Copilot's `allow_all`, starting at this value. */
+  readonly allowAll?: 'on' | 'off'
+  /** Once it turns `allow_all` on itself, it won't be turned off again: setting it back fails. */
+  readonly allowAllSticks?: boolean
+  /** It says yes to setting `allow_all`, and leaves it where it was. */
+  readonly allowAllStays?: boolean
+  /** Once it leaves its mode by itself (`leaveMode`), it refuses to be put back in one. */
+  readonly leavesForGood?: boolean
 }
 
 interface SessionState {
@@ -248,8 +280,18 @@ interface SessionState {
   background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
   /** How many commands it has left running, so each has an id of its own. */
   served: number
+  /** Its approve-everything option, where it has one (`allowAll`). */
+  allowAll: string | undefined
+  /** It turned `allow_all` on itself, and, with `allowAllSticks`, keeps it so. */
+  allowAllStuck: boolean
+  /** It left its mode by itself, and, with `leavesForGood`, won't be put back. */
+  leftForGood: boolean
   /** How large it last said its context is, in tokens. */
   contextSize: number
+  /** How many prompts it has been given. */
+  prompts: number
+  /** What the prompts it did nothing with said (`blank`). */
+  unread: string
 }
 
 /** What `bun dev` prints, coloured as Vite colours it. */
@@ -417,7 +459,8 @@ const playStall = async (
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
  * `[coordinator:review]` starts a review of the pull request whose link the
- * person gave, whose lead, `[lead:review]`, drafts asking for changes with a
+ * person gave, and `[coordinator:keep-note]` keeps what the person said
+ * before it as one of the project's notes; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; asked to, `[lead:make-change]` makes its quick task a change
@@ -470,6 +513,9 @@ const playStall = async (
 export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
 export const BUILT_SETTLED =
   'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** The description it writes for the task's pull request, where the repository has no template. */
+export const DESCRIBED =
+  'Checkout gave up on the first failed payment call, so a dropped connection lost the order. It now retries once before it says the payment failed.'
 /** What it says the task built once it fixed a failed check, after its plan was done. */
 export const BUILT_FIXED =
   'Checkout retries once when the payment call fails, in `src/checkout.ts`, and its check passes again. Push the fix.'
@@ -728,6 +774,9 @@ const playRole = async (
         })
         if (!text.includes('[lead:finish]')) return made
       }
+      // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
+      const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
+      if (moved !== undefined && available.has('settle_task')) return await call('settle_task', { how: moved })
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
@@ -756,7 +805,8 @@ const playRole = async (
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
       const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
-      // Asked for its pull request's description in the repository's template, it writes under the first heading, and ticks a box it shouldn't.
+      // Asked for its pull request's description, it writes one for each repository named; in the repository's template, it writes
+      // under the first heading, and ticks a box it shouldn't.
       // Asked to show its work, it saves a screenshot in its worktree, uncommitted, and hands it with a test run and what it couldn't try.
       const evidence = (): Record<string, unknown> => {
         if (!session.markers.has('[lead:evidence]')) return {}
@@ -780,10 +830,13 @@ const playRole = async (
         // A lead that says only what it did, `[lead:terse]`: nothing of what the task built.
         const built = session.markers.has('[lead:terse]') ? {} : { built: BUILT }
         const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...evidence() })
+        if (!answer.startsWith("Write the description of the task's pull request")) return answer
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
-        if (template === undefined) return answer
-        const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
-        return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions: [{ text }] })
+        const text =
+          template === undefined ? DESCRIBED : template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
+        const names = /, one for each of ([^.]+)\./.exec(answer)?.[1]?.split(', ')
+        const descriptions = names === undefined ? [{ text }] : names.map((repository) => ({ repository, text }))
+        return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions, ...evidence() })
       }
       // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.
       // Started again for it, it reads its brief first: the failure is in what it is told, not always at the start.
@@ -913,6 +966,11 @@ const playRole = async (
       }
       return undefined
     }
+    // Told a decision, it keeps it as one of the project's notes: what the person said before the marker, as they said it.
+    if (available.has('keep_note') && text.includes('[coordinator:keep-note]')) {
+      const said = (text.slice(0, text.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+      return await call('keep_note', { note: said.trim() })
+    }
     // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
     if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
       const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
@@ -988,6 +1046,15 @@ const modeOption = (session: SessionState): acp.SessionConfigOption => ({
   options: MODES.map((value) => ({ value, name: value })),
 })
 
+const allowAllOption = (value: string): acp.SessionConfigOption => ({
+  id: 'allow_all',
+  name: 'Allow all',
+  category: 'permissions',
+  type: 'select',
+  currentValue: value,
+  options: ['on', 'off'].map((each) => ({ value: each, name: each })),
+})
+
 const modelOption = (session: SessionState, variants: boolean): acp.SessionConfigOption => ({
   id: 'model',
   name: 'Model',
@@ -1041,9 +1108,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
   const configOptions = (session: SessionState): Array<acp.SessionConfigOption> => {
     const levels = levelsOf(session.model)
     const effort = levels.length === 0 ? [] : [effortOption(session, levels)]
+    const allowAll = session.allowAll === undefined ? [] : [allowAllOption(session.allowAll)]
     return modes === 'config' || modes === 'stuck'
-      ? [modeOption(session), modelOption(session, variants), ...effort]
-      : [modelOption(session, variants), ...effort]
+      ? [modeOption(session), modelOption(session, variants), ...effort, ...allowAll]
+      : [modelOption(session, variants), ...effort, ...allowAll]
   }
   const sessions = new Map<string, SessionState>()
   const failedOnce = new Set<string>()
@@ -1056,7 +1124,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
 
   return acp
     .agent({ name: 'fake-agent' })
-    .onRequest(acp.methods.agent.initialize, ({ params }) => {
+    .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+      await options.beforeInitialize?.()
       options.initialized?.(params.clientCapabilities ?? undefined)
       return options.bare === true
         ? { protocolVersion: acp.PROTOCOL_VERSION }
@@ -1075,6 +1144,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     })
     .onRequest(acp.methods.agent.session.new, async ({ params }) => {
       if (options.slowStart !== undefined) await pause(options.slowStart)
+      await options.beforeNewSession?.()
       created += 1
       const sessionId = `fake-${created}`
       const session: SessionState = {
@@ -1101,6 +1171,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         runs: 0,
         background: new Map(),
         served: 0,
+        prompts: 0,
+        unread: '',
+        allowAll: options.allowAll,
+        allowAllStuck: false,
+        leftForGood: false,
       }
       sessions.set(sessionId, session)
       return {
@@ -1112,6 +1187,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.setMode, ({ params }) => {
       const session = sessionOf(params.sessionId)
       if (!MODES.includes(params.modeId)) throw acp.RequestError.invalidParams(params, `No mode ${params.modeId}`)
+      if (session.leftForGood) throw acp.RequestError.internalError({ details: 'It stays where it went' })
       session.mode = params.modeId
       return {}
     })
@@ -1129,6 +1205,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (variants && value !== session.model) session.effort = levelsOf(value)[0] ?? ''
         session.model = value
       } else if (params.configId === 'effort' && levelsOf(session.model).includes(value)) session.effort = value
+      else if (params.configId === 'allow_all' && session.allowAllStuck)
+        throw acp.RequestError.internalError({ details: 'allow_all is locked on' })
+      else if (params.configId === 'allow_all' && options.allowAllStays === true && session.allowAll !== undefined) {
+        // Said yes to, and stays where it was.
+      } else if (params.configId === 'allow_all' && session.allowAll !== undefined && ['on', 'off'].includes(value))
+        session.allowAll = value
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })
@@ -1145,6 +1227,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         const session = sessions.get(params.sessionId)
         const left = session?.background.get(params.asyncTaskId)
         if (session === undefined || left === undefined) return { stopped: false }
+        if (options.refusesStop?.() === true) throw new Error('The agent could not stop it.')
         session.background.delete(params.asyncTaskId)
         options.stoppedBackground?.(params.asyncTaskId)
         await client.notify(acp.methods.client.session.update, {
@@ -1166,7 +1249,15 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = false
-      const prompted = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
+      const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
+      session.prompts += 1
+      const blank = options.blank ?? 0
+      if (typeof blank === 'number' ? session.prompts <= blank : blank.includes(session.prompts)) {
+        session.unread = `${prompted}\n\n`
+        return { stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }
+      }
+      session.unread = ''
       // A prompt that ends `[context:85]` says its context is that full, in percent, before anything else; the rest plays as it
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
@@ -1182,6 +1273,39 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
+      // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
+      // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
+      // nothing. Cancelled, it stops.
+      const slowly = /\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/.exec(text)
+      if (slowly?.[2] !== undefined) {
+        const waitOut = async (ms: number) => {
+          for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
+        }
+        await waitOut(Number(slowly[2]) * 1000)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+        if (slowly[1] === 'fails') throw new acp.RequestError(-32603, API_ERROR_MESSAGE)
+        if (slowly[1] === 'ends') return ended()
+        if (slowly[1] === 'thinks')
+          await update({
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: 'The checkout calls the payment provider once, and gives up on its first timeout.' },
+          })
+        if (slowly[1] === 'reads')
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'read-1',
+            title: 'Read checkout.ts',
+            kind: 'read',
+            status: 'in_progress',
+            locations: [{ path: 'checkout.ts' }],
+          })
+        if (slowly[1] !== 'answers') await waitOut(1500)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+        if (slowly[1] === 'reads') await update({ sessionUpdate: 'tool_call_update', toolCallId: 'read-1', status: 'completed' })
+        await say('Looked into it: the payment call has no retry, so one slow answer from the provider fails the whole checkout.')
+        return ended()
+      }
       // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
       // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
       if (text === '/compact') {
@@ -1451,6 +1575,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(await askPerson(scenario === scenarios.questions ? 'two' : 'plain'))
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
+        case scenarios.choice: {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'interaction_28ffdbf7',
+            title: 'Which color do you prefer?',
+            status: 'pending',
+            rawInput: {},
+          })
+          const chosen = await ask({ toolCallId: 'interaction_28ffdbf7', status: 'pending', rawInput: {} }, [
+            { optionId: '1', name: 'red', kind: 'allow_once' },
+            { optionId: '2', name: 'blue', kind: 'allow_once' },
+          ])
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'interaction_28ffdbf7',
+            status: 'completed',
+            rawOutput: 'Response received',
+          })
+          await say(`chosen=${chosen}`)
+          return session.cancelled ? { stopReason: 'cancelled' } : ended()
+        }
         case scenarios.quota:
           await update({
             sessionUpdate: 'session_info_update',
@@ -1488,7 +1633,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.leaveMode:
           session.mode = 'ask'
-          await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
+          session.leftForGood = options.leavesForGood === true
+          // As its kind says it: a mode option moved, or, with legacy modes alone, the session's current mode.
+          await update(
+            modes === 'legacy'
+              ? { sessionUpdate: 'current_mode_update', currentModeId: session.mode }
+              : { sessionUpdate: 'config_option_update', configOptions: configOptions(session) },
+          )
           await say('Left plan mode')
           return ended()
         case scenarios.background:
@@ -1607,7 +1758,15 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say('after')
           return ended()
         case scenarios.settings:
-          await say(`mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}`)
+          await say(
+            `mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}${session.allowAll === undefined ? '' : ` allow_all=${session.allowAll}`}`,
+          )
+          return ended()
+        case scenarios.allowAll:
+          session.allowAll = 'on'
+          session.allowAllStuck = options.allowAllSticks === true
+          await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
+          await say('Allowing all')
           return ended()
         case scenarios.handsBack: {
           // Codex: a command's output in chunks as it runs, then its exit.

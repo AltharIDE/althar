@@ -22,7 +22,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { lacking, noReviews } from './model'
+import { branchPath, lacking, noReviews, stillOpen } from './model'
 import {
   type Answer,
   answered,
@@ -87,6 +87,8 @@ const PullAnswer = Schema.Struct({
     branch: Schema.Struct({ name: Schema.String }),
     // The head, by its first twelve characters, which git and Bitbucket both take.
     commit: Schema.optional(Schema.NullOr(Schema.Struct({ hash: Schema.String }))),
+    // The repository the branch is on: a fork's, for a branch from one; null where the fork is gone.
+    repository: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
   }),
   destination: Schema.Struct({ branch: Schema.Struct({ name: Schema.String }) }),
   author: Schema.optional(Schema.NullOr(User)),
@@ -252,6 +254,17 @@ const changeOf = (repository: Repository, pull: PullAnswer, size: Size | null = 
   deletions: size?.deletions ?? null,
   changedFiles: size?.changedFiles ?? null,
   updatedAt: iso(pull.updated_on),
+  // Where its branch is: the repository's own, a fork's, or a fork that is gone.
+  ...(pull.source.repository === undefined
+    ? {}
+    : {
+        headRepository:
+          pull.source.repository === null
+            ? []
+            : pull.source.repository.full_name.toLowerCase() === repository.path.join('/').toLowerCase()
+              ? null
+              : pull.source.repository.full_name.split('/'),
+      }),
 })
 
 /** Bitbucket's states for each a list can ask for: a declined pull request, or one superseded by another, is closed. */
@@ -533,6 +546,27 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         )
         return changeOf(repository, yield* http.json(PullAnswer, 'GET', pull(repository, change.number)))
       }),
+    // Bitbucket's word for closing one unmerged is declining it.
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        if (now.state !== 'OPEN') return changeOf(repository, now)
+        return changeOf(repository, yield* http.json(PullAnswer, 'POST', `${pull(repository, change.number)}/decline`))
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        if (now.state === 'OPEN') return yield* stillOpen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        // Its branch is where it came from: a fork's, for one from a fork; a fork that is gone took it along.
+        const on = now.source.repository === undefined ? repository.path : now.source.repository?.full_name.split('/')
+        if (on === undefined) return
+        yield* http.json(Schema.Unknown, 'DELETE', `${repo(on)}/refs/branches/${branchPath(now.source.branch.name)}`).pipe(
+          Effect.catchIf(
+            (error) => error.status === 404,
+            () => Effect.void,
+          ),
+        )
+      }),
     checks: (repository, sha) =>
       Effect.map(http.cached(Statuses, `${repo(repository.path)}/commit/${encodeURIComponent(sha)}/statuses?pagelen=100`), (statuses) =>
         statuses.values.map((status): Check => {
@@ -555,15 +589,10 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         const steps = yield* http.json(Steps, 'GET', `${run}/steps?pagelen=100`)
         const failed = steps.values.find((step) => step.state?.result?.name === 'FAILED' || step.state?.result?.name === 'ERROR')
         if (failed === undefined) return null
-        // A finished step's log has moved to storage elsewhere; Bitbucket redirects there.
+        // A finished step's log has moved to storage elsewhere; Bitbucket redirects there, and `text` follows without the token.
         const log = yield* http.text(`${run}/steps/${encodeURIComponent(failed.uuid)}/log`)
         return whole ? log : tail(log)
-      }).pipe(
-        Effect.catchIf(
-          (error) => error.reason === 'not_found' || error.reason === 'forbidden',
-          () => Effect.succeed(null),
-        ),
-      )
+      })
     },
     // A pipeline runs again only whole, as a new one: not a check of its own.
     rerun: () => Effect.succeed(false),

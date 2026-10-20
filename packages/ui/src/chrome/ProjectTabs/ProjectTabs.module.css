@@ -64,6 +64,29 @@
 .tabs::-webkit-scrollbar {
   display: none;
 }
+/* a tab is being dragged: the others give way smoothly, the held one follows the pointer at once */
+.sorting .project:not(.lifted) {
+  transition: transform var(--fast) var(--ease);
+}
+.sorting,
+.sorting .select {
+  cursor: grabbing;
+}
+.lifted {
+  z-index: 1;
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  transition: none;
+}
+.sorting .tab:not(.lifted):hover {
+  background: none;
+}
+.sorting .close {
+  opacity: 0;
+}
+
 /* more tabs past an edge: that edge fades */
 .moreBefore {
   mask-image: linear-gradient(to right, transparent, #000 28px);
@@ -159,7 +182,9 @@
   white-space: nowrap;
 }
 .yours {
+  display: inline-block;
   flex: none;
+  vertical-align: middle;
   width: 6px;
   height: 6px;
   border-radius: 99px;
@@ -200,6 +225,7 @@
 @media (prefers-reduced-motion: reduce) {
   .lights button,
   .tab,
+  .sorting .project,
   .yours,
   .close {
     transition: none;

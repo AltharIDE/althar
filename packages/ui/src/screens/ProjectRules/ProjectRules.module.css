@@ -14,6 +14,11 @@
 .headText {
   min-width: 0;
 }
+/* named by the page around it: only the key, at the start, closer to the sentences */
+.keyOnly {
+  justify-content: flex-start;
+  margin-bottom: 22px;
+}
 .title {
   margin: 0;
   font: 640 27px/1.1 var(--font-display);
@@ -32,7 +37,7 @@
 
 /* one switch over every sentence, in a sheet of its own between the title and the rules it quietens */
 .allowAll {
-  margin: -12px 0 30px;
+  margin: 0 0 32px;
 }
 
 /* what a name or a description opens: its name, what it is, then the setting */

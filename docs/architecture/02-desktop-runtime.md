@@ -123,8 +123,10 @@ A separate runtime gives Althar:
 The runtime runs in an Electron utility process (`utilityProcess`), which main
 starts and supervises ([ADR-003](../decisions/003-electron-shell.md)). The
 runtime package imports nothing from Electron, so the same code runs under
-plain Node for tests, a diagnostic CLI, or a later daemon. The MVP does not
-install a background daemon or operating-system service.
+plain Node for tests, the CLI, and a headless host for the CLI and cloud
+runners (DEV-125). Althar installs no daemon or operating-system service: work
+outlives the window, not the app, and [ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)
+says when a daemon would become worth it.
 
 ## Why Electron
 
@@ -153,15 +155,23 @@ Electrobun is too young to build a product on today.
 1. Electron main starts.
 2. It starts the runtime's utility process from the application bundle, not
    from the current repository or arbitrary `PATH`.
-3. It gives the runtime a profile directory and one end of a `MessagePort`
-   channel; the other end goes to the renderer through the preload bridge.
-4. Main and runtime exchange protocol and application versions.
-5. The runtime opens/migrates SQLite, checks artifact storage, and reconciles
-   work that was active before the previous shutdown.
-6. Only after the runtime reports ready does the renderer receive project data.
+3. It gives the runtime the profile, the worktrees' folder and the app's
+   version in its environment (`main.ts`, `startRuntime`).
+4. The runtime copies the store, migrates SQLite, and reconciles work that was
+   active before the previous shutdown.
+5. Each window, as its page loads, gets one end of a `MessagePort` channel
+   through the preload bridge, and the runtime the other (`connect`). A port
+   that arrives before the runtime is ready waits (`runtime.ts`), so the
+   renderer receives no project data before then.
 
-If the runtime version is incompatible or migration fails, the UI shows a
-recovery state. It must not fall back to partially opening the database itself.
+Main and runtime don't exchange versions: they ship as one binary, so they
+can't differ. A client that can (the CLI over the socket, a phone through the
+relay) says which API version it speaks as it connects, and is refused where
+it doesn't match (DEV-117, [ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)).
+
+If a migration fails, the runtime tells main what stopped it, serves nothing,
+and every window shows a recovery state (`store-failed`). It must not fall
+back to partially opening the database itself.
 
 ### An ordinary UI action
 
@@ -221,18 +231,23 @@ said leaves the machine (ADR-017).
 
 ### Window close and application quit
 
-Closing a window is not necessarily the same as quitting the application. A
-window can close while the runtime and active work continue.
+Closing a window is not the same as quitting the application. On a Mac,
+closing the last window leaves the runtime and its work running. Elsewhere it
+quits today (`main.ts`, `window-all-closed`); where there is a tray, it will
+keep working there (DEV-122).
 
-Explicit application quit:
+Quitting today (`main.ts`, `before-quit`):
 
-1. checks for active work;
-2. explains what will be interrupted;
-3. requests graceful cancellation if the user proceeds;
-4. waits a bounded period;
-5. forcibly terminates owned processes that did not exit;
-6. records what was confirmed and what remains uncertain;
-7. closes persistence cleanly.
+1. main posts `shutdown` to the runtime;
+2. the runtime closes its scope, which stops every session as Stop does: the
+   turn ends, the agent's process group gets TERM, a grace period, then KILL,
+   and both are recorded (`Sessions.ts`, `stopProcessGroup` in
+   `provider-adapters`);
+3. main waits for the runtime to exit, at most 20 seconds, then kills it.
+
+It doesn't yet check for active work, say what will be interrupted, or offer to
+keep working in the background instead: that is DEV-118, and with it Quit
+records what it stopped and what remains uncertain.
 
 The product should never imply that work survives full application termination
 unless an independent runner/daemon actually exists.
@@ -324,27 +339,37 @@ They have different compatibility and retention requirements.
 ## Local transport
 
 The desktop uses `MessagePort` channels: main creates each channel and hands
-one end to the runtime and the other to a renderer. A diagnostic CLI, when it
-exists, connects through an authenticated local socket that speaks the same
-contract. The domain API must not depend on either transport.
+one end to the runtime and the other to a renderer. Holding the port is the
+only credential. The CLI and a headless host will speak the same contract over
+a local socket in the profile (DEV-121, DEV-123), and a phone through a relay
+the runtime dials out to (DEV-131); none exists yet
+([ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)).
+The domain API must not depend on any transport.
+
+Agents run as the person's OS user, so whatever a socket client can read, an
+agent can too, and a per-launch secret doesn't tell them apart. A socket client
+therefore can't give the person's word: answer a permission request or a
+question, push, merge or post a review, or widen what agents may do. Those
+stay with the window, and with a device paired from it.
 
 Required properties:
 
 - request/response correlation;
-- schema and protocol version negotiation;
-- a per-launch authentication secret for any socket;
+- schema and protocol version negotiation: a client says its API version as it
+  connects and is refused where it doesn't match (DEV-117);
+- a per-launch authentication secret for any socket, in a folder only the
+  person can open;
+- a role for each connection, which the runtime checks on every call;
 - bounded message and stream sizes;
 - cancellation;
 - resumable change cursors;
 - backpressure when the UI cannot consume events;
 - structured errors rather than leaked stack traces;
-- no listening on a public network interface.
+- no listening on any network interface.
 
-A local socket is useful when a separate CLI must connect. A direct
-Electron-owned channel is simpler when only the desktop client exists.
-
-Until the desktop app exists, the command-line client (`apps/cli`) runs the
-runtime inside its own process. One runtime at a time may use a profile: the
+Until it attaches over the socket (DEV-128), the command-line client
+(`apps/cli`) runs the runtime inside its own process. One runtime at a time may
+use a profile, whichever host runs it: the
 store holds its database in SQLite's exclusive locking mode, so a second
 runtime fails to open it rather than taking the first one's live sessions for
 a crashed launch's and reconciling them.
@@ -382,8 +407,23 @@ A provider may launch shells, tools, language servers, or tests. Those form a
 **process tree**. Stopping only the first process can leave descendants running.
 
 On Unix-like systems, Althar uses an owned process group. On Windows it uses
-a Job Object or equivalent tree-owning mechanism. These are OS mechanisms for
-addressing all processes launched for one attempt as a unit.
+a Job Object, through a keeper (`packages/provider-adapters/src/keeper.ts`):
+a small C# program, built at first use by the .NET Framework 4 compiler that
+comes with Windows, as Node can't make a job without a native module. Althar
+spawns the keeper with the command; the keeper starts it suspended, puts it in
+a job that kills everything in it once the keeper has gone
+(`KILL_ON_JOB_CLOSE`), lets it run and exits with its code. Everything the
+command starts is in the job from its first instruction, whatever exits in
+between, so the keeper running is the tree running, and killing the keeper
+kills the tree; the tree also goes with Althar, as Node holds the children it
+spawns in a job of its own. Unlike a process group, the tree doesn't outlive
+the command: what it left running goes when it exits, where on Unix it goes
+when Althar, seeing the exit, stops the group. On Windows the keeper is
+spawned attached and hidden (`windowsHide`), never `detached`, and starts the
+command in a new console whose window is created hidden. The console programs
+the command starts share that console, even those that don't ask to be hidden,
+so none opens a window; a command started with no console at all
+(`CREATE_NO_WINDOW`) would have each of them open one.
 
 Cancellation is layered:
 
@@ -511,13 +551,16 @@ owner of durable work.
 
 A daemon can survive application quit and serve several clients, but adds
 installation permissions, service management, upgrades, discovery, and support
-burden before the product needs them.
+burden before the product needs them. A background app (a login item, the
+tray, a Quit that says what it stops) comes first, and ADR-048 says when a
+daemon would become worth it.
 
 ### A separate runtime executable
 
 Packaging the runtime as its own binary would let it outlive the app or serve
 several clients, but a utility process already gives a separate, supervised
-process. Keeping the runtime package free of Electron preserves the option.
+process. Keeping the runtime package free of Electron preserves the option,
+which the headless host takes for the CLI and cloud runners.
 
 ### Split into local microservices
 
@@ -537,8 +580,10 @@ complexity without independent scale or team ownership.
 - Cancellation addresses the complete owned process tree.
 - A stale controller cannot write after replacement.
 - No transaction remains open during provider, Git, filesystem, or network I/O.
-- A diagnostic CLI can use the same versioned contract without importing
-  runtime internals.
+- The CLI can use the same versioned contract without importing runtime
+  internals.
+- A client on the local socket cannot answer a permission request or a
+  question, even one holding the per-launch secret.
 
 ## References
 

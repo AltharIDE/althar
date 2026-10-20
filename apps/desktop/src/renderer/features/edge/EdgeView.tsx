@@ -4,10 +4,10 @@ import { EdgeSheet, Island, ISLAND_HOVER, type NotchSize } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { refOf, text as homeText } from '../home/HomeView'
-import { needLineOf, needsOf, workOf } from '../home/needs'
+import { DEFAULT_ANSWER, needLineOf, needsOf, workOf } from '../home/needs'
 import s from './Edge.module.css'
 import type { EdgeModel } from './useEdge'
-import { isFinished } from '../../shared/calls'
+import { readyOf, standingCalls } from '../../shared/calls'
 import { useModelNames } from '../../shared/modelNames'
 
 /*
@@ -50,17 +50,21 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const name = (id: string | null) => model.agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
-  const calls = (home?.calls ?? []).filter((call) => !model.answered.some((one) => one.call.id === call.id))
-  // Ready to accept: a plain task that finished waits on its board instead.
-  const ready = tasks.filter((task) => task.phase === 'ready' && !isFinished(task))
+  const standing = standingCalls(tasks, home?.calls ?? [])
+  const calls = standing.filter((call) => !model.answered.some((one) => one.call.id === call.id))
+  // What waits on the person as work ready for them (`needsYou`).
+  const ready = readyOf(tasks)
   // What has a call above isn't counted again in the work.
   const called = new Set((home?.calls ?? []).map((call) => call.threadId))
-  const working = tasks.filter((task) => task.phase !== 'ready' && !called.has(task.threadId) && refs.has(task.projectId))
+  // Nor is a task kept for later, which waits for the person to write to it.
+  const working = tasks.filter(
+    (task) => task.phase !== 'ready' && task.phase !== 'kept' && !called.has(task.threadId) && refs.has(task.projectId),
+  )
   const waiting = calls.length + ready.length
   const openThread = (threadId: string) => host.openInWindow(threadId)
 
   const needs: ReadonlyArray<ReactNode> = needsOf({
-    calls: home?.calls ?? [],
+    calls: standing,
     answered: model.answered,
     ready,
     refs,
@@ -97,7 +101,11 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
         )}
       </Pointed>
     )
-  return <Measured onHeight={host.edgeSize}>{sheet}</Measured>
+  return (
+    <Measured onHeight={host.edgeSize} opening={showing && home !== null}>
+      {sheet}
+    </Measured>
+  )
 }
 
 /**
@@ -148,9 +156,18 @@ function Pointed({
 /**
  * The menu bar's sheet, telling the main process how tall it draws, so its
  * window fits it; taller than the screen allows, it scrolls in the window.
+ * As it opens (`opening`: shown, with the home loaded), focus goes to the
+ * first permission's Allow once, so Enter answers it, as the window's card
+ * does, if it is on the page itself. Never again while it stays open: after an
+ * answer focus stays on that line, and a second Enter allows nothing unread.
  */
-function Measured({ children, onHeight }: { children: ReactNode; onHeight: (height: number) => void }) {
+function Measured({ children, onHeight, opening }: { children: ReactNode; onHeight: (height: number) => void; opening: boolean }) {
   const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!opening) return
+    const on = document.activeElement
+    if (on === null || on === document.body) box.current?.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
+  }, [opening])
   useEffect(() => {
     const element = box.current
     if (element === null) return

@@ -78,6 +78,12 @@ export const ChangeRequest = Schema.Struct({
    * hasn't worked it out yet, or doesn't say.
    */
   conflicts: Schema.optional(Schema.Boolean),
+  /**
+   * The repository its branch is on, where that isn't the one it goes into:
+   * a fork's path, or none where the fork is gone. Null for a branch of the
+   * repository's own; absent where the host doesn't say, as a list may not.
+   */
+  headRepository: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
 })
 export type ChangeRequest = typeof ChangeRequest.Type
 
@@ -291,9 +297,32 @@ export interface CodeHost {
    * checks or reviews it still needs, with the host's own words.
    */
   merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Closes a change without merging it, because the person said to: never
+   * on an agent's word. Read back as the host has it after; one already
+   * closed or merged is left as it is. Refused, where the account may not,
+   * with the host's own words.
+   */
+  closeChange(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Deletes a closed change's branch on the host, where the branch is (a
+   * fork's, for one from a fork), because the person said to. Refused for a
+   * change still open; a branch already gone is nothing to do.
+   */
+  deleteBranch(repository: Repository, change: ChangeRequest): Effect.Effect<void, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
-  /** The end of a check's log, or with `whole` all of it, when the host keeps one Althar can read. */
+  /**
+   * The end of a check's log, or with `whole` all of it. Null for a check the
+   * host keeps no log of, such as one another CI service reported; one it
+   * keeps but won't give (refused, expired, out of reach) fails, with why.
+   */
   checkLog(repository: Repository, check: Check, whole?: boolean): Effect.Effect<string | null, ConnectorFailed>
+  /**
+   * What a check the host keeps no log of reported of itself, where it said
+   * more than its summary: a GitHub check run's own summary and text. Null
+   * where it said nothing more.
+   */
+  checkReport?(repository: Repository, check: Check): Effect.Effect<string | null, ConnectorFailed>
   /**
    * Runs a check again, as for one that may have failed by chance: true where
    * the host began it again, false where it can't run that check again.
@@ -327,6 +356,17 @@ export interface CodeHost {
 /** A host's refusal of a review, where it has no `capabilities.reviews`: said in its words for a change. */
 export const noReviews = (product: Product, words: ChangeWords): ConnectorFailed =>
   new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t review a ${words.noun} on this host yet.` })
+
+/** A host's refusal to delete the branch of a change still open: deleting it would close the change, or orphan it. */
+export const stillOpen = (product: Product, words: ChangeWords, number: number): ConnectorFailed =>
+  new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: `${words.short} ${words.prefix}${number} is still open, so its branch stays.`,
+  })
+
+/** A branch as a URL's path takes it: each part encoded, its slashes kept. */
+export const branchPath = (branch: string): string => branch.split('/').map(encodeURIComponent).join('/')
 
 /** A host's refusal to list changes, or to narrow them as asked: said in its words for a change. */
 export const noListing = (product: Product, words: ChangeWords, why?: string): ConnectorFailed =>

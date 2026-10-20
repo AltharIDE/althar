@@ -21,7 +21,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { lacking, noReviews } from './model'
+import { lacking, noReviews, stillOpen } from './model'
 import {
   answered,
   failedOf,
@@ -347,6 +347,8 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     changedFiles: null,
     updatedAt: iso(answer.updatedDate),
     ...conflictsOf(answer.properties?.mergeResult),
+    // Where its branch is: the repository's own, or a fork's, by its project and slug.
+    headRepository: within(repository, answer.fromRef) ? null : [answer.fromRef.repository.project.key, answer.fromRef.repository.slug],
   })
 
   /** A pull request as a list gives it: where its reviewers left it, and no word of its checks, which a list doesn't say. */
@@ -586,6 +588,36 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
             ),
           )
         return changeOf(repository, merged)
+      }),
+    // Bitbucket's word for closing one unmerged is declining it: at the version read, as merging is.
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        if (now.state !== 'OPEN') return changeOf(repository, now)
+        return changeOf(
+          repository,
+          yield* http.json(PullAnswer, 'POST', `${pull(repository, change.number)}/decline?version=${now.version}`, {}),
+        )
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        if (now.state === 'OPEN') return yield* stillOpen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        // Its branch is where it came from, a fork's for one from a fork, and goes by the branch utilities, beside the main API.
+        const on = now.fromRef.repository
+        yield* http
+          .json(
+            Schema.Unknown,
+            'DELETE',
+            `${rest}/branch-utils/latest/projects/${encodeURIComponent(on.project.key)}/repos/${encodeURIComponent(on.slug)}/branches`,
+            { name: now.fromRef.id, dryRun: false },
+          )
+          .pipe(
+            Effect.catchIf(
+              (error) => error.status === 404,
+              () => Effect.void,
+            ),
+          )
       }),
     checks: (_repository, sha) =>
       Effect.map(all(BuildAnswer, `${rest}/build-status/latest/commits/${encodeURIComponent(sha)}`), (builds) =>

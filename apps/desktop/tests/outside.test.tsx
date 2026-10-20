@@ -11,7 +11,6 @@ import { ConnectPanel } from '../src/renderer/features/connections/ConnectPanel'
 import { connectionsOf, ConnectionsView, servicesOf } from '../src/renderer/features/connections/ConnectionsView'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
@@ -31,10 +30,11 @@ import {
   githubGuide,
   items,
   NOW,
+  repositories,
   runnables,
   snapshot,
 } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 /*
  * What reaches outside, in the window: connecting code hosts and trackers,
@@ -735,7 +735,7 @@ describe('running what a task built, with no agent', () => {
       })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Run bun run dev' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1', 'rnbl_dev')
     // The run comes back on the watch: one for another task, or another project, says nothing here.
     const launch = {
@@ -875,6 +875,25 @@ describe('what keeps the places a task waits for', () => {
   })
 })
 
+describe('a task waiting in its project’s line', () => {
+  it('can go to the front of the line from its own view, when it is 2nd or later', async () => {
+    const thread = snapshot()
+    const holders = [{ taskId: 't3', title: 'Fix the login', threadId: 'th3', kept: false, running: [] }]
+    let place = 2
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, place, queued: { busy: 1, atOnce: 1, holders } } })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Move to the front of the line' }))
+    expect(client.moveInLine).toHaveBeenCalledWith(thread.task.id, 0)
+    // First in line, it has nowhere further to go.
+    place = 1
+    act(() => emit(changed('task', 't1')))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Move to the front of the line' })).toBeNull())
+    expect(screen.getByText('Held by Fix the login')).toBeTruthy()
+  })
+})
+
 describe('a waiting task’s open view', () => {
   it('reads who holds the places again when its task changes: a server that went idle leaves the list, a task that took its place joins it', async () => {
     const server = { id: 'bg-1', command: 'bun dev', url: null, startedAt: '2026-10-10T09:00:00.000Z', ended: null }
@@ -993,12 +1012,18 @@ describe('a task’s pull request', () => {
     // Opening a task with a pull request asks its host for news.
     await waitFor(() => expect(client.refreshTask).toHaveBeenCalledWith('t1'))
     expect(outputs.getByText('limit.ts')).toBeTruthy()
-    expect(outputs.getByText('test')).toBeTruthy()
+    // Its checks in a line, what failed by name, opening to the list.
+    await userEvent.click(outputs.getByRole('button', { name: 'Its checks: test failed' }))
+    expect(outputs.getByText('lint')).toBeTruthy()
     // Its review says how it went, not what the reviewer wrote: that is in the conversation.
-    expect(outputs.getByText('Review')).toBeTruthy()
+    expect(outputs.getByText(/^Reviewed by/)).toBeTruthy()
     expect(outputs.queryByText('Holds.')).toBeNull()
-    expect(outputs.getByText('Its checks run on it; mark it ready when you are')).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Open on GitHub' }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/12')
+    expect(outputs.getByText('Draft')).toBeTruthy()
+    // Its number is the one link to its host.
+    expect(outputs.getByRole('link', { name: 'Open meridian/api #12 on GitHub' }).getAttribute('href')).toBe(
+      'https://github.com/meridian/api/pull/12',
+    )
+    expect(outputs.getAllByRole('link')).toHaveLength(1)
     await userEvent.click(screen.getByRole('button', { name: 'Mark ready for review' }))
     expect(ready).toHaveBeenCalledWith('t1', 'https://github.com/meridian/api/pull/12')
     // The conversation is a switch away, and the issue heads it.
@@ -1018,8 +1043,7 @@ describe('a task’s pull request', () => {
       ),
     })
     withServices(<Task />, client)
-    expect(await screen.findByText('2 commits aren’t on the pull request yet.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Push 2 commits' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 2 commits' }))
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/api/pull/12'))
   })
 
@@ -1219,16 +1243,18 @@ describe('a task’s pull request', () => {
 
   it('says on its outputs that it is ready to accept, merged, or closed', async () => {
     for (const [shown, words] of [
-      [change({ draft: false }), 'Nothing merges until you accept it'],
+      [change({ draft: false }), 'Accept and merge'],
       [change({ state: 'merged', draft: false, checks: null }), 'Merged'],
       [
         change({ state: 'closed', draft: false, noun: 'merge request', short: 'MR', prefix: '!', product: 'gitlab' }),
         'MR !12 was closed on GitLab.',
       ],
     ] as const) {
-      const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ task: { ...snapshot().task, changes: [shown] } })) })
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => snapshot({ task: { ...snapshot().task, phase: 'ready', changes: [shown] } })),
+      })
       const view = withServices(<Task />, client)
-      await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+      await screen.findByRole('radio', { name: /Outputs/ })
       expect((await screen.findAllByText(words)).length).toBeGreaterThan(0)
       view.unmount()
     }
@@ -1278,17 +1304,21 @@ function Project() {
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
-      settings={{ model: useProjectSettings('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
+      settings={useSettingsOf('p1')}
       onTask={vi.fn()}
     />
   )
 }
 
 describe('a project, reaching outside', () => {
-  it('says nothing of an unconnected host up front, and walks in to it from the project’s settings, on any view', async () => {
+  it('says nothing of an unconnected host up front, and walks in to it from where its work goes, in the project’s settings', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } }),
+      ),
+      // Its repositories' work goes to GitHub, which Althar isn't connected to.
+      getRepositories: vi.fn(async () =>
+        repositories.map((one) => (one.host?.product === 'github' ? { ...one, host: { ...one.host, account: null } } : one)),
       ),
       connectToken: vi.fn(async () => githubConnection),
     })
@@ -1296,19 +1326,20 @@ describe('a project, reaching outside', () => {
     await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     // Pushing needs no connection, so nothing stands in the way of the conversation.
     expect(screen.queryByText(/isn't connected to GitHub/)).toBeNull()
-    /** The host's module in the project's settings, which says it isn't connected. */
+    /** GitHub, where its repositories' work goes in the project's settings, which says it isn't connected. */
     const connectFromSettings = async () => {
-      await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
-      const panel = within(await screen.findByRole('dialog', { name: 'meridian’s settings' }))
-      const github = panel.getByRole('button', { name: /^GitHub/ })
-      expect(github.textContent).toContain('Not connected')
-      await userEvent.click(github)
+      await userEvent.click(screen.getByRole('radio', { name: /^Settings/ }))
+      await userEvent.click(
+        within(screen.getByRole('navigation', { name: 'Project settings' })).getByRole('button', { name: 'Code and issues' }),
+      )
+      const github = within(await screen.findByRole('region', { name: 'GitHub' }))
+      expect(github.getByText('Not connected')).toBeTruthy()
+      await userEvent.click(github.getByRole('button', { name: 'Connect GitHub' }))
     }
     await connectFromSettings()
-    // GitHub's own walk in, at a sign-in card's width; the settings closed as it opened, so only the walk is over the project.
+    // GitHub's own walk in, at a sign-in card's width, over the project.
     const shown = await screen.findByRole('dialog', { name: 'GitHub' })
     const dialog = within(shown)
-    expect(screen.queryByRole('dialog', { name: 'meridian’s settings' })).toBeNull()
     expect(await dialog.findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
     expect(shown.style.width).toMatch(/^min\(480px,/)
     // Nothing to press Done on yet, and nothing to step back to.
@@ -1326,18 +1357,17 @@ describe('a project, reaching outside', () => {
     await userEvent.click(dialog.getByRole('button', { name: 'Paste it myself' }))
     await userEvent.type(dialog.getByLabelText('Paste it'), 'github_pat_e2e{Enter}')
     expect(await dialog.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
-    // One Done, the walk's own: it closes the walk, and focus goes back to the button the settings opened from.
+    // One Done, the walk's own: it closes the walk.
     expect(dialog.getAllByRole('button', { name: 'Done' })).toHaveLength(1)
     await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Settings' })))
-    // On the board too, where nothing of the conversation shows.
+    // From the board too: the settings are a view of their own, whichever the project was on.
     await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
     await connectFromSettings()
     expect(await screen.findByRole('dialog', { name: 'GitHub' })).toBeTruthy()
   })
 
-  it('opens all the code hosts and trackers for a host it is connected to, walks in to another in their place, and comes back to them', async () => {
+  it('opens all the code hosts and trackers to connect a tracker, walks in to one in their place, and comes back to them', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } }),
@@ -1349,9 +1379,13 @@ describe('a project, reaching outside', () => {
       ),
     })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }))
-    const panel = within(await screen.findByRole('dialog', { name: 'meridian’s settings' }))
-    await userEvent.click(await panel.findByRole('button', { name: /^GitHub\s*Connected as you/ }))
+    await userEvent.click(await screen.findByRole('radio', { name: /^Settings/ }))
+    await userEvent.click(
+      within(screen.getByRole('navigation', { name: 'Project settings' })).getByRole('button', { name: 'Code and issues' }),
+    )
+    await userEvent.click(
+      within(await screen.findByRole('region', { name: 'Trackers' })).getByRole('button', { name: 'Connect a tracker' }),
+    )
     const shown = await screen.findByRole('dialog', { name: 'Code hosts and trackers' })
     const dialog = within(shown)
     expect(await dialog.findByText('Signed in as you')).toBeTruthy()
@@ -1382,7 +1416,8 @@ describe('a project, reaching outside', () => {
       getThread: vi.fn(async () => snapshot({ task: { ...snapshot().task, phase: 'ready', changes: [change(), web] } })),
     })
     withServices(<Task />, client)
-    expect(await screen.findByRole('link', { name: 'Open on GitHub · api' })).toBeTruthy()
+    expect((await screen.findByRole('link', { name: 'Open meridian/api #12 on GitHub' })).textContent).toBe('api #12')
+    expect(screen.getByRole('link', { name: 'Open meridian/web #4 on GitHub' }).textContent).toBe('web #4')
     await userEvent.click(screen.getByRole('button', { name: 'Mark web ready for review' }))
     expect(ready).toHaveBeenCalledWith('t1', 'https://github.com/meridian/web/pull/4')
   })
@@ -1494,7 +1529,7 @@ describe('a project, reaching outside', () => {
     expect(screen.getByRole('button', { name: 'Push 1 commit' }).getAttribute('aria-busy')).toBeNull()
   })
 
-  it('holds Accept while a push is on its way, without showing it as working', async () => {
+  it('offers Accept once what the lead committed since is pushed, and holds the rest while a push is on its way', async () => {
     let done = () => {}
     const push = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
     const { client } = fakeClient({
@@ -1507,13 +1542,13 @@ describe('a project, reaching outside', () => {
     })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    // Accepting merges what the pull request has: what was committed since goes up first.
     await userEvent.click(await screen.findByRole('button', { name: 'Push 1 commit' }))
     await waitFor(() => expect(push).toHaveBeenCalled())
-    const accept = screen.getByRole('button', { name: 'Accept and merge' }) as HTMLButtonElement
-    expect(accept.disabled).toBe(true)
-    expect(accept.getAttribute('aria-busy')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Push 1 commit' }).getAttribute('aria-busy')).toBe('true')
     done()
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Accept and merge' }) as HTMLButtonElement).disabled).toBe(false))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Push 1 commit' }).getAttribute('aria-busy')).toBeNull())
   })
 
   it('holds the push of what merged here while a pull request’s push is on its way', async () => {
@@ -1653,7 +1688,33 @@ describe('what reaching outside says, in every case', () => {
             items.arrival({ kind: 'review', from: 'lee', verdict: 'approved', text: '' }),
             items.arrival({ kind: 'review', from: 'kim', verdict: null, text: 'Fine.' }),
             items.arrival({ kind: 'checks', from: null, text: null, passed: 3, failed: 0, failing: [] }),
-            items.arrival({ kind: 'checks', from: null, text: null, passed: 0, failed: 2, failing: ['test', 'lint'] }),
+            items.arrival({
+              kind: 'checks',
+              from: null,
+              text: null,
+              passed: 0,
+              failed: 2,
+              failing: ['test', 'lint'],
+              logs: [
+                {
+                  name: 'test',
+                  url: null,
+                  log: [
+                    '2026-10-18T19:42:01.1234567Z Run bun test',
+                    '2026-10-18T19:42:09.0000000Z FAIL limit.test.ts',
+                    '2026-10-18T19:42:09.0000000Z ##[error]Process completed with exit code 1.',
+                    '2026-10-18T19:42:10.0000000Z Post job cleanup.',
+                  ].join('\n'),
+                  missing: null,
+                },
+                {
+                  name: 'lint',
+                  url: 'https://github.com/m/a/actions/runs/1/job/2',
+                  log: null,
+                  missing: 'GitHub refused (401): Bad credentials',
+                },
+              ],
+            }),
             items.arrival({ kind: 'closed', from: null, text: null, source: 'gitlab', where: 'MR !4' }),
             items.arrival({ kind: 'ready', from: null, text: null }),
             items.step({ step: 'publish', summary: 'Pushed althar/x.', change: null }),
@@ -1680,6 +1741,14 @@ describe('what reaching outside says, in every case', () => {
     expect(screen.getByText('Checks passed on PR #12')).toBeTruthy()
     expect(screen.getByText('Checks failed on PR #12')).toBeTruthy()
     expect(screen.getByText('Failed: test, lint')).toBeTruthy()
+    // Each failed check shows the end of its log, without its times, or why it couldn't be read, with its page.
+    expect(screen.getByText('FAIL limit.test.ts')).toBeTruthy()
+    expect(screen.queryByText(/2026-10-18T19:42/)).toBeNull()
+    // It ends where Actions marked it failed, not in the job's cleanup after.
+    expect(screen.getByText('##[error]Process completed with exit code 1.')).toBeTruthy()
+    expect(screen.queryByText('Post job cleanup.')).toBeNull()
+    expect(screen.getByText('Couldn’t read its log: GitHub refused (401): Bad credentials.')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Open its page' }).getAttribute('href')).toBe('https://github.com/m/a/actions/runs/1/job/2')
     expect(screen.getByText('Closed MR !4')).toBeTruthy()
     expect(screen.getByText('Ready for review: PR #12')).toBeTruthy()
     expect(screen.getByText('Pushed althar/x.')).toBeTruthy()

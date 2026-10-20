@@ -15,9 +15,9 @@ export interface SignInCheck {
 
 /**
  * Whether the user is signed in to an agent, and how that is paid for, from
- * its documented status command. A command that is missing, fails to run, or
- * prints something unexpected gives `unknown`, never an error: the first
- * prompt will say.
+ * its documented status command. An agent with none, a command that is
+ * missing, fails to run, or prints something unexpected gives `unknown`,
+ * never an error: the first prompt will say.
  */
 export const signInCheck = (
   agent: AgentDefinition,
@@ -26,11 +26,12 @@ export const signInCheck = (
   home: Readonly<Record<string, string>> = {},
 ): Effect.Effect<SignInCheck> =>
   Effect.callback<SignInCheck>((resume) => {
-    const spec = agent.signIn.status(node)
+    const spec = agent.signIn.status?.(node)
+    if (spec === undefined) return resume(Effect.succeed({ status: 'unknown', paidBy: 'unknown' }))
     const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
     // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
-    execFile(launched.command, [...launched.args], { timeout: 15_000, env }, (error, stdout, stderr) => {
+    execFile(launched.command, [...launched.args], { timeout: 15_000, env, windowsHide: true }, (error, stdout, stderr) => {
       if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed({ status: 'unknown', paidBy: 'unknown' }))
       const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
       const output = `${stdout}\n${stderr}`
@@ -64,6 +65,8 @@ export const signOut = (
     const spec = logout.run(node)
     const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
-    execFile(launched.command, [...launched.args], { timeout: 15_000, env }, (error) => resume(Effect.succeed(error === null)))
+    execFile(launched.command, [...launched.args], { timeout: 15_000, env, windowsHide: true }, (error) =>
+      resume(Effect.succeed(error === null)),
+    )
   })
 }

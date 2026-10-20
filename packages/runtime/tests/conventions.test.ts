@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { branchFor, namingIn, titleFor } from '../src/conventions'
+import { branchFor, branchPatternOf, keepsTemplate, namingIn, titleFor, titlePatternOf } from '../src/conventions'
 import { bodyOf } from '../src/pullRequestWords'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, runtime, task } from './support'
@@ -53,6 +53,22 @@ describe('what a repository’s docs say of naming', () => {
   })
 })
 
+describe('a doc’s pattern, as Althar reads it', () => {
+  it('takes Althar’s own placeholders as they are, and none that leaves only a description', () => {
+    assert.strictEqual(branchPatternOf('feature/{key}-{slug}'), 'feature/{key}-{slug}')
+    assert.strictEqual(titlePatternOf('{key}: {title}'), '{key}: {title}')
+    // A branch that is the description alone is no convention.
+    assert.isNull(branchPatternOf('<description>'))
+    assert.isNull(branchPatternOf('{slug}'))
+  })
+
+  it('reads a title only of the issue’s key and the title, with nothing it can’t fill and no other words', () => {
+    assert.strictEqual(titlePatternOf('<ticket>: <title>'), '{key}: {title}')
+    assert.isNull(titlePatternOf('<type>: <title>'))
+    assert.isNull(titlePatternOf('feat: PROJ-123 add login'))
+  })
+})
+
 describe('the names Althar gives', () => {
   it('without a rule or a doc, as it always has', () => {
     assert.strictEqual(branchFor(null, { key: null, slug: 'fix-login' }), 'althar/fix-login')
@@ -65,6 +81,8 @@ describe('the names Althar gives', () => {
     assert.strictEqual(branchFor('feature/{key}-{slug}', { key: 'PROJ-123', slug: 'fix-login' }), 'feature/PROJ-123-fix-login')
     assert.strictEqual(branchFor('feature/{key}-{slug}', { key: '#12', slug: 'fix-login' }), 'feature/12-fix-login')
     assert.strictEqual(titleFor('{key}: {title}', { title: 'Fix login', issue: { key: '#12', sameHost: true } }), '#12: Fix login')
+    // From no issue, the title alone.
+    assert.strictEqual(titleFor('{key}: {title}', { title: 'Fix login', issue: null }), 'Fix login')
     // A name git would refuse, from a key it can't take or a pattern that starts badly, is Althar's own instead.
     assert.strictEqual(branchFor('feature/{key}-{slug}', { key: 'A..B', slug: 'fix-login' }), 'feature/A-B-fix-login')
     assert.strictEqual(branchFor('{key}-{slug}', { key: '-1', slug: 'fix-login' }), 'althar/-1-fix-login')
@@ -73,12 +91,28 @@ describe('the names Althar gives', () => {
 
 describe('a description in the repository’s template', () => {
   const template = '## Summary\n\n<!-- What and why. -->\n\n## How to test\n\n## Checklist\n\n- [ ] Tests pass\n'
-  const nothingElse = { review: null, findings: [], issue: null } as const
+  const nothingElse = { issue: null } as const
 
-  it('with no template, is what it always was', () => {
+  it('is the template itself, unticked, where nothing was written or done to put in it', () => {
+    assert.strictEqual(
+      bodyOf({ lead: null, ...nothingElse, template: '## Summary\n\n- [x] Done\n', written: null }),
+      '## Summary\n\n- [ ] Done\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+    )
+  })
+
+  it('isn’t kept where the lead’s leaves out an item of the template’s checklist', () => {
+    assert.isFalse(keepsTemplate('## Checklist\n\n- [ ] Tests pass\n', '## Checklist\n\nDone.'))
+    assert.isTrue(keepsTemplate('## Checklist\n\n- [ ] Tests pass\n', '## Checklist\n\n- [x] Tests pass\n'))
+  })
+
+  it('with no template, is the lead’s own, else what it did', () => {
     assert.strictEqual(
       bodyOf({ lead: 'Did it.', ...nothingElse, template: null, written: null }),
       'Did it.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+    )
+    assert.strictEqual(
+      bodyOf({ built: 'Built it.', lead: 'Did it.', ...nothingElse, template: null, written: 'Why, and what.' }),
+      'Why, and what.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
     )
   })
 
@@ -90,10 +124,10 @@ describe('a description in the repository’s template', () => {
     )
   })
 
-  it('takes the lead’s, unticked, where it keeps the template', () => {
+  it('takes the lead’s, unticked, where it keeps the template, with nothing of what the task built above it', () => {
     const written = '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [x] Tests pass\n'
     assert.strictEqual(
-      bodyOf({ lead: 'Did it.', ...nothingElse, template, written }),
+      bodyOf({ built: 'Built it. Try it at localhost.', lead: 'Did it.', ...nothingElse, template, written }),
       '## Summary\n\nDid it.\n\n## How to test\n\nRun it.\n\n## Checklist\n\n- [ ] Tests pass\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
     )
   })

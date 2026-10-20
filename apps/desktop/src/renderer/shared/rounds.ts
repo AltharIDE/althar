@@ -2,7 +2,7 @@ import type { ThreadItem } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
-import { type Block, blocksOf, type Part, type StepResult, type Streamed } from './thread'
+import { type Block, blocksOf, carriedOn, type Part, relayed, type StepResult, type Streamed } from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
 
@@ -81,8 +81,6 @@ export type RoundBlock =
 
 type NoticeContent = Extract<ThreadItem, { kind: 'notice' }>['content']
 
-/** What the coordinator passed on, by its role; before roles, by its title. */
-const RELAYED_TITLE = 'From the coordinator'
 /** Althar's housekeeping, by its role; before roles, by what it said. */
 const ASIDES = [
   /on a branch of its own/,
@@ -93,7 +91,7 @@ const ASIDES = [
 ]
 
 const roleOf = (content: NoticeContent): 'relayed' | 'aside' | 'news' =>
-  content.role === 'relayed' || (content.role === undefined && content.title.startsWith(RELAYED_TITLE))
+  relayed(content)
     ? 'relayed'
     : content.role === 'aside' || (content.role === undefined && ASIDES.some((pattern) => pattern.test(content.title)))
       ? 'aside'
@@ -161,6 +159,10 @@ export interface RoundSource {
   readonly worktree: string | null
   readonly queue?: boolean
   readonly outputs?: ReadonlyMap<string, OutputSoFar>
+  readonly turnStarted?: string | null
+  readonly openedAt?: string | null
+  readonly reading?: boolean
+  readonly turnEnded?: string | null
 }
 
 /** A task's thread in rounds, oldest first, with what is still being written but not yet read at the end. */
@@ -179,6 +181,12 @@ export const roundsOf = (
     stretches.at(-1)?.push(item)
     if (item.kind === 'step_result') stretches.push([])
   }
+  // When the newest of what came before the last stretch was written: what was asked in it may have waited behind that.
+  const earlierAt = new Date(
+    items
+      .slice(0, items.length - (stretches.at(-1)?.length ?? 0))
+      .reduce((newest, item) => Math.max(newest, Date.parse(item.createdAt)), 0),
+  ).toISOString()
   const blocks = stretches.flatMap((stretch, index) => {
     const last = index === stretches.length - 1
     return blocksOf(
@@ -188,13 +196,28 @@ export const roundsOf = (
         worktree,
         queue: (source.queue ?? turnRunning) && last,
         ...(source.outputs === undefined ? {} : { outputs: source.outputs }),
+        ...(last && source.turnStarted !== undefined ? { turnStarted: source.turnStarted } : {}),
+        // What opens the thread is answered in its first stretch, when that is all there is yet.
+        ...(last && index === 0 && source.openedAt !== undefined ? { openedAt: source.openedAt } : {}),
+        ...(last && source.reading !== undefined ? { reading: source.reading } : {}),
+        ...(last && source.turnEnded !== undefined ? { turnEnded: source.turnEnded } : {}),
+        ...(last && index > 0 ? { earlierAt } : {}),
       },
       last ? streaming : new Map(),
       ago,
       now,
     )
   })
-  const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
+  /** What a line of Althar's says, as the notice it was. */
+  const noticeOf = (block: Extract<Block, { kind: 'divider' }>): NoticeContent => {
+    const item = items.find((one) => one.id === block.id)
+    return item?.kind === 'notice' ? item.content : { source: 'runtime', severity: 'info', title: block.text, description: null }
+  }
+  // The lead's turn runs in its last round, unless its reply to what it was last asked is still waited for.
+  const lastTurn = blocks.some((block) => block.kind === 'waiting') ? -1 : blocks.findLastIndex((block) => block.kind === 'turn')
+  // Nor where Althar carried the step on after it, after a restart: then the turn running is a later one that has said nothing
+  // yet, and the round before it is over.
+  const running = turnRunning && !blocks.slice(lastTurn + 1).some((block) => block.kind === 'divider' && carriedOn(noticeOf(block)))
   const out: Array<RoundBlock> = []
   let open: Gathering | null = null
   // What Althar did between rounds goes in the next one's work.
@@ -212,7 +235,7 @@ export const roundsOf = (
           pending = []
         }
         open.steps.push(...block.parts)
-        if (turnRunning && index === lastTurn) close(true)
+        if (running && index === lastTurn) close(true)
         return
       }
       case 'step': {
@@ -259,9 +282,7 @@ export const roundsOf = (
         return
       }
       case 'divider': {
-        const item = items.find((one) => one.id === block.id)
-        const content: NoticeContent =
-          item?.kind === 'notice' ? item.content : { source: 'runtime', severity: 'info', title: block.text, description: null }
+        const content = noticeOf(block)
         const role = roleOf(content)
         if (role === 'relayed') {
           close(false)

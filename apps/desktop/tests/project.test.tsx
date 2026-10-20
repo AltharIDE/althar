@@ -2,17 +2,16 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type CoordinatorSnapshot } from '@althar/contracts'
+import { ApiError, type CoordinatorSnapshot, type ThreadItem } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, project, status, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 function Project({
   onTask = vi.fn(),
@@ -30,6 +29,7 @@ function Project({
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
+      settings={useSettingsOf('p1')}
       onTask={onTask}
       {...(room === undefined ? {} : { room })}
       {...(newTask === undefined ? {} : { newTask })}
@@ -48,6 +48,8 @@ const session = {
   effort: null,
   models: [],
   turnRunning: false,
+  turnStartedAt: null,
+  turnEndedAt: null,
   held: true,
   context: null,
   background: [],
@@ -75,7 +77,7 @@ function WithSettings() {
       board={useBoard('p1')}
       connections={useConnections()}
       onTask={vi.fn()}
-      settings={{ model: useProjectSettings('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
+      settings={useSettingsOf('p1')}
     />
   )
 }
@@ -93,7 +95,7 @@ describe('running the project, with no agent', () => {
     withServices(<WithSettings />, client)
     // Once the conversation is read, its front offers what the project runs.
     await screen.findByText(/^Ask the coordinator about/)
-    await userEvent.click(await screen.findByRole('button', { name: 'Run npm run dev' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
     const launch = {
       id: 'proc_1',
@@ -165,7 +167,7 @@ describe('the project’s bar', () => {
     await userEvent.keyboard('b')
     expect(checked()).toMatch(/^Board/)
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Both/)
+    expect(checked()).toMatch(/^Home/)
     await userEvent.keyboard('b')
     expect(checked()).toMatch(/^Conversation/)
     await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
@@ -175,7 +177,7 @@ describe('the project’s bar', () => {
     view.unmount()
   })
 
-  it('says which view it is on, to open on it again, and has only its views to choose from', async () => {
+  it('says which view it is on, to open on it again, and has only its views and its settings to choose from', async () => {
     const onRoomChange = vi.fn()
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     withServices(<Project room={Room.Both} onRoomChange={onRoomChange} />, client)
@@ -185,9 +187,13 @@ describe('the project’s bar', () => {
       within(views)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Conversation', 'Board', 'Both'])
+    ).toEqual(['Home', 'Conversation', 'Board', 'Settings'])
     await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
     expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
+    // Its settings are a view too, kept like the others to open on again.
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
+    expect(onRoomChange).toHaveBeenLastCalledWith(Room.Settings)
+    expect(screen.getByRole('navigation', { name: 'Project settings' })).toBeTruthy()
   })
 })
 
@@ -252,7 +258,9 @@ describe('the Talk room', () => {
     expect(screen.getByText('Implementing')).toBeTruthy()
     expect(screen.getByText('Stopped')).toBeTruthy()
     expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
-    expect(screen.getByText(`Waits for Claude Code, back at ${clock('2026-10-03T15:40:00.000Z')}`)).toBeTruthy()
+    expect(screen.getByText(`Claude Code is out of usage until ${clock('2026-10-03T15:40:00.000Z')}`)).toBeTruthy()
+    // Held for the reset, it is paused, as on the board, not running.
+    expect(screen.getByText('Paused')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Start' }))
     expect(client.startPlan).toHaveBeenCalledWith('pln5')
   })
@@ -375,14 +383,15 @@ describe('the Talk room', () => {
     )
   })
 
-  it('keeps a card’s steps and branch while a later step waits for a free agent, saying it waits and not that it runs', async () => {
+  it('keeps a card’s steps while a later step waits for a free agent, saying it waits and not that it runs', async () => {
     const waitingCard = card({ phase: 'running', step: 'review', queued: { busy: 4, atOnce: 4 }, branch: 'althar/midway' })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project />, client)
     expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
     const track = screen.getByRole('list', { name: 'Steps' })
     expect(track.getAttribute('data-status')).toBe('queued')
-    expect(screen.getByText('althar/midway')).toBeTruthy()
+    // The branch is on the task's own view, not on the card.
+    expect(screen.queryByText('althar/midway')).toBeNull()
   })
 
   it('shows the effort the coordinator picked for a step as one the person chose, keeps it, and lets the person change it', async () => {
@@ -564,6 +573,45 @@ describe('the Talk room', () => {
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' }))
   })
 
+  it('shows the coordinator thinking where its reply will start, and its last reply as it was', async () => {
+    const asked = { ...items.you('And the docs?'), createdAt: new Date().toISOString() }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: { ...session, turnRunning: true, turnStartedAt: asked.createdAt },
+          items: [
+            items.you('Why is checkout slow?'),
+            items.tool({ title: 'Read checkout.ts' }),
+            items.says('The call has no retry.'),
+            asked,
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const thinking = await screen.findByText('Thinking')
+    expect(thinking.closest('article')).toBe(screen.getAllByRole('article').at(-1))
+    // The reply before it is over: its work folded under how long it took, not at work again.
+    expect(screen.getByRole('button', { name: /Worked for/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Working for/ })).toBeNull()
+  })
+
+  it('lets go of Thinking once the coordinator’s turn ended with nothing said, as when it was interrupted before its first word', async () => {
+    const asked = { ...items.you('And the docs?'), createdAt: new Date(Date.now() - 5000).toISOString() }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: { ...session, turnEndedAt: new Date().toISOString() },
+          items: [items.you('Why is checkout slow?'), items.says('The call has no retry.'), asked],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    expect(await screen.findByText('And the docs?')).toBeTruthy()
+    expect(screen.queryByText('Thinking')).toBeNull()
+    expect(screen.getByRole('textbox', { name: /^Tell the coordinator/ })).toBeTruthy()
+  })
+
   it('interrupts it, sends now, and moves it to another agent while it works', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
@@ -634,7 +682,10 @@ describe('the Talk room', () => {
     try {
       const queued = items.you('Next', { state: 'queued', interrupting: false })
       const { client, emit } = fakeClient({
-        getCoordinator: vi.fn(async () => coordinatorSnapshot({ session, items: [queued, items.card(card(), 'c1')] })),
+        // Althar no longer holds the coordinator, so what waits for it stays queued.
+        getCoordinator: vi.fn(async () =>
+          coordinatorSnapshot({ session: { ...session, held: false }, items: [queued, items.card(card(), 'c1')] }),
+        ),
         getThreadItem: vi.fn(async (_threadId: string, itemId: string) =>
           itemId === queued.id ? { ...queued, input: { state: 'delivered' as const, interrupting: false } } : items.says('Read again'),
         ),
@@ -665,6 +716,38 @@ describe('the Talk room', () => {
       ).toEqual(['c1', 'i9', queued.id].toSorted())
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
       await waitFor(() => expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the coordinator thinking on what waits for it idle, and the turn on it only once that is read as delivered', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const sent = items.you('Why is checkout slow?', { state: 'queued', interrupting: false })
+      let delivered: (item: ThreadItem) => void = () => undefined
+      const { client, emit } = fakeClient({
+        getCoordinator: vi
+          .fn(async () =>
+            coordinatorSnapshot({ session: { ...session, turnRunning: true, turnStartedAt: new Date().toISOString() }, items: [] }),
+          )
+          .mockResolvedValueOnce(coordinatorSnapshot({ session, items: [sent] })),
+        getThreadItem: vi.fn(() => new Promise<ThreadItem>((resolve) => (delivered = resolve))),
+      })
+      withServices(<Project />, client)
+      // Read before the runtime gave it to the coordinator, idle, it is being read: the coordinator thinks; then the turn on it starts.
+      expect(await screen.findByText('Thinking')).toBeTruthy()
+      expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
+      act(() => emit(changed('provider_session', 's1', 'thc')))
+      await vi.advanceTimersByTimeAsync(50)
+      await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', sent.id))
+      // The head that says so waits for the message read again: it doesn't jump into the composer's queue meanwhile.
+      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
+      expect(screen.getByText('Why is checkout slow?')).toBeTruthy()
+      act(() => delivered({ ...items.you('Why is checkout slow?', { state: 'delivered', interrupting: false }), id: sent.id }))
+      await waitFor(() => expect(screen.getByRole('textbox', { name: /^Add to the queue/ })).toBeTruthy())
+      expect(screen.getByText('Thinking')).toBeTruthy()
+      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
     } finally {
       vi.useRealTimers()
     }

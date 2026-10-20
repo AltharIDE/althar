@@ -15,6 +15,24 @@ import { type AgentFacts, adapterOf, repositoryNames, type RuntimeFacts } from '
  * signed in as.
  */
 
+/**
+ * The names of the person's projects and repositories, alone, for the main
+ * process to hide in a crash report (main/crashReports.ts): the store is the
+ * runtime's alone while it runs, so main can't read them itself.
+ */
+export const runtimeNames = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const projects = yield* sql<{ name: string; slug: string }>`SELECT name, slug FROM projects`
+  const bindings = yield* sql<{ slug: string; displayName: string; remoteFingerprints: string }>`
+    SELECT slug, display_name, remote_fingerprints FROM repository_bindings`
+  const locations = yield* sql<{ path: string; observedRemotes: string }>`SELECT path, observed_remotes FROM repository_locations`
+  const folders = yield* sql<{ path: string }>`SELECT path FROM project_folders`
+  return {
+    projects: projects.flatMap((project) => [project.name, project.slug]),
+    repositories: repositoryNames({ bindings, locations, folders }),
+  } satisfies Pick<RuntimeFacts, 'projects' | 'repositories'>
+})
+
 /* Each CLI's version, asked once a launch: it starts the CLI. */
 const versions = new Map<string, string | null>()
 
@@ -47,11 +65,7 @@ export const runtimeFacts = (threadId: string | null) =>
       id: number
       name: string
     }>`SELECT migration_id AS id, name FROM schema_migrations ORDER BY migration_id`
-    const projects = yield* sql<{ name: string; slug: string }>`SELECT name, slug FROM projects`
-    const bindings = yield* sql<{ slug: string; displayName: string; remoteFingerprints: string }>`
-      SELECT slug, display_name, remote_fingerprints FROM repository_bindings`
-    const locations = yield* sql<{ path: string; observedRemotes: string }>`SELECT path, observed_remotes FROM repository_locations`
-    const folders = yield* sql<{ path: string }>`SELECT path FROM project_folders`
+    const names = yield* runtimeNames
 
     const [thread] =
       threadId === null
@@ -80,8 +94,7 @@ export const runtimeFacts = (threadId: string | null) =>
     return {
       agents: agentFacts,
       migrations,
-      projects: projects.flatMap((project) => [project.name, project.slug]),
-      repositories: repositoryNames({ bindings, locations, folders }),
+      ...names,
       thread: thread === undefined ? null : { taskId: thread.taskId, projectId: thread.projectId },
       turns,
     } satisfies RuntimeFacts

@@ -6,12 +6,13 @@ import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from '
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
+import { Changes } from './Changes'
 import { TITLE_LENGTH } from './Coordinator'
 import { NotFound, TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
-import { quickIn } from './kinds'
+import { answeredIn, issueDraftsWaiting, quickIn } from './kinds'
 import { Plans } from './Plans'
 import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
@@ -39,11 +40,17 @@ import { Setups } from './Setups'
  * with none still, where it started; a review's copy at the head its lead
  * read, set up with nothing): a run that was cut short resumes like a
  * stopped one, a run that passed is ready again, and a plan that never
- * started waits, held. A merged task is done for good.
+ * started waits, held. A merged task is done for good, but for commits
+ * after its pull requests that are in none yet (ADR-034): the person opens a
+ * new pull request for them, from the task, or abandons them, which leaves
+ * them out, and it settles without them, merged still. Their branch and
+ * worktree stay, as abandoning keeps them, and only what is committed after
+ * counts again. Its menu says Abandon for both: the person has one way to
+ * take a task off their plate, and Althar keeps a merged one merged.
  */
 
-/** What the person can do to a task as a whole, in its menu's order. */
-export type TaskAction = 'start' | 'stop' | 'resume' | 'abandon' | 'reopen'
+/** What the person can do to a task as a whole, in its menu's order. `leaveOut` is abandoning a merged task: its menu says Abandon. */
+export type TaskAction = 'start' | 'stop' | 'resume' | 'leaveOut' | 'abandon' | 'reopen'
 
 /** Where a task stands, as far as its course goes. */
 export interface Standing {
@@ -58,18 +65,35 @@ export interface Standing {
   readonly threads: ReadonlyArray<string>
   /** An agent is on one of them, or starting. */
   readonly working: boolean
+  /** One of them is mid-turn, or starting: not only there, between turns. */
+  readonly busy: boolean
+  /**
+   * Commits after its last pull request merged or closed, in none yet
+   * (ADR-034): read from git, by the caller that has them.
+   */
+  readonly unshipped?: boolean
+  /** Every pull request of it merged, each repository's latest: read from its links, by the caller that has them. */
+  readonly merged?: boolean
 }
 
 /**
- * What applies where a task stands. Merged, nothing. Abandoned, reopening.
+ * What applies where a task stands. Abandoned, reopening. Merged, nothing,
+ * but leaving out commits after its pull requests that are in none yet,
+ * which put it before the person again, once nothing is at work on it; an
+ * open task whose pull requests all merged leaves them out the same way.
  * Otherwise abandoning, always; starting its plan while it waits to start;
- * stopping while its run runs or an agent is on it; resuming while its run
- * is suspended.
+ * stopping while its run runs or an agent is on it; resuming while its run is
+ * suspended. Leaving out stands in for abandoning, never beside it: the
+ * menu says Abandon for either.
  */
-export const actionsOf = (standing: Pick<Standing, 'state' | 'planId' | 'runState' | 'working'>): ReadonlyArray<TaskAction> => {
+export const actionsOf = (
+  standing: Pick<Standing, 'state' | 'planId' | 'runState' | 'working' | 'busy' | 'unshipped' | 'merged'>,
+): ReadonlyArray<TaskAction> => {
+  // Not while a round of work, or an agent's turn, may still add to them.
+  const leaves = standing.unshipped === true && standing.runState !== 'running' && !standing.busy
   switch (standing.state) {
     case 'done':
-      return []
+      return leaves ? ['leaveOut'] : []
     case 'abandoned':
       return ['reopen']
     case 'draft':
@@ -78,7 +102,8 @@ export const actionsOf = (standing: Pick<Standing, 'state' | 'planId' | 'runStat
       if (standing.planId !== null) actions.push('start')
       if (standing.runState === 'running' || standing.working) actions.push('stop')
       if (standing.runState === 'suspended') actions.push('resume')
-      actions.push('abandon')
+      // Merged, with only commits after it to settle, it stays merged: abandoning would say its change never went in.
+      actions.push(leaves && standing.merged === true ? 'leaveOut' : 'abandon')
       return actions
     }
   }
@@ -115,6 +140,7 @@ export const standingOf = (taskId: string) =>
       runState: row.runState === null ? null : yield* Effect.orDie(Schema.decodeUnknownEffect(RunState)(row.runState)),
       threads,
       working: row.starting > 0 || live.some(Option.isSome),
+      busy: row.starting > 0 || live.some((session) => Option.exists(session, (one) => one.turnRunning)),
     } satisfies Standing
   })
 
@@ -122,7 +148,7 @@ export const standingOf = (taskId: string) =>
 const stoppedOutput = (output: string | null) =>
   JSON.stringify({ ...(JSON.parse(output ?? '{}') as Readonly<Record<string, unknown>>), stopped: true })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups | Changes
 
 export class Tasks extends Context.Service<
   Tasks,
@@ -131,6 +157,14 @@ export class Tasks extends Context.Service<
     stop(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Carries a stopped task on from the step it was on: with its last lead, or the one given. */
     resume(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }): Effect.Effect<void, unknown>
+    /**
+     * Abandons a merged task's commits after its last pull requests that are
+     * in none yet, leaving them out: it settles without them, done, and they
+     * stay on its branch, in its worktree. Nothing, where it has none, its
+     * lead may still add to them, or an open task has a pull request that
+     * didn't merge.
+     */
+    leaveOut(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Settles the task without its change; its worktree and branch stay. Refused for a merged task. */
     abandon(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Opens an abandoned task again, on its worktree and branch. Refused for a merged task. */
@@ -141,12 +175,35 @@ export class Tasks extends Context.Service<
      */
     rename(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }): Effect.Effect<void, unknown>
     /**
-     * The person opened the task's screen: when, kept. One that finished as
-     * a plain task (`finished`, as its card reads), with no pull request,
-     * nothing waiting on the person and no plan to start, is done once seen:
-     * settled now. Writing to its lead later opens it again (ADR-034).
+     * The person opened the task's screen: when, kept. Seeing a task moves
+     * nothing: only the person settles one that finished (`markDone`) or
+     * takes it out of Needs you (`keep`).
      */
-    see(input: { readonly taskId: string; readonly finished: boolean }): Effect.Effect<void, unknown>
+    see(input: { readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Settles a finished task that isn't a change as Done, as the person
+     * said, on its card or to its lead: a quick task whose latest run passed,
+     * or a review posted and answered since,
+     * or is the round its lead is in, with no pull request, nothing waiting on
+     * the person and no plan to start. What its agents left running, such as
+     * a page, stops. Writing to its lead later opens it again (ADR-034).
+     * Whether it settled; refused (`left_running`), and not settled, where
+     * something it left running wouldn't stop.
+     */
+    markDone(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
+    /**
+     * Keeps a finished task that isn't a change for later, as the person said:
+     * out of Needs you as it is, with nothing stopped, not settled. A quick
+     * task or a review, open. The person writing to it brings it back
+     * (`bringBack`). Whether it was kept now.
+     */
+    keep(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
+    /**
+     * The person wrote to a task kept for later: it is no longer, so what its
+     * lead does next ends in Needs you. Or to a review whose review was posted,
+     * which has no round to open again: it opens again here.
+     */
+    bringBack(taskId: string): Effect.Effect<void, unknown>
     /** Does something in the task's turn: never beside its stopping, resuming, abandoning or reopening. */
     inTurn<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
   }
@@ -160,6 +217,7 @@ export class Tasks extends Context.Service<
       const runs = yield* Runs
       const plans = yield* Plans
       const setups = yield* Setups
+      const changes = yield* Changes
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /*
        * A task's course changes one at a time, through stopping its agents
@@ -277,6 +335,14 @@ export class Tasks extends Context.Service<
         Effect.gen(function* () {
           if (!actionsOf(yield* standingOf(input.taskId)).includes('resume')) return
           yield* runs.resume(input)
+        })
+
+      // Whether there is anything to leave out, and whether an open task's pull requests all merged, are git's and its host's to say:
+      // Changes reads them again where it marks them, so a press is one.
+      const leaveOut = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          if (!actionsOf({ ...(yield* standingOf(input.taskId)), unshipped: true, merged: true }).includes('leaveOut')) return
+          yield* changes.leaveOut(input)
         })
 
       const abandon = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
@@ -485,47 +551,170 @@ export class Tasks extends Context.Service<
           if (renamed) yield* touchCard(input.taskId)
         })
 
-      const see = (input: { readonly taskId: string; readonly finished: boolean }) =>
+      const see = (input: { readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* timestamp
+          const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
           yield* sql`UPDATE tasks SET seen_at = ${at} WHERE id = ${input.taskId}`
-          if (!input.finished) return
+        })
+
+      /**
+       * What its agents left running in the background, such as a page, stops: on each of its threads. Whether all of it did: one
+       * its agent wouldn't stop is still running.
+       */
+      const stopLeftRunning = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`
+          let stopped = true
+          for (const thread of threads) {
+            const running = yield* sessions.running(thread.id)
+            if (Option.isNone(running)) continue
+            for (const left of running.value.background)
+              if (left.ended === null)
+                yield* sessions.stopBackground(thread.id, left.id).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.andThen(
+                      Effect.logWarning('Could not stop what a task left running', cause),
+                      Effect.sync(() => {
+                        stopped = false
+                      }),
+                    ),
+                  ),
+                )
+          }
+          return stopped
+        })
+
+      /**
+       * Whether it can be settled as Done now: open, finished or its lead at work on it as the person told it, nothing waiting on
+       * the person, and not a change. A quick task, or a review whose review was posted and that its lead answered since.
+       */
+      const doneable = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null; answered: number; open: number }>`
+            SELECT k.project_id, k.state,
+              (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
+              ${sql.unsafe(answeredIn('k'))} AS answered,
+              (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
+              + ${sql.unsafe(issueDraftsWaiting('k'))}
+              + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
+              + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change')
+              -- A change, or made one since, or a review with a draft to post: not one to settle as Done.
+              + (CASE WHEN ${sql.unsafe(quickIn('k'))} OR ${sql.unsafe(answeredIn('k'))} THEN 0 ELSE 1 END) AS open
+            FROM tasks k WHERE k.id = ${taskId}`
+          // Its round under way is its lead's, told by the person: it ends where it settled. A review has no round.
+          const finished = task?.run === 'succeeded' || task?.run === 'running' || task?.answered === 1
+          return task !== undefined && task.state === 'open' && finished && task.open === 0 ? task : undefined
+        })
+
+      const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if ((yield* doneable(input.taskId)) === undefined) return false
+          // What it left running stops first: one that wouldn't stays up, and the task isn't done, for the person to try again.
+          if (!(yield* stopLeftRunning(input.taskId))) return yield* new TaskRefused({ taskId: input.taskId, why: 'left_running' })
+          const at = yield* timestamp
           const settled = yield* sql.withTransaction(
             Effect.gen(function* () {
               // Read again where it is written: a round opened, a call came or a pull request opened meanwhile, and it stays.
-              const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null; open: number }>`
-                SELECT k.project_id, k.state,
-                  (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
-                  (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
-                  + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
-                  + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind IN ('change', 'review'))
-                  -- Made a change since the person's screen read it as plain, or never a quick task: not one to settle on sight.
-                  + (CASE WHEN ${sql.unsafe(quickIn('k'))} THEN 0 ELSE 1 END) AS open
-                FROM tasks k WHERE k.id = ${input.taskId}`
-              if (task === undefined || task.state !== 'open' || task.run !== 'succeeded' || task.open > 0) return false
+              const task = yield* doneable(input.taskId)
+              if (task === undefined) return false
               const state = yield* transition(taskLifecycle, 'open', 'done')
-              const revision = yield* change('tasks', input.taskId, { state, settledAt: at })
+              const revision = yield* change('tasks', input.taskId, { state, settledAt: at, keptAt: null })
               yield* fact({
                 projectId: task.projectId,
                 aggregateType: 'task',
                 aggregateId: input.taskId,
                 revision,
                 type: 'task.done',
-                payload: { seen: true },
-                actorId: instance.personId,
+                payload: { marked: true },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
               })
               return true
             }),
           )
-          if (settled) yield* touchCard(input.taskId)
+          if (!settled) return false
+          yield* touchCard(input.taskId)
+          return true
+        })
+
+      const keep = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
+          const kept = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; change: number }>`
+                SELECT k.project_id, k.state, k.kept_at,
+                  -- A quick task, or a review: a change waits on the person in its own way.
+                  CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
+                    THEN 0 ELSE 1 END AS change
+                FROM tasks k WHERE k.id = ${input.taskId}`
+              if (task === undefined || task.state !== 'open' || task.keptAt !== null || task.change === 1) return false
+              const revision = yield* change('tasks', input.taskId, { keptAt: at })
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: input.taskId,
+                revision,
+                type: 'task.kept',
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+              return true
+            }),
+          )
+          if (kept) yield* touchCard(input.taskId)
+          return kept
+        })
+
+      const bringBack = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const back = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; review: number }>`
+                SELECT k.project_id, k.state, k.kept_at,
+                  EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS review
+                FROM tasks k WHERE k.id = ${taskId}`
+              if (task === undefined) return false
+              // A review posted has no round to open again (Runs.openRound does for any other): it opens here, and what its lead
+              // drafts or says next waits on the person, in Needs you.
+              if (task.state === 'done' && task.review === 1) {
+                const state = yield* transition(taskLifecycle, 'done', 'open')
+                const revision = yield* change('tasks', taskId, { state, settledAt: null, keptAt: null })
+                yield* fact({
+                  projectId: task.projectId,
+                  aggregateType: 'task',
+                  aggregateId: taskId,
+                  revision,
+                  type: 'task.reopened',
+                  actorId: instance.personId,
+                })
+                return true
+              }
+              if (task.keptAt === null) return false
+              yield* sql`UPDATE tasks SET kept_at = NULL WHERE id = ${taskId}`
+              return true
+            }),
+          )
+          if (back) yield* touchCard(taskId)
         })
 
       return Tasks.of({
-        see: (input) => oneAtATime(input.taskId, see(input)),
+        see: (input) => provide(see(input)),
+        markDone: (input) => oneAtATime(input.taskId, markDone(input)),
+        keep: (input) => oneAtATime(input.taskId, keep(input)),
+        bringBack: (taskId) => provide(bringBack(taskId)),
         rename: (input) => provide(rename(input)),
         stop: (input) => oneAtATime(input.taskId, stop(input)),
         resume: (input) => oneAtATime(input.taskId, resume(input)),
+        leaveOut: (input) => oneAtATime(input.taskId, leaveOut(input)),
         abandon: (input) => oneAtATime(input.taskId, abandon(input)),
         reopen: (input) => oneAtATime(input.taskId, reopen(input)),
         inTurn,

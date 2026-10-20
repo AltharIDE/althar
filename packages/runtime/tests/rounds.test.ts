@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
+import { DESCRIBED } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -21,6 +22,7 @@ import { Questions } from '../src/Questions'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import { callTool, fakeConnectors, HOST, hosted, items, notices, repository, runtime, until } from './support'
 
 /*
@@ -191,8 +193,9 @@ describe('a task that goes back to work', () => {
         assert.deepStrictEqual([second?.source, second?.target, second?.draft], ['althar/add-a-retry-2', 'main', true])
         assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry-2^'), git(bare, 'rev-parse', 'main'))
         assert.strictEqual(git(bare, 'rev-list', '--count', 'main..althar/add-a-retry-2'), '1')
-        // Described from the round's work, reviewed once; and the merged branch is as it was merged: nothing forced onto it.
-        assert.include(second?.body, 'Passed after one round of review.')
+        // Described as the lead wrote it for the round's work, with nothing of its review; and the merged branch is as it was merged.
+        assert.isTrue(second?.body.startsWith(`${DESCRIBED}\n\n`))
+        assert.notMatch(second?.body ?? '', /review/i)
         assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), mergedHead)
         assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry-2')
         const [workspace] = yield* sql<{
@@ -289,6 +292,29 @@ describe('a task that goes back to work', () => {
         const [call] = yield* sql<{ payload: string }>`
           SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`
         assert.include(call?.payload, '"why":"no_report"')
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'is ready on the home as on the board when a merged task has commits after its pull request',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const queries = yield* Queries
+        const task = yield* merged(working, bare, github)
+        const homeHas = Effect.map(queries.home(), (home) => home.tasks.filter((one) => one.taskId === task.taskId).map((one) => one.phase))
+        // Merged and settled, it is on neither: the board keeps it below, and the home has no use for it.
+        assert.deepStrictEqual(yield* homeHas, [])
+        // The person commits to its branch after the merge: still done, but ready for a new pull request, on the board and the home.
+        writeFileSync(join(task.path, 'after.txt'), 'after the merge\n')
+        git(task.path, 'add', '-A')
+        git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'After the merge')
+        const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(10))
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'done')
+        assert.strictEqual(ready?.unshipped?.commits, 1)
+        yield* until(homeHas, (phases) => phases[0] === 'ready', Duration.seconds(10))
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,
@@ -746,7 +772,7 @@ describe('a task’s next pull request, in its repositories', () => {
 
 describe('a task’s first pull request in a repository, and a reported round with nothing to go by', () => {
   it.live(
-    'opens a repository’s first pull request after another’s merged, as a follow-up changes it for the first time',
+    'opens a repository’s first pull request after another’s merged, as a follow-up changes it for the first time; then each one’s next, described anew',
     () => {
       const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
       const bares: Record<string, string> = {}
@@ -811,11 +837,21 @@ describe('a task’s first pull request in a repository, and a reported round wi
         const [lead] = yield* sql<{
           id: string
         }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC LIMIT 1`
-        const said = yield* callTool(
-          { role: 'lead', projectId: project.projectId, threadId: task.threadId, sessionId: lead?.id ?? '', taskId: task.taskId },
-          'finish_step',
-          { summary: 'Did web too.', built: 'The retry, in web too.' },
-        )
+        const access = {
+          role: 'lead',
+          projectId: project.projectId,
+          threadId: task.threadId,
+          sessionId: lead?.id ?? '',
+          taskId: task.taskId,
+        } as const
+        // Web's pull request is its first, so the lead is asked for its description; api's merged one has its own already.
+        const asked = yield* callTool(access, 'finish_step', { summary: 'Did web too.', built: 'The retry, in web too.' })
+        assert.match(asked, /^Write the description of the task's pull request before you finish, one for each of web\. /)
+        const said = yield* callTool(access, 'finish_step', {
+          summary: 'Did web too.',
+          built: 'The retry, in web too.',
+          descriptions: [{ repository: 'web', text: 'Web gave up on the first failed call too. It now retries once, as api does.' }],
+        })
         assert.strictEqual(said, 'Althar has your summary. The task is ready for the person.')
         const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
         assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
@@ -829,8 +865,118 @@ describe('a task’s first pull request in a repository, and a reported round wi
         assert.lengthOf(github.changes, 2)
         assert.include(github.changes[1]?.url, '/meridian/web/')
         assert.strictEqual(github.changes[1]?.source, task.branch)
+        assert.isTrue(github.changes[1]?.body.startsWith('Web gave up on the first failed call too.'))
         assert.strictEqual(git(bares.web ?? '', 'log', '-1', '--format=%s', task.branch), 'Web first')
         assert.strictEqual(git(api, 'rev-parse', '--abbrev-ref', 'HEAD'), task.branch)
+
+        // Web's merges too, and the lead changes both again. Web's description came after api's pull request opened, but before
+        // web's own: each next pull request is asked for one of its own, by when its repository's last one opened.
+        squashMerge(bares.web ?? '', task.branch)
+        github.mergeByHand(2)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
+        commitIn(api, 'retry.txt', 'Again for api')
+        commitIn(web, 'retry.txt', 'Again for web')
+        const again = { summary: 'Did both again.', built: 'The retry, again in both.' }
+        assert.match(
+          yield* callTool(access, 'finish_step', again),
+          /^Write the description of the task's pull request before you finish, one for each of api, web\. /,
+        )
+        assert.strictEqual(
+          yield* callTool(access, 'finish_step', {
+            ...again,
+            descriptions: [
+              { repository: 'api', text: 'Api retries twice now.' },
+              { repository: 'web', text: 'Web retries twice now.' },
+            ],
+          }),
+          'Althar has your summary. The task is ready for the person.',
+        )
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped?.commits === 2)
+        yield* runs.publish(task.taskId)
+        assert.deepStrictEqual(
+          github.changes.slice(2).map((change) => change.body.split('\n\n')[0]),
+          ['Api retries twice now.', 'Web retries twice now.'],
+        )
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'abandons, not leaves out, an open task whose one repository merged while another has commits in no pull request',
+    () => {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const bares: Record<string, string> = {}
+      for (const name of ['api', 'web']) {
+        const path = join(folder, name)
+        mkdirSync(path)
+        git(path, 'init', '-q', '-b', 'main')
+        writeFileSync(join(path, 'README.md'), `# ${name}\n`)
+        git(path, 'add', '.')
+        git(path, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Start')
+        git(path, 'remote', 'add', 'origin', `${HOST}/meridian/${name}.git`)
+        bares[name] = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bares[name] })
+        git(path, 'push', '-q', bares[name] ?? '', 'main')
+      }
+      const github = makeFakeService({ pushUrl: (path) => bares[path.at(-1) ?? ''] ?? '' })
+      github.addRepository(['meridian', 'api'])
+      github.addRepository(['meridian', 'web'])
+      const commitIn = (path: string, file: string, message: string) => {
+        appendFileSync(join(path, file), `${message}\n`)
+        git(path, 'add', '-A')
+        git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', message)
+      }
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        yield* connect()
+        const projects = yield* Projects
+        const plans = yield* Plans
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+        const task = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: project.projectId,
+          title: 'Share the retry',
+          description: '[lead:finish]',
+          draft: true,
+          repositories: ['api', 'web'],
+        })
+        const worktrees = yield* sql<{ path: string }>`
+        SELECT w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${task.taskId} ORDER BY b.created_at, b.rowid`
+        const [api = '', web = ''] = worktrees.map((worktree) => worktree.path)
+        // Its plan changes api alone: api's pull request opens, and web has nothing to propose.
+        commitIn(api, 'retry.txt', 'Retry')
+        const planId = yield* plans.propose({
+          projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
+          taskId: task.taskId,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          reason: null,
+          actorId: instance.personId,
+        })
+        yield* plans.start(planId, instance.personId)
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].change !== null, Duration.seconds(20))
+        assert.lengthOf(github.changes, 1)
+
+        // web gets a commit in no pull request, then api's merges, with one after it: api is merged, web isn't, so it stays open.
+        commitIn(web, 'retry.txt', 'Web first')
+        squashMerge(bares.api ?? '', task.branch)
+        github.mergeByHand(1)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(project.projectId), (all) => all[0]?.change?.state === 'merged')
+        commitIn(api, 'retry.txt', 'More for api')
+        yield* until(cards(project.projectId), (all) => all[0]?.unshipped != null)
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
+        assert.isFalse(yield* (yield* Changes).merged(task.taskId))
+
+        // Leaving out wouldn't settle it, so Abandon abandons it, and leaving out leaves nothing out.
+        const actions = (yield* (yield* Queries).thread(task.threadId)).task.actions
+        assert.isTrue(actions.includes('abandon') && !actions.includes('leaveOut'))
+        yield* (yield* Tasks).leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
+        assert.isFalse((yield* notices(task.threadId)).some((notice) => notice.title?.startsWith('Abandoned ') === true))
+        assert.isNotNull((yield* cards(project.projectId))[0]?.unshipped)
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,
@@ -955,6 +1101,203 @@ describe('a round of work and a restart', () => {
           assert.strictEqual(git(workspace?.path ?? '', 'rev-list', '--count', `${workspace?.baseCommit ?? ''}..HEAD`), '2')
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(file)))))
       })
+    },
+    60_000,
+  )
+})
+
+/** What the lead commits in the task's worktree, as a lead did after its plan before rounds existed: no round, no report. */
+const commitIn = (path: string, file: string, message: string) => {
+  appendFileSync(join(path, file), `${message}\n`)
+  git(path, 'add', '-A')
+  git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', message)
+  return git(path, 'rev-parse', 'HEAD')
+}
+
+describe('a merged task with commits after its pull request', () => {
+  it.live(
+    'needs the person, and offers to leave them out: it settles without them, at the time it first settled, and they stay on its branch',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const tasks = yield* Tasks
+        const queries = yield* Queries
+        const task = yield* merged(working, bare, github)
+        const before = yield* taskRow(task.taskId)
+        assert.deepStrictEqual((yield* queries.thread(task.threadId)).task.actions, [])
+
+        // As DEV-58's lead did: a commit after the pull request merged, in no round and no pull request.
+        const slider = commitIn(task.path, 'slider.txt', 'Slider')
+        const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
+        assert.deepStrictEqual(yield* taskRow(task.taskId), before)
+        // In Needs you, it offers something to do about it: before, a merged task offered nothing at all.
+        assert.deepStrictEqual((yield* queries.thread(task.threadId)).task.actions, ['leaveOut'])
+
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        const [settled] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+        assert.isNull(settled?.unshipped ?? null)
+        assert.deepStrictEqual(yield* taskRow(task.taskId), before)
+        assert.deepStrictEqual((yield* queries.thread(task.threadId)).task.actions, [])
+        assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), slider)
+        assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
+        assert.isTrue(
+          (yield* notices(task.threadId)).some(
+            (notice) =>
+              notice.title === 'Abandoned 1 commit after PR #1.' &&
+              notice.description ===
+                "The task stays merged. The commit stays on althar/add-a-retry, in the task's worktree; what's committed after counts again.",
+          ),
+        )
+        // Pressed again, there is nothing to leave out.
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        assert.deepStrictEqual(yield* taskRow(task.taskId), before)
+
+        // What is committed after counts again, alone.
+        commitIn(task.path, 'slider.txt', 'Slider, warmer')
+        const [again] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        assert.deepStrictEqual(again?.unshipped, { commits: 1, add: 1, del: 0 })
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'settles an open one whose pull request merged as done once the person abandons it, leaving them out',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const runs = yield* Runs
+        const tasks = yield* Tasks
+        const sql = yield* SqlClient.SqlClient
+        const task = yield* merged(working, bare, github, '[review:pass] [lead:push]')
+        // A round that committed and was given up leaves a merged task open, its commit offered (ADR-034).
+        yield* say(task.threadId, 'Tidy it up, and push pls.')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'waiting', Duration.seconds(20))
+        const [call] = yield* sql<{ id: string }>`
+          SELECT id FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`
+        yield* runs.answerStuck({
+          envelope: yield* Runtime.envelope('attention.answer_stuck', {}),
+          attentionId: call?.id ?? '',
+          answer: { kind: 'abandon' },
+        })
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
+        const queries = yield* Queries
+        // Its lead's session is still there, between turns, so stopping it is offered as ever; abandoning it leaves the commit out.
+        assert.deepStrictEqual((yield* queries.thread(task.threadId)).task.actions, ['stop', 'leaveOut'])
+
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'done')
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'never ships what the person left out in its next pull request: after a merge its lead brought in, and after a close',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const runs = yield* Runs
+        const tasks = yield* Tasks
+        const task = yield* merged(working, bare, github)
+        // Its lead brings main in, with what merged: the branch has main's tip, as a new pull request starts from.
+        git(task.path, 'fetch', '-q', bare, 'main')
+        git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'merge', '-q', '--no-edit', 'FETCH_HEAD')
+        commitIn(task.path, 'left.txt', 'Left out')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+        commitIn(task.path, 'kept.txt', 'Kept')
+        const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
+
+        // The pull request has what the card said, and nothing the person left out.
+        yield* runs.publish(task.taskId)
+        assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-2')
+        assert.strictEqual(git(bare, 'log', '--format=%s', 'main..althar/add-a-retry-2'), 'Kept')
+        assert.strictEqual(git(bare, 'diff', '--name-only', 'main', 'althar/add-a-retry-2'), 'kept.txt')
+        // The commit left out is still on the task's first branch.
+        assert.strictEqual(git(task.path, 'log', '-1', '--format=%s', 'althar/add-a-retry^'), 'Left out')
+
+        // Closed without merging, it isn't merged: abandoning it abandons it, so nothing is left out.
+        github.close(2)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(task.projectId), (all) => all[0]?.change?.state === 'closed')
+        commitIn(task.path, 'kept.txt', 'Kept again')
+        yield* until(cards(task.projectId), (all) => all[0]?.unshipped?.commits === 1)
+        const actions = (yield* (yield* Queries).thread(task.threadId)).task.actions
+        assert.isTrue(actions.includes('abandon') && !actions.includes('leaveOut'))
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        yield* until(cards(task.projectId), (all) => all[0]?.unshipped?.commits === 1)
+        yield* runs.publish(task.taskId)
+        assert.strictEqual(github.changes[2]?.source, 'althar/add-a-retry-3')
+        // Its next has all of the closed one, and what came after it, and still nothing left out before.
+        assert.strictEqual(git(bare, 'log', '--format=%s', 'main..althar/add-a-retry-3'), 'Kept again\nKept')
+        assert.strictEqual(git(bare, 'diff', '--name-only', 'main', 'althar/add-a-retry-3'), 'kept.txt')
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'finds a commit cherry-picked into the default branch on whichever copy of it has it, a stale one beside it or not',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const task = yield* merged(working, bare, github)
+        const slider = commitIn(task.path, 'slider.txt', 'Slider')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        // Althar fetched main for a next pull request once: that copy stays as it was then, behind what merges after.
+        git(task.path, 'update-ref', 'refs/althar/base/main', git(working, 'rev-parse', 'main'))
+
+        // The slider is cherry-picked into another pull request, which merges; this Mac's main has it, the copy Althar fetched doesn't.
+        const clone = mkdtempSync(join(tmpdir(), 'althar-theirs-'))
+        execFileSync('git', ['clone', '-q', bare, clone])
+        git(clone, 'fetch', '-q', task.path, slider)
+        git(clone, '-c', 'user.name=Host', '-c', 'user.email=host@althar.test', 'cherry-pick', slider)
+        git(clone, 'push', '-q', 'origin', 'main')
+        git(working, 'pull', '-q', '--ff-only', bare, 'main')
+        const [settled] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+        assert.isNull(settled?.unshipped ?? null)
+        assert.deepStrictEqual(yield* (yield* Changes).unshipped(task.taskId), [])
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'doesn’t count commits the default branch has already: brought in by a merge, or cherry-picked into another pull request',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const task = yield* merged(working, bare, github)
+        const slider = commitIn(task.path, 'slider.txt', 'Slider')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+
+        // Someone else's work merges on the host, and the lead brings main in: what main brought isn't the task's to ship.
+        const clone = mkdtempSync(join(tmpdir(), 'althar-theirs-'))
+        execFileSync('git', ['clone', '-q', bare, clone])
+        commitIn(clone, 'theirs.txt', 'Theirs')
+        git(clone, 'push', '-q', 'origin', 'main')
+        git(working, 'pull', '-q', '--ff-only', bare, 'main')
+        git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'merge', '-q', '--no-edit', 'main')
+        const [merging] = yield* until(cards(task.projectId), (all) => all[0]?.unshipped?.commits === 1)
+        assert.deepStrictEqual(merging?.unshipped, { commits: 1, add: 1, del: 0 })
+
+        // Its commit is cherry-picked into another pull request, which merges: the same change under another hash.
+        git(clone, 'fetch', '-q', task.path, 'althar/add-a-retry')
+        git(clone, '-c', 'user.name=Host', '-c', 'user.email=host@althar.test', 'cherry-pick', slider)
+        git(clone, 'push', '-q', 'origin', 'main')
+        git(working, 'pull', '-q', '--ff-only', bare, 'main')
+        // It's in, so nothing keeps the task before the person: settled, with nothing in none.
+        const [settled] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+        assert.isNull(settled?.unshipped ?? null)
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'done')
+        assert.deepStrictEqual(yield* (yield* Changes).unshipped(task.taskId), [])
+      }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,
   )

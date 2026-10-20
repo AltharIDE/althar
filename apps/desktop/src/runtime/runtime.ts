@@ -1,17 +1,20 @@
-import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services, UsageData } from '@althar/runtime'
-import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
+import { backupsIn, connection, databaseIn, Failures, Folders, Nudges, Secrets, services, UsageData } from '@althar/runtime'
+import { Cause, Context, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
+import { appFetchOf } from './appFetch'
+import { handledOf, watchCrashes } from './crashes'
 import { editorsHere, openInEditor } from './editors'
-import { runtimeFacts } from './facts'
+import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
+import { profileInUse } from './profileInUse'
+import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
 
 /*
@@ -25,7 +28,8 @@ import { openInBrowser, openInTerminal } from './terminal'
  * tells the main process what stopped it and where the copy is, serves
  * nothing, and waits to be shut down: a restart would only stop the same way.
  * What usage data says happened goes to the main process too, which sends it
- * only while the person allows it.
+ * only while the person allows it, and so does what it couldn't handle, for
+ * a crash report (crashes.ts).
  */
 
 type Port = Parameters<typeof emitterPort>[0]
@@ -39,6 +43,9 @@ const parent = (
     parentPort: { on(event: 'message', listener: (message: ParentMessage) => void): void; postMessage(message: unknown): void }
   }
 ).parentPort
+
+/* What the runtime couldn't handle goes to the main process, from the start, for a crash report (crashes.ts). */
+const crashes = watchCrashes((message) => parent.postMessage(message))
 
 /** The main process says where the profile and worktrees are; without them there is nothing to open. */
 const required = (name: string) => {
@@ -72,46 +79,16 @@ const clientIds = Object.fromEntries(
 const githubApp =
   process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
 
-/* Secrets the main process is sealing or opening, by request. */
-const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string; readonly keyring?: boolean }) => void>()
-
-/** Asks the main process to seal a secret, or open one; it alone holds the key. */
-const askMain = (type: 'seal' | 'open', value: string) =>
-  Effect.callback<string, SecretsUnavailable>((resume) => {
-    const requestId = randomUUID()
-    sealing.set(requestId, (answer) =>
-      resume(
-        answer.value === undefined
-          ? Effect.fail(
-              new SecretsUnavailable({
-                reason: answer.error ?? 'Althar couldn’t open its keychain.',
-                ...(answer.keyring === true ? { keyring: true } : {}),
-              }),
-            )
-          : Effect.succeed(answer.value),
-      ),
-    )
-    parent.postMessage({ type, requestId, value })
-    return Effect.sync(() => void sealing.delete(requestId))
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: Duration.seconds(15),
-      orElse: () => Effect.fail(new SecretsUnavailable({ reason: 'Althar’s keychain didn’t answer.' })),
-    }),
-  )
+/* Secrets the main process is sealing or opening (sealing.ts). */
+const { ask: askMain, answer: answerSealed } = sealingWith((message) => parent.postMessage(message))
 
 const secrets = Secrets.sealed(join(profile, 'secrets'), {
   seal: (value) => askMain('seal', value),
   open: (sealed) => askMain('open', sealed),
 })
 
-/**
- * Code hosts and trackers are called over the app's own network, Chromium's:
- * it trusts the certificates in the Mac's keychain, as a company's own
- * GitLab, Bitbucket or Jira often needs, and the Mac's proxy settings.
- * Node's `fetch` knows neither.
- */
-const appFetch: Fetch = (input, init) => net.fetch(input, init)
+/** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
+const appFetch: Fetch = appFetchOf(net)
 
 /** OpenRouter's public list of models, with each one's scores and prices (ADR-015). */
 const MODEL_LIST = 'https://openrouter.ai/api/v1/models'
@@ -235,6 +212,7 @@ const program = Effect.gen(function* () {
       ForeignKeyViolations: (failure) =>
         storeStopped('moving', failure.backup, `Rows in ${failure.tables.join(', ')} point at rows that aren’t there.`),
       BackupFailed: (failure) => storeStopped('copying', null, failure.reason),
+      DatabaseInUse: () => profileInUse((message) => parent.postMessage(message)),
     }),
   )
   isReady(context)
@@ -245,6 +223,12 @@ const program = Effect.gen(function* () {
   )
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
+  )
+  // What the runtime kept to what it belonged to and carried on past goes too, as a handled crash report (crashes.ts, ADR-047).
+  yield* Effect.forkScoped(
+    Stream.runForEach(Context.get(context, Failures).events, (failure) =>
+      Effect.sync(() => parent.postMessage({ type: 'crash', crash: handledOf(failure) })),
+    ),
   )
   const ports = yield* Queue.unbounded<Port>()
   accept = (port) => void Queue.offerUnsafe(ports, port)
@@ -261,6 +245,8 @@ const fiber = Effect.runFork(Effect.scoped(program).pipe(Effect.provide(Logger.l
 
 fiber.addObserver((exit) => {
   if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
+    // What it stopped on is a defect of the runtime's: the main process hears of it before it exits.
+    crashes.defect(Cause.squash(exit.cause))
     process.stderr.write(`${Cause.pretty(exit.cause)}\n`)
     process.exit(1)
   }
@@ -282,6 +268,17 @@ const tellFacts = (requestId: string, threadId: string | null) => {
     )
 }
 
+/** The projects' and repositories' names, for the main process to hide in a crash report; at once, with none, while the store isn't open. */
+const tellNames = (requestId: string) => {
+  if (!readyNow) return parent.postMessage({ type: 'names', requestId, error: 'The store isn’t open.' })
+  void ready
+    .then((context) => Effect.runPromise(runtimeNames.pipe(Effect.provideContext(context))))
+    .then(
+      (value) => parent.postMessage({ type: 'names', requestId, value }),
+      (error: unknown) => parent.postMessage({ type: 'names', requestId, error: error instanceof Error ? error.message : String(error) }),
+    )
+}
+
 /** A folder the person chose, from the main process: its grant goes back, for the window to open it by. */
 const allowFolder = (requestId: string, path: string) =>
   void ready.then((context) =>
@@ -297,19 +294,17 @@ parent.on('message', (message) => {
     readonly path?: string
     readonly value?: string
     readonly error?: string
+    readonly keyring?: boolean
     readonly threadId?: string
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
-    sealing.get(data.requestId)?.({
-      ...(data.value === undefined ? {} : { value: data.value }),
-      ...(data.error === undefined ? {} : { error: data.error }),
-    })
-    sealing.delete(data.requestId)
+    answerSealed(data.requestId, data)
   }
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
+  if (data?.type === 'names' && data.requestId !== undefined) tellNames(data.requestId)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
   if (data?.type === 'shutdown') {
     Effect.runFork(Effect.logInfo('Runtime stopping').pipe(Effect.provide(Logger.layer([stdoutLogger]))))

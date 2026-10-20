@@ -3,12 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
-import { TaskStatus } from '@althar/ui'
+import { TaskStatus, TrackStep } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { lookedOf, noOutputsOf, readsOf } from '../src/renderer/features/task/NoOutputsView'
 import { conflictsOf } from '../src/renderer/features/task/Outputs'
-import { elapsedOf, openingFace, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
+import { elapsedOf, openingFace, statusOf, stepsOf, TaskView, tookOf } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
 import { agents, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
@@ -18,8 +18,8 @@ import { reads } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { servicesFor, withServices } from './render'
 
-function Task({ onBack = vi.fn() }: { onBack?: () => void }) {
-  return <TaskView model={useTask('th1')} onBack={onBack} />
+function Task({ onBack = vi.fn(), onRules }: { onBack?: () => void; onRules?: () => void }) {
+  return <TaskView model={useTask('th1')} onBack={onBack} {...(onRules === undefined ? {} : { onRules })} />
 }
 
 /** A PNG's signature and header, 1 by 1: enough for the window to read it as one. */
@@ -46,6 +46,14 @@ const running = (overrides: Partial<ThreadSnapshot> = {}) => {
   const base = thread(overrides)
   return { ...base, session: base.session === null ? null : { ...base.session, turnRunning: true } }
 }
+
+/** What an element's description says, from what it points at. */
+const describedBy = (element: Element) =>
+  (element.getAttribute('aria-describedby') ?? '')
+    .split(' ')
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .filter((said) => said !== '')
+    .join(' ')
 
 /** A task standing as given, with its menu open: the client, the view, and each item the menu offers, by its name. */
 const taskMenu = async (task: Partial<ThreadSnapshot['task']>, session?: ThreadSnapshot['session']) => {
@@ -83,6 +91,79 @@ describe('a task', () => {
     now = thread({ task: { ...thread().task, phase: 'ready' } })
     act(() => emit(changed('task', snapshot().task.id)))
     await waitFor(() => expect(client.seeTask).toHaveBeenCalledTimes(2))
+  })
+
+  it('waits, finished and not a change, for the person: Done and Keep for later beside where it stands, and a suggestion Tab takes', async () => {
+    const steps = [{ key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false }]
+    let now = thread({ task: { ...thread().task, kind: 'plain', phase: 'ready', steps } })
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => now) })
+    withServices(<Task />, client)
+    const header = await screen.findByRole('banner', { name: thread().task.title })
+    expect(within(header).getByText('Finished')).toBeTruthy()
+    // Its steps all done, no bar of them beside Done.
+    expect(within(header).queryByRole('list', { name: 'Steps' })).toBeNull()
+    // Opening it moved nothing: only seen.
+    await waitFor(() => expect(client.seeTask).toHaveBeenCalled())
+    expect(client.markTaskDone).not.toHaveBeenCalled()
+    await userEvent.click(within(header).getByRole('button', { name: 'Keep for later' }))
+    expect(client.keepTaskForLater).toHaveBeenCalledWith(snapshot().task.id)
+    await userEvent.click(within(header).getByRole('button', { name: 'Done' }))
+    expect(client.markTaskDone).toHaveBeenCalledWith(snapshot().task.id)
+    // The composer suggests what it is most likely told: Tab takes it, and nothing goes until Enter.
+    const field = screen.getByRole('textbox', { name: /./ })
+    expect(field.getAttribute('placeholder')).toBe('Mark this as done')
+    await userEvent.click(field)
+    await userEvent.keyboard('{Tab}')
+    expect((field as HTMLTextAreaElement).value).toBe('Mark this as done')
+    expect(client.send).not.toHaveBeenCalled()
+    // Kept for later, it says so, with Done alone beside it.
+    now = thread({ task: { ...thread().task, kind: 'plain', phase: 'kept' } })
+    act(() => emit(changed('task', snapshot().task.id)))
+    expect(await within(header).findByText('Kept for later')).toBeTruthy()
+    expect(within(header).queryByRole('button', { name: 'Keep for later' })).toBeNull()
+    expect(within(header).getByRole('button', { name: 'Done' })).toBeTruthy()
+  })
+
+  it('offers a review posted and answered since Done and Keep for later, as Finished, with the suggestion', async () => {
+    const reviewing = {
+      product: 'github' as const,
+      repository: 'meridian/api',
+      number: 1200,
+      url: 'https://github.com/meridian/api/pull/1200',
+      title: 'Retry webhooks',
+      author: 'ninemate',
+      outside: false,
+      additions: 1,
+      deletions: 0,
+      findings: 0,
+      blocking: 0,
+      verdict: 'comment' as const,
+      posted: { url: 'https://github.com/meridian/api/pull/1200#pullrequestreview-1', at: '2026-10-14T09:00:00.000Z' },
+      waiting: false,
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'review', phase: 'ready', review: reviewing } })),
+    })
+    withServices(<Task />, client)
+    const header = await screen.findByRole('banner', { name: thread().task.title })
+    expect(within(header).getByText('Finished')).toBeTruthy()
+    await userEvent.click(within(header).getByRole('button', { name: 'Done' }))
+    expect(client.markTaskDone).toHaveBeenCalledWith(snapshot().task.id)
+    expect(within(header).getByRole('button', { name: 'Keep for later' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: /./ }).getAttribute('placeholder')).toBe('Mark this as done')
+  })
+
+  it('offers a drafted review Keep for later alone, and a change neither', async () => {
+    const review = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'review', phase: 'ready' } })) })
+    const first = withServices(<Task />, review.client)
+    const header = await screen.findByRole('banner', { name: thread().task.title })
+    expect(within(header).getByRole('button', { name: 'Keep for later' })).toBeTruthy()
+    expect(within(header).queryByRole('button', { name: 'Done' })).toBeNull()
+    first.unmount()
+    const change = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'change', phase: 'ready' } })) })
+    withServices(<Task />, change.client)
+    const again = await screen.findByRole('banner', { name: thread().task.title })
+    expect(within(again).queryByRole('button', { name: 'Keep for later' })).toBeNull()
   })
 
   it('opens whether or not seeing it goes through', async () => {
@@ -143,8 +224,8 @@ describe('a task', () => {
     await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
     // The lead's model, by the name its agent gives it.
     expect((await screen.findAllByText('Claude Opus')).length).toBeGreaterThan(0)
-    // Its branch, and who leads it, are said with where it stands, and shown on hover.
-    expect(screen.getByRole('banner', { name: 'Add a retry' }).textContent).toMatch(/althar\/add-a-retry/)
+    // Where it stands says only that: who leads it is the composer's to say, and its branch nothing in the bar acts on.
+    expect(screen.getByRole('banner', { name: 'Add a retry' }).textContent).not.toMatch(/althar\/add-a-retry/)
     // Nothing made yet, the Outputs face is there all the same, and says so.
     await userEvent.click(screen.getByRole('radio', { name: /Outputs/ }))
     expect(screen.getByRole('heading', { name: 'Nothing changed yet' })).toBeTruthy()
@@ -293,6 +374,40 @@ describe('a task', () => {
     expect(reviewedUnfurl(team)).toMatchObject({ kind: 'change', key: 'PR #7', state: 'open', repository: 'meridian/api' })
   })
 
+  it('shows the issues its lead drafted as cards in the thread, files them one by one or all at once, and waits on the person', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.draft({ draftId: 'idr_1', title: 'Refunds skip the limiter' }),
+            items.draft({ draftId: 'idr_2', title: 'Checkout logs no request ids' }),
+            items.draft({
+              draftId: 'idr_3',
+              title: 'Old',
+              state: 'filed',
+              issue: { key: 'MER-3', url: 'https://linear.app/m/issue/MER-3' },
+            }),
+          ],
+          task: { ...base.task, phase: 'waiting' },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const first = (await screen.findByRole('heading', { name: 'Refunds skip the limiter' })).closest('article')
+    await userEvent.click(within(first as HTMLElement).getByRole('button', { name: 'File issue' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_1')
+    await userEvent.click(within(first as HTMLElement).getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueDraft).toHaveBeenCalledWith('idr_1')
+    // Two wait: one press files both, in order; the one filed already isn't counted.
+    await userEvent.click(screen.getByRole('button', { name: 'File all 2' }))
+    await waitFor(() => expect(client.fileIssueDraft).toHaveBeenLastCalledWith('idr_2'))
+    expect(client.fileIssueDraft).toHaveBeenCalledTimes(3)
+    expect(screen.getByRole('link', { name: /MER-3/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-3')
+    // The header says what it waits for, though no call does.
+    expect(statusOf(thread({ task: { ...base.task, phase: 'waiting' } }))).toEqual({ status: TaskStatus.Yours, state: 'Issues to file' })
+  })
+
   it('posts a review draft whose verdict stands chosen, and folds a posted one to its link', async () => {
     const base = snapshot()
     const { client } = fakeClient({
@@ -366,7 +481,13 @@ describe('a task', () => {
         .getAllByRole('listitem')
         .map((step) => step.textContent),
     ).toEqual(['Implement, done', 'Review, now'])
-    expect(screen.getByText(/1h 4m/)).toBeTruthy()
+    // While its plan runs, where it stands says who does each step, and how long it has run in all.
+    const standing = screen.getByText('Reviewing').parentElement
+    if (standing === null) throw new Error('Where it stands has no element of its own')
+    act(() => standing.focus())
+    const card = await screen.findByRole('tooltip')
+    expect(card.textContent).toMatch(/Implement.*Claude Opus/)
+    expect(card.textContent).toMatch(/1h 4m in all/)
   })
 
   it('pushes its branch with the person’s own git, then offers its host’s pull request page, and what connecting would add', async () => {
@@ -406,7 +527,7 @@ describe('a task', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => at(stands)) })
     const view = withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(outputs.getByText('Not merged yet')).toBeTruthy()
+    expect(outputs.getByRole('button', { name: 'Merge into main' })).toBeTruthy()
     expect(outputs.getByText('Not on origin yet')).toBeTruthy()
     // Nothing to connect for, before anything is pushed.
     expect(screen.queryByText(/Connected to GitHub, Althar would/)).toBeNull()
@@ -437,6 +558,8 @@ describe('a task', () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => ({
         ...base,
+        // Not connected: a push is the person's own git; connected, opening its pull request pushes it.
+        host: { product: 'github' as const, name: 'GitHub', webUrl: 'https://github.com', connected: false },
         task: {
           ...base.task,
           phase: 'ready' as const,
@@ -578,7 +701,7 @@ describe('a task', () => {
     withServices(<Task />, client)
     const outputs = within(await screen.findByRole('article', { name: 'Add a retry' }))
     expect(outputs.getByText('Into main on this Mac. origin doesn’t have it yet.')).toBeTruthy()
-    expect(outputs.getByText('Repository')).toBeTruthy()
+    expect(outputs.getByText('Merged')).toBeTruthy()
     await userEvent.click(outputs.getByRole('button', { name: 'Push main to origin' }))
     await waitFor(() => expect(client.pushHere).toHaveBeenCalledWith('t1'))
     expect(outputs.queryByRole('button', { name: /^Merge into/ })).toBeNull()
@@ -660,7 +783,6 @@ describe('a task', () => {
     })
     const view = withServices(<Task />, client)
     expect(await screen.findByText('Into main and develop on this Mac. origin and upstream don’t have it yet.')).toBeTruthy()
-    expect(screen.getByText('Repositories')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Push main to origin' }))
     await waitFor(() => expect(client.pushHere).toHaveBeenCalledWith('t1'))
     view.unmount()
@@ -724,7 +846,7 @@ describe('a task', () => {
     expect(screen.queryByRole('article', { name: 'Add a retry' })).toBeNull()
   })
 
-  it('accepts a ready pull request at the head it showed, or sends it back as a note to its lead', async () => {
+  it('accepts a ready pull request at the head it showed; what should change is said to its lead in the conversation', async () => {
     const base = thread()
     const { client } = fakeClient({
       getThread: vi.fn(async () => ({
@@ -735,10 +857,7 @@ describe('a task', () => {
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12'))
-    await userEvent.click(screen.getByRole('button', { name: 'Ask for changes' }))
-    await userEvent.type(screen.getByRole('textbox', { name: /What should change/ }), 'Name the retry')
-    await userEvent.click(screen.getByRole('button', { name: 'Send to the lead' }))
-    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Name the retry' })))
+    expect(screen.queryByRole('button', { name: 'Ask for changes' })).toBeNull()
   })
 
   it('counts what is left to push as soon as a push ends, its button busy until the card read since is shown', async () => {
@@ -758,8 +877,7 @@ describe('a task', () => {
       }),
     })
     withServices(<Task />, client)
-    expect(await screen.findByText('10 commits aren’t on the pull request yet.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Push 10 commits' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 10 commits' }))
     await waitFor(() => expect(client.push).toHaveBeenCalledWith('t1', 'def456', url))
     const busy = () => screen.getByRole('button', { name: 'Push 10 commits' }).getAttribute('aria-busy')
     // The push's own read of the card, then another as the runtime's word of the push arrives, before the first answers.
@@ -773,7 +891,6 @@ describe('a task', () => {
     act(() => rereads[1]?.(ready(0)))
     // Read again, nothing is left: no second press.
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Push \d+ commits?$/ })).toBeNull())
-    expect(screen.queryByText('10 commits aren’t on the pull request yet.')).toBeNull()
     expect(client.push).toHaveBeenCalledTimes(1)
   })
 
@@ -1080,44 +1197,60 @@ describe('a task', () => {
 
   it('offers stopping and abandoning in its menu while it works, as the runtime says', async () => {
     const { client, offered } = await taskMenu({})
-    expect(offered).toEqual(['Open in Zed', 'Stop the task', 'Abandon'])
+    expect(offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Stop the task', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Stop the task/ }))
     await waitFor(() => expect(client.stopTask).toHaveBeenCalledWith('t1'))
   })
 
   it('offers resuming a task stopped in the middle of its step', async () => {
     const { client, offered } = await taskMenu({ phase: 'stopped', actions: ['resume', 'abandon'] }, null)
-    expect(offered).toEqual(['Open in Zed', 'Resume', 'Abandon'])
+    expect(offered).toEqual(['Resume', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
     expect(screen.getByText('Stopped')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /Resume/ }))
     await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
   })
 
-  it('offers how its conflicts go, as its project says or otherwise, and nothing beside the menu while it goes by the project', async () => {
+  it('offers how its conflicts go, as its project says or otherwise, and nothing on the menu’s button while it goes by the project', async () => {
     const { client } = await taskMenu({ resolveConflicts: { task: null, project: true } })
-    expect(screen.getByRole('menuitemradio', { name: /Use the project setting/ }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText('It’s on for this project.')).toBeTruthy()
-    expect(screen.queryByText('Auto-resolve conflicts: on')).toBeNull()
-    await userEvent.click(screen.getByRole('menuitemradio', { name: /Off for this task/ }))
+    const choices = within(screen.getByRole('group', { name: 'Resolve conflicts automatically' }))
+    const project = choices.getByRole('menuitemradio', { name: 'Project (on)' })
+    expect(project.getAttribute('aria-checked')).toBe('true')
+    expect(describedBy(project)).toBe('As the project setting, which is on.')
+    expect(screen.getByRole('button', { name: 'More for this task' }).hasAttribute('aria-describedby')).toBe(false)
+    await userEvent.click(choices.getByRole('menuitemradio', { name: 'Off' }))
     await waitFor(() => expect(client.setTaskResolveConflicts).toHaveBeenCalledWith({ taskId: 't1', resolveConflicts: false }))
   })
 
-  it('says beside its menu where its lead resolves conflicts otherwise than its project, and not where it is the same', async () => {
+  it('says on its menu’s button where its lead resolves conflicts otherwise than its project, and not where it is the same', async () => {
     const shownFor = async (own: boolean, project: boolean) => {
       const { client } = fakeClient({
         getThread: vi.fn(async () => thread({ task: { ...thread().task, resolveConflicts: { task: own, project } } })),
       })
       const view = withServices(<Task />, client)
-      await screen.findByRole('button', { name: 'More for this task' })
-      const said = [screen.queryByText('Auto-resolve conflicts: on'), screen.queryByText('Auto-resolve conflicts: off')].map(
-        (one) => one !== null,
-      )
+      const button = await screen.findByRole('button', { name: 'More for this task' })
+      const said = button.hasAttribute('aria-describedby')
+        ? document.getElementById(button.getAttribute('aria-describedby') ?? '')?.textContent
+        : null
       view.unmount()
       return said
     }
-    expect(await shownFor(true, false)).toEqual([true, false])
-    expect(await shownFor(false, true)).toEqual([false, true])
-    expect(await shownFor(true, true)).toEqual([false, false])
+    expect(await shownFor(true, false)).toBe('Resolve conflicts automatically: on')
+    expect(await shownFor(false, true)).toBe('Resolve conflicts automatically: off')
+    expect(await shownFor(true, true)).toBeNull()
+  })
+
+  it('holds allowing everything on where its project allows everything, and opens the project’s rules from it', async () => {
+    const onRules = vi.fn()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: false, project: true } } })),
+    })
+    withServices(<Task onRules={onRules} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    const held = await screen.findByRole('menuitem', { name: 'Allow everything on this task' })
+    expect(describedBy(held)).toMatch(/On for every task in this project/)
+    await userEvent.click(held)
+    expect(onRules).toHaveBeenCalledOnce()
+    expect(client.setTaskAllowEverything).not.toHaveBeenCalled()
   })
 
   it('allows everything on it from its menu', async () => {
@@ -1148,7 +1281,7 @@ describe('a task', () => {
 
   it('offers its folder for a plain task with no branch, and none where it has no worktree', async () => {
     const plain = await taskMenu({ phase: 'ready', branch: null, actions: ['abandon'] }, null)
-    expect(plain.offered).toEqual(['Open in Zed', 'Abandon'])
+    expect(plain.offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Abandon'])
     plain.view.unmount()
     expect((await taskMenu({ phase: 'held', branch: null, worktree: null, actions: ['abandon'] }, null)).offered).toEqual(['Abandon'])
   })
@@ -1161,7 +1294,7 @@ describe('a task', () => {
 
   it('offers starting its plan now while it waits to start', async () => {
     const { client, offered } = await taskMenu({ phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' }, null)
-    expect(offered).toEqual(['Open in Zed', 'Start now', 'Abandon'])
+    expect(offered).toEqual(['Start now', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Start now/ }))
     await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1'))
   })
@@ -1172,7 +1305,7 @@ describe('a task', () => {
       { phase: 'ready', actions: ['abandon'], changes: [...drafts, change({ state: 'merged' })] },
       null,
     )
-    expect(offered).toEqual(['Open in Zed', 'Mark ready for review', 'Abandon'])
+    expect(offered).toEqual(['Mark ready for review', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Mark ready for review/ }))
     await waitFor(() => expect(client.markReady).toHaveBeenCalledTimes(2))
     expect(vi.mocked(client.markReady).mock.calls).toEqual(drafts.map((one) => ['t1', one.url]))
@@ -1181,13 +1314,37 @@ describe('a task', () => {
   it('says an abandoned task was abandoned, and offers reopening it, and only its folder once merged', async () => {
     const drafts = [change({ draft: true })]
     const abandoned = await taskMenu({ phase: 'settled', state: 'abandoned', actions: ['reopen'], changes: drafts }, null)
-    expect(abandoned.offered).toEqual(['Open in Zed', 'Reopen'])
+    expect(abandoned.offered).toEqual(['Reopen', 'Open in Zed'])
     expect(screen.getByText('Abandoned')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /Reopen/ }))
     await waitFor(() => expect(abandoned.client.reopenTask).toHaveBeenCalledWith('t1'))
     abandoned.view.unmount()
     // Merged, it is done for good.
     expect((await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)).offered).toEqual(['Open in Zed'])
+  })
+
+  it('offers abandoning a merged task with commits after its pull request, which keep it in Needs you: it stays merged', async () => {
+    const after = await taskMenu(
+      {
+        phase: 'ready',
+        state: 'done',
+        actions: ['leaveOut'],
+        changes: [change({ state: 'merged' })],
+        unshipped: { commits: 1, add: 300, del: 304 },
+      },
+      null,
+    )
+    expect(after.offered).toEqual(['Open in Zed', 'Abandon'])
+    expect(screen.getByRole('menuitem', { name: /Abandon/ }).textContent).toContain('Its pull request stays merged.')
+    await userEvent.click(screen.getByRole('menuitem', { name: /Abandon/ }))
+    // Asked first, it says what stays merged and what is left out, and offers no reopening.
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('stays merged.')
+    expect(dialog.textContent).toContain('The commit after it goes in no pull request.')
+    expect(dialog.textContent).not.toContain('reopen')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(after.client.leaveOutCommits).toHaveBeenCalledWith('t1'))
+    expect(after.client.abandonTask).not.toHaveBeenCalled()
   })
 
   it('renames a task in its header: pressing the title edits it where it is, Enter keeps it and Escape puts it back', async () => {
@@ -1224,6 +1381,31 @@ describe('a task', () => {
     await waitFor(() => expect(document.activeElement).toBe(again))
   })
 
+  it('attaches a pull request from its menu, asking before it starts the branch from that one’s head', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.attachPullRequest)
+      .mockResolvedValueOnce({ kind: 'start', name: 'PR #185', source: 'permission-card-enter', started: false, kept: 0, own: 2 })
+      .mockRejectedValueOnce(new ApiError({ reason: 'AttachRefused', message: 'Its lead is at work in its worktree.' }))
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Attach a pull request…/ }))
+    const asked = await screen.findByRole('dialog', { name: 'Attach a pull request' })
+    await userEvent.type(
+      within(asked).getByRole('textbox', { name: 'Its link or number' }),
+      'https://github.com/AltharIDE/althar/pull/185{Enter}',
+    )
+    await waitFor(() => expect(client.attachPullRequest).toHaveBeenCalledWith('t1', 'https://github.com/AltharIDE/althar/pull/185', false))
+    // Its branch isn't based on that one's head: it says what starting there keeps, and starts only when pressed.
+    const start = await screen.findByRole('dialog', { name: 'Start from PR #185’s head?' })
+    expect(start.textContent).toContain('Its 2 own commits go on top, one by one.')
+    await userEvent.click(within(start).getByRole('button', { name: 'Start from its head' }))
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toBeTruthy()
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Start from its head' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.attachPullRequest).toHaveBeenCalledTimes(3)
+    expect(client.attachPullRequest).toHaveBeenLastCalledWith('t1', 'https://github.com/AltharIDE/althar/pull/185', true)
+  })
+
   it('asks before abandoning, saying what stays, and abandons on the person’s say-so', async () => {
     const pr = change({ state: 'open' })
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, changes: [pr] } })) })
@@ -1240,7 +1422,12 @@ describe('a task', () => {
     expect(asked.textContent).toContain('The agents on it stop.')
     expect(asked.textContent).toContain('Its worktree stays in /w/meridian, as it is.')
     expect(asked.textContent).toContain('Its branch althar/add-a-retry stays. Nothing is pushed or deleted.')
-    expect(asked.textContent).toContain(`PR ${pr.prefix}${pr.number} stays open on GitHub.`)
+    // Its pull request is offered to close on GitHub, on; its branch there to delete, off.
+    expect(within(asked).getByRole('checkbox', { name: `Close pull request ${pr.prefix}${pr.number} on GitHub` })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    )
+    expect(within(asked).getByRole('checkbox', { name: 'Delete its branch on GitHub' })).toHaveProperty('ariaChecked', 'false')
     // Cancelled, nothing happens.
     await userEvent.click(within(asked).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -1252,6 +1439,60 @@ describe('a task', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(client.abandonTask).toHaveBeenCalledTimes(2)
     expect(client.abandonTask).toHaveBeenLastCalledWith('t1')
+    // Abandoned, its pull request is closed on its host, as the person left it on: only then.
+    expect(client.closePullRequest).toHaveBeenCalledTimes(1)
+    expect(client.closePullRequest).toHaveBeenCalledWith({ taskId: 't1', url: pr.url, deleteBranch: false })
+  })
+
+  /** A task with its pull request open, its abandon dialog open: the client, the pull request and the dialog. */
+  const abandoning = async () => {
+    const pr = change({ state: 'open' })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, changes: [pr] } })) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Abandon/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Abandon this task?' })
+    return { client, pr, dialog, close: `Close pull request ${pr.prefix}${pr.number} on GitHub` }
+  }
+
+  it('abandons with its pull request left open on its host where the person turns closing off', async () => {
+    const { client, dialog, close } = await abandoning()
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: close }))
+    // Left open, its branch there can't be deleted alone.
+    expect(within(dialog).queryByRole('checkbox', { name: 'Delete its branch on GitHub' })).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.abandonTask).toHaveBeenCalledWith('t1')
+    expect(client.closePullRequest).not.toHaveBeenCalled()
+  })
+
+  it('deletes its pull request’s branch on its host too where the person says', async () => {
+    const { client, pr, dialog } = await abandoning()
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' }))
+    expect(dialog.textContent).toContain('Its branch althar/add-a-retry stays on this Mac.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenCalledWith({ taskId: 't1', url: pr.url, deleteBranch: true })
+  })
+
+  it('says a pull request its host wouldn’t close is still open, and offers to close it again', async () => {
+    const { client, pr, dialog } = await abandoning()
+    vi.mocked(client.closePullRequest).mockRejectedValueOnce(
+      new ApiError({
+        reason: 'ConnectorFailed',
+        message: 'GitHub won’t let this account do that: Resource not accessible by integration.',
+      }),
+    )
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    // Abandoned all the same: the dialog says so, and why the pull request is still open.
+    const after = await screen.findByRole('dialog', { name: 'Task abandoned' })
+    expect(within(after).getByRole('alert').textContent).toBe(
+      `PR ${pr.prefix}${pr.number} is still open. GitHub won’t let this account do that: Resource not accessible by integration.`,
+    )
+    expect(client.abandonTask).toHaveBeenCalledTimes(1)
+    await userEvent.click(within(after).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenCalledTimes(2)
   })
 
   it('says when abandoning that a planned task’s plan doesn’t start, and nothing stops for one at rest', async () => {
@@ -1530,6 +1771,79 @@ describe('a task', () => {
     await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'reject', reason: 'Open a PR instead' }))
   })
 
+  it('opens with focus on a permission waiting, so Enter answers it and then the next', async () => {
+    const call = (id: string) => ({
+      id,
+      kind: 'permission' as const,
+      stuck: null,
+      title: `Run ${id}`,
+      reason: 'It asks.',
+      command: id,
+      createdAt: '2026-09-29T12:00:00.000Z',
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [call('a1'), call('a2')] })) })
+    withServices(<Task />, client)
+    await screen.findByText(/1 of 2/)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow' }))
+    await screen.findByText(/2 of 2/)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'allow' }))
+  })
+
+  it('doesn’t take focus from the composer for a permission that comes while it is typed in', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run git push',
+      reason: 'It asks.',
+      command: 'git push',
+      createdAt: '2026-09-29T12:00:00.000Z',
+    }
+    const getThread = vi.fn(async () => thread())
+    const { client, emit } = fakeClient({ getThread })
+    withServices(<Task />, client)
+    const box = await screen.findByPlaceholderText(/^Tell .+ something$/)
+    box.focus()
+    getThread.mockImplementation(async () => thread({ attention: [call] }))
+    act(() => emit(changed('attention_request', 'a1', 'th1')))
+    await screen.findByText('Needs your permission')
+    await act(async () => {})
+    expect(box).toBe(document.activeElement)
+  })
+
+  it('doesn’t take focus back from the composer when a card remounts after a failed answer', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run git push',
+      reason: 'It asks.',
+      command: 'git push',
+      createdAt: '2026-09-29T12:00:00.000Z',
+    }
+    let fail: (error: Error) => void = () => {}
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ attention: [call] })),
+      answer: vi.fn(() => new Promise<never>((_, reject) => (fail = reject))),
+    })
+    withServices(<Task />, client)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledTimes(1))
+    // The person moves on to the composer while the answer is out; then it fails and the card starts afresh.
+    const box = await screen.findByPlaceholderText(/^Tell .+ something$/)
+    box.focus()
+    await act(async () => fail(new Error('offline')))
+    await act(async () => {})
+    await screen.findByText('Needs your permission')
+    expect(box).toBe(document.activeElement)
+    expect(client.answer).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps an answer as a rule by the scope the runtime offers, and offers no always it wouldn’t keep', async () => {
     const call = {
       id: 'a1',
@@ -1756,7 +2070,7 @@ describe('a task', () => {
       'Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, start Codex again.',
       "Codex couldn't start. Check that it's installed and signed in, or hand the step to another agent.",
       "The work has been reviewed three times, and the lead's last changes haven't been reviewed yet. One finding is still open. Review it again, or accept it as it is.",
-      "Codex reached its usage limit and didn't say when it resets.",
+      "Codex ran out of usage while working on the task and didn't say when it's back. Pick another model to carry on, or try Codex again.",
     ])
     // A review has no lead to tell: it advises the buttons it has.
     const inReview = (why: StuckStep['why']) =>
@@ -1780,7 +2094,9 @@ describe('a task', () => {
         },
         'Codex',
       ),
-    ).toBe(`Codex reached its usage limit, until ${clock(back)}.`)
+    ).toBe(
+      `Codex ran out of usage while working on the task. It's back at ${clock(back)}. Pick another model to carry on now, or wait until then.`,
+    )
     expect([at('stalled'), at('looping', 'npm test'), at('over_budget', '6 hours'), at('refused')]).toEqual([
       'Codex has gone quiet: there has been no sign of work on this step for a while. Start it again, or hand the step to another agent.',
       'Codex kept running `npm test` and got the same result each time. Tell it to try something else, or hand the step to another agent.',
@@ -1852,7 +2168,7 @@ describe('a task', () => {
     }
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [out] })) })
     withServices(<Task />, client)
-    await screen.findByText("Codex reached its usage limit and didn't say when it resets.")
+    await screen.findByText(/^Codex ran out of usage while working on the task and didn't say when it's back\./)
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
     // Handing it on is offered only to the agents that aren't out.
     await userEvent.click(screen.getByRole('button', { name: 'Hand to another agent' }))
@@ -1917,7 +2233,9 @@ describe('a task', () => {
       getThread: vi.fn(async () => thread({ attention: [limited(back)] })),
     })
     const view = withServices(<Task />, client)
-    expect(await screen.findByText(`Claude Code (main) reached its usage limit, until ${clock(back)}.`)).toBeTruthy()
+    expect(
+      await screen.findByText(new RegExp(`^Claude Code \\(main\\) ran out of usage .+\\. It's back at ${clock(back)}\\.`)),
+    ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
     // The first free one is offered; the one out since is there but can't be picked, and one signed out isn't there at all.
     await userEvent.click(await screen.findByRole('button', { name: 'Choose another model' }))
@@ -1946,12 +2264,75 @@ describe('a task', () => {
     waiting.unmount()
     vi.mocked(client.getThread).mockImplementation(async () => thread({ attention: [limited(null)] }))
     withServices(<Task />, client)
-    expect(await screen.findByText("Claude Code (main) reached its usage limit and didn't say when it resets.")).toBeTruthy()
+    expect(await screen.findByText(/^Claude Code \(main\) ran out of usage .+ and didn't say when it's back\./)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Wait until/ })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Try Claude Code (main) again' }))
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenLastCalledWith({ attentionId: 'st10', answer: { kind: 'retry', agentId: 'claude-code' } }),
     )
+  })
+
+  it('offers the models that could carry on a step held for a usage limit, with why it waits, without asking', async () => {
+    const back = '2099-01-01T14:00:00.000Z'
+    const held = (step: 'implement' | 'review', why: 'nothing_free' | 'waits') =>
+      thread({
+        task: {
+          ...thread().task,
+          step,
+          waits: {
+            agentId: 'claude-code',
+            until: back,
+            accountId: 'acc_claude',
+            why,
+            choices: [{ agentId: 'codex', accountId: 'acc_codex', model: 'gpt-5.2' }],
+          },
+        },
+      })
+    const { client } = fakeClient({
+      status: vi.fn(async () => ({
+        ...status,
+        agents: agents.map((agent) => (agent.id === 'codex' ? { ...agent, accounts: [usual('acc_codex', 'signed_in')] } : agent)),
+      })),
+      getThread: vi.fn(async () => held('implement', 'nothing_free')),
+    })
+    const view = withServices(<Task />, client)
+    // It says what happened, why it waits, and that the person can move it, though nothing waits on them.
+    expect(
+      await screen.findByText(
+        `Claude Code ran out of usage while working on the task. No other model was free, so the work waits until ${clock(back)}, when it's back. To carry on now, pick another model.`,
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText(`The work waits: Claude Code is out of usage until ${clock(back)}`)).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: /^Continue with/ }))
+    await waitFor(() =>
+      expect(client.handOverHeld).toHaveBeenCalledWith({
+        taskId: thread().task.id,
+        agentId: 'codex',
+        accountId: 'acc_codex',
+        model: 'gpt-5.2',
+      }),
+    )
+
+    // A review held as the project waits can be skipped; kept waiting, the card folds.
+    view.unmount()
+    vi.mocked(client.getThread).mockImplementation(async () => held('review', 'waits'))
+    const review = withServices(<Task />, client)
+    expect(
+      await screen.findByText(
+        `Claude Code ran out of usage during the review. This project waits for usage to reset, so the review waits until ${clock(back)}. To carry on now, pick another model, or skip the review.`,
+      ),
+    ).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Skip the review' }))
+    await waitFor(() => expect(client.skipReview).toHaveBeenCalledWith(thread().task.id))
+    review.unmount()
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: `Wait until ${clock(back)}` }))
+    expect(await screen.findByText(`Waiting until ${clock(back)}`)).toBeTruthy()
+    expect(client.handOverHeld).toHaveBeenCalledOnce()
+    // Still held, it can be moved on after all, in the same view.
+    await userEvent.click(screen.getByRole('button', { name: 'Pick another model' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Continue with/ }))
+    await waitFor(() => expect(client.handOverHeld).toHaveBeenCalledTimes(2))
   })
 
   it('reads the accounts again at the reset of one out of usage, so it can be picked then', async () => {
@@ -2206,7 +2587,7 @@ describe('a task', () => {
       statusOf({ ...base, task: { ...base.task, waits: { agentId: 'codex', until } } }, (id) => (id === 'codex' ? 'Codex' : id)),
     ).toEqual({
       status: TaskStatus.Paused,
-      state: `Waits for Codex, back at ${clock(until)}`,
+      state: `The work waits: Codex is out of usage until ${clock(until)}`,
     })
     // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, both.
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
@@ -2251,25 +2632,36 @@ describe('a task', () => {
     })
   })
 
-  it('says since when it has been where it stands', () => {
+  it('says how long the step it is on has run, only while it runs', () => {
     const base = snapshot()
     const at = (minutes: number) => new Date(Date.UTC(2026, 9, 7, 9, minutes)).toISOString()
-    const on = (step: string) => ({ ...base, task: { ...base.task, step, stepAt: at(0) } })
-    expect(sinceOf(on('implement'), at(6))).toBe('implement · 6m')
-    // Settling the review's findings is part of the review.
-    expect(sinceOf(on('settle'), at(6))).toBe('review · 6m')
-    expect(sinceOf(base, at(6))).toBeNull()
-    const call = { id: 'a', kind: 'permission' as const, title: 't', reason: 'r', command: null, stuck: null, createdAt: at(3) }
-    expect(sinceOf({ ...on('implement'), attention: [call] }, at(6))).toBe('waiting · 3m')
-    expect(sinceOf({ ...on('implement'), task: { ...on('implement').task, waits: { agentId: 'codex', until: at(60) } } }, at(6))).toBeNull()
-    const reported = { ...items.step({ step: 'review' }), createdAt: new Date(Date.now() - 4 * 60_000).toISOString() }
-    const now = new Date().toISOString()
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'ready' }, items: [reported] }, now)).toBe('ready · 4m ago')
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'stopped' }, items: [reported] }, now)).toBe('stopped · 4m ago')
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'settled', settledAt: reported.createdAt } }, now)).toBe('done · 4m ago')
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'settled', state: 'abandoned', settledAt: reported.createdAt } }, now)).toBe(
-      'abandoned · 4m ago',
-    )
+    const on = (step: string, phase: ThreadSnapshot['task']['phase'] = 'running') => ({
+      ...base,
+      task: { ...base.task, phase, step, stepAt: at(0) },
+    })
+    expect(tookOf(on('implement'), at(6))).toBe('6m')
+    expect(tookOf(on('review'), at(4))).toBe('4m')
+    expect(tookOf(base, at(6))).toBeNull()
+    // Ready or stopped, nothing runs: its header has nothing more to say than where it stands.
+    expect(tookOf(on('review', 'ready'), at(6))).toBeNull()
+    expect(tookOf(on('implement', 'stopped'), at(6))).toBeNull()
+  })
+
+  it('names who does each step of its plan: the work its lead, each review the agent the plan names', () => {
+    const base = snapshot()
+    const steps = [
+      { key: 'implement' as const, agentId: 'codex', model: 'gpt-5.2-codex', skipped: false },
+      { key: 'review' as const, agentId: 'claude-code', model: 'opus', skipped: true },
+      { key: 'review' as const, agentId: 'codex', model: 'gpt-5.2-codex', skipped: false },
+    ]
+    const named = (agentId: string, model: string | null) => `${agentId}/${model ?? ''}`
+    const reviewing = { ...base, task: { ...base.task, steps, step: 'review' } }
+    // A skipped step has no bar and no line; the work is its lead's, even where another agent took it over.
+    expect(stepsOf(reviewing, 'Claude Opus', named)).toEqual([
+      { label: 'Implement', state: TrackStep.Done, who: 'Claude Opus' },
+      { label: 'Review', state: TrackStep.Now, who: 'codex/gpt-5.2-codex' },
+    ])
+    expect(stepsOf({ ...base, task: { ...base.task, steps: [] } }, 'Claude Opus', named)).toEqual([])
   })
 
   it('says how long it has run, until it stopped', () => {

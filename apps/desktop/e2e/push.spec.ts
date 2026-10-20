@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { launch, openFirstProject } from './support'
+import { connectGitHub, launch, openFirstProject } from './support'
 
 /*
  * Pushing what the lead committed after its pull request opened, in a real
@@ -26,22 +26,7 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900))
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
-    await page
-      .getByRole('dialog', { name: 'meridian’s settings' })
-      .getByRole('button', { name: /^GitHub/ })
-      .click()
-    const connecting = page.getByRole('dialog', { name: 'GitHub' })
-    await connecting
-      .getByRole('group', { name: 'Ways to connect GitHub' })
-      .getByRole('button', { name: /Make a token/ })
-      .click()
-    await connecting.getByRole('button', { name: 'Paste it myself' }).click()
-    await connecting.getByLabel('Paste it').fill('github_pat_e2e')
-    await connecting.getByRole('button', { name: 'Check' }).click()
-    await expect(connecting.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
-    await connecting.getByRole('button', { name: 'Done' }).click()
-    await expect(connecting).toHaveCount(0)
+    await connectGitHub(page)
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
     await box.fill('Rate-limit refunds per partner. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
@@ -70,7 +55,6 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
       .click()
     const push = page.getByRole('button', { name: 'Push 10 commits' })
     await expect(push).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('10 commits aren’t on the pull request yet.')).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/push-before.png', animations: 'disabled' })
 
@@ -78,7 +62,6 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
     // As the press ends, nothing is left: no count, and no Push to press again.
     await expect(push).toHaveCount(0)
     await expect(page.getByRole('button', { name: /^Push \d+ commits?$/ })).toHaveCount(0)
-    await expect(page.getByText(/commits? aren’t on the pull request yet|One commit isn’t on the pull request yet/)).toHaveCount(0)
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree }).toString().trim()).toBe(
       execFileSync(
         'git',

@@ -15,18 +15,42 @@ export const kindWords = {
   limit: 'Out of usage',
   /** Work done, waiting to be accepted. */
   ready: 'Ready to accept',
+  /** Work done with commits after its last pull request, in none yet: a new pull request is the person's to open. */
+  unshipped: 'Ready for a new pull request',
   /** A review of someone else's pull request, drafted, waiting to be posted. */
   drafted: 'Review drafted',
+  /** A task that isn't a change, its lead done: the person settles it (Done) or keeps it for later. */
+  finished: 'Finished',
 } as const
 
 /**
- * The word for work that is ready: ready to accept; a review, drafted; or,
- * where its lead couldn't resolve a conflict, or fix the checks on the merge,
- * and it is the person's now, stuck, as any step that can't go on without
- * them is.
+ * The word for work that is ready: ready to accept; a review, drafted; a
+ * plain task, finished; or, where its lead couldn't resolve a conflict, or
+ * fix the checks on the merge, and it is the person's now, stuck, as any step
+ * that can't go on without them is.
  */
-export const readyKindOf = (task: { readonly handedBack?: string | null | undefined; readonly kind?: string | undefined }): string =>
-  task.kind === 'review' ? kindWords.drafted : task.handedBack == null ? kindWords.ready : kindWords.stuck
+export const readyKindOf = (task: {
+  readonly handedBack?: string | null | undefined
+  readonly kind?: string | undefined
+  readonly unshipped?: unknown
+  readonly change?: { readonly state: string } | null | undefined
+  readonly reviewing?: Reviewing
+}): string =>
+  task.kind === 'review' && !isAnswered(task.reviewing)
+    ? kindWords.drafted
+    : task.kind === 'plain' || task.kind === 'review'
+      ? kindWords.finished
+      : task.handedBack != null
+        ? kindWords.stuck
+        : isUnshipped(task)
+          ? kindWords.unshipped
+          : kindWords.ready
+
+/** Whether a task has commits after its last pull request merged or closed (or with none), and no pull request open to accept. */
+export const isUnshipped = (task: {
+  readonly unshipped?: unknown
+  readonly change?: { readonly state: string } | null | undefined
+}): boolean => task.unshipped != null && task.change?.state !== 'open'
 
 /** A call's kind, in its word: an agent's question; out of usage or stuck if it is about a step; else a permission. */
 export const callKindOf = (call: { readonly kind: string; readonly stuck: { readonly why: string } | null }): string =>
@@ -41,10 +65,69 @@ export const callKindOf = (call: { readonly kind: string; readonly stuck: { read
 /** Where a call waits, in words: its task, or the conversation with the coordinator, for a question the coordinator asks. */
 export const whereOf = (call: { readonly taskTitle: string | null }): string => call.taskTitle ?? 'Coordinator'
 
+/** What a review task's card and screen know of its review: whether it was posted, and whether a draft waits since. */
+type Reviewing = { readonly posted: unknown; readonly waiting?: boolean | undefined } | null | undefined
+
 /**
- * A plain task that finished (DEV-96): it waits on its board, as Finished,
- * until the person opens it, and asks nothing of them, so nothing else
- * lists or counts it: not the home, the edge, the tabs or the Dock.
+ * A review whose review was posted, written to again, that its lead answered
+ * drafting nothing to post: finished, as a quick task is (ADR-051).
  */
-export const isFinished = (task: { readonly kind: string; readonly phase: string }): boolean =>
-  task.kind === 'plain' && task.phase === 'ready'
+export const isAnswered = (reviewing: Reviewing): boolean => reviewing != null && reviewing.posted != null && reviewing.waiting === false
+
+/**
+ * A plain task that finished (DEV-96), or a review answered: it waits in
+ * Needs you, as Finished, counted as any work ready, until the person
+ * settles it (Done) or keeps it for later. Opening it moves nothing.
+ */
+export const isFinished = (task: { readonly kind: string; readonly phase: string; readonly reviewing?: Reviewing }): boolean =>
+  (task.kind === 'plain' || (task.kind === 'review' && isAnswered(task.reviewing))) && task.phase === 'ready'
+
+/**
+ * Whether a task is the person's to settle with Done or Keep for later: a
+ * finished task that isn't a change, waiting in Needs you or kept for later.
+ * A review with a draft only keeps: it settles as its draft is posted.
+ */
+export const isSettleable = (task: { readonly kind: string; readonly phase: string }): boolean =>
+  task.kind !== 'change' && (task.phase === 'ready' || task.phase === 'kept')
+
+/** Whether a settleable task takes Done: a plain one, or a review answered; a review with a draft settles as it is posted. */
+export const takesDone = (task: { readonly kind: string; readonly reviewing?: Reviewing }): boolean =>
+  task.kind === 'plain' || (task.kind === 'review' && isAnswered(task.reviewing))
+
+/**
+ * Whether a task waits on the person as work ready for them: a change to
+ * accept (its checks passed or failed, with commits to push), commits after
+ * its last pull request to open a new one for, a review drafted to post, a
+ * task that isn't a change finished, or work its lead handed back: every
+ * ready task. One the person kept for later is `kept`, not ready, so it is
+ * out of it until they write to it again. The one rule for the board's
+ * Needs you, the home's list, count and project lines, the edge of the
+ * screen and the tabs, so they can't disagree on it. Calls are the other
+ * half of what waits on them, and each of those does.
+ */
+export const needsYou = <T extends { readonly kind: string; readonly phase: string }>(task: T): boolean => task.phase === 'ready'
+
+/** The tasks among these that wait on the person as work ready for them. */
+export const readyOf = <T extends { readonly kind: string; readonly phase: string }>(tasks: ReadonlyArray<T>): ReadonlyArray<T> =>
+  tasks.filter(needsYou)
+
+/**
+ * The calls that stand for what waits on the person: a task that waits on
+ * several shows its oldest, once (answering it brings the next), and the
+ * calls no waiting task holds each stand alone. The one rule for how calls
+ * are counted, on the board's Needs you, the home, the edge and each
+ * project's line, so a task with two calls is one thing everywhere.
+ */
+export const standingCalls = <C extends { readonly taskId: string | null; readonly createdAt: string }>(
+  tasks: ReadonlyArray<{ readonly taskId: string; readonly phase: string }>,
+  calls: ReadonlyArray<C>,
+): ReadonlyArray<C> => {
+  const waiting = new Set(tasks.filter((task) => task.phase === 'waiting').map((task) => task.taskId))
+  const oldest = new Map<string, C>()
+  for (const call of calls) {
+    if (call.taskId === null || !waiting.has(call.taskId)) continue
+    const held = oldest.get(call.taskId)
+    if (held === undefined || call.createdAt < held.createdAt) oldest.set(call.taskId, call)
+  }
+  return calls.filter((call) => call.taskId === null || !waiting.has(call.taskId) || oldest.get(call.taskId) === call)
+}

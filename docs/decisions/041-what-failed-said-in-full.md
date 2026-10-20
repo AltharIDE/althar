@@ -2,6 +2,16 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
+- **Amended:** 2026-10-18: a failed check's log is never left out
+  silently. The failed-checks card shows the end of each one's log, or
+  why Althar couldn't read it ("GitHub refused (403): …") with a link to
+  the check's page; the lead is told the same, and whether
+  `read_check_log` would fare any better. A check another CI service ran
+  gives its page, and on GitHub what its check run reported. A host's
+  `checkLog` fails with why where it keeps a log it won't give, rather
+  than reading as none. Logs behind a redirect to storage elsewhere
+  (GitHub Actions, Bitbucket Pipelines) are followed without Althar's
+  token, which that storage refuses.
 - **Owner:** Repository maintainers
 - **Context:** Once a change's checks are Althar's to see through
   ([ADR-040](040-a-change-reaches-the-person-green.md)), its lead fixes
@@ -53,7 +63,7 @@
 - **Trade-off:** a failure that is real waits one more run before the lead
   is told. Forty-five minutes is a guess at what "too long" means: some
   suites take longer, and their changes come to the person before they end.
-  The card itself still says only what its checks counted; the thread says
-  the rest.
+  The card on the board still says only what its checks counted; the
+  thread says the rest.
 - **Revisit when:** CI reports are wanted; or the card should say "can't
   read checks" or "checks running for 1h" on its own line.

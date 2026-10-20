@@ -3,7 +3,7 @@ import type { ComposerImage } from '@althar/ui'
 import { useState } from 'react'
 
 import { pictureUrl } from '../../main/pictureAddress'
-import { nextImageId as next, setDraftImages, useDraftOf } from './drafts'
+import { nextImageId as next, setDraftDictated, setDraftImages, useDraftOf } from './drafts'
 import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkInWindow, text } from './images'
 
 /*
@@ -30,11 +30,15 @@ export const takesImages = (models: ReadonlyArray<AgentModels> | null, agentId: 
 export interface Outgoing {
   readonly sent: ReadonlyArray<SentImage>
   readonly pictures: ReadonlyArray<Picture>
+  /** Some of its words were dictated, even if edited after: the agent is told so. Set with the images, so each send carries it. */
+  readonly dictated?: boolean
 }
 
-/** What a send or a switch carries of a message's images: nothing where it has none, as before images. */
-export const sentWith = (images: Outgoing | undefined): { readonly images?: ReadonlyArray<SentImage> } =>
-  images === undefined || images.sent.length === 0 ? {} : { images: images.sent }
+/** What a send or a switch carries of a message's images and of its being dictated: nothing where it has none, as before images. */
+export const sentWith = (images: Outgoing | undefined): { readonly images?: ReadonlyArray<SentImage>; readonly dictated?: boolean } => ({
+  ...(images === undefined || images.sent.length === 0 ? {} : { images: images.sent }),
+  ...(images?.dictated === true ? { dictated: true } : {}),
+})
 
 /** An image waiting in a thread's draft. */
 export interface Waiting {
@@ -66,7 +70,7 @@ export interface Images {
 
 /** The images waiting in the draft kept under `key` (`drafts.ts`). */
 export function useImages(key: string, shrink: Shrink = shrinkInWindow): Images {
-  const waiting = useDraftOf<Waiting>(key).images
+  const { images: waiting, dictated } = useDraftOf<Waiting>(key)
   const setWaiting = (change: (now: ReadonlyArray<Waiting>) => ReadonlyArray<Waiting>) => setDraftImages(key, change)
   const [note, setNote] = useState<string | null>(null)
 
@@ -138,6 +142,7 @@ export function useImages(key: string, shrink: Shrink = shrinkInWindow): Images 
     return {
       sent: ready.map((one) => sentOf({ data: one.data, digest: one.picture.digest, name: one.picture.name })),
       pictures: ready.map((one) => one.picture),
+      ...(dictated ? { dictated: true } : {}),
     }
   }
 
@@ -158,6 +163,8 @@ export function useImages(key: string, shrink: Shrink = shrinkInWindow): Images 
         return [{ id: next(), name: picture.name ?? text.pasted, ready: { data, picture: { ...picture, digest: picture.digest }, src } }]
       })
       setWaiting((now) => [...given, ...now])
+      // Its words came back in the composer: so did their being dictated.
+      if (outgoing.dictated === true) setDraftDictated(key, true)
     },
     fits: (pictures) => {
       const kept = pictures.filter((picture) => picture.digest !== null).length

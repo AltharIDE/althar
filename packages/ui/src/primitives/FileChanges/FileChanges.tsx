@@ -39,9 +39,10 @@ export function FileChanges({ files, most, onOpen, className, text }: FileChange
         const cut = f.path.lastIndexOf('/') + 1
         const inner = (
           <>
-            <span className={s.path}>
+            {/* Narrow, its folders give way before its name. */}
+            <span className={s.path} title={f.path}>
               <span className={s.dir}>{f.path.slice(0, cut)}</span>
-              {f.path.slice(cut)}
+              <span className={s.name}>{f.path.slice(cut)}</span>
             </span>
             <Delta add={f.add} del={f.del} />
             <span className={s.bar} style={cssVars({ '--w': (f.add + f.del) / scale, '--a': f.add / Math.max(1, f.add + f.del) })}>
@@ -69,8 +70,8 @@ export function FileChanges({ files, most, onOpen, className, text }: FileChange
 export function Delta({ add, del, className }: { add?: number; del?: number; className?: string }) {
   return (
     <span className={cx(s.delta, className)}>
-      {add != null && <span className={s.add}>+{add}</span>}
-      {del != null && <span className={s.del}>−{del}</span>}
+      {add != null && <span className={add === 0 ? s.none : s.add}>+{add}</span>}
+      {del != null && <span className={del === 0 ? s.none : s.del}>−{del}</span>}
     </span>
   )
 }

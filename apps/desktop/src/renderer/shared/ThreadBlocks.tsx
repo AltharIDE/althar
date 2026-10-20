@@ -4,6 +4,7 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
+  FailedLogs,
   Issue,
   IssueRef,
   LinkButton,
@@ -14,6 +15,7 @@ import {
   type QuestionAnswer,
   Reasoning,
   Terminal,
+  Thinking,
   ThreadDivider,
   Tool,
   ToolState,
@@ -29,6 +31,7 @@ import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
+import { SaidIn } from './code/CodeHost'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
 import type {
@@ -50,8 +53,10 @@ import s from './ThreadBlocks.module.css'
  * A thread's blocks as the kit draws them, the same in a task and in the
  * coordinator's thread. A turn's work folds under how long it worked, or is
  * working, with its last message open under it; a step's result stands open
- * under the work that led to it. A task's card is the host's
- * to draw, since what it can do with one is the host's.
+ * under the work that led to it. Before the agent says anything, its turn
+ * stands under its name, thinking, where its words will take its place. A
+ * task's card is the host's to draw, since what it can do with one is the
+ * host's.
  */
 
 /** How long a command can be before its row, at the thread's width, clips it. */
@@ -184,7 +189,12 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
 export function PartView({ part, threadId }: { part: Part; threadId: string }) {
   switch (part.kind) {
     case 'message':
-      return <Markdown source={part.text} />
+      // Its names are read as they were when it was said.
+      return (
+        <SaidIn.Provider value={part.id}>
+          <Markdown source={part.text} />
+        </SaidIn.Provider>
+      )
     case 'thought':
       return (
         <Reasoning took="" text={{ thought: () => text.thought }}>
@@ -261,9 +271,27 @@ export const heardVerb = (arrival: ArrivalContent): string => {
   }
 }
 
+/** A GitHub Actions log line's time, which every line starts with: noise on a card. */
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z /
+
+/**
+ * A failed check's log as its card shows it: by its lines, without their
+ * times, ending where GitHub Actions marked it failed (`##[error]`), not in
+ * the job's cleanup after.
+ */
+export const logLines = (log: string) => {
+  const lines = log
+    .trimEnd()
+    .split('\n')
+    .map((line) => line.replace(STAMP, ''))
+  const failed = lines.findLastIndex((line) => line.startsWith('##[error]'))
+  return failed === -1 ? lines : lines.slice(0, failed + 1)
+}
+
 /**
  * Something heard from outside, as a quoted note: who, what they did, where,
- * and what they said. What someone who can't write to the repository said
+ * and what they said. Failed checks show the end of each one's log, or why
+ * it couldn't be read. What someone who can't write to the repository said
  * wasn't passed to the lead, as anyone can comment on a public one; the
  * person reads it, and can pass it on.
  */
@@ -291,6 +319,16 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
       {...(foot === false ? {} : { foot })}
     >
       {body !== null && body !== '' && <Markdown source={body} />}
+      {arrival.logs.length > 0 && (
+        <FailedLogs
+          logs={arrival.logs.map((log) => ({
+            name: log.name,
+            url: log.url,
+            lines: log.log === null ? null : logLines(log.log),
+            missing: log.missing,
+          }))}
+        />
+      )}
     </Arrived>
   )
 }
@@ -448,6 +486,12 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
       case 'review':
         return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
+      case 'waiting':
+        return (
+          <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
+            <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
+          </Turn>
+        )
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

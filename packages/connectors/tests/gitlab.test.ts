@@ -335,6 +335,26 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('says the project a merge request’s branch is on: its own, a fork’s, one that is gone, or nothing it wasn’t told', () =>
+    Effect.gen(function* () {
+      const answers = [
+        request({ source_project_id: 34675721, target_project_id: 34675721 }),
+        request({ source_project_id: 99, target_project_id: 34675721 }),
+        request({ source_project_id: 98, target_project_id: 34675721 }),
+        request(),
+      ]
+      const { host } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, () => ({ json: answers.shift() })],
+        ['GET', `${API}/projects/99`, { json: { id: 99, path_with_namespace: 'dana/cli', web_url: 'https://gitlab.com/dana/cli' } }],
+        ['GET', `${API}/projects/98`, { status: 404, json: { message: '404 Project Not Found' } }],
+      ])
+      assert.isNull((yield* host.change(repository, 12)).headRepository)
+      assert.deepStrictEqual((yield* host.change(repository, 12)).headRepository, ['dana', 'cli'])
+      assert.deepStrictEqual((yield* host.change(repository, 12)).headRepository, [])
+      assert.notProperty(yield* host.change(repository, 12), 'headRepository')
+    }),
+  )
+
   it.effect('marks a draft ready by taking the prefix off its title as it is now', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([
@@ -391,6 +411,48 @@ describe('GitLab as a code host', () => {
       // A server that can't say leaves the size unknown.
       const unknown = yield* host.change(repository, 12)
       assert.deepStrictEqual([unknown.additions, unknown.deletions], [null, null])
+    }),
+  )
+
+  it.effect('closes a merge request unmerged, deletes its branch once closed, and says GitLab’s 401 is an account that may not', () =>
+    Effect.gen(function* () {
+      let state = 'opened'
+      const { host, sent } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, () => ({ json: request({ state, source_project_id: 34675721 }) })],
+        [
+          'PUT',
+          `${PROJECT}/merge_requests/12`,
+          () => {
+            state = 'closed'
+            return { json: request({ state }) }
+          },
+        ],
+        ['DELETE', `${PROJECT}/repository/branches/althar%2Fmer-231`, { status: 204 }],
+      ])
+      const closed = yield* host.closeChange(repository, change)
+      assert.strictEqual(closed.state, 'closed')
+      assert.deepStrictEqual(sent.find((one) => one.method === 'PUT')?.body, { state_event: 'close' })
+      yield* host.deleteBranch(repository, closed)
+      assert.isTrue(sent.some((one) => one.method === 'DELETE'))
+      // Closed already, it is left as it is; a branch already gone is nothing to do.
+      const gone = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request({ state: 'closed' }) }],
+        ['DELETE', `${PROJECT}/repository/branches/althar%2Fmer-231`, { status: 404, json: { message: '404 Branch Not Found' } }],
+      ])
+      assert.strictEqual((yield* gone.host.closeChange(repository, change)).state, 'closed')
+      yield* gone.host.deleteBranch(repository, change)
+      assert.isFalse(gone.sent.some((one) => one.method === 'PUT'))
+      // Open, its branch stays; and an account that may not close it is refused, as forbidden, while its token works.
+      const open = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request() }],
+        ['PUT', `${PROJECT}/merge_requests/12`, { status: 401, json: { message: '401 Unauthorized' } }],
+        ['GET', `${API}/user`, { json: user(5, 'you') }],
+      ])
+      assert.deepInclude(yield* Effect.flip(open.host.deleteBranch(repository, change)), {
+        reason: 'rejected',
+        message: 'MR !12 is still open, so its branch stays.',
+      })
+      assert.deepInclude(yield* Effect.flip(open.host.closeChange(repository, change)), { reason: 'forbidden', status: 401 })
     }),
   )
 
@@ -564,7 +626,7 @@ describe('GitLab as a code host', () => {
     }),
   )
 
-  it.effect('reads the end of a failed job’s log, and nothing for a log it can’t read', () =>
+  it.effect('reads the end of a failed job’s log, and says why where it can’t', () =>
     Effect.gen(function* () {
       const log = Array.from({ length: 400 }, (_, index) => `line ${index}`).join('\n')
       const { host } = gitlab([
@@ -575,7 +637,7 @@ describe('GitLab as a code host', () => {
       const read = yield* host.checkLog(repository, check)
       assert.isTrue(read?.endsWith('line 399'))
       assert.strictEqual(read?.split('\n').length, 150)
-      assert.isNull(yield* host.checkLog(repository, { ...check, id: 'job:34675721:2' }))
+      assert.strictEqual((yield* Effect.flip(host.checkLog(repository, { ...check, id: 'job:34675721:2' }))).reason, 'forbidden')
       assert.isNull(yield* host.checkLog(repository, { ...check, id: 'status:3' }))
     }),
   )

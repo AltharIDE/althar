@@ -4,10 +4,11 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect } from 'effect'
+import { Effect, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { SessionFailed } from '../src/errors'
+import { type Failure, failureOf, Failures } from '../src/Failures'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { notices, runtime, task, turns, until } from './support'
@@ -56,10 +57,14 @@ describe('agents as processes', () => {
       const stopped = yield* records(sessionId)
       assert.strictEqual(stopped.session, 'completed')
       assert.strictEqual(stopped.processes[0]?.state, 'killed')
-      assert.strictEqual(stopped.processes[0]?.signal, 'SIGTERM')
+      // Asked to stop where it can be (TERM); on Windows, where nothing can ask, killed once its grace is up.
+      assert.strictEqual(stopped.processes[0]?.signal, globalThis.process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM')
       assert.isFalse(alive(process?.pid ?? 0))
     }).pipe(Effect.provide(runtime())),
   )
+
+  /** What went on its own, as reported. */
+  const lost: Array<Failure> = []
 
   it.live('marks a session lost, and its turn failed, when the agent exits mid-turn', () =>
     Effect.gen(function* () {
@@ -82,7 +87,18 @@ describe('agents as processes', () => {
       // The thread says why nothing is happening.
       const [said] = yield* until(notices(created.threadId), (rows) => rows.length > 0)
       assert.strictEqual(said?.title, 'Fake process stopped on its own.')
-    }).pipe(Effect.provide(runtime())),
+      // And it is reported, by the agent and how its process ended: never what it wrote.
+      assert.deepStrictEqual(
+        lost.map((each) => [each.where, each.agent, each.name, each.message, each.stack]),
+        [['agent', 'process', 'AgentLost', 'The process agent stopped on its own: exit code 3, signal none.', '']],
+      )
+    }).pipe(
+      Effect.provide(runtime()),
+      Effect.provideService(Failures, {
+        report: (cause, where, agent) => Effect.sync(() => void lost.push(failureOf(cause, where, agent ?? null))),
+        events: Stream.empty,
+      }),
+    ),
   )
 
   it.live('records a session that could not start, and its process as unknown', () =>
@@ -95,7 +111,7 @@ describe('agents as processes', () => {
       const [row] = yield* sql<{ session: string; process: string; pid: number | null }>`
         SELECT s.state AS session, p.state AS process, p.pid FROM provider_sessions s JOIN processes p ON p.provider_session_id = s.id`
       assert.deepStrictEqual(row, { session: 'failed', process: 'unknown', pid: null })
-      assert.strictEqual(error.summary, "althar-no-such-agent isn't installed, or isn't on this Mac's PATH.")
+      assert.strictEqual(error.summary, "althar-no-such-agent isn't installed, or isn't on this computer's PATH.")
       assert.deepStrictEqual(yield* notices(created.threadId), [
         { source: 'runtime', severity: 'error', title: "Fake missing couldn't start.", description: error.summary },
       ])

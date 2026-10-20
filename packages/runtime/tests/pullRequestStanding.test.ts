@@ -255,7 +255,7 @@ describe('how a task’s pull request is told to the coordinator', () => {
     assert.strictEqual(finishedBy(after), null)
     assert.match(
       sectionWords(after),
-      /1 commit on the task's branch is after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for it from the task\./,
+      /1 commit on the task's branch is after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for it from the task, or leaves it out\./,
     )
     assert.notMatch(sectionWords(after), /The task is finished/)
     // One closed, then its next merged: finished, the closed one history.
@@ -268,6 +268,13 @@ describe('how a task’s pull request is told to the coordinator', () => {
     assert.match(
       sectionWords(facts([change()], { host: offline })),
       /Possibly out of date: GitHub is not connected, so this is as last seen\./,
+    )
+  })
+
+  it('says several commits after a merged pull request as several, for the person to open a new pull request for them', () => {
+    assert.include(
+      sectionWords(facts([change({ state: 'merged', draft: false })], { unshipped: 3 })),
+      "3 commits on the task's branch are after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for them from the task, or leaves them out.",
     )
   })
 })
