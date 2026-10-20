@@ -7,6 +7,7 @@ import { spawnOwned } from '@althar/provider-adapters'
 import { Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { RuntimeConfig } from './Config'
 import { freshCopy } from './coordinatorFolder'
 import { Instance } from './Instance'
@@ -419,7 +420,7 @@ export class Launches extends Context.Service<
                   why: 'elsewhere',
                   message:
                     input.taskId === null
-                      ? 'The project has no repository on this computer to run.'
+                      ? `The project has no repository on ${thisDevice()} to run.`
                       : 'The task has no worktree here to run.',
                 })
               const kept = yield* keptOf(input.projectId)
@@ -431,7 +432,7 @@ export class Launches extends Context.Service<
                   why: 'elsewhere',
                   message:
                     input.taskId === null
-                      ? 'Its repository has no copy on this computer to run it in.'
+                      ? `Its repository has no copy on ${thisDevice()} to run it in.`
                       : 'The task has no worktree of its repository here to run it in.',
                 })
               // The one asked for, else the first of those here that says how it runs, as the place's copy is now.
@@ -622,7 +623,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused({
                 why: 'elsewhere',
-                message: 'The project has no repository on this computer to keep a way to run.',
+                message: `The project has no repository on ${thisDevice()} to keep a way to run.`,
               })
             if (input.repository === undefined && bindings.length > 1)
               return yield* new LaunchRefused({
@@ -683,7 +684,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused(
                 places.length === 0
-                  ? { why: 'elsewhere', message: 'The project has no repository on this computer to run it in.' }
+                  ? { why: 'elsewhere', message: `The project has no repository on ${thisDevice()} to run it in.` }
                   : {
                       why: 'which',
                       message: `Say which repository it runs in, as repository: ${places.map((place) => place.binding.name).join(', ')}.`,

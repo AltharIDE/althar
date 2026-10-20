@@ -8,27 +8,30 @@ import {
   BackCrumb,
   Button,
   ChromeButton,
+  commandDown,
+  Composer,
   Delivery,
+  DictationTray,
   DiffLineKind,
   type FileView,
-  Composer,
-  DictationTray,
   Issue,
-  TaskActivity,
   LinkButton,
   Listening,
   type ModelInfo,
+  keys,
+  modKey,
+  ReachLine,
   Running,
+  TaskActivity,
+  type TaskConflicts,
   TaskFace,
   TaskHeader,
-  ReachLine,
-  type TaskConflicts,
   TaskMenu,
   TaskStatus,
   Thread,
   ThreadDivider,
-  ThreadShellProvider,
   ThreadMeasure,
+  ThreadShellProvider,
   ThreadSkeleton,
   TitleBar,
   SettleWays,
@@ -37,7 +40,7 @@ import {
 import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
-import { device, platform } from '../../shared/device'
+import { device } from '../../shared/device'
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
@@ -159,7 +162,7 @@ export const text = {
   loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
-  diffKey: platform === 'darwin' ? '⌘D' : 'Ctrl+D',
+  diffKey: modKey('D'),
 }
 
 /**
@@ -390,7 +393,7 @@ export function TaskView({
   const { show } = changes
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'd' || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
+      if (event.key.toLowerCase() !== 'd' || !commandDown(event) || event.shiftKey || event.altKey) return
       if (files.length === 0) return
       event.preventDefault()
       show()
@@ -720,7 +723,7 @@ export function TaskView({
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={kept} />}
-        text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
+        text={{ sendNowKey: modKey(keys.return) }}
         // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
         above={
           (listening.length > 0 || leftRunning.length > 0) && (

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 
+import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import type { CodeHost } from '../../foundations/codeHost'
 import { BrandMark } from '../../foundations/Marks/Marks'

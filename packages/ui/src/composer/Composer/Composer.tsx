@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef, type FormEvent, type UIEvent, type WheelEvent, type ReactNode, type RefObject } from 'react'
 
+import { commandDown, keys, modKey } from '../../foundations/keys'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
@@ -133,10 +134,10 @@ export const composerText: ComposerText = {
   sendKey: '↵',
   queue: 'Queue',
   stop: 'Interrupt the lead',
-  stopKey: '⌘.',
+  stopKey: modKey('.'),
   sendNow: 'Send now',
   sendNowNote: 'Interrupt the lead with this; it carries on with both',
-  sendNowKey: '⌘↵',
+  sendNowKey: modKey(keys.enter),
   newlineNote: 'Shift+Enter for a new line',
   dictate: 'Dictate',
   dictateBusy: 'Writing down what you said',
@@ -479,7 +480,7 @@ export function Composer({
                 if (dictation?.busy !== true) dictation?.onStop()
                 return
               }
-              if ((e.metaKey || e.ctrlKey) && canSendNow) {
+              if (commandDown(e) && canSendNow) {
                 e.preventDefault()
                 sendNow()
                 return

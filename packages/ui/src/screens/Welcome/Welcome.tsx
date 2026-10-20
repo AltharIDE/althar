@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import { useControlled } from '../../lib/controlled'
 import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
@@ -87,7 +88,7 @@ export const welcomeText: WelcomeText = {
       body: 'Althar runs the agents you already use, like Claude Code and Codex, on your own plans. Each keeps its own sign-in; Althar never sees a password or a key. One task can use several labs, so one checks another.',
     },
   ],
-  end: { title: 'Ready when you are', body: 'Next, Althar looks for the agents on this Mac. Then you make your first project.' },
+  end: { title: 'Ready when you are', body: `Next, Althar looks for the agents on ${device.this}. Then you make your first project.` },
 }
 
 /*
