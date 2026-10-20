@@ -1,11 +1,13 @@
 # Automations
 
-> **A proposal, not yet a plan.** How automations could be built, what each
-> way costs, and the calls that are the person's. Written on 19 October 2026,
+> **Temporary: the build plan for automations.** Written on 19 October 2026,
 > after the prototype (the Automations tab, as cards, each automation on its
-> own page) was picked and thrown away. Once the calls at the end are made,
-> this becomes the build plan; what lasts moves into the architecture docs
-> and ADRs, and this file is deleted when the last step ships.
+> own page) was picked and thrown away, as a proposal with calls for the
+> person. Decided with the person on 21 October 2026: five calls are theirs,
+> and the rest are taken where Claude Code, Codex, Cursor, Orca and Superset
+> agree (What was decided, at the end). What lasts moves into the
+> architecture docs and ADRs as each step ships, and this file is deleted
+> when the last one does.
 
 ## In short
 
@@ -25,27 +27,34 @@
   Althar already keeps running with every window closed. Add one opt-in,
   "Open Althar at login, in the background". No daemon, and no waking the
   Mac, which needs root. A run missed while the Mac slept runs once when it
-  wakes, inside a window; never a backlog.
+  wakes, inside a window; never a backlog. The cloud comes later, in two
+  steps: a relay for GitHub's webhooks, then runs in the cloud, a product of
+  their own, paid per use.
 - **Events come from three places, cheapest first:** Althar's own record (a
   task's pull request merged), then polling what the connectors already read
   (with conditional requests, free when nothing changed), and later webhooks
   through a small relay in the cloud.
-- **A run can do no more than the person, and less by default.** Althar
-  takes every outward step itself, as it does today: a draft pull request, a
-  drafted review, a held plan. It never merges. A run that would ask the
-  person parks in Needs you without holding a place, and the project's
-  allow everything doesn't reach it. Events from outside the team fire
-  nothing by default.
+- **A run goes ahead without asking, mostly.** Its task allows everything,
+  so no permission ask stops it at night; pushing to the default branch is
+  never allowed, and merging is the person's, as for any agent. Althar takes
+  every outward step itself, as it does today, and signs it with the
+  automation's name. An automation's first review waits for the person, who
+  can let its next ones post by themselves. Events from outside the team
+  fire nothing by default.
+- **A new task each time,** by default; a change automation can carry on
+  its open pull request instead.
 - **Small by construction:** one place for automations at most, after the
   person's own work, for every step of its task; a time limit a run, over
-  all its steps; at least an hour between runs; three failures in a row
-  pause it; a query that found nothing starts no task.
+  all its steps; at least an hour between runs; at most five of its pull
+  requests open; three failures in a row pause it; a query that found
+  nothing starts no task.
 - **Ready for the cloud without building it.** The occurrence is a record
   with an idempotency key, whoever noticed the trigger; starting its task is
   a step of its own that could be leased to a device. Moving the clock or the
   webhooks to a server later swaps one part, not the model. Running agents in
   the cloud is a different product, and a separate decision.
-- **Fifteen calls are the person's**, at the end, each with what I'd pick.
+- **The calls are made,** at the end: the five that were the person's, and
+  ten taken where the other tools agree.
 
 ## What was picked
 
@@ -134,6 +143,13 @@ last time, not by the person, and not reviewed by a task already, then start
 one review for each. Four new pull requests make four review tasks, one
 occurrence each, grouped under the automation.
 
+The person's words say which it is. Claude Code, Codex and Orca start one
+session a fire, which does everything; but a review in Althar is of one pull
+request and ends in a review posted on it, so "review the new pull
+requests" makes one review for each. "Tell me what came in" is one plain
+task with one report, and posts nothing. The card says which ("Each pull
+request … one review each", or "One report").
+
 The coordinator compiles the query from the person's words when it writes
 the automation, and the card says it back in words: "Each pull request
 opened since the last time, not yours, not reviewed yet". Where no query
@@ -161,7 +177,7 @@ listing with more says how many it left, rather than moving past them.
 | The person's conversation | Untouched | A machine's message in it every morning |
 | Judgement | Inside the task, by its lead | At once: "only the ones that touch the runtime" |
 
-**I'd pick Althar starting the kept plan.** The coordinator's judgement is
+**Althar starts the kept plan** (call 3). The coordinator's judgement is
 worth most once, when it writes the automation; after that a fire should be
 predictable and cheap. The lead still judges, inside its task, and can end
 with "nothing to do". Revisit if people write automations whose choosing
@@ -186,8 +202,9 @@ does. The test: if no agent runs, it is a rule.
 | **5. A clock in the cloud, the Mac's hands** | On time even with the Mac off; runs when a Mac is up | An Althar account, a server, leases to devices ([07](../architecture/07-persistence-security-and-cloud.md)) | A cloud product; the run still needs a Mac awake |
 | **6. Hands in the cloud too** | Always | Cloud machines, clones, secrets, pay-per-use agents | A different product (see The cloud) |
 
-**I'd pick 1 now, with 2 offered** the first time a scheduled automation is
-turned on, and 3 to 6 not now. Option 1 is close to free: on a Mac, closing
+**1 now, with 2 offered** the first time a scheduled automation is turned
+on (call 1). 3 and 4 not at all; 5 and 6 later, with the cloud (call 12).
+Option 1 is close to free: on a Mac, closing
 the last window already leaves the runtime, its agents and the plan
 countdown running.
 
@@ -214,7 +231,8 @@ countdown running.
 - **A precedent to settle:** a plan that came due while Althar was closed is
   held, "rather than starting unannounced" (`Plans.ts:214`). An automation
   is announced by being on, but a catch-up at launch is still a surprise.
-  Call 2 decides.
+  Call 2 decided against holding: it runs once, within its window, as
+  Claude's desktop tasks and Orca do, and says so in its history.
 
 So the promise on screen is honest: "Runs on this Mac while Althar is open.
 If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
@@ -232,7 +250,7 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
   server that has none. So the next time, kept as an instant, is worked out
   again when the Mac's zone changes; and since a slot is its local date and
   time, flying across zones never runs a day's 9:00 twice, and a day the
-  flight skips is missed, as any. Fixed or travelling time is call 14.
+  flight skips is missed, as any (call 14).
 - **Daylight saving:** a 2:30 that doesn't exist runs at 3:30 (Temporal's
   `compatible`); a 1:30 that happens twice runs once, the first time.
 - **The next slot comes from the last slot, not from now** (Superset
@@ -254,10 +272,16 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
   14:00 says so in its brief ("this was due at 9:00; it is 14:00").
 - **Overlap:** while its last run still runs, the next is skipped (Kubernetes'
   `Forbid`), never replaced: Cursor cancels the run under way, and people
-  lose work to it. A change automation whose last pull request is still
-  open continues that task with a follow-up round rather than opening
-  another, as a dependency bot updates its one pull request (call 4).
-  That is new: today Althar's own messages to a lead don't open a round,
+  lose work to it.
+- **A new task each time, or the open one carried on,** a choice on the
+  automation (call 4). A new task each time is the default, as in every
+  other tool: each run has its own task, worktree and pull request, and at
+  most five of an automation's pull requests are open at once (Dependabot's
+  limit); past that, a run is skipped, saying why. A change automation can
+  instead carry on its last task while that task's pull request is open,
+  with a follow-up round rather than another pull request, as a dependency
+  bot updates its one pull request. Carrying on comes after the first
+  version. It is new: today Althar's own messages to a lead don't open a round,
   and a round never publishes by itself
   ([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
   It takes a round Althar opens for the automation, carrying the new
@@ -347,41 +371,56 @@ any change to its prompt, its lead (agent, model, account), how often it
 runs, its review, its ending or its subjects needs the person to turn it on
 again. Only a tighter limit doesn't: fewer runs a day, a shorter time.
 
+The person's call (5 and 6) is that a run goes ahead on its own, mostly,
+and signs what it does. So:
+
+- **Its task allows everything** ([ADR-043](../decisions/043-allow-everything-is-one-switch-for-a-project-or-a-task.md)'s
+  switch for a task, on from the start), and no permission ask stops a run
+  at night. The automation's page has the switch, on by default; off, the
+  project's rules apply, and an ask waits in Needs you, its place going
+  after the 5 minutes an asking agent already keeps it (`Busy.ts:186`).
+- **Pushing to the default branch is never allowed** in a run, whatever the
+  switches say: the run's rules add it to what they never allow, which
+  allow everything doesn't go past
+  ([ADR-013](../decisions/013-project-rules.md)'s order). Then, as for any
+  rules that never allow something, a command the rules can't read (`eval`,
+  `$(…)`) is refused with how to spell it out. Merging was never an
+  agent's: `gh pr merge` and every other write to the code host are refused
+  in any mode (`hostReason` in `rules.ts`).
 - **Outward steps stay Althar's,** as today. Althar pushes and opens the
-  pull request at the end of a run, posts a review only when the person does
-  (call 5), and files an issue only when the person does. This is GitHub's
-  "safe outputs" design (the agent proposes, a separate trusted step writes,
-  with a cap for each kind), and Althar mostly has it. An automation's lead
-  gets no tool that writes outside the Mac, and two that ordinary leads have
-  are taken away: `reply_on_pull_request`, which posts on the pull request,
-  and `set_run_command`, since what it keeps runs in every next task's setup
-  as Althar's own process, outside the sandbox
+  pull request at the end of a run, as the automation's ending says: ready
+  for review, or a draft. It replies on the pull request when the lead asks
+  it to (`reply_on_pull_request`), and files an issue only when the person
+  does. This is GitHub's "safe outputs" design (the agent proposes, a
+  separate trusted step writes, with a cap for each kind), and Althar
+  mostly has it. One tool ordinary leads have is taken away:
+  `set_run_command`, since what it keeps runs in every next task's setup as
+  Althar's own process, outside the sandbox
   ([ADR-023](../decisions/023-althar-runs-the-project.md)).
-- **A draft pull request as policy, not as a prompt;** at most one open pull
-  request for each automation and subject; ready for review only where the
-  person chose it. It never merges, and pushing to the default branch always
-  asks. Today that holds only while the project's allow everything is off:
-  allow everything goes over what always asks
-  ([ADR-013](../decisions/013-project-rules.md)'s order,
-  [ADR-043](../decisions/043-allow-everything-is-one-switch-for-a-project-or-a-task.md)).
-- **Permissions are the project's rules, as they are.** What would ask the
-  person parks the run: its place goes after the 5 minutes an asking agent
-  already keeps it (`Busy.ts:186`), and the task waits in Needs you with the
-  automation named. Nothing widens for automations: they can't carry an
-  allow-everything of their own, and the project's doesn't reach them (call
-  6).
-- **Try it once now shows what it would ask.** Where the project's rules
-  ask a lot, automations will mostly park; the trial says so ("it asked 3
-  times") and points at the rules, before it's on. Claude Code's desktop
-  tasks carry the trial's "always allow" over to later runs; Althar's
-  Allow always already keeps a rule
-  ([ADR-018](../decisions/018-allow-always-keeps-a-rule.md)).
+- **Signed, with the automation's name.** Althar already signs the reviews
+  and replies it posts ("From Althar, by Claude Code", `signed` in
+  `pullRequestWords.ts`). An automation's say whose: "From Althar's morning
+  review, by Claude Code". So does the description of a pull request it
+  opens.
+- **A review asks once.** An automation's first review waits in Needs you
+  as a drafted review, with Post and "Post this automation's reviews from
+  now on". Chosen, its later reviews post themselves, and the page shows it
+  as a switch the person can turn off. A review of a pull request from
+  outside the team always waits, as it does today. The existing "Post
+  reviews of my team's pull requests without asking" doesn't reach an
+  automation, and posts from inside the drafting tool today
+  (`Reviews.ts:876`), so an automation's review needs its own check there.
+- **A review stays a reader,** whatever the switch: its lead only reads, in
+  its read-only copy, as any review's does (`decideReader` in `rules.ts`).
+- **Try it once now runs it as it would run,** before it's on, so the
+  person sees what it ends in.
 - **What came from outside is data.** An event's text (an issue's body, a
   pull request's title) goes into the brief quoted, marked as from outside,
-  as Claude's routines wrap theirs. Events from people GitHub doesn't name as
-  the repository's own fire nothing by default; allowed, the run is a reader
-  (no network, runs nothing), as a review of an outside pull request already
-  is (call 7). Who counts is whoever made it happen: who asked the review,
+  as Claude's routines wrap theirs. With every ask allowed, this is what
+  keeps a stranger from steering a run: events from people GitHub doesn't
+  name as the repository's own fire nothing by default; allowed, the run is
+  a reader (no network, runs nothing), as a review of an outside pull
+  request already is (call 7). Who counts is whoever made it happen: who asked the review,
   who put the label on, who opened the pull request. A teammate's label on
   an outsider's issue fires, and the issue's text is still quoted as from
   outside. A schedule's subject query takes the same test, and where the
@@ -438,25 +477,21 @@ again. Only a tighter limit doesn't: fewer runs a day, a shorter time.
   wait for the person. OpenCode always says a key, so it leads no
   automation at first. Per-use comes with cost accounting (`runs.budget` is
   already in the schema, unused).
-- **Each run's worktree:** a new task makes a worktree and runs its setup,
-  installing what the lockfile names
+- **Each run's worktree is its task's,** as for any task
+  ([ADR-006](../decisions/006-worktree-per-task.md), call 13): a new task
+  makes a worktree and runs its setup, installing what the lockfile names
   ([ADR-023](../decisions/023-althar-runs-the-project.md)), which takes
   minutes and gigabytes for a JavaScript project. Thirty nightly runs make
-  thirty worktrees. Either keep one warm worktree for each automation, or
-  remove a run's worktree once it settled with nothing to keep (nothing to
-  do; merged; reviewed and posted). Removing goes against what Althar
-  promises today, that it never removes the person's worktrees for them
-  ([ADR-006](../decisions/006-worktree-per-task.md),
-  [01](../architecture/01-concepts-and-project-model.md)), and a document an
-  agent handed back is gone with its worktree
-  ([ADR-020](../decisions/020-what-agents-hand-back.md)). So it is call 13.
-  This is the easiest place for automations to quietly fill a disk.
+  thirty worktrees. No rule of automations' own removes them: the clean-up
+  of finished task folders that is coming (DEV-143) does, for every task
+  alike, a review's soonest. Until it ships, this is the easiest place for
+  automations to quietly fill a disk.
 
 ## Failures, and what reaches the person
 
 | Mark | Meaning |
 |---|---|
-| Made something | A pull request, a drafted review, a held plan, a report |
+| Made something | A pull request, a review (drafted, or posted), a held plan, a report |
 | Nothing to do | Its query found nothing, so no task; or its lead looked and found nothing, and its task settled out of sight |
 | Failed | Its task stopped without finishing, or Althar couldn't start one: a query or a connector failed |
 | Missed | The Mac was asleep or Althar closed, past its window |
@@ -467,7 +502,8 @@ again. Only a tighter limit doesn't: fewer runs a day, a shorter time.
   `dispatched`, and a green routine in Claude "does not mean the task…
   succeeded"; both left people with silent failures.
 - **Quiet by default.** Runs show in the tab. The tasks they make show on
-  the board as any task does: a drafted review waits in Needs you. A query
+  the board as any task does: a review waiting to be posted waits in Needs
+  you. A query
   that found nothing makes no task and no notification. A lead that found
   nothing has a task, since a lead only runs in one, and a plan posts its
   card in the conversation when proposed (`Plans.ts:168`). So a run's card
@@ -490,7 +526,7 @@ again. Only a tighter limit doesn't: fewer runs a day, a shorter time.
   task carries on as any task does.
 - **One switch stops everything:** "Pause all automations", in the quick
   settings and the tab's menu. Removing a project pauses its automations.
-  Whether it also stops runs under way is call 15.
+  Runs under way finish; each can still be stopped from its card (call 15).
 
 ## Where they live
 
@@ -579,10 +615,11 @@ Then three steps, each a decision of its own:
 
 Superset, Claude's routines, Cursor and Copilot went to the cloud first for
 automations, because events and always-on are free there. Factory and
-Claude Code's desktop tasks show that local works for schedules. **My read:**
-local first is right for Althar, whose point is the person's own Mac and
-plans. A relay is the likeliest first cloud piece, if review requests should
-feel instant. Runs in the cloud only if Althar becomes a product for teams.
+Claude Code's desktop tasks show that local works for schedules. **The
+person's roadmap (call 12):** this Mac only now; the relay later, with an
+Althar account; then runs in the cloud, as a product of their own, paid per
+use, with the clock and leases coming with them. Nothing in the first
+version waits on either.
 
 ## Testing it
 
@@ -598,15 +635,18 @@ feel instant. Runs in the cloud only if Althar becomes a product for teams.
   occurrence naming it.
 - **Queries:** a listing with more than its cap, and one that fails, so the
   next slot still finds what they left.
-- **Rules:** a project with allow everything on, where an automation's push
-  to the default branch still asks.
+- **Rules:** an automation's run with every switch on, where a push to the
+  default branch is still refused, and a review's lead still only reads.
+- **Reviews:** an automation's first review waits; told to post from now
+  on, the next posts, signed with its name; one of an outsider's pull
+  request still waits.
 - **A soak:** thirty nightly fires against the fakes: the board stays calm,
   the disk bounded, no duplicates.
 - **Real accounts on demand,** one end-to-end run for each trigger, as the
   integrations do.
 - **Measures:** lag from due to start, missed and skipped by reason,
-  duplicates refused, polls and 304s an hour, runs that parked on a
-  permission.
+  duplicates refused, polls and 304s an hour, what runs did that would
+  have asked.
 
 ## In what order
 
@@ -616,99 +656,97 @@ feel instant. Runs in the cloud only if Althar becomes a product for teams.
    one after another, and a pull request can merge while its review waits;
    who may trigger, for a query's subjects; one place, for every step; time
    limits over all of a run's steps; pausing itself; plan accounts only,
-   checked; the follow-up round for a change automation; worktrees as call
-   13 settles them; open at login, offered the first time a schedule is
-   turned on. That covers release notes, the
-   nightly bump, the weekly polish and flaky sweeps, and the morning review,
-   a schedule with a pull request query.
+   checked; a new task each time, with at most five pull requests open;
+   allow everything for a run's task, with the default branch never; signed
+   outward steps; a review that asks once, then posts if told to; open at
+   login, offered the first time a schedule is turned on. That covers
+   release notes, the nightly bump, the weekly polish and flaky sweeps, and
+   the morning review, a schedule with a pull request query.
 2. **Events polled from GitHub:** review requested, checks failing on main,
    a label added, a pull request opened or merged; shared pollers with
    their cursors, ETags and answers kept on disk; who may trigger, for
    labels, from the issue's timeline.
-3. **More trackers, and paying per use:** Linear and GitLab triggers;
+3. **Carrying on the open one:** the follow-up round Althar opens, for a
+   change automation set to carry on its pull request (call 4).
+4. **More trackers, and paying per use:** Linear and GitLab triggers;
    per-use models with caps, once cost is counted.
-4. **The cloud, if and when:** the relay, then the clock and leases. Runs
-   in the cloud are a separate decision.
+5. **The cloud:** the relay, then runs in the cloud with the clock and
+   leases, each a product step of its own (call 12).
 
-## The calls that are the person's
+## What was decided
 
-1. **While Althar is closed.** (a) Automations run only while Althar runs,
-   and catch up when it opens; (b) as (a), with an opt-in "Open Althar at
-   login, in the background"; (c) a daemon that survives Quit. **I'd pick
-   (b).**
-2. **A run the Mac slept through.** (a) Run once on waking, within its
-   window, and say so in its history; (b) skip it; (c) hold it for the
-   person, as plans that came due are held today. **I'd pick (a),** changeable
-   on each automation's page.
-3. **What a fire does.** (a) Althar starts the kept plan on each subject;
-   (b) the coordinator is told it's time, and decides. **I'd pick (a).**
-4. **Each run: a new task, or the open one carried on.** **I'd pick** a new
-   task for each subject; reviews one task a pull request; a change
-   automation whose last pull request is still open carries that task on
-   with a follow-up round instead of opening another, its commits going up
-   to that pull request without asking, as a check fix's do. That round is
-   new to Althar (ADR-034). A task the person took over or stopped is
-   skipped.
-5. **What it may do with nobody there.** Draft pull requests yes; ready for
-   review only where chosen; never merge. Reviews: drafted only, or posted
-   under the existing "Post reviews of my team's pull requests without
-   asking"? **I'd pick drafted only** in the first version, whatever that
-   setting says. Today the setting posts at once, from inside the drafting
-   tool (`Reviews.ts:877`), so an automation's review needs its own check
-   there.
-6. **Permission asks at night.** **I'd pick** the project's rules as they
-   are, with asks parking in Needs you, and no allow-everything for an
-   automation alone. And the project's allow everything doesn't reach an
-   automation's run: what always asks, asks, and parks. The other way is to
-   let it through, which means an automation can push to the default branch
-   in a project that allows everything.
-7. **Events from people outside the team.** (a) They fire nothing; (b)
-   allowed, the run reads only (no network, runs nothing). **I'd pick (a)**
-   by default, with (b) on the automation's page.
-8. **The limits by default.** One place for automations; at least an hour
-   apart; 45 minutes of work a run, over all its steps; a cap on runs a day
-   for all automations together; on a usage limit, stop rather than move;
-   plan accounts only at first, which leaves OpenCode out, since it always
-   says a key. Keep, or change the numbers.
-9. **The coordinator's reach.** (a) Pausing, resuming and Run now in words,
-   with no card; (b) pausing in words, and resuming and Run now on a small
-   card. Any other change is on a card either way. **I'd pick (b):**
-   resuming and running spend, and the coordinator reads text from outside
-   that could ask it to.
-10. **Where they live.** **I'd pick** in Althar, the person's own, on the
-    Mac they were made on; no files in the repository at first.
-11. **Rules or automations** for what needs no agent (close the issue when
-    its pull request merges). **I'd pick rules.**
-12. **The cloud.** Is running agents in the cloud on the way in the next six
-    months or so, or is the person's own Mac the product? The model is the
-    same either way; it only changes how soon a relay is worth building.
-13. **A run's worktree.** (a) Keep one warm worktree for each automation,
-    set up once, for runs that follow each other; (b) remove a run's
-    worktree once it settled with nothing to keep, which ADR-006 doesn't
-    allow today; (c) keep them all, as any task's. **I'd pick (a) for
-    changes and plain sweeps, and (b) for review copies,** each only for what
-    an automation made, with nothing uncommitted, nothing running there and
-    no document it handed back still shown; ADR-006 gains that exception.
-14. **9:00 where the person is, or where it was made.** **I'd pick** where
-    the person is, read in the Mac's zone of the moment, as Calendar's
-    floating times do.
-15. **What Pause all stops.** (a) Only what would start; runs under way
-    finish; (b) every run under way too. **I'd pick (a):** stopping a run
-    halfway loses its work, as Cursor's cancelled runs do. Each running task
-    can still be stopped from its card.
+Asked of the person on 21 October 2026. Five calls were theirs. The other
+ten, and the word "run", are taken where Claude Code, Codex, Cursor, Orca
+and Superset agree, as the person asked; the numbers are the proposal's.
 
-And a word for the glossary: it keeps "run" off the screen, but the picked
-page says Run now, and the history shows runs. Either "run" joins the
-glossary for automations (a run: one time it fired, and the task it
-started), or the page finds other words.
+The person's:
 
-## What I'd still want to know
+- **4. A new task each time, or the open one carried on:** a choice on the
+  automation, a new task each time by default. Carrying on, for a change
+  automation whose pull request is still open, comes after the first
+  version. A review automation makes one review for each pull request,
+  since a review in Althar is of one pull request; a report is one task.
+- **5. What it may do with nobody there:** mostly anything, signed with the
+  automation's name. Pull requests as its ending says, replies on them,
+  never a merge. Its first review waits for the person, who can let its
+  next ones post by themselves.
+- **6. Permission asks at night:** they don't stop a run. Its task allows
+  everything, on by default and switchable on its page; pushing to the
+  default branch is never allowed, and allow everything doesn't go past
+  that.
+- **12. The cloud:** this Mac only now; a relay for GitHub's webhooks later,
+  with an Althar account; then runs in the cloud, a product of their own,
+  paid per use.
+- **13. A run's worktree:** its task's own, as any task's. The clean-up of
+  finished task folders that is coming (DEV-143) removes them, as it does
+  every task's.
+
+Taken where the other tools agree:
+
+- **1. While Althar is closed:** automations run while Althar runs, windows
+  or not, with an opt-in "Open Althar at login, in the background"; no
+  daemon. Claude Code's desktop tasks, Codex and Orca run only while their
+  app is open.
+- **2. A run the Mac slept through:** once on waking, within its window,
+  said in its history. Claude's desktop tasks run "exactly one catch-up run
+  for the most recently missed time"; Orca keeps a window for each
+  automation, 12 hours by default.
+- **3. What a fire does:** Althar starts the kept plan; the coordinator
+  isn't asked. Every one of them works this way.
+- **7. Events from outside the team** fire nothing by default; allowed, the
+  run only reads. claude-code-action and GitHub's agentic workflows do the
+  same, and with every ask allowed it matters more.
+- **8. The limits by default:** one place for automations; at least an hour
+  apart; 45 minutes of work a run, over all its steps; a cap on runs a day
+  for all automations together; on a usage limit, stop rather than move;
+  plan accounts only at first, which leaves OpenCode out; at most five of
+  an automation's pull requests open, Dependabot's limit.
+- **9. The coordinator's reach:** it pauses one in words; resuming and Run
+  now go on a small card, since both spend and the coordinator reads text
+  from outside. Any other change is on a card.
+- **10. Where they live:** in Althar, the person's own, on the Mac they were
+  made on; no files in the repository. Claude's desktop tasks and Orca keep
+  theirs on the machine that runs them.
+- **11. Rules for what needs no agent,** such as closing an issue when its
+  pull request merges. GitHub already closes an issue a merged pull request
+  names, and Linear moves its own.
+- **14. 9:00 where the person is,** in the Mac's zone of the moment. Claude
+  uses the local time; Orca the Mac's, unless a zone is pinned.
+- **15. Pause all** stops only what would start; runs under way finish.
+  Cursor cancelling running work is what its users complain about.
+
+**"Run" joins the glossary** for automations, when the tab ships: a run is
+one time an automation fired, and the task it started. Every one of the
+other tools says Run now and runs.
+
+## Still to find out
 
 - **What a run costs.** How much of a plan does a week of the morning review
   and the nightly bump use, on the person's own projects? Measure before
   fixing the defaults.
-- **How often runs park.** Under the person's real rules, how many asks does
-  each automation meet? Try it once now will show it; count it.
+- **What would have asked.** With every ask allowed, count what each run did
+  that the project's rules would have asked about, and whether never
+  pushing to the default branch is the only floor it needs.
 - **Unattended, agent by agent.** Do Claude Code, Codex and OpenCode each run
   inside the rules over ACP with nothing interactive Althar can't answer?
   Codex can't ask before a command its sandbox contains, which is why it
@@ -722,7 +760,7 @@ started), or the page finds other words.
   for a dark wake?
 - **Review fatigue.** In dotnet/runtime, 44% of the agent's closed pull
   requests were drafts nobody reviewed. How many open automation pull
-  requests are too many? One for each automation, to begin with.
+  requests are too many? Five for each automation, to begin with.
 - **Two Macs, travel, holidays.** Does the person use more than one Mac?
   Should there be "Pause all until Monday"?
 

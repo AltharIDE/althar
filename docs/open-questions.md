@@ -11,51 +11,48 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 
 ## Automations, 19 October
 
-The proposal, with what each way costs and what I'd pick, is
-[plans/automations.md](plans/automations.md). The prototype picked the
-Automations tab, as cards, each automation on its own page.
+Decided with the person on 21 October: five calls were theirs, the rest
+taken where Claude Code, Codex, Cursor, Orca and Superset agree. The build
+plan is [plans/automations.md](plans/automations.md), What was decided. The
+prototype picked the Automations tab, as cards, each automation on its own
+page.
 
-- [ ] **While Althar is closed.** Only while it runs, catching up when it
-  opens; that and an opt-in "Open Althar at login, in the background"; or a
-  daemon that survives Quit. Leaning: open at login, opt-in.
-- [ ] **A run the Mac slept through.** Run once on waking within its window;
-  skip it; or hold it for the person, as plans that came due are held.
-  Leaning: once, within the window.
-- [ ] **What a fire does.** Althar starts the kept plan on each subject, or
-  the coordinator is told and decides. Leaning: Althar starts it.
-- [ ] **Each run: a new task, or the open one carried on.** Leaning: a new
-  task for each subject; a change whose pull request is still open carries
-  on with a follow-up round, which is new, its commits going up as a check
-  fix's do; a task the person took over is skipped.
-- [ ] **What it may do with nobody there.** Leaning: draft pull requests,
-  reviews drafted only whatever the team-reviews setting says, never merge.
-- [ ] **Permission asks at night.** Leaning: the project's rules as they
-  are; asks park in Needs you; no allow-everything for an automation alone,
-  and the project's allow everything doesn't reach its runs.
-- [ ] **Events from outside the team.** Leaning: they fire nothing, unless
-  allowed, and then the run only reads.
-- [ ] **The limits by default.** One place; an hour apart at least; 45
+- [x] **While Althar is closed.** While Althar runs, windows or not, with an
+  opt-in "Open Althar at login, in the background"; no daemon.
+- [x] **A run the Mac slept through.** Once on waking, within its window.
+- [x] **What a fire does.** Althar starts the kept plan; the coordinator
+  isn't asked.
+- [x] **Each run: a new task, or the open one carried on.** A choice on the
+  automation, a new task each time by default; carrying on a change's open
+  pull request comes later. A review automation makes one review a pull
+  request.
+- [x] **What it may do with nobody there.** Mostly anything, signed with the
+  automation's name, never a merge. Its first review waits; the person can
+  let the next ones post by themselves.
+- [x] **Permission asks at night.** They don't stop a run: its task allows
+  everything, by default, and pushing to the default branch is never
+  allowed.
+- [x] **Events from outside the team.** They fire nothing, unless allowed,
+  and then the run only reads.
+- [x] **The limits by default.** One place; an hour apart at least; 45
   minutes of work a run, over all its steps; runs a day capped for all
   automations together; stop on a usage limit; plan accounts only at
-  first, which leaves OpenCode out.
-- [ ] **The coordinator's reach.** Leaning: pause in words; resume and Run
-  now on a small card; any other change on a card.
-- [ ] **Where they live.** Leaning: in Althar, the person's own, on the Mac
-  they were made on; no files in the repository.
-- [ ] **Rules or automations** for what needs no agent, such as closing an
-  issue when its pull request merges. Leaning: rules.
-- [ ] **The cloud.** Are runs in the cloud on the way, or is the person's
-  own Mac the product? It changes only how soon a webhook relay is worth it.
-- [ ] **A run's worktree.** One warm worktree for each automation; remove a
-  settled run's, which ADR-006 doesn't allow today; or keep them all.
-  Leaning: warm for changes and sweeps, removed for review copies, only what
-  an automation made.
-- [ ] **9:00 where the person is, or where it was made.** Leaning: where the
-  person is.
-- [ ] **What Pause all stops.** Only what would start, or runs under way
-  too. Leaning: only what would start.
-- [ ] **"Run" on screen.** The glossary keeps it off; the picked page has
-  Run now and a history of runs.
+  first, which leaves OpenCode out; at most five pull requests open.
+- [x] **The coordinator's reach.** Pause in words; resume and Run now on a
+  small card; any other change on a card.
+- [x] **Where they live.** In Althar, the person's own, on the Mac they were
+  made on; no files in the repository.
+- [x] **Rules or automations** for what needs no agent, such as closing an
+  issue when its pull request merges. Rules.
+- [x] **The cloud.** This Mac only now; a webhook relay later; then runs in
+  the cloud, a product of their own, paid per use.
+- [x] **A run's worktree.** Its task's own, as any task's; the clean-up of
+  finished task folders (DEV-143) removes them.
+- [x] **9:00 where the person is, or where it was made.** Where the person
+  is.
+- [x] **What Pause all stops.** Only what would start.
+- [x] **"Run" on screen.** It joins the glossary for automations when the
+  tab ships.
 
 ## Failures kept where they belong, 18 October
 
