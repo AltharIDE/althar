@@ -121,6 +121,6 @@
   margin-top: 2px;
 }
 .end button[data-state='open'] {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }

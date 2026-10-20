@@ -26,7 +26,7 @@
   color: var(--t-1);
 }
 .pill:active {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .pill:focus-visible {
   outline-offset: 2px;
@@ -106,7 +106,7 @@
   border-radius: 6px;
 }
 .row:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .rowGlyph {
   display: grid;

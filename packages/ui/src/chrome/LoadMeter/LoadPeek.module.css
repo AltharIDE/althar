@@ -167,7 +167,7 @@
   transition: background var(--fast) var(--ease);
 }
 .way:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .mark {
   margin-top: 2px;

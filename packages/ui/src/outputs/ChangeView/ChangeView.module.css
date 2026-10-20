@@ -130,7 +130,7 @@ div.made {
 }
 .on,
 .on:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .path {
   min-width: 0;

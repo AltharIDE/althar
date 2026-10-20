@@ -40,7 +40,7 @@
   background: var(--sunk);
 }
 .back:hover:not(:disabled) {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .title {
   min-width: 0;

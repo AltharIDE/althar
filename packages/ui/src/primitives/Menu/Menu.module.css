@@ -187,7 +187,7 @@
   outline: none;
 }
 .segment[data-highlighted]:not([aria-checked='true']) {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 .segment:focus-visible {

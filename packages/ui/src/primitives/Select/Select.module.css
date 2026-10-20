@@ -39,7 +39,7 @@
   background: var(--n-3);
 }
 .trigger:active:not([data-disabled]) {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .trigger[data-disabled] {
   color: var(--t-4);

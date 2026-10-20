@@ -27,7 +27,7 @@
   color: var(--t-1);
 }
 .option:active:not(:disabled) {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .option[aria-checked='true'] {
   background: var(--segment-on);
