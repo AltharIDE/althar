@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { desktopScheme, type Scheme, themeSourceFor } from '../src/main/colorScheme'
+import { desktopScheme, FIRST_SCHEME_WAIT, firstScheme, type Scheme, themeSourceFor } from '../src/main/colorScheme'
 import { PAGE, RAISED, windowOptions } from '../src/main/windowOptions'
 import { followScheme } from '../src/renderer/shared/scheme'
 
@@ -130,5 +130,56 @@ describe('the Linux desktop’s scheme, watched once', () => {
     follow(again)
     expect(watch).toHaveBeenCalledTimes(2)
     expect(again).not.toHaveBeenCalled()
+  })
+})
+
+describe('the first window on a Linux desktop matched', () => {
+  /** A desktop that answers after `after` ms, or never. */
+  const desktop = (answer: Scheme | undefined, after: number | null) => {
+    const left = vi.fn()
+    const follow = vi.fn((listener: (scheme: Scheme | undefined) => void) => {
+      if (after === 0) listener(answer)
+      else if (after !== null) setTimeout(() => listener(answer), after)
+      return left
+    })
+    return { follow, left }
+  }
+
+  it('waits for a slow desktop’s dark answer, and then stops listening', async () => {
+    vi.useFakeTimers()
+    try {
+      const { follow, left } = desktop(1, 900)
+      let opened: Scheme | undefined | 'not yet' = 'not yet'
+      void firstScheme(follow, FIRST_SCHEME_WAIT).then((scheme) => (opened = scheme))
+      await vi.advanceTimersByTimeAsync(800)
+      expect(opened).toBe('not yet')
+      await vi.advanceTimersByTimeAsync(100)
+      expect(opened).toBe(1)
+      expect(left).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('opens anyway, a moment on, where the desktop says nothing', async () => {
+    vi.useFakeTimers()
+    try {
+      const { follow, left } = desktop(undefined, null)
+      let opened: Scheme | undefined | 'not yet' = 'not yet'
+      void firstScheme(follow, FIRST_SCHEME_WAIT).then((scheme) => (opened = scheme))
+      await vi.advanceTimersByTimeAsync(FIRST_SCHEME_WAIT - 1)
+      expect(opened).toBe('not yet')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(opened).toBeUndefined()
+      expect(left).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('opens at once where the desktop has already said', async () => {
+    const { follow, left } = desktop(2, 0)
+    expect(await firstScheme(follow, FIRST_SCHEME_WAIT)).toBe(2)
+    expect(left).toHaveBeenCalledOnce()
   })
 })

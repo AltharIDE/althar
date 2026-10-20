@@ -140,6 +140,34 @@ export const desktopScheme = (watch: typeof watchColorScheme = watchColorScheme)
 /** The desktop's scheme, on Linux, watched once for all who follow it. */
 export const followDesktopScheme = desktopScheme()
 
+/** How long the first window waits for the desktop's first word on its scheme: the portal answers in a blink, or not at all. */
+export const FIRST_SCHEME_WAIT = 1500
+
+/**
+ * The desktop's first word on its scheme, from `follow`, or nothing once `within` ms pass without one (no portal, or
+ * one too slow): what the first window waits for on Linux while Appearance is as the system is, so it opens dark on a
+ * dark desktop rather than light and then dark.
+ */
+export const firstScheme = (
+  follow: (listener: (scheme: Scheme | undefined) => void) => () => void,
+  within: number,
+): Promise<Scheme | undefined> =>
+  new Promise((resolve) => {
+    let done = false
+    let leave: (() => void) | undefined
+    const finish = (scheme: Scheme | undefined) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      leave?.()
+      resolve(scheme)
+    }
+    const timer = setTimeout(() => finish(undefined), within)
+    leave = follow(finish)
+    // told at once, as a late listener is: it left before it knew how
+    if (done) leave()
+  })
+
 /**
  * What Electron's nativeTheme should follow for Settings › Appearance. Light and dark are themselves. As the system is,
  * a Mac's and Windows' own setting is what nativeTheme already follows; Linux's isn't, where Electron has no word from

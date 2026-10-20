@@ -7,7 +7,7 @@ import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
-import { followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
+import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { keepingAwake } from './awake'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
@@ -838,9 +838,13 @@ void ready.then(() => {
     const menu = appMenu(process.platform, !app.isPackaged)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
-  // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first.
+  // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
+  // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
   void preferencesRead
     .catch(() => undefined)
+    .then(() =>
+      process.platform === 'linux' && preferences.appearance === 'system' ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT) : undefined,
+    )
     .then(() => {
       if (windows.size === 0) openWindow()
     })
