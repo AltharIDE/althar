@@ -6,6 +6,7 @@ import {
   passwordStore,
   portalKeyUnavailable,
   portalSealUnavailable,
+  sealFailure,
   PORTAL_FEATURE,
   sealWithPortal,
   sealsWithPortal,
@@ -48,6 +49,15 @@ describe('sealing secrets by keyring', () => {
     expect(keyringUnavailable('darwin')).toBe('The keychain Althar seals sign-ins with isn’t available.')
     expect(portalKeyUnavailable).toContain('desktop Secret portal')
     expect(portalSealUnavailable).toContain('Sign in again')
+  })
+})
+
+describe('what main answers when safeStorage throws', () => {
+  it('says a sealed secret it cannot open is unreadable, which the runtime does not ask again, and a seal that fails is not', () => {
+    const thrown = new Error('Error while decrypting the ciphertext provided to safeStorage.decryptString.')
+    expect(sealFailure('open', thrown)).toEqual({ error: thrown.message, unreadable: true })
+    expect(sealFailure('seal', new Error('Encryption is not available.'))).toEqual({ error: 'Encryption is not available.' })
+    expect(sealFailure('open', 'odd')).toEqual({ error: 'odd', unreadable: true })
   })
 })
 
