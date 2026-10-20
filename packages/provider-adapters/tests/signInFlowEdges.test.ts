@@ -14,12 +14,15 @@ import { type SignInFlowEvent, type SignInFlowHandle, type SignInFlowOptions, st
  * that lives out on the device, a page printed on a line never ended.
  */
 
-/** A Codex app-server that answers each method as `plan` says, and tells of a cancel in `marker`, holding on through a kill. */
+/**
+ * A Codex app-server that answers each method as `plan` says. Given a `marker`, it holds on through a kill long enough to
+ * read a cancel and tell of it there, and stops by itself after ten seconds whatever happens.
+ */
 const CODEX = (plan: Readonly<Record<string, unknown>>, marker = '') => `
 const plan = ${JSON.stringify(plan)}
 let buffer = ''
 const say = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
-process.on('SIGTERM', () => {})
+${marker === '' ? '' : "process.on('SIGTERM', () => {}); setTimeout(() => process.exit(0), 10000)"}
 process.stdin.on('data', (data) => {
   buffer += data
   for (let at = buffer.indexOf('\\n'); at >= 0; at = buffer.indexOf('\\n')) {
