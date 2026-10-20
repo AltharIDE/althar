@@ -3801,10 +3801,14 @@ export class Runs extends Context.Service<
       yield* Effect.forkScoped(provide(keptGoing('Runs.holds', holds)))
 
       // What the person says to a task's lead after its plan opens a round of work, as the turn begins (ADR-034); Althar's own words don't.
+      // The turn opened its first step before the step was there: it is marked as that step's, which a step's model is read from.
       yield* sessions.onPersonsTurn((lead) =>
-        provide(Effect.asVoid(openRound(lead.taskId, lead.sessionId))).pipe(
-          Effect.catchCause((cause) => Effect.logWarning('Could not open a round of work for the person’s turn', cause)),
-        ),
+        provide(
+          Effect.gen(function* () {
+            const opened = yield* openRound(lead.taskId, lead.sessionId)
+            if (opened !== undefined) yield* change('turn_deliveries', lead.deliveryId, { nodeAttemptId: opened.attemptId })
+          }),
+        ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not open a round of work for the person’s turn', cause))),
       )
 
       // Each turn a step's agent ends, and each session that goes, is checked for the report its step needs.

@@ -131,6 +131,21 @@ describe('a task’s graph', () => {
         assert.strictEqual(after.steps[0]?.model, other)
         assert.strictEqual(rounds[0]?.steps[0]?.model, was)
         assert.isTrue(after.steps.every((step) => step.state === 'done'))
+
+        // The turn that opened the follow-up, given before its step was there, is that step's.
+        const [opener] = yield* (yield* SqlClient.SqlClient)<{ model: string | null; marked: number }>`
+          SELECT model, node_attempt_id IS NOT NULL AS marked FROM turn_deliveries
+          WHERE thread_id = ${card.threadId} AND prompt LIKE ${'%Also log each retry.%'} ORDER BY requested_at LIMIT 1`
+        assert.deepStrictEqual([opener?.model, opener?.marked], [other, 1])
+
+        // Switched back, each round stays on the model it ran on.
+        const followed = new Map(after.steps.map((step) => [`${step.key}${step.iteration}`, step.model]))
+        yield* (yield* Sessions).setModel({ threadId: card.threadId, model: was })
+        const back = yield* graphOf(card.threadId)
+        assert.deepStrictEqual(
+          back.map((each) => new Map(each.steps.map((step) => [`${step.key}${step.iteration}`, step.model]))),
+          [ran, followed],
+        )
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,

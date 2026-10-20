@@ -2198,11 +2198,13 @@ export class Queries extends Context.Service<
               }>`
                 SELECT n.id, n.execution_id, n.node_key, n.iteration, n.state, a.state AS try_state, a.hold_reason, s.agent_id,
                   -- The model it ran on, as its session's last turn in it was given: a session's own is what it is on now, and
-                  -- a switch would move what it did before to the new one; else that, as for a try not given a turn yet.
+                  -- a switch would move what it did before to the new one; else that, as for a try not given a turn yet. The
+                  -- person's turn that opens a follow-up comes just before its first step does, and is marked as that step's.
                   COALESCE((
                     SELECT t.model FROM turn_deliveries t
-                    WHERE t.provider_session_id = a.provider_session_id AND t.model IS NOT NULL AND t.requested_at >= a.admitted_at
-                      AND (a.ended_at IS NULL OR t.requested_at <= a.ended_at)
+                    WHERE t.provider_session_id = a.provider_session_id AND t.model IS NOT NULL
+                      AND (t.node_attempt_id = a.id
+                        OR (t.requested_at >= a.admitted_at AND (a.ended_at IS NULL OR t.requested_at <= a.ended_at)))
                     ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1
                   ), s.model) AS model,
                   a.started_at, a.ended_at
