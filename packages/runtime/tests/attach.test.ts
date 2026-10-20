@@ -12,9 +12,11 @@ import { SqlClient } from 'effect/sql'
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
+import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import * as Runtime from '../src/Runtime'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
@@ -457,6 +459,112 @@ describe('a task attached to a pull request it didn’t open', () => {
       assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
       const [change] = yield* (yield* Changes).ofTask(workspace?.taskId ?? '')
       assert.strictEqual(change?.url, 'https://github.com/meridian/api/pull/1')
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+})
+
+describe('attaching a task to a pull request, refused', () => {
+  /** What attaching the task to the pull request named says, where it is refused. */
+  const refusalOf = (taskId: string, pullRequest: string, personId: Parameters<Changes['Service']['attach']>[0]['actorId']) =>
+    Effect.gen(function* () {
+      const refused = yield* Effect.flip((yield* Changes).attach({ taskId, pullRequest, start: true, actorId: personId }))
+      return (refused as { readonly message?: string }).message
+    })
+
+  it.live('says what it needs where the pull request named isn’t one it can find, and what the host said', () => {
+    const { github, working } = forked()
+    return Effect.gen(function* () {
+      const { task, personId } = yield* project(working)
+      const refused = (pullRequest: string) => refusalOf(task.taskId, pullRequest, personId)
+      assert.strictEqual(yield* refused('the one Dana opened'), 'Give the pull request’s link, or its number: #123.')
+      assert.strictEqual(yield* refused('#99'), 'That pull request isn’t there, or Althar’s sign-in can’t see it.')
+      github.failNext('change', 'forbidden')
+      assert.strictEqual(yield* refused('#1'), 'The host said: The fake change failed (forbidden)')
+      assert.strictEqual(yield* refused(`${HOST}/meridian/api/issues/3`), 'That link isn’t to a pull request.')
+      assert.strictEqual(
+        yield* refused('https://gitlab.example/meridian/api/-/merge_requests/1'),
+        'Althar isn’t connected to where that link points. Connect its host in Settings, then attach it.',
+      )
+      assert.strictEqual(
+        yield* refused(`${HOST}/acme/tools/pull/4`),
+        'That pull request is on acme/tools, which isn’t one of the task’s repositories.',
+      )
+      assert.lengthOf(yield* (yield* Changes).ofTask(task.taskId), 0)
+      // A task there isn't, isn't found.
+      assert.instanceOf(
+        yield* Effect.flip((yield* Changes).attach({ taskId: 'task_none', pullRequest: '#1', start: true, actorId: personId })),
+        NotFound,
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('only for an open task whose repository is on a connected host', () => {
+    const { github, working } = forked()
+    return Effect.gen(function* () {
+      const { projectId, task, personId } = yield* project(working)
+      const tasks = yield* Tasks
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { taskId: task.taskId }), taskId: task.taskId })
+      assert.strictEqual(yield* refusalOf(task.taskId, '#1', personId), 'The task is abandoned: only an open one follows a pull request.')
+      const other = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Answer it' }),
+        projectId,
+        title: 'Answer it',
+      })
+      const connections = yield* Connections
+      const [connection] = yield* connections.list
+      yield* connections.remove(connection?.id ?? '', personId)
+      assert.strictEqual(
+        yield* refusalOf(other.taskId, '#1', personId),
+        'The task’s repository isn’t on a code host Althar is connected to. Connect it in Settings.',
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('where its branch is on a fork that is gone, or can’t be fetched', () => {
+    const gone = forked({ fork: [] })
+    return Effect.gen(function* () {
+      const { task, personId } = yield* project(gone.working)
+      assert.strictEqual(yield* refusalOf(task.taskId, '#1', personId), 'PR #1’s branch was on a fork that is gone.')
+    })
+      .pipe(Effect.provide(withQueries(gone.github)))
+      .pipe(
+        Effect.andThen(() => {
+          const away = forked()
+          // Deleted on the fork since: there's nothing to fetch.
+          git(away.bare, 'branch', '-q', '-D', 'fix-send-back')
+          return Effect.gen(function* () {
+            const { task, personId } = yield* project(away.working)
+            assert.strictEqual(
+              yield* refusalOf(task.taskId, '#1', personId),
+              'Althar couldn’t fetch PR #1’s branch, fix-send-back, from you/api.',
+            )
+          }).pipe(Effect.provide(withQueries(away.github)))
+        }),
+      )
+  })
+
+  it.live('leaves the task’s branch as it was where starting it from the head would lose what isn’t committed, or conflict', () => {
+    const { github, working } = forked()
+    return Effect.gen(function* () {
+      const { task, personId } = yield* project(working)
+      const before = git(task.worktree, 'rev-parse', 'HEAD')
+      writeFileSync(join(task.worktree, 'notes.md'), 'not committed\n')
+      assert.strictEqual(
+        yield* refusalOf(task.taskId, '#1', personId),
+        'What isn’t committed in its worktree would be lost: notes.md. Commit it or drop it, then attach PR #1.',
+      )
+      assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), before)
+      // Its own commit changes the head's file otherwise: they conflict.
+      git(task.worktree, 'clean', '-q', '-f')
+      const mine = commit(task.worktree, 'send.ts', 'export const sendBack = () => 2\n')
+      assert.strictEqual(
+        yield* refusalOf(task.taskId, '#1', personId),
+        'The task’s own commits conflict with PR #1’s head in send.ts, so its branch stays as it was.',
+      )
+      assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), mine)
+      assert.strictEqual(git(task.worktree, 'branch', '--show-current'), task.branch)
+      assert.strictEqual(git(task.worktree, 'status', '--porcelain'), '')
+      assert.lengthOf(yield* (yield* Changes).ofTask(task.taskId), 0)
     }).pipe(Effect.provide(withQueries(github)))
   })
 })
