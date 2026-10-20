@@ -743,9 +743,28 @@ const evaluates = (text: string, at: number) => {
  * A command line without the bodies of its quoted heredocs (`<<'EOF'`,
  * `<<"EOF"`, `<<-'EOF'`, `<<\EOF`): the shell takes that text literally, so it
  * runs nothing, whatever backticks or words like `push` it holds. An unquoted
- * heredoc's body stays, as the shell expands `$(…)` and backticks in it. The
- * operator and the line it is on stay; the body and its closing line go.
+ * heredoc's body stays, as the shell expands `$(…)` and backticks in it. So does
+ * the body of one a shell or interpreter reads (`sh <<'EOF'`), which runs it, and
+ * one that is never closed. The operator and the line it is on stay; the body and
+ * its closing line go. Comments are skipped, as `# <<'EOF'` opens nothing.
  */
+/** Programs that run what they read, or may: a quoted heredoc fed to one is a script, not text. */
+const readsScripts =
+  /^(?:[a-z]*sh|ksh\d*|eval|source|\.|xargs|ssh|python[\d.]*|pypy\d*|node|nodejs|bun|deno|tsx|ts-node|ruby|irb|perl|php|lua|tclsh|expect|osascript|pwsh|powershell|cmd)$/
+
+/** Whether the line a heredoc is opened on names a program that may run its body, or one we cannot name (`$SHELL`, `$(which sh)`). */
+const mayRunItsBody = (text: string, at: number): boolean => {
+  const start = text.lastIndexOf('\n', at - 1) + 1
+  const stop = text.indexOf('\n', at)
+  return text
+    .slice(start, stop === -1 ? text.length : stop)
+    .split(/[\s;&|()<>]+/)
+    .some((word) => {
+      const bare = word.replace(/['"\\]/g, '')
+      return bare.startsWith('$') || bare.includes('`') || readsScripts.test(bare.slice(bare.lastIndexOf('/') + 1))
+    })
+}
+
 export const withoutQuotedHeredocs = (text: string): string => {
   if (!text.includes('<<')) return text
   let out = ''
@@ -773,6 +792,13 @@ export const withoutQuotedHeredocs = (text: string): string => {
       index++
       continue
     }
+    if (char === '#' && (index === 0 || /[\s;&|(]/.test(text[index - 1] ?? ''))) {
+      const stop = text.indexOf('\n', index)
+      const end = stop === -1 ? text.length : stop
+      out += text.slice(index, end)
+      index = end
+      continue
+    }
     if (text.startsWith('<<<', index)) {
       out += '<<<'
       index += 3
@@ -785,7 +811,7 @@ export const withoutQuotedHeredocs = (text: string): string => {
         pending.push({
           end: word.replace(/'([^']*)'|"([^"]*)"|\\(.)/g, '$1$2$3'),
           tabs: opener[1] === '-',
-          literal: /['"\\]/.test(word),
+          literal: /['"\\]/.test(word) && !mayRunItsBody(text, index),
         })
         out += opener[0]
         index += opener[0].length
@@ -797,19 +823,23 @@ export const withoutQuotedHeredocs = (text: string): string => {
     if (char === '\n' && pending.length > 0) {
       for (const heredoc of pending) {
         // Up to and including the line that closes it, or the end of the text where nothing does.
+        const from = index
         let body = ''
         let closing = ''
+        let closed = false
         while (index < text.length) {
           const stop = text.indexOf('\n', index)
           const line = text.slice(index, stop === -1 ? text.length : stop)
           index = stop === -1 ? text.length : stop + 1
           if ((heredoc.tabs ? line.replace(/^\t+/, '') : line) === heredoc.end) {
             closing = `${line}\n`
+            closed = true
             break
           }
           body += `${line}\n`
         }
-        if (!heredoc.literal) out += `${body}${closing}`
+        if (!closed) out += text.slice(from)
+        else if (!heredoc.literal) out += `${body}${closing}`
       }
       pending = []
     }
