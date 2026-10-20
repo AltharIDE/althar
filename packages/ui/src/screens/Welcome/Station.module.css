@@ -257,7 +257,7 @@
   z-index: 4;
   opacity: 0;
   pointer-events: none;
-  background: rgba(20, 20, 28, 0.05);
+  background: color-mix(in srgb, var(--t-1) 5%, transparent);
   mix-blend-mode: multiply;
   transition:
     opacity 200ms var(--ease),
@@ -267,7 +267,7 @@
   opacity: 1;
 }
 .washDown {
-  background: rgba(20, 20, 28, 0.1);
+  background: color-mix(in srgb, var(--t-1) 10%, transparent);
 }
 
 /* the pointer: a hand on the table showing what a person would do */

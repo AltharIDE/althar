@@ -108,6 +108,11 @@
   --signal-on-ink: #a77bff;
   --signal-on-ink-hover: #b994ff;
   --signal-on-ink-pressed: #9566f2;
+  /* What sits on what is dark in any theme (the lightbox, a dark terminal):
+     unlike --on-ink, these stay light when the theme is dark. */
+  --on-dark: #ffffff;
+  --on-dark-2: #c9c7c0;
+  --on-dark-focus: #b99bff;
 
   /* ---- Terminal, dark -----------------------------------------------------
      Command output on its own dark sheet. The near-greys are kept apart

@@ -1,4 +1,5 @@
 /* The only global styles: tokens and the base layer. Everything else is a
    CSS module beside its component. */
 @import './tokens.css';
+@import './themes.css';
 @import './base.css';

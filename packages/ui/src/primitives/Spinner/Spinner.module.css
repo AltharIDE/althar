@@ -28,6 +28,6 @@
   }
 }
 .onFill {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: color-mix(in srgb, var(--on-ink) 30%, transparent);
   border-top-color: var(--on-ink);
 }

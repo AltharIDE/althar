@@ -252,8 +252,8 @@ export const startEdge = (host: EdgeHost): Edge => {
     const made = new BrowserWindow({
       ...shared(host.preload),
       ...sheetPlace(SHEET.height),
-      // Paper, with the system's own corners and shadow, as a menu has.
-      backgroundColor: '#fcfbf8',
+      // Paper, with the system's own corners and shadow, as a menu has; the kit's raised shade (--n-1) in the theme's scheme.
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#222225' : '#fcfbf8',
       hasShadow: true,
       roundedCorners: true,
     })

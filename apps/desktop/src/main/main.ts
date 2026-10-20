@@ -43,6 +43,7 @@ import {
   Menu,
   MessageChannelMain,
   nativeImage,
+  nativeTheme,
   net,
   Notification,
   powerMonitor,
@@ -54,7 +55,7 @@ import {
   utilityProcess,
 } from 'electron'
 
-import { appMenu, windowOptions } from './windowOptions'
+import { appMenu, PAGE, windowOptions } from './windowOptions'
 import { keyringIsSafe, keyringUnavailable, passwordStore, sealWithPortal, sealsWithPortal, withPortalFeature } from './keyring'
 
 /*
@@ -249,6 +250,8 @@ let preferences: AppPreferences = DEFAULT_PREFERENCES
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
   awake.wants(kept)
+  // Light, dark or as the system is: the windows' pages follow the scheme this gives, and their paper below (paintPaper).
+  nativeTheme.themeSource = kept.appearance
   // A count the runtime gave before the file was read is shown again as the person has it.
   if (waiting > 0) app.setBadgeCount(dockCount(waiting, kept))
 })
@@ -572,6 +575,13 @@ const openOutside = (url: string) => {
 /** Althar's picture for the window's icon on Linux, at the size X11 takes: the full-size file would silently overflow the property and leave the window iconless. */
 const windowIcon = () => nativeImage.createFromPath(join(here, '../../resources/icons/cobalt.png')).resize({ width: 128, height: 128 })
 
+/** The paper under every window's page, in the scheme's shade: what shows as it resizes, or before the page draws. */
+const paintPaper = () => {
+  const paper = nativeTheme.shouldUseDarkColors ? PAGE.dark : PAGE.light
+  for (const window of windows) if (!window.isDestroyed()) window.setBackgroundColor(paper)
+}
+nativeTheme.on('updated', paintPaper)
+
 const openWindow = () => {
   const window = new BrowserWindow({
     width: 1280,
@@ -580,7 +590,7 @@ const openWindow = () => {
     minHeight: 600,
     show: false,
     // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), and on Linux it carries Althar's icon.
-    ...windowOptions(process.platform, windowIcon()),
+    ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
       sandbox: true,
@@ -717,6 +727,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
   awake.wants(preferences)
+  nativeTheme.themeSource = preferences.appearance
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })

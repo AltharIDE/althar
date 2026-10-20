@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useRef, use
 import { cx } from '../../lib/cx'
 import { reducedMotion } from '../../lib/motion'
 import type { RootProps } from '../../lib/props'
+import { useTheme } from '../../lib/theme'
 import { BORE, DOTS, PARTICLES } from '../../foundations/HalftoneMark/halftone'
 import { COLUMNS, drawColumn, drawGrain, PICTURE } from '../../foundations/Light/columns'
 import { arrivalOf, AT, clamp, dotAt, lightAt, particleAt, pointAt, SETTLED, type Speck, springEasing } from './timeline'
@@ -104,7 +105,8 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
   const skipped = useRef(false)
   const finished = useEffectEvent(() => onDone?.())
 
-  // The light's columns, each drawn once and soft already, and its grain.
+  const theme = useTheme()
+  // The light's columns, each drawn once and soft already, and its grain; again in another theme, whose cobalt differs.
   useLayoutEffect(() => {
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
     COLUMNS.forEach((column, i) => {
@@ -118,7 +120,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
       drawGrain(context, 128)
       grain.current.style.backgroundImage = `url(${tile.toDataURL()})`
     }
-  }, [])
+  }, [theme])
 
   useEffect(() => {
     const fast = quick || reducedMotion()

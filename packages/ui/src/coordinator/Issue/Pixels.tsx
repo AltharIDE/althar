@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 
 import { cx } from '../../lib/cx'
+import { useTheme } from '../../lib/theme'
 import s from './Pixels.module.css'
 
 /*
@@ -44,6 +45,7 @@ interface Field {
 export function Pixels({ cell = 5, gap = 2, fps = 18, playing = false, className }: PixelsProps) {
   const ref = useRef<HTMLCanvasElement>(null)
   const field = useRef<Field | null>(null)
+  const theme = useTheme()
 
   /* the field itself: its size, its squares, one still frame, and what keeps it current */
   useEffect(() => {
@@ -141,6 +143,14 @@ export function Pixels({ cell = 5, gap = 2, fps = 18, playing = false, className
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
   }, [playing, fps])
+
+  /* another theme: its colour read again, and the still frame drawn in it */
+  useEffect(() => {
+    const f = field.current
+    if (!f) return
+    f.recolour()
+    f.draw()
+  }, [theme])
 
   return <canvas ref={ref} className={cx(s.pixels, className)} aria-hidden="true" />
 }
