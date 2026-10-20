@@ -156,12 +156,12 @@ const READABLE = 0.9
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
 
-/** All of it, as large as fits and never larger than life: centred across, a third of the way down. */
+/** All of it, as large as fits and never larger than life: centred across, its lanes from the top, under the markers. */
 export function fitView(layout: Layout, room: Room): View {
   const aw = room.w - room.left
   const ah = room.h - room.top
   const k = clamp(Math.min(aw / layout.w, ah / layout.h, 1), ZOOM.min, ZOOM.max)
-  return { k, x: room.left + (aw - layout.w * k) / 2, y: room.top + Math.max(0, (ah - layout.h * k) / 3) }
+  return { k, x: room.left + (aw - layout.w * k) / 2, y: room.top }
 }
 
 /** Where the task stands, in the middle, at least readable. */
@@ -188,7 +188,8 @@ export function openingView(layout: Layout, room: Room): View {
   const h = layout.h * k
   const start = layout.rounds.at(-1)?.x ?? 0
   const fromStart = (layout.focus.x + CARD.w / 2 - start) * k <= aw - 24
-  const x = fromStart ? room.left - start * k : clamp(room.left + aw * 0.62 - layout.focus.x * k, room.left + aw - w, room.left)
+  // From its start, the line before it tucked under the agents' edge, so the two don't read as a double line.
+  const x = fromStart ? room.left - 1 - start * k : clamp(room.left + aw * 0.62 - layout.focus.x * k, room.left + aw - w, room.left)
   return {
     k,
     x: w <= aw ? room.left + (aw - w) / 2 : x,

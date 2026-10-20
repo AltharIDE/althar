@@ -121,7 +121,7 @@ describe('how a task’s graph is looked at', () => {
   it('opens readable on the round at work from its start, where all of it wouldn’t be', () => {
     const view = openingView(long, room)
     expect(view.k).toBe(0.9)
-    expect(view.x).toBe(room.left - long.rounds[1]!.x * 0.9)
+    expect(view.x).toBe(room.left - 1 - long.rounds[1]!.x * 0.9)
   })
 
   it('opens on the step at work where the round at work is too long to show from its start', () => {
@@ -195,6 +195,17 @@ describe('a task’s graph on screen', () => {
     expect(region.querySelector('[class*="gutter"]')).toHaveTextContent(/^Opus 5leadCodexAlthar$/)
   })
 
+  it('draws each line, and its head, in its look', () => {
+    render(<StepGraph lanes={lanes} rounds={rounds} steps={steps} />)
+    const svg = screen.getByRole('region', { name: 'The task’s steps' }).querySelector('svg')
+    const lines = [...(svg?.querySelectorAll(':scope > path') ?? [])]
+    const heads = [...(svg?.querySelectorAll('marker path') ?? [])]
+    expect(lines).toHaveLength(2)
+    // A look whose class didn't resolve would leave a line undrawn: each has the line's class and its look's.
+    for (const line of lines) expect(line.getAttribute('class')?.trim().split(/\s+/)).toHaveLength(2)
+    for (const head of heads) expect(head.getAttribute('class')).toBeTruthy()
+  })
+
   it('zooms with ⌘ and the wheel, pans with the wheel alone, and says the zoom it is at', () => {
     render(<StepGraph lanes={lanes} rounds={rounds} steps={steps} />)
     const canvas = screen.getByRole('region', { name: 'The task’s steps' })
@@ -262,6 +273,22 @@ describe('a task’s graph on screen', () => {
     expect(scale()).toBeCloseTo(1.08)
     fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }))
     expect(scale()).toBeCloseTo(0.9)
+  })
+
+  it('keeps where the task stands in view as steps come, until the person moves it', () => {
+    const { rerender } = render(<StepGraph lanes={lanes} rounds={rounds} steps={steps} />)
+    const world = screen.getByRole('region', { name: 'The task’s steps' }).querySelector('[class*="world"]') as HTMLElement
+    const more = [...steps, { id: 'follow-up', lane: 'lead', round: 'r1', label: 'Follow-up', state: GraphNodeState.Now }]
+    const at = world.style.transform
+    rerender(<StepGraph lanes={lanes} rounds={rounds} steps={more} />)
+    expect(world.style.transform).not.toBe(at)
+    // Moved by the person, it stays where they put it as more comes.
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    const theirs = world.style.transform
+    rerender(
+      <StepGraph lanes={lanes} rounds={rounds} steps={[...more, { ...more[3]!, id: 'review-2', lane: 'reviewer', label: 'Review 2' }]} />,
+    )
+    expect(world.style.transform).toBe(theirs)
   })
 
   it('brings a card it tabs to into view', () => {

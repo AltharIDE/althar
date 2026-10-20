@@ -72,33 +72,33 @@
   stroke-width: 1.25;
   stroke-linejoin: round;
 }
-.edge-done {
+.edgeDone {
   stroke: var(--t-4);
 }
-.head-done {
+.headDone {
   fill: var(--t-4);
 }
-.edge-round,
-.edge-next {
+.edgeRound,
+.edgeNext {
   stroke: var(--line-3);
 }
-.edge-next {
+.edgeNext {
   stroke-dasharray: 3 4;
 }
-.head-round,
-.head-next {
+.headRound,
+.headNext {
   fill: var(--line-3);
 }
-.edge-live {
+.edgeLive {
   stroke: var(--live);
 }
-.head-live {
+.headLive {
   fill: var(--live);
 }
-.edge-you {
+.edgeYou {
   stroke: var(--signal);
 }
-.head-you {
+.headYou {
   fill: var(--signal);
 }
 

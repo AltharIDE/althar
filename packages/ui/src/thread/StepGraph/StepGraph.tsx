@@ -153,6 +153,21 @@ const STEP_ZOOM = 1.2
 const DOTS = 18
 
 const LOOKS: readonly EdgeLook[] = ['done', 'next', 'live', 'you', 'round']
+/** Each look's line and head, by class. */
+const EDGE: Readonly<Record<EdgeLook, string | undefined>> = {
+  done: s.edgeDone,
+  next: s.edgeNext,
+  live: s.edgeLive,
+  you: s.edgeYou,
+  round: s.edgeRound,
+}
+const HEAD: Readonly<Record<EdgeLook, string | undefined>> = {
+  done: s.headDone,
+  next: s.headNext,
+  live: s.headLive,
+  you: s.headYou,
+  round: s.headRound,
+}
 
 export function StepGraph({ lanes, rounds, steps, detail, open, onOpenChange, onRound, text, className, ...rest }: StepGraphProps) {
   const t = { ...stepGraphText, ...text }
@@ -180,16 +195,19 @@ export function StepGraph({ lanes, rounds, steps, detail, open, onOpenChange, on
     watch.observe(element)
     return () => watch.disconnect()
   }, [])
-  // Placed once, as it is first measured: what changes after, a step starting or ending, never moves it under the person.
+  // Placed as it is measured, and again as its steps or its room change, to keep where the task stands in view: until the
+  // person moves it, after which it stays where they put it; and never while a report is open by its card.
+  const moved = useRef(false)
   const placed = useRef(false)
   useLayoutEffect(() => {
-    if (room === null || placed.current) return
+    if (room === null || (placed.current && (moved.current || opened !== null))) return
     placed.current = true
     setView(openingView(layout, room))
-  }, [layout, room])
+  }, [layout, room, opened])
 
   // A view the person moves to closes what is open: its popover stays by the card it was opened from.
   const move = (next: View | ((current: View) => View)) => {
+    moved.current = true
     if (opened !== null) openStep(null)
     setView((current) => (current === null ? current : typeof next === 'function' ? next(current) : next))
   }
@@ -308,17 +326,12 @@ export function StepGraph({ lanes, rounds, steps, detail, open, onOpenChange, on
                       orient="auto"
                       markerUnits="userSpaceOnUse"
                     >
-                      <path d="M 0 0.5 L 7.5 4 L 0 7.5 Z" className={s[`head-${look}`]} />
+                      <path d="M 0 0.5 L 7.5 4 L 0 7.5 Z" className={HEAD[look]} />
                     </marker>
                   ))}
                 </defs>
                 {layout.edges.map((edge) => (
-                  <path
-                    key={edge.id}
-                    d={edge.d}
-                    className={cx(s.edge, s[`edge-${edge.look}`])}
-                    markerEnd={`url(#step-graph-${edge.look})`}
-                  />
+                  <path key={edge.id} d={edge.d} className={cx(s.edge, EDGE[edge.look])} markerEnd={`url(#step-graph-${edge.look})`} />
                 ))}
               </svg>
               <ol className={s.cards}>
@@ -334,7 +347,12 @@ export function StepGraph({ lanes, rounds, steps, detail, open, onOpenChange, on
                       who={lane.who}
                       state={t.state[step.state]}
                       opened={opened === step.id}
-                      onFocus={() => room !== null && setView((current) => (current === null ? current : showing(current, place, room)))}
+                      onFocus={() => {
+                        if (room === null) return
+                        // Tabbed to, a card is brought into view: the person's move, which the canvas then keeps.
+                        moved.current = true
+                        setView((current) => (current === null ? current : showing(current, place, room)))
+                      }}
                     />
                   )
                   return (
