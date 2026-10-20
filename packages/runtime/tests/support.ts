@@ -281,7 +281,8 @@ export const runtime = (
     ...(more.editors === undefined ? {} : { editors: more.editors }),
     setups: { shell: '/bin/sh', ...more.setups },
     ...(more.load === undefined ? {} : { load: more.load }),
-    ...(more.usage === undefined ? {} : { usage: more.usage }),
+    // No test reads a real sign-in: a provider's usage endpoint answers that there is none, unless a test says.
+    usage: { readEndpoint: () => Promise.resolve({ kind: 'none' as const }), ...more.usage },
     ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     busy: { machine: ROOMY, ...more.busy },

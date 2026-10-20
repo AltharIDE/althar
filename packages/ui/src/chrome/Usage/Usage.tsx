@@ -35,7 +35,14 @@ export interface UsageMeterRow {
 }
 
 /** Why an account has no numbers, or old ones. */
-export type UsageFaultKind = 'sign_in_again' | 'source_changed' | 'unreachable' | 'no_source' | 'no_data_yet' | 'cannot_classify'
+export type UsageFaultKind =
+  | 'sign_in_again'
+  | 'expired'
+  | 'source_changed'
+  | 'unreachable'
+  | 'no_source'
+  | 'no_data_yet'
+  | 'cannot_classify'
 
 /** One account of an agent. */
 export interface UsageAccountRow {
@@ -50,6 +57,8 @@ export interface UsageAccountRow {
   source: string | null
   /** Why the numbers are missing, or the last ones; the consumer writes the message. */
   fault: { kind: UsageFaultKind; message: string } | null
+  /** Why no usage is read for it, where its agent reports none: said calmly, in place of the meters. */
+  noReading?: string | null
 }
 
 /** An agent and its accounts. */
@@ -111,6 +120,7 @@ export const usageText: UsageText = {
   meter: (left, resets) => `${left}, ${resets}`,
   fault: {
     sign_in_again: 'Sign in again',
+    expired: 'Sign-in expired',
     source_changed: 'The usage source changed',
     unreachable: 'Can’t reach the usage source',
     no_source: 'No usage source',
@@ -173,7 +183,7 @@ function Account({ agent, account, t }: { agent: string; account: UsageAccountRo
           <span className={s.faultHead}>{t.fault[fault.kind]}</span> <span>{fault.message}</span>
         </p>
       )}
-      {fault === null && bare && <p className={s.calm}>{account.paidBy === 'key' ? t.key : t.unknown}</p>}
+      {fault === null && bare && <p className={s.calm}>{account.noReading ?? (account.paidBy === 'key' ? t.key : t.unknown)}</p>}
       {!bare && (
         <div className={s.meters}>
           {fault !== null && <VisuallyHidden>{t.lastRead}</VisuallyHidden>}

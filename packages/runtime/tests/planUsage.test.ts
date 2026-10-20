@@ -1,6 +1,6 @@
 import { assert, describe, it } from '@effect/vitest'
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
-import type { CredentialsRead, UsageRead, UsageWindow } from '@althar/provider-adapters'
+import type { CredentialsRead, EndpointRead, UsageAccount, UsageRead, UsageWindow } from '@althar/provider-adapters'
 import { Duration, Effect, Layer, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
@@ -41,6 +41,7 @@ const withUsage = (
     readonly readAgent?: () => Promise<UsageRead>
     readonly readCredentials?: () => Promise<CredentialsRead>
     readonly readVersion?: () => Promise<string | null>
+    readonly readEndpoint?: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>
   },
   more: { readonly perUse?: ReadonlyArray<string>; readonly signedOut?: ReadonlyArray<string>; readonly database?: string } = {},
 ) =>
@@ -55,6 +56,7 @@ const withUsage = (
         kept: Duration.zero,
         ...(usage.readAgent === undefined ? {} : { readAgent: usage.readAgent }),
         ...(usage.readCredentials === undefined ? {} : { readCredentials: usage.readCredentials }),
+        ...(usage.readEndpoint === undefined ? {} : { readEndpoint: usage.readEndpoint }),
         // OpenCode 2, whose listing tells plans from keys, unless the test says another.
         readVersion: usage.readVersion ?? (async () => '2.0.29'),
       },
@@ -160,6 +162,29 @@ describe('Codex’s plan, asked of its app-server', () => {
     }),
   )
 
+  it.effect('reads ChatGPT’s usage endpoint where its app-server can’t answer, but not where it isn’t signed in', () =>
+    Effect.gen(function* () {
+      let answer: UsageRead = { kind: 'failed', message: 'Codex stopped before it answered.' }
+      const asked: string[] = []
+      const layer = withUsage({
+        readAgent: async () => answer,
+        readEndpoint: async (sourceId) =>
+          sourceId === 'codex-chatgpt'
+            ? (asked.push(sourceId), { kind: 'usage', stale: false, usage: { windows: [used(55)], source: 'endpoint', observedAt: NOW } })
+            : { kind: 'none' },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const view = accountOf(yield* usage.now(true), 'codex')
+        assert.deepStrictEqual([view.source, view.windows.map((window) => window.usedPercent), view.fault], ['endpoint', [55], null])
+        assert.deepStrictEqual(asked, ['codex-chatgpt'])
+        answer = { kind: 'failed', message: 'Not signed in with ChatGPT.' }
+        assert.strictEqual(accountOf(yield* usage.now(true), 'codex').fault?.kind, 'sign_in_again')
+        assert.deepStrictEqual(asked, ['codex-chatgpt'])
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
   it.effect('is a fault, not an empty row, when Codex reports no window for a plan', () =>
     Effect.gen(function* () {
       const view = accountOf(yield* (yield* PlanUsage).now(true), 'codex')
@@ -185,7 +210,59 @@ describe('Codex’s plan, asked of its app-server', () => {
   )
 })
 
-describe('Claude Code’s plan, heard from its sessions', () => {
+describe('Claude Code’s plan, read from its endpoint and heard from its sessions', () => {
+  it.effect('is read for an idle account from Anthropic’s endpoint, with the account’s home and the agent’s version', () =>
+    Effect.gen(function* () {
+      const asked: Array<[string, UsageAccount]> = []
+      const layer = withUsage({
+        readVersion: async () => '2.1.5 (Claude Code)',
+        readEndpoint: async (sourceId, account) =>
+          sourceId === 'claude-oauth'
+            ? (asked.push([sourceId, account]),
+              {
+                kind: 'usage',
+                stale: false,
+                usage: { windows: [used(30), { kind: 'weekly', usedPercent: 70 }], source: 'endpoint', observedAt: NOW },
+              })
+            : { kind: 'none' },
+      })
+      yield* Effect.gen(function* () {
+        const view = accountOf(yield* (yield* PlanUsage).now(true), 'claude-code')
+        assert.deepStrictEqual([view.source, view.windows.length, view.fault], ['endpoint', 2, null])
+        assert.deepStrictEqual(
+          asked.map(([sourceId, account]) => [sourceId, account.agent, account.provider, account.agentVersion]),
+          [['claude-oauth', 'claude-code', 'anthropic', '2.1.5 (Claude Code)']],
+        )
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('says its sign-in has expired, keeping what it last read, and isn’t asked while a session has just said', () =>
+    Effect.gen(function* () {
+      let reply: EndpointRead = { kind: 'usage', stale: false, usage: { windows: [used(30)], source: 'endpoint', observedAt: NOW } }
+      let asked = 0
+      const layer = withUsage({ readEndpoint: async (sourceId) => (sourceId === 'claude-oauth' ? (asked++, reply) : { kind: 'none' }) })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        yield* usage.now(true)
+        reply = { kind: 'fault', fault: 'expired', message: 'Its sign-in has expired.' }
+        const view = accountOf(yield* usage.now(true), 'claude-code')
+        assert.strictEqual(view.fault?.kind, 'expired')
+        assert.include(view.fault?.message ?? '', 'renews it the next time it runs on this account')
+        assert.deepStrictEqual(
+          view.windows.map((window) => window.usedPercent),
+          [30],
+        )
+        // A session says its windows: the endpoint isn't asked again for a while.
+        yield* usage.heard(account!.id, 'claude-code', used(35))
+        const before = asked
+        assert.isNull(accountOf(yield* usage.now(true), 'claude-code').fault)
+        assert.strictEqual(asked, before)
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
   it.effect('is a fault until the adapter has reported, then each window it reports, kept as last said', () =>
     Effect.gen(function* () {
       const usage = yield* PlanUsage
@@ -395,18 +472,20 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
     ),
   )
 
-  it.effect('are a plan with no source yet for a ChatGPT sign-in, whose endpoint waits for its spike (#221)', () =>
+  it.effect('are a plan with no reading for a ChatGPT sign-in, and say why, calmly rather than as a fault', () =>
     Effect.gen(function* () {
       const view = openCode(yield* (yield* PlanUsage).now(true))
       assert.strictEqual(view.paidBy, 'plan')
-      assert.deepStrictEqual(view.fault, { kind: 'no_source', message: 'OpenCode’s openai sign-in has no usage source yet.' })
+      assert.isNull(view.fault)
+      assert.include(view.noReading ?? '', 'its own database')
       assert.deepStrictEqual(view.windows, [])
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['openai', 'plan']) }))),
   )
 
-  it.effect('are a fault for a plan provider that waits for its spike, and one with no pair at all', () =>
+  it.effect('say why for every plan provider with no reading', () =>
     Effect.gen(function* () {
-      assert.strictEqual(openCode(yield* (yield* PlanUsage).now(true)).fault?.kind, 'no_source')
+      const view = openCode(yield* (yield* PlanUsage).now(true))
+      assert.deepStrictEqual([view.fault, view.noReading?.includes('GitHub Copilot')], [null, true])
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['github-copilot', 'plan']) }))),
   )
 
@@ -418,8 +497,12 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
 })
 
 describe('the agents run over ACP', () => {
-  /* One such agent alone, a fake under Grok's id, paid as the test says. */
-  const grok = (perUse: ReadonlyArray<string>) =>
+  /* One such agent alone, a fake under its id, paid as the test says. */
+  const only = (
+    agentId: string,
+    perUse: ReadonlyArray<string>,
+    readEndpoint?: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>,
+  ) =>
     runtime(
       ':memory:',
       {},
@@ -429,19 +512,53 @@ describe('the agents run over ACP', () => {
           Agents,
           Effect.gen(function* () {
             const all = yield* Agents
-            return Agents.of({ list: [yield* all.get('grok')], get: all.get })
+            return Agents.of({ list: [yield* all.get(agentId)], get: all.get })
           }).pipe(Effect.orDie),
         ).pipe(Layer.provide(fakeAgents({}, [], {}, perUse))),
-        usage: { every: Duration.zero, kept: Duration.zero },
+        usage: { every: Duration.zero, kept: Duration.zero, ...(readEndpoint === undefined ? {} : { readEndpoint }) },
       },
     )
+  const reading: EndpointRead = {
+    kind: 'usage',
+    stale: false,
+    usage: { windows: [{ kind: 'weekly', usedPercent: 72 }], source: 'endpoint', observedAt: NOW },
+  }
 
-  it.effect('say a plan has no usage source yet, rather than that it has not been read', () =>
+  it.effect('read Grok Build’s and Kimi Code’s plans from their providers, with the account’s own sign-in', () =>
     Effect.gen(function* () {
-      const view = accountOf(yield* (yield* PlanUsage).now(true), 'grok')
+      for (const [agentId, sourceId] of [
+        ['grok', 'grok-billing'],
+        ['kimi', 'kimi-usages'],
+      ] as const) {
+        const asked: string[] = []
+        const view = yield* Effect.gen(function* () {
+          return accountOf(yield* (yield* PlanUsage).now(true), agentId)
+        }).pipe(Effect.provide(only(agentId, [], async (id) => (asked.push(id), reading))))
+        assert.deepStrictEqual([view.source, view.windows.map((window) => window.usedPercent), asked], ['endpoint', [72], [sourceId]])
+      }
+    }),
+  )
+
+  it.effect('take Kimi Code with no plan sign-in for a key, and Grok with none found for a fault to look at', () =>
+    Effect.gen(function* () {
+      const kimi = yield* Effect.gen(function* () {
+        return accountOf(yield* (yield* PlanUsage).now(true), 'kimi')
+      }).pipe(Effect.provide(only('kimi', [])))
+      assert.deepStrictEqual([kimi.paidBy, kimi.fault], ['key', null])
+      const grok = yield* Effect.gen(function* () {
+        return accountOf(yield* (yield* PlanUsage).now(true), 'grok')
+      }).pipe(Effect.provide(only('grok', [])))
+      assert.strictEqual(grok.fault?.kind, 'no_data_yet')
+    }),
+  )
+
+  it.effect('say calmly why one reports no usage anyone can read, rather than that it has not been read', () =>
+    Effect.gen(function* () {
+      const view = accountOf(yield* (yield* PlanUsage).now(true), 'copilot')
       assert.strictEqual(view.paidBy, 'plan')
-      assert.deepStrictEqual(view.fault, { kind: 'no_source', message: 'Fake grok has no usage source Althar reads yet.' })
-    }).pipe(Effect.provide(grok([]))),
+      assert.isNull(view.fault)
+      assert.include(view.noReading ?? '', 'premium requests')
+    }).pipe(Effect.provide(only('copilot', [], async () => assert.fail('Copilot has no endpoint to read')))),
   )
 
   it.effect('show a key with no fault', () =>
@@ -449,7 +566,7 @@ describe('the agents run over ACP', () => {
       const view = accountOf(yield* (yield* PlanUsage).now(true), 'grok')
       assert.strictEqual(view.paidBy, 'key')
       assert.isNull(view.fault)
-    }).pipe(Effect.provide(grok(['grok']))),
+    }).pipe(Effect.provide(only('grok', ['grok']))),
   )
 })
 

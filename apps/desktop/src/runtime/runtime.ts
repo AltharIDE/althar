@@ -190,6 +190,8 @@ const program = Effect.gen(function* () {
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
+          // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none.
+          usage: { readEndpoint: () => Promise.resolve({ kind: 'none' as const }) },
         }
       : undefined
   const context = yield* Layer.build(

@@ -78,14 +78,16 @@ export const UsageWindow = Schema.Struct({
 export type UsageWindow = typeof UsageWindow.Type
 
 /**
- * Why an account has no usage to show, which is a fault to fix and not a
- * calm state (docs/plans/plan-usage.md): its sign-in is refused, the provider
- * answered in another shape or can't be reached, there is no source for it
- * yet, the agent has not reported yet, or its sign-ins can't be told plan
- * from key.
+ * Why an account's usage is missing or old, a fault to fix (docs/plans/plan-usage.md):
+ * it is signed out, its sign-in has expired (the agent renews it when it next
+ * runs), the provider answered in another shape or can't be reached, the
+ * source isn't allowed, the agent has not been read yet, or its sign-ins
+ * can't be told plan from key. An agent that reports no usage anyone can
+ * read is not a fault: it says so in `noReading`.
  */
 export const UsageFaultKind = Schema.Literals([
   'sign_in_again',
+  'expired',
   'source_changed',
   'unreachable',
   'no_source',
@@ -110,6 +112,8 @@ export const AccountUsage = Schema.Struct({
   windows: Schema.Array(UsageWindow),
   /** Why the numbers are missing or old, where they are; the windows shown are the last ones then. */
   fault: Schema.NullOr(Schema.Struct({ kind: UsageFaultKind, message: Schema.String })),
+  /** Why Althar reads no usage for it, where the agent reports none anyone can read: shown calmly, not as a fault. */
+  noReading: Schema.NullOr(Schema.String),
 })
 export type AccountUsage = typeof AccountUsage.Type
 

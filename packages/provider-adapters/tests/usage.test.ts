@@ -6,7 +6,16 @@ import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
 import { normalize } from '../src/events'
-import { claudeRateLimitWindow, codexUsage, nextWarning, readAgentUsage, type WarningState, windowKind } from '../src/usage'
+import {
+  claudeRateLimitWindow,
+  codexUsage,
+  leftOf,
+  nextWarning,
+  readAgentUsage,
+  tightestWindow,
+  type WarningState,
+  windowKind,
+} from '../src/usage'
 
 const NOW = new Date('2026-10-15T12:00:00.000Z')
 
@@ -61,7 +70,14 @@ describe('Codex’s rate limits as an account’s usage', () => {
         windows: [
           { kind: 'five_hour', minutes: 300, usedPercent: 40, resetsAt: new Date(1_760_540_400_000).toISOString() },
           { kind: 'weekly', minutes: 10_080, usedPercent: 12, resetsAt: new Date(1_761_000_000_000).toISOString() },
-          { kind: 'five_hour', label: 'Spark', minutes: 300, usedPercent: 3, resetsAt: new Date(1_760_540_400_000).toISOString() },
+          {
+            kind: 'five_hour',
+            label: 'Spark',
+            minutes: 300,
+            usedPercent: 3,
+            resetsAt: new Date(1_760_540_400_000).toISOString(),
+            model: 'spark',
+          },
         ],
       },
     })
@@ -402,5 +418,33 @@ describe('the patch to Claude Code’s adapter', () => {
     const handler = code.slice(at, code.indexOf('case "conversation_reset"', at))
     expect(handler).toContain('lastAssistantTotalUsage ?? session.contextUsedTokens ?? 0')
     expect(handler).not.toContain('lastAssistantTotalUsage !== null')
+  })
+})
+
+describe('the tightest window', () => {
+  const now = Date.parse('2026-10-21T12:00:00Z')
+  const soon = '2026-10-21T14:00:00Z'
+  const windows = [
+    { kind: 'five_hour', usedPercent: 60, resetsAt: soon },
+    { kind: 'weekly', usedPercent: 70, resetsAt: '2026-10-26T09:00:00Z' },
+    { kind: 'weekly', label: 'Opus', model: 'opus', usedPercent: 98, resetsAt: '2026-10-26T09:00:00Z' },
+    { kind: 'other', label: 'Extra usage', usedPercent: 100, spend: true },
+  ] as const
+
+  it('is the one with the least left, of those that limit the model, never money past the plan', () => {
+    expect(tightestWindow(windows, now)).toMatchObject({ kind: 'weekly', usedPercent: 70 })
+    expect(tightestWindow(windows, now, 'claude-opus-5 Claude Opus 5')).toMatchObject({ label: 'Opus' })
+    expect(tightestWindow(windows, now, 'sonnet')).toMatchObject({ kind: 'weekly', usedPercent: 70 })
+    expect(leftOf(windows[2])).toBe(2)
+  })
+
+  it('leaves out a window whose reset has passed, which has started again', () => {
+    expect(tightestWindow(windows, Date.parse('2026-10-27T00:00:00Z'))).toBeUndefined()
+    expect(
+      tightestWindow([{ kind: 'five_hour', usedPercent: 99, resetsAt: soon }, windows[1]], Date.parse('2026-10-21T15:00:00Z')),
+    ).toMatchObject({
+      kind: 'weekly',
+    })
+    expect(tightestWindow([], now)).toBeUndefined()
   })
 })

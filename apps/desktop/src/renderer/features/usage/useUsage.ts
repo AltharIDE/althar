@@ -77,6 +77,7 @@ export const rowOf = (account: AccountUsage, now: Date): UsageAccountRow => ({
   meters: account.windows.map((window) => meterOf(window, now)),
   source: sourceWords(account, now),
   fault: account.fault,
+  noReading: account.noReading,
 })
 
 /** Every account under its agent, the agents in the order the runtime lists them. */
