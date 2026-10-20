@@ -469,6 +469,11 @@ describe('setting up a task’s worktree', () => {
       const first = yield* Effect.gen(function* () {
         const { task } = yield* taskIn(repository(), slowOnce)
         const [ran] = yield* until(setupProcesses, (rows) => rows[0]?.state === 'running')
+        // Under way, not only launched: Node takes a moment to start, and stopped before, it would wait again next time.
+        yield* until(
+          Effect.map(workspacesOf(task.taskId), (rows) => rows.filter((row) => existsSync(join(row.path, 'tried')))),
+          (rows) => rows.length > 0,
+        )
         return { task, pid: ran?.pid ?? 0 }
       }).pipe(Effect.provide(runtime(file)))
       // Althar quit: the setup's process group stopped with it.
