@@ -77,7 +77,7 @@
   --traffic: #4a4a50;
 
   /* ---- Frost: dark glass, sheets on it a touch lighter ---- */
-  --frost: color-mix(in srgb, var(--n-1) 80%, transparent);
+  --frost: color-mix(in srgb, var(--paper) 84%, transparent);
   --frost-faint: rgba(255, 255, 255, 0.035);
   --frost-sheet: rgba(255, 255, 255, 0.06);
   --frost-raised: rgba(255, 255, 255, 0.09);
@@ -85,9 +85,10 @@
   --frost-well: rgba(255, 255, 255, 0.13);
   --frost-well-hover: rgba(255, 255, 255, 0.18);
   --frost-ring: 0 0 0 0.5px rgba(255, 255, 255, 0.09);
+  /* on dark a dark edge is lost: the glass is ringed with light instead */
   --lift-frost:
-    0 0 0 0.5px rgba(0, 0, 0, 0.65), inset 0 0.5px 0 rgba(255, 255, 255, 0.1), 0 18px 48px -14px rgba(0, 0, 0, 0.6),
-    0 4px 12px -6px rgba(0, 0, 0, 0.4);
+    0 0 0 0.5px rgba(255, 255, 255, 0.16), inset 0 0.5px 0 rgba(255, 255, 255, 0.1), 0 18px 48px -14px rgba(0, 0, 0, 0.7),
+    0 4px 12px -6px rgba(0, 0, 0, 0.5);
 
   /* ---- On ink: the ink fill is light now, so what sits on it is dark ---- */
   --on-ink: var(--n-0);

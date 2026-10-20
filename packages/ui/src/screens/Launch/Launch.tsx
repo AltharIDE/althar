@@ -111,7 +111,7 @@ export function Launch({ ready, quick = false, onDone, children, className, ...r
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
     COLUMNS.forEach((column, i) => {
       const context = columns.current[i]?.getContext('2d')
-      if (context) drawColumn(context, column, live)
+      if (context) drawColumn(context, column, live, theme.startsWith('dark'))
     })
     const tile = document.createElement('canvas')
     tile.width = tile.height = 128
