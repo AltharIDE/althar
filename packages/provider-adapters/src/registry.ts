@@ -257,6 +257,13 @@ export interface AgentDefinition {
    * it, the person's commands reach it as they are.
    */
   readonly commands?: 'althar'
+  /**
+   * Where it says a failure as a message rather than an error, ending its
+   * turn as if done (Copilot's usage limits): the words that open it. Such a
+   * message is classified as an error would be (`failures.ts`), so a limit
+   * holds the work as any other agent's does.
+   */
+  readonly failsInText?: string
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
 }
@@ -824,6 +831,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * and not the person's login-shell environment, which it otherwise gives
      * every command it runs, past Althar's allowlist.
      */
+    /* Its limits and other failures come as a message, `Error: You've hit your rate limit. …`, and the turn ends as if done (1.0.63's session.error). */
+    failsInText: 'Error: ',
     launch: () => ({
       command: 'copilot',
       args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'],

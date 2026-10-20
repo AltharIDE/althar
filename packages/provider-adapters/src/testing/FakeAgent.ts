@@ -72,6 +72,8 @@ export const scenarios = {
   choice: 'choice',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
+  /** Copilot's usage limit, said as a message, `Error: …`, and the turn ending as if done. */
+  limitInText: 'limit-in-text',
   /** Claude's structured report of a full context. */
   contextFull: 'context-full',
   /** Claude's structured warning of a short rate limit, then a normal reply. */
@@ -1598,6 +1600,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
+        case scenarios.limitInText:
+          await say(
+            "Error: You've hit your rate limit. Please wait for your limit to reset in 3 hours 20 minutes or switch to auto model to continue. Learn More (https://docs.github.com/copilot/concepts/rate-limits).",
+          )
+          return ended()
         case scenarios.quota:
           await update({
             sessionUpdate: 'session_info_update',

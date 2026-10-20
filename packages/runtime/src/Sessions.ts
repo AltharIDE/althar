@@ -1770,6 +1770,7 @@ export class Sessions extends Context.Service<
                 transport,
                 onPermission: (request) => permissions.decide(requestContext, request),
                 permissions: definition.permissions,
+                ...(definition.failsInText === undefined ? {} : { failsInText: definition.failsInText }),
                 // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
                 ...(thread.role === 'reviewer'
                   ? {}
