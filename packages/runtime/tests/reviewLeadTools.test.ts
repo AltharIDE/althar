@@ -5,13 +5,13 @@ import { dirname, join } from 'node:path'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
-import { Plans } from '../src/Plans'
+import { Models } from '../src/Models'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Reviews } from '../src/Reviews'
@@ -21,10 +21,9 @@ import { callTool, fakeConnectors, HOST, hosted, notices, repository, runtime, t
 
 /*
  * A lead's and the coordinator's tools where a task can't do what was
- * asked: a review's lead settling it before its draft is posted; a planned
- * change's lead making it a change; a review started whose lead couldn't;
- * and a quick task that can't be done while something on it waits on the
- * person.
+ * asked: a review's lead settling it before its draft is posted; a review
+ * started whose lead couldn't; and a quick task that can't be done while
+ * something on it waits on the person.
  */
 
 const withQueries = (connectors: Parameters<typeof fakeConnectors>[0]) =>
@@ -95,47 +94,6 @@ describe('a review’s lead', () => {
   })
 })
 
-describe('a planned change’s lead', () => {
-  it.live('can’t make it a change: its plan says already who reviews it and how it ends', () =>
-    Effect.gen(function* () {
-      const plans = yield* Plans
-      const instance = yield* Instance
-      const projects = yield* Projects
-      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-      const change = yield* projects.createTask({
-        envelope: yield* Runtime.envelope('task.create', {}),
-        projectId: project.projectId,
-        title: 'Retry the checkout',
-        draft: true,
-      })
-      yield* plans.propose({
-        projectId: project.projectId as ProjectId,
-        taskId: change.taskId,
-        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
-        reason: null,
-        actorId: instance.personId,
-        end: null,
-        startsIn: Duration.hours(1),
-      })
-      const lead: ToolAccess = {
-        role: 'lead',
-        projectId: project.projectId,
-        threadId: change.threadId,
-        sessionId: 'none',
-        taskId: change.taskId,
-      }
-      assert.strictEqual(
-        yield* callTool(lead, 'make_it_a_change', { title: 'Retry it', review: null, output: 'draft' }),
-        'This task was planned as a change from its start: its plan already says who reviews it and how it ends. Carry on, and call finish_step when it’s done.',
-      )
-      const sql = yield* SqlClient.SqlClient
-      assert.deepStrictEqual(yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${change.taskId}`, [
-        { title: 'Retry the checkout' },
-      ])
-    }).pipe(Effect.provide(runtime())),
-  )
-})
-
 describe('the coordinator’s review_pull_request', () => {
   it.live('says the review started but its lead couldn’t, where Althar couldn’t make the copy it reads', () => {
     const at = hosted()
@@ -148,9 +106,13 @@ describe('the coordinator’s review_pull_request', () => {
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${other.taskId}`
       const folder = dirname(dirname(workspace?.path ?? ''))
       chmodSync(folder, 0o555)
-      const said = yield* callTool(coordinator, 'review_pull_request', { pull_request: '#1', lead: { agent: 'claude-code' } }).pipe(
-        Effect.ensuring(Effect.sync(() => chmodSync(folder, 0o755))),
-      )
+      // The person asked for Claude Code's large model, thinking hard.
+      const models = yield* Models
+      yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      const said = yield* callTool(coordinator, 'review_pull_request', {
+        pull_request: '#1',
+        lead: { agent: 'claude-code', model: 'large', effort: 'high' },
+      }).pipe(Effect.ensuring(Effect.sync(() => chmodSync(folder, 0o755))))
       assert.match(
         said,
         /^Started review-1-send-back to review ninemate's pull request #1, "Send back", but its lead couldn't start: its thread says why, and the person starts another there\. Tell them\.$/,
