@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-19
+- **Amended:** 2026-10-20: in the task's header, Done and the pin sit
+  inside the chip that says where it stands, in its violet, as its
+  segments, not in ink beside it: one coloured thing in the bar, holding
+  what you do about it.
 - **Owner:** Repository maintainers
 - **Context:** A quick task, a prototype, a spike or a chat-like task
   ([ADR-035](035-a-task-s-kind-is-read-from-what-it-has.md)) finished as
@@ -19,8 +23,8 @@
     notifications: `needsYou` (`shared/calls.ts`) is every ready task again.
   - **Two ways on, beside where it stands:** in its card's corner, as a
     check and a pin shown as the card is hovered or has the focus, and in its
-    task's header, Done in words and in ink, then the pin, with no step bar
-    once it finished. **Done** settles it (`MarkTaskDone`, `task.done` with
+    task's header, inside the chip that says where it stands, in its violet:
+    Done in words, then the pin, with no step bar once it finished. **Done** settles it (`MarkTaskDone`, `task.done` with
     `marked: true`) and stops what its agents left running, such as a page,
     first: one that won't stop leaves it unsettled, said so, to try again;
     **Keep for later** takes it out of Needs you as it is (`KeepTaskForLater`,

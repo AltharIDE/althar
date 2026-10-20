@@ -3,12 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
-import { TaskStatus } from '@althar/ui'
+import { TaskStatus, TrackStep } from '@althar/ui'
 
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { lookedOf, noOutputsOf, readsOf } from '../src/renderer/features/task/NoOutputsView'
 import { conflictsOf } from '../src/renderer/features/task/Outputs'
-import { elapsedOf, openingFace, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
+import { elapsedOf, openingFace, statusOf, stepsOf, TaskView, tookOf } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
 import { agents, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
@@ -18,8 +18,8 @@ import { reads } from '../src/renderer/data/reads'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { servicesFor, withServices } from './render'
 
-function Task({ onBack = vi.fn() }: { onBack?: () => void }) {
-  return <TaskView model={useTask('th1')} onBack={onBack} />
+function Task({ onBack = vi.fn(), onRules }: { onBack?: () => void; onRules?: () => void }) {
+  return <TaskView model={useTask('th1')} onBack={onBack} {...(onRules === undefined ? {} : { onRules })} />
 }
 
 /** A PNG's signature and header, 1 by 1: enough for the window to read it as one. */
@@ -46,6 +46,14 @@ const running = (overrides: Partial<ThreadSnapshot> = {}) => {
   const base = thread(overrides)
   return { ...base, session: base.session === null ? null : { ...base.session, turnRunning: true } }
 }
+
+/** What an element's description says, from what it points at. */
+const describedBy = (element: Element) =>
+  (element.getAttribute('aria-describedby') ?? '')
+    .split(' ')
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .filter((said) => said !== '')
+    .join(' ')
 
 /** A task standing as given, with its menu open: the client, the view, and each item the menu offers, by its name. */
 const taskMenu = async (task: Partial<ThreadSnapshot['task']>, session?: ThreadSnapshot['session']) => {
@@ -216,8 +224,8 @@ describe('a task', () => {
     await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
     // The lead's model, by the name its agent gives it.
     expect((await screen.findAllByText('Claude Opus')).length).toBeGreaterThan(0)
-    // Its branch, and who leads it, are said with where it stands, and shown on hover.
-    expect(screen.getByRole('banner', { name: 'Add a retry' }).textContent).toMatch(/althar\/add-a-retry/)
+    // Where it stands says only that: who leads it is the composer's to say, and its branch nothing in the bar acts on.
+    expect(screen.getByRole('banner', { name: 'Add a retry' }).textContent).not.toMatch(/althar\/add-a-retry/)
     // Nothing made yet, the Outputs face is there all the same, and says so.
     await userEvent.click(screen.getByRole('radio', { name: /Outputs/ }))
     expect(screen.getByRole('heading', { name: 'Nothing changed yet' })).toBeTruthy()
@@ -473,7 +481,13 @@ describe('a task', () => {
         .getAllByRole('listitem')
         .map((step) => step.textContent),
     ).toEqual(['Implement, done', 'Review, now'])
-    expect(screen.getByText(/1h 4m/)).toBeTruthy()
+    // While its plan runs, where it stands says who does each step, and how long it has run in all.
+    const standing = screen.getByText('Reviewing').parentElement
+    if (standing === null) throw new Error('Where it stands has no element of its own')
+    act(() => standing.focus())
+    const card = await screen.findByRole('tooltip')
+    expect(card.textContent).toMatch(/Implement.*Claude Opus/)
+    expect(card.textContent).toMatch(/1h 4m in all/)
   })
 
   it('pushes its branch with the person’s own git, then offers its host’s pull request page, and what connecting would add', async () => {
@@ -1190,38 +1204,53 @@ describe('a task', () => {
 
   it('offers resuming a task stopped in the middle of its step', async () => {
     const { client, offered } = await taskMenu({ phase: 'stopped', actions: ['resume', 'abandon'] }, null)
-    expect(offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Resume', 'Abandon'])
+    expect(offered).toEqual(['Resume', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
     expect(screen.getByText('Stopped')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /Resume/ }))
     await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
   })
 
-  it('offers how its conflicts go, as its project says or otherwise, and nothing beside the menu while it goes by the project', async () => {
+  it('offers how its conflicts go, as its project says or otherwise, and nothing on the menu’s button while it goes by the project', async () => {
     const { client } = await taskMenu({ resolveConflicts: { task: null, project: true } })
-    expect(screen.getByRole('menuitemradio', { name: /Use the project setting/ }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText('It’s on for this project.')).toBeTruthy()
-    expect(screen.queryByText('Resolve conflicts automatically: on')).toBeNull()
-    await userEvent.click(screen.getByRole('menuitemradio', { name: /Off for this task/ }))
+    const choices = within(screen.getByRole('group', { name: 'Resolve conflicts automatically' }))
+    const project = choices.getByRole('menuitemradio', { name: 'Project (on)' })
+    expect(project.getAttribute('aria-checked')).toBe('true')
+    expect(describedBy(project)).toBe('As the project setting, which is on.')
+    expect(screen.getByRole('button', { name: 'More for this task' }).hasAttribute('aria-describedby')).toBe(false)
+    await userEvent.click(choices.getByRole('menuitemradio', { name: 'Off' }))
     await waitFor(() => expect(client.setTaskResolveConflicts).toHaveBeenCalledWith({ taskId: 't1', resolveConflicts: false }))
   })
 
-  it('says beside its menu where its lead resolves conflicts otherwise than its project, and not where it is the same', async () => {
+  it('says on its menu’s button where its lead resolves conflicts otherwise than its project, and not where it is the same', async () => {
     const shownFor = async (own: boolean, project: boolean) => {
       const { client } = fakeClient({
         getThread: vi.fn(async () => thread({ task: { ...thread().task, resolveConflicts: { task: own, project } } })),
       })
       const view = withServices(<Task />, client)
-      await screen.findByRole('button', { name: 'More for this task' })
-      const said = [
-        screen.queryByText('Resolve conflicts automatically: on'),
-        screen.queryByText('Resolve conflicts automatically: off'),
-      ].map((one) => one !== null)
+      const button = await screen.findByRole('button', { name: 'More for this task' })
+      const said = button.hasAttribute('aria-describedby')
+        ? document.getElementById(button.getAttribute('aria-describedby') ?? '')?.textContent
+        : null
       view.unmount()
       return said
     }
-    expect(await shownFor(true, false)).toEqual([true, false])
-    expect(await shownFor(false, true)).toEqual([false, true])
-    expect(await shownFor(true, true)).toEqual([false, false])
+    expect(await shownFor(true, false)).toBe('Resolve conflicts automatically: on')
+    expect(await shownFor(false, true)).toBe('Resolve conflicts automatically: off')
+    expect(await shownFor(true, true)).toBeNull()
+  })
+
+  it('holds allowing everything on where its project allows everything, and opens the project’s rules from it', async () => {
+    const onRules = vi.fn()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: false, project: true } } })),
+    })
+    withServices(<Task onRules={onRules} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    const held = await screen.findByRole('menuitem', { name: 'Allow everything on this task' })
+    expect(describedBy(held)).toMatch(/On for every task in this project/)
+    await userEvent.click(held)
+    expect(onRules).toHaveBeenCalledOnce()
+    expect(client.setTaskAllowEverything).not.toHaveBeenCalled()
   })
 
   it('allows everything on it from its menu', async () => {
@@ -1265,7 +1294,7 @@ describe('a task', () => {
 
   it('offers starting its plan now while it waits to start', async () => {
     const { client, offered } = await taskMenu({ phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' }, null)
-    expect(offered).toEqual(['Open in Zed', 'Start now', 'Attach a pull request…', 'Abandon'])
+    expect(offered).toEqual(['Start now', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Start now/ }))
     await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1'))
   })
@@ -1276,7 +1305,7 @@ describe('a task', () => {
       { phase: 'ready', actions: ['abandon'], changes: [...drafts, change({ state: 'merged' })] },
       null,
     )
-    expect(offered).toEqual(['Open in Zed', 'Mark ready for review', 'Attach a pull request…', 'Abandon'])
+    expect(offered).toEqual(['Mark ready for review', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Mark ready for review/ }))
     await waitFor(() => expect(client.markReady).toHaveBeenCalledTimes(2))
     expect(vi.mocked(client.markReady).mock.calls).toEqual(drafts.map((one) => ['t1', one.url]))
@@ -1285,7 +1314,7 @@ describe('a task', () => {
   it('says an abandoned task was abandoned, and offers reopening it, and only its folder once merged', async () => {
     const drafts = [change({ draft: true })]
     const abandoned = await taskMenu({ phase: 'settled', state: 'abandoned', actions: ['reopen'], changes: drafts }, null)
-    expect(abandoned.offered).toEqual(['Open in Zed', 'Reopen'])
+    expect(abandoned.offered).toEqual(['Reopen', 'Open in Zed'])
     expect(screen.getByText('Abandoned')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /Reopen/ }))
     await waitFor(() => expect(abandoned.client.reopenTask).toHaveBeenCalledWith('t1'))
@@ -2603,25 +2632,36 @@ describe('a task', () => {
     })
   })
 
-  it('says since when it has been where it stands', () => {
+  it('says how long the step it is on has run, only while it runs', () => {
     const base = snapshot()
     const at = (minutes: number) => new Date(Date.UTC(2026, 9, 7, 9, minutes)).toISOString()
-    const on = (step: string) => ({ ...base, task: { ...base.task, step, stepAt: at(0) } })
-    expect(sinceOf(on('implement'), at(6))).toBe('implement · 6m')
-    // Settling the review's findings is part of the review.
-    expect(sinceOf(on('settle'), at(6))).toBe('review · 6m')
-    expect(sinceOf(base, at(6))).toBeNull()
-    const call = { id: 'a', kind: 'permission' as const, title: 't', reason: 'r', command: null, stuck: null, createdAt: at(3) }
-    expect(sinceOf({ ...on('implement'), attention: [call] }, at(6))).toBe('waiting · 3m')
-    expect(sinceOf({ ...on('implement'), task: { ...on('implement').task, waits: { agentId: 'codex', until: at(60) } } }, at(6))).toBeNull()
-    const reported = { ...items.step({ step: 'review' }), createdAt: new Date(Date.now() - 4 * 60_000).toISOString() }
-    const now = new Date().toISOString()
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'ready' }, items: [reported] }, now)).toBe('ready · 4m ago')
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'stopped' }, items: [reported] }, now)).toBe('stopped · 4m ago')
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'settled', settledAt: reported.createdAt } }, now)).toBe('done · 4m ago')
-    expect(sinceOf({ ...base, task: { ...base.task, phase: 'settled', state: 'abandoned', settledAt: reported.createdAt } }, now)).toBe(
-      'abandoned · 4m ago',
-    )
+    const on = (step: string, phase: ThreadSnapshot['task']['phase'] = 'running') => ({
+      ...base,
+      task: { ...base.task, phase, step, stepAt: at(0) },
+    })
+    expect(tookOf(on('implement'), at(6))).toBe('6m')
+    expect(tookOf(on('review'), at(4))).toBe('4m')
+    expect(tookOf(base, at(6))).toBeNull()
+    // Ready or stopped, nothing runs: its header has nothing more to say than where it stands.
+    expect(tookOf(on('review', 'ready'), at(6))).toBeNull()
+    expect(tookOf(on('implement', 'stopped'), at(6))).toBeNull()
+  })
+
+  it('names who does each step of its plan: the work its lead, each review the agent the plan names', () => {
+    const base = snapshot()
+    const steps = [
+      { key: 'implement' as const, agentId: 'codex', model: 'gpt-5.2-codex', skipped: false },
+      { key: 'review' as const, agentId: 'claude-code', model: 'opus', skipped: true },
+      { key: 'review' as const, agentId: 'codex', model: 'gpt-5.2-codex', skipped: false },
+    ]
+    const named = (agentId: string, model: string | null) => `${agentId}/${model ?? ''}`
+    const reviewing = { ...base, task: { ...base.task, steps, step: 'review' } }
+    // A skipped step has no bar and no line; the work is its lead's, even where another agent took it over.
+    expect(stepsOf(reviewing, 'Claude Opus', named)).toEqual([
+      { label: 'Implement', state: TrackStep.Done, who: 'Claude Opus' },
+      { label: 'Review', state: TrackStep.Now, who: 'codex/gpt-5.2-codex' },
+    ])
+    expect(stepsOf({ ...base, task: { ...base.task, steps: [] } }, 'Claude Opus', named)).toEqual([])
   })
 
   it('says how long it has run, until it stopped', () => {

@@ -1,27 +1,32 @@
-import { useRef } from 'react'
+import { type ReactElement, useRef } from 'react'
 
-import { Menu, MenuCheckboxItem, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
+import { Menu, MenuItem, MenuSegments, MenuSeparator, MenuSwitchItem } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
-import s from './TaskMenu.module.css'
 
 /*
- * What you can do with a task as a whole, from its bar: rename it, open its folder in
- * an editor, start its plan now, mark its draft pull request ready, skip
- * the review of the work under way, stop it, resume it, abandon it, reopen
- * it. Each item is there when its callback is,
- * and the consumer gives only those that apply where the task stands, so
- * the menu never offers what the task can't do. With nothing to offer, there
- * is no button. Stopping a task is not interrupting its lead: the composer's
- * square stops one turn and the task keeps going; this stops every agent on
- * it until you resume it. Each item says what happens, since none of them is
- * undone by pressing it again.
+ * What you can do with a task as a whole, from its bar, by intent. First what
+ * moves it on where it stands (start its plan now, mark its draft pull
+ * request ready, skip the review under way, resume it, reopen it) and what
+ * you do with it (rename it, open its folder in an editor, attach a pull
+ * request it didn't open). Then its own two settings, changed in place:
+ * whether its lead resolves a conflict with the default branch on its own,
+ * as its project says or otherwise, and whether everything its agents ask is
+ * allowed. Last, what stops or ends it: stop it, and abandon it, grey among
+ * the rest until pointed at. Each item is there when its callback is, and the
+ * consumer gives only those that apply where the task stands, so the menu
+ * never offers what the task can't do. With nothing to offer, there is no
+ * button.
  *
- * Whether its lead resolves a conflict with the default branch on its own
- * is a choice in it too, while it is open: as its project says, or otherwise.
- * Where the task says otherwise than its project, a quiet word beside the
- * button says so; otherwise nothing shows of it until the menu opens.
+ * Every row is one line; what it does shows at the menu's foot while it is
+ * highlighted, and is its description, since none of them is undone by
+ * pressing it again. Stopping a task is not interrupting its lead: the
+ * composer's square stops one turn and the task keeps going; this stops every
+ * agent on it until you resume it.
  *
- * Allowing everything its agents ask is a switch in it while it is open.
+ * Where the task resolves conflicts otherwise than its project, a dot on the
+ * button says so, and its tooltip how; otherwise nothing shows of it until the
+ * menu opens. Where its project allows everything, the task's switch shows on,
+ * held, and opens the project's rules, where that is changed.
  */
 
 /** Whether a task's lead resolves conflicts on its own: as its project says, or, otherwise than it, unasked or when asked. */
@@ -54,19 +59,20 @@ export interface TaskMenuText {
   reopen: string
   reopenAbout: string
   conflicts: string
-  /** Going by the project, with what the project says now. */
-  conflictsProject: string
+  /** Going by the project, with what the project says now: the choice, and what it means. */
+  conflictsProject: (on: boolean) => string
   conflictsProjectAbout: (on: boolean) => string
   conflictsOn: string
   conflictsOnAbout: string
   conflictsOff: string
   conflictsOffAbout: string
-  /** Beside the button, where the task says otherwise than its project. */
+  /** On the button, where the task says otherwise than its project. */
   conflictsHint: (on: boolean) => string
-  /** Allowing everything its agents ask on the task: the switch, what it does, and what it says while its project allows everything. */
+  /** Allowing everything its agents ask on the task: the switch, what it does, and, while its project allows everything, why it is on and where that is changed. */
   allowAll: string
   allowAllAbout: string
   allowAllProject: string
+  allowAllHeld: string
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -94,16 +100,17 @@ export const taskMenuText: TaskMenuText = {
   reopen: 'Reopen',
   reopenAbout: 'It opens again, on the same worktree and branch.',
   conflicts: 'Resolve conflicts automatically',
-  conflictsProject: 'Use the project setting',
-  conflictsProjectAbout: (on) => `It’s ${on ? 'on' : 'off'} for this project.`,
-  conflictsOn: 'On for this task',
+  conflictsProject: (on) => `Project (${on ? 'on' : 'off'})`,
+  conflictsProjectAbout: (on) => `As the project setting, which is ${on ? 'on' : 'off'}.`,
+  conflictsOn: 'On',
   conflictsOnAbout: 'The lead fixes merge conflicts itself, and Althar pushes the fix to an open pull request.',
-  conflictsOff: 'Off for this task',
+  conflictsOff: 'Off',
   conflictsOffAbout: 'You ask the lead to fix a conflict when one comes up.',
   conflictsHint: (on) => `Resolve conflicts automatically: ${on ? 'on' : 'off'}`,
   allowAll: 'Allow everything on this task',
   allowAllAbout: 'Nothing its agents ask waits for you. Never still holds.',
   allowAllProject: 'On for every task in this project, from its Rules.',
+  allowAllHeld: 'On for the project, in its Rules',
 }
 
 export interface TaskMenuProps {
@@ -139,11 +146,15 @@ export interface TaskMenuProps {
    * project's (`project`), which holds over it. Given while it is open.
    */
   allowEverything?: { readonly on: boolean; readonly project: boolean; readonly onChange: (on: boolean) => void }
+  /** Opens its project's rules: where its project allows everything, the task's held switch opens them. */
+  onRules?: () => void
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
   text?: Partial<TaskMenuText>
 }
+
+const present = (item: ReactElement | false | undefined | null): item is ReactElement => Boolean(item)
 
 export function TaskMenu({
   onRename,
@@ -160,6 +171,7 @@ export function TaskMenu({
   onReopen,
   conflicts,
   allowEverything,
+  onRules,
   open,
   defaultOpen,
   onOpenChange,
@@ -168,11 +180,8 @@ export function TaskMenu({
   const t = { ...taskMenuText, ...text }
   // Renaming puts the cursor in the title's field: the menu closing doesn't take focus back to its button.
   const renaming = useRef(false)
-  const opener = onOpen !== undefined && editor !== undefined ? { onOpen, editor } : null
-  // Ways to look at what it made, in the editor, and to name it.
-  const opens = opener !== null || onRename !== undefined
-  // Forward first, then what holds or brings it back, then what settles it, set apart.
-  const course = [
+  // What moves it on where it stands, then what you do with it.
+  const work = [
     onStartNow && (
       <MenuItem key="start" icon="play" description={t.startNowAbout} onSelect={onStartNow}>
         {t.startNow}
@@ -183,19 +192,9 @@ export function TaskMenu({
         {t.markReady}
       </MenuItem>
     ),
-    onAttach && (
-      <MenuItem key="attach" icon="pr" description={t.attachAbout} onSelect={onAttach}>
-        {t.attach}
-      </MenuItem>
-    ),
     onSkipReview && (
       <MenuItem key="skip-review" icon="after" description={t.skipReviewAbout} onSelect={onSkipReview}>
         {t.skipReview}
-      </MenuItem>
-    ),
-    onStop && (
-      <MenuItem key="stop" icon="hold" description={t.stopAbout} onSelect={onStop}>
-        {t.stop}
       </MenuItem>
     ),
     onResume && (
@@ -208,15 +207,90 @@ export function TaskMenu({
         {t.reopen}
       </MenuItem>
     ),
-  ].filter(Boolean)
-  if (!opens && course.length === 0 && !onAbandon && !conflicts && !allowEverything) return null
-  // Said beside the button only where the task goes otherwise than its project.
+    onRename && (
+      <MenuItem
+        key="rename"
+        icon="pencil"
+        description={t.renameAbout}
+        onSelect={() => {
+          renaming.current = true
+          onRename()
+        }}
+      >
+        {t.rename}
+      </MenuItem>
+    ),
+    onOpen && editor !== undefined && (
+      <MenuItem key="open" icon="external" description={t.openAbout} onSelect={onOpen}>
+        {t.open(editor)}
+      </MenuItem>
+    ),
+    onAttach && (
+      <MenuItem key="attach" icon="clip" description={t.attachAbout} onSelect={onAttach}>
+        {t.attach}
+      </MenuItem>
+    ),
+  ].filter(present)
+  // Its own settings, changed in place.
+  const settings = [
+    conflicts && (
+      <MenuSegments
+        key="conflicts"
+        label={t.conflicts}
+        value={conflicts.choice}
+        onChange={(choice) => conflicts.onChange(choice as TaskConflicts)}
+        options={[
+          { value: 'project', label: t.conflictsProject(conflicts.project), description: t.conflictsProjectAbout(conflicts.project) },
+          { value: 'on', label: t.conflictsOn, description: t.conflictsOnAbout },
+          { value: 'off', label: t.conflictsOff, description: t.conflictsOffAbout },
+        ]}
+      />
+    ),
+    allowEverything && (
+      <MenuSwitchItem
+        key="allow"
+        checked={allowEverything.on}
+        onCheckedChange={allowEverything.onChange}
+        // Its project's switch holds over the task's: that one is turned off in the project's rules, which it opens.
+        held={allowEverything.project}
+        {...(onRules === undefined ? {} : { onHeld: onRules })}
+        {...(allowEverything.project ? { note: t.allowAllHeld } : {})}
+        description={allowEverything.project ? t.allowAllProject : t.allowAllAbout}
+      >
+        {t.allowAll}
+      </MenuSwitchItem>
+    ),
+  ].filter(present)
+  // What stops or ends it, last; abandoning grey among the rest until pointed at.
+  const end = [
+    onStop && (
+      <MenuItem key="stop" icon="hold" description={t.stopAbout} onSelect={onStop}>
+        {t.stop}
+      </MenuItem>
+    ),
+    onAbandon && (
+      <MenuItem
+        key="abandon"
+        icon="close"
+        tone="danger"
+        quiet
+        description={merged ? t.abandonMergedAbout : t.abandonAbout}
+        onSelect={onAbandon}
+      >
+        {t.abandon}
+      </MenuItem>
+    ),
+  ].filter(present)
+  const groups = [work, settings, end].filter((group) => group.length > 0)
+  if (groups.length === 0) return null
+  // Said on the button only where the task goes otherwise than its project.
   const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project
-  const menu = (
+  return (
     <Menu
       label={t.label}
       align="end"
-      width={300}
+      width={280}
+      descriptions="foot"
       returnFocus={() => {
         const back = !renaming.current
         renaming.current = false
@@ -225,72 +299,11 @@ export function TaskMenu({
       open={open}
       defaultOpen={defaultOpen}
       onOpenChange={onOpenChange}
-      trigger={<ChromeButton icon="more" label={t.trigger} compact />}
+      trigger={
+        <ChromeButton icon="more" label={t.trigger} compact {...(differs ? { mark: t.conflictsHint(conflicts.choice === 'on') } : {})} />
+      }
     >
-      {onRename && (
-        <MenuItem
-          icon="pencil"
-          description={t.renameAbout}
-          onSelect={() => {
-            renaming.current = true
-            onRename()
-          }}
-        >
-          {t.rename}
-        </MenuItem>
-      )}
-      {opener && (
-        <MenuItem icon="external" description={t.openAbout} onSelect={opener.onOpen}>
-          {t.open(opener.editor)}
-        </MenuItem>
-      )}
-      {opens && course.length > 0 && <MenuSeparator />}
-      {course}
-      {conflicts && (
-        <>
-          {(opens || course.length > 0) && <MenuSeparator />}
-          <MenuRadioGroup label={t.conflicts} value={conflicts.choice} onChange={(choice) => conflicts.onChange(choice as TaskConflicts)}>
-            <MenuRadioItem value="project" description={t.conflictsProjectAbout(conflicts.project)}>
-              {t.conflictsProject}
-            </MenuRadioItem>
-            <MenuRadioItem value="on" description={t.conflictsOnAbout}>
-              {t.conflictsOn}
-            </MenuRadioItem>
-            <MenuRadioItem value="off" description={t.conflictsOffAbout}>
-              {t.conflictsOff}
-            </MenuRadioItem>
-          </MenuRadioGroup>
-        </>
-      )}
-      {allowEverything && (
-        <>
-          {(opens || course.length > 0 || conflicts) && <MenuSeparator />}
-          <MenuCheckboxItem
-            checked={allowEverything.on || allowEverything.project}
-            // Its project's switch holds over the task's: that one is turned off in the project's rules.
-            disabled={allowEverything.project}
-            description={allowEverything.project ? t.allowAllProject : t.allowAllAbout}
-            onCheckedChange={allowEverything.onChange}
-          >
-            {t.allowAll}
-          </MenuCheckboxItem>
-        </>
-      )}
-      {onAbandon && (
-        <>
-          {(opens || course.length > 0 || conflicts || allowEverything) && <MenuSeparator />}
-          <MenuItem icon="close" tone="danger" description={merged ? t.abandonMergedAbout : t.abandonAbout} onSelect={onAbandon}>
-            {t.abandon}
-          </MenuItem>
-        </>
-      )}
+      {groups.flatMap((group, at) => (at === 0 ? group : [<MenuSeparator key={`rule-${at}`} />, ...group]))}
     </Menu>
-  )
-  if (!differs) return menu
-  return (
-    <>
-      <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>
-      {menu}
-    </>
   )
 }
