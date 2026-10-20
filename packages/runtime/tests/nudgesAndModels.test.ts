@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
 import { Limits } from '../src/Limits'
+import { ModelFacts } from '../src/ModelFacts'
 import { Models } from '../src/Models'
 import { type NudgeEvent, Nudges } from '../src/Nudges'
 import { Projects } from '../src/Projects'
@@ -20,7 +21,8 @@ import { callTool, repository, runtime, turns, until } from './support'
  * What waits on the person and what work can go to, at turns their own
  * tests don't take: a lead's question nudging them as a call, an agent out
  * of usage leaving the models usable now, a model switched off that its
- * agent doesn't offer, and a settled task's card read again as it was.
+ * agent doesn't offer, what is known of models read with no copy kept, and
+ * a settled task's card read again as it was.
  */
 
 const open = Effect.gen(function* () {
@@ -84,6 +86,31 @@ describe('the models usable now', () => {
       assert.deepStrictEqual(yield* agentsOf, ['claude-code', 'opencode'])
     }).pipe(Effect.provide(runtime(':memory:', {}, { each: { codex: { outOfUsage: {} } } }))),
   )
+})
+
+describe('what is known of models', () => {
+  it.live('is read from the list where Althar keeps no copy of it, and kept nowhere', () => {
+    const asked: Array<string> = []
+    const fetch = async (url: string) => {
+      asked.push(url)
+      return Response.json({
+        data: [
+          {
+            id: 'fake/large',
+            benchmarks: { artificial_analysis: { intelligence_index: 60, coding_index: 70, agentic_index: 50 } },
+            pricing: { prompt: '0.000001', completion: '0.000002' },
+            context_length: 200_000,
+          },
+        ],
+      })
+    }
+    return Effect.gen(function* () {
+      const facts = yield* ModelFacts
+      const large = Effect.sync(() => [facts.of({ id: 'codex', name: 'Fake codex' }, { id: 'large', name: 'Large' })?.intelligence])
+      yield* until(large, ([intelligence]) => intelligence === 60)
+      assert.deepStrictEqual(asked, ['https://openrouter.test/models'])
+    }).pipe(Effect.provide(runtime(':memory:', {}, { modelFacts: { url: 'https://openrouter.test/models', fetch } })))
+  })
 })
 
 describe('a step’s model named by its agent', () => {

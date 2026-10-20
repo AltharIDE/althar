@@ -17,8 +17,9 @@ import { repository, runtime } from './support'
  * What a task's screens read from git where its repository isn't as Althar
  * set it up: a branch started over on a history of its own, a default
  * branch the person renamed, and one merged here that follows a remote
- * branch this Mac never fetched. And a project opened from a folder that
- * isn't a repository's root.
+ * branch this Mac never fetched; where its branch would be pushed among
+ * several remotes, none of them origin. And a project opened from a folder
+ * that isn't a repository's root.
  */
 
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
@@ -100,6 +101,25 @@ describe('what a task’s screens read from git', () => {
         [['main', 'origin/main', 0]],
       )
     }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+describe('where a task’s branch would be pushed', () => {
+  it.live(
+    'is nowhere Althar can tell in a repository of several remotes, none of them origin, that its default branch follows none of',
+    () =>
+      Effect.gen(function* () {
+        const root = repository()
+        git(root, 'remote', 'add', 'github', 'https://github.com/meridian/api.git')
+        git(root, 'remote', 'add', 'gitlab', 'https://gitlab.com/meridian/api.git')
+        const { threadId, worktree } = yield* taskIn(root)
+        commit(worktree, 'retry.ts', 'retry\n')
+        const here = (yield* (yield* Queries).thread(threadId, {})).task.here
+        assert.deepStrictEqual(
+          here.map((one) => [one.branch, one.remote]),
+          [['main', null]],
+        )
+      }).pipe(Effect.provide(withQueries())),
   )
 })
 
