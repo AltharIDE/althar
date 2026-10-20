@@ -10,13 +10,15 @@ import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
+import { Coordinator } from '../src/Coordinator'
 import { AttachRefused } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { ReviewRefused, Reviews } from '../src/Reviews'
 import * as Runtime from '../src/Runtime'
-import { fakeConnectors, HOST, hosted, notices, runtime } from './support'
+import type { ToolAccess } from '../src/ToolServer'
+import { callTool, fakeConnectors, HOST, hosted, notices, runtime } from './support'
 
 /*
  * A project of two repositories on the same connected host, api and web:
@@ -29,25 +31,26 @@ const git = (cwd: string, ...args: Array<string>) =>
     .toString()
     .trim()
 
-/** Someone's branch on web, pushed to its remote: its head. */
-const branchOnWeb = (web: { readonly working: string; readonly bare: string }, branch: string) => {
-  git(web.working, 'checkout', '-q', '-b', branch)
-  writeFileSync(join(web.working, `${branch}.ts`), `export const ${branch.replace(/-/g, '')} = 1\n`)
-  git(web.working, 'add', '.')
-  git(web.working, 'commit', '-q', '-m', `Write ${branch}`)
-  const head = git(web.working, 'rev-parse', 'HEAD')
-  git(web.working, 'push', '-q', web.bare, branch)
-  git(web.working, 'checkout', '-q', 'main')
+/** Someone's branch on a repository, pushed to its remote: its head. */
+const branchOn = (at: { readonly working: string; readonly bare: string }, branch: string) => {
+  git(at.working, 'checkout', '-q', '-b', branch)
+  writeFileSync(join(at.working, `${branch}.ts`), `export const ${branch.replace(/-/g, '')} = 1\n`)
+  git(at.working, 'add', '.')
+  git(at.working, 'commit', '-q', '-m', `Write ${branch}`)
+  const head = git(at.working, 'rev-parse', 'HEAD')
+  git(at.working, 'push', '-q', at.bare, branch)
+  git(at.working, 'checkout', '-q', 'main')
   return head
 }
 
-/** api and web on the fake host, with pull requests #1 and #2 on web from branches of its own. */
+/** api and web on the fake host, with pull requests #1 and #2 on web and #3 on api, each from a branch of its own. */
 const twoRepositories = () => {
   const api = hosted(['meridian', 'api'])
   const web = hosted(['meridian', 'web'])
   const heads = new Map<number, string>([
-    [1, branchOnWeb(web, 'fix-nav')],
-    [2, branchOnWeb(web, 'fix-footer')],
+    [1, branchOn(web, 'fix-nav')],
+    [2, branchOn(web, 'fix-footer')],
+    [3, branchOn(api, 'fix-retry')],
   ])
   const github: FakeService = makeFakeService({
     pushUrl: (path) => (path[1] === 'web' ? web.bare : api.bare),
@@ -62,6 +65,13 @@ const twoRepositories = () => {
     author: 'you',
     source: 'fix-footer',
     headSha: heads.get(2) ?? '',
+  })
+  github.addPullRequest({
+    path: ['meridian', 'api'],
+    title: 'Fix the retry',
+    author: 'you',
+    source: 'fix-retry',
+    headSha: heads.get(3) ?? '',
   })
   return { api, web, github }
 }
@@ -152,6 +162,41 @@ describe('a project of two repositories on one connected host', () => {
       assert.include(
         (yield* notices(task.threadId)).map((notice) => notice.title),
         'The task follows PR #2 now: Fix the footer',
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('lists each repository’s pull requests under its name, and has nothing to push to once a task’s two are merged', () => {
+    const { api, web, github } = twoRepositories()
+    return Effect.gen(function* () {
+      const { projectId, names, across, personId } = yield* opened(api.working, web.working)
+      const coordinator: ToolAccess = {
+        role: 'coordinator',
+        projectId,
+        threadId: yield* (yield* Coordinator).thread(projectId),
+        sessionId: 'coordinator-session',
+        taskId: null,
+      }
+      const listed = yield* callTool(coordinator, 'find_pull_requests', {})
+      assert.include(listed, `${names[0] ?? ''} (meridian/api)`)
+      assert.include(listed, `${names[1] ?? ''} (meridian/web)`)
+
+      // A task following a pull request in each.
+      const task = yield* across('Fix both')
+      const changes = yield* Changes
+      for (const link of [`${HOST}/meridian/web/pull/1`, `${HOST}/meridian/api/pull/3`])
+        assert.strictEqual(
+          (yield* changes.attach({ taskId: task.taskId, pullRequest: link, start: true, actorId: personId })).kind,
+          'attached',
+        )
+      const lead: ToolAccess = { role: 'lead', projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      // Both merged on the host: nothing is open to push to.
+      github.mergeByHand(1)
+      github.mergeByHand(3)
+      yield* changes.refresh(task.taskId)
+      assert.strictEqual(
+        yield* callTool(lead, 'push_to_pull_request', {}),
+        "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.",
       )
     }).pipe(Effect.provide(withQueries(github)))
   })
