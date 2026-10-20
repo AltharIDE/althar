@@ -15,18 +15,16 @@
   min-height: 0;
   overflow-y: auto;
   padding: 40px;
-  background: radial-gradient(ellipse 70% 55% at 50% 30%, color-mix(in srgb, var(--ink) 13%, transparent), transparent 72%), var(--n-2);
-  transition: background var(--slow) var(--ease);
-}
-/* on dark the ink's wash is light, not a stain */
-:global([data-theme='dark']) .who {
+  /* the ink's wash; on dark lifted toward the words and fainter (dark.css) */
+  --glow: color-mix(in oklab, var(--ink), var(--t-1) var(--glow-lift, 0%));
   background:
     radial-gradient(
       ellipse 70% 55% at 50% 30%,
-      color-mix(in srgb, color-mix(in oklab, var(--ink) 70%, var(--t-1)) 10%, transparent),
+      color-mix(in srgb, var(--glow) calc(13% * var(--glow-strength, 1)), transparent),
       transparent 72%
     ),
     var(--n-2);
+  transition: background var(--slow) var(--ease);
 }
 .whoInner {
   display: grid;

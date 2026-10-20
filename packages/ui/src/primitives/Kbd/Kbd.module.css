@@ -9,20 +9,12 @@
   border: 1px solid var(--line);
   background: var(--chip);
   font: 500 10px/15px var(--font);
-  color: var(--t-3);
+  color: var(--kbd-ink, var(--t-3));
 }
-/* on a filled button, in its words' own colour: white on violet, and on ink whichever way the theme turns it */
+/* on a filled button, in its words' own colour: white on violet, and on ink whichever way the theme turns it.
+   A wash on paper; on dark a ring, since a wash there dims the glyph against the fill (dark.css). */
 .onFill {
-  border-color: transparent;
-  background: color-mix(in srgb, currentColor 18%, transparent);
+  border-color: color-mix(in srgb, currentColor var(--kbd-fill-ring, 0%), transparent);
+  background: color-mix(in srgb, currentColor var(--kbd-fill-wash, 18%), transparent);
   color: inherit;
-}
-/* on dark a wash on violet lifts the key's ground and dims its glyph: a ring instead, the glyph on the fill itself */
-:global([data-theme='dark']) .onFill {
-  background: transparent;
-  border-color: color-mix(in srgb, currentColor 35%, transparent);
-}
-/* on dark a key sits on a wash over a wash: its word a touch brighter, so it still reads at AA */
-:global([data-theme='dark']) .kbd:not(.onFill) {
-  color: color-mix(in oklab, var(--t-3) 65%, var(--t-2));
 }

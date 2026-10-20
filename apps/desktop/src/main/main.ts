@@ -727,7 +727,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
   awake.wants(preferences)
-  nativeTheme.themeSource = preferences.appearance
+  if (key === 'appearance') nativeTheme.themeSource = preferences.appearance
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })
@@ -819,7 +819,12 @@ void ready.then(() => {
     const menu = appMenu(process.platform, !app.isPackaged)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
-  openWindow()
+  // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first.
+  void preferencesRead
+    .catch(() => undefined)
+    .then(() => {
+      if (windows.size === 0) openWindow()
+    })
   startReports({
     profile: () => locations().profile,
     // The install's one id, the one usage data keeps (usageData.ts), whether or not its switch is on.

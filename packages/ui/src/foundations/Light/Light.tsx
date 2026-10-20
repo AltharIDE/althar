@@ -109,7 +109,7 @@ export function Light({ height = 0.62, motion = 'drift', sink = false, onSunk, c
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
     COLUMNS.forEach((column, i) => {
       const context = columns.current[i]?.getContext('2d')
-      if (context) drawColumn(context, column, live, theme.startsWith('dark'))
+      if (context) drawColumn(context, column, live, theme === 'dark')
     })
     const tile = document.createElement('canvas')
     tile.width = tile.height = 128

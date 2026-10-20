@@ -330,12 +330,7 @@ button.toggleWords {
   place-items: center;
   height: 118px;
   border-radius: 11px;
-  background: linear-gradient(165deg, var(--n-4), var(--n-5));
-  box-shadow: inset 0 0 0 1px var(--line-2);
-}
-/* on dark the desk behind the Dock is darker toward its foot, as a wallpaper at night, not lighter */
-:global([data-theme='dark']) .desk {
-  background: linear-gradient(165deg, var(--n-2), var(--n-0));
+  background: var(--desk, linear-gradient(165deg, var(--n-4), var(--n-5)));
   box-shadow: inset 0 0 0 1px var(--line-2);
 }
 .dock {
@@ -457,7 +452,8 @@ button.toggleWords {
   gap: 10px;
   padding: 14px 16px;
   border-radius: 15px;
-  background: var(--frost-raised);
+  /* on the frosted panel; a page that sets one on itself names its own (--control-sheet) */
+  background: var(--control-sheet, var(--frost-raised));
   box-shadow: var(--frost-ring);
 }
 /* quiet words and links under the modules; a long foot, as with an update ready, wraps rather than crowds */

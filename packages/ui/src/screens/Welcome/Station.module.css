@@ -258,7 +258,7 @@
   opacity: 0;
   pointer-events: none;
   background: color-mix(in srgb, var(--t-1) 5%, transparent);
-  mix-blend-mode: multiply;
+  mix-blend-mode: var(--wash-blend, multiply); /* on dark it lightens, as a hover there does (dark.css) */
   transition:
     opacity 200ms var(--ease),
     background 120ms var(--ease);
@@ -346,9 +346,4 @@
   .wash {
     display: none;
   }
-}
-
-/* on dark the wash lightens, as a hover there does */
-:global([data-theme='dark']) .wash {
-  mix-blend-mode: screen;
 }

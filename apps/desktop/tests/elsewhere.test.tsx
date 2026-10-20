@@ -71,7 +71,7 @@ describe('settings on Windows', () => {
     })
     withServices(<Settings at="appearance" />, fakeClient().client, host)
     expect(await screen.findByText('In the system tray')).toBeTruthy()
-    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(screen.queryByRole('radiogroup', { name: 'In other apps' })).toBeNull()
     expect(screen.getByText('Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight.')).toBeTruthy()
   })
 })

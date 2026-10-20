@@ -93,8 +93,6 @@
 .picture > * {
   max-width: 100%;
   max-height: 100%;
-}
-/* on dark a dark picture (an ink app icon) loses its edge on the page: a faint outline round its own shape */
-:global([data-theme='dark']) .picture > * {
-  filter: drop-shadow(0 0 0.6px rgba(255, 255, 255, 0.5));
+  /* on dark a dark picture (an ink app icon) keeps its edge (dark.css) */
+  filter: var(--icon-edge, none);
 }

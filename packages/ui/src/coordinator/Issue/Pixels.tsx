@@ -46,6 +46,7 @@ export function Pixels({ cell = 5, gap = 2, fps = 18, playing = false, className
   const ref = useRef<HTMLCanvasElement>(null)
   const field = useRef<Field | null>(null)
   const theme = useTheme()
+  const drawnIn = useRef(theme)
 
   /* the field itself: its size, its squares, one still frame, and what keeps it current */
   useEffect(() => {
@@ -147,7 +148,8 @@ export function Pixels({ cell = 5, gap = 2, fps = 18, playing = false, className
   /* another theme: its colour read again, and the still frame drawn in it */
   useEffect(() => {
     const f = field.current
-    if (!f) return
+    if (!f || drawnIn.current === theme) return
+    drawnIn.current = theme
     f.recolour()
     f.draw()
   }, [theme])

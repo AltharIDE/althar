@@ -72,6 +72,16 @@
   --tile-hover: rgba(255, 255, 255, 0.11);
   --ring-track: rgba(255, 255, 255, 0.16);
   --selection: rgba(167, 123, 255, 0.38);
+  /* the night's look of parts (dark.css) is not the island's: it is the same black in every theme */
+  --kbd-ink: initial;
+  --kbd-ink-chosen: initial;
+  --kbd-fill-wash: initial;
+  --kbd-fill-ring: initial;
+  --field-hover: initial;
+  --icon-edge: initial;
+  --logo-tile: initial;
+  --logo-ink: initial;
+  --logo-edge: initial;
   --sunk: rgba(255, 255, 255, 0.08);
   --lift: none;
   --live: var(--live-on-ink);

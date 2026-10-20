@@ -16,7 +16,10 @@ import type { MenuItemConstructorOptions, NativeImage } from 'electron'
  */
 
 /** The page's own colour (the kit's --n-2), light and dark, for what shows before the page has drawn and round it as it resizes. */
-export const PAGE = { light: '#f4f2ec', dark: '#1a1a1d' } as const
+export const PAGE = { light: '#f4f2ec', dark: '#1c1a17' } as const
+
+/** A raised sheet's colour (the kit's --n-1), light and dark: the menu bar's sheet, which draws its own paper. */
+export const RAISED = { light: '#fcfbf8', dark: '#25231f' } as const
 
 export const windowOptions = (platform: NodeJS.Platform, icon: NativeImage, dark = false) => ({
   backgroundColor: dark ? PAGE.dark : PAGE.light,

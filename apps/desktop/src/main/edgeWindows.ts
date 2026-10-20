@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
 
 import { darkPanel, readSystemUsesLightTheme, type Scheme, watchColorScheme } from './colorScheme'
+import { RAISED } from './windowOptions'
 import {
   DEFAULT_EDGE,
   type EdgePlace,
@@ -217,10 +218,11 @@ export const startEdge = (host: EdgeHost): Edge => {
   let scheme: Scheme | undefined
   let taskbarLight: boolean | undefined
   const picture = (yours: boolean) => {
-    // The Windows taskbar follows the system theme (SystemUsesLightTheme), not the apps' (nativeTheme), which is the fallback.
+    // The Windows taskbar follows the system theme (SystemUsesLightTheme), not the apps' (nativeTheme).
     // On Linux Electron's nativeTheme says light where it has no word, on a dark panel too, so the desktop's setting comes from
     // the Settings portal; with none, most panels are dark: the mark is light.
-    let dark = nativeTheme.shouldUseDarkColors
+    // Until it is read, the system's own (the taskbar's) scheme, never the app's: Settings › Appearance may differ from it.
+    let dark = process.platform === 'win32' ? nativeTheme.shouldUseDarkColorsForSystemIntegratedUI : nativeTheme.shouldUseDarkColors
     if (process.platform === 'linux') dark = darkPanel(scheme)
     else if (taskbarLight !== undefined) dark = !taskbarLight
     const image = nativeImage.createFromPath(join(host.pictures, markFile(process.platform, dark, yours)))
@@ -249,7 +251,7 @@ export const startEdge = (host: EdgeHost): Edge => {
   }
 
   /** The sheet's paper, light or dark as the app's appearance makes the scheme. */
-  const sheetPaper = () => (nativeTheme.shouldUseDarkColors ? '#222225' : '#fcfbf8')
+  const sheetPaper = () => (nativeTheme.shouldUseDarkColors ? RAISED.dark : RAISED.light)
   // Changed while it is made, its paper follows, as its page does.
   nativeTheme.on('updated', () => {
     if (sheet !== undefined && !sheet.isDestroyed()) sheet.setBackgroundColor(sheetPaper())

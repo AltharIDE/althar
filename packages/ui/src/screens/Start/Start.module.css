@@ -101,19 +101,12 @@
 /* Where an agent landed, the light gathers on the ring under it. */
 .gather {
   fill: var(--on-dark); /* light itself, white in either theme */
-  opacity: 0.55;
+  opacity: var(--gather, 0.55); /* on dark a hint of it, or it is a grey halo over the names (dark.css) */
   filter: blur(6px);
   animation: rise 600ms ease both;
 }
 .gatherOff {
-  opacity: 0.2;
-}
-/* on dark a white glow is a grey halo over the names: a hint of it */
-:global([data-theme='dark']) .gather {
-  opacity: 0.22;
-}
-:global([data-theme='dark']) .gatherOff {
-  opacity: 0.08;
+  opacity: var(--gather-off, 0.2);
 }
 .agent {
   position: absolute;

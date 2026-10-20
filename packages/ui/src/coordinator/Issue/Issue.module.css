@@ -34,22 +34,14 @@ a.issue:hover .pixels {
   width: 36px;
   height: 36px;
   border-radius: 9px;
-  background: var(--ink-fill);
-  color: var(--on-ink);
+  /* a source's mark on its tile: ink on paper; on dark its own dark tile with its light mark (dark.css) */
+  background: var(--logo-tile, var(--ink-fill));
+  color: var(--logo-ink, var(--on-ink));
+  box-shadow: inset 0 0 0 1px var(--logo-edge, transparent);
 }
 .linear .logo {
-  background: var(--linear);
-}
-/* On dark a source keeps its own dark mark, light on a dark tile, rather than inverting to a light square;
-   Linear keeps its brand indigo with white, as on paper. */
-:global([data-theme='dark']) .logo {
-  background: var(--pressed-paper);
-  color: var(--t-1);
-  box-shadow: inset 0 0 0 1px var(--line-2);
-}
-:global([data-theme='dark']) .linear .logo {
-  background: #5e6ad2;
-  color: #ffffff;
+  background: var(--linear-tile, var(--linear));
+  color: var(--linear-tile-ink, var(--on-ink));
   box-shadow: none;
 }
 .main {

@@ -25,9 +25,9 @@ test('opens dark when kept dark, and follows Settings › Appearance at once', a
   try {
     // The page took the scheme before it drew, and the window's paper under it is the page's dark.
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-    expect(await paper(electronApp)).toContain('#1A1A1D')
+    expect(await paper(electronApp)).toContain('#1C1A17')
     expect(await electronApp.evaluate(({ nativeTheme }) => nativeTheme.themeSource)).toBe('dark')
-    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(26, 26, 29)')
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(28, 26, 23)')
     await page.screenshot({ path: 'test-results/appearance-dark-first-screen.png', scale: 'css', animations: 'disabled' })
 
     await openFirstProject(electronApp, page, repository(home))
@@ -48,7 +48,7 @@ test('opens dark when kept dark, and follows Settings › Appearance at once', a
     await choice.getByRole('radio', { name: /^Match/ }).click()
     const dark = await electronApp.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors)
     await expect(page.locator('html')).toHaveAttribute('data-theme', dark ? 'dark' : 'light')
-    await expect.poll(() => paper(electronApp)).toContain(dark ? '#1A1A1D' : '#F4F2EC')
+    await expect.poll(() => paper(electronApp)).toContain(dark ? '#1C1A17' : '#F4F2EC')
   } finally {
     await electronApp.close()
   }

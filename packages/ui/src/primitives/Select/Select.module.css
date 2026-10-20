@@ -36,12 +36,7 @@
 }
 .filled:hover:not([data-disabled]),
 .filled[data-state='open'] {
-  background: var(--n-3);
-}
-/* on dark the field shade sits under the tile; hovered, the tile lightens instead */
-:global([data-theme='dark']) .filled:hover:not([data-disabled]),
-:global([data-theme='dark']) .filled[data-state='open'] {
-  background: var(--tile-hover);
+  background: var(--field-hover, var(--n-3));
 }
 .trigger:active:not([data-disabled]) {
   background: var(--pressed-paper);

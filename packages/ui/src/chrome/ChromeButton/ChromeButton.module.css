@@ -48,11 +48,7 @@
   height: 5px;
   border-radius: 99px;
   background: var(--t-2);
-  box-shadow: 0 0 0 1.5px var(--n-1);
-}
-/* on dark the dot is cut out of the window's bar it sits on, not ringed in a lighter grey */
-:global([data-theme='dark']) .marked::after {
-  box-shadow: 0 0 0 1.5px var(--chrome);
+  box-shadow: 0 0 0 1.5px var(--dot-cutout, var(--n-1)); /* on dark, cut out of the bar it sits on (dark.css) */
 }
 /* in the tooltip, what the dot says, under the button's name */
 .said {

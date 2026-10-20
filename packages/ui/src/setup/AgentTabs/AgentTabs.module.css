@@ -24,7 +24,7 @@
     color var(--fast) var(--ease);
 }
 .tab:hover {
-  background: var(--frost-sheet);
+  background: var(--tab-hover, var(--frost-sheet));
   color: var(--t-1);
 }
 .tab[data-state='active'],
@@ -69,13 +69,9 @@
   gap: 14px;
   padding: 16px 18px;
   border-radius: 15px;
-  background: var(--frost-raised);
+  background: var(--page-sheet, var(--frost-raised));
   box-shadow: var(--frost-ring);
   animation: in var(--base) var(--ease-fold);
-}
-/* on dark a white wash over the panel is a lighter slab; the chosen agent's sheet is the paper its tab is */
-:global([data-theme='dark']) .panel {
-  background: var(--paper);
 }
 .panel:focus-visible {
   outline: 1.5px solid var(--signal);
@@ -128,9 +124,4 @@
   .panel {
     animation: none;
   }
-}
-
-/* on dark a white wash on a tab outshines the chosen tab's paper: hovered, a tab stays below it */
-:global([data-theme='dark']) .tab:hover:not([data-state='active']) {
-  background: color-mix(in oklab, var(--n-1), var(--paper) 50%);
 }

@@ -117,6 +117,9 @@
 .light {
   background: rgba(255, 255, 255, 0.7);
 }
+.taskbar .glyph {
+  background: rgba(var(--taskbar-ink, 20, 20, 28), 0.5);
+}
 
 /* Windows: a light taskbar along the foot, the tray beside the date and time */
 .windows {
@@ -129,8 +132,9 @@
   align-items: center;
   height: 12px;
   padding: 0 4px;
-  background: rgba(243, 243, 246, 0.92);
-  box-shadow: 0 -0.5px 0 rgba(20, 20, 28, 0.12);
+  /* light, or dark with a dark theme, as Windows' own (dark.css): the mark, in the theme's ink, shows on either */
+  background: var(--taskbar, rgba(243, 243, 246, 0.92));
+  box-shadow: 0 -0.5px 0 var(--taskbar-edge, rgba(20, 20, 28, 0.12));
 }
 .tray {
   display: flex;
@@ -142,8 +146,8 @@
   width: 3px;
   height: 3px;
   margin: 1px 1px 0;
-  border-top: 1px solid rgba(20, 20, 28, 0.6);
-  border-left: 1px solid rgba(20, 20, 28, 0.6);
+  border-top: 1px solid rgba(var(--taskbar-ink, 20, 20, 28), 0.6);
+  border-left: 1px solid rgba(var(--taskbar-ink, 20, 20, 28), 0.6);
   rotate: 45deg;
 }
 .inkMark {
@@ -158,18 +162,5 @@
   width: 7px;
   height: 1.5px;
   border-radius: 2px;
-  background: rgba(20, 20, 28, 0.55);
-}
-
-/* In dark, Windows' own taskbar is dark too, so the mark (in the theme's ink) still shows on it. */
-:global([data-theme='dark']) .taskbar {
-  background: rgba(36, 36, 40, 0.92);
-  box-shadow: 0 -0.5px 0 rgba(255, 255, 255, 0.1);
-}
-:global([data-theme='dark']) .caret {
-  border-color: rgba(255, 255, 255, 0.6);
-}
-:global([data-theme='dark']) .taskbar .glyph,
-:global([data-theme='dark']) .date i {
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(var(--taskbar-ink, 20, 20, 28), 0.55);
 }

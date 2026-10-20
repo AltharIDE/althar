@@ -20,7 +20,7 @@
   --n-5: #d6d1c6; /* strong fill, borders that must read */
   --chrome: #ebe8e0; /* the window's own bars */
   --paper: #ffffff; /* the lightest: fields, cards and chosen options that sit on a raised sheet */
-  --paper-plain: var(--paper); /* the paper, where a sheet rebinds --paper for what it holds */
+  --paper-plain: var(--paper); /* the root's paper, for where a sheet rebinds --paper for what it holds */
 
   /* ---- Ink ---------------------------------------------------------------*/
   --t-1: #141417; /* primary */
@@ -67,7 +67,7 @@
   /* ---- Roles on paper -----------------------------------------------------
      What sits on a raised sheet, by what it does. On paper each is a shade
      of the page; on dark a step down from paper reads as a hole, so there
-     each is its own lighter wash (themes.css).                              */
+     each is its own lighter wash (dark.css).                                */
   --hover-paper: var(--n-2); /* a row the pointer or the keys are on, in a menu or list */
   --hover-faint: var(--n-1); /* the faintest hover, under a stronger chosen row */
   --chosen: var(--n-1); /* the chosen row of a list down a side */
@@ -133,8 +133,8 @@
   --ink-fill: #141417;
 
   /* ---- On ink -------------------------------------------------------------
-     What sits on an ink fill (--t-1) or a dark terminal. Washes on ink are
-     white at low alpha, written where they are used.                         */
+     What sits on an ink fill (--ink-fill). Washes on a fill take the colour
+     of its words (currentColor), written where they are used.                */
   --on-ink: #ffffff;
   --on-ink-2: #c9c7c0;
   --on-ink-focus: #b99bff;
@@ -249,8 +249,9 @@
   --mark-umber: #6e4b3a;
 
   /* ---- Projects --------------------------------------------------------------
-     A project's own ink, for its mark and nothing else. Muted, and clear of
-     cobalt and violet, which say what runs and what waits on you. */
+     A project's own ink, for its swatch and the wash of its page; its mark
+     keeps its own (--mark-*). Muted, and clear of cobalt and violet, which
+     say what runs and what waits on you. */
   --project-clay: #b4532a;
   --project-ochre: #8a6d2f;
   --project-olive: #6b7330;

@@ -2,7 +2,7 @@ import { act, render } from '@testing-library/react'
 import type { CSSProperties } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { COLUMN_COUNT, COLUMNS, toneOf } from '../src/foundations/Light/columns'
+import { COLUMN_COUNT, COLUMNS, drawColumn, toneOf } from '../src/foundations/Light/columns'
 import { LIGHT, Light } from '../src/foundations/Light/Light'
 
 /*
@@ -104,6 +104,83 @@ describe('the light, drawn', () => {
     const { container } = render(<Light motion="still" />)
     expect(feet).toContain(toneOf(0)[0])
     expect(Array.from(container.querySelectorAll<HTMLElement>('div')).every((one) => one.style.backgroundImage === '')).toBe(true)
+  })
+})
+
+describe('the light, on dark', () => {
+  /** Every stop a column's gradient is given, in order. */
+  const stopsOf = (column: (typeof COLUMNS)[number], dark: boolean) => {
+    const stops: Array<[number, string]> = []
+    const context = {
+      createLinearGradient: () => ({ addColorStop: (at: number, colour: string) => void stops.push([at, colour]) }),
+      clearRect() {},
+      beginPath() {},
+      moveTo() {},
+      lineTo() {},
+      ellipse() {},
+      closePath() {},
+      fill() {},
+      filter: '',
+      fillStyle: '',
+    } as unknown as CanvasRenderingContext2D
+    drawColumn(context, column, '#8a95ff', dark)
+    return stops
+  }
+  const alphaOf = (colour: string) => Number(/rgba\(.*,\s*([\d.]+)\)$/.exec(colour)?.[1])
+
+  it('glows rather than pales: each column thins its own saturated foot to nothing, never to white', () => {
+    for (const column of COLUMNS) {
+      const stops = stopsOf(column, true)
+      expect(stops.map(([at]) => at)).toEqual([0, 0.34, 0.66, 1])
+      const alphas = stops.map(([, colour]) => alphaOf(colour))
+      expect(alphas.at(-1)).toBe(0)
+      // fainter as it rises
+      expect(alphas[0]!).toBeGreaterThan(alphas[1]!)
+      expect(alphas[1]!).toBeGreaterThan(alphas[2]!)
+      // one hue all the way up: no pale tone, no white
+      const hues = new Set(stops.map(([, colour]) => colour.replace(/,\s*[\d.]+\)$/, ')')))
+      expect(hues.size).toBe(1)
+      expect([...hues][0]).not.toBe('rgba(255, 255, 255)')
+    }
+  })
+
+  it('lets the cobalt middle lead: the outer columns are fainter, the corners warm', () => {
+    const middle = COLUMNS.find((column) => column.d < 0.16)!
+    const edge = COLUMNS.find((column) => column.d >= 0.8)!
+    expect(alphaOf(stopsOf(middle, true)[0]![1])).toBe(1)
+    expect(alphaOf(stopsOf(edge, true)[0]![1])).toBeLessThan(0.5)
+    expect(stopsOf(edge, true)[0]![1]).toBe('rgba(255, 148, 102, 0.4)')
+  })
+
+  it('draws as on paper where the theme is light', () => {
+    const column = COLUMNS.find((one) => one.d >= 0.8)!
+    expect(stopsOf(column, false).map(([, colour]) => colour)).toEqual([...column.tones, 'rgba(255, 255, 255, 0)'])
+  })
+
+  it('draws again when the theme turns dark, in the dark light', async () => {
+    const feet: string[] = []
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      if (this.isConnected === false) return null
+      return {
+        createLinearGradient: () => ({ addColorStop: (at: number, colour: string) => void (at === 0 && feet.push(colour)) }),
+        clearRect() {},
+        beginPath() {},
+        moveTo() {},
+        lineTo() {},
+        ellipse() {},
+        closePath() {},
+        fill() {},
+      }
+    }) as unknown as HTMLCanvasElement['getContext']
+    try {
+      render(<Light motion="still" />)
+      expect(feet).toHaveLength(COLUMN_COUNT)
+      await act(async () => void (document.documentElement.dataset.theme = 'dark'))
+      expect(feet).toHaveLength(2 * COLUMN_COUNT)
+      expect(feet.slice(COLUMN_COUNT).every((colour) => colour.startsWith('rgba('))).toBe(true)
+    } finally {
+      delete document.documentElement.dataset.theme
+    }
   })
 })
 

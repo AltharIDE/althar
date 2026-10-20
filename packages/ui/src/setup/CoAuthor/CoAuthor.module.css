@@ -190,27 +190,24 @@
   fill: var(--t-3);
 }
 .althar {
+  position: relative;
   margin-left: -6px;
   box-shadow: 0 0 0 2px var(--paper);
   transition: translate var(--base) var(--ease-fold);
+}
+/* its own dark tile keeps an edge where it meets a dark row (dark.css); over the picture, so drawn above it */
+.althar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--face-edge, transparent);
+  pointer-events: none;
 }
 .off .althar {
   translate: 5px 0;
   box-shadow: none;
 }
-/* on dark the face's own dark tile meets a dark row: a faint ring over its edge keeps it */
-:global([data-theme='dark']) .althar {
-  position: relative;
-}
-:global([data-theme='dark']) .althar::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
-  pointer-events: none;
-}
-
 @keyframes arrive {
   from {
     opacity: 0;
