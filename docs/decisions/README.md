@@ -60,5 +60,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [050](050-an-agent-joins-where-althar-can-hold-it-to-asking.md) | An ACP agent joins where Althar can hold it to asking, and the rest wait with their reasons |
 | [051](051-a-finished-task-waits-for-the-person-to-settle-it.md) | A finished task that isn't a change waits in Needs you until the person settles it |
 | [052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md) | A task can be attached to an open pull request it didn't open, and follows it as one it opened |
-| [053](053-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
-| [054](054-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [053](053-the-code-an-agent-names-opens-beside-the-conversation.md) | The code an agent names opens beside the conversation, read where the agent works, and never edited |
+| [054](054-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [055](055-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |

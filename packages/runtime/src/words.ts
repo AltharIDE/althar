@@ -121,6 +121,7 @@ const kinds: Readonly<Record<string, string>> = {
   repository: 'repository',
   output: 'output',
   document: 'document',
+  file: 'file',
   note: 'note',
 }
 

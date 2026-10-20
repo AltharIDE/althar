@@ -2118,6 +2118,91 @@ export type OutputText = typeof OutputText.Type
 export const DocumentText = Schema.Struct({ path: Schema.String, body: Schema.String, bytes: Schema.Number, lines: Schema.Number })
 export type DocumentText = typeof DocumentText.Type
 
+/**
+ * Where the code a thread's agent names is read from: a task's worktrees as
+ * they are now, what isn't committed too; or, for the coordinator, each of
+ * the project's repositories at its default branch, as this device last
+ * fetched it. Each repository with its branch; where there are several, a
+ * path starts with its repository's slug.
+ */
+export const CodePlace = Schema.Struct({
+  kind: Schema.Literals(['task', 'default']),
+  repositories: Schema.Array(Schema.Struct({ slug: Schema.String, name: Schema.String, branch: Schema.String })),
+})
+export type CodePlace = typeof CodePlace.Type
+
+const CodeLine = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
+/**
+ * A file a name in a message names, there: by its path as the place names
+ * it, with the lines the name gave, if any. A name in code (`listEditors`)
+ * names the one file that declares it, at that line. What its task changed
+ * in it, against where the task's branch started; and, on the default branch,
+ * how it was when the message was said, where it changed since, with where
+ * the lines named are now (null: they were rewritten since).
+ */
+export const CodeFile = Schema.Struct({
+  kind: Schema.Literal('file'),
+  /** The name, as the agent wrote it. */
+  name: Schema.String,
+  path: Schema.String,
+  line: Schema.optional(CodeLine),
+  end: Schema.optional(CodeLine),
+  /** The name in code it named, where it named one rather than the file. */
+  symbol: Schema.optional(Schema.String),
+  /** Found by its file's name alone: the one file of that name, or the one in a folder the message names. */
+  byName: Schema.Boolean,
+  bytes: Schema.Number,
+  /** Its lines; none counted for what isn't text, or is too large to read. */
+  lines: Schema.Number,
+  /** Text to show; not text; or too large to read here. */
+  content: Schema.Literals(['text', 'binary', 'large']),
+  changed: Schema.NullOr(Schema.Struct({ add: Schema.Number, del: Schema.Number })),
+  since: Schema.NullOr(
+    Schema.Struct({
+      /** The commit it was read at when said. */
+      commit: Schema.String,
+      /** When the message was said. */
+      said: Schema.String,
+      /** Where the lines named are now; null where they were rewritten since; absent where it named none. */
+      now: Schema.optional(Schema.NullOr(Schema.Struct({ line: CodeLine, end: Schema.optional(CodeLine) }))),
+    }),
+  ),
+})
+export type CodeFile = typeof CodeFile.Type
+
+/**
+ * What a name in a message names: a file; a path that isn't there, with
+ * files of nearly its name; or a file's name that several files have, which
+ * the message doesn't tell apart. A name that is none of these, such as a
+ * command or a word, isn't code, and isn't answered.
+ */
+export const CodeFound = Schema.Union([
+  CodeFile,
+  Schema.Struct({ kind: Schema.Literal('missing'), name: Schema.String, path: Schema.String, near: Schema.Array(Schema.String) }),
+  Schema.Struct({
+    kind: Schema.Literal('several'),
+    name: Schema.String,
+    line: Schema.optional(CodeLine),
+    end: Schema.optional(CodeLine),
+    paths: Schema.Array(Schema.String),
+  }),
+])
+export type CodeFound = typeof CodeFound.Type
+
+/** The most names one message is asked about, and the most messages at once. */
+export const CODE_NAMES = { perMessage: 100, messages: 200 } as const
+
+/** A file's text, whole, or past a size the lines around the one asked for: `from` is its first line's number, `total` how many it has. */
+export const CodeText = Schema.Struct({
+  path: Schema.String,
+  text: Schema.String,
+  from: CodeLine,
+  total: Schema.Number,
+  cut: Schema.Boolean,
+})
+export type CodeText = typeof CodeText.Type
+
 /** A stretch of what a found task holds, in order: the words that matched what was asked for are `hit`. */
 export const FoundPart = Schema.Struct({ text: Schema.String, hit: Schema.Boolean })
 export type FoundPart = typeof FoundPart.Type
@@ -2445,6 +2530,34 @@ export const Api = RpcGroup.make(
    * file inside one of the task's worktrees, and not too large to read.
    */
   call('ReadDocument', { threadId: Schema.String, path: Schema.String }, DocumentText),
+  /**
+   * What the names in a thread's messages name, where its agent works
+   * (CodePlace): for each message, by the item it is where it has one, so
+   * it is read as it was when it was said, what its names are.
+   */
+  call(
+    'FindCode',
+    {
+      threadId: Schema.String,
+      messages: Schema.Array(
+        Schema.Struct({
+          itemId: Schema.optional(Schema.String),
+          names: Schema.Array(Schema.String.check(Schema.isMaxLength(300))).check(Schema.isMaxLength(CODE_NAMES.perMessage)),
+        }),
+      ).check(Schema.isMaxLength(CODE_NAMES.messages)),
+    },
+    Schema.Struct({ place: CodePlace, messages: Schema.Array(Schema.Struct({ found: Schema.Array(CodeFound) })) }),
+  ),
+  /**
+   * A file where a thread's agent works, by its path as FindCode named it:
+   * as it is now, or at the commit it was when a message was said. Whole,
+   * or past a size, the lines around `line`.
+   */
+  call(
+    'ReadCode',
+    { threadId: Schema.String, path: Schema.String, commit: Schema.optional(Schema.String), line: Schema.optional(CodeLine) },
+    CodeText,
+  ),
   /** The project's coordinator thread, made the first time it is asked for. */
   call('GetCoordinator', { projectId: Schema.String, before: Schema.optional(Schema.Int), limit }, CoordinatorSnapshot),
   /** Starts a task you planned yourself: it shows in the coordinator's thread like one it planned, and starts at once. */
@@ -2845,6 +2958,17 @@ export const Api = RpcGroup.make(
   command(
     'OpenInEditor',
     { taskId: Schema.String, editor: Schema.String, path: Schema.optional(Schema.String), line: Schema.optional(Schema.Number) },
+    Schema.Boolean,
+  ),
+  /**
+   * Opens a file a thread's agent named in an editor, at a line where given,
+   * by its path as FindCode named it: a task's in the task's folder, the
+   * coordinator's in the person's own checkout of its repository, the folder
+   * alone where the file isn't there. Whether it could.
+   */
+  command(
+    'OpenCode',
+    { threadId: Schema.String, editor: Schema.String, path: Schema.String, line: Schema.optional(CodeLine) },
     Schema.Boolean,
   ),
   /** Pushes the task's branch to its open pull request, up to the commit the person saw. */
