@@ -415,8 +415,8 @@ release (Tier D), and provider-signed reasoning is lost either way.
 A usage limit belongs to an account (`ProviderPrincipal`), so it pauses every
 session on that account at once ([05](05-workflow-engine.md)). The agent's
 other accounts are not out, and moving on tries them first (Several
-accounts, below). ACP does not report limits. Althar detects them in two
-layers:
+accounts, below). ACP does not report plan windows yet. Althar detects limits
+in two layers:
 
 1. **From errors, on every agent.** Each adapter classifies a failed turn as
    `usage_limit`, with the reset time when the error carries one. Claude's
@@ -427,31 +427,54 @@ layers:
    `usage_limit`, `context_full` (start a new session from a brief),
    `transient` (a short rate limit or an overloaded service: retry after a
    pause), `auth_required`, `invalid_request` or `unknown`.
-2. **From account status, where the agent exposes it.** A native side channel
-   reports use per window and reset times before the limit is reached:
-   - Claude Code: the Agent SDK's `rate_limit_event` gives status, use per
-     window (five-hour, seven-day, per model) and reset times.
-     `claude-agent-acp` doesn't forward it, so Althar ships the adapter
-     with a patch that forwards it as an ACP extension notification, and
-     offers the patch upstream.
+2. **From account status, before the limit is reached.** Plan usage is
+   required for every agent and every subscription account
+   ([plan](../plans/plan-usage.md)). An account's windows (five hours, a
+   week, a month, told apart by length) come from the first of these that
+   works for its (agent, provider) pair:
+   1. ACP's quota feature, once an adapter advertises it (an RFD is open:
+      [#2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316);
+      v1's `usage_update` carries context and cost only, and ACP v2, a Draft,
+      leaves it unchanged);
+   2. an extension the adapter ships in ACP;
+   3. the agent's own control channel, started with the account's home;
+   4. the provider's usage endpoint, read with the account's token: not
+      built. Rule 3 bars it, and an exception waits until a spike has seen
+      a real endpoint ([#221](https://github.com/AltharIDE/althar/issues/221)).
+
+   Today:
+   - Claude Code: `claude-agent-acp` forwards one window per event in
+     `usage_update` `_meta["_claude/rateLimit"]` (the Agent SDK's
+     `rate_limit_event`), and drops it if it arrives before a turn's first
+     usage figure ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
+     so Althar carries a patch for that (`patches/`, on the pinned version). An account with no session is read
+     through the SDK's usage report, or a probe session; both are
+     unverified. Step 4 is not used: Anthropic's terms bar it.
    - Codex: app-server's `account/rateLimits/read` and
-     `account/rateLimits/updated`, through a small app-server connection used
-     only for this.
-   - OpenCode: the provider's rate-limit errors and retry hints. API keys have
-     no plan windows.
+     `account/rateLimits/updated` (`usage.ts`), started in the account's home.
+   - OpenCode: no channel. Plan or key is told per provider from its own
+     `opencode auth list --standalone --format json` (2.x; 1.x can't say).
+     No plan provider has a source yet, so a plan sign-in shows a fault
+     rather than windows ([#221](https://github.com/AltharIDE/althar/issues/221)).
+
+   Errors (layer 1) stay under all of it: they say a limit was reached, not
+   how much is left.
 
 ```ts
 type AccountStatus = {
   principalId: string
-  state: "ok" | "warning" | "limited"
-  windows: Array<{ kind: string; usedFraction?: number; resetsAt?: string }>
-  source: "error" | "side_channel"
+  state: "ok" | "warning" | "limited" | "fault"
+  windows: Array<{ kind: "five_hour" | "weekly" | "monthly" | "other"; label?: string; usedPercent: number; resetsAt?: string }>
+  source: "acp" | "acp_extension" | "agent" | "endpoint" | "error"
+  fault?: "sign_in_again" | "source_changed" | "unreachable" | "no_source" | "no_data_yet" | "cannot_classify"
   observedAt: string
 }
 ```
 
 With account status, the scheduler can hold or move work before the limit is
-reached rather than after.
+reached rather than after, and warnings fire at 50, 25, 10 and 5% remaining
+(once per account, window and reset), shown in the open coordinator's Talk
+room and on the usage tab.
 
 ## Provider session lifecycle
 

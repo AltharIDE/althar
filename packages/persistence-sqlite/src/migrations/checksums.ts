@@ -42,4 +42,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0036_task_kept': 'c2746f1815024236a13a4de561fc61562559c6f6667acd825ce39732cd85104b',
   '0037_attached_change_sets': '1fde6e504a76e9c3bb92b7f7d486220f007bfc66214b3bed93da239d82ed847c',
   '0038_skills': 'ac2b8ba12660d4a876e22c87ae030f75ab3c93dcd6596ed57835feb4a2923ae2',
+  '0039_plan_usage': '6aeb2107a3f9b0c1f7e269d4e7f0c26a50796f4068b373cd5ced7a846e4664f4',
 }

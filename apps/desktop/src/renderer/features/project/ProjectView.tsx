@@ -47,6 +47,7 @@ import { ProjectSettingsPage } from '../projectSettings/ProjectSettingsPage'
 import { FIRST_PROJECT_SECTION, type ProjectSection } from '../projectSettings/sections'
 import { connectionsNeedYou } from '../projectSettings/standing'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
+import { UsageNotices } from '../usage/UsageNotices'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
@@ -502,6 +503,8 @@ export function ProjectView({
                         onAnswerQuestion={model.answerQuestion}
                       />
                     </ThreadShellProvider>
+                    {/* Plan usage warnings not yet seen: Althar's own notices, in the room the person is looking at. */}
+                    <UsageNotices />
                   </Thread>
                 </TaskFace>
               )}

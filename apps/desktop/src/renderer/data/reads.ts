@@ -33,6 +33,8 @@ export const keys = {
   settings: ['settings'] as const,
   /** The skills store: read before the skills show, and again as a skill changes, in this window or another (feed.ts). */
   skills: ['skills'] as const,
+  /** Every account's plan usage and the warnings not yet seen: kept whole as the runtime sends it. */
+  planUsage: ['planUsage'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
   search: (projectId: string | null, text: string) => ['search', projectId, text] as const,
   /** What a command printed: kept once it ended, so it never changes. */
@@ -120,6 +122,8 @@ export const reads = (client: Client) => ({
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
   skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
+  // The runtime sends it whole on the feed whenever it changes, so it is read once a window, and again only by asking.
+  planUsage: () => queryOptions({ queryKey: keys.planUsage, queryFn: () => client.getPlanUsage() }),
   // What is found changes with everything a task holds, and nothing on the feed says when: read again as the finder opens, and kept a moment.
   search: (projectId: string | null, text: string) =>
     queryOptions({

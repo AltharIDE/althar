@@ -1,0 +1,2 @@
+# Patches apply to files with LF line ends: kept as they are, even where Git checks out with CRLF (Windows).
+patches/*.patch -text

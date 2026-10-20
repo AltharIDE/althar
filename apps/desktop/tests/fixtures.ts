@@ -11,6 +11,7 @@ import type {
   HomeSnapshot,
   InstalledSkill,
   Load,
+  PlanUsage,
   Picture,
   ProjectNote,
   ProjectRulesView,
@@ -24,6 +25,7 @@ import type {
   ThreadItem,
   ThreadSnapshot,
   Unfurl,
+  UsageWarning,
   WatchEvent,
 } from '@althar/contracts'
 import { vi } from 'vitest'
@@ -892,6 +894,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     getLoad: vi.fn(async () => load),
+    getPlanUsage: vi.fn(async () => ({ accounts: [], warnings: [] })),
+    acknowledgeUsageWarnings: vi.fn(async () => {}),
     openInEditor: vi.fn(async () => true),
     installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
@@ -1099,6 +1103,42 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   openInWindow: vi.fn(),
   clipboardToken: vi.fn(async () => null),
   ...overrides,
+})
+
+/** An account's plan usage as the runtime reads it: a Codex account on its plan, its 5-hour window 60% used. */
+export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}): PlanUsage['accounts'][number] => ({
+  agentId: 'codex',
+  agentName: 'Codex',
+  accountId: 'acc_codex_work',
+  accountName: 'work',
+  paidBy: 'plan',
+  source: 'agent',
+  observedAt: '2026-10-15T10:00:00.000Z',
+  plan: 'pro',
+  windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  fault: null,
+  ...over,
+})
+
+/** A warning the runtime has raised and the person has not seen: 25% of the 5-hour window left. */
+export const usageWarning = (over: Partial<UsageWarning> = {}): UsageWarning => ({
+  accountId: 'acc_codex_work',
+  accountName: 'work',
+  agentId: 'codex',
+  agentName: 'Codex',
+  windowKey: 'five_hour',
+  kind: 'five_hour',
+  label: null,
+  remainingPercent: 25,
+  resetsAt: '2026-10-15T15:00:00.000Z',
+  raisedAt: '2026-10-15T10:00:00.000Z',
+  ...over,
+})
+
+/** The usage feed carries, whole. */
+export const planUsage = (accounts: PlanUsage['accounts'] = [usageAccount()], warnings: PlanUsage['warnings'] = []): PlanUsage => ({
+  accounts,
+  warnings,
 })
 
 /** A change the runtime's feed reports. */
