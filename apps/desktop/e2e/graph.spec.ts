@@ -14,7 +14,9 @@ import { connectGitHub, launch, openFirstProject, say, toConversation } from './
  * it, the review passes and its draft pull request opens; its graph has a
  * lane for each agent and the steps in the order they ran. A card opens its
  * report, a round's marker goes to what started it in the conversation, and
- * a follow-up shows as a second round. The screenshots it takes are
+ * a follow-up shows as a second round. A report goes to its place in the
+ * conversation, and a permission asked mid-step is answered from its card
+ * with the keyboard. The screenshots it takes are
  * this change's own evidence (test-results/graph-*.png).
  */
 
@@ -56,8 +58,13 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await expect(report).toBeVisible()
     await expect(report.getByRole('button', { name: 'Show in the conversation' })).toBeVisible()
     await page.screenshot({ path: 'test-results/graph-report.png', animations: 'disabled', scale: 'css' })
-    await page.keyboard.press('Escape')
-    await expect(report).toHaveCount(0)
+    // Its way to the conversation: the review's report there, in view and focused.
+    await report.getByRole('button', { name: 'Show in the conversation' }).click()
+    await expect(page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Conversation/ })).toBeChecked()
+    const reviewed = page.locator('[data-item]:focus')
+    await expect(reviewed).toBeInViewport()
+    await expect(reviewed).toContainText('finding')
+    await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
 
     // The round's marker goes to what started it: the request the conversation opens with.
     await graph.getByRole('button', { name: /You asked/ }).click()
@@ -72,6 +79,22 @@ test('a task’s steps as a graph: a lane for each agent, a card’s report, and
     await expect(graph.getByRole('button', { name: /^Follow-up/ })).toBeVisible()
     await page.mouse.move(1400, 880)
     await graph.screenshot({ path: 'test-results/graph-follow-up.png', animations: 'disabled', scale: 'css' })
+
+    // Mid-step, its lead asks to run a command: its card waits on the person, and opened, Enter allows it.
+    await toConversation(page)
+    await say(page, 'run make deploy')
+    await page.getByRole('radiogroup', { name: 'Face' }).getByRole('radio', { name: /Graph/ }).click()
+    const asking = graph.getByRole('button', { name: /waits on you/ })
+    await expect(asking).toBeVisible({ timeout: 20_000 })
+    await asking.click()
+    const permission = page.getByRole('dialog')
+    await expect(permission.getByText('make deploy').first()).toBeVisible()
+    await expect(permission.locator('input[type="radio"]:checked')).toBeFocused()
+    await page.screenshot({ path: 'test-results/graph-permission.png', animations: 'disabled', scale: 'css' })
+    await page.keyboard.press('Enter')
+    await expect(graph.getByRole('button', { name: /waits on you/ })).toHaveCount(0, { timeout: 10_000 })
+    await toConversation(page)
+    await expect(page.getByText('chosen=allow_once')).toBeVisible()
   } finally {
     await electronApp.close()
   }

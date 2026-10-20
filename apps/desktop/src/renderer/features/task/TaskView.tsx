@@ -819,12 +819,13 @@ export function TaskView({
             })}
       />
     )
-  // Permissions waiting, as one stack with Allow all, in the conversation or where the Graph face opens the step asking.
-  const permissionCalls = (requests: ReadonlyArray<AttentionRequest>) => (
+  // Permissions waiting, as one stack with Allow all, in the conversation or where the Graph face opens the step asking:
+  // there, opened to be answered, it takes focus, so Enter answers it.
+  const permissionCalls = (requests: ReadonlyArray<AttentionRequest>, opened = false) => (
     <PermissionCalls
       requests={requests}
       project={snapshot.project.name}
-      focusOnMount={permitting || 'idle'}
+      focusOnMount={opened || permitting || 'idle'}
       onAnswer={model.answer}
       // Out of what the project always asks about: everything on this task allowed, where it isn't yet; or the rules.
       wayOut={{
@@ -894,7 +895,7 @@ export function TaskView({
           className={s.graphFace}
           graph={graph}
           stuck={stuckCall}
-          permissions={permissionCalls}
+          permissions={(requests) => permissionCalls(requests, true)}
           onShow={showInThread}
           // The composer that says what went wrong is the conversation's: here, the face says it.
           error={model.error}
