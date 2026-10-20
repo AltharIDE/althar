@@ -3,7 +3,7 @@
   gap: 2px;
   padding: 2px;
   border-radius: 8px;
-  background: var(--n-2);
+  background: var(--segment-track);
 }
 .option {
   display: flex;
@@ -30,7 +30,7 @@
   background: var(--n-4);
 }
 .option[aria-checked='true'] {
-  background: var(--paper);
+  background: var(--segment-on);
   color: var(--t-1);
   font-weight: 550;
   box-shadow: var(--lift);

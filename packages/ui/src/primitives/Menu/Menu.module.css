@@ -62,13 +62,13 @@
 /* Radix moves focus with the pointer and marks the item it is on */
 .item[data-highlighted],
 .item:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .item:focus-visible {
   box-shadow: inset 0 0 0 1.5px var(--signal);
 }
 .item:active:not([data-disabled]) {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .item[data-disabled] {
   color: var(--t-4);

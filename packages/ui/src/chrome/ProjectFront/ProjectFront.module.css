@@ -12,6 +12,13 @@
     radial-gradient(ellipse 520px 220px at 0% 0%, color-mix(in srgb, var(--ink) 15%, transparent), transparent 70%),
     radial-gradient(ellipse 900px 160px at 20% -40%, color-mix(in srgb, var(--ink) 7%, transparent), transparent 70%), var(--n-2);
 }
+/* on dark the ink's wash is light, not a stain: the ink lifted toward the words, a little fainter */
+:global([data-theme='dark']) .front {
+  --glow: color-mix(in oklab, var(--ink) 70%, var(--t-1));
+  background:
+    radial-gradient(ellipse 520px 220px at 0% 0%, color-mix(in srgb, var(--glow) 11%, transparent), transparent 70%),
+    radial-gradient(ellipse 900px 160px at 20% -40%, color-mix(in srgb, var(--glow) 5%, transparent), transparent 70%), var(--n-2);
+}
 .mark {
   flex: none;
 }

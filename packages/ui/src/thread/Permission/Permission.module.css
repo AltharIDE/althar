@@ -101,7 +101,7 @@
   width: 18px;
   height: 18px;
   border-radius: 5px;
-  background: var(--n-4);
+  background: var(--chip);
   font: 600 10.5px var(--mono);
   color: var(--t-2);
 }

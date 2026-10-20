@@ -151,8 +151,8 @@
   border-radius: inherit;
   background: linear-gradient(
     90deg,
-    var(--t-1) 0%,
-    var(--t-1) calc(100% - var(--heat) * 100%),
+    var(--ink-fill) 0%,
+    var(--ink-fill) calc(100% - var(--heat) * 100%),
     color-mix(in srgb, var(--warm) calc(45% + var(--heat) * 55%), var(--danger)) 100%
   );
   transition: width 120ms ease-out;
@@ -196,7 +196,7 @@
   height: 18px;
   margin-left: -9px;
   border-radius: 99px;
-  background: var(--paper);
+  background: var(--knob);
   border: 1px solid color-mix(in srgb, var(--warm) calc(var(--heat) * 100%), var(--line-3));
   box-shadow: var(--lift-2);
   transition:

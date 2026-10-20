@@ -89,10 +89,10 @@
   user-select: none;
 }
 .item[data-highlighted] {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .item:active:not([data-disabled]) {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .item[data-state='checked'] {
   font-weight: 550;

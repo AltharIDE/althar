@@ -7,7 +7,7 @@
   padding: 0 4px;
   border-radius: var(--r-sm);
   border: 1px solid var(--line);
-  background: var(--n-4);
+  background: var(--chip);
   font: 500 10px/15px var(--font);
   color: var(--t-3);
 }

@@ -41,7 +41,7 @@
 }
 
 :where(.ch-root) ::selection {
-  background: var(--signal-dim);
+  background: var(--selection);
   color: var(--t-1);
 }
 

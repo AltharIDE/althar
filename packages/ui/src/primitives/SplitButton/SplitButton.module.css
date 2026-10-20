@@ -16,7 +16,7 @@
   color: var(--t-3);
 }
 .split .more[aria-expanded='true'] {
-  background: var(--n-4);
+  background: var(--chip);
   color: var(--t-1);
 }
 /* the two halves share an edge: the one with focus draws its ring over the other */

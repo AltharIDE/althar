@@ -29,7 +29,7 @@
 
   --t-1: #ececee;
   --t-2: #b7b7bd;
-  --t-3: #9a9aa2;
+  --t-3: #a3a3ab;
   --t-4: #6a6a72;
 
   --line: rgba(255, 255, 255, 0.075);
@@ -41,6 +41,7 @@
   --signal-bright: #b9a1ff;
   --signal-pressed: #9474f5;
   --signal-dim: rgba(166, 138, 255, 0.15);
+  --selection: rgba(166, 138, 255, 0.34);
   --signal-line: rgba(166, 138, 255, 0.42);
   --signal-hover: rgba(166, 138, 255, 0.22);
   --signal-paper: color-mix(in oklab, #a68aff 10%, var(--n-1));
@@ -59,6 +60,17 @@
   --danger-dim: rgba(242, 129, 111, 0.11);
   --danger-hover: rgba(242, 129, 111, 0.18);
   --ok: #5fc47e;
+
+  /* ---- Roles on paper: washes lighter than the sheet, as dark surfaces hover ---- */
+  --hover-paper: color-mix(in oklab, var(--paper), var(--t-1) 6%);
+  --pressed-paper: color-mix(in oklab, var(--paper), var(--t-1) 11%);
+  --chip: rgba(255, 255, 255, 0.08);
+  --well: color-mix(in oklab, var(--paper), var(--n-2) 50%);
+  --segment-track: rgba(255, 255, 255, 0.055);
+  --segment-on: color-mix(in oklab, var(--paper), var(--t-1) 10%);
+  --knob: color-mix(in oklab, var(--paper), var(--t-1) 18%);
+  --live-step: color-mix(in srgb, var(--live) 92%, var(--n-1));
+  --you-lane: color-mix(in oklab, var(--signal) 5%, var(--n-2));
 
   /* ---- Derived materials ---- */
   --n-1-clear: color-mix(in srgb, var(--n-1) 0%, transparent);
@@ -164,7 +176,7 @@
   --t-1: #efeae1;
   --ink-fill: #ddd7cc;
   --t-2: #bcb5a9;
-  --t-3: #a09a8d;
+  --t-3: #a9a396;
   --t-4: #6e695f;
 
   --line: rgba(255, 240, 215, 0.075);
@@ -181,6 +193,16 @@
   --frost-hover: rgba(255, 240, 215, 0.13);
   --frost-well: rgba(255, 240, 215, 0.13);
   --frost-well-hover: rgba(255, 240, 215, 0.18);
+  --frost-ring: 0 0 0 0.5px rgba(255, 240, 215, 0.09);
+  --lift-frost:
+    0 0 0 0.5px rgba(255, 240, 215, 0.16), inset 0 0.5px 0 rgba(255, 240, 215, 0.1), 0 18px 48px -14px rgba(0, 0, 0, 0.7),
+    0 4px 12px -6px rgba(0, 0, 0, 0.5);
+  --lift-pop: 0 0 0 0.5px rgba(255, 240, 215, 0.1), 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 24px -12px var(--shadow);
+  --lift-dialog: 0 0 0 0.5px rgba(255, 240, 215, 0.09), 0 1px 2px rgba(0, 0, 0, 0.4), 0 24px 48px -20px rgba(0, 0, 0, 0.75);
+  --chip: rgba(255, 240, 215, 0.08);
+  --segment-track: rgba(255, 240, 215, 0.055);
+  /* violet over brown goes dusty in srgb; mixed in oklab it stays a tint */
+  --you-lane: color-mix(in oklab, var(--signal) 4%, var(--n-2));
   --traffic: #4c4841;
 
   --term: #12110f;
@@ -212,6 +234,7 @@
   --line-3: rgba(255, 255, 255, 0.2);
 
   --lift-card: 0 0 0 0.5px rgba(255, 255, 255, 0.04);
+  --you-lane: color-mix(in oklab, var(--signal) 7%, var(--n-2));
   --traffic: #3c3c41;
 
   /* the page is darker than any terminal could be: the terminal lifts instead */

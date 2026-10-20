@@ -61,6 +61,13 @@
   --n-3: rgba(255, 255, 255, 0.05);
   --n-4: rgba(255, 255, 255, 0.08);
   --paper: rgba(255, 255, 255, 0.1);
+  --hover-paper: rgba(255, 255, 255, 0.06);
+  --pressed-paper: rgba(255, 255, 255, 0.08);
+  --chip: rgba(255, 255, 255, 0.08);
+  --well: rgba(255, 255, 255, 0.06);
+  --segment-track: rgba(255, 255, 255, 0.06);
+  --segment-on: rgba(255, 255, 255, 0.14);
+  --knob: rgba(255, 255, 255, 0.85);
   --sunk: rgba(255, 255, 255, 0.08);
   --lift: none;
   --live: var(--live-on-ink);

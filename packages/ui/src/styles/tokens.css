@@ -40,6 +40,7 @@
   --signal: #7a3ff0;
   --signal-bright: #6a2fd6;
   --signal-dim: rgba(122, 63, 240, 0.1);
+  --selection: rgba(122, 63, 240, 0.1); /* selected text */
   --signal-line: rgba(122, 63, 240, 0.32);
   --signal-hover: rgba(122, 63, 240, 0.16);
   --signal-paper: #f6f1ff; /* a sheet that is asking you something */
@@ -62,6 +63,20 @@
   --danger-dim: rgba(196, 64, 47, 0.07);
   --danger-hover: rgba(196, 64, 47, 0.12);
   --ok: #2e8c46;
+
+  /* ---- Roles on paper -----------------------------------------------------
+     What sits on a raised sheet, by what it does. On paper each is a shade
+     of the page; on dark a step down from paper reads as a hole, so there
+     each is its own lighter wash (themes.css).                              */
+  --hover-paper: var(--n-2); /* a row the pointer or the keys are on, in a menu or list */
+  --pressed-paper: var(--n-4); /* that row, pressed */
+  --chip: var(--n-4); /* a small fill that holds words: inline code, a key, a kbd */
+  --well: var(--n-2); /* a recess in a card: a pull request's row, a thumbnail */
+  --segment-track: var(--n-2); /* behind a segmented control's choices */
+  --segment-on: var(--paper); /* the chosen one */
+  --knob: var(--paper); /* a slider's thumb */
+  --live-step: color-mix(in srgb, var(--live) 78%, var(--n-1)); /* the step that runs now, on a track */
+  --you-lane: color-mix(in srgb, var(--signal) 3.5%, var(--n-2)); /* the lane of calls only you can make */
 
   /* ---- Derived materials ------------------------------------------------*/
   --n-1-clear: rgba(252, 251, 248, 0); /* --n-1 at zero alpha, for fades */
