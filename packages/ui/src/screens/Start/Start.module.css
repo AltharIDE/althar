@@ -100,7 +100,7 @@
 }
 /* Where an agent landed, the light gathers on the ring under it. */
 .gather {
-  fill: var(--paper);
+  fill: var(--on-dark); /* light itself, white in either theme */
   opacity: 0.55;
   filter: blur(6px);
   animation: rise 600ms ease both;
