@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
@@ -15,7 +17,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
  * A lead's tools for its task's pull request, where what it asks for isn't
@@ -164,5 +166,26 @@ describe('a task’s pull request, as the person acts on it', () => {
       assert.strictEqual(task?.state, 'done')
       assert.strictEqual(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktree }).toString().trim(), kept)
     }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('a task’s pull request across a restart', () => {
+  it.live('is listened to again at the next launch, and what was said on it meanwhile arrives', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-db-')), 'profile.sqlite')
+    const launch = (every: Duration.Duration) =>
+      Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { connectors: fakeConnectors({ github }), listenEvery: every })))
+    return Effect.gen(function* () {
+      const { lead } = yield* withPullRequest(working).pipe(Effect.provide(launch(Duration.hours(1))))
+      // Said while Althar was closed.
+      github.commentAs(1, 'dana', 'Is it seconds?')
+      yield* Effect.gen(function* () {
+        const arrivals = Effect.map(items(lead.threadId), (all) => all.filter((item) => item.kind === 'arrival'))
+        const [heard] = yield* until(arrivals, (all) => all.length > 0, Duration.seconds(10))
+        assert.deepInclude(heard?.content, { kind: 'comment', from: 'dana' })
+      }).pipe(Effect.provide(launch(Duration.millis(100))))
+    })
   })
 })

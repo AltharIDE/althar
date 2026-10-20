@@ -1,9 +1,11 @@
-import { makeFakeService } from '@althar/connectors/testing'
+import { products } from '@althar/connectors'
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Connectors } from '../src/Config'
 import { Connections, NotConnected } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
@@ -161,6 +163,37 @@ describe('an issue', () => {
       // Its project counts it as ready for the person, and nothing under way.
       const [listed] = (yield* queries.projects).projects
       assert.deepInclude(listed, { working: 0, ready: 1, waiting: 0 })
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) }))),
+      ),
+    )
+  })
+
+  it.live('gets no link to the pull request where its tracker keeps none', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    const fake = linear()
+    const tracker: FakeService = { ...fake, capabilities: { ...fake.capabilities, links: false } }
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      yield* connect('linear')
+      const { projectId, threadId } = yield* opened(working)
+      const body = `Rate-limit refunds ${LINK} [coordinator:plan] [lead:finish] [lead:edit] [review:pass]`
+      yield* (yield* Coordinator).say({
+        envelope: yield* Runtime.envelope('thread.send', { body }),
+        threadId,
+        body,
+        disposition: 'after_current',
+      })
+      const cards = Effect.map((yield* Queries).coordinator(projectId), (snapshot) =>
+        snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
+      )
+      yield* until(cards, (all) => all[0]?.phase === 'ready' && all[0].change != null, Duration.seconds(20))
+      assert.strictEqual(github.changes[0]?.title, 'MER-231: Rate-limit refunds')
+      assert.deepStrictEqual(fake.linksOn('MER-231'), [])
+      assert.notInclude(fake.calls, 'link')
     }).pipe(
       Effect.provide(
         Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) }))),
@@ -381,5 +414,61 @@ describe('an issue', () => {
       assert.strictEqual(other.branch, 'althar/issue-12-other')
       assert.isNull(yield* issues.ofTask(other.taskId))
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
+  })
+})
+
+describe('a link on a connection that is only one side of its service', () => {
+  /** GitHub, its connections made only as a code host, or only as a tracker. */
+  const onlyAs = (service: FakeService, side: 'host' | 'tracker') =>
+    Layer.succeed(
+      Connectors,
+      Connectors.of({
+        products: [
+          { ...products.github, make: () => (side === 'host' ? { host: service } : { tracker: service }), access: service.access },
+        ],
+        fetch: () => Promise.reject(new Error('No network in tests')),
+        clientIds: {},
+        callbackPort: 0,
+        cliToken: () => Effect.succeed(null),
+      }),
+    )
+
+  /** Says something to the project's coordinator and unfurls its links: the links its message shows. */
+  const pasted = (threadId: string, body: string) =>
+    Effect.gen(function* () {
+      const envelope = yield* Runtime.envelope('thread.send', { body })
+      yield* (yield* Coordinator).say({ envelope, threadId, body, disposition: 'after_current' })
+      yield* (yield* Issues).unfurlInput(envelope.commandId)
+      const said = (yield* items(threadId)).filter((item) => item.kind === 'user_message').at(-1)
+      return (said?.content.links ?? []) as ReadonlyArray<unknown>
+    })
+
+  it.live('unfurls no issue where the connection reads no issues, and reads none', () => {
+    const { working } = hosted()
+    const github = makeFakeService()
+    github.addRepository(['meridian', 'api'])
+    github.addIssue({ ref: 'meridian/api#12', title: 'Refunds ignore the limit' })
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { threadId } = yield* opened(working)
+      const link = `${HOST}/meridian/api/issues/12`
+      assert.deepStrictEqual(yield* pasted(threadId, `Look at ${link}`), [])
+      assert.instanceOf(yield* Effect.flip((yield* Issues).read(link)), NotConnected)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: onlyAs(github, 'host') })))
+  })
+
+  it.live('unfurls no pull request where the connection reads no code, and says a pull request’s link isn’t an issue', () => {
+    const { working } = hosted()
+    const github = makeFakeService()
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const { threadId } = yield* opened(working)
+      const link = `${HOST}/meridian/api/pull/1`
+      assert.deepStrictEqual(yield* pasted(threadId, `Look at ${link}`), [])
+      const refused = yield* Effect.flip((yield* Issues).read(link))
+      assert.instanceOf(refused, NotAnIssue)
+      assert.strictEqual(refused.what, 'pull request')
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: onlyAs(github, 'tracker') })))
   })
 })

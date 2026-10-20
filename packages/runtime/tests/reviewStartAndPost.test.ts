@@ -9,11 +9,13 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
+import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Reviews } from '../src/Reviews'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, notices, runtime, until } from './support'
@@ -141,6 +143,36 @@ describe('a review, at its edges', () => {
       const [copy] = yield* sql<{ state: string }>`SELECT state FROM workspaces WHERE task_id = ${started.taskId}`
       assert.strictEqual(copy?.state, 'failed')
       assert.lengthOf(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${started.threadId}`, 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('is listed as reviewed before once its task is over, for the coordinator to start another', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const started = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+      })
+      yield* (yield* Tasks).abandon({
+        envelope: yield* Runtime.envelope('task.abandon', { taskId: started.taskId }),
+        taskId: started.taskId,
+      })
+      const coordinator: ToolAccess = {
+        role: 'coordinator',
+        projectId,
+        threadId: yield* (yield* Coordinator).thread(projectId),
+        sessionId: 'coordinator-session',
+        taskId: null,
+      }
+      const found = yield* callTool(coordinator, 'find_pull_requests', {})
+      assert.include(found, `task ${started.slug} reviewed it before`)
+      assert.notInclude(found, 'reviews it already')
     }).pipe(Effect.provide(withQueries(github)))
   })
 })

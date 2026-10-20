@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { IssueDraftCard } from '@althar/contracts'
-import { makeLinear, products } from '@althar/connectors'
+import { ConnectorFailed, makeLinear, products } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
@@ -524,6 +524,29 @@ describe('issue drafts', () => {
       const asked = yield* callTool(access, 'draft_issue', { title: 'Somewhere', tracker: ' ', container: '' })
       assert.isTrue(asked.startsWith('Say where on Linear it goes, as container: T1 (Team 1), T2 (Team 2), '), asked)
       assert.isTrue(asked.endsWith('T20 (Team 20), and 5 more.'), asked)
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('say a tracker’s refusal in Althar’s words where the tracker gave none of its own', () => {
+    const fake = linearWith(MERIDIAN)
+    const refusals: Array<ConnectorFailed['reason']> = ['forbidden', 'rejected']
+    // A tracker that refuses without a word, as some answer a 403 or a 422.
+    const linear: FakeService = {
+      ...fake,
+      create: () => Effect.fail(new ConnectorFailed({ product: 'linear', reason: refusals.shift() ?? 'rejected', message: '' })),
+    }
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
+      const [card] = yield* cardsOf(projectId)
+      assert.deepInclude(yield* drafts.file(card?.draftId ?? '', instance.personId), {
+        state: 'failed',
+        error: 'Linear says this account may not file issues there',
+      })
+      assert.deepInclude(yield* drafts.file(card?.draftId ?? '', instance.personId), { state: 'failed', error: 'Linear refused it.' })
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 
