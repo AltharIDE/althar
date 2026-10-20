@@ -305,7 +305,7 @@
     "sharp",
   ],
   "patchedDependencies": {
-    "@agentclientprotocol/claude-agent-acp@0.93.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.93.0.patch",
+    "@agentclientprotocol/claude-agent-acp@0.94.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.94.0.patch",
   },
   "overrides": {
     "@posthog/core": "1.57.4",

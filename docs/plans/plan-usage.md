@@ -295,7 +295,7 @@ before building on it):
 
 | | Claude Code | Codex | OpenCode |
 |---|---|---|---|
-| Adapter now / latest | `claude-agent-acp` 0.93.0 (Althar pins it, patched) / 0.93.0 | `codex-acp` 2.2.2 / 2.2.2 | OpenCode's own |
+| Adapter now / latest | `claude-agent-acp` 0.94.0 (Althar pins it, patched) / 0.94.0 | `codex-acp` 2.2.2 / 2.2.2 | OpenCode's own |
 | Plan windows over ACP today | Partly: `_meta` on `usage_update`, one window per event, dropped before a turn's first usage | No: held, not sent | No |
 | Context and cost `usage_update` | `used`, `size`, `cost` | `used`, `size` | `used`, `size`, `cost` |
 | ACP version | v1 (v2 opt-in) | v1 and v2 on `main` | v1 |
@@ -329,9 +329,9 @@ before building on it):
   and a key, where the agent tells one, shows none.
 - **Claude Code's adapter drops a window that arrives before a turn's first
   usage figure** (#1127): Althar carries a patch for it (`patches/`, applied
-  by bun to the pinned 0.93.0; a test fails if it is not applied, and a bump
+  by bun to the pinned 0.94.0; a test fails if it is not applied, and a bump
   of the adapter needs the patch made again). The patched event carries the
-  context as last known (`session.contextUsedTokens`, set by 0.93.0 on each
+  context as last known (`session.contextUsedTokens`, set by 0.94.0 on each
   usage figure and after a compaction), or 0 where the session has none yet;
   `events.ts` makes such a 0 a `PlanWindow` alone, so the context meter and
   the handover check keep theirs. Accounts with no session show a fault.
