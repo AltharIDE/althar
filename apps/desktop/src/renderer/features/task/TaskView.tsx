@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
@@ -431,7 +431,9 @@ export function TaskView({
   }, [onBack, open, setFace, hasGraph])
   // The Graph face takes the person to a place in the conversation: earlier pages are read from the model as it is then.
   const latest = useRef(model)
-  latest.current = model
+  useLayoutEffect(() => {
+    latest.current = model
+  })
   const showInThread = useCallback(
     (itemId: string | undefined) => {
       setFace('talk')
