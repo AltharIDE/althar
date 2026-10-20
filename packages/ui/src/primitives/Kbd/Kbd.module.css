@@ -22,3 +22,7 @@
   background: transparent;
   border-color: color-mix(in srgb, currentColor 35%, transparent);
 }
+/* on dark a key sits on a wash over a wash: its word a touch brighter, so it still reads at AA */
+:global([data-theme='dark']) .kbd:not(.onFill) {
+  color: color-mix(in oklab, var(--t-3) 65%, var(--t-2));
+}

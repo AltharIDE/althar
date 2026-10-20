@@ -129,3 +129,8 @@
     animation: none;
   }
 }
+
+/* on dark a white wash on a tab outshines the chosen tab's paper: hovered, a tab stays below it */
+:global([data-theme='dark']) .tab:hover:not([data-state='active']) {
+  background: color-mix(in oklab, var(--n-1), var(--paper) 50%);
+}
