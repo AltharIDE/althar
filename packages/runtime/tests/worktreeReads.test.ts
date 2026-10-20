@@ -1,21 +1,26 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
+import { SqlClient } from 'effect/sql'
 
 import { changedFiles, fileDiff } from '../src/diffs'
 import { NotFound } from '../src/errors'
 import { evidenceForReview } from '../src/evidence'
+import { Projects } from '../src/Projects'
+import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, runtime, task } from './support'
 
 /*
  * What is read of a task's worktree for others, at turns the neighbouring
  * tests don't take: a repository nested in it, which git wouldn't add as a
- * file, and a log the lead handed without the command that printed it.
+ * file; a log the lead handed without the command that printed it; and a
+ * screenshot from the worktree of a task's second repository.
  */
 
 const git = (cwd: string, ...args: Array<string>) =>
@@ -78,6 +83,53 @@ describe('the evidence a reviewer reads', () => {
         ].join('\n'),
       )
       assert.strictEqual(readFileSync(join(folder, '1-log.txt'), 'utf8'), 'Retried twice, then sent.')
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('a screenshot a lead hands in a task of two repositories', () => {
+  it.live('is kept as the second worktree’s, where it was saved', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projects = yield* Projects
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      for (const name of ['api', 'web']) {
+        mkdirSync(join(folder, name))
+        git(join(folder, name), 'init', '-q', '-b', 'main')
+        writeFileSync(join(folder, name, 'README.md'), `# ${name}\n`)
+        git(join(folder, name), 'add', '.')
+        git(join(folder, name), 'commit', '-q', '-m', 'Start')
+      }
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+      const made = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Share the retry',
+        repositories: ['api', 'web'],
+      })
+      const worktrees = yield* sql<{ name: string; path: string }>`
+        SELECT b.display_name AS name, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${made.taskId}`
+      const web = worktrees.find((one) => one.name === 'web')?.path ?? ''
+      writeFileSync(join(web, 'after.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: project.projectId,
+        threadId: made.threadId,
+        sessionId: 'none',
+        taskId: made.taskId,
+      }
+      assert.strictEqual(
+        yield* callTool(lead, 'finish_step', {
+          built: 'A retry in both.',
+          summary: 'Did it.',
+          evidence: [{ kind: 'screenshot', caption: 'The web page, after', path: join(web, 'after.png') }],
+        }),
+        'Althar has your summary.',
+      )
+      const [item] = yield* sql<{ content: string }>`
+        SELECT content FROM thread_items WHERE thread_id = ${made.threadId} AND kind = 'step_result' ORDER BY sequence DESC LIMIT 1`
+      const [shot] = (JSON.parse(item?.content ?? '{}') as { evidence?: ReadonlyArray<Record<string, unknown>> }).evidence ?? []
+      assert.deepInclude(shot, { kind: 'screenshot', worktree: web, path: 'after.png' })
     }).pipe(Effect.provide(runtime())),
   )
 })
