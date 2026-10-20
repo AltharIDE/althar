@@ -22,6 +22,7 @@ import {
   type RuleContext,
   sayRules,
   shortCommand,
+  withoutQuotedHeredocs,
 } from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
@@ -1985,3 +1986,69 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
 })
 
 const reasonOf = (verdict: ReturnType<typeof decide>) => ('reason' in verdict ? verdict.reason : '')
+
+describe('a quoted heredoc is text, not a command', () => {
+  const body = 'Fix the `merge` of the retry queue, then push it.\n\nUses `git push` and `$(rm -rf /)` as examples.'
+  const heredoc = (head: string, quote: string, text: string = body, end = 'EOF') => `${head} <<${quote}\n${text}\n${end}`
+
+  it('is allowed with backticks and words like push in its body', () => {
+    for (const line of [
+      heredoc('git commit -F -', "'EOF'"),
+      heredoc('git commit -F -', '"EOF"'),
+      heredoc('git commit -F -', '\\EOF'),
+      `git commit -m "title" -F - <<'EOF'\nSays "quoted" and 'single' and \`ticks\` and don't.\nEOF`,
+      `cd packages && git commit -F - <<-'EOF'\n\tpush the \`merge\`\n\tEOF`,
+    ])
+      assert.strictEqual(run(line).verdict, 'allow', line)
+  })
+
+  it('drops the body of each of several heredocs on one line, and what follows', () => {
+    const line = `cat <<'A' <<"B" > notes.txt\nfirst \`push\`\nA\nsecond \`merge\`\nB\ngit status`
+    assert.deepStrictEqual(
+      parseCommandLine(line).commands.map((words) => words[0]),
+      ['cat', 'git'],
+    )
+    assert.isFalse(parseCommandLine(line).opaque)
+    assert.strictEqual(run(line).verdict, 'allow')
+  })
+
+  it('leaves a code host command to the code host rule, not to "can\'t tell"', () => {
+    const verdict = run(heredoc('gh pr create --body-file -', "'EOF'"))
+    assert.strictEqual(verdict.verdict, 'deny')
+    assert.notInclude('reason' in verdict ? verdict.reason : '', "can't tell")
+  })
+
+  it('still reads the commands around it', () => {
+    assert.notStrictEqual(run(heredoc('git push --force origin main', "'EOF'")).verdict, 'allow')
+    assert.notStrictEqual(run(`${heredoc('cat', "'EOF'")}\ngit push --force origin main`).verdict, 'allow')
+  })
+
+  it('keeps an unquoted heredoc as shell, which expands $(…) and backticks', () => {
+    const unquoted = heredoc('cat', '', 'now $(rm -rf /) and `git push`')
+    assert.isTrue(parseCommandLine(unquoted).opaque)
+    assert.notStrictEqual(run(unquoted).verdict, 'allow')
+    assert.notStrictEqual(run(heredoc('cat', '-', '\t$(git push --force origin main)', 'EOF')).verdict, 'allow')
+    assert.strictEqual(run(heredoc('cat', "-'EOF'", '\t$(git push --force origin main)', 'EOF')).verdict, 'allow')
+    assert.strictEqual(withoutQuotedHeredocs(unquoted), unquoted)
+  })
+
+  it('reads a heredoc operator inside quotes as text, and <<< as a here-string', () => {
+    assert.strictEqual(withoutQuotedHeredocs(`echo "<<'EOF'"\ngit status`), `echo "<<'EOF'"\ngit status`)
+    assert.strictEqual(withoutQuotedHeredocs(`cat <<< 'x'\ngit status`), `cat <<< 'x'\ngit status`)
+  })
+
+  it('leaves the rest of the text where a heredoc is never closed', () => {
+    assert.strictEqual(withoutQuotedHeredocs(`cat <<'EOF'\nstill text`), `cat <<'EOF'\n`)
+  })
+
+  it('also reads for a role that only reads', () => {
+    assert.strictEqual(decideReader(request({ title: heredoc('cat', "'EOF'") }), { offline: false }).verdict, 'allow')
+  })
+})
+
+describe('a quoted heredoc with a subshell beside it', () => {
+  it('asks for a push in the command, not for words in the heredoc', () => {
+    assert.strictEqual(run("cat <<'EOF'\npush `merge`\nEOF").verdict, 'allow')
+    assert.notStrictEqual(run("cat <<'EOF'\nhi\nEOF\n$(git push origin x)").verdict, 'allow')
+  })
+})

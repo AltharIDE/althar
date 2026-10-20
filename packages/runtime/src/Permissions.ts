@@ -321,7 +321,7 @@ export class Permissions extends Context.Service<
         readonly decision: PermissionDecision
         readonly cited?: { readonly rules: ReadonlyArray<AllowRule>; readonly policyId: string }
       } => {
-        if (verdict.verdict === 'deny') return { decision: { decision: 'reject', reason: verdict.reason } }
+        if (verdict.verdict === 'deny') return { decision: { decision: 'reject', reason: verdict.reason, decidedBy: 'rules' } }
         const [first] = verdict.rules ?? []
         return first === undefined || verdict.rules === undefined
           ? { decision: { decision: 'allow', reason: 'Allowed by the project rules.' } }
@@ -510,7 +510,7 @@ export class Permissions extends Context.Service<
               const decision: PermissionDecision =
                 read.verdict === 'allow'
                   ? { decision: 'allow', reason: 'This role may do this.' }
-                  : { decision: 'reject', reason: read.reason }
+                  : { decision: 'reject', reason: read.reason, decidedBy: 'rules' }
               yield* sql.withTransaction(
                 recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
               )

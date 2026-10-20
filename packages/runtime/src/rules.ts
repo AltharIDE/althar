@@ -739,8 +739,87 @@ const evaluates = (text: string, at: number) => {
   return /^[#=~^+]*[A-Za-z_][A-Za-z0-9_]*\[/.test(rest)
 }
 
+/**
+ * A command line without the bodies of its quoted heredocs (`<<'EOF'`,
+ * `<<"EOF"`, `<<-'EOF'`, `<<\EOF`): the shell takes that text literally, so it
+ * runs nothing, whatever backticks or words like `push` it holds. An unquoted
+ * heredoc's body stays, as the shell expands `$(…)` and backticks in it. The
+ * operator and the line it is on stay; the body and its closing line go.
+ */
+export const withoutQuotedHeredocs = (text: string): string => {
+  if (!text.includes('<<')) return text
+  let out = ''
+  /** The heredocs opened on the line being read, in order: the word that closes each, whether tabs may indent it, whether its body is text. */
+  let pending: Array<{ readonly end: string; readonly tabs: boolean; readonly literal: boolean }> = []
+  let quote = ''
+  let index = 0
+  while (index < text.length) {
+    const char = text[index] ?? ''
+    if (quote !== '') {
+      out += char
+      if (char === '\\' && quote === '"' && index + 1 < text.length) out += text[++index]
+      else if (char === quote) quote = ''
+      index++
+      continue
+    }
+    if (char === '\\') {
+      out += char + (text[index + 1] ?? '')
+      index += 2
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+      out += char
+      index++
+      continue
+    }
+    if (text.startsWith('<<<', index)) {
+      out += '<<<'
+      index += 3
+      continue
+    }
+    if (char === '<' && text.startsWith('<<', index) && text[index + 2] !== '(') {
+      const opener = /^<<(-?)[ \t]*((?:[^\s;&|<>()'"\\]|'[^']*'|"[^"]*"|\\.)+)/.exec(text.slice(index))
+      if (opener !== null) {
+        const word = opener[2] ?? ''
+        pending.push({
+          end: word.replace(/'([^']*)'|"([^"]*)"|\\(.)/g, '$1$2$3'),
+          tabs: opener[1] === '-',
+          literal: /['"\\]/.test(word),
+        })
+        out += opener[0]
+        index += opener[0].length
+        continue
+      }
+    }
+    out += char
+    index++
+    if (char === '\n' && pending.length > 0) {
+      for (const heredoc of pending) {
+        // Up to and including the line that closes it, or the end of the text where nothing does.
+        let body = ''
+        let closing = ''
+        while (index < text.length) {
+          const stop = text.indexOf('\n', index)
+          const line = text.slice(index, stop === -1 ? text.length : stop)
+          index = stop === -1 ? text.length : stop + 1
+          if ((heredoc.tabs ? line.replace(/^\t+/, '') : line) === heredoc.end) {
+            closing = `${line}\n`
+            break
+          }
+          body += `${line}\n`
+        }
+        if (!heredoc.literal) out += `${body}${closing}`
+      }
+      pending = []
+    }
+  }
+  return out
+}
+
 /** A command line's commands as written, with the separator that ends each ('' for the last). */
-const splitCommandLine = (text: string) => {
+const splitCommandLine = (source: string) => {
+  const text = withoutQuotedHeredocs(source)
   const commands: Array<Array<string>> = []
   const ends: Array<string> = []
   /** For each command, which of its words are redirect operators, not arguments that look like them (`echo '>'`). */
@@ -2155,9 +2234,11 @@ const unseenReadings = (words: ReadonlyArray<string>, where: Places, context: Ru
 /** What a command line does that the rules keep for the person: every kind, in every command of it. */
 const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
   const { commands, opaque } = eachCommand(text, context)
+  // What a quoted heredoc holds is text: words in it say nothing of what the command does.
+  const read = withoutQuotedHeredocs(text)
   return [
-    ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(text)
-      ? [kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear', /\bpush\b/.test(text))]
+    ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(read)
+      ? [kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear', /\bpush\b/.test(read))]
       : []),
     ...commands.flatMap((command) => command.kinds),
   ]
@@ -2209,7 +2290,7 @@ const commandRule = (text: string, rules: ProjectRuleSet['commands'], system: Sy
       : exactly(rule)
         ? text.trim() === rule.pattern
         : commands.some((words) => startsAs(rule.pattern, words)) ||
-          (opaque && namesProgram(text, rule.pattern.trim().split(/\s+/)[0] ?? '')),
+          (opaque && namesProgram(withoutQuotedHeredocs(text), rule.pattern.trim().split(/\s+/)[0] ?? '')),
   )
   return met.find((rule) => rule.decision === 'never') ?? met[0]
 }
