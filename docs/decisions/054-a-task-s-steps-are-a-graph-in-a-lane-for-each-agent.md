@@ -20,8 +20,12 @@
     carries each run, the plan's and each follow-up's, with its steps in the
     order they ran: which step (implement, review, settle, publish), the
     how-manyth review, where its last try stands (done, running, waiting,
-    held and why, failed, cancelled), the agent and model of that try, when
-    it started and ended, and whether a change to the steps put it in; and
+    held and why, failed, cancelled), the agent and model of that try (the
+    model of the last turn given in it, not its session's, which a switch
+    rewrites; the person's turn that opens a follow-up comes just before its
+    first step and is marked as that step's, earlier ones by migration
+    0038), when it started and ended, and whether a change to the steps put
+    it in; and
     what started a follow-up, the person's message or what the coordinator
     passed on. What is still to come is only what the plan has and hasn't
     started (its work, its first review, its pull request): a review's

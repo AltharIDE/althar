@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { migrations } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -142,9 +143,23 @@ describe('a task’s graph', () => {
         const followed = new Map(after.steps.map((step) => [`${step.key}${step.iteration}`, step.model]))
         yield* (yield* Sessions).setModel({ threadId: card.threadId, model: was })
         const back = yield* graphOf(card.threadId)
+        const models = (graph: typeof back) =>
+          graph.map((each) => new Map(each.steps.map((step) => [`${step.key}${step.iteration}`, step.model])))
+        assert.deepStrictEqual(models(back), [ran, followed])
+
+        // A follow-up from before its opening turn was marked: its step took the session's model again, until the store
+        // is migrated, which marks the turn as the runtime now does.
+        yield* sql`UPDATE turn_deliveries SET node_attempt_id = NULL WHERE thread_id = ${card.threadId}`
+        assert.strictEqual((yield* graphOf(card.threadId))[1]?.steps[0]?.model, was, 'unmarked, it reads as the session')
+        const openers = migrations.find((migration) => migration.key === '0038_round_openers') ?? assert.fail('no migration')
+        for (const statement of openers.statements) yield* sql.unsafe(statement)
+        assert.deepStrictEqual(models(yield* graphOf(card.threadId)), [ran, followed])
+        const marked = yield* sql<{ prompt: string | null }>`
+          SELECT prompt FROM turn_deliveries WHERE thread_id = ${card.threadId} AND node_attempt_id IS NOT NULL`
         assert.deepStrictEqual(
-          back.map((each) => new Map(each.steps.map((step) => [`${step.key}${step.iteration}`, step.model]))),
-          [ran, followed],
+          marked.map((row) => row.prompt?.includes('Also log each retry.')),
+          [true],
+          'only the opener, not the plan’s first turn',
         )
       }).pipe(Effect.provide(runtimeWith(github)))
     },
