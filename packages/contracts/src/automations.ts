@@ -97,7 +97,7 @@ export const AutomationSummary = Schema.Struct({
   pausedBy: Schema.NullOr(Schema.Literals(['person', 'itself'])),
   /** Why it paused itself, in a sentence. */
   pauseReason: Schema.NullOr(Schema.String),
-  /** When it runs next, where it is on and nothing stops it. */
+  /** When it runs next, where it is on and nothing stops it; or, not turned on yet, when it would first. */
   nextAt: Schema.NullOr(Schema.String),
   /** Its latest runs, newest first: seven at most. */
   latest: Schema.Array(AutomationRun),

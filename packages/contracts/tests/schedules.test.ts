@@ -7,7 +7,8 @@ import { daysWords, Schedule, scheduleInLine, scheduleWords, timeWords } from '.
 describe('schedules', () => {
   it('says a schedule in words', () => {
     assert.strictEqual(scheduleWords({ every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' }), 'Every weekday at 9:00')
-    assert.strictEqual(scheduleWords({ every: 'week', days: [7, 1, 2, 3, 4, 5, 6], at: '02:00' }), 'Every day at 2:00')
+    assert.strictEqual(scheduleWords({ every: 'week', days: [7, 1, 2, 3, 4, 5, 6], at: '02:00' }), 'Every night at 2:00')
+    assert.strictEqual(scheduleWords({ every: 'week', days: [1, 2, 3, 4, 5, 6, 7], at: '09:00' }), 'Every day at 9:00')
     assert.strictEqual(scheduleWords({ every: 'week', days: [5], at: '16:30' }), 'Every Friday at 16:30')
     assert.strictEqual(scheduleWords({ every: 'week', days: [6, 7], at: '10:00' }), 'Every weekend at 10:00')
     assert.strictEqual(scheduleWords({ every: 'week', days: [4, 1, 1], at: '09:00' }), 'Every Monday and Thursday at 9:00')

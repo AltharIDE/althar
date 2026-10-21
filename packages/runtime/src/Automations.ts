@@ -288,9 +288,9 @@ export class Automations extends Context.Service<
         return row?.value === 'on'
       })
 
-      /** When it runs next: its next slot's time and stagger, where it is on and nothing stops it. */
+      /** When it runs next: its next slot's time and stagger, where it is on and nothing stops it; or, proposed, when it would first. */
       const nextAtOf = (row: Row, definition: AutomationDefinition, paused: boolean) => {
-        if (row.state !== 'on' || paused) return null
+        if ((row.state !== 'on' && row.state !== 'proposed') || paused) return null
         const at = nowOf()
         const stagger = staggered ? staggerOf(row.id) : 0
         return new Date(instantOf(nextToCome(definition.schedule, at, zoneOf(), stagger), zoneOf()) + stagger).toISOString()
@@ -1134,6 +1134,8 @@ export class Automations extends Context.Service<
             Effect.gen(function* () {
               const automationId = yield* make({ projectId: input.projectId, definition: input.definition, actorId: input.actorId })
               yield* cardIn({ projectId: input.projectId, threadId: input.threadId, automationId, definition: input.definition })
+              // Its card says when it would first run.
+              yield* refreshCards(automationId)
               return automationId
             }),
           ),

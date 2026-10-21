@@ -171,7 +171,8 @@ describe('automations', () => {
       yield* until(occurrencesOf(on), (rows) => rows.length === 1)
       yield* Effect.sleep('300 millis')
       assert.deepStrictEqual(yield* occurrencesOf(proposed), [])
-      assert.isNull((yield* automations.read(proposed)).nextAt)
+      // Not on yet, it says when it would first run.
+      assert.strictEqual((yield* automations.read(proposed)).nextAt, '2026-10-23T08:00:00.000Z')
     }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
   })
 
@@ -286,7 +287,7 @@ describe('automations', () => {
           /^Proposed the automation “Release notes”, every Friday at 16:00\. Nothing runs until the person turns it on/,
         )
         const [card] = yield* cards
-        assert.deepInclude(card, { state: 'proposed', was: null, ask: null })
+        assert.deepInclude(card, { state: 'proposed', was: null, ask: null, nextAt: '2026-10-23T15:00:00.000Z' })
         assert.deepInclude(card?.definition, {
           name: 'Release notes',
           schedule: { every: 'week', days: [5], at: '16:00' },

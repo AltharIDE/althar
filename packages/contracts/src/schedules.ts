@@ -58,10 +58,10 @@ export const scheduleInLine = (schedule: Schedule) => {
   return `${words.charAt(0).toLowerCase()}${words.slice(1)}`
 }
 
-/** The schedule in words, as the card and the page say it: "Every weekday at 9:00", "Every hour at :15". */
-export const scheduleWords = (schedule: Schedule) =>
-  schedule.every === 'hour'
-    ? schedule.minute === 0
-      ? 'Every hour'
-      : `Every hour at :${String(schedule.minute).padStart(2, '0')}`
-    : `${daysWords(schedule.days)} at ${timeWords(schedule.at)}`
+/** The schedule in words, as the card and the page say it: "Every weekday at 9:00", "Every night at 2:00", "Every hour at :15". */
+export const scheduleWords = (schedule: Schedule) => {
+  if (schedule.every === 'hour') return schedule.minute === 0 ? 'Every hour' : `Every hour at :${String(schedule.minute).padStart(2, '0')}`
+  // Every day in the small hours is every night.
+  const night = daysOf(schedule.days).length === 7 && schedule.at < '06:00'
+  return `${night ? 'Every night' : daysWords(schedule.days)} at ${timeWords(schedule.at)}`
+}

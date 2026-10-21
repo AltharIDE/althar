@@ -41,7 +41,7 @@ describe('an automation’s words', () => {
     const due = Date.parse('2026-10-21T01:00:00Z')
     const brief = briefOf(NIGHTLY, due, due + 60_000, LONDON)
     assert.include(brief, NIGHTLY.prompt)
-    assert.include(brief, 'This is a run of the automation “Nightly dependency bump”, which runs every day at 2:00')
+    assert.include(brief, 'This is a run of the automation “Nightly dependency bump”, which runs every night at 2:00')
     assert.include(brief, 'It was due at 2:00.')
     assert.include(brief, 'allows everything but pushing to the default branch')
     // Late, it says when it is.
