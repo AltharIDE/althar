@@ -59,6 +59,10 @@ describe('resetTime', () => {
     assert.strictEqual(resetTime('try again in 45 min', now), '2026-09-28T20:45:00.000Z')
   })
 
+  it('reads a long run of digits with no unit after it at once, and says nothing of it', () => {
+    assert.isUndefined(resetTime(`try again in ${'9'.repeat(100_000)}x`, now))
+  })
+
   it('says nothing when the error does not say', () => {
     assert.isUndefined(resetTime('usage limit reached', now))
     assert.isUndefined(classify(new Error('usage limit reached'), now).resetsAt)

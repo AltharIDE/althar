@@ -100,14 +100,37 @@ const UNITS: ReadonlyArray<readonly [RegExp, number]> = [
   [/^(?:s|seconds?|secs?)$/i, 1000],
 ]
 
-/** A length of time as agents write it, "3 hours 20 minutes", "19h14m47s", "68940s", "34.07s", "900ms": in ms, or undefined. */
+const isDigit = (text: string, at: number) => {
+  const code = text.charCodeAt(at)
+  return code >= 48 && code <= 57
+}
+
+/**
+ * A length of time as agents write it, "3 hours 20 minutes", "19h14m47s",
+ * "68940s", "34.07s", "900ms": in ms, or undefined. Read a number and the word
+ * after it at a time, not by one regex over the text, which takes time on the
+ * square of a long run of digits with no unit after it.
+ */
 const lengthOf = (text: string): number | undefined => {
   let total: number | undefined
-  for (const [, amount, unit] of text.matchAll(
-    /(\d+(?:\.\d+)?)\s*(ms|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])/gi,
-  )) {
-    const scale = UNITS.find(([named]) => named.test(unit ?? ''))?.[1]
-    if (scale !== undefined) total = (total ?? 0) + Number(amount) * scale
+  for (let at = 0; at < text.length;) {
+    if (!isDigit(text, at)) {
+      at += 1
+      continue
+    }
+    const start = at
+    while (isDigit(text, at)) at += 1
+    if (text[at] === '.' && isDigit(text, at + 1)) for (at += 1; isDigit(text, at);) at += 1
+    const amount = Number(text.slice(start, at))
+    let from = at
+    while (/\s/.test(text[from] ?? '')) from += 1
+    let to = from
+    while (/[a-z]/i.test(text[to] ?? '')) to += 1
+    const scale = UNITS.find(([named]) => named.test(text.slice(from, to)))?.[1]
+    if (scale !== undefined) {
+      total = (total ?? 0) + amount * scale
+      at = to
+    }
   }
   return total
 }
