@@ -96,9 +96,15 @@
   read-only sandbox, whose commands can't write the copy, so its `git
   fetch` and `git tag` are refused when they ask to go beyond it; OpenCode
   and agents with no sandbox Althar holds get only the rules' additions.
-  What Claude Code's sandbox does with these settings is read from its
-  documentation and its settings' schema, and tried on a real session
-  (tests/agents/reader.test.ts).
+  A command Claude Code can't read itself, such as one with `$?`, asks
+  instead of running in the sandbox, and then meets the reader rules: the
+  brief says to write such commands plainly. What Claude Code's sandbox
+  does with these settings was read from its documentation and settings'
+  schema, and tried on a real session on macOS on 21 October 2026
+  (tests/agents/reader.test.ts): `git fetch`, `git tag`, `$(…)` with
+  `uptime`, and a `node --test` file ran without asking; a write outside
+  the folder, `curl`, and reading `~/.ssh` were refused by the sandbox.
+  Linux isn't tried yet.
 - **Revisit when:** Codex's sandbox can be held to a folder with writes
   in its git folder; Althar can tell before a session starts that an
   agent's sandbox will start on Windows; the coordinator needs the

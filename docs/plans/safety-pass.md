@@ -174,7 +174,7 @@ refused the rest.
 | Fetching before a task starts, and for pull requests and reviews | `git.ts:261`, `281`, `381`; `Changes.ts:889`, `1520`, `3163`; `Reviews.ts:396` | No: into `refs/althar/…` or remote-tracking refs, never a local branch |
 | Merging a task here, without a pull request | `localMerge.ts` | No: worked out without a working tree; the default branch moves as a ref where nothing has it checked out, else only by a fast-forward in a checkout with nothing uncommitted and no untracked file in the way; undone with `reset --keep` |
 | Pushing the task's branch | `git.ts:493-516` | No: never forced, except when the person presses Push on rewritten commits, with a lease |
-| The coordinator's and a review's copies: `checkout --force`, `clean -fdq` | `coordinatorFolder.ts:50-51`, `reviewCopy.ts:40-41` | No: folders Althar made for itself |
+| The coordinator's and a review's copies: `checkout --force`, `clean -fdq` | `coordinatorFolder.ts`, `reviewCopy.ts:40-41` | No: folders Althar made for itself. The coordinator's are repositories of their own, whose git folder is made again for every turn; a link left in place of a copy or its git folder is removed, never followed, and only a copy's own old worktree record is dropped (ADR-056) |
 | A fresh branch for a follow-up change, deleted when the switch fails | `Changes.ts:893-906` | No: only the branch it just made |
 | Hooks | The runtime's git runs with the repository's hooks off | No |
 
