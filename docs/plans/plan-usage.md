@@ -170,7 +170,9 @@ window of its own; a new step on an agent nearly out on every account goes
 by the project's rule as if out (moved to an agent with room, or started on
 what is left; held until the reset; or asked, with the agent itself a way
 on), and the thread says why. The lead's fixes after a review are a new
-step, and so is a review that waited for a place. A running step is never
+step, and so are a review that waited for a place and a later round of
+review: a lead or reviewer kept from before goes on on another of its
+agent's accounts only where that one has room. A running step is never
 stopped.
 
 ## Limits when they hit

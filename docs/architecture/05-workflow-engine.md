@@ -632,7 +632,9 @@ read ([03](03-agent-runtime-and-auth.md), Usage limits). Work starts on the
 account with the most room where the project rotates through an agent's
 accounts, room for the model it runs where that model has a window of its own
 (Opus's week), and a conversation keeps its account unless it is nearly out
-(under 5% of its tightest window). A new step whose agent is nearly out on
+(under 5% of its tightest window): a session kept for a new step, as the lead
+for its fixes or the reviewer for a later round, goes on on another of its
+agent's accounts that has room. A new step whose agent is nearly out on
 every account it could run on goes by the project's rule as if it were out,
 the lead's fixes after a review and a review that waited for a place
 included: moved

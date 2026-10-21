@@ -1919,10 +1919,19 @@ export class Runs extends Context.Service<
             session.agentId !== step.agentId || (accountId !== undefined && session.accountId !== accountId)
           if (Option.isSome(running) && (spent || elsewhere(running.value))) yield* Effect.ignore(sessions.stop(threadId))
           const onIt = Option.filter(running, (session) => !spent && !elsewhere(session))
+          // A new round, as any new step: its account nearly out for the model, it starts afresh on another of the agent's with room.
+          const roomier = Option.isSome(onIt)
+            ? yield* roomierAccount(run, 'review', onIt.value, step.model ?? (yield* modelOf(onIt.value.sessionId)), threadId)
+            : Option.none<{ accountId: string; said: string }>()
+          if (Option.isSome(roomier)) {
+            yield* Effect.ignore(sessions.stop(threadId))
+            yield* sayOut(run.threadId, run.projectId, roomier.value.said)
+          }
           // Kept for another round, the reviewer is on the model its step names; one that won't move starts afresh.
-          const kept = Option.isSome(onIt) && (yield* onModel(threadId, onIt.value.sessionId, step.model))
-          if (Option.isSome(onIt) && !kept) yield* Effect.ignore(sessions.stop(threadId))
+          const kept = Option.isSome(onIt) && Option.isNone(roomier) && (yield* onModel(threadId, onIt.value.sessionId, step.model))
+          if (Option.isSome(onIt) && Option.isNone(roomier) && !kept) yield* Effect.ignore(sessions.stop(threadId))
           const live = kept ? onIt : Option.none()
+          const on = accountId ?? Option.getOrUndefined(Option.map(roomier, (moved) => moved.accountId))
           const sessionId = Option.isSome(live)
             ? live.value.sessionId
             : yield* sessions.start({
@@ -1930,7 +1939,7 @@ export class Runs extends Context.Service<
                 agentId: step.agentId,
                 ...(step.model === null ? {} : { model: step.model }),
                 ...(step.effort == null ? {} : { effort: step.effort }),
-                ...(accountId === undefined ? {} : { accountId }),
+                ...(on === undefined ? {} : { accountId: on }),
               })
           // A reviewer carrying on has the brief it started with: the lead's evidence as it stands now, written out again, goes with the round.
           const [first] = yield* worktreesOf(run.taskId)
@@ -2029,6 +2038,16 @@ export class Runs extends Context.Service<
       /** What the lead is told to settle a review's findings. */
       const settling = (findings: ReadonlyArray<Finding & { readonly id: string }>) =>
         `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason. If settling changes the work, say again in \`built\` what the task has built, as it now stands, and, where it changes what the pull request's description says, give that again in \`descriptions\`.`
+
+      /** The model a session is on, where it says. */
+      const modelOf = (sessionId: string) =>
+        Effect.map(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) => sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${sessionId}`,
+          ),
+          ([on]) => on?.model ?? null,
+        )
 
       /**
        * Whether a session kept for a step is on the model the step asks for,
@@ -2171,10 +2190,42 @@ export class Runs extends Context.Service<
         })
 
       /**
+       * A session kept for a new step whose account is nearly out for the
+       * model, where the project rotates: another of the agent's accounts with
+       * room for it, and what the thread says of the move. None where the
+       * others are nearly out too, so the project's rule goes as for the agent
+       * nearly out (`insteadOf`, `heldLow`), and none where the account is out:
+       * its handover goes as any (ADR-012).
+       */
+      const roomierAccount = (
+        run: RunRow,
+        step: 'review' | 'settle',
+        session: { readonly agentId: string; readonly accountId: string },
+        model: string | null,
+        threadId: string,
+      ) =>
+        Effect.gen(function* () {
+          const { agentId, accountId } = session
+          const room = yield* limits.room(accountId, model ?? undefined)
+          if (Option.isNone(room) || room.value.leftPercent >= NEARLY_OUT) return Option.none<{ accountId: string; said: string }>()
+          if (Option.isSome(yield* limits.outAccount(accountId)) || !(yield* limits.rotates(run.projectId)))
+            return Option.none<{ accountId: string; said: string }>()
+          const next = yield* limits.pick({ agentId, projectId: run.projectId, threadId, ...(model === null ? {} : { model }) })
+          const theirs = yield* limits.room(next.id, model ?? undefined)
+          if (next.id === accountId || (Option.isSome(theirs) && theirs.value.leftPercent < NEARLY_OUT))
+            return Option.none<{ accountId: string; said: string }>()
+          const [from, to] = [yield* limits.named(agentId, null, accountId), yield* limits.named(agentId, null, next.id)]
+          return Option.some({
+            accountId: next.id,
+            said: lowWords({ from: from.agent, room: room.value, step, to: { agent: to.agent, model: null } }),
+          })
+        })
+
+      /**
        * How the lead settling a review goes on where it is nearly out, as any
        * new step (docs/architecture/05): the lead at work on the thread, on its
        * model, else the plan's. Its account nearly out, where the project
-       * rotates and another of the agent's has more room, it goes on there; the
+       * rotates and another of the agent's has room, it goes on there; the
        * agent nearly out on every account, the project's rule goes: moved to an
        * agent with room (`insteadOf`), or held or asked about before it starts
        * (`held`). Undefined where it settles where it is. What runs on is never
@@ -2190,26 +2241,8 @@ export class Runs extends Context.Service<
               SELECT model, effort FROM provider_sessions WHERE id = ${live.value.sessionId}`
             const model = on?.model ?? null
             lead = { key: 'implement', agentId: live.value.agentId, model, effort: on?.effort ?? null, skipped: false }
-            const { accountId, agentId } = live.value
-            const room = yield* limits.room(accountId, model ?? undefined)
-            if (
-              Option.isSome(room) &&
-              room.value.leftPercent < NEARLY_OUT &&
-              Option.isNone(yield* limits.outAccount(accountId)) &&
-              (yield* limits.rotates(run.projectId))
-            ) {
-              const next = yield* limits.pick({
-                agentId,
-                projectId: run.projectId,
-                threadId: run.threadId,
-                ...(model === null ? {} : { model }),
-              })
-              if (next.id !== accountId) {
-                const [from, to] = [yield* limits.named(agentId, null, accountId), yield* limits.named(agentId, null, next.id)]
-                const said = lowWords({ from: from.agent, room: room.value, step: 'settle', to: { agent: to.agent, model: null } })
-                return { agentId, model, effort: on?.effort ?? null, said, accountId: next.id }
-              }
-            }
+            const roomier = yield* roomierAccount(run, 'settle', live.value, model, run.threadId)
+            if (Option.isSome(roomier)) return { agentId: live.value.agentId, model, effort: on?.effort ?? null, ...roomier.value }
           }
           if (lead === undefined) return undefined
           const instead = yield* insteadOf(run, lead, 'settle', true)
