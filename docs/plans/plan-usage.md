@@ -165,10 +165,13 @@ returns, so it shows when a source reports it; nothing else is built for it.
 Built in `Limits.ts`, `usableModels.ts` and `Runs.ts` (architecture 05,
 Usage limits). An account's room is its tightest window left, as last read;
 under 5% it is nearly out. Work starts on the account with the most room
-where the project rotates; a new step on an agent nearly out on every
-account goes by the project's rule as if out (moved to an agent with room,
-or started on what is left; held until the reset; or asked, with the agent
-itself a way on), and the thread says why. A running step is never stopped.
+where the project rotates, for the model it runs where that model has a
+window of its own; a new step on an agent nearly out on every account goes
+by the project's rule as if out (moved to an agent with room, or started on
+what is left; held until the reset; or asked, with the agent itself a way
+on), and the thread says why. The lead's fixes after a review are a new
+step, and so is a review that waited for a place. A running step is never
+stopped.
 
 ## Limits when they hit
 
@@ -385,7 +388,12 @@ run in parallel.
   change in this plan: it is kept in one module, with tests that nothing is
   written, logged or sent elsewhere.
 - None of the endpoint reads was tried against a real account here: each
-  follows Orca's working code (stablyai/orca `ef950401`).
+  follows Orca's working code (stablyai/orca `ef950401`), and the tests run
+  them against fakes of the same shapes. Unconfirmed until someone signed in
+  opens the usage view (Cmd/Ctrl+U) on this build: Claude Code idle (its
+  token from the Keychain or `~/.claude/.credentials.json`), a second Claude
+  account in its own home (its Keychain entry named for that home), Codex's
+  `account/rateLimits/read`, Kimi Code and Grok Build.
 - OpenCode's stored token for a provider may differ from the agent-native
   one (scope, expiry); each provider source needs its own spike.
 - A Codex app-server started for a read must not refresh or write tokens

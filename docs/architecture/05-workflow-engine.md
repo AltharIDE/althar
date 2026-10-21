@@ -630,9 +630,12 @@ detects a limit is in [03](03-agent-runtime-and-auth.md), Usage limits.
 **Before a limit is reached, new work steers by the plans' windows** as last
 read ([03](03-agent-runtime-and-auth.md), Usage limits). Work starts on the
 account with the most room where the project rotates through an agent's
-accounts, and a conversation keeps its account unless it is nearly out (under
-5% of its tightest window). A new step whose agent is nearly out on every
-account it could run on goes by the project's rule as if it were out: moved
+accounts, room for the model it runs where that model has a window of its own
+(Opus's week), and a conversation keeps its account unless it is nearly out
+(under 5% of its tightest window). A new step whose agent is nearly out on
+every account it could run on goes by the project's rule as if it were out,
+the lead's fixes after a review and a review that waited for a place
+included: moved
 to an agent with room (or, with none, started on what is left), held until
 the reset, or asked about, with the agent itself among the ways on; the
 thread says why ("Codex has 3% of its five-hour limit left, until 14:00, so
