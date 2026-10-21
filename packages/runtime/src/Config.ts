@@ -22,6 +22,8 @@ export interface Shot {
   readonly fullPage: boolean
   /** A CSS selector: only the first element it finds. */
   readonly selector: string | null
+  /** The origins of Althar's runs it may be of beside this computer's: a page it goes on to, by a redirect or itself, must be at one of them too (screenshots.ts, mayDraw). */
+  readonly origins: ReadonlyArray<string>
 }
 
 /** A screenshot taken: a PNG at 1×, as base64, its size, and the page's title. */

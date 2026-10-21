@@ -12,7 +12,7 @@ import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { isLocal, shotOf, shotWords } from '../src/screenshots'
+import { isLocal, mayDraw, shotOf, shotWords } from '../src/screenshots'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, callToolWhole, items, listTools, repository, runtime, until } from './support'
 
@@ -225,6 +225,7 @@ describe('screenshot', () => {
       height: 800,
       fullPage: false,
       selector: null,
+      origins: [],
     })
     assert.deepStrictEqual(shotOf({ url: 'http://127.0.0.1:6006/', width: 99_999, height: 10, full_page: true, selector: ' main ' }, []), {
       url: 'http://127.0.0.1:6006/',
@@ -232,11 +233,19 @@ describe('screenshot', () => {
       height: 160,
       fullPage: true,
       selector: 'main',
+      origins: [],
     })
     // A run that answers by this computer's name is Althar's, so it is taken.
     assert.deepInclude(shotOf({ url: 'http://studio.lan:3000/a' }, ['http://studio.lan:3000/']) as object, {
       url: 'http://studio.lan:3000/a',
+      origins: ['http://studio.lan:3000'],
     })
+    // What the page goes on to is held to the same: this computer, or the runs' origins.
+    assert.isTrue(mayDraw('http://localhost:6006/iframe.html', []))
+    assert.isTrue(mayDraw('http://studio.lan:3000/b', ['http://studio.lan:3000']))
+    assert.isFalse(mayDraw('http://studio.lan:4000/', ['http://studio.lan:3000']))
+    assert.isFalse(mayDraw('https://example.com/', []))
+    assert.isFalse(mayDraw('file:///etc/hosts', []))
     assert.strictEqual(
       shotOf({ url: 'https://example.com/' }, ['http://studio.lan:3000/']),
       "Althar takes screenshots only of what is served on this computer, such as a run's or a dev server's on localhost: not example.com.",
@@ -245,7 +254,7 @@ describe('screenshot', () => {
     assert.strictEqual(shotOf({}, []), 'Give the url of the page, such as http://localhost:5173/.')
     assert.strictEqual(shotOf({ url: 'http://' }, []), "http:// isn't an address Althar can open.")
 
-    const shot: Shot = { url: 'http://localhost:5173/', width: 800, height: 600, fullPage: false, selector: '#plan' }
+    const shot: Shot = { url: 'http://localhost:5173/', width: 800, height: 600, fullPage: false, selector: '#plan', origins: [] }
     assert.strictEqual(
       shotWords(shot, { width: 320, height: 120, title: 'Meridian' }),
       'A screenshot of http://localhost:5173/ ("Meridian"), the element #plan, at a 800×600 viewport: 320×120 pixels, at 1×.',
@@ -283,8 +292,8 @@ describe('screenshot', () => {
       const byLead = yield* callToolWhole(lead, 'screenshot', { url: 'localhost:6006', full_page: true, selector: '#root' })
       assert.strictEqual(byLead.content[1]?.type, 'image')
       assert.deepStrictEqual(asked, [
-        { url: 'http://localhost:5173/settings', width: 800, height: 600, fullPage: false, selector: null },
-        { url: 'http://localhost:6006/', width: 1280, height: 800, fullPage: true, selector: '#root' },
+        { url: 'http://localhost:5173/settings', width: 800, height: 600, fullPage: false, selector: null, origins: [] },
+        { url: 'http://localhost:6006/', width: 1280, height: 800, fullPage: true, selector: '#root', origins: [] },
       ])
       // A page out on the internet isn't taken; one that won't load says why.
       const outside = yield* callToolWhole(lead, 'screenshot', { url: 'https://example.com' })

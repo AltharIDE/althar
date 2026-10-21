@@ -1,4 +1,5 @@
 import type { Screenshot, Shot } from '@althar/runtime'
+import { mayDraw } from '@althar/runtime/screenshots'
 
 /*
  * A screenshot an agent asked Althar for, taken here, where Chromium is
@@ -6,8 +7,10 @@ import type { Screenshot, Shot } from '@althar/runtime'
  * offscreen, at the viewport asked, in a session of its own that keeps
  * nothing and is granted nothing, then captured, the whole page or one
  * element, and sent back at 1×. The runtime has checked the page is served on
- * this computer; a page it goes on to fetch from elsewhere is drawn as a
- * browser would.
+ * this computer; the window holds every frame of it there too, refusing a
+ * redirect or a navigation to anywhere else (mayDraw), so a local page can't
+ * hand Althar one from the internet. What a page fetches into itself is drawn
+ * as a browser would.
  */
 
 /** How long a page may take to load and draw before Althar gives up on it. */
@@ -22,8 +25,15 @@ export interface PageWindow {
   resize(width: number, height: number): void
   capture(rect?: { x: number; y: number; width: number; height: number }): Promise<Picture>
   title(): string
+  /** The first address the page tried to go on to and was refused, or null; loading and running in it end there. A frame in it that would go elsewhere stays empty. */
+  strayed(): string | null
   close(): void
 }
+
+/** Where a window may let a frame of the page go: an address with nothing to fetch, or one the shot may be of. */
+export type Allowed = (url: string) => boolean
+
+const NOTHING_TO_FETCH = /^(about|data|blob):/i
 
 /** A captured picture, as Electron's NativeImage has it. */
 export interface Picture {
@@ -73,10 +83,10 @@ const timedOut = <T>(promise: Promise<T>, ms: number, why: string) =>
 /** Takes a screenshot in a window `open` makes at the viewport's size; it rejects with why, in words for the agent. */
 export const takeScreenshot = async (
   shot: Shot,
-  open: (width: number, height: number) => PageWindow,
+  open: (width: number, height: number, allowed: Allowed) => PageWindow,
   within = WITHIN_MS,
 ): Promise<Screenshot> => {
-  const window = open(shot.width, shot.height)
+  const window = open(shot.width, shot.height, (url) => NOTHING_TO_FETCH.test(url) || mayDraw(url, shot.origins))
   try {
     const drawn = async () => {
       try {
@@ -103,7 +113,15 @@ export const takeScreenshot = async (
       }
       return { picture: await window.capture(rect), wanted: rect?.width ?? shot.width }
     }
-    const { picture, wanted } = await timedOut(drawn(), within, `the page took longer than ${Math.round(within / 1000)} seconds to draw`)
+    const { picture, wanted } = await timedOut(
+      drawn(),
+      within,
+      `the page took longer than ${Math.round(within / 1000)} seconds to draw`,
+    ).catch((error: unknown) => {
+      const strayed = window.strayed()
+      if (strayed === null) throw error
+      throw new Error(`the page went on to ${strayed}, which isn't served on this computer, so Althar didn't follow it`)
+    })
     if (picture.isEmpty()) throw new Error('the page drew nothing')
     // At 1×: a screen at 2× draws twice as many pixels, which the agent would read for nothing.
     const sized = picture.getSize().width > wanted ? picture.resize({ width: wanted }) : picture

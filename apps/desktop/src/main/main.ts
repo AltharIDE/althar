@@ -458,6 +458,10 @@ const screenshot = (child: UtilityProcess, message: RuntimeMessage) => {
       child.postMessage({ type: 'screenshot-taken', requestId, error: error instanceof Error ? error.message : String(error) }),
   )
 }
+/* The end-to-end tests take one as an agent would, straight from the main process (e2e/screenshots.spec.ts). Packaged builds leave this out. */
+if (__ALTHAR_TEST_HOOKS__)
+  (globalThis as unknown as { takeScreenshot: (shot: Shot) => Promise<unknown> }).takeScreenshot = (shot) =>
+    takeScreenshot(shot, pageWindow)
 
 const startRuntime = () => {
   const { profile, worktrees } = locations()

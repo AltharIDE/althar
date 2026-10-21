@@ -29,6 +29,17 @@ export const isLocal = (hostname: string) => {
   )
 }
 
+/** Whether a page at `url` may be drawn: over http, on this computer or at one of Althar's runs' `origins`. */
+export const mayDraw = (url: string, origins: ReadonlyArray<string>) => {
+  let at: URL
+  try {
+    at = new URL(url)
+  } catch {
+    return false
+  }
+  return (at.protocol === 'http:' || at.protocol === 'https:') && (isLocal(at.hostname) || origins.includes(at.origin))
+}
+
 const within = (value: unknown, least: number, most: number, otherwise: number) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(most, Math.max(least, Math.round(value))) : otherwise
 
@@ -49,14 +60,14 @@ export const shotOf = (input: unknown, running: ReadonlyArray<string>): Shot | s
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:')
     return `Althar takes screenshots of web pages only, over http: not ${url.protocol} addresses.`
-  const ours = running.some((one) => {
+  const origins = running.flatMap((one) => {
     try {
-      return new URL(one).origin === url.origin
+      return [new URL(one).origin]
     } catch {
-      return false
+      return []
     }
   })
-  if (!isLocal(url.hostname) && !ours)
+  if (!mayDraw(url.href, origins))
     return `Althar takes screenshots only of what is served on this computer, such as a run's or a dev server's on localhost: not ${url.host}.`
   const selector = typeof asked.selector === 'string' && asked.selector.trim() !== '' ? asked.selector.trim() : null
   return {
@@ -65,6 +76,7 @@ export const shotOf = (input: unknown, running: ReadonlyArray<string>): Shot | s
     height: within(asked.height, SHORTEST, TALLEST, VIEWPORT.height),
     fullPage: asked.full_page === true,
     selector,
+    origins,
   }
 }
 
