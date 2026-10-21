@@ -308,7 +308,7 @@ export const projectRulesText: ProjectRulesText = {
     field: { commands: 'A command, as it starts', hosts: 'A host' },
     empty: {
       commands: 'How the command starts. Run outside the sandbox, it still asks, and meets these rules',
-      hosts: 'A host such as registry.npmjs.org, or *.example.com for every host under it',
+      hosts: 'A host such as registry.npmjs.org',
     },
     typed: { commands: 'Runs outside the sandbox', hosts: 'Reached without asking' },
   },

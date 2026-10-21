@@ -843,7 +843,10 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
 - hosts its sandboxed commands reach without asking
   (`sandbox.network.allowedDomains`), only those the rules would let a
   request for them through without anyone: none while the rest asks the
-  person or the coordinator decides it, none the project never allows.
+  person or the coordinator decides it, none the project never allows. A
+  host is named on its own, never `*.` for every host under one: the rules
+  judge a request by the host it names, and a wildcard would let through
+  hosts under it that they ask about or refuse.
 
 Both are worked out from the project: the tools its packages bring, its
 test and end-to-end scripts, what is kept for how it runs and is set up,

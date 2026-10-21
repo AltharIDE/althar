@@ -1117,7 +1117,8 @@ describe('project rules, through the API', () => {
         const reached = yield* client.SetProjectRules({
           commandId: commandId(),
           projectId: project.id,
-          sandbox: { hosts: { added: ['https://Registry.Acme.dev/npm', 'not a host'], removed: [] } },
+          // Never a wildcard: the rules couldn't check each host under it.
+          sandbox: { hosts: { added: ['https://Registry.Acme.dev/npm', 'not a host', '*.acme.dev'], removed: [] } },
         })
         assert.deepStrictEqual(reached.sandbox.hosts, ['registry.acme.dev'])
         const trimmed = yield* client.SetProjectRules({

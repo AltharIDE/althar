@@ -33,6 +33,9 @@ export const text = {
   },
   /** Why what was typed can't be a host. */
   notAHost: (typed: string) => `“${typed.trim()}” isn’t a host. Type its name, such as registry.npmjs.org.`,
+  /** Why a wildcard can't be a host the sandbox reaches. */
+  wildHost:
+    'Name each host on its own, such as pkgs.example.com: the rules check every host a lead reaches, and can’t check every host under a *.',
   /** Enter on nothing but spaces or a lone *. */
   noCommand: 'Type how the command starts first.',
   /** The task names are shown for: its key from the project's name. */
@@ -246,7 +249,7 @@ export const sandboxEdited = (edits: SandboxEdits, value: string, to: 'add' | 'r
 const sandboxEntryOf = (list: SandboxList, typed: string): { readonly value: string } | { readonly problem: string } => {
   const value = list === 'hosts' ? hostOf(typed) : commandStartOf(typed)
   if (value !== null) return { value }
-  return { problem: list === 'hosts' ? text.notAHost(typed) : text.noCommand }
+  return { problem: list === 'commands' ? text.noCommand : typed.includes('*') ? text.wildHost : text.notAHost(typed) }
 }
 
 /** Althar's own patterns, where a repository's docs say nothing and the person set none. */

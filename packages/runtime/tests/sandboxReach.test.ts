@@ -1,3 +1,4 @@
+import { hostOf } from '@althar/contracts'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -278,6 +279,22 @@ describe('a lead’s session', () => {
       }).pipe(Effect.provide(runtime())),
     20_000,
   )
+
+  it.live(
+    'never reaches every host under a name, which would pass one the project never allows',
+    () =>
+      Effect.gen(function* () {
+        // The rules allow `*.example.com` as written, and refuse `private.example.com`, which it would let through.
+        const sandbox = yield* leading({
+          permissions: 'rules',
+          commands: [{ pattern: 'private.example.com', decision: 'never' }],
+          sandbox: { hosts: { added: ['*.example.com', 'pkgs.example.com'], removed: [] } },
+        })
+        assert.include(sandbox?.hosts ?? [], 'pkgs.example.com')
+        assert.notInclude(sandbox?.hosts ?? [], '*.example.com')
+      }).pipe(Effect.provide(runtime())),
+    20_000,
+  )
 })
 
 describe('a lead’s brief', () => {
@@ -287,5 +304,14 @@ describe('a lead’s brief', () => {
       "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` included, stays in the sandbox, so change folder in a call of its own first. Your sandbox reaches these hosts without asking: github.com, registry.npmjs.org.",
     )
     assert.strictEqual(upFrontSaid({ commands: ['ps'], hosts: [] }).includes('hosts'), false)
+  })
+})
+
+describe('a host the person types', () => {
+  it('is one host by its name, from an address or with a port, and never every host under one', () => {
+    assert.deepStrictEqual(
+      ['HTTPS://PyPI.org/simple', 'pkgs.acme.dev:8443', 'localhost', '*.example.com', 'private.*.com', 'not a host', ''].map(hostOf),
+      ['pypi.org', 'pkgs.acme.dev', 'localhost', null, null, null, null],
+    )
   })
 })

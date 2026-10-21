@@ -10,6 +10,7 @@ import {
   type ProviderSessionState,
   transition,
 } from '@althar/domain'
+import { hostOf } from '@althar/contracts'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { answerFor, type PermissionDecision, type PermissionMeanings, type PermissionRequest } from '@althar/provider-adapters'
 import { Cause, Context, Crypto, Deferred, Effect, Fiber, Layer, Schema } from 'effect'
@@ -650,8 +651,10 @@ export class Permissions extends Context.Service<
           const { policy, project } = yield* rulesNow(projectId, taskId)
           const reach = yield* workedOutReach(projectId, taskId)
           const edits = policy.rules.sandbox
-          // A host goes in only where the rules let a request for it through without the person or the coordinator.
+          // A host goes in only where the rules let a request for it through without the person or the coordinator;
+          // never a wildcard, which would let through hosts under it the rules ask about or refuse.
           const reached = (host: string) =>
+            hostOf(host) === host &&
             decide(
               { sessionId: '', toolCallId: '', title: host, kind: 'other', rawInput: { host }, paths: [], options: [] },
               { ...rules, project },
