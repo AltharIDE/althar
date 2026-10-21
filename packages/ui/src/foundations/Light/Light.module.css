@@ -21,6 +21,8 @@
   position: absolute;
   inset: 0;
   opacity: 0.9;
+  /* on dark its light specks read as static: fainter there (dark.css) */
+  filter: opacity(var(--grain-scale, 1));
   background-size: 128px 128px;
   mask-image: radial-gradient(ellipse 52% 40% at 50% 100%, #000 25%, transparent 78%);
 }

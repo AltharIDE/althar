@@ -38,8 +38,9 @@
 /* one switch over every sentence, in a sheet of its own between the title and the rules it quietens */
 .allowAll {
   margin: 0 0 32px;
+  /* a control sheet set on the page, not on the frosted panel */
+  --control-sheet: var(--page-sheet);
 }
-
 /* what a name or a description opens: its name, what it is, then the setting */
 .popLabel {
   display: block;

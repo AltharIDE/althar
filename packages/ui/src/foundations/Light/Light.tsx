@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx'
 import { reducedMotion } from '../../lib/motion'
 import type { RootProps } from '../../lib/props'
 import { springEasing } from '../../lib/spring'
+import { useTheme } from '../../lib/theme'
 import { COLUMNS, type Column, drawColumn, drawGrain, PICTURE } from './columns'
 import s from './Light.module.css'
 
@@ -101,13 +102,14 @@ export function Light({ height = 0.62, motion = 'drift', sink = false, onSunk, c
   const moving = useRef<Animation[]>([])
   const sunk = useRef(onSunk)
   useEffect(() => void (sunk.current = onSunk), [onSunk])
+  const theme = useTheme()
 
-  // Each column drawn once, soft already, and the grain.
+  // Each column drawn once, soft already, and the grain; again in another theme, whose cobalt differs.
   useLayoutEffect(() => {
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
     COLUMNS.forEach((column, i) => {
       const context = columns.current[i]?.getContext('2d')
-      if (context) drawColumn(context, column, live)
+      if (context) drawColumn(context, column, live, theme === 'dark')
     })
     const tile = document.createElement('canvas')
     tile.width = tile.height = 128
@@ -116,7 +118,7 @@ export function Light({ height = 0.62, motion = 'drift', sink = false, onSunk, c
       drawGrain(context, 128)
       grain.current.style.backgroundImage = `url(${tile.toDataURL()})`
     }
-  }, [])
+  }, [theme])
 
   useEffect(() => () => moving.current.forEach((run) => run.cancel()), [])
 

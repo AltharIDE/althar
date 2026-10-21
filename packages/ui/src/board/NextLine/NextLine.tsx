@@ -1,20 +1,23 @@
-import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { cx } from '../../lib/cx'
+import { useReorder } from '../../lib/useReorder'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import b from '../Board/Board.module.css'
 import s from './NextLine.module.css'
 
 /*
  * The line up next: the tasks waiting for a free agent, in the order they
- * start, which the person puts in the order they want. Pointing at a row
- * shows its grip in the lane's margin. Dragging the grip lifts the row; the
- * others make room as it goes, and each row's place says where it would be.
- * Let go, and the line keeps that order. A click on the grip, or Enter on
- * it, opens the same moves as a menu, the way without dragging. Escape while
- * dragging puts the row back. Pointer events, not the browser's drag and
- * drop, followed on the window, so the row moves with the pointer however far
- * it goes and is let go wherever the pointer is.
+ * start, which the person puts in the order they want. Any part of a row
+ * takes hold of it: pressed and moved, the row lifts and follows the pointer,
+ * the others slide aside to show where it would land, and the lane scrolls
+ * when the pointer is held at its edge. Let go, and it settles into its place
+ * and the line keeps that order; a press that doesn't move is a click, and
+ * still opens the task. Pointing at a row shows its grip in the lane's margin:
+ * a click on it, or Enter on it, opens the same moves as a menu, the way
+ * without dragging, and ⌥⇧↑ and ⌥⇧↓ on a row's grip move it a place. Escape
+ * while dragging puts the row back. How the row is followed is the project
+ * tabs' (`useReorder`), down a column instead of along a bar.
  */
 
 export interface NextLineText {
@@ -45,7 +48,7 @@ export interface NextLineRow {
 export interface NextLineProps {
   /** The rows in line, in the order they start. */
   rows: ReadonlyArray<NextLineRow>
-  /** A row at its place in line, from 1: while one is dragged, the place it would take. */
+  /** A row at its place in line, from 1: while one is dragged, its place as it stands, and the new one once it is let go. */
   render: (id: string, place: number) => ReactNode
   /**
    * The person moved a row to a place, from 0, the rest keeping their order:
@@ -56,11 +59,16 @@ export interface NextLineProps {
   text?: Partial<NextLineText>
 }
 
-/** How far the pointer goes before a press on the grip is a drag rather than a click, in pixels. */
-const SLOP = 4
+/** How long a row takes to settle into its place once let go, in milliseconds: the others' slide (`--base`). */
+export const LAND = 180
 
-/** How long an acknowledged move shows before the line given rules again, should it never say otherwise, in milliseconds. */
-export const SETTLE = 2000
+/**
+ * How long an acknowledged move shows before the line given rules again,
+ * should the runtime never say otherwise, in milliseconds. A backstop, not
+ * the way a move ends: the line shows the order put until the runtime's
+ * list says it, however long that takes.
+ */
+export const SETTLE = 15000
 
 const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.length === b.length && a.every((id, i) => id === b[i])
 
@@ -76,7 +84,7 @@ const moved = (order: ReadonlyArray<string>, id: string, to: number) => {
  * what the line was when they gave it, or once the move was acknowledged, the
  * line then. The next line given after the acknowledgement is the runtime's
  * word, whatever joined or left meanwhile, so the order put goes then, or
- * shortly after the acknowledgement where the line given never changes.
+ * after a long while where the line given never changes.
  */
 interface Put {
   readonly order: ReadonlyArray<string>
@@ -84,26 +92,13 @@ interface Put {
   readonly settled: boolean
 }
 
-interface Press {
-  readonly id: string
-  readonly pointer: number
-  readonly y: number
-  moving: boolean
-  order: ReadonlyArray<string>
-  /** Stops following the pointer. */
-  readonly stop: () => void
-}
-
 export function NextLine({ rows, render, onMove, text }: NextLineProps) {
   const t = { ...nextLineText, ...text }
   const ids = rows.map((row) => row.id)
   const byId = new Map(rows.map((row) => [row.id, row]))
-  // While a row is dragged, the order it would make; once moved, that order until the line given says it too.
-  const [drag, setDrag] = useState<{ readonly id: string; readonly order: ReadonlyArray<string> } | null>(null)
   const [put, setPut] = useState<Put | null>(null)
   const [menu, setMenu] = useState<string | null>(null)
-  const press = useRef<Press | null>(null)
-  const items = useRef(new Map<string, HTMLLIElement>())
+  const list = useRef<HTMLOListElement>(null)
   // The line last drawn, for what an acknowledgement waits to see change.
   const drawn = useRef(ids)
   useEffect(() => {
@@ -118,7 +113,6 @@ export function NextLine({ rows, render, onMove, text }: NextLineProps) {
     const done = setTimeout(() => setPut((now) => (now === put ? null : now)), SETTLE)
     return () => clearTimeout(done)
   }, [put])
-  const order = drag?.order ?? shown
   const movable = onMove !== undefined && rows.length > 1
 
   const move = (id: string, to: number) => {
@@ -134,110 +128,95 @@ export function NextLine({ rows, render, onMove, text }: NextLineProps) {
       )
   }
 
-  const finish = (commit: boolean) => {
-    const held = press.current
-    press.current = null
-    setDrag(null)
-    if (held === null) return
-    held.stop()
-    if (!held.moving) {
-      if (commit) setMenu(held.id)
-      return
-    }
-    if (commit) move(held.id, held.order.indexOf(held.id))
-  }
-
-  const over = (event: globalThis.PointerEvent) => {
-    const held = press.current
-    if (held === null) return
-    // No button down: its release was missed, and this is hover.
-    if (event.buttons === 0) return finish(false)
-    if (!held.moving && Math.abs(event.clientY - held.y) < SLOP) return
-    held.moving = true
-    // It goes after every other row whose middle is above the pointer.
-    const others = held.order.filter((one) => one !== held.id)
-    const at = others.filter((one) => {
-      const box = items.current.get(one)?.getBoundingClientRect()
-      return box !== undefined && box.top + box.height / 2 < event.clientY
-    }).length
-    held.order = moved(held.order, held.id, at)
-    setDrag({ id: held.id, order: held.order })
-  }
-
-  // The window's pointer events reach the latest of these, the line given perhaps changed since the press.
-  const live = useRef({ finish, over })
-  useEffect(() => {
-    live.current = { finish, over }
-  })
-  useEffect(() => () => press.current?.stop(), [])
-
-  const dragging = drag !== null
-  useEffect(() => {
-    if (!dragging) return
-    // Puts the row back; the release after it moves nothing.
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.stopPropagation()
-      const held = press.current
-      if (held !== null) held.moving = false
-      live.current.finish(false)
-    }
-    window.addEventListener('keydown', escape, true)
-    return () => window.removeEventListener('keydown', escape, true)
-  }, [dragging])
-
-  const grip = (id: string) => ({
-    onPointerDown: (event: PointerEvent<HTMLButtonElement>) => {
-      if (event.button !== 0 || !event.isPrimary) return
-      // The grip's own press: it drags, or on release opens its menu, rather than the menu opening at once.
-      event.preventDefault()
-      // Followed on the window, not captured by the grip: moving its row in the list would let a capture go.
-      const pointer = event.pointerId
-      const moving = (one: globalThis.PointerEvent) => one.pointerId === pointer && live.current.over(one)
-      const up = (one: globalThis.PointerEvent) => one.pointerId === pointer && live.current.finish(true)
-      const cancel = (one: globalThis.PointerEvent) => one.pointerId === pointer && live.current.finish(false)
-      window.addEventListener('pointermove', moving)
-      window.addEventListener('pointerup', up)
-      window.addEventListener('pointercancel', cancel)
-      press.current?.stop()
-      press.current = {
-        id,
-        pointer,
-        y: event.clientY,
-        moving: false,
-        order: shown,
-        stop: () => {
-          window.removeEventListener('pointermove', moving)
-          window.removeEventListener('pointerup', up)
-          window.removeEventListener('pointercancel', cancel)
-        },
-      }
+  const { dragging, bind, cancel } = useReorder({
+    ids: shown,
+    movable: movable ? shown.length : 0,
+    list,
+    axis: 'y',
+    settle: LAND,
+    // The rows hold buttons of their own (the title opens the task): a click on one must still reach it.
+    grab: 'drag',
+    onReorder: (id, beforeId) => {
+      const others = shown.filter((one) => one !== id)
+      const at = beforeId === null ? -1 : others.indexOf(beforeId)
+      move(id, at < 0 ? others.length : at)
     },
   })
 
+  // Rows measured at the press are no longer the rows there are, where one joined or left under the pointer.
+  const line = shown.join('\n')
+  const measured = useRef(line)
+  useEffect(() => {
+    if (measured.current !== line) cancel()
+    measured.current = line
+  }, [line, cancel])
+
+  // A row moved by key has been taken out of the document and put back where it goes: its grip is given the focus again.
+  const refocus = useRef<string | null>(null)
+  useEffect(() => {
+    if (refocus.current === null) return
+    const row = Array.from(list.current?.children ?? []).find((one) => (one as HTMLElement).dataset.row === refocus.current)
+    row?.querySelector<HTMLElement>('[data-grip]')?.focus()
+    refocus.current = null
+  })
+
+  const shifted = (id: string): CSSProperties | undefined => {
+    if (dragging === null) return undefined
+    const y = dragging.id === id ? dragging.offset : (dragging.shifts[id] ?? 0)
+    return y === 0 ? undefined : { transform: `translateY(${y}px)` }
+  }
+
   return (
-    <ol className={b.list}>
-      {order.map((id, index) => {
+    <ol ref={list} className={cx(b.list, s.list, dragging !== null && s.sorting)}>
+      {shown.map((id, index) => {
         const row = byId.get(id)
         if (row === undefined) return null
+        const held = movable ? bind(id) : undefined
+        const lifted = dragging?.id === id
         return (
           <li
             key={id}
-            ref={(element) => {
-              if (element === null) items.current.delete(id)
-              else items.current.set(id, element)
-            }}
-            className={cx(s.item, drag?.id === id && s.lifted)}
+            data-row={id}
+            className={cx(s.item, lifted && s.lifted, lifted && dragging.settling && s.settling)}
+            style={shifted(id)}
+            {...(held === undefined
+              ? {}
+              : {
+                  onPointerDown: held.onPointerDown,
+                  onPointerMove: held.onPointerMove,
+                  onPointerUp: held.onPointerUp,
+                  onPointerCancel: held.onPointerCancel,
+                  onLostPointerCapture: held.onLostPointerCapture,
+                  onClickCapture: held.onClickCapture,
+                  // Ahead of the grip's own: ⌥⇧↓ must not open its menu.
+                  onKeyDownCapture: (event: KeyboardEvent<HTMLElement>) => {
+                    // Not the menu's, which React sends up through its portal.
+                    if (!event.currentTarget.contains(event.target as Node)) return
+                    held.onKeyDown(event)
+                    if (!event.defaultPrevented) return
+                    event.stopPropagation()
+                    refocus.current = id
+                  },
+                })}
           >
             {movable && (
               <Menu
                 label={t.menu}
                 open={menu === id}
-                // Opened from the keyboard at once; a press on the grip opens it on release, where it didn't drag.
-                onOpenChange={(open) => setMenu(open ? (press.current === null ? id : null) : null)}
+                onOpenChange={(open) => setMenu(open ? id : null)}
                 placement="below"
                 align="start"
-                trigger={<button type="button" className={s.grip} aria-label={t.grip(row.title)} {...grip(id)} />}
+                trigger={
+                  <button
+                    type="button"
+                    data-grip=""
+                    className={s.grip}
+                    aria-label={t.grip(row.title)}
+                    // Opened by its click, which a drag from it doesn't make, rather than by the press that may start one.
+                    onPointerDown={(event: PointerEvent<HTMLElement>) => event.button === 0 && event.preventDefault()}
+                    onClick={() => setMenu(id)}
+                  />
+                }
               >
                 <MenuItem icon="up" disabled={index === 0} onSelect={() => move(id, 0)}>
                   {t.front}
@@ -245,10 +224,10 @@ export function NextLine({ rows, render, onMove, text }: NextLineProps) {
                 <MenuItem disabled={index === 0} onSelect={() => move(id, index - 1)}>
                   {t.up}
                 </MenuItem>
-                <MenuItem disabled={index === order.length - 1} onSelect={() => move(id, index + 1)}>
+                <MenuItem disabled={index === shown.length - 1} onSelect={() => move(id, index + 1)}>
                   {t.down}
                 </MenuItem>
-                <MenuItem icon="down" disabled={index === order.length - 1} onSelect={() => move(id, order.length - 1)}>
+                <MenuItem icon="down" disabled={index === shown.length - 1} onSelect={() => move(id, shown.length - 1)}>
                   {t.back}
                 </MenuItem>
               </Menu>

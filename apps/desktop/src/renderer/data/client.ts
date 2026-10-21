@@ -10,6 +10,7 @@ import {
   type FoundAccount,
   type ProjectNote,
   type ProjectRulesView,
+  type SandboxEdits,
   Api,
   ApiError,
   type BoardSnapshot,
@@ -73,7 +74,9 @@ import { RpcClient } from 'effect/rpc'
  */
 
 /** What may change of a project's rules at once: any of it. */
-export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision'>> & {
+export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox'>> & {
+    /** What the person changed of what leads' sandboxes let through: each list's edits, whole. */
+    readonly sandbox?: { readonly commands?: SandboxEdits; readonly hosts?: SandboxEdits }
     /** The revision a change that replaces a list was made against: refused where the rules have moved on since. */
     readonly expectedRevision?: number
   }

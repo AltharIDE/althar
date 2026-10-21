@@ -19,10 +19,10 @@
   transition: background var(--fast) var(--ease);
 }
 .opens:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .opens:active {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .title {
   display: flex;

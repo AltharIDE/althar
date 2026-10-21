@@ -72,11 +72,25 @@ export interface PermissionRequest {
   readonly options: ReadonlyArray<PermissionOption>
 }
 
-/** Althar's permission decision. Coordinator denials are explained at the next turn boundary, even when the provider's rejection carries on. */
+/**
+ * Althar's permission decision. A refusal by the project's rules or the coordinator is explained at the next turn
+ * boundary, even when the provider's rejection carries on: the agent's own message says only that the person refused.
+ * No `decidedBy` is the person's answer on a card.
+ */
 export interface PermissionDecision {
   readonly decision: 'allow' | 'reject'
   readonly reason?: string
-  readonly decidedBy?: 'coordinator'
+  readonly decidedBy?: 'coordinator' | 'rules'
+}
+
+/** What an agent is told when a request was refused and its provider could not say who by or why. */
+export const refusalSaid = (title: string, decided: PermissionDecision): string => {
+  const why = decided.reason === undefined || decided.reason === '' ? '' : `: ${decided.reason.replace(/\.$/, '')}`
+  return decided.decidedBy === 'rules'
+    ? `Althar's rules refused this (${title})${why}. Carry on without it.`
+    : decided.decidedBy === 'coordinator'
+      ? `${title} was not allowed by the coordinator${why}. Carry on without it.`
+      : `The person declined ${title}${why}. Carry on without it.`
 }
 
 /** What was sent back for a decision: an option (and how far it reaches), or a cancelled request. */
@@ -374,17 +388,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       const answer = (decided: PermissionDecision): acp.RequestPermissionResponse => {
         if (settled) return CANCELLED
         settled = true
-        const { decision, reason } = decided
+        const { decision } = decided
         const chosen = answerFor(request.options, decision, options.permissions)
-        const explain = decision === 'reject' && (chosen.stopsTurn || decided.decidedBy === 'coordinator')
+        const explain = decision === 'reject' && (chosen.stopsTurn || decided.decidedBy !== undefined)
         receive(params.sessionId, {
           _tag: 'Event',
           event: { _tag: 'PermissionAnswered', toolCallId: request.toolCallId, decision, ...chosen },
-          ...(explain
-            ? {
-                resumeWith: `${request.title} was not allowed by ${decided.decidedBy === 'coordinator' ? 'the coordinator' : "the project's rules"}${reason === undefined ? '' : `: ${reason}`}. Carry on without it.`,
-              }
-            : {}),
+          ...(explain ? { resumeWith: refusalSaid(request.title, decided) } : {}),
         })
         return chosen.optionId === null ? CANCELLED : { outcome: { outcome: 'selected', optionId: chosen.optionId } }
       }

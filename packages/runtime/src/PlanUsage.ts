@@ -40,7 +40,7 @@ import { SignIns } from './SignIns'
  * - Claude Code: live, the adapter's `_meta` on its usage updates, one
  *   window per event, heard from sessions (`heard`); and for any account,
  *   idle ones too, Anthropic's usage endpoint with the account's own sign-in
- *   (the usage read, ADR-055), at most every five minutes and not while a
+ *   (the usage read, ADR-056), at most every five minutes and not while a
  *   session has just said.
  * - Codex: its app-server, asked in the account's home; ChatGPT's usage
  *   endpoint where that can't answer.
@@ -76,7 +76,7 @@ export interface PlanUsageOptions {
   readonly readAgent?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<UsageRead>
   /** An agent's version as its CLI says it; as it is, unless a test says. OpenCode is listed only on a version known to list its sign-ins. */
   readonly readVersion?: (agent: AgentDefinition) => Promise<string | null>
-  /** How a provider's usage endpoint is read with an account's sign-in (ADR-055); the package's reader, unless a test says. */
+  /** How a provider's usage endpoint is read with an account's sign-in (ADR-056); the package's reader, unless a test says. */
   readonly readEndpoint?: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>
   /** How an OpenCode account's sign-ins are listed. */
   readonly readCredentials?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<CredentialsRead>
@@ -297,7 +297,7 @@ export class PlanUsage extends Context.Service<
               })
             /*
              * A provider's usage endpoint, read with the account's own sign-in
-             * (ADR-055), from the account's home. With no sign-in for it there,
+             * (ADR-056), from the account's home. With no sign-in for it there,
              * `none` says what that is: for Kimi Code, a key; for an agent whose
              * status said plan, a sign-in Althar couldn't find.
              */

@@ -300,6 +300,26 @@ describe('the Talk room’s composer when Althar doesn’t take what was said', 
       expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Rename the flag', disposition: 'after_current', dictated: true }),
     )
   })
+
+  it('sends a queued message to the coordinator now, a dictated one as dictated, out of the queue', async () => {
+    const spoken = items.you('Rename the flag', { state: 'queued', interrupting: false, dictated: true })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ session: { ...session, turnRunning: true }, items: [spoken, items.tool({ status: 'in_progress' })] }),
+      ),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Send now' }))
+    expect(client.takeBack).toHaveBeenCalledWith(spoken.id)
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'thc',
+        body: 'Rename the flag',
+        disposition: 'interrupt_and_continue',
+        dictated: true,
+      }),
+    )
+  })
 })
 
 describe('a run over the coordinator’s composer', () => {
