@@ -11,7 +11,7 @@ export const demoOptionsFromUrl = (): DemoOptions => {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return { live: true }
   const params = new URLSearchParams(window.location.search)
   const connection = params.get('connection')
-  const states: ReadonlyArray<Connection['state']> = ['unpaired', 'connecting', 'online', 'away']
+  const states: ReadonlyArray<Connection['state']> = ['unpaired', 'connecting', 'online', 'away', 'outdated']
   return {
     live: params.get('live') !== '0',
     connection: states.find((state) => state === connection) ?? 'online',

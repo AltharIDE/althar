@@ -3,6 +3,7 @@ import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Stream } fr
 import { RpcClient } from 'effect/rpc'
 
 import type { AltharClient, Connection, PairedMac, Unsubscribe } from '../AltharClient'
+import { onPhone } from './scheduler'
 
 /*
  * The client the phone uses once the relay exists: the runtime's own RPC
@@ -10,7 +11,8 @@ import type { AltharClient, Connection, PairedMac, Unsubscribe } from '../Althar
  * the desktop's data layer does (apps/desktop/src/renderer/data/client.ts):
  * every command gets an id, and is tried once more under the same id when
  * the runtime didn't answer, never when it said no; the watch picks up from
- * the last change it heard when its stream breaks.
+ * the last change it heard when its stream breaks. Everything runs on the
+ * phone's scheduler (./scheduler.ts), so a busy fiber can't hold the screen.
  *
  * How the phone stands with the Mac is the relay's to say, so it's handed
  * in: `link` reports it, and pairs and unpairs.
@@ -37,7 +39,7 @@ const REWATCH_AFTER = Duration.seconds(1)
 
 /** Runs a call, settling with the call's own failure, in words. */
 const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
-  Effect.runPromiseExit(effect).then((exit) => {
+  Effect.runPromiseExit(onPhone(effect)).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     const error = Cause.squash(exit.cause)
     throw error instanceof ApiError ? error : new Error(messageOf(error))
@@ -58,10 +60,12 @@ const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Prom
 export const connectRelay = async (port: PortLike, link: RelayLink): Promise<AltharClient & { readonly close: () => Promise<void> }> => {
   const scope = await Effect.runPromise(Scope.make())
   const api = await Effect.runPromise(
-    Effect.gen(function* () {
-      const protocol = yield* Layer.build(clientProtocol(port))
-      return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
-    }).pipe(Scope.provide(scope)),
+    onPhone(
+      Effect.gen(function* () {
+        const protocol = yield* Layer.build(clientProtocol(port))
+        return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+      }).pipe(Scope.provide(scope)),
+    ),
   )
   return {
     connection: () => link.connection(),
@@ -82,7 +86,7 @@ export const connectRelay = async (port: PortLike, link: RelayLink): Promise<Alt
           }),
         ),
       )
-      const fiber = Effect.runFork(Effect.forever(Effect.andThen(Effect.ignore(heard), Effect.sleep(REWATCH_AFTER))))
+      const fiber = Effect.runFork(onPhone(Effect.forever(Effect.andThen(Effect.ignore(heard), Effect.sleep(REWATCH_AFTER)))))
       return () => void Effect.runFork(Fiber.interrupt(fiber))
     },
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),

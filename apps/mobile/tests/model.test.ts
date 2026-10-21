@@ -95,6 +95,13 @@ describe('words', () => {
     expect(away?.title).toBe('Balazs’s MacBook Pro is away')
     expect(away?.detail).toContain('7m ago')
   })
+
+  it('says which side needs updating when the two speak different versions', () => {
+    expect(connectionWords({ state: 'outdated', mac: DEMO_MAC, ours: 1, theirs: 2 }, NOW)?.title).toBe('Update Althar on this phone')
+    expect(connectionWords({ state: 'outdated', mac: DEMO_MAC, ours: 2, theirs: 1 }, NOW)?.title).toBe(
+      'Update Althar on Balazs’s MacBook Pro',
+    )
+  })
 })
 
 describe('a thread, as rounds', () => {
@@ -125,5 +132,17 @@ describe('a diff line, cut', () => {
     ])
     expect(pieces('unchanged', undefined)).toEqual([{ text: 'unchanged', changed: false }])
     expect(pieces('a b', ['zzz'])).toEqual([{ text: 'a b', changed: false }])
+  })
+})
+
+describe('files viewed', () => {
+  it('toggles a file for a task, and keeps tasks apart', async () => {
+    const { viewedFiles } = await import('../src/model/viewed')
+    viewedFiles.reset()
+    viewedFiles.toggle('task_a', 'src/a.ts')
+    expect([...viewedFiles.of('task_a')]).toEqual(['src/a.ts'])
+    expect(viewedFiles.of('task_b').size).toBe(0)
+    viewedFiles.toggle('task_a', 'src/a.ts')
+    expect(viewedFiles.of('task_a').size).toBe(0)
   })
 })

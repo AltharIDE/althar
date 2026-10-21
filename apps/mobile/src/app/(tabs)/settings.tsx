@@ -53,6 +53,14 @@ function Row({
   )
 }
 
+const standing = {
+  unpaired: 'Not paired',
+  online: 'Connected',
+  away: 'Away',
+  connecting: 'Reaching it…',
+  outdated: 'Needs an update',
+} as const
+
 export default function Settings() {
   const theme = useTheme()
   const router = useRouter()
@@ -78,7 +86,7 @@ export default function Settings() {
             <Row
               icon={<Laptop width={22} height={22} color={theme.t2} />}
               title={mac.name}
-              detail={`${connection.state === 'online' ? 'Connected' : connection.state === 'away' ? 'Away' : 'Reaching it…'} · paired ${new Date(mac.pairedAt).toLocaleDateString()}`}
+              detail={`${standing[connection.state]} · paired ${new Date(mac.pairedAt).toLocaleDateString()}`}
             />
             <Divider inset={50} />
             <Row

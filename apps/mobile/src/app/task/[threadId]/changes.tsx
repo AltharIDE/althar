@@ -1,10 +1,11 @@
 import type { ChangedFile } from '@althar/contracts'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { NavArrowRight } from 'iconoir-react-native'
+import { CheckCircle, NavArrowRight } from 'iconoir-react-native'
 import { Pressable, ScrollView, View } from 'react-native'
 
 import { useThread } from '../../../client/react'
 import { Card, Divider, Text } from '../../../components/ui'
+import { useViewed } from '../../../model/viewed'
 import { lines, plural } from '../../../model/words'
 import { useTheme } from '../../../theme/Theme'
 import { space } from '../../../theme/tokens'
@@ -17,7 +18,7 @@ import { space } from '../../../theme/tokens'
 
 const letters = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' } as const
 
-function FileRow({ file, onPress }: { readonly file: ChangedFile; readonly onPress: () => void }) {
+function FileRow({ file, seen, onPress }: { readonly file: ChangedFile; readonly seen: boolean; readonly onPress: () => void }) {
   const theme = useTheme()
   const slash = file.path.lastIndexOf('/')
   const folder = slash === -1 ? '' : file.path.slice(0, slash + 1)
@@ -36,9 +37,13 @@ function FileRow({ file, onPress }: { readonly file: ChangedFile; readonly onPre
         backgroundColor: pressed ? theme.pressed : 'transparent',
       })}
     >
-      <Text kind="monoSmall" style={{ color: tone, width: 12 }}>
-        {letters[file.status]}
-      </Text>
+      {seen ? (
+        <CheckCircle width={14} height={14} color={theme.ok} accessibilityLabel="Viewed" />
+      ) : (
+        <Text kind="monoSmall" style={{ color: tone, width: 14 }}>
+          {letters[file.status]}
+        </Text>
+      )}
       <View style={{ flex: 1, gap: 2 }}>
         <Text kind="bodyMedium" lines={1}>
           {name}
@@ -64,12 +69,15 @@ export default function Changes() {
   const router = useRouter()
   const thread = useThread(threadId)
   const files = thread.data?.task.files ?? []
+  const viewed = useViewed(taskId)
+  const seen = files.filter((file) => viewed.has(file.path)).length
   const add = files.reduce((sum, one) => sum + one.add, 0)
   const del = files.reduce((sum, one) => sum + one.del, 0)
   return (
     <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.md }}>
       <Text kind="sub" ink="t3">
         {plural(files.length, 'file')} · {lines(add, del)}
+        {seen > 0 ? ` · ${seen} viewed` : ''}
         {thread.data === undefined ? '' : ` · ${plural(thread.data.task.commits, 'commit')} on ${thread.data.task.branch ?? 'its branch'}`}
       </Text>
       <Card style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
@@ -78,6 +86,7 @@ export default function Changes() {
             {index === 0 ? null : <Divider inset={40} />}
             <FileRow
               file={file}
+              seen={viewed.has(file.path)}
               onPress={() => router.push({ pathname: '/task/[threadId]/diff', params: { threadId, taskId, path: file.path } })}
             />
           </View>

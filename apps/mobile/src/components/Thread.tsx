@@ -3,11 +3,13 @@ import { CheckCircle, NavArrowDown, NavArrowRight, WarningTriangle, XmarkCircle 
 import { useState } from 'react'
 import { Pressable, View } from 'react-native'
 
+import { useCommand, useConnection } from '../client/react'
+import { tapDone } from '../lib/device'
 import { blocksOf, type Block } from '../model/thread'
 import { since, whoWorks } from '../model/words'
 import { useTheme } from '../theme/Theme'
 import { radius, space } from '../theme/tokens'
-import { Chip, LiveDot, Text, Well } from './ui'
+import { Button, Chip, LiveDot, Text, Well } from './ui'
 
 /*
  * A task's thread on a phone: what you asked, what agents said, each round
@@ -19,7 +21,49 @@ type Report = Extract<ThreadItem, { readonly kind: 'step_result' }>
 
 const stepNames = { implement: 'Implement', review: 'Review', settle: 'Settle the review', publish: 'Pull request' } as const
 
-export function ReportCard({ report }: { readonly report: Report }) {
+/** A finding, with a way to hand it to the lead: what review on a phone comes to (docs/design.md). */
+function Finding({ finding, threadId }: { readonly finding: Report['content']['findings'][number]; readonly threadId: string | null }) {
+  const reachable = useConnection().state === 'online'
+  const [sent, setSent] = useState(false)
+  const send = useCommand((client, body: string) =>
+    threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition: 'after_current' }),
+  )
+  const where = finding.file === null ? '' : ` (${finding.file}${finding.line === null ? '' : `:${finding.line}`})`
+  return (
+    <View style={{ flexDirection: 'row', gap: space.sm }}>
+      <Chip label={finding.severity} tone={finding.severity === 'blocking' || finding.severity === 'major' ? 'danger' : 'plain'} />
+      <View style={{ flex: 1, gap: 4 }}>
+        <Text kind="sub">{finding.claim}</Text>
+        {finding.file === null ? null : (
+          <Text kind="monoSmall" ink="t3">
+            {finding.file}
+            {finding.line === null ? '' : `:${finding.line}`}
+          </Text>
+        )}
+        {threadId === null ? null : sent ? (
+          <Text kind="caption" ink="ok">
+            Sent to the lead
+          </Text>
+        ) : (
+          <View style={{ alignSelf: 'flex-start' }}>
+            <Button
+              label="Ask the lead to fix it"
+              tone="plain"
+              small
+              disabled={!reachable}
+              busy={send.isPending}
+              onPress={() =>
+                send.mutate(`Please fix this finding${where}: ${finding.claim}`, { onSuccess: () => (tapDone(), setSent(true)) })
+              }
+            />
+          </View>
+        )}
+      </View>
+    </View>
+  )
+}
+
+export function ReportCard({ report, threadId = null }: { readonly report: Report; readonly threadId?: string | null }) {
   const theme = useTheme()
   const { content } = report
   const passed = content.verdict === 'pass'
@@ -46,18 +90,7 @@ export function ReportCard({ report }: { readonly report: Report }) {
       </View>
       <Text kind="body">{content.summary}</Text>
       {content.findings.map((finding, index) => (
-        <View key={index} style={{ flexDirection: 'row', gap: space.sm }}>
-          <Chip label={finding.severity} tone={finding.severity === 'blocking' || finding.severity === 'major' ? 'danger' : 'plain'} />
-          <View style={{ flex: 1 }}>
-            <Text kind="sub">{finding.claim}</Text>
-            {finding.file === null ? null : (
-              <Text kind="monoSmall" ink="t3">
-                {finding.file}
-                {finding.line === null ? '' : `:${finding.line}`}
-              </Text>
-            )}
-          </View>
-        </View>
+        <Finding key={index} finding={finding} threadId={threadId} />
       ))}
       {content.evidence.length === 0 ? null : (
         <View style={{ gap: 4 }}>
@@ -140,7 +173,17 @@ function Work({ block }: { readonly block: Extract<Block, { readonly kind: 'work
   )
 }
 
-function Item({ item, now }: { readonly item: ThreadItem; readonly now: number }) {
+function Item({
+  item,
+  now,
+  threadId,
+  latest,
+}: {
+  readonly item: ThreadItem
+  readonly now: number
+  readonly threadId: string
+  readonly latest: boolean
+}) {
   const theme = useTheme()
   switch (item.kind) {
     case 'user_message':
@@ -186,7 +229,7 @@ function Item({ item, now }: { readonly item: ThreadItem; readonly now: number }
         </View>
       )
     case 'step_result':
-      return <ReportCard report={item} />
+      return <ReportCard report={item} threadId={latest ? threadId : null} />
     case 'question':
       return (
         <Well>
@@ -201,19 +244,27 @@ function Item({ item, now }: { readonly item: ThreadItem; readonly now: number }
 }
 
 export function Thread({
+  threadId,
   items,
   now,
   streamed,
 }: {
+  readonly threadId: string
   readonly items: ReadonlyArray<ThreadItem>
   readonly now: number
   readonly streamed: { readonly agentId: string; readonly text: string } | null
 }) {
   const blocks = blocksOf(items, now)
+  // Only the latest report's findings can be handed to the lead: a later round settled the earlier ones.
+  const latest = items.findLast((item) => item.kind === 'step_result')?.id
   return (
     <View style={{ gap: space.lg }}>
       {blocks.map((block) =>
-        block.kind === 'work' ? <Work key={block.id} block={block} /> : <Item key={block.item.id} item={block.item} now={now} />,
+        block.kind === 'work' ? (
+          <Work key={block.id} block={block} />
+        ) : (
+          <Item key={block.item.id} item={block.item} now={now} threadId={threadId} latest={block.item.id === latest} />
+        ),
       )}
       {streamed === null ? null : (
         <View style={{ gap: 4 }} accessibilityLiveRegion="polite">

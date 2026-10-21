@@ -94,6 +94,26 @@ the client seam the relay will implement. Screens, as shot in
 | New task (`new-task`) | Project, what should be done, Plan it |
 | Pair (`pair`, `pair-verify`) | Scan the Mac's code; check four words on both screens; done |
 | Settings, Notifications (`settings`, `notifications-full`) | The paired Mac, Face ID, unpair; notification groups, with previews of the lock screen, the island and the Live Activity |
+| Diagnostics (`diagnostics`) | The relay client's whole path, run in the app against a runtime of the contract's own: on a phone, a one-tap check on Hermes |
+| The Mac out of date (`home-outdated`) | Which side needs updating when the two speak different API versions |
+
+Behind the screens, also built and tested:
+
+- **The relay client** (`src/client/relay/RelayClient.ts`): the runtime's own
+  RPC over a port that carries JSON text, with a command id per command and a
+  watch that picks up where it left off, as the desktop's data layer does.
+  Tested against a server of the contract's own, which also shows the demo's
+  records pass the contract's schemas both ways.
+- **Effect on Hermes** ([hermes-spike.md](hermes-spike.md)): it runs, on the
+  exact Hermes React Native 0.88 ships. The two things it needed are done: a
+  scheduler that yields with `setTimeout`, and `crypto.getRandomValues`.
+- **Notifications** (`src/notify`): the categories, Deny from the
+  notification, Allow opening the call for Face ID, "not delivered" when a
+  Deny didn't arrive. The demo taps you as calls arrive, so it can be tried
+  on a phone now.
+- **The pairing code and the four words** (`src/client/relay/pairing.ts`):
+  the QR's contents, refused in words when stale or wrong, and the words
+  drawn from both keys and the nonce.
 
 ### The rules it follows
 
@@ -186,13 +206,14 @@ Each with a recommendation; none of them blocks the next steps.
 
 ## Next
 
-1. The relay client: a `PortLike` over the relay's WebSocket, carrying the
-   contract's RPC as JSON, behind the same `AltharClient` seam; the version
-   handshake first (refused with both versions named, as the socket is).
-2. Pairing for real: the key made in the Secure Enclave with biometrics, the
-   QR's public key, the four words from both keys.
-3. Notifications: categories, the service extension, the not-delivered
-   notification.
+1. The relay itself, and the Mac's side of it (above). On the phone: the
+   relay's channel as a `TextChannel` (a WebSocket, then a Noise KK session
+   over it from a vetted library), handed to `connectRelay`; the version
+   handshake as `outdated`.
+2. Pairing for real: the key made in the Secure Enclave behind Face ID, sent
+   to the Mac through the relay; the words drawn as `pairing.ts` draws them.
+3. The notification service extension, which opens encrypted pushes; Deny
+   answered from a killed app (a background task).
 4. Native dictation (`expo-speech-recognition` or Apple's speech framework
    through a small module), transcribing at the end.
 5. The Live Activity, as a Swift target through `@bacons/apple-targets`, as

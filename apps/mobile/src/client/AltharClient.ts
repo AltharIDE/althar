@@ -38,6 +38,8 @@ export type Connection =
   | { readonly state: 'online'; readonly mac: PairedMac }
   /** The relay can't reach the Mac: asleep, offline, or Althar isn't running. What the phone shows is as of `lastSeen`. */
   | { readonly state: 'away'; readonly mac: PairedMac; readonly lastSeen: string }
+  /** The Mac's runtime speaks another version of the API (`API_VERSION`): one of the two needs updating before they can talk. */
+  | { readonly state: 'outdated'; readonly mac: PairedMac; readonly ours: number; readonly theirs: number }
 
 export type Unsubscribe = () => void
 

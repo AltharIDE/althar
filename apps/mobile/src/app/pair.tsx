@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { PairedMac } from '../client/AltharClient'
 import { DEMO_MAC } from '../client/demo/DemoClient'
+import { parsePairingCode } from '../client/relay/pairing'
 import { useClient } from '../client/react'
 import { Button, Card, Text } from '../components/ui'
 import { tapDone } from '../lib/device'
@@ -46,6 +47,13 @@ function Steps({ at }: { readonly at: Step }) {
 function Scan({ onScanned }: { readonly onScanned: (code: string) => void }) {
   const theme = useTheme()
   const [permission, ask] = useCameraPermissions()
+  const [refused, setRefused] = useState<string | null>(null)
+  const scanned = (data: string) => {
+    if (data === 'althar-pair:demo') return onScanned(data)
+    const parsed = parsePairingCode(data)
+    if (parsed.ok) onScanned(data)
+    else setRefused(parsed.why)
+  }
   const camera = Platform.OS !== 'web' && permission?.granted === true
   return (
     <View style={{ gap: space.lg }}>
@@ -67,7 +75,7 @@ function Scan({ onScanned }: { readonly onScanned: (code: string) => void }) {
           <CameraView
             style={{ position: 'absolute', inset: 0 }}
             barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={({ data }) => (data.startsWith('althar-pair:') ? onScanned(data) : undefined)}
+            onBarcodeScanned={({ data }) => scanned(data)}
           />
         ) : (
           <QrCode width={72} height={72} color="rgba(255,255,255,0.35)" />
@@ -83,6 +91,11 @@ function Scan({ onScanned }: { readonly onScanned: (code: string) => void }) {
           }}
         />
       </View>
+      {refused === null ? null : (
+        <Text kind="sub" ink="danger">
+          {refused}
+        </Text>
+      )}
       {Platform.OS !== 'web' && permission?.granted !== true ? (
         <Button label="Let Althar use the camera" tone="ink" onPress={() => void ask()} />
       ) : (

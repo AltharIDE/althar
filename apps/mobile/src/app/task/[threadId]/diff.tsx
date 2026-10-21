@@ -6,6 +6,7 @@ import { ScrollView, Text as NativeText, View } from 'react-native'
 import { useFileDiff } from '../../../client/react'
 import { Button, Text } from '../../../components/ui'
 import { pieces } from '../../../model/diff'
+import { useViewed, viewedFiles } from '../../../model/viewed'
 import { lines as lineWords } from '../../../model/words'
 import { useTheme } from '../../../theme/Theme'
 import { space, type } from '../../../theme/tokens'
@@ -53,6 +54,7 @@ export default function Diff() {
   const theme = useTheme()
   const [wrap, setWrap] = useState(true)
   const diff = useFileDiff(taskId, path)
+  const seen = useViewed(taskId).has(path)
   const name = path.slice(path.lastIndexOf('/') + 1)
   const body = (
     <View style={{ paddingVertical: space.sm }}>
@@ -71,6 +73,9 @@ export default function Diff() {
       />
       <View
         style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.md,
           paddingHorizontal: space.lg,
           paddingVertical: space.sm,
           borderBottomWidth: 1,
@@ -78,15 +83,23 @@ export default function Diff() {
           backgroundColor: theme.page,
         }}
       >
-        <Text kind="monoSmall" ink="t2" lines={1}>
-          {path}
-        </Text>
-        {diff.data === undefined ? null : (
-          <Text kind="caption" ink="t3">
-            {lineWords(diff.data.file.add, diff.data.file.del)}
-            {diff.data.truncated ? ' · cut short: open it on your Mac for the rest' : ''}
+        <View style={{ flex: 1 }}>
+          <Text kind="monoSmall" ink="t2" lines={1}>
+            {path}
           </Text>
-        )}
+          {diff.data === undefined ? null : (
+            <Text kind="caption" ink="t3">
+              {lineWords(diff.data.file.add, diff.data.file.del)}
+              {diff.data.truncated ? ' · cut short: open it on your Mac for the rest' : ''}
+            </Text>
+          )}
+        </View>
+        <Button
+          label={seen ? 'Viewed ✓' : 'Mark viewed'}
+          tone={seen ? 'quiet' : 'plain'}
+          small
+          onPress={() => viewedFiles.toggle(taskId, path)}
+        />
       </View>
       <ScrollView>{wrap ? body : <ScrollView horizontal>{body}</ScrollView>}</ScrollView>
     </View>

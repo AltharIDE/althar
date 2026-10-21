@@ -21,6 +21,7 @@ const SHOTS = [
   { name: 'home-dark', url: '/', theme: 'dark' },
   { name: 'home-away', url: '/?connection=away' },
   { name: 'home-unpaired', url: '/?connection=unpaired' },
+  { name: 'home-outdated', url: '/?connection=outdated' },
   { name: 'home-full', url: '/', full: true },
   { name: 'call-permission', url: '/call/att_migrate' },
   { name: 'call-stuck', url: '/call/att_rounds' },

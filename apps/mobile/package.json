@@ -21,6 +21,7 @@
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/jetbrains-mono": "^0.4.1",
     "@expo/metro-runtime": "~58.0.14",
+    "@noble/hashes": "2",
     "@tanstack/react-query": "^5.104.1",
     "effect": "4.0.0-rc.118",
     "expo": "~58.0.16",

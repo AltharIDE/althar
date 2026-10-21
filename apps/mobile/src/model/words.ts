@@ -62,6 +62,16 @@ export const connectionWords = (connection: Connection, now: number): { readonly
       return { title: 'Not paired', detail: 'Pair with Althar on your Mac to see your work here.' }
     case 'connecting':
       return { title: `Reaching ${connection.mac.name}…`, detail: 'Althar on your Mac answers once it’s awake.' }
+    case 'outdated':
+      return connection.theirs > connection.ours
+        ? {
+            title: 'Update Althar on this phone',
+            detail: `${connection.mac.name} runs a newer Althar than this phone knows how to talk to.`,
+          }
+        : {
+            title: `Update Althar on ${connection.mac.name}`,
+            detail: 'This phone speaks a newer Althar than the Mac does. Nothing is lost meanwhile.',
+          }
     case 'away':
       return {
         title: `${connection.mac.name} is away`,

@@ -25,13 +25,14 @@ bun run ios                              # in the iOS simulator, on a Mac
 | Command | What it does |
 | --- | --- |
 | `bun run check` | Type checks, the contract's types included |
-| `bun run test` | The models' and the demo client's unit tests |
+| `bun run test` | Unit tests: the models, notifications, pairing, the demo client, and the relay client against a server of the contract's own |
+| `bun run lint` | The repository's lint and format checks, on this app |
 | `bun run export:web` | Builds the web version into `dist` |
 | `bun run shots [name…]` | Screenshots of each screen from `dist`, at 390×844, into `test-results/shots` |
 
-The demo reads the page's address on the web: `?connection=away` or
-`?connection=unpaired` for those states, `?live=0` to hold still (the shots
-use it), `?theme=dark`.
+The demo reads the page's address on the web: `?connection=away`,
+`?connection=unpaired` or `?connection=outdated` for those states,
+`?live=0` to hold still (the shots use it), `?theme=dark`.
 
 ## Where things are
 
@@ -40,7 +41,10 @@ use it), `?theme=dark`.
 | `src/app` | The screens, by route (Expo Router) |
 | `src/client` | `AltharClient`, the seam: the runtime's calls a phone needs, with the contract's shapes; React hooks over it |
 | `src/client/demo` | The demo: an afternoon of three projects, kept in memory, changing as the runtime would |
+| `src/client/relay` | The relay client over the contract's RPC as JSON, the phone's scheduler, the pairing code and words, and the self-test Diagnostics runs |
+| `src/notify` | Notifications: what each says and does (pure), and the bridge to the system |
 | `src/model` | Pure: what needs you, at work, words, a thread's rounds, a diff line's pieces |
 | `src/components` | Cards, rows, the thread, the composer, and the kit's primitives drawn for a phone |
 | `src/theme` | The kit's tokens, light and dark |
-| `docs` | The design, and the research behind it |
+| `docs` | The design, the research behind it, and the Hermes spike's report |
+| `spikes/hermes` | The spike itself: `./run.sh` builds React Native 0.88's Hermes and runs Effect and the contract on it |

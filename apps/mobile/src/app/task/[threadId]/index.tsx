@@ -225,7 +225,7 @@ export default function TaskScreen() {
                 }
               />
             ) : null}
-            <Thread items={data.items} now={now} streamed={streamed} />
+            <Thread threadId={data.threadId} items={data.items} now={now} streamed={streamed} />
           </>
         )}
       </ScrollView>

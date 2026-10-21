@@ -36,8 +36,11 @@
     twice and kept in step.
   - **Flutter:** Dart, and nothing shared (ADR-003 turned it down too).
 - **Trade-off:** a second UI to keep in step with the desktop's words and
-  rules (`model/calls.ts` mirrors the desktop's `shared/calls.ts`); and Effect
-  must run on Hermes, React Native's engine, for the relay client.
+  rules (`model/calls.ts` mirrors the desktop's `shared/calls.ts`). Effect
+  runs on Hermes, React Native's engine, as a spike on the exact Hermes
+  React Native 0.88 ships showed, with Expo's Babel preset, one copy of
+  Effect, and a scheduler that yields with `setTimeout`
+  ([apps/mobile/docs/hermes-spike.md](../../apps/mobile/docs/hermes-spike.md)).
 - **Revisit when:** Effect can't run on Hermes for the relay client; or the
   phone grows past a remote into a main way to work, where native code
   would pay for itself.

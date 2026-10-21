@@ -19,7 +19,7 @@ export function ConnectionBanner({ now, waiting }: { readonly now: number; reado
   const connection = useConnection()
   const words = connectionWords(connection, now)
   if (words === null) return null
-  const away = connection.state === 'away'
+  const away = connection.state === 'away' || connection.state === 'outdated'
   return (
     <View
       accessibilityRole="alert"
@@ -39,7 +39,9 @@ export function ConnectionBanner({ now, waiting }: { readonly now: number; reado
         <Text kind="bodyMedium">{words.title}</Text>
         <Text kind="sub" ink="t2">
           {words.detail}
-          {away && waiting > 0 ? ` ${waiting} ${waiting === 1 ? 'call waits' : 'calls wait'} there; answer once it’s back.` : ''}
+          {away && waiting > 0
+            ? ` ${waiting} ${waiting === 1 ? 'call waits' : 'calls wait'} there; ${connection.state === 'outdated' ? 'answer on your Mac meanwhile' : 'answer once it’s back'}.`
+            : ''}
         </Text>
         {connection.state === 'unpaired' ? (
           <View style={{ marginTop: space.sm, alignSelf: 'flex-start' }}>

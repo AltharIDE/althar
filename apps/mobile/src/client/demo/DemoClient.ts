@@ -53,7 +53,9 @@ export class DemoClient implements AltharClient {
         ? { state: 'unpaired' }
         : wanted === 'away'
           ? { state: 'away', mac: DEMO_MAC, lastSeen: ago(this.now(), 7) }
-          : { state: wanted, mac: DEMO_MAC }
+          : wanted === 'outdated'
+            ? { state: 'outdated', mac: DEMO_MAC, ours: 1, theirs: 2 }
+            : { state: wanted, mac: DEMO_MAC }
     if (options.live === true) this.goLive()
   }
 
