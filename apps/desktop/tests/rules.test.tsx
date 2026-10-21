@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError, type ProjectRulesView } from '@althar/contracts'
 
 import { RulesSection } from '../src/renderer/features/rules/RulesSection'
-import { useRules } from '../src/renderer/features/rules/useRules'
+import { useRules, withChange } from '../src/renderer/features/rules/useRules'
 import { agents, changed, fakeClient, projectRules, usual } from './fixtures'
 import { withServices } from './render'
 
@@ -54,6 +54,7 @@ describe('a project’s rules', () => {
       'Ask me',
       'Go ahead',
       'The rest',
+      'Sandbox',
       'Finished',
       'Limits',
     ])
@@ -109,6 +110,61 @@ describe('a project’s rules', () => {
     await userEvent.click(screen.getByRole('switch', { name: 'Allow everything' }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', allowEverything: true }))
     expect(screen.getAllByText('Off while everything is allowed.')).toHaveLength(3)
+  })
+
+  it('says what leads run outside their sandbox and the hosts they reach, and that hosts wait while the rest asks', async () => {
+    const { client } = fakeClient({ getProjectRules: rulesOf({}) })
+    withServices(<Rules />, client)
+    await screen.findByRole('heading', { name: 'Sandbox', level: 3 })
+    expect(says('Sandbox')).toBe(
+      'Leads run bunx playwright, node scripts/e2e.ts, ps and env -i outside their sandbox from the start. They reach github.com and registry.npmjs.org without asking. Each command still meets these rules.',
+    )
+    await choose(screen.getByRole('button', { name: 'allowed' }), 'Ask me')
+    await waitFor(() => expect(says('Sandbox')).toContain('registry.npmjs.org without asking, once everything else is allowed.'))
+  })
+
+  it('adds a host by its name and takes a command out, each kept as the person’s edit against the revision it read', async () => {
+    let kept: ProjectRulesView = { ...projectRules, revision: 4 }
+    const { client } = fakeClient({ getProjectRules: vi.fn(async () => kept) })
+    vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
+      expect(expectedRevision).toBe(kept.revision)
+      kept = { ...withChange(kept, change), projectId, revision: kept.revision + 1 }
+      return kept
+    })
+    withServices(<Rules />, client)
+    await screen.findByRole('heading', { name: 'Sandbox', level: 3 })
+    await userEvent.click(screen.getByRole('button', { name: 'Add a host leads reach without asking' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A host' }), 'not a host{Enter}')
+    expect(screen.getByRole('textbox', { name: 'A host', description: /isn’t a host/ })).toBeTruthy()
+    await userEvent.clear(screen.getByRole('textbox', { name: 'A host' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A host' }), '*.example.com{Enter}')
+    expect(screen.getByRole('textbox', { name: 'A host', description: /Name each host on its own/ })).toBeTruthy()
+    expect(client.setProjectRules).not.toHaveBeenCalled()
+    await userEvent.clear(screen.getByRole('textbox', { name: 'A host' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A host' }), 'HTTPS://PyPI.org/simple{Enter}')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p1',
+        sandbox: { hosts: { added: ['pypi.org'], removed: [] } },
+        expectedRevision: 4,
+      }),
+    )
+    await waitFor(() => expect(within(sentence('Sandbox')).getByText('pypi.org')).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: 'Remove env -i' }))
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p1',
+        sandbox: { commands: { added: [], removed: ['env -i'] } },
+        expectedRevision: 5,
+      }),
+    )
+    expect(screen.queryByRole('button', { name: 'Remove env -i' })).toBeNull()
+    // Claude Code keeps a line that starts with bun in its sandbox, whatever the list says.
+    const calls = vi.mocked(client.setProjectRules).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Add a command leads run outside their sandbox' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A command, as it starts' }), 'bun run test:e2e{Enter}')
+    expect(screen.getByRole('textbox', { name: 'A command, as it starts', description: /starts with bun/ })).toBeTruthy()
+    expect(client.setProjectRules).toHaveBeenCalledTimes(calls)
   })
 
   it('takes a command out at once, and adds one where its sentence ends', async () => {
@@ -223,7 +279,7 @@ describe('a project’s rules', () => {
     vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
       expect(expectedRevision).toBe(kept.revision)
       await new Promise((resolve) => setTimeout(resolve, 150))
-      kept = { ...kept, ...change, projectId, revision: kept.revision + 1 }
+      kept = { ...withChange(kept, change), projectId, revision: kept.revision + 1 }
       return kept
     })
     withServices(<Rules />, client)
@@ -249,7 +305,7 @@ describe('a project’s rules', () => {
     vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
       // Each against its own project's rules.
       expect(expectedRevision).toBe(rulesFor(projectId).revision)
-      return { ...rulesFor(projectId), ...change, revision: rulesFor(projectId).revision + 1 }
+      return { ...withChange(rulesFor(projectId), change), revision: rulesFor(projectId).revision + 1 }
     })
     function Switching() {
       const [projectId, setProjectId] = useState('p1')
@@ -290,7 +346,7 @@ describe('a project’s rules', () => {
     const { client, emit } = fakeClient({ getProjectRules })
     vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
       expect(expectedRevision).toBe(1)
-      const kept = { ...server, ...change, projectId, revision: 2 }
+      const kept = { ...withChange(server, change), projectId, revision: 2 }
       // Saved; then a permission answered with always allow keeps a rule, and the watch says so before this answer arrives.
       server = { ...kept, commands: [{ pattern: 'git status', decision: 'allow' }], revision: 3 }
       emit(changed('policy', 'pol3', null, 'p1'))
@@ -339,7 +395,7 @@ describe('a project’s rules', () => {
       expect(expectedRevision).toBe(revision)
       await new Promise((resolve) => setTimeout(resolve, 30))
       revision += 1
-      return { ...projectRules, ...change, projectId, revision }
+      return { ...withChange(projectRules, change), projectId, revision }
     })
     withServices(<Rules />, client)
     await choose(await screen.findByRole('button', { name: 'force pushing' }), 'The rest')

@@ -18,7 +18,7 @@
   transition: background var(--fast) var(--ease);
 }
 .row:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: color-mix(in srgb, var(--paper) 60%, transparent);
 }
 .row:active {
   background: var(--paper);
@@ -132,7 +132,7 @@
   text-decoration: none;
 }
 .result:hover {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 .result:focus-visible {

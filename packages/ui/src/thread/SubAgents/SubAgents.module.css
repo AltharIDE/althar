@@ -26,7 +26,7 @@
   background: var(--n-1);
 }
 .row:active {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .row:focus-visible {
   outline-offset: -1.5px;

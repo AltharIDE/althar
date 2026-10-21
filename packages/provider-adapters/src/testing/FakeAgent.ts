@@ -1530,7 +1530,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
 
-      const resumed = /not allowed by (the project's rules|the coordinator)/.test(text)
+      const resumed = /Althar's rules refused this|not allowed by the coordinator|The person declined/.test(text)
       if (resumed && !session.stubborn) {
         await say('carrying on without it')
         return ended()

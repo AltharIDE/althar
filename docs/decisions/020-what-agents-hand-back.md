@@ -2,6 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-10
+- **Amended:** 2026-10-21: a document a finished task's agent committed
+  still reads once its folder is removed, from the commit kept as it went
+  ([ADR-056](056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md)).
 - **Owner:** Repository maintainers
 - **Context:** Agents hand back more than words: a screenshot from a browser
   tool, a picture a tool read, a document they wrote, a file they point at,
@@ -80,7 +83,9 @@
   - **Output is its end.** A long run keeps its last 256 KB; its start is
     counted, not kept.
   - **A document shows as it is now,** not as it was when the agent wrote
-    it, and is gone once the worktree is.
+    it. Once a finished task's folder is removed, one it committed reads
+    from the commit kept as the folder went; one it never committed is
+    gone (ADR-056).
   - **Claude Code's output doesn't stream:** its adapter sends it once, at
     the end.
 - **Revisit when:**

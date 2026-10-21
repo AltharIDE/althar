@@ -48,7 +48,7 @@ import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 
-import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY } from './support'
+import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY, ROOMY_DISK } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
@@ -91,6 +91,8 @@ const connected = (
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
         busy: { machine: options.machine ?? ROOMY },
+        // A roomy disk, so no finished task's folder goes for the Mac running the tests being full.
+        disk: () => Effect.succeed(ROOMY_DISK),
         // A pull request with no checks has none: no test waits for a host to show them.
         checksAppear: Duration.zero,
       }),
@@ -1027,6 +1029,66 @@ describe('settings, through the API', () => {
   )
 })
 
+describe('finished tasks’ folders, through the API', () => {
+  it.live('keeps when they go, lists one with its size, removes it by hand, and brings it back as it opens in an editor', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<string> = []
+        const { client, grant, store } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (_editor, folder) => Effect.sync(() => void opens.push(folder)).pipe(Effect.as(true)),
+          },
+        })
+        assert.strictEqual((yield* client.GetSettings({})).folderWait, 'smart')
+        yield* client.SetFolderWait({ commandId: commandId(), wait: 'never' })
+        assert.strictEqual((yield* client.GetSettings({})).folderWait, 'never')
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
+        const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
+        execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'Retry'], {
+          cwd: worktree,
+        })
+        yield* store(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) =>
+              sql`UPDATE tasks SET state = 'done', settled_at = ${new Date(Date.now() - 86_400_000).toISOString()} WHERE id = ${task.id}`,
+          ),
+        )
+        const listed = yield* eventually(client.GetTaskFolders({}), (folders) => !folders.measuring && folders.folders.length === 1)
+        assert.deepStrictEqual(
+          listed.folders.map((folder) => [folder.taskId, folder.threadId, folder.title, folder.kind, folder.held]),
+          [[task.id, task.threadId, 'Add a retry', 'merged', null]],
+        )
+        assert.isTrue((listed.folders[0]?.bytes ?? 0) > 0)
+        assert.isNotNull(listed.disk)
+        const removed = yield* client.RemoveTaskFolder({ commandId: commandId(), taskId: task.id, seen: null })
+        assert.strictEqual(removed.failed, 0)
+        assert.isFalse(existsSync(worktree))
+        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).task.folder, 'removed')
+        assert.deepStrictEqual((yield* client.CleanUpFolders({ commandId: commandId() })).failed, 0)
+        // Opened in an editor, it comes back first, and counts as opened.
+        assert.isTrue(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed' }))
+        assert.isTrue(existsSync(worktree))
+        assert.strictEqual(opens.length, 1)
+        const opened = yield* store(
+          Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ openedAt: string | null }>`SELECT opened_at FROM tasks WHERE id = ${task.id}`),
+        )
+        assert.isNotNull(opened[0]?.openedAt)
+        const items = (yield* client.GetThread({ threadId: task.threadId })).items
+        assert.deepStrictEqual(
+          items.flatMap((item) => (item.kind === 'notice' && item.content.role === 'folder' ? [item.content.title.split(' · ')[0]] : [])),
+          ['You removed its folder', 'Folder back from its branch'],
+        )
+        // Opened today, it is held back.
+        const again = yield* eventually(client.GetTaskFolders({}), (folders) => folders.folders.length === 1)
+        assert.strictEqual(again.folders[0]?.held?.why, 'opened')
+      }),
+    ),
+  )
+})
+
 describe('this computer’s load, through the API', () => {
   it.live('says how hard this computer works, read as it is, checked on the way', () =>
     Effect.scoped(
@@ -1067,6 +1129,12 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // A repository with no packages, on no host: only what every lead runs outside its sandbox.
+          sandbox: {
+            commands: ['ps', 'env -i'],
+            hosts: [],
+            edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
+          },
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
@@ -1107,6 +1175,20 @@ describe('project rules, through the API', () => {
             { codex: ['acc_x'] },
           ],
         )
+        // What leads' sandboxes let through, changed in part: a list given is kept whole, tidied, and the other stays.
+        const reached = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          // Never a wildcard: the rules couldn't check each host under it.
+          sandbox: { hosts: { added: ['https://Registry.Acme.dev/npm', 'not a host', '*.acme.dev'], removed: [] } },
+        })
+        assert.deepStrictEqual(reached.sandbox.hosts, ['registry.acme.dev'])
+        const trimmed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          sandbox: { commands: { added: ['bunx  playwright *'], removed: ['env -i'] } },
+        })
+        assert.deepStrictEqual([trimmed.sandbox.commands, trimmed.sandbox.hosts], [['ps', 'bunx playwright'], ['registry.acme.dev']])
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(

@@ -66,6 +66,11 @@ export const text = {
       ? 'One of this Mac’s alert sounds, with each notification.'
       : 'The system’s own sound, with each notification, or none.',
   /* Appearance. */
+  theme: 'Light or dark',
+  themeNote: `Match ${device.the} turns dark when ${device.the} does.`,
+  themeLight: 'Light',
+  themeDark: 'Dark',
+  themeSystem: `Match ${device.the}`,
   icon: 'App icon',
   edge: 'In other apps',
   edgeNote: 'Where Althar shows what needs you, while you work in another app.',

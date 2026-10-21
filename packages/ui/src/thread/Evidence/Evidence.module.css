@@ -40,7 +40,7 @@
   background: var(--n-1);
 }
 .opens:active {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .opens > :last-child {
   align-self: center;

@@ -25,16 +25,19 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
+  Segmented,
   SettingList,
   SettingRow,
   SettingsLayout,
   SettingsNav,
   SettingSwitch,
+  TaskFolders,
   UpdateReady,
   UsageData,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
+import type { Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
 import { useServices } from '../../data/services'
@@ -64,6 +67,7 @@ import { useCoAuthor } from './useCoAuthor'
 import { useEdgeGlance } from './useEdgeGlance'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
+import { useTaskFolders } from './useTaskFolders'
 
 /*
  * Althar's settings, as a tab of the window beside the home's. Down the
@@ -82,9 +86,11 @@ export interface SettingsPageProps {
   /** The section open, as the tab's address says it. */
   section: Section
   onSection: (section: Section) => void
+  /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
+  onTask?: (threadId: string) => void
 }
 
-export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, onTask }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -124,7 +130,14 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
         </>
       }
     >
-      <SectionBody section={section} start={start} accounts={accounts} connections={connections} looks={looks} />
+      <SectionBody
+        section={section}
+        start={start}
+        accounts={accounts}
+        connections={connections}
+        looks={looks}
+        {...(onTask === undefined ? {} : { onTask })}
+      />
     </SettingsLayout>
   )
 }
@@ -141,12 +154,14 @@ function SectionBody({
   accounts,
   connections,
   looks,
+  onTask,
 }: {
   section: Section
   start: StartModel
   accounts: AccountSignInModel
   connections: ConnectionsModel
   looks: Looks
+  onTask?: (threadId: string) => void
 }) {
   switch (section) {
     case 'agents':
@@ -154,7 +169,7 @@ function SectionBody({
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
-      return <ThisMacSection />
+      return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
     case 'reviews':
       return <ReviewsSection connections={connections} />
     case 'notifications':
@@ -254,9 +269,10 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
 
 /* ---- work on this computer --------------------------------------------------------- */
 
-function ThisMacSection() {
+function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
   const { preferences, set, failed } = usePreferences()
   const atOnce = useAgentsAtOnce()
+  const folders = useTaskFolders(onTask)
   return (
     <>
       <SettingList>
@@ -284,6 +300,23 @@ function ThisMacSection() {
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
         />
+        {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-056). */}
+        {folders !== null && (
+          <TaskFolders
+            wait={folders.wait}
+            onWait={folders.setWait}
+            disk={folders.disk}
+            goes={folders.goes}
+            held={folders.held}
+            onCleanUp={folders.cleanUp}
+            onRemove={folders.remove}
+            {...(folders.open === undefined ? {} : { onOpen: folders.open })}
+            measuring={folders.measuring}
+            freed={folders.freed}
+            busy={folders.busy}
+            {...(folders.error === null ? {} : { error: folders.error })}
+          />
+        )}
       </SettingList>
       <Failed when={failed || atOnce?.failed === true} />
     </>
@@ -384,71 +417,89 @@ function AppearanceSection({ appIcon, edge }: Looks) {
   const icon = appIcons.find((one) => one.value === appIcon.icon)
   const { spot } = edge
   const words = spot === null ? null : edgeWords(spot)
+  const { preferences, set, failed } = usePreferences()
   return (
-    <SettingList>
-      {spot !== null && words !== null && (
-        <SettingRow
-          title={text.edge}
-          note={glance === EXAMPLE ? text.examples : text.edgeNote}
-          glyph={<Icon name="globe" size={15} />}
-          under={
-            <div className={s.under}>
-              {choosing(spot) && edge.place !== null ? (
-                <EdgePlaces
-                  label={text.edge}
-                  options={edgePlaces.map((one) => ({
-                    value: one.value,
-                    title: one.title,
-                    note: one.note,
-                    picture:
-                      one.value === 'island' ? (
-                        <IslandPicture glance={glance} height={260} />
-                      ) : (
-                        <MenuPicture glance={glance} height={260} />
-                      ),
-                  }))}
-                  value={edge.place}
-                  onChange={edge.choose}
-                />
-              ) : (
-                <EdgeHere
-                  title={words.title}
-                  note={words.note}
-                  {...(words.why === undefined ? {} : { why: words.why })}
-                  // A Mac's menu bar as it would be, the sheet open; elsewhere the system's edge, larger.
-                  picture={spot === EdgeSpot.MenuBar ? <MenuPicture glance={glance} /> : <EdgeMini spot={spot} scale={2.6} />}
-                />
-              )}
-              <Failed when={edge.failed} />
-            </div>
-          }
-        >
-          {() => null}
+    <>
+      <SettingList>
+        <SettingRow title={text.theme} note={text.themeNote} glyph={<Icon name="theme" size={15} />}>
+          {() => (
+            <Segmented<Appearance>
+              label={text.theme}
+              value={preferences.appearance}
+              onChange={(appearance) => set('appearance', appearance)}
+              options={[
+                { value: 'light', label: text.themeLight },
+                { value: 'dark', label: text.themeDark },
+                { value: 'system', label: text.themeSystem },
+              ]}
+            />
+          )}
         </SettingRow>
-      )}
-      {icon !== undefined && (
-        <SettingRow
-          title={text.icon}
-          note={icon.title}
-          glyph={<Icon name="image" size={15} />}
-          under={
-            <div className={s.under}>
-              <DockPreview name={icon.title} picture={<img src={icon.picture} alt="" />} />
-              <Choices
-                label={text.icon}
-                layout="tiles"
-                options={appIcons.map((one) => ({ value: one.value, title: one.title, picture: <img src={one.picture} alt="" /> }))}
-                value={appIcon.icon}
-                onChange={appIcon.choose}
-              />
-              <Failed when={appIcon.failed}>{text.iconFailed}</Failed>
-            </div>
-          }
-        >
-          {() => null}
-        </SettingRow>
-      )}
-    </SettingList>
+        {spot !== null && words !== null && (
+          <SettingRow
+            title={text.edge}
+            note={glance === EXAMPLE ? text.examples : text.edgeNote}
+            glyph={<Icon name="globe" size={15} />}
+            under={
+              <div className={s.under}>
+                {choosing(spot) && edge.place !== null ? (
+                  <EdgePlaces
+                    label={text.edge}
+                    options={edgePlaces.map((one) => ({
+                      value: one.value,
+                      title: one.title,
+                      note: one.note,
+                      picture:
+                        one.value === 'island' ? (
+                          <IslandPicture glance={glance} height={260} />
+                        ) : (
+                          <MenuPicture glance={glance} height={260} />
+                        ),
+                    }))}
+                    value={edge.place}
+                    onChange={edge.choose}
+                  />
+                ) : (
+                  <EdgeHere
+                    title={words.title}
+                    note={words.note}
+                    {...(words.why === undefined ? {} : { why: words.why })}
+                    // A Mac's menu bar as it would be, the sheet open; elsewhere the system's edge, larger.
+                    picture={spot === EdgeSpot.MenuBar ? <MenuPicture glance={glance} /> : <EdgeMini spot={spot} scale={2.6} />}
+                  />
+                )}
+                <Failed when={edge.failed} />
+              </div>
+            }
+          >
+            {() => null}
+          </SettingRow>
+        )}
+        {icon !== undefined && (
+          <SettingRow
+            title={text.icon}
+            note={icon.title}
+            glyph={<Icon name="image" size={15} />}
+            under={
+              <div className={s.under}>
+                <DockPreview name={icon.title} picture={<img src={icon.picture} alt="" />} />
+                <Choices
+                  label={text.icon}
+                  layout="tiles"
+                  options={appIcons.map((one) => ({ value: one.value, title: one.title, picture: <img src={one.picture} alt="" /> }))}
+                  value={appIcon.icon}
+                  onChange={appIcon.choose}
+                />
+                <Failed when={appIcon.failed}>{text.iconFailed}</Failed>
+              </div>
+            }
+          >
+            {() => null}
+          </SettingRow>
+        )}
+      </SettingList>
+      <Failed when={failed} />
+    </>
   )
 }
 
