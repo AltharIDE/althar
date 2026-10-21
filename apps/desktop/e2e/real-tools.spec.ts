@@ -10,7 +10,7 @@ import { connectGitHub, mainWindow, openFirstProject, say } from './support'
 
 /*
  * What a real agent does through Althar's tools rather than around its
- * sandbox (ADR-055), in the app, against the fake GitHub: the coordinator
+ * sandbox (ADR-057), in the app, against the fake GitHub: the coordinator
  * runs the project and takes a screenshot of it; a task's lead installs
  * again, runs the project in its worktree, takes a screenshot, stops it,
  * and, once its pull request's checks fail, runs them again, told which it

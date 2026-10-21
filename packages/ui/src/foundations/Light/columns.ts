@@ -60,8 +60,13 @@ export const PICTURE = { width: 64, height: 256, column: 30, blur: 5 } as const
  * column's place. Blurring it once here, not on every frame, keeps the light
  * cheap to show while it moves. Its picture is wider than the column by the
  * blur's reach either side. `live` is the window's --live, for the middle.
+ * On dark the light glows rather than pales: each column keeps a saturated
+ * foot (the ladder's own, the deep cobalt in the middle; the outer ones a
+ * clear blue and a warm orange, since their pale tones would mix to grey)
+ * and thins it out to nothing as it rises, the outer ones fainter, so the
+ * cobalt middle leads and light words over it still read.
  */
-export const drawColumn = (context: CanvasRenderingContext2D, column: Column, live?: string) => {
+export const drawColumn = (context: CanvasRenderingContext2D, column: Column, live?: string, dark = false) => {
   const { width, height, column: inner, blur } = PICTURE
   const left = (width - inner) / 2
   const cap = height * 0.22
@@ -69,10 +74,19 @@ export const drawColumn = (context: CanvasRenderingContext2D, column: Column, li
   // The middle's foot is --live, as the mark's dots are, when the window says what that is.
   const low = live !== undefined && first === toneOf(0)[0] ? live : first
   const fill = context.createLinearGradient(0, height, 0, 0)
-  fill.addColorStop(0, low)
-  fill.addColorStop(0.34, middle)
-  fill.addColorStop(0.66, high)
-  fill.addColorStop(1, 'rgba(255, 255, 255, 0)')
+  if (dark) {
+    const foot = column.d >= 0.8 ? '#ff9466' : column.d >= 0.6 ? '#5aa2ff' : first
+    const strength = column.d >= 0.8 ? 0.4 : column.d >= 0.6 ? 0.5 : column.d >= 0.36 ? 0.8 : 1
+    fill.addColorStop(0, thinned(foot, strength))
+    fill.addColorStop(0.34, thinned(foot, 0.6 * strength))
+    fill.addColorStop(0.66, thinned(foot, 0.18 * strength))
+    fill.addColorStop(1, thinned(foot, 0))
+  } else {
+    fill.addColorStop(0, low)
+    fill.addColorStop(0.34, middle)
+    fill.addColorStop(0.66, high)
+    fill.addColorStop(1, 'rgba(255, 255, 255, 0)')
+  }
   context.clearRect(0, 0, width, height)
   context.filter = `blur(${blur}px)`
   context.fillStyle = fill
@@ -84,6 +98,12 @@ export const drawColumn = (context: CanvasRenderingContext2D, column: Column, li
   context.lineTo(left + inner, height + blur * 3)
   context.closePath()
   context.fill()
+}
+
+/** A tone as `#rrggbb`, at `alpha`. */
+export const thinned = (hex: string, alpha: number) => {
+  const n = Number.parseInt(hex.slice(1, 7), 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
 
 /** A tile of fine grain, drawn once, faint dark and light specks, for over the light. */

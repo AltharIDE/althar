@@ -12,7 +12,7 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { WindowButtons } from '../WindowButtons/WindowButtons'
 import s from './ProjectTabs.module.css'
-import { type Dragging, useReorder } from './useReorder'
+import { type Dragging, useReorder } from '../../lib/useReorder'
 
 /*
  * The top of the window, and its one bar: a tab for the home, then one for

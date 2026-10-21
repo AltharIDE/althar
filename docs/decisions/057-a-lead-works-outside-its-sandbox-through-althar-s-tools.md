@@ -1,4 +1,4 @@
-# ADR-055: A lead works outside its sandbox through Althar's tools, not around it
+# ADR-057: A lead works outside its sandbox through Althar's tools, not around it
 
 - **Status:** Accepted
 - **Date:** 2026-10-21

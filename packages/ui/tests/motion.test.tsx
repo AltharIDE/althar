@@ -65,6 +65,21 @@ describe('Pixels', () => {
     expect(ctx.fillRect).toHaveBeenCalled()
   })
 
+  it('draws its still frame again in another theme, and only then', async () => {
+    const ctx = fakeContext()
+    motion(true)
+    render(<Pixels />)
+    expect(ctx.clearRect).toHaveBeenCalledTimes(1)
+    try {
+      await act(async () => void (document.documentElement.dataset.theme = 'dark'))
+      expect(ctx.clearRect).toHaveBeenCalledTimes(2)
+      await act(async () => void (document.documentElement.dataset.theme = 'dark'))
+      expect(ctx.clearRect).toHaveBeenCalledTimes(2)
+    } finally {
+      delete document.documentElement.dataset.theme
+    }
+  })
+
   it('draws one still frame where there are no observers', () => {
     const ctx = fakeContext()
     motion(false)

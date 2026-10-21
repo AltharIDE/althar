@@ -60,7 +60,7 @@
 }
 /* a full CPU, or memory macOS is short of, goes to full ink; no new colour */
 .full .steps i[data-lit='rest'] {
-  background: var(--t-1);
+  background: var(--ink-fill);
 }
 
 .strain {
