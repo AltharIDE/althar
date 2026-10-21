@@ -26,6 +26,7 @@ import { Plans } from './Plans'
 import { Reviews } from './Reviews'
 import { Runs } from './Runs'
 import { fillIndex } from './Search'
+import { FolderCleanup } from './FolderCleanup'
 import { Tasks } from './Tasks'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
@@ -97,7 +98,10 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(busy))),
   )
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
-  const work = Tasks.layer.pipe(Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))))
+  // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
+  const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer).pipe(
+    Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))),
+  )
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
   const signing = AccountSignIns.layer.pipe(Layer.provideMerge(work))
   // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.

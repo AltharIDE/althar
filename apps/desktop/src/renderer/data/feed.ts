@@ -110,6 +110,8 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
   ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
   // Its notes, which the coordinator keeps as the person decides, only while they show.
   ...(event.projectId !== null && event.aggregateType === 'project_note' ? [{ key: keys.notes(event.projectId), offScreen: false }] : []),
+  // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).
+  ...(event.aggregateType === 'workspace' || event.aggregateType === 'task' ? [{ key: keys.folders, offScreen: false }] : []),
 ]
 
 /**
