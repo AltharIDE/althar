@@ -40,7 +40,7 @@ export function ProjectBar({
 }
 
 /** The views of its work, in the order b steps through them; from its automations or its settings, b goes to the first. */
-export const ROOMS: readonly Room[] = [Room.Talk, Room.Board, Room.Both]
+export const ROOMS: readonly Room[] = [Room.Both, Room.Talk, Room.Board]
 
 /** The view after this one, round the end. */
 export const nextRoom = (room: Room): Room => ROOMS[(ROOMS.indexOf(room) + 1) % ROOMS.length] ?? Room.Talk

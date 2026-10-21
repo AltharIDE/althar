@@ -29,7 +29,8 @@ Althar reaches every agent through one protocol, the Agent Client Protocol
 
 ## Agents in the MVP
 
-Claude Code, Codex and OpenCode are interchangeable from the first version. A
+Claude Code, Codex and OpenCode are interchangeable from the first version, and
+seven more since October 2026 ([ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)). A
 task's lead, any step and the coordinator can run on any of them, and a task
 can move between them.
 
@@ -38,6 +39,13 @@ can move between them.
 | Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key; status from `claude auth status` | Starts in the user's own default mode, which can be `bypassPermissions`, so Althar turns bypass off and adds ask rules for every session. The Agent SDK reports usage limits, but the adapter doesn't forward them |
 | Codex | `codex-acp`, the ACP project's adapter, driving its own bundled Codex | ChatGPT plan or OpenAI API key; status from `codex login status` | Althar uses its `workspace-write` mode, not the default `agent` mode, whose automatic reviewer answers requests itself. Usage limits reach the adapter but are only rendered as `/status` text |
 | OpenCode | `opencode acp`, native | API keys for any provider; local model servers; status from `opencode auth list` | The bring-your-own-key route. It cannot use a Claude plan. It allows most actions without asking unless configured, so Althar starts it with inline config that makes it ask |
+| GitHub Copilot | `copilot --acp`, native (public preview); Althar can download it | A Copilot plan; no status command | Asks before every edit, command and fetch in its `#agent` mode. Althar holds its `allow_all` off and sends the person's `/` messages as words, as `/yolo` would turn asking off. A repository's hooks can approve, so it leads no review. One account until its keychain sign-in is seen per folder |
+| Junie | `junie --acp=true`, native | A JetBrains AI plan or a Junie key; no status command | Ordinary edits inside the project don't ask; commands, sensitive files and MCP tools do. Althar holds its brave mode off. Its plan mode has no edit tools, so readers run there. One account until Althar signs a home out before removing it |
+| Grok Build | `grok agent --no-leader stdio`, native | SuperGrok or X Premium+, or an xAI key; status from `grok models` | No modes: its session's `_meta` turns always-approve and its auto mode off. The allow rules in the person's Claude Code settings approve its commands, and nothing at launch stops them |
+| Kimi Code | `kimi acp`, native | A Kimi Code membership; status from `kimi provider list` | Commands ask; edits inside a git repository and web fetches don't. Its plan mode refuses edits, so readers run there |
+| Mistral Vibe | `vibe-acp`, native | A Mistral key its browser sign-in makes, paid by Le Chat Pro or Team, or pay-as-you-go; no status command | Its `ask` mode asks before edits, web, MCP tools and most commands; no read-only mode, so readers ask and Althar's rules deny their writes. One account: its key is a keychain item every folder shares |
+| Qwen Code | `qwen --acp --approval-mode default`, native | Alibaba Cloud's Coding Plan key or any provider's; no status command | Starts in `auto`, a model judging what is safe, unless told. Commands it reads as only reading run unasked. A repository's `.qwen/settings.json` can add allow rules |
+| Google Antigravity | `agy_acp_server.par`, Google's own ACP server, apart from the `agy` CLI; Althar downloads 1.3.0 from Google at the person's asking, pinned by sha256, as Orca does. No Windows build | A Google account, signed in only inside Althar over ACP's `authenticate`; no status command | Every role runs in `default`, held there, as `auto_edit` and `yolo` approve unasked; no read-only mode, so Althar's rules deny a reader's writes. The model's questions come as permission requests on `interaction_` tool calls and go to the person. Its sign-in is the home's own file, not the keychain. Google's terms may count a sign-in from another app a breach |
 
 What each agent reports was read from the agents themselves on 28 September
 2026, with `scripts/probe.ts` in `@althar/provider-adapters`: claude-agent-acp
@@ -47,6 +55,17 @@ model as session config options and can change both within a session; all
 three can load and resume sessions. Claude Code and Codex also advertise
 steering a turn in progress, as an extension in `_meta`. Probe again after
 upgrading any of them.
+
+The six after them were read on 18 and 19 October 2026 (GitHub Copilot CLI
+1.0.98, Junie 3659.7, Grok Build 1.0.63, Kimi Code 2.2.0, Mistral Vibe 2.26.1,
+Qwen Code 0.25.2): each started over ACP with a home of its own and no
+sign-in, against a stand-in model on the computer where it takes one, so their
+sessions, options and permission requests were seen; and from their own code
+and help. Google Antigravity's server 1.3.0 is as Orca (stablyai/orca) runs
+it, from Orca's code and its recording of a real session; it hasn't run here.
+None has run signed in against its vendor's models yet. Which agents join, and
+why four more wait, is
+[ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md).
 
 Althar checks sign-in with each agent's documented status command, never by
 reading a credential store, and tells the user the agent's own login command
@@ -58,8 +77,20 @@ and the agent's usual folder is the first
 ([ADR-012](../decisions/012-several-accounts-per-agent.md); Several accounts,
 below).
 
-Another ACP agent, such as Gemini CLI, is added by a registry entry and the
-contract suite, not new code.
+Another ACP agent is added by a registry entry and the contract suite, not new
+code, where its entry can say what keeps it asking
+([ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)).
+Gemini CLI no longer runs on Google's consumer plans (since 18 June 2026), which
+moved to Antigravity.
+
+### Agents not run yet
+
+| Agent | What it waits for |
+|---|---|
+| Cursor | A signed-in probe of its current build: what was read is two months older, and its plan and ask modes are its servers', which may not keep Althar's tools |
+| Devin | A mode that asks before an edit; and the kinds of its permission options, some of which switch the session to bypass |
+| Factory Droid | Its `Script` tool asking in an ACP session |
+| Auggie | Augment's permission to build it in; and a way to make it ask that doesn't name each tool |
 
 ## Adapter contract
 
@@ -246,14 +277,16 @@ Each agent is a registry entry, not a code path:
 
 ```ts
 type AgentDefinition = {
-  id: "claude-code" | "codex" | "opencode"
+  id: "claude-code" | "codex" | "opencode" | "copilot" | "junie" | "grok" | "kimi" | "mistral-vibe" | "qwen-code" | "antigravity"
   source: "bundled" | "user_installed"
   launch: (node: string) => LaunchSpec // command, args, env, which parent variables it inherits
-  modes: { ask: string; readOnly: string }
-  options: { mode: string; model: string; effort?: string; ownEffort?: string } // config option ids, and the level that is a model's own
-  signIn: { status: (node: string) => LaunchSpec; read: (output, exitCode) => boolean | undefined; login: string }
+  modes: { ask: string | null; readOnly: string | null; reader: string | null } // null: no modes, it asks by its `sessionMeta`
+  options: { mode: string; model: string; effort?: string; ownEffort?: string; held?: Record<string, string> } // config option ids, the level that is a model's own, and options held at a value
+  signIn: { status?: (node: string) => LaunchSpec; read: (output, exitCode) => boolean | undefined; login: string }
+  home: { variable: string; usual: (env, homeDir) => string; shared: (names) => string[]; accounts?: 'one' } // ADR-012
   permissions: PermissionMeanings // what its option ids mean
   sessionMeta?: (role?: 'lead' | 'reader') => Record<string, unknown> // `_meta` for session/new: asking, or read-only
+  commands?: 'althar' // the person's `/` messages go as words: one of its commands turns asking off
   knownGaps: string[]
 }
 ```
@@ -805,7 +838,22 @@ the rules read it as a shell would, into commands and words. They ask about:
   tags, and deleting a branch other than the task's;
 - merges, and deploy and publish commands;
 - git pointed at another repository;
-- a write whose words name a place outside the worktree, following symlinks.
+- a write whose words name a place outside the worktree, following symlinks,
+  installing for the whole computer (`npm i -g`, `brew install`) among them;
+- deleting or forcing a local branch that isn't the task's, clearing the
+  stash, and throwing away what git keeps to recover lost work, since a
+  worktree shares these with the person's checkout;
+- reading a `.env` file outside the worktree.
+
+They refuse, for every role, a request that names where the person keeps
+keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.npmrc` and the like), and Claude
+Code sessions are given those places as denied reads. What could lose work
+(a force push, a push to the default branch, deleting outside the worktree,
+git throwing away work in another checkout or replacing a file there,
+dropping a stash entry, a delete whose target shows only when it runs) asks
+even with everything allowed, and the coordinator never judges it; always
+allowing writes outside the worktree doesn't cover it
+([the safety pass](../plans/safety-pass.md)).
 
 Where they can't tell where a push goes or where an edit writes, they ask.
 

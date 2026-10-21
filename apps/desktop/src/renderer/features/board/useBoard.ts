@@ -32,6 +32,16 @@ export interface BoardModel extends WorkActions {
   readonly showOlder: () => void
   /** Why the last page of older tasks didn't load. */
   readonly olderError: string | null
+  /** Putting the project's line in the person's order. */
+  readonly line: LineActions
+}
+
+/** What the person does to the line of tasks waiting for a free agent, and why the last of it failed. */
+export interface LineActions {
+  /** Puts a task at a place in the line, from 0: it fails where the runtime refused it. */
+  readonly move: (taskId: string, to: number) => Promise<void>
+  readonly oldestFirst: () => void
+  readonly failed: string | null
 }
 
 /** Settled tasks, most recent first. */
@@ -46,6 +56,14 @@ export const useBoard = (projectId: string): BoardModel => {
   const [loaded, setLoaded] = useState(0)
   const loading = useRef(false)
   const [olderError, setOlderError] = useState<string | null>(null)
+  const [lineFailed, setLineFailed] = useState<string | null>(null)
+  const lined = (go: () => Promise<void>) => {
+    setLineFailed(null)
+    return go().catch((error: unknown) => {
+      setLineFailed(messageOf(error))
+      throw error
+    })
+  }
   const snapshot = read.data ?? null
   const board = useMemo(() => {
     if (snapshot === null) return null
@@ -83,6 +101,11 @@ export const useBoard = (projectId: string): BoardModel => {
     moreSettled: board !== null && settled.length < board.settledTotal,
     showOlder,
     olderError,
+    line: {
+      move: (taskId, to) => lined(() => client.moveInLine(taskId, to)),
+      oldestFirst: () => void lined(() => client.lineOldestFirst(projectId)).catch(() => undefined),
+      failed: lineFailed,
+    },
     error: actions.error ?? (read.error === null ? null : messageOf(read.error)),
   }
 }

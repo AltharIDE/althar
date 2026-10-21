@@ -15,7 +15,7 @@ import { readAppPreferences, writeAppPreference } from '../src/main/preferences'
 const profile = () => mkdtempSync(join(tmpdir(), 'althar-preferences-'))
 
 describe('the app’s preferences kept in the profile', () => {
-  it('start awake while plugged in, every notification on, the count on, silent with no sound to go back to, the first editor found, the load in the bar, usage data and crash reports on, and not opening at login', async () => {
+  it('start awake while plugged in, every notification on, the count on, silent with no sound to go back to, the first editor found, the load in the bar, usage data and crash reports on, light or dark as the system is, and not opening at login', async () => {
     expect(await readAppPreferences(profile())).toEqual({
       keepAwake: true,
       awakeOnBattery: false,
@@ -29,8 +29,17 @@ describe('the app’s preferences kept in the profile', () => {
       showLoad: true,
       usageData: true,
       crashReports: true,
+      appearance: 'system',
       openAtLogin: false,
     })
+  })
+
+  it('hold light, dark or the system’s for the appearance, and nothing else', () => {
+    expect(holds('appearance', 'light')).toBe(true)
+    expect(holds('appearance', 'dark')).toBe(true)
+    expect(holds('appearance', 'system')).toBe(true)
+    expect(holds('appearance', 'auto')).toBe(false)
+    expect(holds('appearance', true)).toBe(false)
   })
 
   it('read each as kept, and where it starts where what is kept isn’t one it can hold', () => {

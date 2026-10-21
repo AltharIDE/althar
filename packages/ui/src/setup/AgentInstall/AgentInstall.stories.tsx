@@ -49,6 +49,23 @@ export const Downloads: Story = {
   },
 }
 
+/** One version from its maker's own address, as Antigravity's server is from Google: which, and from whom, not GitHub's latest. */
+export const FromItsMaker: Story = {
+  args: {
+    name: 'Google Antigravity',
+    brand: Brand.Antigravity,
+    size: '115 MB',
+    pinned: { from: 'Google', version: '1.3.0' },
+    onInstall: fn(),
+    onHelp: fn(),
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/Althar can fetch Google Antigravity 1\.3\.0 from Google, about 115 MB/)).toBeInTheDocument()
+    await expect(c.queryByText(/GitHub/)).toBeNull()
+  },
+}
+
 export const AllStates: Story = {
   render: () => (
     <States

@@ -15,15 +15,16 @@
 .button svg {
   color: var(--t-3);
 }
+/* washes of ink, which read on the task's bar and on the tabs' alike */
 .button:hover {
-  background: var(--n-3);
+  background: var(--line);
   color: var(--t-1);
 }
 .button:active {
-  background: var(--n-4);
+  background: var(--line-2);
 }
 .button[aria-expanded='true'] {
-  background: var(--n-4);
+  background: var(--line-2);
   color: var(--t-1);
 }
 .button[aria-expanded='true'] svg {
@@ -33,6 +34,29 @@
   width: 26px;
   padding: 0;
   justify-content: center;
+}
+/* something worth knowing before it opens: a dot at its corner */
+.marked {
+  position: relative;
+}
+.marked::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--t-2);
+  box-shadow: 0 0 0 1.5px var(--dot-cutout, var(--n-1)); /* on dark, cut out of the bar it sits on (dark.css) */
+}
+/* in the tooltip, what the dot says, under the button's name */
+.said {
+  display: grid;
+  gap: 2px;
+}
+.mark {
+  color: var(--t-3);
 }
 @media (prefers-reduced-motion: reduce) {
   .button {

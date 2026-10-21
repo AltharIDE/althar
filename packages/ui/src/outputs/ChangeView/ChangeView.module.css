@@ -126,11 +126,11 @@ div.made {
   cursor: pointer;
 }
 .file:hover {
-  background: var(--n-1);
+  background: var(--hover-faint);
 }
 .on,
 .on:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .path {
   min-width: 0;

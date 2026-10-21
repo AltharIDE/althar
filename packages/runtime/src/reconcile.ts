@@ -1,5 +1,5 @@
 import type { ActorId, DeviceId, ProjectId, RuntimeInstanceId } from '@althar/domain'
-import { osStartTime, stopProcessGroup, type StopReport } from '@althar/provider-adapters'
+import { osStartTime, platformTrees, stopProcessGroup, type StopReport } from '@althar/provider-adapters'
 import { Duration, Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -48,9 +48,10 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
     let stop: StopReport | undefined
     if (stale.pid !== null) {
       const leaderStarted = yield* osStartTime(stale.pid)
-      // Ours when the leader is the process recorded; or when the leader has gone but its group lives on, since a
+      // Ours when the leader is the process recorded; or, on Unix, when the leader has gone but its group lives on, since a
       // pid isn't reused while a group with that id exists. Then what the agent left running, such as a dev server, is stopped too.
-      const ours = leaderStarted === undefined || leaderStarted === stale.osStartedAt
+      // On Windows the tree went with its keeper, the leader recorded, and a pid without its start is another process's.
+      const ours = leaderStarted === undefined ? platformTrees().outlivesRoot : leaderStarted === stale.osStartedAt
       if (ours) stop = yield* stopProcessGroup(stale.pid, Duration.seconds(2))
     }
     const stopped = stop !== undefined && stop.signal !== 'none'

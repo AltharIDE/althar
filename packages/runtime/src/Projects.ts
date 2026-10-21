@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs'
-import { basename, join, relative } from 'node:path'
+import { basename, join, relative, sep } from 'node:path'
 
 import { inkFor, type ProjectInk } from '@althar/contracts'
 import {
@@ -73,10 +73,14 @@ export interface Reading {
   readonly project: { readonly id: string; readonly name: string } | null
 }
 
-/** The path as the file system has it, without symbolic links, as git names a repository's root. */
+/**
+ * The path as the file system has it, without symbolic links, as git names a
+ * repository's root: on Windows by the native call, the one that expands a
+ * short name (`RUNNER~1`) to the whole one git gives.
+ */
 const real = (path: string) => {
   try {
-    return realpathSync(path)
+    return process.platform === 'win32' ? realpathSync.native(path) : realpathSync(path)
   } catch {
     return path
   }
@@ -118,7 +122,12 @@ export const readFolder = (opened: string) =>
     if (root !== null)
       return root === path
         ? { kind: 'repository' as const, name: basename(path), repositories: [yield* describe(root, null)] }
-        : { kind: 'inside' as const, name: basename(path), repositories: [yield* describe(root, relative(root, path))] }
+        : // The folder in it, with `/` as git writes it, on Windows too.
+          {
+            kind: 'inside' as const,
+            name: basename(path),
+            repositories: [yield* describe(root, relative(root, path).split(sep).join('/'))],
+          }
     let entries: ReadonlyArray<string> = []
     try {
       entries = readdirSync(path, { withFileTypes: true })

@@ -38,16 +38,21 @@ import { Sessions } from './Sessions'
  * turn of a lead or a reviewer not already at work (`turn`): what the person
  * says to it, an agent they start or switch to, and what Althar tells it.
  *
- * What waits goes in the order the person would choose (`Order`, ADR-037):
+ * What waits goes in the order the person would choose (`Order`, ADR-037, ADR-049):
  * first what the person did, which never waits, and starts though every place
  * is taken (their answer, what they say to an agent, a task they resume); then
  * the work of a task already under way (the step after another, a step
  * carried on after a restart or back from a usage limit, a conflict or check
- * round, what Althar tells an agent); then new work (a plan's first step).
- * Within each, what waited longest goes first. A step after another on the
- * same task takes the place of the agent before it, ahead of whatever waits,
- * so a task never loses its place between its own steps; unless what that
- * agent left running still runs, when the two would be two agents at work.
+ * round, what Althar tells an agent); then new work, what waits before any
+ * agent has worked on its task (a plan's first step, a review's or a quick
+ * task's lead's first turn), which is its project's line, up next on its
+ * board. Within each, what waited longest goes first; in the line, unless
+ * the person put it in an order of their own (`move`), kept on each task
+ * (`line_at`), so a restart keeps it and a task that joins later goes to its
+ * end. A step after another on the same task takes the place of the agent
+ * before it, ahead of whatever waits, so a task never loses its place between
+ * its own steps; unless what that agent left running still runs, when the two
+ * would be two agents at work.
  * Without a place, work waits: written in the store where it waits, so a
  * restart doesn't lose it, or, a turn, in what the thread has queued. When a
  * place frees, what stands first starts (`queue`): looked at whenever an
@@ -77,7 +82,7 @@ export interface AtOnce {
 /**
  * Where work that waits for a place stands (ADR-037): what the person did,
  * which starts at once; the work of a task already under way; new work; and
- * last, an automation's run, every step of it (docs/plans/automations.md).
+ * last, an automation's run, every step of it (ADR-055).
  */
 export type Order = 'person' | 'underway' | 'new' | 'automation'
 
@@ -139,11 +144,26 @@ export interface Waiter extends Agent {
 const keyOf = (taskId: string, review?: boolean) => (review === true ? `${taskId} review` : taskId)
 const waiterKey = (waiter: Agent) => keyOf(waiter.taskId, waiter.review)
 
-/** What waits, in the order it starts: by where it stands, then what waited longest. */
-const inOrder = (waiters: ReadonlyArray<Waiter>, automated: ReadonlySet<string>) =>
-  waiters.toSorted(
-    (a, b) => RANK[orderIn(a.order, a.taskId, automated)] - RANK[orderIn(b.order, b.taskId, automated)] || a.since.localeCompare(b.since),
-  )
+/**
+ * Something waiting, where it stands: its rank, the time it stands at within
+ * it (since when it waits, or where the person put it), and whether it is in
+ * its project's line: nothing of its task has had an agent yet.
+ */
+interface Ranked {
+  readonly waiter: Waiter
+  readonly rank: number
+  readonly at: string
+  readonly line: boolean
+}
+
+/** A project's line: its tasks in the order they start, and whether that is the person's order rather than the oldest first. */
+export interface Line {
+  readonly tasks: ReadonlyArray<string>
+  readonly reordered: boolean
+}
+
+/** What a time a millisecond later is, as the store keeps times. */
+const after = (at: string) => new Date(Date.parse(at) + 1).toISOString()
 
 export class Busy extends Context.Service<
   Busy,
@@ -174,8 +194,18 @@ export class Busy extends Context.Service<
       agent: Agent & { readonly threadId: string; readonly sessionId: string; readonly byPerson?: boolean },
       work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
     ): Effect.Effect<boolean>
-    /** Who waits for a place, in the order they start: what waited longest first. */
-    readonly order: Effect.Effect<ReadonlyArray<Agent>>
+    /** Who waits for a place, in the order they start, and whether each is in its project's line. */
+    readonly order: Effect.Effect<ReadonlyArray<Agent & { readonly line: boolean }>>
+    /** A project's line: its tasks that wait for a place before any agent has worked on them, in the order they start. */
+    line(projectId: string): Effect.Effect<Line>
+    /**
+     * Puts a task in its project's line at a place, from 0, the rest keeping
+     * their order, as the person moved it; a place past the end is its end.
+     * False, and nothing moved, where it isn't in the line.
+     */
+    move(taskId: string, to: number): Effect.Effect<boolean, SqlError.SqlError>
+    /** Puts a project's line back in the order its tasks began waiting. */
+    oldestFirst(projectId: string): Effect.Effect<void, SqlError.SqlError>
     /** Adds where waiting work is read from: each time the queue is looked at, every source is read, and what waited longest starts first. */
     queue(waiting: Effect.Effect<ReadonlyArray<Waiter>, unknown>): Effect.Effect<void>
     /** Looks at the queue again: a place may have freed, or something waits. */
@@ -357,12 +387,53 @@ export class Busy extends Context.Service<
         return { at, lingering, holders: [...holders.values()] }
       })
 
-      /** Everything waiting, in the order it starts. */
-      const waiting = Effect.gen(function* () {
-        const all = yield* Effect.forEach(sources, (source) =>
-          source.pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what waits for a place', cause), []))),
+      /** Whether nothing of a task has had an agent yet: no turn of any of its agents reached one. */
+      const untouched = (taskId: string) =>
+        Effect.map(
+          sql<{ one: number }>`
+            SELECT 1 AS one FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id
+            WHERE h.task_id = ${taskId} AND d.delivered_at IS NOT NULL LIMIT 1`,
+          (rows) => rows.length === 0,
         )
-        return inOrder([...all.flat(), ...turns.values()], yield* automated)
+
+      /**
+       * Everything waiting, in the order it starts: what the person did, then
+       * work under way, then the line, where the person put it, else what
+       * waited longest first.
+       */
+      const waiting = Effect.gen(function* () {
+        const all = [
+          ...(yield* Effect.forEach(sources, (source) =>
+            source.pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what waits for a place', cause), []))),
+          )).flat(),
+          ...turns.values(),
+        ]
+        // A task's lead waiting before anything of its task has had an agent is in the line, with where the person put it.
+        const asked = [...new Set(all.flatMap((waiter) => (waiter.order === 'person' || waiter.review === true ? [] : [waiter.taskId])))]
+        const lined =
+          asked.length === 0
+            ? []
+            : yield* sql<{ id: string; lineAt: string | null }>`
+                SELECT k.id, k.line_at FROM tasks k WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify(asked)}))
+                  AND NOT EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id
+                    WHERE h.task_id = k.id AND d.delivered_at IS NOT NULL)`.pipe(
+                Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read the line of what waits', cause), [])),
+              )
+        const line = new Map(lined.map((row) => [row.id, row.lineAt]))
+        const tasks = yield* automated
+        return all
+          .map((waiter): Ranked => {
+            const inLine = waiter.order !== 'person' && waiter.review !== true && line.has(waiter.taskId)
+            // An automation's run waits after everything else, in the line or not (ADR-055).
+            const order = orderIn(waiter.order, waiter.taskId, tasks)
+            return {
+              waiter,
+              line: inLine,
+              rank: order === 'automation' ? RANK.automation : inLine ? RANK.new : RANK[waiter.order],
+              at: (inLine ? line.get(waiter.taskId) : null) ?? waiter.since,
+            }
+          })
+          .toSorted((a, b) => a.rank - b.rank || a.at.localeCompare(b.at))
       })
 
       /**
@@ -380,8 +451,7 @@ export class Busy extends Context.Service<
           // Work waiting for a place of its own, standing where this does or before it, goes first; what waits on an agent at
           // work, or is on its way, takes none.
           return !(yield* waiting).some(
-            (waiter) =>
-              waiterKey(waiter) !== key && !at.has(waiterKey(waiter)) && RANK[orderIn(waiter.order, waiter.taskId, tasks)] <= RANK[order],
+            ({ waiter, rank }) => waiterKey(waiter) !== key && !at.has(waiterKey(waiter)) && rank <= RANK[order],
           )
         })
 
@@ -408,21 +478,22 @@ export class Busy extends Context.Service<
           const most = (yield* atOnce).count
           const tasks = yield* automated
           const left: Array<string> = []
-          for (const waiter of queue) {
+          for (const { waiter, line, rank } of queue) {
             const key = waiterKey(waiter)
             // On its way already: it is counted, and not started twice.
             if (starting.has(key)) continue
-            const order = orderIn(waiter.order, waiter.taskId, tasks)
             if (
-              order !== 'person' &&
+              waiter.order !== 'person' &&
               !busy.has(key) &&
-              (busy.size >= most || (order === 'automation' && automationsAt(busy, tasks) >= automationsAtOnce))
+              (busy.size >= most || (rank === RANK.automation && automationsAt(busy, tasks) >= automationsAtOnce))
             ) {
               left.push(waiter.taskId)
               continue
             }
             busy.add(key)
             hold(key)
+            // Out of the line: where the person put it no longer stands.
+            if (line) yield* sql`UPDATE tasks SET line_at = NULL WHERE id = ${waiter.taskId} AND line_at IS NOT NULL`
             // A turn that waited has its place now: it waits no more, here or on its thread.
             for (const [threadId, turn] of turns)
               if (turn === waiter) {
@@ -526,11 +597,12 @@ export class Busy extends Context.Service<
         return yield* Effect.forEach(
           rows.filter((row) => !live.has(row.threadId)),
           (row) =>
-            Effect.map(personSaid(row.threadId), (person) => ({
+            Effect.map(Effect.all([personSaid(row.threadId), untouched(row.taskId)]), ([person, fresh]) => ({
               taskId: row.taskId,
               review: row.kind === 'step',
-              // What the person said starts at once; what Althar said to it is the work of a task under way.
-              order: person ? ('person' as const) : ('underway' as const),
+              // What the person said starts at once; what Althar said to it is the work of a task under way, or new work
+              // where nothing of its task has had an agent yet.
+              order: person ? ('person' as const) : fresh ? ('new' as const) : ('underway' as const),
               since: row.since,
               // Its place held until its first turn is under way, or waits again in its own session's queue.
               start: Effect.gen(function* () {
@@ -580,8 +652,13 @@ export class Busy extends Context.Service<
         Effect.gen(function* () {
           const key = keyOf(agent.taskId, agent.review)
           // What the person says to an agent, or an agent they started or switched to, goes on at once; what Althar tells it is the
-          // work of a task under way.
-          const order: Order = agent.byPerson === true || (yield* personSaid(agent.threadId)) ? 'person' : 'underway'
+          // work of a task under way, or new work where nothing of its task has had an agent yet, as a review's first turn.
+          const order: Order =
+            agent.byPerson === true || (yield* personSaid(agent.threadId))
+              ? 'person'
+              : agent.review !== true && (yield* untouched(agent.taskId))
+                ? 'new'
+                : 'underway'
           const room = yield* lock.withPermits(1)(
             Effect.gen(function* () {
               const room = yield* roomFor(key, (yield* atWork).at, order)
@@ -623,6 +700,78 @@ export class Busy extends Context.Service<
           yield* wake
         })
 
+      /** A project's line in the order it starts: each task once, with the time it stands at and since when it waits. */
+      const lineOf = (projectId: string) =>
+        Effect.gen(function* () {
+          const lined = (yield* waiting).filter((entry) => entry.line)
+          if (lined.length === 0) return []
+          const ids = [...new Set(lined.map((entry) => entry.waiter.taskId))]
+          const ours = new Set(
+            (yield* sql<{ id: string }>`
+              SELECT id FROM tasks WHERE project_id = ${projectId} AND id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`).map(
+              (row) => row.id,
+            ),
+          )
+          const seen = new Set<string>()
+          return lined.flatMap(({ waiter, at }) => {
+            if (!ours.has(waiter.taskId) || seen.has(waiter.taskId)) return []
+            seen.add(waiter.taskId)
+            return [{ taskId: waiter.taskId, at, since: waiter.since }]
+          })
+        })
+
+      /** The cards of a line's tasks, read again: each one's place in it changed. */
+      const touchLine = (line: ReadonlyArray<{ readonly taskId: string }>) =>
+        Effect.forEach(line, (one) => Effect.ignore(provide(touchTask(one.taskId))), { discard: true })
+
+      const move = (taskId: string, to: number) =>
+        Effect.gen(function* () {
+          const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+          if (task === undefined) return false
+          const moved = yield* lock.withPermits(1)(
+            Effect.gen(function* () {
+              const line = yield* lineOf(task.projectId)
+              const it = line.find((one) => one.taskId === taskId)
+              if (it === undefined) return null
+              const others = line.filter((one) => one !== it)
+              const at = Math.max(0, Math.min(others.length, Math.floor(to)))
+              const order = [...others.slice(0, at), it, ...others.slice(at)]
+              // Each takes one of the times the line stands at now, in its new order: a task that joins later, waiting since
+              // later, still goes after them all, and the line keeps its place among other projects' work.
+              let last = ''
+              yield* sql.withTransaction(
+                Effect.forEach(
+                  order,
+                  (one, i) => {
+                    const stands = line[i]?.at ?? one.at
+                    last = stands > last ? stands : after(last)
+                    return sql`UPDATE tasks SET line_at = ${last} WHERE id = ${one.taskId}`
+                  },
+                  { discard: true },
+                ),
+              )
+              return line
+            }),
+          )
+          if (moved === null) return false
+          yield* touchLine(moved)
+          yield* wake
+          return true
+        })
+
+      const oldestFirst = (projectId: string) =>
+        Effect.gen(function* () {
+          const line = yield* lock.withPermits(1)(
+            Effect.gen(function* () {
+              const line = yield* lineOf(projectId)
+              yield* sql`UPDATE tasks SET line_at = NULL WHERE project_id = ${projectId} AND line_at IS NOT NULL`
+              return line
+            }),
+          )
+          yield* touchLine(line)
+          yield* wake
+        })
+
       return Busy.of({
         atOnce,
         set,
@@ -630,7 +779,18 @@ export class Busy extends Context.Service<
           const { at, holders } = yield* atWork
           return { busy: at.size, atOnce: (yield* atOnce).count, holders }
         }),
-        order: waiting,
+        order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
+        line: (projectId) =>
+          Effect.map(lineOf(projectId), (line): Line => {
+            const oldest = line.toSorted((a, b) => a.since.localeCompare(b.since))
+            return { tasks: line.map((one) => one.taskId), reordered: line.some((one, i) => one.taskId !== oldest[i]?.taskId) }
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning('Could not read a project’s line', cause), { tasks: [], reordered: false }),
+            ),
+          ),
+        move,
+        oldestFirst,
         enter,
         turn,
 

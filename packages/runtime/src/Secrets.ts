@@ -6,15 +6,13 @@ import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
 /*
  * Where Althar keeps a secret, such as a code host's token
  * (docs/architecture/06, "Signing in"): sealed, in a file of its own in the
- * profile, never in the record or a log. Only Althar can open one. In the
- * app, Electron's safeStorage seals it in the main process, with a key the
- * system keychain keeps for the signed app alone: another process asking for
- * that key, an agent's shell among them, gets a prompt the person would
- * notice. The runtime never holds the key; it asks main to seal and open.
- *
- * The command-line client has no such key, so it keeps no secrets: the
- * connections it shares with the app stay the app's. Tests keep secrets in
- * memory.
+ * profile, never in the record or a log. In the app, Electron's safeStorage
+ * seals it in the main process, using the system keychain or, in a Linux
+ * Flatpak, the Secret portal's key for Althar's application id when available.
+ * Main falls back only to a safe synchronous keyring for the current session;
+ * the runtime never holds the key and asks main to seal and open. The command-line client
+ * has no such key, so it keeps no secrets: the connections it shares with the
+ * app stay the app's. Tests keep secrets in memory.
  *
  * Under load a secret can fail to be kept or given back for a moment: the
  * main process too busy to answer in time, the keychain slow to hand over its

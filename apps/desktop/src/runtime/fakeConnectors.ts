@@ -18,7 +18,8 @@ import { Effect, Layer } from 'effect'
  * fake service in the runtime's own process, on an instance at
  * https://github.test, which no network reaches. Its repositories are
  * meridian/api, with one issue, and meridian/web where
- * ALTHAR_FAKE_REMOTE_WEB is set; what is pushed to one goes to the bare
+ * ALTHAR_FAKE_REMOTE_WEB is set, with the pull requests ALTHAR_FAKE_PULLS
+ * lists for a test to review; what is pushed to one goes to the bare
  * repository ALTHAR_FAKE_REMOTE_API or _WEB names, else ALTHAR_FAKE_REMOTE. A pasted token connects it, and so
  * does gh's sign-in, which is signed in to it. Loaded only when
  * ALTHAR_FAKE_AGENTS is set.
@@ -34,6 +35,10 @@ github.addRepository(['meridian', 'api'])
 // Only for a test that gives it somewhere to push: every other sees the one repository it always did.
 if (process.env.ALTHAR_FAKE_REMOTE_WEB !== undefined) github.addRepository(['meridian', 'web'])
 github.addIssue({ ref: 'meridian/api#12', title: 'Checkout gives up after one try', body: 'It should retry.' })
+// Pull requests someone else opened on meridian/api, for a test that reviews them: each its title, author and head commit, which
+// the test pushed to the remote as refs/pull/<n>/head, numbered from 1 in the order given.
+for (const pull of JSON.parse(process.env.ALTHAR_FAKE_PULLS ?? '[]') as ReadonlyArray<{ title: string; author: string; headSha: string }>)
+  github.addPullRequest({ path: ['meridian', 'api'], ...pull })
 
 export const fakeConnectors = Layer.succeed(
   Connectors,

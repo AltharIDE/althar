@@ -346,7 +346,12 @@ describe('dictation carried from a task', () => {
     const card = await screen.findByRole('region', { name: 'To the lead · Add a retry' })
     await userEvent.click(within(card).getByRole('button', { name: 'Send to the lead' }))
     await waitFor(() =>
-      expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on with the tests.', disposition: 'after_current' }),
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Carry on with the tests.',
+        disposition: 'after_current',
+        dictated: true,
+      }),
     )
     await waitFor(() => expect(screen.queryByRole('region', { name: 'To the lead · Add a retry' })).toBeNull())
     expect((await coordinatorBox()).value).toBe('')
@@ -465,7 +470,12 @@ describe('dictation carried with the person', () => {
     await userEvent.type(field, ' On mobile.')
     await userEvent.click(within(card).getByRole('button', { name: 'Send to the coordinator' }))
     await waitFor(() =>
-      expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Why is checkout slow? On mobile.', disposition: 'after_current' }),
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'thc',
+        body: 'Why is checkout slow? On mobile.',
+        disposition: 'after_current',
+        dictated: true,
+      }),
     )
     await waitFor(() => expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull())
     // Nothing went to the task.
@@ -499,7 +509,7 @@ describe('dictation carried with the person', () => {
     await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
     await speech.fails()
     const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
-    expect(within(card).getByText(/of what you said couldn't be written down/)).toBeTruthy()
+    expect(within(card).getByText(/of what you said couldn’t be written down/)).toBeTruthy()
     await userEvent.click(within(card).getByRole('button', { name: 'Try again' }))
     await speech.heard('Why is checkout slow?')
     const written = await screen.findByRole('region', { name: 'To the coordinator · meridian' })

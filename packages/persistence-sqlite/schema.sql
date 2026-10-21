@@ -198,7 +198,7 @@ CREATE TABLE tasks (
   created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)), line_at TEXT CHECK (line_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kept_at TEXT CHECK (kept_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -406,7 +406,7 @@ CREATE TABLE user_inputs (
   state TEXT NOT NULL REFERENCES vocab_user_input_state (word),
   superseded_by_input_id TEXT,
   accepted_at TEXT NOT NULL CHECK (accepted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), dictated INTEGER NOT NULL DEFAULT 0 CHECK (dictated IN (0, 1)),
   UNIQUE (thread_id, sequence),
   CHECK ((state = 'superseded') = (superseded_by_input_id IS NOT NULL)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
@@ -715,19 +715,6 @@ CREATE INDEX decisions_by_attention_request ON decisions (attention_request_id);
 
 CREATE INDEX decisions_by_finding ON decisions (finding_id);
 
-CREATE TABLE change_sets (
-  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'chg_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
-  project_id TEXT NOT NULL REFERENCES projects (id),
-  task_id TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  state TEXT NOT NULL REFERENCES vocab_change_set_state (word),
-  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
-  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
-  FOREIGN KEY (run_id, project_id) REFERENCES runs (id, project_id),
-  UNIQUE (id, project_id)
-) STRICT;
-
 CREATE TABLE repository_changes (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'rchg_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
   project_id TEXT NOT NULL REFERENCES projects (id),
@@ -798,8 +785,6 @@ CREATE TABLE observations (
   source TEXT NOT NULL,
   observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 ) STRICT;
-
-CREATE INDEX change_sets_by_task ON change_sets (task_id);
 
 CREATE INDEX work_items_ready ON work_items (available_at) WHERE state = 'pending';
 
@@ -1177,6 +1162,21 @@ CREATE TABLE runnables (
 ) STRICT;
 
 CREATE INDEX runnables_kept ON runnables (project_id, position) WHERE dropped_at IS NULL;
+
+CREATE TABLE "change_sets" (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'chg_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  task_id TEXT NOT NULL,
+  run_id TEXT,
+  state TEXT NOT NULL REFERENCES vocab_change_set_state (word),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
+  FOREIGN KEY (run_id, project_id) REFERENCES runs (id, project_id),
+  UNIQUE (id, project_id)
+) STRICT;
+
+CREATE INDEX change_sets_by_task ON change_sets (task_id);
 
 CREATE TABLE automations (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'auto_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),

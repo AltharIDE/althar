@@ -49,8 +49,8 @@
   border-radius: 99px;
   background: var(--sunk);
 }
-.back svg {
-  transform: rotate(180deg);
+.back:hover:not(:disabled) {
+  background: var(--pressed-paper);
 }
 .title {
   margin: 0;

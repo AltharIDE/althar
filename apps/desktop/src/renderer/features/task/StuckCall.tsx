@@ -1,5 +1,6 @@
 import type { AgentStatus, AttentionRequest, StuckStep } from '@althar/contracts'
 import { Stuck, type StuckAttempt } from '@althar/ui'
+import { useState } from 'react'
 
 import type { StuckAnswer } from '../../data/client'
 import { useModelNames } from '../../shared/modelNames'
@@ -34,7 +35,7 @@ export const text = {
       case 'not_connected':
         return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then press Try again."
       case 'usage_limit':
-        return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt))
+        return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt), stuck.step)
       case 'stalled':
         return `${agent} has gone quiet: there has been no sign of work on this step for a while. ${review ? 'Review again, or skip the review.' : 'Start it again, or hand the step to another agent.'}`
       case 'looping':
@@ -87,22 +88,38 @@ export const text = {
   },
 }
 
-export function StuckCall({
+interface StuckCallProps {
+  request: AttentionRequest
+  stuck: StuckStep
+  agents: ReadonlyArray<AgentStatus>
+  agentName: (id: string | null) => string
+  /** Answers it; false where it didn't go through, and the card starts afresh, answerable again. */
+  onAnswer: (attentionId: string, answer: StuckAnswer) => void | Promise<boolean>
+  /** Report a problem about this step, with its task: Report this. Without it, none. */
+  onReport?: (step: string) => void
+}
+
+/**
+ * A stuck step's card, started afresh when an answer doesn't go through: the
+ * kit's card shows an answer once given, the runtime only once it took it.
+ */
+export function StuckCall({ onAnswer, ...props }: StuckCallProps) {
+  const [round, setRound] = useState(0)
+  const send = (attentionId: string, answer: StuckAnswer) =>
+    void Promise.resolve(onAnswer(attentionId, answer)).then((through) => {
+      if (through === false) setRound((now) => now + 1)
+    })
+  return <StuckCard key={round} {...props} onAnswer={send} />
+}
+
+function StuckCard({
   request,
   stuck,
   agents,
   agentName,
   onAnswer,
   onReport,
-}: {
-  request: AttentionRequest
-  stuck: StuckStep
-  agents: ReadonlyArray<AgentStatus>
-  agentName: (id: string | null) => string
-  onAnswer: (attentionId: string, answer: StuckAnswer) => void
-  /** Report a problem about this step, with its task: Report this. Without it, none. */
-  onReport?: (step: string) => void
-}) {
+}: Omit<StuckCallProps, 'onAnswer'> & { onAnswer: (attentionId: string, answer: StuckAnswer) => void }) {
   const named = useModelNames()
   const agent = agentName(stuck.agentId) || 'The agent'
   // A usage limit that says who could take over asks with them; one raised before it did asks as any stuck step.
@@ -110,7 +127,7 @@ export function StuckCall({
     return (
       <LimitCall
         request={request}
-        step={text.step[stuck.step]}
+        step={stuck.step}
         agentId={stuck.agentId}
         limit={stuck.limit}
         agents={agents}

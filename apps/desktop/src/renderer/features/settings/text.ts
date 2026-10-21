@@ -9,11 +9,11 @@ export const text = {
   gear: 'Althar settings',
   /** The quick settings, as a screen reader names them. */
   quick: 'Quick settings',
-  kbd: '⌘,',
+  kbd: platform === 'darwin' ? '⌘,' : 'Ctrl+,',
   /** The Settings tab, and the way to it from the quick settings. */
   settings: 'Settings',
   all: 'All settings',
-  allKbd: '⌘⇧,',
+  allKbd: platform === 'darwin' ? '⌘⇧,' : 'Ctrl+Shift+,',
   agents: 'Agents',
   connecting: `Looking at the agents on ${device.this}…`,
   agentHere: (name: string) => `${name} isn’t on ${device.this}`,
@@ -70,6 +70,11 @@ export const text = {
       ? 'One of this Mac’s alert sounds, with each notification.'
       : 'The system’s own sound, with each notification, or none.',
   /* Appearance. */
+  theme: 'Light or dark',
+  themeNote: `Match ${device.the} turns dark when ${device.the} does.`,
+  themeLight: 'Light',
+  themeDark: 'Dark',
+  themeSystem: `Match ${device.the}`,
   icon: 'App icon',
   edge: 'In other apps',
   edgeNote: 'Where Althar shows what needs you, while you work in another app.',

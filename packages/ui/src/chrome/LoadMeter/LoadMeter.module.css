@@ -12,11 +12,11 @@
   transition: background var(--fast) var(--ease);
 }
 .button:hover {
-  background: var(--n-3);
+  background: var(--line);
 }
 .button:active,
 .button[aria-expanded='true'] {
-  background: var(--n-4);
+  background: var(--line-2);
 }
 
 .gauge {
@@ -44,10 +44,10 @@
   width: 4px;
   height: 9px;
   border-radius: 1px;
-  background: var(--n-4);
+  background: var(--track);
   transition: background var(--slow) var(--ease);
 }
-/* on a pressed or open button's fill, which is the unlit steps' own shade, they go a shade deeper */
+/* on a pressed or open button's fill, the unlit steps go a shade deeper */
 .button:active .steps i:not([data-lit]),
 .button[aria-expanded='true'] .steps i:not([data-lit]) {
   background: var(--n-5);
@@ -60,7 +60,7 @@
 }
 /* a full CPU, or memory macOS is short of, goes to full ink; no new colour */
 .full .steps i[data-lit='rest'] {
-  background: var(--t-1);
+  background: var(--ink-fill);
 }
 
 .strain {

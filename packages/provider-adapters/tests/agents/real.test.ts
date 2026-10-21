@@ -60,11 +60,23 @@ const repository = () => {
   return cwd
 }
 
-/** A model other than each agent's default, to switch to. */
+/**
+ * A model other than each agent's default, to switch to. The later six's are
+ * from their catalogs as they were read offline, not yet run signed in: a
+ * real account may offer others.
+ */
 const otherModel: Record<AgentId, string> = {
   'claude-code': 'sonnet',
   codex: 'gpt-5.6-luna',
   opencode: 'opencode-go/deepseek-v4-flash',
+  copilot: 'claude-sonnet-4.6',
+  junie: 'v1:12:jetbrains-ai:claude-opus-5-5',
+  grok: 'grok-4.5',
+  kimi: 'kimi-k3',
+  'mistral-vibe': 'devstral-medium-2',
+  'qwen-code': 'qwen3-coder-plus',
+  // Its efforts are models of their own, as Orca's recording of 1.3.0 lists them.
+  antigravity: 'gemini-3.8-flash-low',
 }
 
 /**
@@ -79,6 +91,14 @@ const command: Record<AgentId, string> = {
   codex:
     'Run the shell command `touch ~/althar-sandbox-probe.txt`, asking for the permission it needs, then tell me in one line whether it worked.',
   opencode: 'Run the shell command `git log --oneline` here, then tell me in one line what it printed.',
+  // The later six run commands they read as only reading without asking; one that reaches the network asks in each.
+  copilot: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
+  junie: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
+  grok: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
+  kimi: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
+  'mistral-vibe': 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
+  'qwen-code': 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
+  antigravity: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
 }
 
 /**
@@ -87,7 +107,19 @@ const command: Record<AgentId, string> = {
  * its Plan mode, which a lead isn't in, and OpenCode keeps its question tool
  * off over ACP, so both ask in their own words.
  */
-const asks: Record<AgentId, ContractSubject['asks']> = { 'claude-code': 'form', codex: 'words', opencode: 'words' }
+const asks: Record<AgentId, ContractSubject['asks']> = {
+  'claude-code': 'form',
+  codex: 'words',
+  opencode: 'words',
+  copilot: 'words',
+  junie: 'words',
+  grok: 'words',
+  kimi: 'words',
+  'mistral-vibe': 'words',
+  'qwen-code': 'words',
+  // Its questions come as permission requests on `interaction_` tool calls, which Althar asks as a choice.
+  antigravity: 'form',
+}
 
 /** A question each agent asks: with its question tool, where it has one. */
 const question: Record<AgentId, string> = {
@@ -96,6 +128,14 @@ const question: Record<AgentId, string> = {
   codex: 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
   opencode:
     'I need to choose which colour the button should be, red or blue. Ask me which one I want: with your question tool if you have it, otherwise as a question in your reply. Do nothing else.',
+  copilot: 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
+  junie: 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
+  grok: 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
+  kimi: 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
+  'mistral-vibe': 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
+  'qwen-code': 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
+  antigravity:
+    'Before anything else, use your tool for asking me a question to ask which colour the button should be, with the options Red and Blue. Then reply with only the colour I chose.',
 }
 
 const only = process.env.ALTHAR_AGENTS?.split(',')
@@ -114,6 +154,7 @@ for (const agent of Object.values(agents)) {
     modes: agent.modes,
     modeOptionId: agent.options.mode,
     ...(agent.sessionMeta === undefined ? {} : { sessionMeta: agent.sessionMeta() }),
+    ...(agent.options.held === undefined ? {} : { held: agent.options.held }),
     permissions: agent.permissions,
     model: { optionId: agent.options.model, switchTo: otherModel[agent.id] },
     prompts: {

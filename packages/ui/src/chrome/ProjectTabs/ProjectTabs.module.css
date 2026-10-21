@@ -182,7 +182,9 @@
   white-space: nowrap;
 }
 .yours {
+  display: inline-block;
   flex: none;
+  vertical-align: middle;
   width: 6px;
   height: 6px;
   border-radius: 99px;

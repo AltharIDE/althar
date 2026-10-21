@@ -2,15 +2,15 @@ import { Room } from '../../foundations/vocabulary'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 
 /*
- * The project window's only navigation: the conversation, the board, both
- * side by side, its automations, or the project's settings in their place.
- * A dot says the conversation has news while you are elsewhere, and a violet
- * one that something waits on you there: an automation that paused itself,
- * or something in the settings, such as a connection to sign in again. What
- * waits on you in the work isn't the board's: the bar's WorkStatus says it,
- * whichever view is on. A task has no place here: it takes the window, and
- * its bar goes back with a BackCrumb. The shortcuts are the consumer's to
- * bind; the switch names them.
+ * The project window's only navigation: home (the conversation and the board side
+ * by side), the conversation, the board, its automations, or the project's
+ * settings in their place. A dot says the conversation has news while you are
+ * elsewhere, and a violet one that something waits on you there: an
+ * automation that paused itself, or something in the settings, such as a
+ * connection to sign in again. What waits on you in the work isn't the
+ * board's: the bar's WorkStatus says it, whichever view is on. A task has no
+ * place here: it takes the window, and its bar goes back with a BackCrumb.
+ * The shortcuts are the consumer's to bind; the switch names them.
  */
 
 export interface RoomSwitchText {
@@ -25,9 +25,9 @@ export interface RoomSwitchText {
 export const roomSwitchText: RoomSwitchText = {
   label: 'View',
   room: {
+    [Room.Both]: 'Home',
     [Room.Talk]: 'Conversation',
     [Room.Board]: 'Board',
-    [Room.Both]: 'Both',
     [Room.Automations]: 'Automations',
     [Room.Settings]: 'Settings',
   },
@@ -36,7 +36,7 @@ export const roomSwitchText: RoomSwitchText = {
   yours: 'needs you',
 }
 
-const ROOMS = [Room.Talk, Room.Board, Room.Both, Room.Automations, Room.Settings] as const
+const ROOMS = [Room.Both, Room.Talk, Room.Board, Room.Automations, Room.Settings] as const
 
 export interface RoomSwitchProps {
   value: Room

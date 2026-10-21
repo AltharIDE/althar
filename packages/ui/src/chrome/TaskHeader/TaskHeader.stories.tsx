@@ -1,35 +1,36 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { OPUS } from '../../fixtures/models'
+import { CODEX, OPUS } from '../../fixtures/models'
 import { TaskStatus, unreachable } from '../../foundations/vocabulary'
 import { trackOf } from '../../primitives/StepTrack/StepTrack'
 import { States } from '../../storybook/States'
 import { BackCrumb } from '../BackCrumb/BackCrumb'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { RunButton } from '../RunButton/RunButton'
+import { SettleWays } from '../../board/SettleWays/SettleWays'
 import { TaskMenu } from '../TaskMenu/TaskMenu'
 import { TitleBar } from '../TitleBar/TitleBar'
-import { TaskHeader, type TaskHeaderProps } from './TaskHeader'
+import { TaskHeader, type TaskHeaderProps, type TaskHeaderStep } from './TaskHeader'
 
 type Face = 'talk' | 'out'
 const FACES = [
   { value: 'talk' as const, label: 'Conversation', kbd: 'c' },
   { value: 'out' as const, label: 'Outputs', kbd: 'o' },
 ]
-const STEPS = ['Implement', 'Review', 'Settle', 'Review']
+
+/** Its plan's two steps, the lead implementing and another agent reviewing, at the step it is on. */
+const planAt = (at: number, done = false): TaskHeaderStep[] =>
+  trackOf(['Implement', 'Review'], at, at, done).map((step, index) => ({ ...step, who: index === 0 ? OPUS.name : CODEX.name }))
 
 const BASE: TaskHeaderProps<Face> = {
   title: 'Repair token refresh on privilege change',
   status: TaskStatus.Running,
   state: 'Reviewing',
-  lead: OPUS,
-  branch: 'althar/token-refresh',
-  since: 'review · 6m',
+  steps: planAt(1),
+  took: '6m',
   elapsed: '2h 14m',
-  cost: '$4.10',
-  steps: trackOf(STEPS, 1),
   faces: FACES,
   face: 'talk',
 }
@@ -88,23 +89,58 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Its review running. */
-export const Running: Story = {}
-/** Reviewed and settled; accepting it is yours. */
-export const ReadyForYou: Story = {
-  args: { status: TaskStatus.Yours, state: 'Ready for you', since: 'settled · 4m ago', steps: trackOf(STEPS, 3, 3, true), face: 'out' },
+/**
+ * Its review running, in a blue chip with its steps' bars. Pointed at or focused, where it stands says who
+ * does each step: the reviewer, not the lead the composer names, and for how long.
+ */
+export const Reviewing: Story = {
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.hover(c.getByText('Reviewing'))
+    const card = await within(document.body).findByRole('tooltip')
+    await expect(card).toHaveTextContent(OPUS.name)
+    await expect(card).toHaveTextContent(`Review${CODEX.name}6m`)
+    await expect(card).toHaveTextContent('2h 14m in all')
+    await expect(card).not.toHaveTextContent('althar/')
+  },
 }
-export const Paused: Story = { args: { status: TaskStatus.Paused, state: 'Stopped' } }
+/** Its lead implementing, the review to come; how long in all is the step's own, so it is said once. */
+export const Implementing: Story = { args: { state: 'Implementing', steps: planAt(0), took: '52m', elapsed: '52m' } }
+/** Reviewed and settled; accepting it is yours. Nothing runs, so where it stands has nothing more to say: no bars, no card. */
+export const ReadyForYou: Story = {
+  args: { status: TaskStatus.Yours, state: 'Ready for you', steps: planAt(1, true), face: 'out' },
+  play: async ({ canvasElement }) => {
+    const said = within(canvasElement).getByText('Ready for you').parentElement
+    await expect(said).not.toHaveAttribute('tabindex')
+    await userEvent.hover(within(canvasElement).getByText('Ready for you'))
+    await waitFor(() => expect(within(document.body).queryByRole('tooltip')).toBeNull())
+  },
+}
+export const Stopped: Story = { args: { status: TaskStatus.Stopped, state: 'Stopped', steps: planAt(0) } }
 /** A question: nothing built, but the switch is still there, so its place never moves. */
 export const NothingBuilt: Story = {
   args: {
     title: 'Why do refunds fail fast when webhooks retry?',
     status: TaskStatus.Done,
     state: 'Answered',
-    branch: undefined,
-    since: 'answered · 11m ago',
-    elapsed: '6m',
-    steps: trackOf(['Read', 'Answer'], 1, 1, true),
+    steps: [],
+  },
+}
+/** A prototype its lead finished: Done, then a pin, Keep for later, inside where it stands, in its violet; no card. */
+export const FinishedNotAChange: Story = {
+  args: {
+    title: 'Prototype: allow everything, for a project and a task',
+    status: TaskStatus.Yours,
+    state: 'Finished',
+    steps: [],
+    beside: <SettleWays place="header" onDone={fn()} onKeep={fn()} />,
+  },
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByText('Finished').closest<HTMLElement>('[data-status]')
+    if (chip === null) throw new Error('Where it stands is not a chip')
+    await expect(chip).toHaveAttribute('data-status', TaskStatus.Yours)
+    await expect(within(chip).getByRole('button', { name: 'Done' })).toBeVisible()
+    await expect(within(chip).getByRole('button', { name: 'Keep for later' })).toBeVisible()
   },
 }
 /** A title too long for the bar: one line, the whole of it on hover. */
@@ -144,8 +180,6 @@ export const SwitchingFaces: Story = {
     await expect(c.getByRole('radio', { name: /Outputs/ })).toBeChecked()
     await userEvent.click(c.getByRole('button', { name: /Graph/ }))
     await expect(c.getByRole('button', { name: /Graph/ })).toHaveAttribute('aria-expanded', 'true')
-    // Who leads it, its branch and how long are said with where it stands.
-    await expect(c.getByText('Reviewing').parentElement).toHaveTextContent(/althar\/token-refresh/)
   },
 }
 
@@ -154,9 +188,11 @@ export const AllStates: Story = {
     <States
       size="wide"
       cells={[
-        { state: 'running', node: <Header /> },
+        { state: 'reviewing', node: <Header /> },
+        { state: 'implementing', node: <Header {...Implementing.args} /> },
         { state: 'ready for you', node: <Header {...ReadyForYou.args} /> },
-        { state: 'stopped', node: <Header {...Paused.args} /> },
+        { state: 'finished, not a change', node: <Header {...FinishedNotAChange.args} /> },
+        { state: 'stopped', node: <Header {...Stopped.args} /> },
         { state: 'nothing built', node: <Header {...NothingBuilt.args} /> },
         { state: 'long title', node: <Header {...LongTitle.args} /> },
       ]}

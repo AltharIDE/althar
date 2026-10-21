@@ -145,6 +145,20 @@ describe('a thread as blocks', () => {
     const [stopped] = blocksOf(source(running), new Map(), at)
     expect(stopped?.kind === 'turn' && stopped.parts[1]).toMatchObject({ verb: 'Read', state: ToolState.Cancelled })
   })
+
+  it('takes no turn before Althar carried the step on after a restart, or what the agent read since, for the one running', () => {
+    const earlier = [items.says('Reading.'), items.tool({ status: 'completed' })]
+    const live = (thread: ReadonlyArray<ThreadItem>) =>
+      blocksOf(source(thread, true), new Map(), at).flatMap((block) => (block.kind === 'turn' && block.live ? [block.id] : []))
+    expect(live(earlier)).toHaveLength(1)
+    // Started again after a restart, the turn running has said nothing yet.
+    expect(
+      live([...earlier, items.notice({ source: 'runtime', title: 'Althar restarted; the step carried on from here.' }, null)]),
+    ).toEqual([])
+    expect(live([...earlier, items.you('And the docs.')])).toEqual([])
+    // What waits to interrupt it leaves it running.
+    expect(live([...earlier, items.you('Stop.', { state: 'queued', interrupting: true })])).toHaveLength(1)
+  })
 })
 
 describe('the wait for a reply', () => {

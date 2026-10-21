@@ -19,6 +19,8 @@ export const sending = (
     readonly text: string
     readonly queued: boolean
     readonly interrupting: boolean
+    /** Some of its words were dictated. */
+    readonly dictated?: boolean
     /** The images sent with it. */
     readonly pictures?: ReadonlyArray<Picture>
   },
@@ -32,7 +34,11 @@ export const sending = (
     agentId: null,
     createdAt: new Date().toISOString(),
     content: { text: message.text, links: [], pictures: message.pictures ?? [] },
-    input: { state: message.queued ? 'queued' : 'delivered', interrupting: message.interrupting },
+    input: {
+      state: message.queued ? 'queued' : 'delivered',
+      interrupting: message.interrupting,
+      ...(message.dictated === true ? { dictated: true } : {}),
+    },
   }
   return { id, items: [...items, item] }
 }
@@ -163,7 +169,13 @@ export const readingNow = (
 export const queuedOf = (
   items: ReadonlyArray<ThreadItem>,
   shown: boolean,
-): ReadonlyArray<{ readonly id: string; readonly text: string; readonly attached?: string; readonly pictures: ReadonlyArray<Picture> }> =>
+): ReadonlyArray<{
+  readonly id: string
+  readonly text: string
+  readonly attached?: string
+  readonly pictures: ReadonlyArray<Picture>
+  readonly dictated?: boolean
+}> =>
   !shown
     ? []
     : items.flatMap((item) =>
@@ -174,6 +186,7 @@ export const queuedOf = (
                 text: item.content.text,
                 ...(item.content.pictures.length === 0 ? {} : { attached: imagesText.attached(item.content.pictures.length) }),
                 pictures: item.content.pictures,
+                ...(item.input.dictated === true ? { dictated: true } : {}),
               },
             ]
           : [],

@@ -25,6 +25,7 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
+  Segmented,
   SettingList,
   SettingRow,
   SettingsLayout,
@@ -35,10 +36,11 @@ import {
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
+import type { Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
 import { useServices } from '../../data/services'
-import { agentLineOf, brandOf } from '../../shared/agents'
+import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
@@ -50,7 +52,7 @@ import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
-import { AgentProblem, StartError } from '../start/StartView'
+import { AgentProblem, openGuide, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
@@ -191,13 +193,17 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     ...(brand === undefined ? {} : { brand }),
     ...(line === undefined ? {} : { line }),
     ...(agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
+    // Not on this computer: its tab quieter, after those that are.
+    ...(agent.installed ? {} : { away: true }),
   }
 }
 
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts }: { start: StartModel; accounts: AccountSignInModel }) {
   const [agentId, setAgentId] = useState<string | null>(null)
-  const agents = start.status?.agents ?? []
+  // Those on this computer first, then the others Althar runs, each in the registry's order.
+  const all = start.status?.agents ?? []
+  const agents = [...all.filter((agent) => agent.installed), ...all.filter((agent) => !agent.installed)]
   // The agent chosen, else the one signing in, else one that needs the person, else the first.
   const chosen =
     agents.find((agent) => agent.id === agentId) ??
@@ -214,9 +220,14 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
   const brand = brandOf(chosen.id)
   return (
     <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
-      <AgentTabList label={text.agents} agents={agents.map(tabOf)} />
+      <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
       <StartError model={start} />
-      <AgentTabPanel agent={tabOf(chosen)} headingLevel={2} aside={<ModelsView key={chosen.id} agent={chosen} />}>
+      {/* What its work may use, beside its accounts, once it is on this computer and can say. */}
+      <AgentTabPanel
+        agent={tabOf(chosen)}
+        headingLevel={2}
+        {...(chosen.installed ? { aside: <ModelsView key={chosen.id} agent={chosen} /> } : {})}
+      >
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
         ) : chosen.installed && chosen.download?.installing !== true ? (
@@ -227,6 +238,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
             text={{ missing: text.agentHere }}
             {...(brand === undefined ? {} : { brand })}
             {...(chosen.download === null ? {} : { size: chosen.download.size })}
+            {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
             state={
               chosen.download?.installing === true
                 ? { kind: 'installing' }
@@ -235,6 +247,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
                   : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
             }
             onInstall={() => void start.install(chosen.id)}
+            {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
           />
         )}
       </AgentTabPanel>
@@ -396,71 +409,89 @@ function AppearanceSection({ appIcon, edge }: Looks) {
   const icon = appIcons.find((one) => one.value === appIcon.icon)
   const { spot } = edge
   const words = spot === null ? null : edgeWords(spot)
+  const { preferences, set, failed } = usePreferences()
   return (
-    <SettingList>
-      {spot !== null && words !== null && (
-        <SettingRow
-          title={text.edge}
-          note={glance === EXAMPLE ? text.examples : text.edgeNote}
-          glyph={<Icon name="globe" size={15} />}
-          under={
-            <div className={s.under}>
-              {choosing(spot) && edge.place !== null ? (
-                <EdgePlaces
-                  label={text.edge}
-                  options={edgePlaces.map((one) => ({
-                    value: one.value,
-                    title: one.title,
-                    note: one.note,
-                    picture:
-                      one.value === 'island' ? (
-                        <IslandPicture glance={glance} height={260} />
-                      ) : (
-                        <MenuPicture glance={glance} height={260} />
-                      ),
-                  }))}
-                  value={edge.place}
-                  onChange={edge.choose}
-                />
-              ) : (
-                <EdgeHere
-                  title={words.title}
-                  note={words.note}
-                  {...(words.why === undefined ? {} : { why: words.why })}
-                  // A Mac's menu bar as it would be, the sheet open; elsewhere the system's edge, larger.
-                  picture={spot === EdgeSpot.MenuBar ? <MenuPicture glance={glance} /> : <EdgeMini spot={spot} scale={2.6} />}
-                />
-              )}
-              <Failed when={edge.failed} />
-            </div>
-          }
-        >
-          {() => null}
+    <>
+      <SettingList>
+        <SettingRow title={text.theme} note={text.themeNote} glyph={<Icon name="theme" size={15} />}>
+          {() => (
+            <Segmented<Appearance>
+              label={text.theme}
+              value={preferences.appearance}
+              onChange={(appearance) => set('appearance', appearance)}
+              options={[
+                { value: 'light', label: text.themeLight },
+                { value: 'dark', label: text.themeDark },
+                { value: 'system', label: text.themeSystem },
+              ]}
+            />
+          )}
         </SettingRow>
-      )}
-      {icon !== undefined && (
-        <SettingRow
-          title={text.icon}
-          note={icon.title}
-          glyph={<Icon name="image" size={15} />}
-          under={
-            <div className={s.under}>
-              <DockPreview name={icon.title} picture={<img src={icon.picture} alt="" />} />
-              <Choices
-                label={text.icon}
-                layout="tiles"
-                options={appIcons.map((one) => ({ value: one.value, title: one.title, picture: <img src={one.picture} alt="" /> }))}
-                value={appIcon.icon}
-                onChange={appIcon.choose}
-              />
-              <Failed when={appIcon.failed}>{text.iconFailed}</Failed>
-            </div>
-          }
-        >
-          {() => null}
-        </SettingRow>
-      )}
-    </SettingList>
+        {spot !== null && words !== null && (
+          <SettingRow
+            title={text.edge}
+            note={glance === EXAMPLE ? text.examples : text.edgeNote}
+            glyph={<Icon name="globe" size={15} />}
+            under={
+              <div className={s.under}>
+                {choosing(spot) && edge.place !== null ? (
+                  <EdgePlaces
+                    label={text.edge}
+                    options={edgePlaces.map((one) => ({
+                      value: one.value,
+                      title: one.title,
+                      note: one.note,
+                      picture:
+                        one.value === 'island' ? (
+                          <IslandPicture glance={glance} height={260} />
+                        ) : (
+                          <MenuPicture glance={glance} height={260} />
+                        ),
+                    }))}
+                    value={edge.place}
+                    onChange={edge.choose}
+                  />
+                ) : (
+                  <EdgeHere
+                    title={words.title}
+                    note={words.note}
+                    {...(words.why === undefined ? {} : { why: words.why })}
+                    // A Mac's menu bar as it would be, the sheet open; elsewhere the system's edge, larger.
+                    picture={spot === EdgeSpot.MenuBar ? <MenuPicture glance={glance} /> : <EdgeMini spot={spot} scale={2.6} />}
+                  />
+                )}
+                <Failed when={edge.failed} />
+              </div>
+            }
+          >
+            {() => null}
+          </SettingRow>
+        )}
+        {icon !== undefined && (
+          <SettingRow
+            title={text.icon}
+            note={icon.title}
+            glyph={<Icon name="image" size={15} />}
+            under={
+              <div className={s.under}>
+                <DockPreview name={icon.title} picture={<img src={icon.picture} alt="" />} />
+                <Choices
+                  label={text.icon}
+                  layout="tiles"
+                  options={appIcons.map((one) => ({ value: one.value, title: one.title, picture: <img src={one.picture} alt="" /> }))}
+                  value={appIcon.icon}
+                  onChange={appIcon.choose}
+                />
+                <Failed when={appIcon.failed}>{text.iconFailed}</Failed>
+              </div>
+            }
+          >
+            {() => null}
+          </SettingRow>
+        )}
+      </SettingList>
+      <Failed when={failed} />
+    </>
   )
 }
 

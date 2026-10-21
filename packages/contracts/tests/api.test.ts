@@ -11,6 +11,7 @@ import {
   AtOnceCount,
   CommandId,
   FOUND_MOST,
+  GraphRound,
   Load,
   NewProjectId,
   PAGE,
@@ -325,6 +326,30 @@ describe('the API', () => {
     assert.strictEqual(PAGE, 100)
   })
 
+  it('takes a task’s rounds of work only with steps of the graph’s kinds and states', () => {
+    const decode = Schema.decodeUnknownSync(GraphRound)
+    const step = {
+      id: 'node_1',
+      key: 'review',
+      iteration: 1,
+      state: 'held',
+      hold: 'machine_busy',
+      agentId: 'codex',
+      model: 'gpt-5.2',
+      startedAt: null,
+      endedAt: null,
+      added: false,
+    }
+    const round = { id: 'run_1', followUp: true, createdAt: at, endedAt: null, said: null, changedAt: null, steps: [step] }
+    assert.strictEqual(decode(round).steps[0]?.hold, 'machine_busy')
+    // What started a follow-up: the person's message, or what the coordinator passed on.
+    assert.isTrue(decode({ ...round, said: { itemId: 'i1', text: 'One more thing', relayed: true } }).said?.relayed)
+    assert.throws(() => decode({ ...round, steps: [{ ...step, key: 'verify' }] }))
+    assert.throws(() => decode({ ...round, steps: [{ ...step, state: 'stuck' }] }))
+    assert.throws(() => decode({ ...round, steps: [{ ...step, iteration: 0.5 }] }))
+    assert.throws(() => decode({ ...round, steps: [{ ...step, hold: 'tired' }] }))
+  })
+
   it('takes a load only as parts of the whole and bytes', () => {
     const load = { cpu: 0.5, memoryUsed: 8e9, memoryTotal: 16e9, pressure: null, shares: [], history: [] }
     const share = {
@@ -442,6 +467,8 @@ describe('the API', () => {
               SetAutomationPostsReviews: () => Effect.die('unused'),
               SetAutomationsPaused: () => Effect.die('unused'),
               SetAgentsAtOnce: () => Effect.die('unused'),
+              MoveInLine: () => Effect.die('unused'),
+              LineOldestFirst: () => Effect.die('unused'),
               StartAccountSignIn: () => Effect.die('unused'),
               GetAccountSignIn: () => Effect.die('unused'),
               PasteAccountSignInCode: () => Effect.die('unused'),
@@ -449,6 +476,9 @@ describe('the API', () => {
               GetThreadItem: () => Effect.die('unused'),
               ReadOutput: () => Effect.die('unused'),
               ReadDocument: () => Effect.die('unused'),
+              FindCode: () => Effect.die('unused'),
+              ReadCode: () => Effect.die('unused'),
+              OpenCode: () => Effect.die('unused'),
               GetCoordinator: () => Effect.die('unused'),
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,
@@ -461,6 +491,7 @@ describe('the API', () => {
               PostReviewDraft: () => Effect.void,
               DiscardReviewDraft: () => Effect.void,
               AnswerStuck: () => Effect.void,
+              HandOverHeld: () => Effect.void,
               StartSession: ({ commandId: id }) => Effect.succeed(id),
               SwitchAgent: () => Effect.die('unused'),
               SetModel: () => Effect.void,
@@ -473,6 +504,8 @@ describe('the API', () => {
               ResumeTask: () => Effect.void,
               LeaveOutCommits: () => Effect.void,
               AbandonTask: () => Effect.void,
+              MarkTaskDone: () => Effect.void,
+              KeepTaskForLater: () => Effect.void,
               RenameTask: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
@@ -509,6 +542,7 @@ describe('the API', () => {
               GetProjectRules: () => Effect.die('unused'),
               GetProjectNotes: () => Effect.succeed([]),
               DropProjectNote: () => Effect.void,
+              EditProjectNote: () => Effect.void,
               GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
               SetProjectInk: () => Effect.die('unused'),
@@ -529,6 +563,8 @@ describe('the API', () => {
               SkipReview: () => Effect.void,
               RefreshTask: () => Effect.void,
               StopListening: () => Effect.void,
+              AttachPullRequest: () =>
+                Effect.succeed({ kind: 'attached' as const, name: 'PR #1', source: 'main', started: false, kept: 0, own: 0 }),
               StopBackground: () => Effect.void,
               ClearBackground: () => Effect.void,
               RunProject: () => Effect.die('unused'),

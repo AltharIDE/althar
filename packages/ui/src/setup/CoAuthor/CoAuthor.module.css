@@ -143,6 +143,20 @@
   font-size: 11px;
   color: var(--t-2);
 }
+/* Althar's name, a link as the version's notes are: in the line's ink, underlined faintly */
+.sub a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+  transition:
+    color var(--fast) var(--ease),
+    text-decoration-color var(--fast) var(--ease);
+}
+.sub a:hover {
+  color: var(--t-1);
+  text-decoration-color: currentColor;
+}
 
 /* faces, round, Althar's over the person's edge */
 .faces {
@@ -163,7 +177,7 @@
   object-fit: cover;
 }
 .mark {
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 .ghost {
@@ -176,15 +190,24 @@
   fill: var(--t-3);
 }
 .althar {
+  position: relative;
   margin-left: -6px;
   box-shadow: 0 0 0 2px var(--paper);
   transition: translate var(--base) var(--ease-fold);
+}
+/* its own dark tile keeps an edge where it meets a dark row (dark.css); over the picture, so drawn above it */
+.althar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--face-edge, transparent);
+  pointer-events: none;
 }
 .off .althar {
   translate: 5px 0;
   box-shadow: none;
 }
-
 @keyframes arrive {
   from {
     opacity: 0;

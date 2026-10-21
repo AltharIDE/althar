@@ -21,6 +21,7 @@ import { useServices, useWatch } from '../../data/services'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useImages'
 import { useOutputs } from '../../shared/useOutputs'
+import { canPick } from '../../shared/agents'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
@@ -102,7 +103,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const thread = useQuery(read.coordinator(projectId))
   const coordinator = thread.data ?? null
   const status = useQuery(read.status()).data
-  const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
+  const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
   const [failed, setError] = useState<string | null>(null)
   const readFailure = thread.error ?? listed.error
@@ -275,6 +276,7 @@ export const useProject = (projectId: string): ProjectModel => {
         text,
         queued,
         interrupting: disposition === 'interrupt_and_continue',
+        ...(images?.dictated === true ? { dictated: true } : {}),
         ...(images === undefined ? {} : { pictures: images.pictures }),
       })
       id = next.id

@@ -18,10 +18,11 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import { platform } from '../../shared/device'
 import { useModels } from '../../data/models'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, useDraft } from '../../shared/drafts'
+import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
@@ -40,6 +41,7 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
+import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
@@ -51,7 +53,7 @@ import { connectionsNeedYou } from '../projectSettings/standing'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
-import { DraftCard, type DraftActions } from './DraftCard'
+import { DraftCard, type DraftActions } from '../../shared/DraftCard'
 import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import s from './Project.module.css'
@@ -181,8 +183,11 @@ export function ProjectView({
   const [section, setSection] = useState<ProjectSection>(settings.section ?? FIRST_PROJECT_SECTION)
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
-  const shown = useThreadHost(false)
+  // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread.
+  const shown = useThreadHost(false, { threadId: model.coordinator?.threadId ?? null, taskId: null })
   const both = useBothWidth()
+  // The lanes the person collapsed, kept for every project, apart beside the conversation.
+  const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
@@ -309,6 +314,7 @@ export function ProjectView({
     if (said === undefined || !images.fits(said.pictures)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
+      if (said.dictated === true) setDraftDictated(draftOf, true)
       images.restore(said.pictures)
     }
   }
@@ -359,7 +365,7 @@ export function ProjectView({
         queued={queuedOf(coordinator?.items ?? [], queue)}
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        text={{ queued: text.queue }}
+        text={{ queued: text.queue, sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
         meter={contextMeter(session, named, model.compact)}
         picker={
@@ -482,7 +488,12 @@ export function ProjectView({
                   </div>
                 )
               ) : (
-                <TaskFace className={s.face} composer={composer}>
+                <TaskFace
+                  className={s.face}
+                  composer={composer}
+                  // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
+                  {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
+                >
                   <Thread label={text.conversation} busy={busy}>
                     {coordinator.earlier && (
                       <ThreadDivider
@@ -555,6 +566,14 @@ export function ProjectView({
               )}
             </div>
           )}
+          {/* Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far edge. */}
+          {room === Room.Both &&
+            talking &&
+            shown.workbench(null, {
+              max: Math.max(360, window.innerWidth - both.width - 48),
+              className: s.over,
+              style: { left: both.width },
+            })}
           {boarding && (
             <div className={s.board}>
               {lanes !== null ? (
@@ -571,6 +590,9 @@ export function ProjectView({
                     onOpen={onTask}
                     closing={closing}
                     actions={board}
+                    line={board.line}
+                    folds={folds}
+                    onFoldsChange={setFolds}
                     {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                   />
                 </>

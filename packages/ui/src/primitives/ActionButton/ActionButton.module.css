@@ -40,13 +40,13 @@
   color: var(--t-3);
 }
 .default:hover:not(:disabled) {
-  background: var(--n-4);
+  background: var(--sunk);
   color: var(--t-1);
 }
 .default:active:not(:disabled),
 .default[aria-pressed='true'],
 .default[aria-expanded='true'] {
-  background: var(--n-5);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 
@@ -62,16 +62,16 @@
 }
 
 .onDark {
-  color: var(--on-ink-2);
+  color: var(--on-dark-2);
 }
 .onDark:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--on-ink);
+  color: var(--on-dark);
 }
 .onDark:active:not(:disabled) {
   background: rgba(255, 255, 255, 0.16);
-  color: var(--on-ink);
+  color: var(--on-dark);
 }
 .onDark:focus-visible {
-  outline-color: var(--on-ink-focus);
+  outline-color: var(--on-dark-focus);
 }

@@ -8,12 +8,13 @@
   transition: background var(--fast) var(--ease);
 }
 .ring:hover,
-.ring:focus-visible {
-  background: var(--n-2);
+.ring:focus-visible,
+.ring[aria-expanded='true'] {
+  background: var(--hover-paper);
 }
 .track {
   fill: none;
-  stroke: var(--n-4);
+  stroke: var(--ring-track);
   stroke-width: 2.2;
 }
 .fill {

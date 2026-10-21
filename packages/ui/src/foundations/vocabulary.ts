@@ -120,6 +120,8 @@ export enum LimitAnswer {
   Waiting = 'waiting',
   /** Tried the same agent again, as one that didn't say when it resets may be back. */
   Again = 'again',
+  /** Went on without the step: a review, skipped. */
+  Skipped = 'skipped',
 }
 
 /** A step of a task's graph. */
@@ -197,6 +199,12 @@ export enum GraphNodeState {
   Added = 'added',
   /** A stopped attempt, which stays, hollow. */
   Stopped = 'stopped',
+  /** It waits on you: a permission, a question, or a step that needs you. */
+  Waiting = 'waiting',
+  /** It waits for an agent: a free place on this machine, or one back from its usage limit. */
+  Held = 'held',
+  /** A change to the steps that waits for your say; dashed, in your colour, until you answer it. */
+  Proposed = 'proposed',
 }
 
 /** Your answer to a graph change that needs more than the run was given. */
@@ -447,6 +455,8 @@ export enum FoundState {
   Yours = 'you',
   /** Done, waiting for you to accept it. */
   Ready = 'ready',
+  /** Finished, not a change, and kept for later: out of Needs you as it is. */
+  Kept = 'kept',
   Stopped = 'stopped',
   Merged = 'merged',
   /** Settled without a merge to show for it. */

@@ -6,7 +6,7 @@
   grid-template-columns: minmax(0, 1fr);
 }
 .hasPanel {
-  grid-template-columns: minmax(0, 1fr) clamp(420px, 38vw, 600px);
+  grid-template-columns: minmax(0, 1fr) var(--panel-width, clamp(420px, 38vw, 600px));
 }
 /* The page it sits on; a column raised off the page, like the conversation beside the board, sets --face-surface. */
 .main {

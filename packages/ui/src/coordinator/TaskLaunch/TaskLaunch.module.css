@@ -33,7 +33,7 @@
   font-size: 13px;
 }
 .step:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .n {
   font: 11px var(--mono);

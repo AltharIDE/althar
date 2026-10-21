@@ -17,13 +17,14 @@
   height: 5px;
   border-radius: 99px;
   overflow: hidden;
-  background: var(--n-3) linear-gradient(var(--t-1), var(--t-1)) no-repeat 0 0 / 0% 100%;
+  background: var(--n-3) linear-gradient(var(--ink-fill), var(--ink-fill)) no-repeat 0 0 / 0% 100%;
   box-shadow: inset 0 0 0 1px var(--line);
   transition:
     background-color 400ms var(--ease),
     box-shadow 400ms var(--ease);
 }
 .name {
+  padding-inline-end: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -33,7 +34,7 @@
 
 /* a step that finishes fills with ink from its start; its own colour goes once it is covered */
 .done i {
-  background-color: var(--t-1);
+  background-color: var(--ink-fill);
   background-size: 100% 100%;
   box-shadow: none;
   transition:
@@ -52,7 +53,7 @@
 /* the step it is on: a still bar of cobalt, with a faint sheen gliding over it slowly, so it reads as at work without a
    segment running across it */
 .now i {
-  background-color: color-mix(in srgb, var(--live) 78%, var(--n-1));
+  background-color: var(--live-step);
   box-shadow: none;
 }
 .now i::after {

@@ -4,6 +4,7 @@ import {
   type AgentModels,
   type AlwaysScope,
   type AppSettings,
+  type Attachment,
   type AutomationDefinition,
   type AutomationSnapshot,
   type AutomationsSnapshot,
@@ -24,6 +25,9 @@ import {
   type FoundServer,
   type FoundTasks,
   type CoordinatorSnapshot,
+  type CodeFound,
+  type CodePlace,
+  type CodeText,
   type DocumentText,
   type DomMessagePort,
   domPort,
@@ -120,6 +124,13 @@ export interface Client {
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** One file a task changed, as a diff from its base to its worktree. */
   readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
+  /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
+  readonly findCode: (
+    threadId: string,
+    messages: ReadonlyArray<{ readonly itemId?: string; readonly names: ReadonlyArray<string> }>,
+  ) => Promise<{ readonly place: CodePlace; readonly messages: ReadonlyArray<{ readonly found: ReadonlyArray<CodeFound> }> }>
+  /** A file a thread's agent named, by its path as findCode named it: as it is now, or at the commit it was when a message was said. */
+  readonly readCode: (threadId: string, path: string, at?: { readonly commit?: string; readonly line?: number }) => Promise<CodeText>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
@@ -132,7 +143,9 @@ export interface Client {
   readonly seeTask: (taskId: string) => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
-  readonly switchAgent: (input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage> }) => Promise<string>
+  readonly switchAgent: (
+    input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage>; readonly dictated?: boolean },
+  ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
   readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
@@ -148,6 +161,10 @@ export interface Client {
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
+  /** Puts a task waiting for a free agent at a place in its project's line, from 0 the front; the line starts in that order. */
+  readonly moveInLine: (taskId: string, to: number) => Promise<void>
+  /** Puts a project's line back in the order its tasks began waiting. */
+  readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** A project's automations, for its Automations tab. */
@@ -198,6 +215,10 @@ export interface Client {
   readonly abandonTask: (taskId: string) => Promise<void>
   /** Opens an abandoned task again, on its worktree and branch. */
   readonly reopenTask: (taskId: string) => Promise<void>
+  /** Settles a finished task that isn't a change as Done, stopping what it left running, such as a page. */
+  readonly markTaskDone: (taskId: string) => Promise<void>
+  /** Takes a finished task that isn't a change out of Needs you as it is, kept for later. */
+  readonly keepTaskForLater: (taskId: string) => Promise<void>
   /** Gives the task another title, in any state; its slug, branch and folder stay. */
   readonly renameTask: (taskId: string, title: string) => Promise<void>
   readonly send: (input: {
@@ -206,6 +227,8 @@ export interface Client {
     readonly disposition: 'after_current' | 'interrupt_and_continue'
     /** Images sent with it, in order. */
     readonly images?: ReadonlyArray<SentImage>
+    /** Any of its words came from dictation, even if edited after. */
+    readonly dictated?: boolean
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
@@ -304,6 +327,8 @@ export interface Client {
   readonly getProjectNotes: (projectId: string) => Promise<ReadonlyArray<ProjectNote>>
   /** Drops one of a project's notes: no coordinator session starts with it again. */
   readonly dropProjectNote: (projectId: string, noteId: string) => Promise<void>
+  /** Says one of its notes in the person's words. */
+  readonly editProjectNote: (projectId: string, noteId: string, body: string) => Promise<void>
   /** The names a project's code uses that have parts, most used first, for dictation to write as it does. */
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
@@ -355,6 +380,13 @@ export interface Client {
     readonly path?: string
     readonly line?: number
   }) => Promise<boolean>
+  /** Opens a file a thread's agent named in an editor, at a line where given: a task's in its folder, the coordinator's in the person's checkout. */
+  readonly openCode: (input: {
+    readonly threadId: string
+    readonly editor: string
+    readonly path: string
+    readonly line?: number
+  }) => Promise<boolean>
   /** Pushes the task's branch to its pull request, up to the commit the person saw; in a task of several repositories, the one at `url`. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Replaces the commits on the task's pull request with its branch, up to the commit the person saw, only while it is still at `replaces`: a force push they confirmed. */
@@ -365,6 +397,8 @@ export interface Client {
   readonly refreshTask: (taskId: string) => Promise<void>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (taskId: string, url: string) => Promise<void>
+  /** Attaches the task to an open pull request it didn't open, by its link or number; `start` starts its branch from that one's head. */
+  readonly attachPullRequest: (taskId: string, pullRequest: string, start: boolean) => Promise<Attachment>
   /**
    * Closes the task's pull request at this address on its host, unmerged; its branch there too, with `deleteBranch`. What the
    * host said to deleting the branch, where it didn't.
@@ -396,6 +430,13 @@ export interface Client {
   readonly getRepositoryScripts: (projectId: string) => Promise<ReadonlyArray<RepositoryScript>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
+  /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
+  readonly handOverHeld: (input: {
+    readonly taskId: string
+    readonly agentId: string
+    readonly accountId?: string
+    readonly model?: string
+  }) => Promise<void>
   /**
    * Calls `listener` with each change after `since` (or from now) until the
    * returned function is called; and `onWatching` each time it starts
@@ -502,6 +543,16 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
+    findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
+    readCode: (threadId, path, at = {}) =>
+      settle(
+        api.ReadCode({
+          threadId,
+          path,
+          ...(at.commit === undefined ? {} : { commit: at.commit }),
+          ...(at.line === undefined ? {} : { line: at.line }),
+        }),
+      ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
@@ -534,6 +585,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setAutomationPostsReviews: (automationId, on) => command((commandId) => api.SetAutomationPostsReviews({ commandId, automationId, on })),
     setAutomationsPaused: (paused) => command((commandId) => api.SetAutomationsPaused({ commandId, paused })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
+    moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
+    lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
@@ -543,6 +596,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
+    markTaskDone: (taskId) => command((commandId) => api.MarkTaskDone({ commandId, taskId })),
+    keepTaskForLater: (taskId) => command((commandId) => api.KeepTaskForLater({ commandId, taskId })),
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
@@ -589,6 +644,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
     getProjectNotes: (projectId) => settle(api.GetProjectNotes({ projectId })),
     dropProjectNote: (projectId, noteId) => command((commandId) => api.DropProjectNote({ commandId, projectId, noteId })),
+    editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
@@ -613,6 +669,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     listEditors: () => settle(api.ListEditors({})),
     getLoad: () => settle(api.GetLoad({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
+    openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     replacePullRequest: (taskId, head, replaces, url) =>
@@ -621,6 +678,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.MergeNote({ commandId, taskId, ...(url === undefined ? {} : { url }) })).then(({ note }) => note),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
+    attachPullRequest: (taskId, pullRequest, start) =>
+      command((commandId) => api.AttachPullRequest({ commandId, taskId, pullRequest, start })),
     closePullRequest: (input) => command((commandId) => api.ClosePullRequest({ commandId, ...input })),
     stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
     clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),
@@ -635,6 +694,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
+    handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.

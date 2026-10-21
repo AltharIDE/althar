@@ -27,6 +27,10 @@
     'mark status actions';
   row-gap: 0;
 }
+/* connected, with nothing under its name: one row, so the name sits level with its mark and actions */
+.head:not(:has(> .status)) {
+  grid-template-areas: 'mark name actions';
+}
 .head > .mark {
   grid-area: mark;
 }
@@ -68,7 +72,7 @@
   color: var(--t-2);
 }
 .calls {
-  color: var(--signal-bright);
+  color: var(--signal);
 }
 .instance {
   color: var(--t-3);
@@ -85,7 +89,18 @@
       'mark name actions'
       '. status status';
   }
+  .head > .status,
   .account .line {
     white-space: normal;
+  }
+  /* an account's actions go under its line, as an agent's do */
+  .account {
+    grid-template-columns: 20px minmax(0, 1fr);
+    row-gap: 0;
+  }
+  /* pulled out by an action's padding, so its word starts under the line's */
+  .account > .actions {
+    grid-column: 2;
+    margin-inline-start: -8px;
   }
 }

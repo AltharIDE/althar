@@ -8,9 +8,20 @@
   min-height: 128px;
   padding: 14px 24px 14px 28px;
   border-bottom: 1px solid var(--line);
+  /* the ink's wash; on dark lifted toward the words and fainter, so it reads as light, not a stain (dark.css) */
+  --glow: color-mix(in oklab, var(--ink), var(--t-1) var(--glow-lift, 0%));
   background:
-    radial-gradient(ellipse 520px 220px at 0% 0%, color-mix(in srgb, var(--ink) 15%, transparent), transparent 70%),
-    radial-gradient(ellipse 900px 160px at 20% -40%, color-mix(in srgb, var(--ink) 7%, transparent), transparent 70%), var(--n-2);
+    radial-gradient(
+      ellipse 520px 220px at 0% 0%,
+      color-mix(in srgb, var(--glow) calc(15% * var(--glow-strength, 1)), transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 900px 160px at 20% -40%,
+      color-mix(in srgb, var(--glow) calc(7% * var(--glow-strength, 1)), transparent),
+      transparent 70%
+    ),
+    var(--n-2);
 }
 .mark {
   flex: none;
@@ -96,10 +107,6 @@
   background: var(--n-3);
   color: var(--t-1);
 }
-.open:focus-visible {
-  outline: 2px solid var(--focus, currentColor);
-  outline-offset: 0;
-}
 .noMark {
   width: 10px;
   height: 10px;
@@ -118,6 +125,6 @@
   margin-top: 2px;
 }
 .end button[data-state='open'] {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }

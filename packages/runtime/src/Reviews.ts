@@ -189,6 +189,8 @@ export const reviewBriefOf = (taskId: string) =>
     const [latest] = yield* sql<{ verdict: ReviewVerdict | null; comments: string }>`
       SELECT verdict, comments FROM review_drafts WHERE task_id = ${taskId} AND state <> 'discarded'
       ORDER BY created_at DESC, rowid DESC LIMIT 1`
+    const [waiting] = yield* sql<{ id: string }>`
+      SELECT id FROM review_drafts WHERE task_id = ${taskId} AND state IN ('pending', 'posting', 'failed', 'uncertain') LIMIT 1`
     const [posted] = yield* sql<{ reviewUrl: string; decidedAt: string }>`
       SELECT review_url, decided_at FROM review_drafts WHERE task_id = ${taskId} AND state = 'posted'
       ORDER BY decided_at DESC, rowid DESC LIMIT 1`
@@ -210,6 +212,7 @@ export const reviewBriefOf = (taskId: string) =>
       blocking: kept.filter((comment) => comment.severity === 'blocking').length,
       verdict: latest?.verdict ?? null,
       posted: posted === undefined ? null : { url: posted.reviewUrl, at: posted.decidedAt },
+      waiting: waiting !== undefined,
     } satisfies ReviewBrief
   })
 

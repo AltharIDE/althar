@@ -363,6 +363,8 @@ describe('coordinator permission judgments', () => {
         assert.lengthOf(prompts, 1)
         assert.include(prompts[0] ?? '', 'Run the checkout tests')
         assert.include(prompts[0] ?? '', 'npm test')
+        // What could lose work, reach a secret or leave the computer goes to the person, whatever the judge makes of it.
+        assert.include(prompts[0] ?? '', 'Never allow what could lose the person’s work or reach their secrets')
         const [stored] = yield* sql<{ actor: string; scope: string }>`SELECT decided_by_actor_id AS actor, scope FROM decisions`
         assert.deepStrictEqual(stored, { actor: instance.coordinatorId, scope: 'once' })
         const [judged] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'permission_request.judged'`

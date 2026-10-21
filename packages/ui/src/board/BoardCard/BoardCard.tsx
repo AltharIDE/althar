@@ -59,6 +59,12 @@ export type BoardCardProps = RootProps<
     object?: ReactNode
     /** One fact, at its foot. */
     foot?: ReactNode
+    /**
+     * What can be done to it without opening it, in its top corner, over
+     * where it stands, shown as the card is hovered or has the focus: a
+     * finished task's Done and Keep for later.
+     */
+    corner?: ReactNode
     /** The automation whose run it is, by its name: said in a small line, with the automation's mark. */
     from?: string
     /** Open beside the board. */
@@ -95,6 +101,7 @@ export function BoardCard({
   track,
   object,
   foot,
+  corner,
   from,
   current,
   onOpen,
@@ -127,6 +134,7 @@ export function BoardCard({
           {t.from(from)}
         </p>
       )}
+      {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
     </article>
   )
 }

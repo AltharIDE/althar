@@ -55,3 +55,31 @@
 .from svg {
   flex: none;
 }
+
+/*
+ * What can be done to it without opening it: above the card's own button, in its top corner, on the card's own
+ * ground, so it covers what the top line says there. Shown as the card is hovered or something in it has the focus;
+ * always where nothing hovers.
+ */
+.corner {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: inherit;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.card:hover .corner,
+.card:focus-within .corner {
+  opacity: 1;
+}
+@media (hover: none) {
+  .corner {
+    opacity: 1;
+  }
+}

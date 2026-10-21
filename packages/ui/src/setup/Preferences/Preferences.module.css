@@ -3,14 +3,17 @@
   display: grid;
 }
 
-/* a part of a section: its name and a line on it, what is done for all of it at the end, then what it holds; a little apart from the one before */
+/* a part of a section: its name and a line on it, what is done for all of it at the end, then what it holds; after
+   anything before it, well apart and under a hairline */
 .group {
   display: grid;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
-.group + .group {
-  margin-top: 14px;
+.group:not(:first-child) {
+  margin-top: 12px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
 }
 .groupHead {
   display: flex;
@@ -23,15 +26,16 @@
   gap: 2px;
   min-width: 0;
 }
+/* a title that reads as one: bigger and darker than the names of the rows under it */
 .groupTitle {
   margin: 0;
-  font-size: 12.5px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--t-2);
+  color: var(--t-1);
 }
 .groupNote {
   margin: 0;
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.45;
   color: var(--t-3);
 }
@@ -68,7 +72,7 @@
   width: 30px;
   height: 30px;
   border-radius: 99px;
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 /* a mark with its own colours, in the glyph's place, as it is */
@@ -147,8 +151,8 @@
   border-radius: inherit;
   background: linear-gradient(
     90deg,
-    var(--t-1) 0%,
-    var(--t-1) calc(100% - var(--heat) * 100%),
+    var(--ink-fill) 0%,
+    var(--ink-fill) calc(100% - var(--heat) * 100%),
     color-mix(in srgb, var(--warm) calc(45% + var(--heat) * 55%), var(--danger)) 100%
   );
   transition: width 120ms ease-out;
@@ -183,7 +187,7 @@
   height: 16px;
   margin-left: -1px;
   border-radius: 2px;
-  background: var(--signal);
+  background: var(--ink-fill);
 }
 .thumb {
   position: absolute;
@@ -192,7 +196,7 @@
   height: 18px;
   margin-left: -9px;
   border-radius: 99px;
-  background: var(--paper);
+  background: var(--knob);
   border: 1px solid color-mix(in srgb, var(--warm) calc(var(--heat) * 100%), var(--line-3));
   box-shadow: var(--lift-2);
   transition:
@@ -203,19 +207,18 @@
   transform: scale(1.12);
 }
 .track:focus-visible .thumb {
-  box-shadow:
-    0 0 0 4px var(--signal-dim),
-    var(--lift-2);
+  outline: 1.5px solid var(--signal);
+  outline-offset: 1px;
 }
 /* it clicks into the default */
 .clicked {
-  border-color: var(--signal);
+  border-color: var(--ink-fill);
   animation: click 280ms ease-out;
 }
 @keyframes click {
   40% {
     transform: scale(1.28);
-    box-shadow: 0 0 0 6px var(--signal-dim);
+    box-shadow: 0 0 0 6px var(--line-2);
   }
 }
 .scale {
@@ -224,13 +227,13 @@
   justify-content: space-between;
   margin-top: 6px;
   font-size: 11px;
-  color: var(--t-4);
+  color: var(--t-3);
   font-variant-numeric: tabular-nums;
 }
 .mark {
   position: absolute;
   transform: translateX(-50%);
-  color: var(--signal);
+  color: var(--t-2);
   white-space: nowrap;
 }
 .markStart {
@@ -260,7 +263,7 @@
 .well {
   padding: 0 12px;
   border-radius: 10px;
-  background: var(--frost-well);
+  background: var(--inset);
   transition: opacity var(--base) var(--ease);
 }
 .well .row {
@@ -292,6 +295,8 @@
   width: 44px;
   height: 44px;
   object-fit: contain;
+  /* on dark a dark icon (Cursor's black tile) keeps its edge (dark.css) */
+  filter: var(--icon-edge, none);
 }
 .letter {
   display: grid;
@@ -418,10 +423,10 @@
 }
 .place:has(:checked),
 .place:has(:checked):hover {
-  box-shadow: 0 0 0 2px var(--t-1);
+  box-shadow: 0 0 0 2px var(--ink-fill);
 }
 .place:has(:focus-visible) {
-  outline: 2px solid var(--live);
+  outline: 1.5px solid var(--signal);
   outline-offset: 2px;
 }
 .place .scene {
@@ -463,7 +468,7 @@
   box-shadow: inset 0 0 0 1.5px var(--t-3);
 }
 .place:has(:checked) .radio {
-  box-shadow: inset 0 0 0 4px var(--t-1);
+  box-shadow: inset 0 0 0 4px var(--ink-fill);
 }
 
 /* ---- where it shows, with nothing to choose: the screen beside the words, or over them where there isn't room ---- */

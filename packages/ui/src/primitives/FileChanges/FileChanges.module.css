@@ -14,17 +14,28 @@
   transition: background var(--fast) var(--ease);
 }
 button.file:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: flex;
+  min-width: 0;
   font: 12px/1.3 var(--mono);
   color: var(--t-1);
 }
+.dir,
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .dir {
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--t-3);
+}
+.name {
+  flex: none;
+  max-width: 100%;
 }
 .delta {
   display: inline-flex;
@@ -36,6 +47,10 @@ button.file:hover {
 }
 .del {
   color: var(--danger);
+}
+/* nothing added, or nothing removed: no colour to say so */
+.none {
+  color: var(--t-3);
 }
 /* how big the file's change is against the largest, and how much of it is addition */
 .bar {

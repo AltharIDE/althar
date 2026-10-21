@@ -16,13 +16,19 @@ import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { errorClassOf, promptFor, Sessions } from '../src/Sessions'
+import { DICTATED, errorClassOf, promptFor, Sessions } from '../src/Sessions'
 import { items, repository, runtime, task, turns, until } from './support'
 
-const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current') =>
+const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current', dictated = false) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
-    return yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body, disposition })
+    return yield* sessions.send({
+      envelope: yield* Runtime.envelope('thread.send', { threadId, body }),
+      threadId,
+      body,
+      disposition,
+      ...(dictated ? { dictated } : {}),
+    })
   })
 
 /** The thread item of what the person said, and where that input stands. */
@@ -158,6 +164,46 @@ describe('sessions', () => {
         replies.at(-1),
         `echo: ${promptFor([{ body: 'use the retry helper', disposition: 'interrupt_and_continue' }], undefined)}`,
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('tells the agent a message was dictated, and only that one, in the prompt and not in the thread', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, 'ask alpha about the retry', 'after_current', true)
+      yield* ended(created.threadId, 1)
+      yield* say(created.threadId, 'ask Althar about the cache')
+      yield* ended(created.threadId, 2)
+      const all = yield* threadItems(created.threadId)
+      const said = all.filter((item) => item.kind === 'user_message').map((item) => item.content.text)
+      const replies = all.filter((item) => item.kind === 'agent_message').map((item) => String(item.content.text))
+      // What the thread shows is what the person said, as it was.
+      assert.deepStrictEqual(said.slice(-2), ['ask alpha about the retry', 'ask Althar about the cache'])
+      assert.strictEqual(replies.at(-2), `echo: ask alpha about the retry\n\n${DICTATED}`)
+      assert.strictEqual(replies.at(-1), 'echo: ask Althar about the cache')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps the mark on a dictated message that waits behind a turn, and says it as the thread shows it', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, scenarios.slow)
+      yield* until(threadItems(created.threadId), (rows) => rows.some((item) => item.content.text === 'Starting'))
+      const queued = yield* say(created.threadId, 'then check the alter docs', 'after_current', true)
+      const row = yield* message(queued.inputId)
+      assert.strictEqual(row.state, 'queued')
+      // The thread shows its words as they were said, marker or not.
+      const waiting = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'user_message').at(-1)
+      assert.strictEqual(waiting?.content.text, 'then check the alter docs')
+      yield* sessions.interrupt(created.threadId)
+      yield* ended(created.threadId, 2)
+      const replies = (yield* threadItems(created.threadId))
+        .filter((item) => item.kind === 'agent_message')
+        .map((item) => String(item.content.text))
+      assert.strictEqual(replies.at(-1), `echo: then check the alter docs\n\n${DICTATED}`)
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -724,7 +770,9 @@ describe('sessions', () => {
         yield* say(created.threadId, scenarios.commandChoices)
         yield* until(sql<{ id: string }>`SELECT id FROM attention_requests WHERE state = 'open'`, (rows) => rows.length === 1)
         const [process] = yield* sql<{ pid: number }>`SELECT pid FROM processes WHERE provider_session_id = ${sessionId}`
-        globalThis.process.kill(-(process?.pid ?? 0), 'SIGKILL')
+        // Its whole tree: its process group, or on Windows its keeper, whose job ends with it.
+        const pid = process?.pid ?? 0
+        globalThis.process.kill(globalThis.process.platform === 'win32' ? pid : -pid, 'SIGKILL')
         yield* until(
           Effect.map(session(sessionId), (row) => [row]),
           ([row]) => row?.state === 'lost',

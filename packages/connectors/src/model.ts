@@ -78,6 +78,12 @@ export const ChangeRequest = Schema.Struct({
    * hasn't worked it out yet, or doesn't say.
    */
   conflicts: Schema.optional(Schema.Boolean),
+  /**
+   * The repository its branch is on, where that isn't the one it goes into:
+   * a fork's path, or none where the fork is gone. Null for a branch of the
+   * repository's own; absent where the host doesn't say, as a list may not.
+   */
+  headRepository: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
 })
 export type ChangeRequest = typeof ChangeRequest.Type
 
