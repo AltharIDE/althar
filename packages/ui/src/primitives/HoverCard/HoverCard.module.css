@@ -6,7 +6,7 @@
   width: max-content;
   max-width: min(280px, calc(100vw - 16px));
   padding: 10px 12px;
-  background: var(--paper);
+  background: var(--float);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow: var(--lift-pop);
@@ -30,7 +30,7 @@
   }
 }
 
-/* a control's name: one line, smaller, the shortcut beside it */
+/* a control's name: smaller, the shortcut beside it; one line, or, where it says more than the card is wide, wrapping inside it */
 .tip {
   flex-direction: row;
   align-items: center;
@@ -38,5 +38,4 @@
   padding: 5px 8px;
   border-radius: var(--r);
   color: var(--t-1);
-  white-space: nowrap;
 }

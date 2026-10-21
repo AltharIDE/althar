@@ -30,13 +30,13 @@
 .default:active:not(:disabled),
 .default[aria-pressed='true'],
 .default[aria-expanded='true'] {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 
 .fill {
   border-radius: 8px;
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 .fill:hover:not(:disabled) {

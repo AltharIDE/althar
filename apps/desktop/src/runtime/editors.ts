@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, posix } from 'node:path'
 
 import { locate } from '@althar/provider-adapters'
 import { Effect } from 'effect'
@@ -105,6 +105,9 @@ export const start = (command: string, args: ReadonlyArray<string>, platform: No
 const commandOf = (known: Known, platform: NodeJS.Platform): string | null =>
   known.cli === undefined ? null : (locate(known.cli.name, { bundled: null, kept: null }, { platform, scripts: true })?.command ?? null)
 
+/** Where a Mac keeps apps: a Mac's paths, whatever system asks. */
+const macApps = (home: string) => ['/Applications', posix.join(home, 'Applications')]
+
 /** The editors found here, in the order they are offered, then the file manager. */
 export const editorsHere = (
   home = homedir(),
@@ -114,10 +117,7 @@ export const editorsHere = (
 ): ReadonlyArray<{ readonly id: string; readonly name: string }> => {
   const found =
     platform === 'darwin'
-      ? KNOWN.filter(
-          (editor) =>
-            editor.app !== undefined && ['/Applications', join(home, 'Applications')].some((dir) => exists(join(dir, editor.app ?? ''))),
-        )
+      ? KNOWN.filter((editor) => editor.app !== undefined && macApps(home).some((dir) => exists(posix.join(dir, editor.app ?? ''))))
       : KNOWN.filter((editor) => find(editor) !== null)
   return [...found.map(({ id, name }) => ({ id, name })), fileManagerOf(platform)]
 }
@@ -138,7 +138,11 @@ export const bundleOf = (
   if (id === 'finder') return FINDER_APP
   const known = KNOWN.find((editor) => editor.id === id)
   if (known?.app === undefined) return null
-  return ['/Applications', join(home, 'Applications')].map((dir) => join(dir, known.app ?? '')).find((path) => exists(path)) ?? null
+  return (
+    macApps(home)
+      .map((dir) => posix.join(dir, known.app ?? ''))
+      .find((path) => exists(path)) ?? null
+  )
 }
 
 /** How an editor's command is told to open a file at a line. */

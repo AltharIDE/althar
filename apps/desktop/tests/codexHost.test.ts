@@ -143,7 +143,8 @@ const said = (at: ReturnType<typeof device>) => {
   }
 }
 
-describe('the Codex host bridge', () => {
+// A Flatpak's, and so Linux's: its script runs in a POSIX shell.
+describe.skipIf(process.platform === 'win32')('the Codex host bridge', () => {
   it('runs the device’s Codex with the account’s settings and git settings crossing whole, the device’s home, and its own working directory', () => {
     const at = device()
     const { output } = said(at)

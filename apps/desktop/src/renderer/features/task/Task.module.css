@@ -10,6 +10,13 @@
   min-height: 0;
 }
 
+/* the Graph face fills what is under the header, its canvas edge to edge */
+.graphFace {
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+}
+
 .loading {
   display: grid;
   flex: 1;
@@ -55,6 +62,10 @@
 .issue {
   display: flex;
 }
+.fileAll {
+  display: flex;
+  justify-content: flex-end;
+}
 .quiet {
   margin: 0;
   font-size: 13px;
@@ -62,17 +73,11 @@
 }
 /* Pushed with no connection: what connecting would add, under the change. */
 .offer {
-  margin: 14px 0 0;
+  margin: 0;
   font-size: 13px;
   line-height: 1.55;
   color: var(--t-2);
   text-wrap: pretty;
-}
-.changeActions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 14px;
 }
 .external {
   font-size: 12.5px;
@@ -82,7 +87,6 @@
   text-underline-offset: 2px;
 }
 
-/* What the task made: the change set and what can be done with it, on the page, as wide as the header over it. */
 /* Its outputs, alone or beside where its code host is connected, as a conversation has a panel beside it. */
 .outputsFace {
   flex: 1;
@@ -94,7 +98,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(420px, 38vw, 600px);
+  grid-template-columns: minmax(0, 1fr) var(--panel-width, clamp(420px, 38vw, 600px));
 }
 .withPanel > .outputs {
   height: 100%;
@@ -103,10 +107,55 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  container-type: inline-size;
 }
-.outputsBody {
+/* What it made as wide as the window lets it be, what it changed in a column beside it, held in view as the page scrolls. */
+.outputsWide,
+.outputsAlone {
   display: grid;
-  align-content: start;
-  gap: 14px;
-  padding-block: 24px 48px;
+  gap: 44px;
+  align-items: start;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 28px 40px 72px;
+}
+.outputsWide {
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 27vw, 360px);
+}
+.outputsAlone {
+  grid-template-columns: minmax(0, 880px);
+  justify-content: center;
+}
+.side,
+.sideAlone {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.side {
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  /* room for the card's edge and shadow, which the scroll would clip */
+  margin: -4px;
+  padding: 4px;
+}
+.sideAlone {
+  max-width: 420px;
+}
+/* Narrow, as beside an open panel: the change first, what it made under it. */
+@container (max-width: 820px) {
+  .outputsWide {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    padding-inline: 24px;
+  }
+  .side {
+    position: static;
+    order: -1;
+    max-height: none;
+    overflow: visible;
+  }
 }

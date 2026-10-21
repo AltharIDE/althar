@@ -1026,8 +1026,11 @@ describe('where sign-ins are kept', () => {
       assert.strictEqual(yield* secrets.get('conn_1'), '{"token":"ghp newer"}')
       // What is on disk is sealed, and only this user may read it.
       assert.notInclude(readFileSync(join(folder, 'conn_1'), 'utf8'), 'ghp')
-      assert.strictEqual(statSync(join(folder, 'conn_1')).mode & 0o777, 0o600)
-      assert.strictEqual(statSync(folder).mode & 0o777, 0o700)
+      // Windows keeps no such modes: its folders under the person's profile are theirs alone already.
+      if (process.platform !== 'win32') {
+        assert.strictEqual(statSync(join(folder, 'conn_1')).mode & 0o777, 0o600)
+        assert.strictEqual(statSync(folder).mode & 0o777, 0o700)
+      }
       assert.deepStrictEqual(readdirSync(folder), ['conn_1'])
       yield* secrets.remove('conn_1')
       yield* secrets.remove('conn_1')

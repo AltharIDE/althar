@@ -46,9 +46,25 @@
   border-radius: 99px;
   background: var(--live);
 }
-.next {
+.dotYou {
+  background: var(--signal);
+}
+.you {
+  color: var(--signal);
+}
+.next,
+.held {
   background: transparent;
   color: var(--t-3);
+}
+.waiting {
+  border-color: var(--signal);
+  color: var(--t-1);
+}
+.proposed {
+  border-style: dashed;
+  border-color: var(--signal);
+  color: var(--t-1);
 }
 .added {
   border-style: dashed;

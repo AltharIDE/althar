@@ -26,7 +26,7 @@
   color: var(--t-1);
 }
 .pill:active {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .pill:focus-visible {
   outline-offset: 2px;
@@ -106,7 +106,7 @@
   border-radius: 6px;
 }
 .row:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .rowGlyph {
   display: grid;
@@ -115,11 +115,11 @@
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: var(--n-2);
+  background: var(--tile);
   color: var(--t-1);
 }
 .row:hover .rowGlyph {
-  background: var(--paper);
+  background: var(--tile-hover);
 }
 .rowMain {
   flex: 1;

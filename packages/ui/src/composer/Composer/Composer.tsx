@@ -79,6 +79,8 @@ export const COMPOSER_IMAGE_TYPES = 'image/png,image/jpeg,image/gif,image/webp'
 
 export interface ComposerText {
   send: string
+  /** The key that takes a suggestion into the field, shown where the send button would be. */
+  takeKey: string
   /** The key that sends or queues, shown in the button's tooltip. */
   sendKey: string
   /** Sending while the agent works: it waits until the agent is done with what it is doing. */
@@ -114,6 +116,8 @@ export interface ComposerText {
   queued: (n: number) => string
   /** Takes a queued message back into the field. */
   editQueued: string
+  /** Sends a queued message now, interrupting the agent with it, rather than when the agent is done. */
+  sendQueuedNow: string
   unqueue: (text: string) => string
   /** The button that picks images from the computer. */
   addImages: string
@@ -127,6 +131,7 @@ export interface ComposerText {
 
 export const composerText: ComposerText = {
   send: 'Send',
+  takeKey: 'Tab',
   sendKey: '↵',
   queue: 'Queue',
   stop: 'Interrupt the lead',
@@ -147,6 +152,7 @@ export const composerText: ComposerText = {
   dictatedAway: 'What you said was written down while you were away.',
   queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
   editQueued: 'Edit',
+  sendQueuedNow: 'Send now',
   unqueue: (text) => `Take “${text}” out of the queue`,
   addImages: 'Add images',
   dropImages: 'Drop to add them to your message',
@@ -176,10 +182,18 @@ export interface ComposerProps {
   queued?: readonly QueuedMessage[]
   /** Take a queued message back into the field. Without it, a queued message has no Edit. */
   onEditQueued?: (id: string) => void
+  /** Send a queued message now, interrupting the agent with it, instead of when it is done. Without it, a queued message has no Send now. */
+  onSendQueuedNow?: (id: string) => void
   /** Take a queued message out of the queue. */
   onUnqueue?: (id: string) => void
   /** The shortcut that focuses the composer, shown when there is nothing to send. */
   hint?: string
+  /**
+   * What it would most likely be told next, in grey where nothing is
+   * written, as a suggested prompt: Tab takes it into the field, and Enter
+   * then sends it, so a stray key sends nothing. Not while the agent works.
+   */
+  suggestion?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
   /** Dictation carried from another thread (a DictationPill): centred over the composer, above all that floats on its edge, so it covers none of it. */
@@ -228,8 +242,10 @@ export function Composer({
   dictation,
   queued = [],
   onEditQueued,
+  onSendQueuedNow,
   onUnqueue,
   hint,
+  suggestion,
   above,
   carried,
   tray,
@@ -323,10 +339,13 @@ export function Composer({
     if (out || images.length > 0) onSendNow?.(out)
   }
 
+  /* A suggestion to take, while nothing is written or arriving and the agent is free. */
+  const suggested = suggestion !== undefined && suggestion !== '' && !busy && !drafted && !dictating ? suggestion : null
+
   const shownPlaceholder = (() => {
     if (interim) return ''
     if (elapsed !== null) return t.listening
-    return placeholder
+    return suggested ?? placeholder
   })()
 
   const note = (() => {
@@ -339,6 +358,7 @@ export function Composer({
   const action = (() => {
     if (drafted) return <IconButton icon="up" label={busy ? t.queue : t.send} tone="fill" type="submit" kbd={t.sendKey} />
     if (busy && onStopAgent) return <IconButton icon="square" label={t.stop} tone="fill" onClick={onStopAgent} kbd={t.stopKey} />
+    if (suggested !== null) return <Kbd className={s.kbd}>{t.takeKey}</Kbd>
     if (hint) return <Kbd className={s.kbd}>{hint}</Kbd>
     return null
   })()
@@ -376,6 +396,11 @@ export function Composer({
                   {onEditQueued && (
                     <LinkButton className={s.queuedEdit} onClick={() => onEditQueued(q.id)}>
                       {t.editQueued}
+                    </LinkButton>
+                  )}
+                  {onSendQueuedNow && (
+                    <LinkButton className={s.queuedEdit} onClick={() => onSendQueuedNow(q.id)}>
+                      {t.sendQueuedNow}
                     </LinkButton>
                   )}
                   {onUnqueue && <IconButton icon="close" size="small" label={t.unqueue(q.text)} onClick={() => onUnqueue(q.id)} />}
@@ -452,6 +477,12 @@ export function Composer({
               onAddImages(pasted)
             }}
             onKeyDown={(e) => {
+              /* Tab takes the suggestion into the field, to send with Enter or change first. */
+              if (e.key === 'Tab' && !e.shiftKey && suggested !== null) {
+                e.preventDefault()
+                onChange(suggested)
+                return
+              }
               if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
               /* Enter while dictating wraps up what was said and leaves it in the field, unsent; while it is written down, it waits. */
               if (dictating) {

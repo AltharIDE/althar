@@ -44,18 +44,28 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   handled failure when its session is lost: its id and how its process
   ended, never what it wrote (ADR-047).
 
-## The Flatpak's keyring, 15 October
+## The Flatpak's sign-in key, 15 October
 
-- [ ] **Where the sealing key lives in the Flatpak, so it survives a restart.**
-  Found with the person's own Flatpak on KDE (Electron 44, `gnome-libsecret`):
-  inside the sandbox libsecret keeps its keyring in a file of the app's own,
-  but Chromium looks the key up in the host's secret service, finds none, and
-  logs "OSCrypt generated a new password" at every start. A sign-in sealed in
-  one run is then unreadable in the next (`safeStorage.decryptString` fails).
-  Althar now says so ("sign in again", the connection goes to
-  `reauth_required`) rather than "unreachable", but the key itself is decided
-  elsewhere: KDE (KWallet) on PR #201, GNOME on PR #207. Settled when a whole
-  task has survived a restart under both (ADR-028).
+- [x] **A sign-in whose key is lost asks to be made again.** When
+  `safeStorage.decryptString` throws, main marks the answer `unreadable`
+  (`sealFailure`), and the runtime puts the connection in `reauth_required`
+  ("sign in again") rather than reporting the keychain away.
+- [x] **Keep a sign-in key across restarts on GNOME and KDE.** Every Linux
+  Flatpak prefers Chromium's app-specific Secret portal seal (`v12`), KDE
+  included; direct KWallet access is removed from this branch so browser apps
+  do not share the normal key. If the portal is missing, Althar keeps the
+  former synchronous safeStorage behavior only when the selected backend passes
+  `keyringIsSafe`, encryption is available, and the backend is the private
+  sandbox-local `gnome_libsecret` file. This fallback can be session only and
+  may prompt again after restart. The runtime still carries opaque
+  sealed values and never receives the key. See
+  [ADR-028](decisions/028-linux-windows-packages-and-the-keyring.md).
+- [ ] **Run the real GNOME restart test.** It has not been run in this task's
+  KDE-only sandbox. Follow the exact GNOME session or VM steps in ADR-028;
+  verify GitHub stays connected after `flatpak kill dev.althar.app` and the
+  second launch has no `OSCrypt generated a new password` message. #207
+  replaces the closed #201's KDE-specific path with the app-specific portal
+  path on both desktops.
 
 ## Usage data, 12 October
 
@@ -341,9 +351,13 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   Until then such a project's setup command runs outside the agent.
 - [ ] **A sandbox for agents' shells.** The environment keeps the person's
   ambient sign-ins from agents, and the rules refuse the keychain and git's
-  helpers, but a shell can still read what the person keeps in plain files
-  under their home folder (`~/.git-credentials`, an unencrypted SSH key, a
-  cloud CLI's config). Only running agents in a sandbox closes that:
+  helpers, and since DEV-69 any request that names where people keep keys
+  and sign-ins (`~/.git-credentials`, `~/.ssh`, a cloud CLI's config), and
+  Claude Code's sandbox is given those places as denied reads. But a command
+  an agent's sandbox runs without asking never reaches the rules, Codex's
+  sandbox reads anywhere, and a command can find such a file without naming
+  it ([the safety pass](plans/safety-pass.md)). Only running agents in a
+  sandbox of Althar's own closes that:
   macOS's sandbox profiles, a container, or a separate user. Also: agents'
   own API keys (03, "API keys and OAuth") should be sealed the way code hosts' tokens
   are, not kept where `security` reads them.

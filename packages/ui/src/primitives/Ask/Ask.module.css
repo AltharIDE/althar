@@ -4,12 +4,23 @@
   border-radius: var(--r-lg);
   background: var(--signal-paper);
   box-shadow: inset 0 0 0 1px var(--signal-line);
+  /* what is set on it is raised in its own violet: white on paper, a lifted violet-grey at night */
+  --paper: var(--signal-raised);
+}
+/* ink: a way on is offered, but nothing waits on the person */
+.quiet {
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  --paper: var(--paper-plain);
 }
 .head {
   display: flex;
   align-items: center;
   gap: 7px;
   color: var(--signal);
+}
+.quiet .head {
+  color: var(--t-2);
 }
 .kicker {
   font-size: 12px;

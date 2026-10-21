@@ -54,6 +54,12 @@ export type BoardCardProps = RootProps<
     object?: ReactNode
     /** One fact, at its foot. */
     foot?: ReactNode
+    /**
+     * What can be done to it without opening it, in its top corner, over
+     * where it stands, shown as the card is hovered or has the focus: a
+     * finished task's Done and Keep for later.
+     */
+    corner?: ReactNode
     /** Open beside the board. */
     current?: boolean
     onOpen?: () => void
@@ -88,6 +94,7 @@ export function BoardCard({
   track,
   object,
   foot,
+  corner,
   current,
   onOpen,
   text,
@@ -113,6 +120,7 @@ export function BoardCard({
       {track !== undefined && track.length > 0 && <StepTrack steps={track} labels status={status} className={s.track} />}
       {object !== undefined && object !== null && <div className={s.object}>{object}</div>}
       {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}
+      {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
     </article>
   )
 }

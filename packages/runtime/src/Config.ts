@@ -54,6 +54,11 @@ export interface RuntimeOptions {
   readonly countdown?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /** When finished tasks' folders are first swept after Althar starts, and how often after: 2 minutes and an hour unless a test says otherwise (ADR-056). */
+  readonly foldersFirst?: Duration.Duration
+  readonly foldersEvery?: Duration.Duration
+  /** How full the disk a folder is on is read, in bytes: the system's own figures unless a test says, so none depends on the Mac it runs on. */
+  readonly disk?: (path: string) => Effect.Effect<{ readonly total: number; readonly free: number; readonly used: number } | null>
   /**
    * How long after a change's work comes back its pull request may show no checks before Althar takes it to have none: a
    * host registers its checks a few seconds after a push. A minute unless a test says otherwise (ADR-040).
@@ -104,6 +109,8 @@ export interface IdleOptions {
   readonly wake?: Duration.Duration
   /** How long after its turn ends a lead is given to report what it left running: two seconds. */
   readonly reports?: Duration.Duration
+  /** How long a step's agent whose turn ended having done nothing at all is given before it is told to carry on: a minute. */
+  readonly blank?: Duration.Duration
 }
 
 export interface BusyOptions {
@@ -315,7 +322,7 @@ export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | nu
     execFile(
       tool,
       args,
-      { timeout: 10_000, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      { timeout: 10_000, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
       (error, stdout) => {
         const token = stdout.trim()
         if (error === null) return resume(Effect.succeed(/^\S{20,400}$/.test(token) ? token : null))

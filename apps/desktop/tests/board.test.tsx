@@ -306,21 +306,138 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
-  it('keeps a plain task that finished out of Needs you, since it asks nothing, and waits for it above what settled', () => {
+  it('keeps a plain task that finished in Needs you, counted, until the person keeps it for later, the latest kept first', () => {
+    const finished = task({ taskId: 'p1', threadId: 'thp1', title: 'Which partners call v1?', phase: 'ready', kind: 'plain', branch: null })
+    const ready = task({ taskId: 't4', threadId: 'th4', title: 'Rate-limit refunds', phase: 'ready', change: change() })
+    const lanes = lanesOf(board({ tasks: [finished, ready], calls: [] }))
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['p1', 't4'])
+    expect(lanes.kept).toEqual([])
+    expect(yoursOf(lanes)).toBe(2)
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([
+      ['Finished', 'Which partners call v1?'],
+      ['Ready to accept', 'Rate-limit refunds'],
+    ])
+    expect(firstNeedOf(lanes)).toBe('thp1')
+    // Kept for later, it is out of Needs you, with what else was kept, the latest first.
+    const older = task({
+      taskId: 'p2',
+      threadId: 'thp2',
+      title: 'Prototype the tabs',
+      phase: 'kept',
+      kind: 'plain',
+      keptAt: '2026-10-01T09:00:00.000Z',
+    })
+    const kept = lanesOf(board({ tasks: [older, { ...finished, phase: 'kept', keptAt: '2026-10-02T09:00:00.000Z' }, ready], calls: [] }))
+    expect(kept.ready.map((work) => work.taskId)).toEqual(['t4'])
+    expect(kept.kept.map((work) => work.taskId)).toEqual(['p1', 'p2'])
+    expect(yoursOf(kept)).toBe(1)
+    expect(firstNeedOf(kept)).toBe('th4')
+  })
+
+  it('offers Done and Keep for later in a finished card’s corner where it isn’t a change, and Kept beside Settled in its head once there is some', async () => {
+    const markDone = vi.fn(async () => true)
+    const keep = vi.fn(async () => true)
+    const actions = {
+      push: vi.fn(),
+      merge: vi.fn(),
+      pushing: new Set<string>(),
+      merging: new Set<string>(),
+      failed: {},
+      markDone,
+      keep,
+      settling: new Set<string>(),
+    }
+    const finished = task({ taskId: 'p1', threadId: 'thp1', title: 'Prototype the tabs', phase: 'ready', kind: 'plain', branch: null })
+    const kept = task({
+      taskId: 'p2',
+      threadId: 'thp2',
+      title: 'Spike the limits',
+      phase: 'kept',
+      kind: 'plain',
+      branch: null,
+      summary: 'Codex says its limits every turn.',
+      keptAt: '2026-10-14T11:00:00.000Z',
+    })
+    const review = task({ taskId: 'r1', threadId: 'thr1', title: 'Review #1199', phase: 'ready', kind: 'review', branch: null })
+    // Its review posted, then written to again, and answered: finished, as a quick task is.
+    const answered = task({
+      taskId: 'r2',
+      threadId: 'thr2',
+      title: 'Review #1200',
+      phase: 'ready',
+      kind: 'review',
+      branch: null,
+      reviewing: {
+        product: 'github',
+        repository: 'meridian/api',
+        number: 1200,
+        url: 'https://github.com/meridian/api/pull/1200',
+        title: 'Retry webhooks',
+        author: 'ninemate',
+        outside: false,
+        additions: 1,
+        deletions: 0,
+        findings: 0,
+        blocking: 0,
+        verdict: 'comment',
+        posted: { url: 'https://github.com/meridian/api/pull/1200#pullrequestreview-1', at: '2026-10-14T09:00:00.000Z' },
+        waiting: false,
+      },
+    })
+    const settled = task({
+      taskId: 's1',
+      threadId: 'ths1',
+      title: 'Shipped before',
+      phase: 'settled',
+      state: 'done',
+      settledAt: '2026-10-14T10:00:00.000Z',
+    })
     const lanes = lanesOf(
       board({
         tasks: [
-          task({ taskId: 'p1', threadId: 'thp1', title: 'Which partners call v1?', phase: 'ready', kind: 'plain', branch: null }),
+          finished,
+          kept,
+          review,
+          answered,
+          settled,
           task({ taskId: 't4', threadId: 'th4', title: 'Rate-limit refunds', phase: 'ready', change: change() }),
         ],
         calls: [],
+        settledTotal: 1,
       }),
     )
-    expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4'])
-    expect(lanes.finished.map((work) => work.taskId)).toEqual(['p1'])
-    expect(yoursOf(lanes)).toBe(1)
-    expect(needsOf(lanes, () => '', vi.fn()).map((need) => need.title)).toEqual(['Rate-limit refunds'])
-    expect(firstNeedOf(lanes)).toBe('th4')
+    withServices(
+      <BoardView lanes={lanes} agents={agents} now="2026-10-14T12:00:00.000Z" onOpen={vi.fn()} actions={actions} />,
+      fakeClient().client,
+    )
+    const needs = within(screen.getByRole('region', { name: /^Needs you/ }))
+    const card = (title: string) => within(needs.getByRole('button', { name: title }).closest('article') ?? document.body)
+    // A finished plain task: both. A review drafted: Keep for later alone. A change: neither.
+    await userEvent.click(card('Prototype the tabs').getByRole('button', { name: 'Done' }))
+    expect(markDone).toHaveBeenCalledWith('p1')
+    await userEvent.click(card('Prototype the tabs').getByRole('button', { name: 'Keep for later' }))
+    expect(keep).toHaveBeenCalledWith('p1')
+    expect(card('Review #1199').queryByRole('button', { name: 'Done' })).toBeNull()
+    await userEvent.click(card('Review #1199').getByRole('button', { name: 'Keep for later' }))
+    expect(keep).toHaveBeenCalledWith('r1')
+    // A review posted and answered since: Finished, with both.
+    expect(card('Review #1200').getByText('Finished')).toBeTruthy()
+    await userEvent.click(card('Review #1200').getByRole('button', { name: 'Done' }))
+    expect(markDone).toHaveBeenCalledWith('r2')
+    expect(card('Rate-limit refunds').queryByRole('button', { name: 'Keep for later' })).toBeNull()
+    // Settled opens on its ledger, as it always has, its head naming what was kept beside it.
+    const lane = within(screen.getByRole('region', { name: /^Settled/ }))
+    expect(lane.getByText('Shipped before')).toBeTruthy()
+    expect(lane.queryByText('Spike the limits')).toBeNull()
+    expect(lane.getByRole('button', { name: /^Settled/, pressed: true })).toBeTruthy()
+    await userEvent.click(lane.getByRole('button', { name: 'Kept 1', pressed: false }))
+    // Pressed, Kept shows in Settled's place: each in a line, when it was kept under its title.
+    expect(lane.getByRole('button', { name: 'Kept 1', pressed: true })).toBeTruthy()
+    expect(lane.getByText('Spike the limits')).toBeTruthy()
+    expect(lane.getByText(/^kept /)).toBeTruthy()
+    expect(lane.queryByText('Shipped before')).toBeNull()
+    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    expect(markDone).toHaveBeenCalledWith('p2')
   })
 
   it('keeps a merged task with commits after its pull request in Needs you, and settles it once they are left out', () => {
@@ -896,7 +1013,7 @@ describe('every state the board shows', () => {
       ),
     ).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
-    expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
+    expect(screen.getByText(`Codex is out of usage until ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
     // One waiting for a free agent says so, and what for.
     expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
     expect(screen.getByText('Waiting')).toBeTruthy()
@@ -1590,5 +1707,73 @@ describe('the bar and the dock, on the rest of the board', () => {
     withServices(<Docked target={{ kind: 'task', id: 'w' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     expect(await within(dock).findByText('Waiting work', { selector: 'h2' })).toBeTruthy()
+  })
+})
+
+describe('collapsing lanes', () => {
+  beforeEach(() => window.localStorage.removeItem('althar.lanes'))
+
+  const theBoard = async () => {
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    return screen.findByRole('region', { name: 'The project’s work' })
+  }
+
+  it('keeps a lane the person collapsed, for every project, and apart beside the conversation', async () => {
+    const work = await theBoard()
+    await userEvent.click(within(work).getByRole('button', { name: 'Collapse Settled' }))
+    expect(document.activeElement).toBe(within(work).getByRole('button', { name: 'Expand Settled, 2' }))
+    expect(JSON.parse(window.localStorage.getItem('althar.lanes') ?? 'null')).toEqual({
+      alone: { collapsed: ['settled'], opened: [] },
+      beside: { collapsed: [], opened: [] },
+    })
+    // Beside the conversation, the board keeps its own.
+    await userEvent.click(screen.getByRole('radio', { name: 'Home' }))
+    const beside = await screen.findByRole('region', { name: 'The project’s work' })
+    expect(within(beside).getByRole('button', { name: 'Collapse Settled' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
+    const alone = await screen.findByRole('region', { name: 'The project’s work' })
+    await userEvent.click(within(alone).getByRole('button', { name: 'Expand Settled, 2' }))
+    expect(JSON.parse(window.localStorage.getItem('althar.lanes') ?? 'null').alone).toEqual({ collapsed: [], opened: ['settled'] })
+  })
+
+  it('opens on what was kept, leaving out what it doesn’t know as a lane', async () => {
+    window.localStorage.setItem('althar.lanes', JSON.stringify({ alone: { collapsed: ['next', 'archive', 3], opened: 'settled' } }))
+    const work = await theBoard()
+    expect(within(work).getByRole('button', { name: 'Expand Up next, 1' })).toBeTruthy()
+    expect(within(work).getByRole('button', { name: 'Collapse Settled' })).toBeTruthy()
+  })
+
+  it('collapses nothing from storage it can’t read', async () => {
+    window.localStorage.setItem('althar.lanes', '{not json')
+    const work = await theBoard()
+    expect(within(work).queryByRole('button', { name: /^Expand/ })).toBeNull()
+    expect(within(work).getByRole('button', { name: 'Collapse Up next' })).toBeTruthy()
+  })
+
+  it('keeps a lane collapsed for this window when storage can be read but won’t take it', async () => {
+    const setItem = Storage.prototype.setItem.bind(window.localStorage)
+    const full = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
+      if (key === 'althar.lanes') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      setItem(key, value)
+    })
+    try {
+      const work = await theBoard()
+      await userEvent.click(within(work).getByRole('button', { name: 'Collapse Settled' }))
+      expect(within(work).getByRole('button', { name: 'Expand Settled, 2' })).toBeTruthy()
+      expect(window.localStorage.getItem('althar.lanes')).toBeNull()
+    } finally {
+      full.mockRestore()
+    }
+  })
+
+  it('keeps Needs you open while something waits in it, saying why', async () => {
+    window.localStorage.setItem('althar.lanes', JSON.stringify({ alone: { collapsed: ['you'], opened: [] } }))
+    const work = await theBoard()
+    const stays = within(work).getByRole('button', { name: 'Needs you stays open while something waits on you' })
+    expect(stays.getAttribute('aria-disabled')).toBe('true')
+    await userEvent.click(stays)
+    expect(within(work).getByRole('button', { name: 'Ship it' })).toBeTruthy()
   })
 })

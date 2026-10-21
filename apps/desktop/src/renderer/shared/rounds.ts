@@ -2,7 +2,7 @@ import type { ThreadItem } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
-import { type Block, blocksOf, type Part, relayed, type StepResult, type Streamed } from './thread'
+import { type Block, blocksOf, carriedOn, type Part, relayed, type StepResult, type Streamed } from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
 
@@ -74,6 +74,8 @@ export type RoundBlock =
   | { readonly kind: 'relayed'; readonly id: string; readonly title: string | null; readonly body: string }
   /** Althar, saying something the person should know: a conflict, checks. */
   | { readonly kind: 'althar'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' }
+  /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
+  | { readonly kind: 'folder'; readonly id: string; readonly text: string }
   /** A reviewer's verdict and findings, in its own voice. */
   | { readonly kind: 'verdict'; readonly id: string; readonly at: string; readonly result: StepResult }
   /** The pull request the task opened or pushed to. */
@@ -90,12 +92,14 @@ const ASIDES = [
   /showed no sign of work/,
 ]
 
-const roleOf = (content: NoticeContent): 'relayed' | 'aside' | 'news' =>
-  relayed(content)
-    ? 'relayed'
-    : content.role === 'aside' || (content.role === undefined && ASIDES.some((pattern) => pattern.test(content.title)))
-      ? 'aside'
-      : 'news'
+const roleOf = (content: NoticeContent): 'relayed' | 'aside' | 'folder' | 'news' =>
+  content.role === 'folder'
+    ? 'folder'
+    : relayed(content)
+      ? 'relayed'
+      : content.role === 'aside' || (content.role === undefined && ASIDES.some((pattern) => pattern.test(content.title)))
+        ? 'aside'
+        : 'news'
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`)
 
@@ -208,8 +212,16 @@ export const roundsOf = (
       now,
     )
   })
+  /** What a line of Althar's says, as the notice it was. */
+  const noticeOf = (block: Extract<Block, { kind: 'divider' }>): NoticeContent => {
+    const item = items.find((one) => one.id === block.id)
+    return item?.kind === 'notice' ? item.content : { source: 'runtime', severity: 'info', title: block.text, description: null }
+  }
   // The lead's turn runs in its last round, unless its reply to what it was last asked is still waited for.
   const lastTurn = blocks.some((block) => block.kind === 'waiting') ? -1 : blocks.findLastIndex((block) => block.kind === 'turn')
+  // Nor where Althar carried the step on after it, after a restart: then the turn running is a later one that has said nothing
+  // yet, and the round before it is over.
+  const running = turnRunning && !blocks.slice(lastTurn + 1).some((block) => block.kind === 'divider' && carriedOn(noticeOf(block)))
   const out: Array<RoundBlock> = []
   let open: Gathering | null = null
   // What Althar did between rounds goes in the next one's work.
@@ -227,7 +239,7 @@ export const roundsOf = (
           pending = []
         }
         open.steps.push(...block.parts)
-        if (turnRunning && index === lastTurn) close(true)
+        if (running && index === lastTurn) close(true)
         return
       }
       case 'step': {
@@ -274,9 +286,7 @@ export const roundsOf = (
         return
       }
       case 'divider': {
-        const item = items.find((one) => one.id === block.id)
-        const content: NoticeContent =
-          item?.kind === 'notice' ? item.content : { source: 'runtime', severity: 'info', title: block.text, description: null }
+        const content = noticeOf(block)
         const role = roleOf(content)
         if (role === 'relayed') {
           close(false)
@@ -292,6 +302,10 @@ export const roundsOf = (
           return
         }
         close(false)
+        if (role === 'folder') {
+          out.push({ kind: 'folder', id: block.id, text: block.text })
+          return
+        }
         out.push({ kind: 'althar', id: block.id, text: shorter(block.text), tone: content.severity === 'info' ? 'info' : 'warning' })
         return
       }

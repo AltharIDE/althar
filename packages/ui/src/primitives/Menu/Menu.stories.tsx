@@ -4,7 +4,18 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../Button/Button'
-import { Menu, MenuCheckboxItem, MenuGroup, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, type MenuProps } from './Menu'
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuItem,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSegments,
+  MenuSeparator,
+  MenuSwitchItem,
+  type MenuProps,
+} from './Menu'
 import { States, statesParameters } from '../../storybook/States'
 
 const EFFORTS = ['Low', 'Medium', 'High', 'Max']
@@ -147,6 +158,71 @@ export const Checkboxes: Story = {
     await expect(work).toHaveAttribute('aria-checked', 'false')
     await expect(page.getByRole('menuitemcheckbox', { name: 'Personal' })).toHaveAttribute('aria-disabled', 'true')
     await expect(c.getByRole('button', { name: 'Accounts: Personal' })).toBeInTheDocument()
+  },
+}
+
+/* A menu of one-line rows with two settings in it, changed in place: what each row does shows at its foot. */
+function SettingsMenu(props: Partial<MenuProps>) {
+  const [sync, setSync] = useState('auto')
+  const [sound, setSound] = useState(true)
+  return (
+    <Menu label="This project" width={280} descriptions="foot" trigger={<Button>Project</Button>} {...props}>
+      <MenuItem icon="pencil" description="Give it another name. Its folders keep theirs." onSelect={() => {}}>
+        Rename
+      </MenuItem>
+      <MenuSeparator />
+      <MenuSegments
+        label="Sync"
+        value={sync}
+        onChange={setSync}
+        options={[
+          { value: 'auto', label: 'Auto', description: 'It syncs whenever something changes.' },
+          { value: 'hourly', label: 'Hourly', description: 'It syncs once an hour.' },
+          { value: 'off', label: 'Off', description: 'It syncs only when you ask.' },
+        ]}
+      />
+      <MenuSwitchItem checked={sound} onCheckedChange={setSound} description="A sound plays when something needs you.">
+        Sounds
+      </MenuSwitchItem>
+      <MenuSwitchItem
+        checked={false}
+        onCheckedChange={() => {}}
+        held
+        note="On for every project, in Settings"
+        description="Settings holds it on."
+      >
+        Notifications
+      </MenuSwitchItem>
+      <MenuSeparator />
+      <MenuItem icon="close" tone="danger" quiet description="It goes from Althar. Its folders stay." onSelect={() => {}}>
+        Remove
+      </MenuItem>
+    </Menu>
+  )
+}
+
+/**
+ * Settings in a menu: a few choices side by side, and switches, each changed in place with the menu left open.
+ * Every row is one line; what the highlighted one does shows at the foot, and is its description either way. A
+ * danger that shouldn't call out is grey until highlighted.
+ */
+export const SettingsInPlace: Story = {
+  render: () => <SettingsMenu />,
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Project' }))
+    const hourly = await page.findByRole('menuitemradio', { name: 'Hourly' })
+    await expect(hourly).toHaveAccessibleDescription('It syncs once an hour.')
+    await userEvent.click(hourly)
+    await expect(hourly).toHaveAttribute('aria-checked', 'true')
+    const sounds = page.getByRole('menuitemcheckbox', { name: 'Sounds' })
+    await userEvent.click(sounds)
+    await expect(sounds).toHaveAttribute('aria-checked', 'false')
+    await expect(page.getByRole('menuitemcheckbox', { name: 'Notifications' })).toHaveAttribute('aria-disabled', 'true')
+    await userEvent.hover(page.getByRole('menuitem', { name: 'Remove' }))
+    await waitFor(() =>
+      expect(page.getByText('It goes from Althar. Its folders stay.', { selector: '[aria-hidden="true"]' })).toBeVisible(),
+    )
   },
 }
 

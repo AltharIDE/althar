@@ -10,7 +10,8 @@ import { describe, expect, it } from 'vitest'
  * its JavaScript in a trailer at the end of the file, which the rewrite
  * drops: Claude Code's bundled `claude` (the Agent SDK's native binary)
  * would run as plain `bun`, so its sign-in and sessions would fail. These
- * checks hold the manifest to leaving the app's binaries alone.
+ * checks hold the manifest to leaving the app's binaries alone and keep its
+ * keyring access limited to the host Secret Service for safe sync fallback.
  */
 
 const manifest = readFileSync(join(import.meta.dirname, '..', 'flatpak', 'dev.althar.app.yml'), 'utf8')
@@ -21,5 +22,13 @@ describe('the Flatpak manifest', () => {
     expect(app).toMatch(/build-options:\n\s+strip: false\n\s+no-debuginfo: true/)
     // On the app module itself, before the commands that copy the app in.
     expect(app.indexOf('no-debuginfo: true')).toBeLessThan(app.indexOf('build-commands:'))
+  })
+
+  it('does not grant direct KWallet access; Flatpak sign-ins use the Secret portal on KDE too', () => {
+    const finish = manifest.slice(manifest.indexOf('finish-args:'), manifest.indexOf('modules:'))
+    expect(finish).toContain('- --talk-name=org.freedesktop.secrets\n')
+    expect(finish).not.toMatch(/org\.kde\.kwalletd/)
+    // The portal is reachable through the default portal proxy and needs no explicit bus permission.
+    expect(finish).not.toMatch(/^\s*-\s+--talk-name=org\.freedesktop\.portal\.Secret/m)
   })
 })

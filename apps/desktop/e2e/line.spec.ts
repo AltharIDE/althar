@@ -83,11 +83,17 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(rows.nth(3)).toContainText('Try the double jump')
     await expect(rows.nth(0)).toContainText('Next in line')
     await expect(rows.nth(3)).toContainText('4th in line')
-    await expect(running.getByRole('button')).toHaveCount(0)
+    await expect(running.getByRole('article')).toHaveCount(0)
     await expect(next.getByText('Drag to change the order')).toBeVisible()
     await page.mouse.move(1400, 880)
     await page.waitForTimeout(400)
     await work.screenshot({ path: 'test-results/line-board.png', scale: 'css', animations: 'disabled' })
+
+    // A shot of the line mid-drag. Not on Linux: under X, a shot has the window report X's own pointer, which no button
+    // holds, and the line takes it for a release it missed, ending the drag Playwright's mouse still holds.
+    const midDrag = async (path: string) => {
+      if (process.platform !== 'linux') await next.screenshot({ path, scale: 'css', animations: 'disabled' })
+    }
 
     // The person drags the quick task by its grip to the front: the rows make room, and it says it is next as it goes.
     await rows.nth(3).hover()
@@ -101,7 +107,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - ((from.y - top.y + 10) * step) / 10)
     await expect(rows.nth(0)).toContainText('Try the double jump')
     await expect(rows.nth(0)).toContainText('Next in line')
-    await next.screenshot({ path: 'test-results/line-dragging.png', scale: 'css', animations: 'disabled' })
+    await midDrag('test-results/line-dragging.png')
     await page.mouse.up()
     await expect(next.getByRole('button', { name: 'Back to oldest first' })).toBeVisible()
     await expect(rows.nth(1)).toContainText(PULLS[0] ?? '')
@@ -136,7 +142,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await glide(down, { x: down.x, y: bottom.y + bottom.height - 4 })
     await inOrder([...reviews, JUMP])
     await expect(rows.nth(3)).toContainText('4th in line')
-    await next.screenshot({ path: 'test-results/line-dragging-down.png', scale: 'css', animations: 'disabled' })
+    await midDrag('test-results/line-dragging-down.png')
     await page.mouse.up()
     await page.waitForTimeout(2500)
     await inOrder([...reviews, JUMP])

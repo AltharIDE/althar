@@ -17,6 +17,7 @@ function Settings() {
       start={start}
       section={isSection(section) ? section : FIRST_SECTION}
       onSection={(next) => void navigate({ to: '/settings/$section', params: { section: next } })}
+      onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
     />
   )
 }

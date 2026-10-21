@@ -1,6 +1,15 @@
-import { type AgentStatus, type CommandRule, fillPattern, type ProjectRulesView } from '@althar/contracts'
+import {
+  type AgentStatus,
+  type CommandRule,
+  commandStartOf,
+  fillPattern,
+  hostOf,
+  type ProjectRulesView,
+  runsOutside,
+  type SandboxEdits,
+} from '@althar/contracts'
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd, unreachable } from '@althar/ui'
-import { type CommandPlace, ProjectRules, type RestMode, type RuleCommand } from '@althar/ui/screens'
+import { type CommandPlace, ProjectRules, type RestMode, type RuleCommand, type SandboxList } from '@althar/ui/screens'
 
 import { PartPending, pendingText } from '../../shared/Pending'
 import { HEADING } from '../projectSettings/sections'
@@ -23,6 +32,16 @@ export const text = {
     const named = list === 'never' ? 'Never' : 'Ask me'
     return `“${pattern}” is under ${named}, which comes first, so nothing changed. Take it out there first.`
   },
+  /** Why what was typed can't be a host. */
+  notAHost: (typed: string) => `“${typed.trim()}” isn’t a host. Type its name, such as registry.npmjs.org.`,
+  /** Why a wildcard can't be a host the sandbox reaches. */
+  wildHost:
+    'Name each host on its own, such as pkgs.example.com: the rules check every host a lead reaches, and can’t check every host under a *.',
+  /** Enter on nothing but spaces or a lone *. */
+  noCommand: 'Type how the command starts first.',
+  /** A command Claude Code keeps in its sandbox whatever the list says. */
+  bunStays:
+    'Claude Code runs a command that starts with bun in its sandbox whatever this list says. Add what it runs instead, such as node scripts/e2e.ts.',
   /** The task names are shown for: its key from the project's name. */
   example: (project: string) => {
     const letters = project
@@ -214,6 +233,30 @@ export const withCommand = (
   }
 }
 
+/**
+ * A sandbox list's edits with one value added or taken out: added, it is no
+ * longer taken out; taken out, it is no longer added, and stays out of what
+ * Althar works out later.
+ */
+export const sandboxEdited = (edits: SandboxEdits, value: string, to: 'add' | 'remove'): SandboxEdits =>
+  to === 'add'
+    ? {
+        added: edits.added.includes(value) ? edits.added : [...edits.added, value],
+        removed: edits.removed.filter((each) => each !== value),
+      }
+    : {
+        added: edits.added.filter((each) => each !== value),
+        removed: edits.removed.includes(value) ? edits.removed : [...edits.removed, value],
+      }
+
+/** What was typed for a sandbox list, as the list keeps it; or why it can't be. */
+const sandboxEntryOf = (list: SandboxList, typed: string): { readonly value: string } | { readonly problem: string } => {
+  const value = list === 'hosts' ? hostOf(typed) : commandStartOf(typed)
+  if (value !== null) return { value }
+  if (list === 'commands') return { problem: runsOutside(typed) ? text.noCommand : text.bunStays }
+  return { problem: typed.includes('*') ? text.wildHost : text.notAHost(typed) }
+}
+
 /** Althar's own patterns, where a repository's docs say nothing and the person set none. */
 export const OWN = { branch: 'althar/{key}-{slug}', title: '{title}' } as const
 
@@ -304,6 +347,19 @@ export function RulesSection({ model }: { model: RulesModel }) {
               const only = ids.length === every ? others : { ...others, [agentId]: ids }
               return { onlyAccounts: Object.keys(only).length === 0 ? null : only }
             })
+          }}
+          sandbox={{
+            commands: rules.sandbox.commands,
+            hosts: rules.sandbox.hosts,
+            onAdd: (list, typed) => {
+              const entry = sandboxEntryOf(list, typed)
+              if ('problem' in entry) return entry.problem
+              if (rules.sandbox[list].includes(entry.value)) return undefined
+              model.change((now) => ({ sandbox: { [list]: sandboxEdited(now.sandbox.edits[list], entry.value, 'add') } }))
+              return undefined
+            },
+            onRemove: (list, value) =>
+              model.change((now) => ({ sandbox: { [list]: sandboxEdited(now.sandbox.edits[list], value, 'remove') } })),
           }}
         />
       )}

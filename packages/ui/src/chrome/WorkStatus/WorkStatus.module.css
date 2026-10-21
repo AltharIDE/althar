@@ -76,7 +76,7 @@
   transition: background var(--fast) var(--ease);
 }
 .need:hover:not(.here) {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 /* already on screen: said, not offered */
 .here .title {
