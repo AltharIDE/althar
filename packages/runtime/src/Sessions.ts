@@ -322,6 +322,9 @@ const SERVING_EVERY = Duration.millis(500)
 const SERVING_TRIES = 1_200
 const PORTS_EVERY = 4
 
+/** The longest a turn waits to read what the agent's tree listens on before it begins. */
+const BASELINE_WITHIN = Duration.seconds(5)
+
 /** Keeps what the agent last said of its context, from an event it streamed. */
 const heardContext = (running: Running, event: SessionEvent) => {
   if (event._tag === 'ContextUsage') running.context = { used: event.used, size: event.size }
@@ -774,18 +777,21 @@ export class Sessions extends Context.Service<
           return portFor({ found, claimed, own: held.length > 0, known, rivals })
         })
 
-      /** Reads where the agent's tree listens as its turn begins, in the background: the turn doesn't wait for it. */
+      /**
+       * Reads where the agent's tree listens as its turn begins. The turn waits
+       * for it, a moment, before the prompt goes: a server it starts must not
+       * be in what listened before. Bounded, for a lookup that hangs.
+       */
       const notingListening = (running: Running) =>
         Effect.gen(function* () {
-          const before = yield* Deferred.make<ReadonlySet<number>>()
-          running.listeningBefore = before
           const agent = running.connection.process?.pid
-          yield* Effect.forkIn(
-            Effect.andThen(agent === undefined ? Effect.succeed([]) : portsBelow([agent]), (ports) =>
-              Deferred.succeed(before, new Set(ports)),
-            ),
-            running.scope,
-          )
+          const ports =
+            agent === undefined
+              ? []
+              : yield* portsBelow([agent]).pipe(Effect.timeoutOption(BASELINE_WITHIN), Effect.map(Option.getOrElse(() => [])))
+          const before = yield* Deferred.make<ReadonlySet<number>>()
+          yield* Deferred.succeed(before, new Set(ports))
+          running.listeningBefore = before
         })
 
       /**

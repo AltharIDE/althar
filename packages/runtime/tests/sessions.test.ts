@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
@@ -671,6 +672,37 @@ describe('sessions', () => {
         assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
         yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live.skipIf(process.platform === 'win32')(
+      'finds a silent server started while the lookup of what listened before is still slow',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          // `lsof` answers late, from the machine as it is then: the server the agent starts as its turn begins is listening by
+          // then, and is in what listened before unless the turn waited for that to be read before the agent was told.
+          const real = execFileSync('which', ['lsof'], { encoding: 'utf8' }).trim()
+          const dir = mkdtempSync(join(tmpdir(), 'slow-lsof-'))
+          writeFileSync(join(dir, 'lsof'), `#!/bin/sh\nsleep 1\nexec ${real} "$@"\n`, { mode: 0o755 })
+          const path = process.env.PATH
+          process.env.PATH = `${dir}:${path ?? ''}`
+          yield* Effect.gen(function* () {
+            yield* begin(created.threadId, 'process')
+            yield* say(created.threadId, scenarios.backgroundCodexQuiet)
+            yield* ended(created.threadId, 1)
+            const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+            assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+            yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                process.env.PATH = path
+                rmSync(dir, { recursive: true, force: true })
+              }),
+            ),
+          )
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     )
 
     it.live(
