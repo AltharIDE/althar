@@ -202,6 +202,8 @@ export class PlanUsage extends Context.Service<
         const keep = (accountId: string, next: Held) =>
           Effect.gen(function* () {
             held.set(accountId, next)
+            // A key has no windows: one read while it was on a plan no longer steers work, nor says it is on one (SignIns).
+            if (next.paidBy === 'key') return yield* sql`DELETE FROM plan_usage_readings WHERE account_id = ${accountId}`
             if (next.source === null || next.observedAt === null || next.windows.length === 0) return
             yield* sql`
             INSERT INTO plan_usage_readings ${sql.insert({

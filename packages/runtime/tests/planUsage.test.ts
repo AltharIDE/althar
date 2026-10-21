@@ -1,15 +1,20 @@
 import { assert, describe, it } from '@effect/vitest'
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import type { CredentialsRead, EndpointRead, UsageAccount, UsageRead, UsageWindow } from '@althar/provider-adapters'
-import { Duration, Effect, Layer, Stream } from 'effect'
+import { agents as registry } from '@althar/provider-adapters'
+import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
 import { Agents } from '../src/Config'
+import { Limits } from '../src/Limits'
 import { Live } from '../src/Live'
+import { Models } from '../src/Models'
 import { PlanUsage } from '../src/PlanUsage'
-import { fakeAgents, runtime } from './support'
+import { SignIns } from '../src/SignIns'
+import { usableModels } from '../src/usableModels'
+import { fakeAgents, runtime, until } from './support'
 
 /*
  * Plan usage (docs/plans/plan-usage.md): where each account's windows come
@@ -538,6 +543,49 @@ describe('the agents run over ACP', () => {
       }
     }),
   )
+
+  it.live('take Kimi Code read on its plan for one its plan pays for, though its status can’t say, to move work to and to list', () => {
+    // Kimi Code's status, as it ships, can't say how it is paid: its plan is told by its sign-in for it being there.
+    let answer: EndpointRead = reading
+    const asShipped = runtime(
+      ':memory:',
+      {},
+      {
+        agents: Layer.effect(
+          Agents,
+          Effect.gen(function* () {
+            const all = yield* Agents
+            const kimi = yield* all.get('kimi')
+            const shipped = registry.kimi.signIn
+            const signIn = { ...kimi.definition.signIn, paidBy: (output: string) => shipped.paidBy?.(output) }
+            return Agents.of({ list: [{ ...kimi, definition: { ...kimi.definition, signIn } }], get: (agentId) => all.get(agentId) })
+          }).pipe(Effect.orDie),
+        ).pipe(Layer.provide(fakeAgents())),
+        usage: { every: Duration.zero, kept: Duration.zero, readEndpoint: async () => answer },
+      },
+    )
+    return Effect.gen(function* () {
+      const signIns = yield* SignIns
+      const limits = yield* Limits
+      const [account] = yield* (yield* Accounts).of('kimi')
+      assert.strictEqual((yield* signIns.account(account!)).paidBy, 'unknown')
+      // Not read yet, it isn't taken for a plan: work moves to it unasked only where a plan pays.
+      assert.isUndefined(yield* limits.free([]))
+      assert.strictEqual(accountOf(yield* (yield* PlanUsage).now(true), 'kimi').paidBy, 'plan')
+      assert.strictEqual((yield* signIns.account(account!)).paidBy, 'plan')
+      assert.strictEqual(yield* limits.free([]), 'kimi')
+      // The coordinator's list has its models on the plan, with what the plan has left.
+      yield* until((yield* Models).catalog, (all) => all.every((agent) => !agent.probing))
+      const routes = (yield* usableModels()).flatMap((model) => model.routes)
+      assert.isNotEmpty(routes)
+      assert.isTrue(routes.every((route) => route.plan && route.room?.leftPercent === 28))
+      // Its plan's sign-in gone, read again it is a key, with nothing left of the plan's windows.
+      answer = { kind: 'none' }
+      yield* (yield* PlanUsage).now(true)
+      assert.strictEqual((yield* signIns.account(account!)).paidBy, 'unknown')
+      assert.isTrue(Option.isNone(yield* limits.room(account!.id)))
+    }).pipe(Effect.provide(asShipped))
+  })
 
   it.effect('take Kimi Code with no plan sign-in for a key, and Grok with none found for a fault to look at', () =>
     Effect.gen(function* () {
