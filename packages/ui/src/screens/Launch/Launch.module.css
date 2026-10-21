@@ -56,6 +56,8 @@
   position: absolute;
   inset: 0;
   opacity: 0;
+  /* the frames set its opacity; on dark it is fainter on top of that (dark.css) */
+  filter: opacity(var(--grain-scale, 1));
   background-size: 128px 128px;
   mask-image: radial-gradient(ellipse 52% 62% at 50% 100%, #000 25%, transparent 78%);
 }

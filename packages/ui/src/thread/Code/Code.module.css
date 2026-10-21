@@ -307,7 +307,7 @@ button.gap {
 
 button.gap:hover,
 button.gap:focus-visible {
-  background: var(--n-2);
+  background: var(--hover-paper);
   color: var(--t-2);
 }
 

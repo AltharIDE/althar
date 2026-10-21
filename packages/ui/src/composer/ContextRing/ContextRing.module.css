@@ -10,11 +10,11 @@
 .ring:hover,
 .ring:focus-visible,
 .ring[aria-expanded='true'] {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .track {
   fill: none;
-  stroke: var(--n-4);
+  stroke: var(--ring-track);
   stroke-width: 2.2;
 }
 .fill {

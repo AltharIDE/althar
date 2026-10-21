@@ -37,7 +37,11 @@ export const mainWindow = async (electronApp: ElectronApplication): Promise<Page
  */
 const quiet = process.platform === 'darwin' && process.env.ALTHAR_E2E_FOREGROUND !== '1'
 
-export const launch = async (home: string, env: Record<string, string> = {}) => {
+/**
+ * Launches the app on `home`'s profile. Playwright has the window's `prefers-color-scheme` say light unless told otherwise;
+ * `scheme: 'system'` leaves it to the app's own appearance, as it is outside a test.
+ */
+export const launch = async (home: string, env: Record<string, string> = {}, { scheme }: { readonly scheme?: 'system' } = {}) => {
   // Run from inside an Electron app, as a lead in Althar is, the shell says to run Electron as Node; the app must run as itself.
   // And from inside an agent's sandbox, git is configured for the agent (its proxy, its safe folders): the app's git is its own.
   const inherited = Object.fromEntries(
@@ -46,6 +50,7 @@ export const launch = async (home: string, env: Record<string, string> = {}) => 
   const electronApp = await electron.launch({
     // Chromium refuses to run as root with its sandbox, as in a container: there, without it.
     args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
+    ...(scheme === 'system' ? { colorScheme: null } : {}),
     env: {
       ...inherited,
       ALTHAR_PROFILE: join(home, 'profile'),

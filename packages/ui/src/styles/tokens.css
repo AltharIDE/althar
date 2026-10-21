@@ -20,6 +20,7 @@
   --n-5: #d6d1c6; /* strong fill, borders that must read */
   --chrome: #ebe8e0; /* the window's own bars */
   --paper: #ffffff; /* the lightest: fields, cards and chosen options that sit on a raised sheet */
+  --paper-plain: var(--paper); /* the root's paper, for where a sheet rebinds --paper for what it holds */
 
   /* ---- Ink ---------------------------------------------------------------*/
   --t-1: #141417; /* primary */
@@ -39,11 +40,19 @@
   --signal: #7a3ff0;
   --signal-bright: #6a2fd6;
   --signal-dim: rgba(122, 63, 240, 0.1);
+  --selection: rgba(122, 63, 240, 0.1); /* selected text */
   --signal-line: rgba(122, 63, 240, 0.32);
   --signal-hover: rgba(122, 63, 240, 0.16);
   --signal-paper: #f6f1ff; /* a sheet that is asking you something */
+  --signal-raised: #ffffff; /* what sits on that sheet: its options, its command */
   --signal-pressed: #5b26bd;
   --on-signal: #ffffff;
+  /* violet as a fill that carries words (a button, a chosen key): the
+     signal itself on paper; on dark, where the signal lightens to read as
+     text, the fill keeps a deeper violet so its words stay white */
+  --signal-fill: #7a3ff0;
+  --signal-fill-hover: #6a2fd6;
+  --signal-fill-pressed: #5b26bd;
 
   /* ---- Cobalt ------------------------------------------------------------
      Althar's own colour: the work it is running right now.               */
@@ -54,6 +63,29 @@
   --danger-dim: rgba(196, 64, 47, 0.07);
   --danger-hover: rgba(196, 64, 47, 0.12);
   --ok: #2e8c46;
+
+  /* ---- Roles on paper -----------------------------------------------------
+     What sits on a raised sheet, by what it does. On paper each is a shade
+     of the page; on dark a step down from paper reads as a hole, so there
+     each is its own lighter wash (dark.css).                                */
+  --hover-paper: var(--n-2); /* a row the pointer or the keys are on, in a menu or list */
+  --hover-faint: var(--n-1); /* the faintest hover, under a stronger chosen row */
+  --chosen: var(--n-1); /* the chosen row of a list down a side */
+  --inset: var(--frost-well); /* a well under a row, holding what depends on it */
+  --pressed-paper: var(--n-4); /* that row, pressed */
+  --chip: var(--n-4); /* a small fill that holds words: inline code, a key, a kbd */
+  --well: var(--n-2); /* a recess in a card: a pull request's row, a thumbnail */
+  --segment-track: var(--n-2); /* behind a segmented control's choices */
+  --segment-on: var(--paper); /* the chosen one */
+  --knob: var(--paper); /* a slider's thumb */
+  --knob-off: #ffffff; /* a switch's knob while it is off (on, it takes --on-ink) */
+  --tile: var(--n-2); /* a small square or pill that holds a glyph or a word on a sheet */
+  --tile-hover: var(--paper); /* that tile, its row hovered */
+  --ring-track: var(--n-4); /* what is left of a ring that fills */
+  --scroll-thumb: var(--n-5); /* a scrollbar's thumb */
+  --float: var(--paper); /* a tooltip, raised over whatever sheet it opens on */
+  --live-step: color-mix(in srgb, var(--live) 78%, var(--n-1)); /* the step that runs now, on a track */
+  --you-lane: color-mix(in srgb, var(--signal) 3.5%, var(--n-2)); /* the lane of calls only you can make */
 
   /* ---- Derived materials ------------------------------------------------*/
   --n-1-clear: rgba(252, 251, 248, 0); /* --n-1 at zero alpha, for fades */
@@ -94,9 +126,15 @@
     0 0 0 0.5px rgba(20, 16, 10, 0.2), inset 0 0.5px 0 rgba(255, 255, 255, 0.9), 0 18px 48px -14px rgba(40, 32, 20, 0.34),
     0 4px 12px -6px rgba(40, 32, 20, 0.16);
 
+  /* ---- Ink as a fill -------------------------------------------------------
+     The ink itself where it fills (a primary button, a switch that is on, a
+     chosen option's ring): the same as --t-1 on paper; on dark a shade
+     softer than the brightest words, so a fill never glares.               */
+  --ink-fill: #141417;
+
   /* ---- On ink -------------------------------------------------------------
-     What sits on an ink fill (--t-1) or a dark terminal. Washes on ink are
-     white at low alpha, written where they are used.                         */
+     What sits on an ink fill (--ink-fill). Washes on a fill take the colour
+     of its words (currentColor), written where they are used.                */
   --on-ink: #ffffff;
   --on-ink-2: #c9c7c0;
   --on-ink-focus: #b99bff;
@@ -108,6 +146,11 @@
   --signal-on-ink: #a77bff;
   --signal-on-ink-hover: #b994ff;
   --signal-on-ink-pressed: #9566f2;
+  /* What sits on what is dark in any theme (the lightbox, a dark terminal):
+     unlike --on-ink, these stay light when the theme is dark. */
+  --on-dark: #ffffff;
+  --on-dark-2: #c9c7c0;
+  --on-dark-focus: #b99bff;
 
   /* ---- Terminal, dark -----------------------------------------------------
      Command output on its own dark sheet. The near-greys are kept apart
@@ -194,9 +237,21 @@
   --linear: #5e6ad2;
   --linear-ink: #4b55b8;
 
+  /* ---- Marks ----------------------------------------------------------------
+     A project's mark in its own inks, the same in every theme (ProjectMark). */
+  --mark-clay: #b4532a;
+  --mark-ochre: #8a6d2f;
+  --mark-olive: #6b7330;
+  --mark-moss: #4f7a4a;
+  --mark-teal: #2f6f7a;
+  --mark-slate: #56616e;
+  --mark-rose: #a24d5c;
+  --mark-umber: #6e4b3a;
+
   /* ---- Projects --------------------------------------------------------------
-     A project's own ink, for its mark and nothing else. Muted, and clear of
-     cobalt and violet, which say what runs and what waits on you. */
+     A project's own ink, for its swatch and the wash of its page; its mark
+     keeps its own (--mark-*). Muted, and clear of cobalt and violet, which
+     say what runs and what waits on you. */
   --project-clay: #b4532a;
   --project-ochre: #8a6d2f;
   --project-olive: #6b7330;

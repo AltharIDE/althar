@@ -53,10 +53,10 @@
   transform-origin: 0 0;
   background-color: var(--n-1);
   background-image:
-    linear-gradient(rgba(20, 20, 28, calc(0.055 * var(--grid))) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 20, 28, calc(0.055 * var(--grid))) 1px, transparent 1px),
-    linear-gradient(rgba(20, 20, 28, calc(0.03 * var(--grid))) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 20, 28, calc(0.03 * var(--grid))) 1px, transparent 1px);
+    linear-gradient(color-mix(in srgb, var(--t-1) calc(5.5% * var(--grid)), transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--t-1) calc(5.5% * var(--grid)), transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in srgb, var(--t-1) calc(3% * var(--grid)), transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--t-1) calc(3% * var(--grid)), transparent) 1px, transparent 1px);
   background-size:
     160px 160px,
     160px 160px,
@@ -255,7 +255,7 @@
 .here {
   width: 2px;
   height: 16px;
-  background: var(--t-1);
+  background: var(--ink-fill);
 }
 .cell {
   display: flex;

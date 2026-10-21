@@ -27,7 +27,7 @@
 }
 /* the lane of calls only you can make, washed faintly in their colour */
 .you.column {
-  background: color-mix(in srgb, var(--signal) 3.5%, var(--n-2));
+  background: var(--you-lane);
 }
 
 .head {
@@ -249,7 +249,7 @@ span.you {
 .card[aria-current='true'] {
   background: var(--paper);
   box-shadow:
-    inset 0 0 0 1.5px var(--t-1),
+    inset 0 0 0 1.5px var(--ink-fill),
     var(--lift-card);
 }
 .card:has(.open:focus-visible) {
@@ -271,7 +271,7 @@ span.you {
 }
 .row[aria-current='true'] {
   background: var(--paper);
-  box-shadow: inset 0 0 0 1.5px var(--t-1);
+  box-shadow: inset 0 0 0 1.5px var(--ink-fill);
 }
 .row:has(.open:focus-visible) {
   outline: 1.5px solid var(--signal);
