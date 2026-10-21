@@ -108,14 +108,14 @@
   color: var(--t-2);
 }
 .railButton:hover {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 .railButton:active {
   background: var(--n-5);
 }
 .railButton[data-state='checked'] {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
   font-weight: 550;
 }
@@ -168,7 +168,7 @@
 }
 .row:hover,
 .row:focus-within {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .use {
   display: flex;
@@ -224,7 +224,7 @@
   opacity: 1;
 }
 .pin:hover {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 .pin[aria-pressed='true'] {

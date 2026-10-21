@@ -1,3 +1,4 @@
+import { commandStartOf, hostOf } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -23,6 +24,10 @@ import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rule
  * with who is free and when the reset is.
  */
 export type UsageLimit = 'move' | 'wait' | 'ask'
+
+/** What the person added to a list Althar works out, and took from it. */
+const SandboxEdits = Schema.Struct({ added: Schema.Array(Schema.String), removed: Schema.Array(Schema.String) })
+type SandboxEdits = typeof SandboxEdits.Type
 
 export const ProjectRules = Schema.Struct({
   source: Schema.String,
@@ -90,6 +95,13 @@ export const ProjectRules = Schema.Struct({
       only: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
     }),
   ),
+  /**
+   * What the person added to and took from what leads' sandboxes let through
+   * from the start (`sandboxReach.ts`): commands they run outside it, by how
+   * they start, and hosts they reach without asking. Without it, what Althar
+   * works out.
+   */
+  sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
 })
 export type ProjectRules = typeof ProjectRules.Type
 
@@ -174,6 +186,19 @@ export const resolvesConflictsFor = (rules: ProjectRules, task: number | boolean
 
 /** The project's rule for an agent's accounts: rotation, off unless the person turned it on, and the accounts it may use. */
 export type AccountRule = NonNullable<ProjectRules['accounts']>
+
+/** A list's edits as kept: each entry tidied, once, dropping what isn't one; an entry on both sides stays added. */
+const keptEdits = (edits: SandboxEdits, tidy: (typed: string) => string | null): SandboxEdits => {
+  const added = [...new Set(edits.added.flatMap((each) => tidy(each) ?? []))]
+  return { added, removed: [...new Set(edits.removed.flatMap((each) => tidy(each) ?? []))].filter((each) => !added.includes(each)) }
+}
+
+/** The sandbox's edits with what changed of them: a list given replaces that list, whole; the other stays. */
+const sandboxWith = (rules: ProjectRules, change: NonNullable<ProjectRules['sandbox']>): NonNullable<ProjectRules['sandbox']> => ({
+  ...rules.sandbox,
+  ...(change.commands === undefined ? {} : { commands: keptEdits(change.commands, commandStartOf) }),
+  ...(change.hosts === undefined ? {} : { hosts: keptEdits(change.hosts, hostOf) }),
+})
 
 /** What a revision's rules say of accounts: no rotation, and every account, unless the person said otherwise. */
 export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: false }
@@ -351,6 +376,7 @@ export class Policies extends Context.Service<
                   ...(kept as ProjectRules),
                   ...rest,
                   ...(commands === undefined ? {} : { commands }),
+                  ...(change.sandbox === undefined ? {} : { sandbox: sandboxWith(rules, change.sandbox) }),
                   source: 'person',
                 }
                 next = changed

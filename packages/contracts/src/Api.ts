@@ -354,6 +354,27 @@ export const RepositoryConventions = Schema.Struct({
 })
 export type RepositoryConventions = typeof RepositoryConventions.Type
 
+/** What the person added to a list Althar works out for a project, and took from it. */
+export const SandboxEdits = Schema.Struct({ added: Schema.Array(Schema.String), removed: Schema.Array(Schema.String) })
+export type SandboxEdits = typeof SandboxEdits.Type
+
+/**
+ * What a project's leads' sandboxes let through from the start: commands
+ * they run outside it rather than failing inside it first, and hosts they
+ * reach without asking. Each list is what Althar works out from the project,
+ * with the person's edits; a command still meets the rules, and the hosts
+ * apply only while the rules let the rest through.
+ */
+export const SandboxReachView = Schema.Struct({
+  /** Commands by how they start: `bunx playwright`, `bun run test:e2e`. */
+  commands: Schema.Array(Schema.String),
+  /** Hosts by name: `github.com`, `registry.npmjs.org`. */
+  hosts: Schema.Array(Schema.String),
+  /** What the person changed of each, kept over what is worked out later. */
+  edits: Schema.Struct({ commands: SandboxEdits, hosts: SandboxEdits }),
+})
+export type SandboxReachView = typeof SandboxReachView.Type
+
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
@@ -387,6 +408,8 @@ export const ProjectRulesView = Schema.Struct({
   changeIssues: Schema.Boolean,
   /** What each of the project's repositories says, in the project's order. */
   conventions: Schema.Array(RepositoryConventions),
+  /** What its leads' sandboxes let through from the start. */
+  sandbox: SandboxReachView,
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
 
@@ -2907,6 +2930,8 @@ export const Api = RpcGroup.make(
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
       changeIssues: Schema.optional(Schema.Boolean),
+      /** What the person changed of what leads' sandboxes let through, each list whole. */
+      sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
       /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */
       expectedRevision: Schema.optional(Schema.Number),
     },

@@ -15,11 +15,11 @@
 }
 .button:hover,
 .button[aria-expanded='true'] {
-  background: var(--n-2);
+  background: var(--hover-paper);
   color: var(--t-1);
 }
 .button:active {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .field {
   height: 26px;
@@ -68,10 +68,10 @@
   color: var(--t-1);
 }
 .option:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .option:active {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .current {
   font-weight: 550;
@@ -162,10 +162,10 @@
 }
 .all:hover {
   color: var(--t-1);
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .all:active {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .all svg {
   margin-left: auto;

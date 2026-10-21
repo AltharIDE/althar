@@ -712,6 +712,27 @@ describe('how Althar looks, on the Settings tab', () => {
     ])
   })
 
+  it('offers light, dark or as the Mac is, as the Mac is to begin with, and keeps a choice', async () => {
+    const host = fakeHost()
+    withServices(<Settings at="appearance" />, fakeClient().client, host)
+    const choice = await screen.findByRole('radiogroup', { name: 'Light or dark' })
+    const checked = () =>
+      within(choice)
+        .getAllByRole('radio')
+        .filter((radio) => radio.getAttribute('aria-checked') === 'true')
+        .map((radio) => radio.textContent)
+    expect(
+      within(choice)
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Light', 'Dark', 'Match the Mac'])
+    expect(checked()).toEqual(['Match the Mac'])
+    expect(screen.getByText('Match the Mac turns dark when the Mac does.')).toBeTruthy()
+    await userEvent.click(within(choice).getByRole('radio', { name: 'Dark' }))
+    await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'dark'))
+    await waitFor(() => expect(checked()).toEqual(['Dark']))
+  })
+
   it('offers where Althar shows in another app, on a Mac with a notch, and keeps a choice', async () => {
     const host = fakeHost()
     withServices(<Settings at="appearance" />, fakeClient().client, host)

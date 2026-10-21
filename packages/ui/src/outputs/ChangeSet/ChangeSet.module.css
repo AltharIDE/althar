@@ -115,7 +115,7 @@
   cursor: pointer;
 }
 .opens:hover {
-  background: var(--n-1);
+  background: var(--hover-faint);
 }
 .opens > :last-child {
   flex: none;
@@ -226,7 +226,7 @@ span.you {
   cursor: pointer;
 }
 .folder:hover {
-  background: var(--n-1);
+  background: var(--hover-faint);
 }
 .folder > :first-child {
   color: var(--t-3);

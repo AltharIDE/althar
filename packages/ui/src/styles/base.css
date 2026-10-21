@@ -41,7 +41,7 @@
 }
 
 :where(.ch-root) ::selection {
-  background: var(--signal-dim);
+  background: var(--selection);
   color: var(--t-1);
 }
 
@@ -59,7 +59,7 @@
 .ch-root,
 .ch-root * {
   scrollbar-width: thin;
-  scrollbar-color: var(--n-5) transparent;
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {

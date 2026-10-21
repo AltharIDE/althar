@@ -166,6 +166,11 @@ function Example(
           if (q) setValue(q.text)
           setQueue(queue.filter((x) => x.id !== id))
         }}
+        onSendQueuedNow={(id) => {
+          const q = queue.find((x) => x.id === id)
+          if (q) onSendNow(q.text)
+          setQueue(queue.filter((x) => x.id !== id))
+        }}
         onUnqueue={(id) => setQueue(queue.filter((x) => x.id !== id))}
         {...rest}
         onSendNow={(text) => {
@@ -516,6 +521,27 @@ export const QueueingAndEditing: Story = {
     await userEvent.click(c.getByRole('button', { name: 'Take “Also check the webhook retry path.” out of the queue' }))
     await userEvent.click(c.getByRole('button', { name: 'Edit' }))
     await expect(c.getByRole('textbox', { name: 'Tell the lead' })).toHaveValue('And keep the limiter where it is.')
+  },
+}
+/** Each queued message has Send now beside its Edit: it interrupts the lead with that one, and leaves the queue. */
+export const SendingQueuedNow: Story = {
+  args: { onSendNow: fn() },
+  render: (args) => (
+    <Example
+      busy
+      onStopAgent={() => {}}
+      onSendNow={args.onSendNow}
+      waiting={['Also check the webhook retry path.', 'Use the fixture log, not staging.']}
+    />
+  ),
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getAllByRole('button', { name: 'Send now' })).toHaveLength(2)
+    await userEvent.click(c.getAllByRole('button', { name: 'Send now' })[1]!)
+    await expect(args.onSendNow).toHaveBeenCalledTimes(1)
+    await expect(args.onSendNow).toHaveBeenCalledWith('Use the fixture log, not staging.')
+    await expect(c.getByText('Queued; the lead reads it next')).toBeInTheDocument()
+    await expect(c.queryByText('Use the fixture log, not staging.')).toBeNull()
   },
 }
 export const SeveralQueued: Story = {
