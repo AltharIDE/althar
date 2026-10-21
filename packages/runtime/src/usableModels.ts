@@ -85,18 +85,21 @@ export const usableModels = (projectId?: string) =>
       if (Option.isSome(yield* limits.out(agent.id, projectId).pipe(Effect.orElseSucceed(() => Option.none())))) continue
       const offered = catalog.find((one) => one.agentId === agent.id)
       if (offered === undefined) continue
-      // The account work would start on, of those the project allows: none signed in, and the agent is no way to a model there.
-      const starts = yield* limits.pick({ agentId: agent.id, ...(projectId === undefined ? {} : { projectId }) }).pipe(Effect.option)
-      if (Option.isNone(starts)) continue
-      const account = yield* signIns.account(starts.value)
-      if (account.status === 'signed_out') continue
-      // A plan pays where that account is on one, not just any signed in.
-      const plan = account.paidBy === 'plan'
       for (const model of offered.models) {
         if (isAgentDefault(model) || offered.blocked.includes(model.id)) continue
         const name = knownModelName(agent, model)
         // A model's own window (Opus's weekly) counts beside the plan's, by its id or its name.
-        const room = plan ? Option.getOrNull(yield* limits.room(starts.value.id, `${model.id} ${name}`)) : null
+        const named = `${model.id} ${name}`
+        // The account work on it would start on, of those the project allows: none signed in, and the agent is no way to it there.
+        const starts = yield* limits
+          .pick({ agentId: agent.id, model: named, ...(projectId === undefined ? {} : { projectId }) })
+          .pipe(Effect.option)
+        if (Option.isNone(starts)) continue
+        const account = yield* signIns.account(starts.value)
+        if (account.status === 'signed_out') continue
+        // A plan pays where that account is on one, not just any signed in.
+        const plan = account.paidBy === 'plan'
+        const room = plan ? Option.getOrNull(yield* limits.room(starts.value.id, named)) : null
         const fact = facts.of(agent, model)
         const key = fact?.slug ?? name.toLowerCase()
         const route: Route = {

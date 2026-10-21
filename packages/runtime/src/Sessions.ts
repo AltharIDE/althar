@@ -2034,6 +2034,7 @@ export class Sessions extends Context.Service<
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(input.model === undefined ? {} : { model: input.model }),
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
@@ -2609,6 +2610,7 @@ export class Sessions extends Context.Service<
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(input.model === undefined ? {} : { model: input.model }),
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)

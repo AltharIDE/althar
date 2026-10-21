@@ -2256,7 +2256,10 @@ export class Runs extends Context.Service<
                 projectId: on.run.projectId,
                 ...(planned === undefined ? {} : { planned }),
               })
-              const to = next === agentId ? (yield* limits.pick({ agentId: next, projectId: on.run.projectId })).id : null
+              const to =
+                next === agentId
+                  ? (yield* limits.pick({ agentId: next, projectId: on.run.projectId, ...(model === null ? {} : { model }) })).id
+                  : null
               const step = on.step === 'publish' ? undefined : on.step
               const said = outWords({
                 from: (yield* limits.named(agentId, null, accountId)).agent,
@@ -2348,7 +2351,10 @@ export class Runs extends Context.Service<
             const next = (yield* nextAccount(agentId, thread.projectId)) ? agentId : yield* limits.free([agentId], [], thread.projectId)
             if (next !== undefined) {
               const model = yield* limits.modelFor({ agentId: next, projectId: thread.projectId })
-              const to = next === agentId ? (yield* limits.pick({ agentId: next, projectId: thread.projectId })).id : null
+              const to =
+                next === agentId
+                  ? (yield* limits.pick({ agentId: next, projectId: thread.projectId, ...(model === null ? {} : { model }) })).id
+                  : null
               yield* sessions.switchAgent({
                 threadId,
                 agentId: next,

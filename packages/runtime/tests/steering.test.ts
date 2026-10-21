@@ -12,12 +12,14 @@ import { SqlClient } from 'effect/sql'
 import { Accounts } from '../src/Accounts'
 import { Instance } from '../src/Instance'
 import { Limits, lowWords, NEARLY_OUT, roomWords, whenWords, windowWords } from '../src/Limits'
+import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import type { PlanStep } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
+import { usableModels } from '../src/usableModels'
 import { items, repository, runtime, until } from './support'
 
 /*
@@ -198,6 +200,43 @@ describe('a new step on an agent nearly out', () => {
 })
 
 describe('the account work starts on', () => {
+  it.live('has the most room for the model asked for, where the model has a window of its own, and the coordinator is told it', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const limits = yield* Limits
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const projects = yield* Projects
+      const usual = yield* first('codex')
+      const work = yield* accounts.add({ agentId: 'codex', name: 'work', folder: mkdtempSync(join(tmpdir(), 'althar-model-')) })
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      yield* policies.setAccounts(project.projectId, { rotate: true }, instance.personId)
+      const resetsAt = new Date(Date.now() + HOUR).toISOString()
+      const large = (usedPercent: number): UsageWindow => ({ kind: 'weekly', label: 'Large', model: 'large', usedPercent, resetsAt })
+      // The usual account has more of its plan left, but its large model's week is all but gone.
+      yield* reading(usual, 'codex', [...left(90, resetsAt), large(99)])
+      yield* reading(work.id, 'codex', [...left(60, resetsAt), large(40)])
+      const pick = (model?: string) =>
+        Effect.map(
+          limits.pick({ agentId: 'codex', projectId: project.projectId, ...(model === undefined ? {} : { model }) }),
+          (account) => account.id,
+        )
+      assert.deepStrictEqual([yield* pick(), yield* pick('small'), yield* pick('large')], [usual, usual, work.id])
+      assert.isTrue(Option.isNone(yield* limits.nearlyOut('codex', project.projectId, 'large')))
+      // list_models: each of Codex's models on the account it would start on, with that account's room for it.
+      yield* until((yield* Models).catalog, (all) => all.every((agent) => !agent.probing))
+      const routes = (yield* usableModels(project.projectId)).flatMap((model) => model.routes).filter((route) => route.agentId === 'codex')
+      const each = routes.map((route) => [route.model, route.room?.accountId, route.room?.leftPercent] as const)
+      assert.deepStrictEqual(
+        each.toSorted((a, b) => a[0].localeCompare(b[0])),
+        [
+          ['large', work.id, 60],
+          ['small', usual, 80],
+        ],
+      )
+    }).pipe(Effect.provide(withAgents())),
+  )
+
   it.live('is the one with the most room where the project rotates, and the first where it doesn’t', () =>
     Effect.gen(function* () {
       const accounts = yield* Accounts

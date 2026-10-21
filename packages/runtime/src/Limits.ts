@@ -170,7 +170,8 @@ export class Limits extends Context.Service<
      * nearly out; else, where the project rotates, the one with the most
      * room that isn't signed out or out of usage (the person's order where
      * none is read); where it doesn't, the first not signed out; else the
-     * first. Where it doesn't
+     * first. Room is for the model where named, so a model's own window
+     * (Opus's week) counts. Where it doesn't
      * rotate, an account out of usage is still the one work runs on: its
      * limit is handled as the project says (move to another agent, or wait).
      */
@@ -179,6 +180,7 @@ export class Limits extends Context.Service<
       readonly projectId?: string
       readonly threadId?: string
       readonly accountId?: string
+      readonly model?: string
     }): Effect.Effect<Account, Failure | NotFound>
     /**
      * The first agent free to take work over, besides those given: signed in
@@ -284,12 +286,15 @@ export class Limits extends Context.Service<
 
       const nearly = (room: Option.Option<Room>) => Option.isSome(room) && room.value.leftPercent < NEARLY_OUT
 
-      /** Accounts with the most room first; one not read goes just above one nearly out, and the person's order breaks ties. */
-      const byRoom = (list: ReadonlyArray<Account>) =>
+      /** Accounts with the most room first, for the model where named; one not read goes just above one nearly out, and the person's order breaks ties. */
+      const byRoom = (list: ReadonlyArray<Account>, model?: string) =>
         Effect.gen(function* () {
           const rooms = new Map<string, number>()
           for (const account of list)
-            rooms.set(account.id, Option.match(yield* roomOf(account), { onNone: () => NEARLY_OUT, onSome: (room) => room.leftPercent }))
+            rooms.set(
+              account.id,
+              Option.match(yield* roomOf(account, model), { onNone: () => NEARLY_OUT, onSome: (room) => room.leftPercent }),
+            )
           return list.toSorted((a, b) => (rooms.get(b.id) ?? 0) - (rooms.get(a.id) ?? 0))
         })
 
@@ -387,10 +392,10 @@ export class Limits extends Context.Service<
                 SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
                 ORDER BY started_at DESC LIMIT 1`
               const own = list.find((account) => account.id === last?.accountId)
-              if (own !== undefined && (yield* runs(own)) && !nearly(yield* roomOf(own))) return own
+              if (own !== undefined && (yield* runs(own)) && !nearly(yield* roomOf(own, input.model))) return own
             }
             // Where it rotates, the one with the most room; where it doesn't, the first, in the person's order.
-            for (const account of rotate ? yield* byRoom(list) : list) if (yield* runs(account)) return account
+            for (const account of rotate ? yield* byRoom(list, input.model) : list) if (yield* runs(account)) return account
             const [first] = list
             return first ?? (yield* new NotFound({ kind: 'account', id: input.agentId }))
           }),
