@@ -32,7 +32,10 @@
     viewport asked (1280×800 without), the whole page (cut at 16,000 pixels)
     or one element by a CSS selector. Only a page served on this computer, on
     a loopback address or where one of Althar's runs answers, over http;
-    never one on the internet, which would be a way out of the sandbox. Where
+    never one on the internet, which would be a way out of the sandbox. The
+    window holds the page there: a redirect or the page's own navigation
+    anywhere else ends the shot with where it went, and a frame that would
+    go elsewhere stays empty. Where
     nothing draws pages, as on the command line, the tool says so.
   - **`rerun_check` (leads)** runs checks again on the task's own pull
     request: the one named, or each that failed. Its outcome is heard as
