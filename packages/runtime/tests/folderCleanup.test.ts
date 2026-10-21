@@ -213,7 +213,7 @@ describe('finished tasks’ folders', () => {
       yield* (yield* FolderCleanup).sweep
       assert.isFalse(existsSync(older.worktree))
       assert.isTrue(existsSync(newer.worktree))
-      assert.match((yield* folderLines(older.threadId))[0]?.title ?? '', /^Folder removed when this Mac ran low on space/)
+      assert.match((yield* folderLines(older.threadId))[0]?.title ?? '', /^Folder removed when this computer ran low on space/)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk })))))
   })
 
@@ -543,7 +543,7 @@ describe('the words for a folder going', () => {
     assert.strictEqual(goneWords('wait', 1, 0), 'Folder removed a day after the task finished')
     assert.strictEqual(goneWords('wait', 30, 14 * 1024 ** 3), 'Folder removed a month after the task finished · 14 GB')
     assert.strictEqual(goneWords('wait', 3, 640 * 1024 ** 2), 'Folder removed 3 days after the task finished · 640 MB')
-    assert.strictEqual(goneWords('low', 7, null), 'Folder removed when this Mac ran low on space')
+    assert.strictEqual(goneWords('low', 7, null), 'Folder removed when this computer ran low on space')
     assert.strictEqual(sizeWords(10 * 1024 ** 3), '10 GB')
   })
 })

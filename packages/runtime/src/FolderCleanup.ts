@@ -178,7 +178,7 @@ export const goneWords = (why: Why, days: number, bytes: number | null) => {
     case 'wait':
       return `Folder removed ${days === 0 ? 'as the task finished' : `${daysWords(days)} after the task finished`}${size}`
     case 'low':
-      return `Folder removed when this Mac ran low on space${size}`
+      return `Folder removed when this computer ran low on space${size}`
     case 'clean':
       return `Folder removed when you cleaned up${size}`
     case 'hand':
