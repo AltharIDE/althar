@@ -219,7 +219,7 @@ export type FolderHold = typeof FolderHold.Type
 export const FolderHeld = Schema.Struct({ why: FolderHold, count: Schema.NullOr(Schema.Int) })
 export type FolderHeld = typeof FolderHeld.Type
 
-/** A finished task's folder still on this Mac: its task, how and when it ended, its size, and what holds it, if anything. */
+/** A finished task's folder still on this computer: its task, how and when it ended, its size, and what holds it, if anything. */
 export const FinishedFolder = Schema.Struct({
   taskId: Schema.String,
   threadId: Schema.String,
@@ -234,7 +234,7 @@ export const FinishedFolder = Schema.Struct({
 })
 export type FinishedFolder = typeof FinishedFolder.Type
 
-/** Finished tasks' folders on this Mac, and the disk they are on. */
+/** Finished tasks' folders on this computer, and the disk they are on. */
 export const TaskFolders = Schema.Struct({
   /** The disk the folders are on, in bytes: its size and what is used; null where it couldn't be read. */
   disk: Schema.NullOr(Schema.Struct({ total: Schema.Number, used: Schema.Number })),
@@ -1953,7 +1953,7 @@ export const ThreadSnapshot = Schema.Struct({
     branch: Schema.NullOr(Schema.String),
     worktree: Schema.NullOr(Schema.String),
     /**
-     * Its folder, where it isn't on this Mac as it should be: removed once
+     * Its folder, where it isn't on this computer as it should be: removed once
      * the task finished (ADR-055), or coming back, from its branch, and
      * setting up again. Absent while it is here.
      */
@@ -2670,7 +2670,7 @@ export const Api = RpcGroup.make(
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   /** When finished tasks' folders go from now on; a sweep runs at once by it. */
   command('SetFolderWait', { wait: FolderWait }, Schema.Void),
-  /** Finished tasks' folders on this Mac, with the disk they are on: sizes not yet measured start being measured. */
+  /** Finished tasks' folders on this computer, with the disk they are on: sizes not yet measured start being measured. */
   call('GetTaskFolders', {}, TaskFolders),
   /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */
   command('CleanUpFolders', {}, FoldersFreed),

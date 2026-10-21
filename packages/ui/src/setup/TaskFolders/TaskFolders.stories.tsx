@@ -44,7 +44,7 @@ const onCleanUp = fn()
 const onRemove = fn()
 const onOpen = fn()
 
-/** The row in Work on this Mac, its choice kept, as Settings keeps it. */
+/** The row in Work on this computer, its choice kept, as Settings keeps it. */
 function Row(props: Partial<TaskFoldersProps>) {
   const [wait, setWait] = useState<FolderWait>(props.wait ?? 'smart')
   return (
@@ -119,7 +119,7 @@ export const RemoveAsksFirst: Story = {
     await userEvent.click(within(asking).getByRole('button', { name: 'Remove anyway' }))
     await expect(onRemove).toHaveBeenCalledWith('h2')
     await userEvent.click(held.getAllByRole('button', { name: 'Remove' })[0]!)
-    await expect(held.getByText('Its 4 commits stay on its branch, on this Mac.')).toBeVisible()
+    await expect(held.getByText('Its 4 commits stay on its branch, on this computer.')).toBeVisible()
     await userEvent.click(held.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(held.queryByRole('group')).toBeNull())
   },

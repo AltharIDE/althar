@@ -84,7 +84,7 @@ export interface SettingsPageProps {
   /** The section open, as the tab's address says it. */
   section: Section
   onSection: (section: Section) => void
-  /** Opens a task, by its thread: one whose folder shows under Work on this Mac. */
+  /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
   onTask?: (threadId: string) => void
 }
 
@@ -298,7 +298,7 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
         />
-        {/* When finished tasks' folders go, and what of this Mac's disk they take (ADR-055). */}
+        {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-055). */}
         {folders !== null && (
           <TaskFolders
             wait={folders.wait}

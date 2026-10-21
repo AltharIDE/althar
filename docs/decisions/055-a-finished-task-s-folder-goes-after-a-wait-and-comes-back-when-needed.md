@@ -90,9 +90,9 @@
     header's chip says "Bringing its folder back", in blue, until it is
     set up. A removal and a return wait for each other (`withFolder`), and
     a removal waits for the task's thread to be quiet (`Sessions.quiet`).
-  - **Where the person sees it.** One row in Settings › Work on this Mac,
+  - **Where the person sees it.** One row in Settings › Work on this computer,
     "Remove finished tasks' folders", with the choice at its end.
-    - **Under it:** this Mac's disk as one bar, with what is held back
+    - **Under it:** this computer's disk as one bar, with what is held back
       in a paler cobalt and what could go now hatched.
     - **The legend:** it opens a compact list, one line a folder: what
       Clean up takes, then, below a hairline, what is held back, each with
@@ -110,7 +110,7 @@
   - **Only when the disk runs low:** it acts at the worst moment and
     surprises. Smart includes it as a backstop.
   - **Off by default, or per project:** off, it would never be turned
-    on. Nobody makes this choice per project, and the disk is the Mac's.
+    on. Nobody makes this choice per project, and the disk is the computer's.
   - **Deleting the branch:** a ref costs nothing, and it is what a folder
     comes back from.
   - **A dialog before Clean up:** nothing it takes is lost for good.

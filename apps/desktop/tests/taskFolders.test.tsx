@@ -12,7 +12,7 @@ import { fakeClient } from './fixtures'
 import { withServices } from './render'
 
 /*
- * Finished tasks' folders under Work on this Mac (ADR-055): when they go,
+ * Finished tasks' folders under Work on this computer (ADR-055): when they go,
  * the disk they take, what Clean up takes and what is held back, each with
  * why; Clean up, a folder removed by hand, a task opened from its row, and
  * what couldn't be done.
@@ -59,7 +59,7 @@ function Settings({ onTask }: { onTask?: (threadId: string) => void }) {
   )
 }
 
-describe('finished tasks’ folders under Work on this Mac', () => {
+describe('finished tasks’ folders under Work on this computer', () => {
   it('says when they go, what could go now and what is held back, and takes another choice', async () => {
     const { client } = fakeClient({ getTaskFolders: vi.fn(async () => FOLDERS) })
     withServices(<Settings />, client)

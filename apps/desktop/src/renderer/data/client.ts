@@ -164,7 +164,7 @@ export interface Client {
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   /** When finished tasks' folders go from now on (ADR-055). */
   readonly setFolderWait: (wait: FolderWait) => Promise<void>
-  /** Finished tasks' folders on this Mac, with the disk they are on. */
+  /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
   readonly cleanUpFolders: () => Promise<FoldersFreed>

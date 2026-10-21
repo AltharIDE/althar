@@ -11,7 +11,7 @@ import { launch, openFirstProject, say } from './support'
 /*
  * A finished task's folder (ADR-055), in a real window with the fake agent,
  * on a profile and worktrees of the test's own: a quick task that committed
- * a change is marked Done; Settings › Work on this Mac lists its folder as
+ * a change is marked Done; Settings › Work on this computer lists its folder as
  * one that can go, and Clean up removes it; its thread says so as a line,
  * and what it changed still reads. Run brings the folder back, its header
  * saying so while it is set up again, and runs once it is; cleaned up
@@ -98,7 +98,7 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
     expect(kept).not.toBeNull()
     expect(existsSync(kept ?? '')).toBe(true)
 
-    // Work on this Mac lists its folder as one that can go; Clean up removes it, and says what it freed.
+    // Work on this computer lists its folder as one that can go; Clean up removes it, and says what it freed.
     await thisComputer()
     const legend = row.getByRole('button', { name: /Can go now/ })
     await expect(legend).toBeVisible({ timeout: 30_000 })

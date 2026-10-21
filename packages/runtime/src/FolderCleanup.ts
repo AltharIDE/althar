@@ -226,7 +226,7 @@ export class FolderCleanup extends Context.Service<
     readonly wait: Effect.Effect<FolderWait, SqlError>
     /** Keeps another choice, and sweeps by it at once. */
     setWait(wait: FolderWait): Effect.Effect<void, SqlError>
-    /** Finished tasks' folders on this Mac, with the disk they are on; those not measured yet start being measured. */
+    /** Finished tasks' folders on this computer, with the disk they are on; those not measured yet start being measured. */
     readonly list: Effect.Effect<TaskFolders, unknown>
     /** Removes every finished task's folder nothing holds, whatever its wait. */
     cleanUp(actorId: ActorId): Effect.Effect<FoldersFreed, unknown>

@@ -11,8 +11,8 @@ import { SettingRow } from '../Preferences/Preferences'
 import s from './TaskFolders.module.css'
 
 /*
- * When finished tasks' folders go, and what this Mac's disk holds of them,
- * as one row of Work on this Mac. The choice is at its end, Smart to start.
+ * When finished tasks' folders go, and what this computer's disk holds of them,
+ * as one row of Work on this computer. The choice is at its end, Smart to start.
  * Under it, one bar of the disk: what the rest of the Mac uses, the folders
  * Althar holds back in a paler cobalt, and what could go now hatched. Its
  * legend says each in GB and opens a compact list, one line a folder: what
@@ -103,7 +103,7 @@ export const taskFoldersText: TaskFoldersText = {
   why: { uncommitted: 'Not committed', unpushed: 'Never pushed', running: 'Running', opened: 'Opened today', unreadable: 'Can’t be read' },
   ask: {
     uncommitted: (n) => `${plural(n, 'changed file goes', 'changed files go')} with it.`,
-    unpushed: (n) => `Its ${plural(n, 'commit stays', 'commits stay')} on its branch, on this Mac.`,
+    unpushed: (n) => `Its ${plural(n, 'commit stays', 'commits stay')} on its branch, on this computer.`,
     opened: () => 'If an editor has it open, its files close there.',
     unreadable: () => 'Git can’t say what is in it: whatever is goes with it.',
   },
@@ -275,7 +275,7 @@ function FolderList({
 
 /**
  * When finished tasks' folders go, the choice at the row's end; under it
- * this Mac's disk as one bar, its legend opening the folders, and Clean up.
+ * this computer's disk as one bar, its legend opening the folders, and Clean up.
  */
 export function TaskFolders({
   wait,

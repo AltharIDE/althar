@@ -31,7 +31,7 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
-  /** Finished tasks' folders on this Mac, and the disk they are on: read again as the feed says they changed. */
+  /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
   search: (projectId: string | null, text: string) => ['search', projectId, text] as const,
