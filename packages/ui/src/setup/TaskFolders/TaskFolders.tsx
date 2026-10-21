@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useState } from 'react'
+import { useState } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -148,38 +148,35 @@ export interface TaskFoldersProps {
   measuring?: boolean
   /** What was freed just now, in bytes; null where nothing was. */
   freed?: number | null
-  /** What is being removed: everything Clean up takes, or one folder by its task's id. */
-  busy?: 'clean' | string | null
+  /** What is being removed: `clean`, everything Clean up takes, or one folder by its task's id. */
+  busy?: string | null
   /** What went wrong, in words. */
   error?: string
   text?: Partial<TaskFoldersText>
 }
 
-/** A folder Clean up takes: how its task ended, its name, when, its size. */
+/** A folder Clean up takes: how its task ended, its name, when, its size; pressed, where it can, it opens its task. */
 function GoesRow({ one, onOpen }: { one: FinishedFolder; onOpen: ((id: string) => void) | undefined }) {
-  return (
-    <li className={cx(s.item, onOpen !== undefined && s.opens)} {...opener(one.id, onOpen)}>
+  const words = (
+    <>
       <Icon name={KIND_GLYPH[one.kind]} size={11} className={cx(s.mark, one.kind === 'merged' && s.merged)} />
       <span className={s.title}>{one.title}</span>
       <span className={s.meta}>{one.when}</span>
       <span className={s.size}>{one.bytes === null ? '' : sizeOf(one.bytes)}</span>
+    </>
+  )
+  return (
+    <li>
+      {onOpen === undefined ? (
+        <div className={s.item}>{words}</div>
+      ) : (
+        <button type="button" className={cx(s.item, s.opens)} onClick={() => onOpen(one.id)}>
+          {words}
+        </button>
+      )}
     </li>
   )
 }
-
-/** A row that opens its task: pressed, or Enter or Space on it. */
-const opener = (id: string, onOpen: ((id: string) => void) | undefined) =>
-  onOpen === undefined
-    ? {}
-    : {
-        tabIndex: 0,
-        onClick: () => onOpen(id),
-        onKeyDown: (event: KeyboardEvent) => {
-          if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
-          event.preventDefault()
-          onOpen(id)
-        },
-      }
 
 /** A folder held back: why as its glyph and words; Remove, but while it runs, asks first under the row. */
 function HeldRow({
@@ -214,13 +211,13 @@ function HeldRow({
         </span>
       )}
       {asking && one.why !== 'running' && (
-        <span className={s.ask} role="group" aria-label={`${t.remove}: ${one.title}`}>
+        <fieldset className={s.ask} aria-label={`${t.remove}: ${one.title}`}>
           <span className={s.askWords}>{t.ask[one.why](one.count ?? 0)}</span>
           <LinkButton onClick={() => onAsk(false)}>{t.cancel}</LinkButton>
           <Button size="small" variant={loses(one.why) ? 'danger' : 'default'} busy={busy} onClick={onRemove}>
             {loses(one.why) ? t.removeAnyway : t.remove}
           </Button>
-        </span>
+        </fieldset>
       )}
     </li>
   )

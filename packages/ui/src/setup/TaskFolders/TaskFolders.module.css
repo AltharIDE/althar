@@ -179,6 +179,12 @@
 }
 
 .opens {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
@@ -263,16 +269,19 @@
   opacity: 0;
 }
 
-/* asking first: what goes or stays, under the row */
+/* asking first: what goes or stays, under the row; a fieldset, its own frame undone */
 .ask {
+  min-inline-size: 0;
+  border-width: 1px 0 0;
+  border-style: solid;
+  border-color: var(--line);
   grid-row: 2;
   grid-column: 2 / -1;
   display: flex;
   align-items: center;
   gap: 12px;
   margin: 4px 0 2px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
+  padding: 6px 0 0;
   font-size: 12px;
   color: var(--t-2);
 }

@@ -31,7 +31,7 @@ export interface TaskFoldersModel {
   readonly open?: (taskId: string) => void
   /** What the last Clean up or Remove freed, in bytes. */
   readonly freed: number | null
-  readonly busy: 'clean' | string | null
+  readonly busy: string | null
   /** What went wrong, in words. */
   readonly error: string | null
 }
@@ -57,7 +57,7 @@ export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFolders
   const settings = useQuery(reads(client).settings()).data
   const folders = useQuery(reads(client).folders()).data
   const [freed, setFreed] = useState<number | null>(null)
-  const [busy, setBusy] = useState<'clean' | string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Choices in the order they were made: only the latest failing reads again.
   const made = useRef(0)
@@ -80,7 +80,7 @@ export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFolders
   )
 
   const removing = useCallback(
-    (doing: 'clean' | string, run: () => Promise<{ readonly freed: number; readonly failed: number }>) => {
+    (doing: string, run: () => Promise<{ readonly freed: number; readonly failed: number }>) => {
       setBusy(doing)
       setError(null)
       run().then(
