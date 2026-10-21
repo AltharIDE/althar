@@ -28,6 +28,7 @@ import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
+import { withChange } from '../src/renderer/features/rules/useRules'
 import type { Host } from '../src/renderer/data/services'
 
 /* What the runtime would say, as plain values, and a client that says it. */
@@ -64,6 +65,11 @@ export const projectRules: ProjectRulesView = {
   titlePattern: null,
   moveIssues: true,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
+  sandbox: {
+    commands: ['bunx playwright', 'node scripts/e2e.ts', 'ps', 'env -i'],
+    hosts: ['github.com', 'registry.npmjs.org'],
+    edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
+  },
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [
@@ -870,6 +876,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     ]),
     getLoad: vi.fn(async () => load),
     openInEditor: vi.fn(async () => true),
+    openCode: vi.fn(async () => true),
+    // Names no code, unless a test says what they name.
+    findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<unknown>) => ({
+      place: { kind: 'task' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'althar/retry-the-checkout' }] },
+      messages: messages.map(() => ({ found: [] })),
+    })),
+    readCode: vi.fn(async (_threadId: string, path: string) => ({ path, text: 'const tries = 5\n', from: 1, total: 1, cut: false })),
     installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
@@ -891,10 +904,15 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
       postTeamReviews: false,
+      folderWait: 'smart' as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
+    setFolderWait: vi.fn(async () => {}),
+    getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
+    cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 0 })),
+    removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
     moveInLine: vi.fn(async () => {}),
     lineOldestFirst: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
@@ -906,6 +924,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     leaveOutCommits: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),
+    markTaskDone: vi.fn(async () => {}),
+    keepTaskForLater: vi.fn(async () => {}),
     renameTask: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
@@ -952,7 +972,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     dropProjectNote: vi.fn(async () => {}),
     editProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
-    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
+    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({
+      ...withChange(projectRules, change),
+      projectId,
+    })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
       ...usual('acc_added', 'signed_out'),
       name: input.name,
@@ -973,6 +996,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     skipReview: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
+    attachPullRequest: vi.fn(async () => ({
+      kind: 'attached' as const,
+      name: 'PR #1',
+      source: 'feature',
+      started: false,
+      kept: 0,
+      own: 0,
+    })),
     closePullRequest: vi.fn(async () => ({ branch: null })),
     stopBackground: vi.fn(async () => {}),
     clearBackground: vi.fn(async () => {}),

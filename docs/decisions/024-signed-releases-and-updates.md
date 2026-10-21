@@ -44,7 +44,17 @@
     credentials nothing is notarized, and the packaging says so.
   - **What a release holds.** For Apple silicon: a dmg to install from, a
     zip with `latest-mac.yml` for the updater, and their blockmaps for
-    smaller downloads later.
+    smaller downloads later. For Linux: an AppImage with `latest-linux.yml`,
+    a deb and an rpm (ADR-028). For Windows on x64 (DEV-78): an NSIS
+    installer, `Althar-<version>-x64-setup.exe`, which installs for the
+    person alone with no administrator's prompt, with a Start menu entry and
+    an uninstaller, its blockmap, and `latest.yml` for the updater.
+  - **Windows is unsigned for now** (DEV-78). The installer and the app carry
+    no Authenticode signature yet, so SmartScreen warns on a download it
+    doesn't know: More info, then Run anyway. The release workflow keeps a
+    skipped "Sign" step, and `scripts/package.ts` a `WINDOWS_SIGNING` slot,
+    naming what Azure Artifact Signing or an OV certificate needs; signing
+    goes there, inside electron-builder, before the feed is written.
   - **CI makes releases, from a version tag on main** (DEV-81).
     `.github/workflows/release.yml` runs on a tag `v<version>` pushed on a
     commit on main, or by hand from main, never on a pull request. It checks
@@ -74,7 +84,12 @@
   - **One update track, from GitHub Releases.** electron-updater reads
     `latest-mac.yml` from the latest published release and downloads the
     zip it names; Squirrel.Mac takes it only if it is signed as the running
-    app is, and puts it in place. Adapters ship inside the app, so an app
+    app is, and puts it in place. On Windows it reads `latest.yml` and
+    downloads the installer, which runs silently as Althar quits or
+    restarts; on Linux, `latest-linux.yml` and the AppImage. Off a Mac the
+    update is ready once it is down. An unsigned Windows app checks no
+    signature on its update; once releases are signed, the publisher's
+    name goes into the app and later updates must carry it. Adapters ship inside the app, so an app
     update is an adapter update. Stable only: testers and everyone else
     share it.
   - **When.** A packaged app checks ten seconds after it starts, then every
@@ -135,10 +150,13 @@
     the environment's reviewers. Revoking either means a new secret.
   - A Mac that releases needs the private key in its keychain, which asks
     once before codesign may use it.
-  - Apple silicon only; Intel, Windows and Linux follow with their packages.
+  - Apple silicon only on a Mac; Intel Macs, ARM Linux and ARM Windows
+    (which runs the x64 build emulated) have no build of their own.
+  - Windows' releases are unsigned until Althar has a certificate: each
+    person gets past SmartScreen once, and an update isn't checked against
+    a publisher.
   - No rollback: an update that breaks something is fixed by the next one.
     A migration in it can't be undone.
 - **Revisit when:** testers need a beta channel; adapters need to update
-  without an app release (DEV-46); Windows and Linux packages land (DEV-77,
-  DEV-78); the adapters stop running on Electron's binary, so the helpers can
+  without an app release (DEV-46); Windows is signed (the rest of DEV-78); the adapters stop running on Electron's binary, so the helpers can
   drop the agents' entitlements; or a release has to be rolled back.

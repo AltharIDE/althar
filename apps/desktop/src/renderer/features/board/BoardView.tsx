@@ -17,6 +17,7 @@ import {
   FactLine,
   FileChips,
   Findings,
+  KeptRow,
   LinkButton,
   NextLine,
   NextRow,
@@ -24,6 +25,7 @@ import {
   Outcome,
   PullChip,
   SettledRow,
+  SettleWays,
   TaskKind,
   TaskStatus,
   Thumbs,
@@ -31,11 +33,11 @@ import {
   unreachable,
   Wait,
 } from '@althar/ui'
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { busyWords, inLineWords, waitsWords } from '../../shared/agents'
-import { callKindOf, kindWords, whereOf } from '../../shared/calls'
+import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { doingWords, doneHere, factsOf, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
@@ -82,6 +84,8 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
+  /** Settles a finished task that isn't a change, from its kept row. */
+  done: 'Done',
   /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
   /** A plain task at work: no steps worth showing, and nothing of its own yet. */
   working: 'Working',
@@ -117,6 +121,17 @@ export const text = {
   closeChange: (name: string) => `Close ${name}`,
   abandoned: 'Abandoned',
   showOlder: 'Show older',
+  /** What Done and Keep for later do, on hover. */
+  doneHint: 'Settle it: it moves to Settled, and what it left running, such as a page, stops.',
+  keepHint: 'Take it out of Needs you as it is, with its page still up. Writing to it brings it back.',
+  /** The two the Settled lane's head names, while something is kept for later; the one showing in ink. */
+  settledOrKept: 'Settled or kept for later',
+  settledShelf: 'Settled',
+  keptShelf: 'Kept',
+  /** When a kept task was kept, under its title. */
+  keptAt: (ago: string) => `kept ${ago}`,
+  /** Settled, while nothing has settled but something was kept for later. */
+  nothingSettled: 'Nothing has settled yet.',
 }
 
 /** Closing settled tasks' pull requests from their rows: the one closing now, the last that failed and why, and how to close one. */
@@ -335,9 +350,11 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
           : [{ id: `${index}-${picture.digest}`, src: pictureUrl(picture.digest, true), name: picture.name ?? text.picture(index + 1) }],
       )
       const files = work.handed?.files ?? []
+      const ways = settleWaysOf(work, actions)
       return {
         ...base,
         word: text.finished,
+        ...(ways === null ? {} : { corner: ways }),
         ...(pictures.length > 0
           ? { object: <Thumbs pictures={pictures.slice(0, HANDED_SHOWN)} /> }
           : files.length > 0
@@ -351,12 +368,18 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
               : {}),
       }
     }
-    case 'review':
+    case 'review': {
+      // Its draft is posted or discarded in its task; here it is only kept for later. Posted and answered since, it is finished.
+      const ways = settleWaysOf(work, actions)
+      const findings = work.reviewing == null ? null : findingsOf(work.reviewing)
       return {
         ...base,
-        word: text.reviewDrafted,
-        ...(work.reviewing == null ? {} : { object: theirs(work.reviewing), foot: findingsOf(work.reviewing) }),
+        word: isAnswered(work.reviewing) ? text.finished : text.reviewDrafted,
+        ...(work.reviewing == null ? {} : { object: theirs(work.reviewing) }),
+        ...(findings === null ? {} : { foot: findings }),
+        ...(ways === null ? {} : { corner: ways }),
       }
+    }
     case 'change': {
       // Commits after its last pull request merged or closed: its branch, as for work with none, until a new one opens; with
       // another of its repositories' pull requests open, that one, to accept, and the branch under it with what is in none.
@@ -402,8 +425,26 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   }
 }
 
-/** What a ready card does without opening its task: push, and merge, and how they stand. */
-export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'>
+/** What a ready card does without opening its task: push, and merge, mark done or keep for later, and how they stand. */
+export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
+  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling'>>
+
+/**
+ * A finished task's Done and Keep for later, for its card's corner, where it
+ * isn't a change: a review with a draft only keeps, as it settles once
+ * posted, and one kept has only Done.
+ */
+const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactNode => {
+  const { markDone, keep } = actions ?? {}
+  if (!isSettleable(work) || markDone === undefined || keep === undefined) return null
+  return (
+    <SettleWays
+      {...(takesDone(work) ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
+      {...(work.phase === 'ready' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
+      {...(actions?.settling?.has(work.taskId) === true ? { busy: 'done' as const } : {})}
+    />
+  )
+}
 
 /**
  * A ready pull request's foot: what stands between it and merging, as one
@@ -490,6 +531,8 @@ export function BoardView({
   onFoldsChange?: (folds: BoardFolds) => void
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
+  // Which of Settled's tabs shows, while something is kept for later.
+  const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
   const asks = [
     ...lanes.waiting.map((waiting) => ({ at: waiting.call?.createdAt ?? waiting.task.createdAt, waiting, call: null })),
@@ -582,61 +625,107 @@ export function BoardView({
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal + lanes.finished.length}>
-        {/* A plain task that finished asks nothing of the person, so it waits here, above what is done, until they open it. */}
-        {lanes.finished.map((work) => (
-          <BoardCard key={work.taskId} {...readyCardOf(work)} onOpen={() => onOpen(work.threadId)} />
-        ))}
-        <BoardList>
-          {lanes.settled.map((work) => {
-            const change = work.change
-            const outcome = change?.state === 'merged' ? Outcome.Merged : work.state === 'abandoned' ? Outcome.Abandoned : Outcome.Done
-            const named = change === null ? null : `${change.short} ${change.prefix}${change.number}`
-            const kind = kindWordOf(work)
-            return (
-              <SettledRow
-                key={work.taskId}
-                outcome={outcome}
-                task={work.slug}
-                {...(kind === undefined ? {} : { kind })}
-                title={work.title}
-                // Its pull request as its host last said: open is open, whatever became of the task (an abandoned one's is left open).
-                {...(named === null || change === null
-                  ? work.branch === null
-                    ? {}
-                    : { meta: work.branch }
-                  : {
-                      meta:
-                        change.state === 'merged'
-                          ? text.merged(named)
-                          : change.state === 'closed'
-                            ? text.closed(named)
-                            : text.stillOpen(named),
-                    })}
-                {...(named !== null && change?.state === 'open' && closing !== undefined
-                  ? {
-                      action: {
-                        label: text.closeChange(named),
-                        onAction: () => closing.close(work.taskId, change.url),
-                        busy: closing.busy === work.taskId,
-                      },
-                      ...(closing.failed?.taskId === work.taskId ? { error: closing.failed.message } : {}),
-                    }
-                  : {})}
-                at={work.settledAt === null ? '' : ago(work.settledAt, new Date(now))}
-                onOpen={() => onOpen(work.threadId)}
-                text={{ task: unnamed }}
-              />
-            )
-          })}
-        </BoardList>
-        {onShowOlder !== undefined && (
-          <Button variant="quiet" size="small" onClick={onShowOlder}>
-            {text.showOlder}
-          </Button>
+      <BoardColumn
+        lane={BoardLane.Settled}
+        count={lanes.settledTotal}
+        filled={lanes.settledTotal > 0 || lanes.kept.length > 0}
+        // What was kept for later, named beside Settled in its head while there is some; pressing it shows it in Settled's place.
+        {...(lanes.kept.length === 0
+          ? {}
+          : {
+              shelves: {
+                label: text.settledOrKept,
+                value: shelf,
+                onChange: (value: string) => setShelf(value === 'kept' ? 'kept' : 'settled'),
+                options: [
+                  { value: 'settled', label: text.settledShelf, count: lanes.settledTotal },
+                  { value: 'kept', label: text.keptShelf, count: lanes.kept.length, icon: 'pin' as const },
+                ],
+              },
+            })}
+      >
+        {shelf === 'kept' && lanes.kept.length > 0 ? (
+          <BoardList>
+            {lanes.kept.map((work) => (
+              <Kept key={work.taskId} work={work} now={now} onOpen={() => onOpen(work.threadId)} actions={actions} />
+            ))}
+          </BoardList>
+        ) : (
+          <>
+            {lanes.settled.length === 0 && <p className={s.shelfNote}>{text.nothingSettled}</p>}
+            <BoardList>
+              {lanes.settled.map((work) => {
+                const change = work.change
+                const outcome = change?.state === 'merged' ? Outcome.Merged : work.state === 'abandoned' ? Outcome.Abandoned : Outcome.Done
+                const named = change === null ? null : `${change.short} ${change.prefix}${change.number}`
+                const kind = kindWordOf(work)
+                return (
+                  <SettledRow
+                    key={work.taskId}
+                    outcome={outcome}
+                    task={work.slug}
+                    {...(kind === undefined ? {} : { kind })}
+                    title={work.title}
+                    // Its pull request as its host last said: open is open, whatever became of the task (an abandoned one's is left open).
+                    {...(named === null || change === null
+                      ? work.branch === null
+                        ? {}
+                        : { meta: work.branch }
+                      : {
+                          meta:
+                            change.state === 'merged'
+                              ? text.merged(named)
+                              : change.state === 'closed'
+                                ? text.closed(named)
+                                : text.stillOpen(named),
+                        })}
+                    {...(named !== null && change?.state === 'open' && closing !== undefined
+                      ? {
+                          action: {
+                            label: text.closeChange(named),
+                            onAction: () => closing.close(work.taskId, change.url),
+                            busy: closing.busy === work.taskId,
+                          },
+                          ...(closing.failed?.taskId === work.taskId ? { error: closing.failed.message } : {}),
+                        }
+                      : {})}
+                    at={work.settledAt === null ? '' : ago(work.settledAt, new Date(now))}
+                    onOpen={() => onOpen(work.threadId)}
+                    text={{ task: unnamed }}
+                  />
+                )
+              })}
+            </BoardList>
+            {onShowOlder !== undefined && (
+              <Button variant="quiet" size="small" onClick={onShowOlder}>
+                {text.showOlder}
+              </Button>
+            )}
+          </>
         )}
       </BoardColumn>
     </Board>
+  )
+}
+
+/**
+ * A task kept for later, as a row in Settled's place while Kept shows: what
+ * it is and when it was kept, with Done at its end where it is the person's
+ * to settle (a review with a draft settles once posted).
+ */
+function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; onOpen: () => void; actions: CardActions | undefined }) {
+  const markDone = actions?.markDone
+  const failed = actions?.failed[work.taskId]
+  return (
+    <KeptRow
+      title={work.title}
+      at={work.keptAt == null ? '' : text.keptAt(ago(work.keptAt, new Date(now)))}
+      onOpen={onOpen}
+      {...(takesDone(work) && markDone !== undefined
+        ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint, busy: actions?.settling?.has(work.taskId) === true }
+        : {})}
+      {...(failed === undefined ? {} : { error: failed.message })}
+    />
   )
 }
 

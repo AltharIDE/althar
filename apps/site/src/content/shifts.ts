@@ -6,7 +6,8 @@
  *
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
- * item that was missed. Topped up on 19 October with 9 to 19 October; pure
+ * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -54,6 +55,27 @@ export interface Upcoming extends Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'cursor-new-plans',
+    date: '2026-10-18',
+    kind: ShiftKind.Pricing,
+    who: 'Cursor',
+    title: 'Cursor’s plans are rebuilt around one subscription',
+    what: 'Individual plans are now Free, Plus $8, Premium $30, Super $100 and Ultra $200, sold with Grok and X. Pro at $20 maps to Premium at $30. Legacy plans keep working; moving to the new ones is permanent.',
+    source: { name: 'Cursor docs', url: 'https://cursor.com/docs/account/pricing/legacy-cursor-plans' },
+  },
+  {
+    id: 'copilot-six-models-left',
+    date: '2026-10-19',
+    kind: ShiftKind.Access,
+    who: 'GitHub',
+    title: 'Six models leave Copilot, GPT-5.5 and GPT-5.4 among them',
+    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-5.6 Sol and Luna, Gemini 3.8 Flash and Grok 4.6; admins may need to enable them.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-09-18-upcoming-deprecation-of-selected-github-copilot-models-in-mid-october',
+    },
+  },
   {
     id: 'gpt-5-5-retired',
     date: '2026-10-14',
@@ -360,19 +382,6 @@ export const SHIFTS: readonly Shift[] = [
  */
 export const UPCOMING: readonly Upcoming[] = [
   {
-    id: 'copilot-six-models-leave',
-    date: '2026-10-19',
-    announced: '2026-09-18',
-    kind: ShiftKind.Access,
-    who: 'GitHub',
-    title: 'Six models leave Copilot, GPT-5.5 and GPT-5.4 among them',
-    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-5.6 Sol and Luna, Gemini 3.8 Flash and Grok 4.6; admins may need to enable them.',
-    source: {
-      name: 'GitHub Changelog',
-      url: 'https://github.blog/changelog/2026-09-18-upcoming-deprecation-of-selected-github-copilot-models-in-mid-october',
-    },
-  },
-  {
     id: 'openai-legacy-models-leave',
     date: '2026-10-23',
     announced: '2026-04-22',
@@ -414,6 +423,19 @@ export const UPCOMING: readonly Upcoming[] = [
     title: 'Cursor loses direct access to OpenAI’s models',
     what: 'OpenAI’s upcoming models won’t go to Cursor either, now that SpaceX owns it.',
     source: { name: 'CNBC', url: 'https://www.cnbc.com/2026/08/29/openai-cursor-spacex-model-access.html' },
+  },
+  {
+    id: 'copilot-opus-5-terra-leave',
+    date: '2026-11-16',
+    announced: '2026-10-15',
+    kind: ShiftKind.Access,
+    who: 'GitHub',
+    title: 'Claude Opus 5, Opus 4.8 and GPT-5.6 Terra leave Copilot',
+    what: 'Replacements are Claude Opus 5.5 and GPT-6.1 Sol or GPT-6 Luna. Anthropic’s API is not affected.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-10-15-upcoming-deprecation-of-selected-github-copilot-models-in-mid-november',
+    },
   },
   {
     id: 'sonnet-4-5-retires',

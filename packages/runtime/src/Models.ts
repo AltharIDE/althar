@@ -10,6 +10,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { UnknownAgent } from './errors'
+import { Installs, isInstalled } from './Installs'
 import { Instance } from './Instance'
 import { blockedModelsOf, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
 import { change, timestamp } from './records'
@@ -47,7 +48,7 @@ export interface AgentModels {
   readonly images: boolean | null
 }
 
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | RuntimeConfig
+type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | Installs | RuntimeConfig
 
 export interface OfferedModel {
   readonly id: string
@@ -197,6 +198,7 @@ export class Models extends Context.Service<
       const sql = yield* SqlClient.SqlClient
       const agents = yield* Agents
       const signIns = yield* SignIns
+      const installs = yield* Installs
       const instance = yield* Instance
       const context = yield* Effect.context<Store>()
       // Asking runs in the runtime's scope: it stops, and its agent with it, when the runtime does.
@@ -297,8 +299,8 @@ export class Models extends Context.Service<
           // What it said when asked this launch is newer than any session: a model it offers since then is there.
           const asked = probed.get(definition.id)
           if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
-          // Not asked yet this launch: asked now, in the background, if it is signed in; its latest session says until then.
-          if (!probing.has(definition.id) && (yield* signIns.of(definition.id)) !== 'signed_out') {
+          // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
+          if (!probing.has(definition.id) && isInstalled(installs, definition) && (yield* signIns.of(definition.id)) !== 'signed_out') {
             probing.add(definition.id)
             yield* Effect.forkIn(probe(entry), scope)
             return { ...seen, ...now, defaults, blocked, probing: true }

@@ -43,6 +43,7 @@ const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
   running: TaskStatus.Running,
   waiting: TaskStatus.Yours,
   ready: TaskStatus.Done,
+  kept: TaskStatus.Paused,
   stopped: TaskStatus.Stopped,
   settled: TaskStatus.Done,
 }

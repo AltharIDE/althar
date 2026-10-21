@@ -21,10 +21,18 @@ import { launch, mainWindow } from './support'
 const electronPath = createRequire(import.meta.url)('electron') as string
 const app = join(import.meta.dirname, '..')
 
-/** How many times the main process has started the runtime, and how many times it has seen it exit, from the app's log (which keeps every launch's). */
+/**
+ * How many times the main process has started the runtime, seen it exit, and heard from it that the profile is held,
+ * from the app's log (which keeps every launch's).
+ */
 const runtimeLines = (home: string) => {
   const log = readFileSync(join(home, 'profile', 'logs', 'main.log'), 'utf8')
-  return { started: log.split('Runtime started').length - 1, exited: log.split('Runtime exited').length - 1 }
+  const count = (line: string) => log.split(line).length - 1
+  return {
+    started: count('Runtime started'),
+    exited: count('Runtime exited'),
+    held: count('Profile is open in another Althar'),
+  }
 }
 
 test('a profile another runtime has open is said, not crashed over, and Try again opens it once it is free', async () => {
@@ -50,14 +58,17 @@ test('a profile another runtime has open is said, not crashed over, and Try agai
 
     // Main waits out the restarts it would have made; the runtime started once and never exited.
     await page.waitForTimeout(3_000)
-    expect(runtimeLines(home)).toEqual({ started: earlier.started + 1, exited: earlier.exited })
+    expect(runtimeLines(home)).toEqual({ started: earlier.started + 1, exited: earlier.exited, held: earlier.held + 1 })
     await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
 
     // Still held: trying again says the same.
     await page.getByRole('button', { name: 'Try again' }).click()
-    await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
+    // The old runtime's exit and the new one's start are logged as each happens, in either order.
     await expect.poll(() => runtimeLines(home).exited).toBe(earlier.exited + 1)
-    expect(runtimeLines(home).started).toBe(earlier.started + 2)
+    await expect.poll(() => runtimeLines(home).started).toBe(earlier.started + 2)
+    // The new runtime has found it held, so letting go of it now can't let that one open it before Try again.
+    await expect.poll(() => runtimeLines(home).held).toBe(earlier.held + 2)
+    await expect(page.getByRole('heading', { name: 'Althar is open somewhere else', level: 1 })).toBeVisible()
 
     // Closed, it opens.
     other.close()

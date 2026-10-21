@@ -82,6 +82,9 @@ export const agentSaid = (error: unknown): string | undefined => {
       return `The agent doesn't offer ${text(error, 'value')}.`
     case 'TurnInProgress':
       return 'The lead is still on its last turn.'
+    // An agent that couldn't start: the sentence Althar wrote when it failed, or nothing where there was none to say.
+    case 'SessionFailed':
+      return text(error, 'summary')
     default:
       return undefined
   }
@@ -111,6 +114,7 @@ const kinds: Readonly<Record<string, string>> = {
   repository: 'repository',
   output: 'output',
   document: 'document',
+  file: 'file',
   note: 'note',
 }
 
@@ -217,6 +221,7 @@ export const words = (
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
       case 'LaunchRefused':
+      case 'AttachRefused':
         return text(error, 'message')
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
@@ -227,7 +232,9 @@ export const words = (
       case 'ChangedSinceSeen':
         return text(error, 'what') === 'branch'
           ? 'The branch changed since you looked at it, so nothing was pushed. Have another look at what would go up, then push.'
-          : 'The pull request changed since you looked at it. Have another look before you accept it.'
+          : text(error, 'what') === 'folder'
+            ? 'What is in the task’s folder changed since you looked at it, so it stays. Have another look before you remove it.'
+            : 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'NotAnIssue':
@@ -334,6 +341,11 @@ const taskRefused = {
   abandoned: 'The task is abandoned. Reopen it to carry on.',
   no_title: 'Give the task a title.',
   title_too_long: 'Keep the title short: what should change, in a few words.',
+  left_running:
+    'Althar couldn’t stop what the task left running, such as a page, so it isn’t done yet. Try Done again, or keep it for later.',
+  folder_in_use: 'Something runs from the task’s folder, or an agent works in it, so it stays. Stop it first, then remove the folder.',
+  folder_in_way:
+    'Something that isn’t the task’s worktree is where its folder goes, so the folder can’t come back there. Move it away, then try again.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Why an issue draft can't change, by where it stands. */
@@ -360,6 +372,7 @@ const reviewIncomplete = {
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'LaunchRefused',
+  'AttachRefused',
   'DraftClosed',
   'DraftUntitled',
   'ReviewDraftClosed',

@@ -195,9 +195,12 @@ const unzipInto = (bytes: Uint8Array, folder: string, names: ReadonlySet<string>
 const fail = (agentId: string, summary: string, reason: unknown = summary) =>
   new InstallFailed({ agentId, summary, reason: reason instanceof Error ? reason.message : String(reason) })
 
+/** The bsdtar this computer has. */
+const tarHere = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
+
 const run = (command: string, args: ReadonlyArray<string>, timeout = 60_000) =>
   Effect.callback<string, Error>((resume) => {
-    execFile(command, [...args], { timeout }, (error, stdout, stderr) =>
+    execFile(command, [...args], { timeout, windowsHide: true }, (error, stdout, stderr) =>
       resume(error === null ? Effect.succeed(stdout) : Effect.fail(new Error(`${error.message}\n${stderr}`))),
     )
   })
@@ -220,6 +223,10 @@ const findIn = (dir: string, name: string, depth = 3): string | null => {
   }
   return null
 }
+
+/** Whether the agent can be started here: one with no command of its own always can, any other where its command is found. */
+export const isInstalled = (installs: Pick<Installs['Service'], 'locate'>, definition: AgentDefinition): boolean =>
+  definition.cli === undefined || installs.locate(definition) !== null
 
 export class Installs extends Context.Service<
   Installs,
@@ -364,8 +371,9 @@ export class Installs extends Context.Service<
             }
             const archive = join(folder, assetOf(install.assets) ?? 'download')
             writeFileSync(archive, bytes)
-            // bsdtar, as macOS and Windows have, unpacks a zip as well as a gzipped tar.
-            yield* run('tar', ['-xf', archive, '-C', unpacked]).pipe(
+            // bsdtar, as macOS and Windows have, unpacks a zip as well as a gzipped tar: on Windows its own, by its path, as
+            // Git's GNU tar may come first on the PATH, which takes neither a zip nor a drive (C:) in a path.
+            yield* run(tarHere, ['-xf', archive, '-C', unpacked]).pipe(
               Effect.mapError((error) => fail(definition.id, `${definition.name}'s download couldn't be unpacked.`, error)),
             )
             const program = programName(name, platform)

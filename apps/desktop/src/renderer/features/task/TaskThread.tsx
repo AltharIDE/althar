@@ -5,14 +5,12 @@ import {
   Checked,
   Gallery,
   type GalleryShot,
-  Issue,
   Markdown,
   Relayed,
-  Reviewer,
   Round,
   shotName,
   Thinking,
-  Verdict,
+  ThreadDivider,
   WorkLine,
   WorkNote,
   WorkSaid,
@@ -26,8 +24,9 @@ import { useModelNames } from '../../shared/modelNames'
 import { type Round as RoundModel, type RoundBlock, type Said, type WorkStep, withoutShotList } from '../../shared/rounds'
 import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
-import { productBrand, productName } from '../../shared/products'
-import { PartView, text as threadText, ThreadBlocks } from '../../shared/ThreadBlocks'
+import { SaidIn } from '../../shared/code/CodeHost'
+import { PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
+import { PublishedReport, ReviewReport } from './Reports'
 import s from './TaskThread.module.css'
 
 /*
@@ -37,14 +36,10 @@ import s from './TaskThread.module.css'
  * on the person's side; a reviewer in its own voice; what Althar says. What
  * the person said, what came from outside, questions, runs and the rest are
  * drawn as every thread draws them (ThreadBlocks). Before the lead says
- * anything, its round stands under its name, thinking.
+ * anything, its round stands under its name, thinking. What started a
+ * round, and what a step reported, carry their item's id (`data-item`), so
+ * the Graph face can take the person to them.
  */
-
-export const text = {
-  /** A pull request the task opened, or a branch it pushed, where Althar's report doesn't say. */
-  opened: (name: string) => `Opened ${name}.`,
-  pushed: 'Pushed the branch.',
-}
 
 type Shared = Omit<ComponentProps<typeof ThreadBlocks>, 'blocks' | 'card' | 'queued'>
 
@@ -95,7 +90,9 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
   // What it says, then what it shows and hands back, each a part of the round, spaced as the round spaces them: its own pictures large.
   const said = (one: Said, children?: ReactNode) => (
     <Fragment key={one.id}>
-      <Markdown source={one.text} />
+      <SaidIn.Provider value={one.id}>
+        <Markdown source={one.text} />
+      </SaidIn.Provider>
       <Gallery shots={one.handed.pictures.map((picture) => ({ ...picture, caption: picture.label ?? picture.name }))} />
       {children}
       <HandedBack
@@ -133,7 +130,13 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
     // What Copy takes: what it said last, else first.
     const copy = block.live ? undefined : (block.result ?? block.ack)?.text
     return (
-      <Round key={block.id} model={modelOf(block.agentId)} at={block.at} {...(copy === undefined ? {} : { copy })}>
+      <Round
+        key={block.id}
+        model={modelOf(block.agentId)}
+        at={block.at}
+        {...(copy === undefined ? {} : { copy })}
+        {...(report === null ? {} : { 'data-item': report.id })}
+      >
         {block.ack !== null && said(block.ack)}
         {work !== null && (
           <WorkLine
@@ -183,50 +186,32 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
           </Round>
         )
       case 'relayed':
-        return <Relayed key={block.id} title={block.title} body={block.body} />
+        return <Relayed key={block.id} title={block.title} body={block.body} data-item={block.id} />
       case 'althar':
         return (
           <AltharLine key={block.id} tone={block.tone}>
             {block.text}
           </AltharLine>
         )
+      case 'folder':
+        return (
+          <ThreadDivider key={block.id} icon="folder">
+            {block.text}
+          </ThreadDivider>
+        )
       case 'verdict':
         return (
-          <Round key={block.id} model={named(block.result.agentId)} at={block.at} part="Review">
-            <Reviewer
-              verdict={block.result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}
-              findings={block.result.findings.map((finding, index) => ({
-                id: `${block.id}-${index}`,
-                weight: finding.severity,
-                ...(finding.file === null ? {} : { at: finding.line === null ? finding.file : `${finding.file}:${finding.line}` }),
-                claim: finding.claim,
-              }))}
-            />
-            {block.result.summary !== '' && <Markdown source={block.result.summary} />}
+          <Round key={block.id} model={named(block.result.agentId)} at={block.at} part="Review" data-item={block.id}>
+            <ReviewReport id={block.id} result={block.result} />
           </Round>
         )
-      case 'published': {
+      case 'published':
         // Althar's own words for it, and the pull request under them, as every thread shows one.
-        const change = block.result.change
-        const said = block.result.summary.trim()
         return (
-          <div key={block.id} className={s.published}>
-            <AltharLine>
-              {said !== '' ? said : change === null ? text.pushed : text.opened(`${change.short} ${change.prefix}${change.number}`)}
-            </AltharLine>
-            {change !== null && (
-              <Issue
-                mark={productBrand(change.product)}
-                source={productName(change.product)}
-                id={`${change.short} ${change.prefix}${change.number}`}
-                title={change.title}
-                href={change.url}
-                meta={[change.repository, change.draft ? threadText.change.draft : threadText.change[change.state]].join(' · ')}
-              />
-            )}
+          <div key={block.id} className={s.published} data-item={block.id}>
+            <PublishedReport result={block.result} />
           </div>
         )
-      }
       default:
         return <ThreadBlocks key={block.id} {...shared} blocks={[block as Block]} />
     }

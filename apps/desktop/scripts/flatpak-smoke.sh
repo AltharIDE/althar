@@ -5,7 +5,7 @@
 # Codex, through the permission the manifest asks for),
 # data that persists beside the profile (its home is fresh each run), and
 # permissions (no host filesystem or ssh-agent socket, but the tray watcher
-# and the keyring reachable). The window's own
+# and keyring are reachable; it checks the Secret portal if present). The window's own
 # behavior is
 # the same X11 smoke the other packages use: ALTHAR_BIN=/usr/bin/althar
 # ALTHAR_ARGS=--ozone-platform=x11 scripts/x11-smoke.sh. Needs the app
@@ -69,6 +69,16 @@ if [ -n "$claude_bin" ]; then
 else
   bad "the bundled Claude Code CLI is installed"
 fi
+
+# The app-scoped key is available through Flatpak's default portal proxy on
+# supported desktops. The portal is optional: without it the app uses
+# safeStorage's keyring-backed session fallback and may ask for sign-in again
+# after restart.
+portal_version=$(run "gdbus call --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop --method org.freedesktop.DBus.Properties.Get org.freedesktop.portal.Secret version")
+case "$portal_version" in
+  *uint32\ [1-9]*) ok "the app-specific Secret portal answers from the sandbox ($portal_version)" ;;
+  *) echo "SKIP: no Secret portal response; sign-ins use the session keyring fallback and may need renewing after restart" ;;
+esac
 
 run 'test -f /app/share/applications/dev.althar.app.desktop && grep -q "StartupWMClass=dev.althar.app" /app/share/applications/dev.althar.app.desktop' && ok "the desktop entry is there, with the right class" || bad "desktop entry"
 run 'test -f /app/share/metainfo/dev.althar.app.metainfo.xml && test -f /app/share/icons/hicolor/512x512/apps/dev.althar.app.png' && ok "metainfo and icon are there" || bad "metainfo and icon"

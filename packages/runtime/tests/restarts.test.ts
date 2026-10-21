@@ -1,9 +1,10 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Ids, newId } from '@althar/domain'
@@ -15,6 +16,7 @@ import { Policies } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { fakeAgents, notices, repository, runtime, until } from './support'
 
 /*
@@ -157,6 +159,28 @@ const reviewThread = (taskId: string) =>
 
 const store = () => join(mkdtempSync(join(tmpdir(), 'althar-restarts-')), 'althar.sqlite')
 
+/** A day passes while Althar is closed: every time the store at `file` keeps is a day earlier. */
+const aDayLater = (file: string) => {
+  const db = new DatabaseSync(file)
+  for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all())
+    for (const column of db.prepare(`PRAGMA table_info("${String(name)}")`).all())
+      if (String(column.name).endsWith('_at'))
+        db.exec(
+          `UPDATE "${String(name)}" SET "${String(column.name)}" = strftime('%Y-%m-%dT%H:%M:%fZ', "${String(column.name)}", '-1 day') WHERE "${String(column.name)}" LIKE '____-__-__T%'`,
+        )
+  db.close()
+}
+
+/** The turns of the thread's latest session, oldest first, with the tokens each used. */
+const turnsOf = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return yield* sql<{ state: string; tokens: number | null }>`
+      SELECT state, json_extract(usage, '$.totalTokens') AS tokens FROM turn_deliveries
+      WHERE provider_session_id = (SELECT id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1)
+      ORDER BY requested_at, rowid`
+  })
+
 describe('A step a restart stopped', () => {
   it.live('carries on by itself, on its lead, with one quiet line in the thread and nothing asked of the person', () =>
     Effect.gen(function* () {
@@ -176,6 +200,105 @@ describe('A step a restart stopped', () => {
         assert.strictEqual(said.length, 1)
         assert.strictEqual(said[0]?.severity, 'info')
       }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
+  it.live('carries on a day later where its agent’s first turns do nothing, as Claude Code’s do while its sign-in is renewed', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file)
+      aDayLater(file)
+      yield* Effect.gen(function* () {
+        // Started again at once, its first two turns end having done nothing: told to carry on after a pause, it does.
+        const turns = yield* until(turnsOf(task.threadId), (rows) => rows.length === 3)
+        assert.deepStrictEqual(
+          turns.map((turn) => [turn.state, turn.tokens]),
+          [
+            ['completed', 0],
+            ['completed', 0],
+            ['delivered', null],
+          ],
+        )
+        const [attempt] = yield* implement
+        assert.strictEqual(attempt?.state, 'running')
+        assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+        assert.strictEqual((yield* sessionsOf(task.threadId)).length, 2)
+      }).pipe(Effect.provide(runtime(file, { blank: 2 }, { idle: { blank: Duration.millis(200) } })))
+    }),
+  )
+
+  it.live('needs the person where its agent’s turns keep doing nothing', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file)
+      yield* Effect.gen(function* () {
+        const [call] = yield* until(callsOf(task.taskId), (rows) => rows.length === 1)
+        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'stalled' })
+        // Carried on, then told to carry on three times.
+        assert.strictEqual((yield* turnsOf(task.threadId)).length, 4)
+      }).pipe(Effect.provide(runtime(file, { blank: 10 }, { idle: { blank: Duration.millis(100) } })))
+    }),
+  )
+
+  it.live('counts the turns that did nothing only in a row: a turn that did something gives it its tries again', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file)
+      aDayLater(file)
+      yield* Effect.gen(function* () {
+        const sessions = yield* Sessions
+        // Its first three turns do nothing; told to carry on, the fourth works, until the person stops it.
+        yield* until(turnsOf(task.threadId), (rows) => rows.length === 4 && rows[3]?.state === 'delivered')
+        yield* sessions.interrupt(task.threadId)
+        yield* until(turnsOf(task.threadId), (rows) => rows[3]?.state === 'interrupted')
+        // What they say next does nothing at first; told to carry on, it works again.
+        const body = 'Go on.'
+        yield* sessions.send({
+          envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+          threadId: task.threadId,
+          body,
+        })
+        const turns = yield* until(turnsOf(task.threadId), (rows) => rows.length >= 6)
+        assert.deepStrictEqual(
+          turns.slice(3, 5).map((turn) => [turn.state, turn.tokens]),
+          [
+            ['interrupted', null],
+            ['completed', 0],
+          ],
+        )
+        assert.isNull(turns[5]?.tokens)
+        assert.notInclude(
+          (yield* callsOf(task.taskId)).map((call) => call.why),
+          'stalled',
+        )
+      }).pipe(Effect.provide(runtime(file, { blank: [1, 2, 3, 5] }, { idle: { blank: Duration.millis(100) } })))
+    }),
+  )
+
+  it.live('isn’t told to carry on where another turn came while it waited, as one the person stopped', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* working(file)
+      aDayLater(file)
+      yield* Effect.gen(function* () {
+        const sessions = yield* Sessions
+        yield* until(turnsOf(task.threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
+        // While Althar waits to tell it to carry on, the person says something, and stops the turn it starts.
+        const body = 'And the docs.'
+        yield* sessions.send({
+          envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+          threadId: task.threadId,
+          body,
+        })
+        yield* until(turnsOf(task.threadId), (rows) => rows.length === 2 && rows[1]?.state === 'delivered')
+        yield* sessions.interrupt(task.threadId)
+        yield* until(turnsOf(task.threadId), (rows) => rows[1]?.state === 'interrupted')
+        yield* Effect.sleep(Duration.seconds(2))
+        // The turn the person stopped is theirs to carry on.
+        assert.strictEqual((yield* turnsOf(task.threadId)).length, 2)
+        assert.strictEqual((yield* implement)[0]?.state, 'running')
+        assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+      }).pipe(Effect.provide(runtime(file, { blank: 1 }, { idle: { blank: Duration.seconds(1) } })))
     }),
   )
 

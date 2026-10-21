@@ -91,7 +91,7 @@
   border-radius: 5px;
 }
 .more:hover {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .more:active {
   background: var(--n-5);

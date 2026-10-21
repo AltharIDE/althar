@@ -1,0 +1,382 @@
+/* A task's steps as a graph: a dotted canvas of lanes, the agents held at its left and the markers at its top. */
+
+/* it fills the box it is given: a canvas has no height of its own */
+.graph {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  background-color: var(--n-2);
+  /* the dot grid moves and grows with the canvas */
+  background-image: radial-gradient(circle, var(--line-2) 1px, transparent 1.3px);
+  background-size: var(--dots, 18px) var(--dots, 18px);
+  background-position: var(--dots-x, 0) var(--dots-y, 0);
+}
+.canvas:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: -2px;
+}
+.dragging {
+  cursor: grabbing;
+}
+.world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+/* ——— the lanes, and the lines where rounds start ——— */
+.under {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid var(--line);
+}
+.lane:first-child {
+  border-top: 1px solid var(--line);
+}
+.lane:nth-child(even) {
+  background: color-mix(in srgb, var(--paper) 40%, transparent);
+}
+.line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--line-3);
+}
+
+/* ——— lines between steps: straight, thin, a small solid head ——— */
+.edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.edge {
+  fill: none;
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+.edgeDone {
+  stroke: var(--t-4);
+}
+.headDone {
+  fill: var(--t-4);
+}
+.edgeRound,
+.edgeNext {
+  stroke: var(--line-3);
+}
+.edgeNext {
+  stroke-dasharray: 3 4;
+}
+.headRound,
+.headNext {
+  fill: var(--line-3);
+}
+.edgeLive {
+  stroke: var(--live);
+}
+.headLive {
+  fill: var(--live);
+}
+.edgeYou {
+  stroke: var(--signal);
+}
+.headYou {
+  fill: var(--signal);
+}
+
+/* ——— a step ——— */
+.cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.place {
+  position: absolute;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  height: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: var(--lift);
+  text-align: left;
+  cursor: default;
+  transition:
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+button.card {
+  cursor: pointer;
+}
+button.card:hover {
+  border-color: var(--line-3);
+  box-shadow: var(--lift-2);
+}
+.now {
+  border-color: var(--live);
+  box-shadow: 0 0 0 3px var(--live-dim);
+}
+.waiting,
+.proposed {
+  border-color: var(--signal);
+  background: var(--signal-paper);
+  box-shadow: none;
+}
+.proposed {
+  border-style: dashed;
+}
+.next,
+.held,
+.stopped {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--paper) 45%, transparent);
+  box-shadow: none;
+}
+.added {
+  border: 1px dashed var(--live);
+  background: color-mix(in srgb, var(--paper) 45%, transparent);
+  box-shadow: none;
+}
+.opened,
+button.card:focus-visible {
+  border-color: transparent;
+  outline: none;
+  box-shadow:
+    0 0 0 1.5px var(--t-1),
+    0 0 0 4px var(--n-3);
+}
+.top {
+  order: -1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--t-3);
+}
+.n {
+  flex: none;
+  font: 500 10.5px/1 var(--mono);
+  color: var(--t-4);
+}
+.mark {
+  flex: none;
+}
+.when {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.now .when {
+  font-weight: 550;
+  color: var(--live);
+}
+:is(.waiting, .proposed) .when {
+  font-weight: 550;
+  color: var(--signal);
+}
+.label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--t-1);
+}
+:is(.next, .held, .added, .stopped) .label {
+  font-weight: 550;
+  color: var(--t-3);
+}
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-top: auto;
+  font-size: 11.5px;
+  color: var(--t-2);
+}
+.model {
+  min-width: 0;
+}
+.althar {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.outcome {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--t-3);
+}
+.warn {
+  font-weight: 550;
+  color: var(--t-2);
+}
+
+/* ——— the agents, at the left ——— */
+.gutter {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 2;
+  overflow: hidden;
+  background: var(--n-2);
+  border-right: 1px solid var(--line);
+}
+.corner {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 1;
+  background: var(--n-2);
+  border-bottom: 1px solid var(--line);
+}
+.name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 20px;
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.lead {
+  padding-left: 18px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+/* ——— where each round starts, over the lanes ——— */
+.strip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--n-2);
+  border-bottom: 1px solid var(--line);
+}
+.markerAt {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+  border-left: 1px dashed var(--line-3);
+}
+.markerAt:first-child,
+.pinned {
+  border-left-color: transparent;
+}
+.marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 10px 0 9px;
+  border-radius: 99px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+button.marker:hover,
+.marker:focus-visible {
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-1);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--t-4);
+}
+.dotChanged {
+  background: var(--live);
+}
+.after {
+  color: var(--t-3);
+}
+.saidCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.said {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  white-space: pre-wrap;
+}
+.changed {
+  color: var(--live);
+}
+.toSaid {
+  color: var(--t-3);
+}
+
+/* ——— zoom, fit, where it stands ——— */
+.controls {
+  position: absolute;
+  right: 16px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  cursor: default;
+}
+.controls i {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--line-2);
+}
+.percent {
+  min-width: 36px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--t-3);
+}

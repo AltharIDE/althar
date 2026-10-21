@@ -17,8 +17,24 @@ export const Default: Story = {}
 export const Open: Story = { args: { expanded: true } }
 /** Only the glyph, in a narrow window; still named. */
 export const Compact: Story = { args: { compact: true } }
-/** With its key, as a task's Graph and Code show it. */
-export const WithKey: Story = { args: { icon: 'branch', label: 'Graph', kbd: 'g' } }
+/** With its key, said in its tooltip, as a task's "3 files" has ⌘D. */
+export const WithKey: Story = {
+  args: { icon: 'branch', label: 'Graph', kbd: 'g' },
+  play: async ({ canvasElement }) => {
+    const button = within(canvasElement).getByRole('button', { name: 'Graph' })
+    await expect(within(button).queryByText('g')).toBeNull()
+    await userEvent.hover(button)
+    await expect(await within(document.body).findByText('g')).toBeInTheDocument()
+  },
+}
+/** Something worth knowing before it opens: a dot on it, said in its tooltip and as its description, as a task's menu does where the task resolves conflicts otherwise than its project. */
+export const Marked: Story = {
+  args: { icon: 'more', label: 'More for this task', compact: true, mark: 'Resolve conflicts automatically: on' },
+  play: async ({ canvasElement }) => {
+    const button = within(canvasElement).getByRole('button', { name: 'More for this task' })
+    await expect(button).toHaveAccessibleDescription('Resolve conflicts automatically: on')
+  },
+}
 
 export const Pressing: Story = {
   args: { compact: true },
@@ -38,6 +54,7 @@ export const AllStates: Story = {
         { state: 'compact', node: <ChromeButton {...args} compact /> },
         { state: 'compact, on', node: <ChromeButton {...args} compact expanded /> },
         { state: 'with key', node: <ChromeButton {...args} icon="branch" label="Graph" kbd="g" /> },
+        { state: 'marked', node: <ChromeButton {...args} icon="more" label="More" compact mark="Resolve conflicts automatically: on" /> },
       ]}
     />
   ),

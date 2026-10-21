@@ -30,6 +30,14 @@ const editor: Kind<string | null> = {
   holds: (value): value is string | null => value === null || (typeof value === 'string' && /^[a-z0-9-]{1,40}$/.test(value)),
 }
 
+/** Light or dark, or as the system is: what Settings › Appearance offers as Light, Dark and Match the Mac, the PC or the computer. */
+export type Appearance = 'light' | 'dark' | 'system'
+
+const appearance: Kind<Appearance> = {
+  starts: 'system',
+  holds: (value): value is Appearance => value === 'light' || value === 'dark' || value === 'system',
+}
+
 export const PREFERENCES = {
   /** Keeps the Mac from sleeping while any work runs or waits; the display may still sleep. */
   keepAwake: onOff(true),
@@ -55,6 +63,8 @@ export const PREFERENCES = {
   usageData: onOff(true),
   /** Crash reports: what failed in Althar and where in its code, masked, never what anyone wrote (crashReports.ts). */
   crashReports: onOff(true),
+  /** Light or dark, or as the system is. The main process sets Electron's nativeTheme by it, and the windows follow the scheme that gives. */
+  appearance,
 } as const
 
 type Kinds = typeof PREFERENCES

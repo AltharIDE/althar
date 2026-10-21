@@ -29,6 +29,8 @@ const BROWSER_ONLY = new Set<string>([
   'chrome/ProjectTabs/ProjectTabs.stories.tsx#Reordering',
   'chrome/ProjectTabs/ProjectTabs.stories.tsx#MissedRelease',
   'board/NextLine/NextLine.stories.tsx#Dragging',
+  'board/NextLine/NextLine.stories.tsx#DifferentHeights',
+  'board/NextLine/NextLine.stories.tsx#Scrolling',
 ])
 
 /**

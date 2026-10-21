@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { assert, describe, it } from '@effect/vitest'
 
 import { agents } from '../src/registry'
+import { SECRET_PLACES, secretReadRules } from '../src/secrets'
 
 describe('the agent registry', () => {
   it('ships every bundled adapter where it says', () => {
@@ -117,6 +118,23 @@ describe('the agent registry', () => {
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash', 'Edit', 'Write'])
   })
 
+  it('denies every Claude Code session reading where the person keeps keys and sign-ins', () => {
+    type Meta = { claudeCode: { options: { settings: { permissions: { deny?: Array<string> } } } } }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    for (const [role, options] of [
+      ['lead', {}],
+      ['reader', {}],
+      ['reader', { offline: true }],
+      ['reader', { untrusted: true }],
+    ] as const) {
+      const deny = (metaOf(role, options) as Meta).claudeCode.options.settings.permissions.deny ?? []
+      assert.includeMembers(deny, ['Read(~/.ssh/**)', 'Read(~/.aws/**)', 'Read(~/.npmrc)'], role)
+      assert.includeMembers(deny, secretReadRules() as Array<string>, role)
+    }
+    assert.lengthOf(secretReadRules(), SECRET_PLACES.length * 2)
+  })
+
   it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {
     type Sandbox = { network?: { allowLocalBinding?: boolean } }
     const sandboxOf = (role?: 'reader') =>
@@ -124,6 +142,52 @@ describe('the agent registry', () => {
         .settings.sandbox
     assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true })
     assert.isUndefined(sandboxOf('reader').network)
+  })
+
+  it('runs a Claude Code lead’s known commands outside its sandbox, and lets it reach the known hosts, and a reader neither', () => {
+    type Sandbox = {
+      autoAllowBashIfSandboxed: boolean
+      allowUnsandboxedCommands: boolean
+      excludedCommands?: Array<string>
+      network?: { allowLocalBinding?: boolean; allowedDomains?: Array<string> }
+    }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const sandboxOf = (role: 'lead' | 'reader', options?: Parameters<typeof metaOf>[1]) =>
+      (metaOf(role, options) as { claudeCode: { options: { settings: { sandbox: Sandbox; permissions: { ask: Array<string> } } } } })
+        .claudeCode.options.settings
+    const upFront = { commands: ['bunx playwright', 'bun run test:e2e', 'env -i'], hosts: ['github.com', 'registry.npmjs.org'] }
+    const lead = sandboxOf('lead', { sandbox: upFront })
+    // Each by the whole command and by how it starts, as Claude Code's settings take them.
+    assert.deepStrictEqual(lead.sandbox.excludedCommands, [
+      'bunx playwright',
+      'bunx playwright *',
+      'bun run test:e2e',
+      'bun run test:e2e *',
+      'env -i',
+      'env -i *',
+    ])
+    assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['github.com', 'registry.npmjs.org'] })
+    // A command outside the sandbox still asks, and meets Althar's rules: nothing else changes.
+    assert.include(lead.permissions.ask, 'Bash')
+    assert.isTrue(lead.sandbox.autoAllowBashIfSandboxed)
+    // Without known commands or hosts, the settings say nothing of them.
+    const plain = sandboxOf('lead', { sandbox: { commands: [], hosts: [] } }).sandbox
+    assert.isUndefined(plain.excludedCommands)
+    assert.deepStrictEqual(plain.network, { allowLocalBinding: true })
+    // A reader is given neither, whatever it is passed.
+    const reader = sandboxOf('reader', { sandbox: upFront }).sandbox
+    assert.isUndefined(reader.excludedCommands)
+    assert.isUndefined(reader.network)
+    // Only Claude Code takes them: Codex and OpenCode have nowhere to put them, and the rest aren't known to.
+    assert.deepStrictEqual(
+      Object.values(agents)
+        .filter((agent) => agent.upFront === true)
+        .map((agent) => agent.id),
+      ['claude-code'],
+    )
+    assert.isUndefined(agents.codex.sessionMeta)
+    assert.isUndefined(agents.opencode.sessionMeta)
   })
 
   it('makes Claude Code a reader: its edits denied, and every command asking', () => {

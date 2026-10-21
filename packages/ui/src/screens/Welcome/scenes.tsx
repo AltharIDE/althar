@@ -11,9 +11,10 @@ import { CallPeek } from '../../dock/CallPeek/CallPeek'
 import { ListPeek } from '../../dock/ListPeek/ListPeek'
 import { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
-import { BoardLane, ChangeState, RuntimeState, TaskStatus } from '../../foundations/vocabulary'
+import { BoardLane, ChangeState, CheckState, RuntimeState, TaskStatus } from '../../foundations/vocabulary'
 import { ChangeSet } from '../../outputs/ChangeSet/ChangeSet'
 import { cx } from '../../lib/cx'
+import { Button } from '../../primitives/Button/Button'
 import { Panel } from '../../primitives/Panel/Panel'
 import { Runtimes, type RuntimeEntry } from '../../setup/Runtimes/Runtimes'
 import { SourceMap } from '../../setup/SourceMap/SourceMap'
@@ -411,26 +412,21 @@ export function ChangeScene({ live, instant }: SceneProps) {
       <ChangeSet
         host={GITHUB}
         state={merged ? ChangeState.Merged : ready ? ChangeState.Ready : ChangeState.Draft}
-        note={
-          merged
-            ? 'Accepted by you · merged in order'
-            : ready
-              ? 'Every check passed · nothing merges until you accept'
-              : 'Opens for review when every check passes'
-        }
-        title={TASK.title}
-        branch="ch/418-token-refresh"
-        base="main"
-        commits={11}
-        lead={OPUS}
-        reviewers={[GPT, GEMINI]}
+        {...(merged ? { note: 'Accepted by you · merged in order' } : {})}
         prs={PRS}
-        checks={checks(stage)}
-        onAccept={() => setMerged(true)}
-        onSendBack={noop}
+        checks={checks(stage).filter((check) => check.id !== 'review')}
+        review={{ state: CheckState.Passed, by: [GPT, GEMINI] }}
+        actions={
+          ready &&
+          !merged && (
+            <Button variant="signal" onClick={() => setMerged(true)}>
+              Accept and merge both
+            </Button>
+          )
+        }
       />
-      {notes > 0 && <Note target="ch/418-token-refresh" side="left" from="far" reach={44} label="Its own branch; your folders untouched" />}
-      {notes > 1 && <Note target="Integration" side="bottom" from="far" reach={44} shift={-30} label="Every check, run for you" />}
+      {notes > 0 && <Note target="api #1191" side="left" from="far" reach={44} label="Its own branch; your folders untouched" />}
+      {notes > 1 && <Note target='[aria-label^="Its checks"]' side="right" from="far" reach={44} label="Every check, run for you" />}
       {notes > 2 && merged && <Note target="Accepted by you" side="top" from="far" reach={48} shift={120} label="Merging stays yours" />}
       {pointer}
     </div>

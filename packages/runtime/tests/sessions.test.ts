@@ -770,7 +770,9 @@ describe('sessions', () => {
         yield* say(created.threadId, scenarios.commandChoices)
         yield* until(sql<{ id: string }>`SELECT id FROM attention_requests WHERE state = 'open'`, (rows) => rows.length === 1)
         const [process] = yield* sql<{ pid: number }>`SELECT pid FROM processes WHERE provider_session_id = ${sessionId}`
-        globalThis.process.kill(-(process?.pid ?? 0), 'SIGKILL')
+        // Its whole tree: its process group, or on Windows its keeper, whose job ends with it.
+        const pid = process?.pid ?? 0
+        globalThis.process.kill(globalThis.process.platform === 'win32' ? pid : -pid, 'SIGKILL')
         yield* until(
           Effect.map(session(sessionId), (row) => [row]),
           ([row]) => row?.state === 'lost',

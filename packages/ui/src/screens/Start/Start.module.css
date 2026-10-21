@@ -100,13 +100,13 @@
 }
 /* Where an agent landed, the light gathers on the ring under it. */
 .gather {
-  fill: var(--paper);
-  opacity: 0.55;
+  fill: var(--on-dark); /* light itself, white in either theme */
+  opacity: var(--gather, 0.55); /* on dark a hint of it, or it is a grey halo over the names (dark.css) */
   filter: blur(6px);
   animation: rise 600ms ease both;
 }
 .gatherOff {
-  opacity: 0.2;
+  opacity: var(--gather-off, 0.2);
 }
 .agent {
   position: absolute;
@@ -483,7 +483,7 @@
     box-shadow var(--fast) var(--ease);
 }
 .tick[data-state='checked'] {
-  background: var(--t-1);
+  background: var(--ink-fill);
   box-shadow: none;
 }
 .tickAdd {

@@ -37,14 +37,21 @@ export function StatusGlyph({ status }: { status: IssueStatus }) {
       return (
         <Svg>
           <circle cx="7" cy="7" r="6.25" fill="currentColor" />
-          <path d="m4.5 7.2 1.7 1.7 3.4-3.6" fill="none" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="m4.5 7.2 1.7 1.7 3.4-3.6"
+            fill="none"
+            style={{ stroke: 'var(--paper)' }}
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </Svg>
       )
     case IssueStatus.Cancelled:
       return (
         <Svg>
           <circle cx="7" cy="7" r="6.25" fill="currentColor" />
-          <path d="m5 5 4 4m0-4-4 4" fill="none" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" />
+          <path d="m5 5 4 4m0-4-4 4" fill="none" style={{ stroke: 'var(--paper)' }} strokeWidth="1.4" strokeLinecap="round" />
         </Svg>
       )
     default:
@@ -68,8 +75,8 @@ export function PriorityGlyph({ priority }: { priority: IssuePriority }) {
       return (
         <Svg>
           <rect x="1" y="1" width="12" height="12" rx="3" fill="currentColor" />
-          <path d="M7 3.8v4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
-          <circle cx="7" cy="10.1" r="0.95" fill="#fff" />
+          <path d="M7 3.8v4" style={{ stroke: 'var(--paper)' }} strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="7" cy="10.1" r="0.95" style={{ fill: 'var(--paper)' }} />
         </Svg>
       )
     case IssuePriority.High:

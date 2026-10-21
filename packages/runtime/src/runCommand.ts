@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { basename, join, relative } from 'node:path'
+import { basename, join, relative, sep } from 'node:path'
 
 /*
  * How a repository runs, worked out from what is in it (ADR-023), until a
@@ -247,7 +247,8 @@ export const scriptsIn = (folder: string, root: string = folder): ReadonlyArray<
   for (const workspace of folders) {
     const inner = manifestIn(workspace)
     if (inner === undefined) continue
-    const path = relative(folder, workspace)
+    // With `/`, as a package manager's filter and the person write it, on Windows too.
+    const path = relative(folder, workspace).split(sep).join('/')
     // A workspace with no name is named by its folder, which Yarn can't run it by.
     const named = typeof inner.name === 'string' ? inner.name : undefined
     if (named === undefined && manager === 'yarn') continue
@@ -255,4 +256,23 @@ export const scriptsIn = (folder: string, root: string = folder): ReadonlyArray<
       scripts.push({ package: named ?? path, name, body, command: inWorkspace(manager, named ?? `./${path}`, name) })
   }
   return scripts
+}
+
+/** The package manager the lockfile in `folder`, or at its repository's root, names: `bun`; null where none does. */
+export const managerIn = (folder: string, root: string = folder): string | null => managerOf(folder, root)?.name ?? null
+
+/** The package.json in `folder` and each of its workspaces', read: none where it has no package.json. */
+export const manifestsIn = (folder: string): ReadonlyArray<Readonly<Record<string, unknown>>> => {
+  const manifest = manifestIn(folder)
+  if (manifest === undefined) return []
+  const folders = new Set(
+    workspacesOf(manifest).flatMap((pattern) => (typeof pattern === 'string' ? workspaceFolders(folder, pattern) : [])),
+  )
+  return [
+    manifest,
+    ...[...folders].flatMap((workspace) => {
+      const inner = manifestIn(workspace)
+      return inner === undefined ? [] : [inner]
+    }),
+  ]
 }

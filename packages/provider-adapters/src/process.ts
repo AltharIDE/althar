@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,13 +8,18 @@ import { Readable, Writable } from 'node:stream'
 import { Deferred, Duration, Effect, type Scope } from 'effect'
 
 import { AgentStartFailed } from './errors'
+import { platformTrees, type ProcessTrees, type StopReport, stopTree } from './processTrees'
 import type { LaunchSpec } from './registry'
 
+export { platformTrees, type ProcessTrees, type StopReport } from './processTrees'
+
 /*
- * An agent process Althar owns (docs/architecture/02). It runs in its own
- * process group, so stopping it reaches every process it started, even after
- * the agent itself has exited. Stopping is staged: TERM to the group, a grace
- * period, then KILL, and anything still alive after that is reported. It is
+ * An agent process Althar owns (docs/architecture/02). Stopping it reaches
+ * every process it started (processTrees.ts): on Unix its process group, even
+ * after the agent itself has exited; on Windows the Job Object its keeper
+ * holds it in. Stopping is staged: TERM to the group where the platform can ask,
+ * a grace period, then KILL, and anything still alive after that is reported.
+ * No console window opens for it or anything it starts on Windows. It is
  * never found by name or by a pid that may have been reused; the handle is the
  * only way in.
  */
@@ -70,12 +75,6 @@ export interface ProcessExit {
   readonly signal: string | null
 }
 
-/** How stopping went: the last signal sent to the group, and whether anything outlived it. */
-export interface StopReport {
-  readonly signal: 'none' | 'SIGTERM' | 'SIGKILL'
-  readonly survivors: boolean
-}
-
 /** One chunk of the raw protocol, numbered in the order it crossed, in either direction. */
 export interface CapturedFrame {
   readonly sequence: number
@@ -118,49 +117,14 @@ export interface SpawnOptions {
   readonly capture?: (frame: CapturedFrame) => void
   /** Called with everything the process writes to stderr, as it comes and with its pid, for the app's log of agents. */
   readonly stderr?: (chunk: string, pid: number) => void
+  /** How its tree is reached: the platform's, unless a test says otherwise. */
+  readonly trees?: ProcessTrees
 }
 
 const STDERR_KEPT = 8_192
 
-const groupAlive = (pid: number) => {
-  try {
-    process.kill(-pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Signals the whole process group; a group that is already gone is fine. */
-const signalGroup = (pid: number, signal: NodeJS.Signals) => {
-  try {
-    process.kill(-pid, signal)
-  } catch {
-    // The group has already exited.
-  }
-}
-
-/** Waits for the group to empty, up to a limit. */
-const groupGone = (pid: number, limit: Duration.Input) =>
-  Effect.gen(function* () {
-    const until = Date.now() + Duration.toMillis(Duration.fromInputUnsafe(limit))
-    while (groupAlive(pid) && Date.now() < until) yield* Effect.sleep('25 millis')
-    return !groupAlive(pid)
-  })
-
 /** When the OS says a process started, as ISO 8601, or undefined if it can't say. With the pid, it tells a process from a later one given the same pid. */
-export const osStartTime = (pid: number): Effect.Effect<string | undefined> =>
-  Effect.callback<string | undefined>((resume) => {
-    execFile(
-      'ps',
-      ['-o', 'lstart=', '-p', String(pid)],
-      { timeout: 2_000, env: { LC_ALL: 'C', PATH: process.env.PATH ?? '' } },
-      (error, stdout) => {
-        const started = error === null ? new Date(stdout.trim()) : undefined
-        resume(Effect.succeed(started !== undefined && !Number.isNaN(started.getTime()) ? started.toISOString() : undefined))
-      },
-    )
-  })
+export const osStartTime = (pid: number, trees: ProcessTrees = platformTrees()): Effect.Effect<string | undefined> => trees.startedAt(pid)
 
 const tapped = <T extends ReadableStream<Uint8Array> | WritableStream<Uint8Array>>(
   stream: T,
@@ -188,6 +152,7 @@ export const spawnOwned = (
 ): Effect.Effect<OwnedProcess, AgentStartFailed, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.gen(function* () {
+      const trees = options.trees ?? platformTrees()
       const exited = yield* Deferred.make<ProcessExit>()
       const stopped = yield* Deferred.make<StopReport>()
       const temp = privateTemp(spec)
@@ -195,8 +160,23 @@ export const spawnOwned = (
       // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled; what it runs may inherit more of Althar's environment, as reaching the device needs.
       const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
       const env = launched === spec ? inherited : childEnvironment(launched)
+      const launch = yield* trees.launch(launched.command, launched.args).pipe(
+        Effect.mapError((reason) => {
+          removeTemp(temp?.folder)
+          return new AgentStartFailed({ command: launched.command, reason })
+        }),
+      )
       const child = yield* Effect.try({
-        try: () => spawn(launched.command, [...launched.args], { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'], env }),
+        try: () =>
+          spawn(launch.command, [...launch.args], {
+            cwd,
+            detached: launch.detached,
+            windowsHide: true,
+            // Joined as they are, the program's own path quoted, as Node's own `shell: true` runs cmd.exe.
+            ...(launched.verbatim === true ? { windowsVerbatimArguments: true, argv0: `"${launch.command}"` } : {}),
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env,
+          }),
         catch: (cause) => {
           removeTemp(temp?.folder)
           return new AgentStartFailed({ command: launched.command, reason: String(cause) })
@@ -222,7 +202,7 @@ export const spawnOwned = (
           resume(Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message })))
         })
       })
-      const osStartedAt = yield* osStartTime(pid)
+      const osStartedAt = yield* osStartTime(pid, trees)
       return {
         pid,
         ...(osStartedAt === undefined ? {} : { osStartedAt }),
@@ -237,7 +217,7 @@ export const spawnOwned = (
     }),
     (owned) =>
       Effect.gen(function* () {
-        const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2))
+        const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2), options.trees)
         // The report waits until the OS has reaped the agent itself, so its pid is free when the report says so.
         yield* Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2)))
         // Its own temporary folder goes once nothing of it is left to use it.
@@ -247,16 +227,11 @@ export const spawnOwned = (
   )
 
 /**
- * Stops a process group Althar owns: TERM, a grace period, then KILL, and
- * says whether anything outlived it. A group that has already gone is left
- * alone. The runtime also uses it for a group an earlier launch left behind,
- * once it has checked the group's leader is the process it recorded.
+ * Stops a process tree Althar owns (processTrees.ts): TERM where the platform
+ * can ask, a grace period, then KILL, and says whether anything outlived it.
+ * A tree that has already gone is left alone. The runtime also uses it for a
+ * tree an earlier launch left behind, once it has checked the tree is the one
+ * it recorded.
  */
-export const stopProcessGroup = (pid: number, grace: Duration.Input): Effect.Effect<StopReport> =>
-  Effect.gen(function* () {
-    if (!groupAlive(pid)) return { signal: 'none', survivors: false }
-    signalGroup(pid, 'SIGTERM')
-    if (yield* groupGone(pid, grace)) return { signal: 'SIGTERM', survivors: false }
-    signalGroup(pid, 'SIGKILL')
-    return { signal: 'SIGKILL', survivors: !(yield* groupGone(pid, Duration.seconds(2))) }
-  })
+export const stopProcessGroup = (pid: number, grace: Duration.Input, trees: ProcessTrees = platformTrees()): Effect.Effect<StopReport> =>
+  stopTree(trees, pid, grace)

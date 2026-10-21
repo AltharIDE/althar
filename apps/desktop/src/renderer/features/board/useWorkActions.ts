@@ -9,8 +9,9 @@ import { headsOf } from '../../shared/mergeHere'
 /*
  * What the person does from a dock, on the board or the home: answer a call,
  * accept a pull request by merging it, push what the lead committed, merge
- * work that ended on its branch here, open its pull request, or send the
- * work back to its lead with a note. Each says what went wrong, if it did.
+ * work that ended on its branch here, open its pull request, send the work
+ * back to its lead with a note, or settle a finished task that isn't a
+ * change (Done) or keep it for later. Each says what went wrong, if it did.
  */
 
 /** What went wrong with a task's last push or merge. */
@@ -31,6 +32,12 @@ export interface WorkActions {
   readonly opening: ReadonlySet<string>
   /** The tasks whose commits are being pushed. */
   readonly pushing: ReadonlySet<string>
+  /** The tasks being marked done or kept for later. */
+  readonly settling: ReadonlySet<string>
+  /** Settles a finished task that isn't a change as Done; whether it went through. */
+  readonly markDone: (taskId: string) => Promise<boolean>
+  /** Takes a finished task that isn't a change out of Needs you, kept for later; whether it went through. */
+  readonly keep: (taskId: string) => Promise<boolean>
   /** Merges a ready task's pull request at the head the person saw; whether it went through. */
   readonly merge: (taskId: string, head: string, url?: string) => Promise<boolean>
   /** Merges a ready task's repositories without a pull request into their default branches here, up to the heads the dock showed; whether it went through. */
@@ -57,6 +64,7 @@ export const useWorkActions = (): WorkActions => {
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
   const [opening, setOpening] = useState<ReadonlySet<string>>(new Set())
   const [pushing, setPushing] = useState<ReadonlySet<string>>(new Set())
+  const [settling, setSettling] = useState<ReadonlySet<string>>(new Set())
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
   /** Runs an action, marking the task busy with it meanwhile (each task on its own, so cards act side by side); whether it went through. */
@@ -98,6 +106,9 @@ export const useWorkActions = (): WorkActions => {
     sending,
     opening,
     pushing,
+    settling,
+    markDone: useCallback((taskId) => busy(setSettling, taskId, () => client.markTaskDone(taskId)), [busy, client]),
+    keep: useCallback((taskId) => busy(setSettling, taskId, () => client.keepTaskForLater(taskId)), [busy, client]),
     mergeHere: useCallback(
       (task) => busy(setMerging, task.taskId, () => client.mergeHere(task.taskId, headsOf(task.here))),
       [busy, client],

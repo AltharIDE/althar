@@ -80,7 +80,7 @@
   color: var(--t-1);
 }
 .more:active {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .more:focus-visible {
   outline-offset: -1.5px;

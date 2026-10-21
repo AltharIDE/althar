@@ -1,0 +1,610 @@
+/* A file an agent named: its title, where it was read from, a word about it, and its lines. */
+
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  font: 600 12.5px/18px var(--mono);
+  color: var(--t-1);
+}
+
+.title svg {
+  flex: none;
+  color: var(--t-3);
+}
+
+.titleName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titleLines {
+  font-weight: 450;
+  color: var(--t-3);
+}
+
+/* the folder it is in, after its name: it gives way first, cut from its start, as a path's end says the most */
+.titleFolder {
+  flex: 0 100 auto;
+  min-width: 24px;
+  margin-left: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font: 400 11.5px/18px var(--mono);
+  color: var(--t-3);
+}
+
+.titleFolder bdi {
+  direction: ltr;
+}
+
+/* under the head: its path, where it was read from, and the ways to see it */
+.meta {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-height: 40px;
+  padding: 6px 12px 6px 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--t-3);
+}
+
+.pathRow {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-right: -6px;
+}
+
+.path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font: 11.5px/16px var(--mono);
+  color: var(--t-3);
+}
+
+.path bdi {
+  direction: ltr;
+}
+
+.path strong {
+  font-weight: 500;
+  color: var(--t-2);
+}
+
+.copy {
+  flex: none;
+}
+
+.where {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.where svg {
+  flex: none;
+  color: var(--t-4);
+}
+
+.where > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branch {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 11px/16px var(--mono);
+  color: var(--t-2);
+}
+
+.byName::before {
+  content: '·';
+  margin-right: 10px;
+  color: var(--t-4);
+}
+
+.modes {
+  flex: none;
+  margin-left: auto;
+}
+
+.add {
+  color: var(--add-sign);
+  font-weight: 550;
+}
+
+.del {
+  color: var(--del-sign);
+  font-weight: 550;
+}
+
+/* a word about what is shown: the lines were rewritten since, they moved, the file is cut, the line is past its end */
+.note {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 14px 8px 18px;
+  border-bottom: 1px solid var(--note-line);
+  background: var(--note-paper);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--t-2);
+}
+
+.note button {
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 550;
+  color: var(--t-1);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* the lines, scrolling both ways, their numbers staying put; on the surface of what holds them. Positioned, so a line's
+   offset, which scrolls it into place, is counted from the lines' own top. */
+.lines {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  margin: 0;
+  padding: 6px 0 24px;
+  overflow: auto;
+  background: var(--code-surface, var(--paper));
+  font: 12px/20px var(--mono);
+  font-variant-ligatures: none;
+  color: var(--t-1);
+  tab-size: 2;
+}
+
+.lines:focus-visible {
+  outline: 2px solid var(--signal-line);
+  outline-offset: -2px;
+}
+
+/* a gap at either end sits flush against the edge it leaves out */
+.lines:has(> .gap:first-child) {
+  padding-top: 0;
+}
+
+.lines:has(> .gap:last-child) {
+  padding-bottom: 0;
+}
+
+.line {
+  display: block;
+  min-width: max-content;
+  padding-right: 18px;
+  white-space: pre;
+}
+
+.n {
+  position: sticky;
+  left: 0;
+  display: inline-block;
+  width: 52px;
+  padding-right: 12px;
+  margin-right: 14px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-4);
+  background: var(--code-surface, var(--paper));
+  box-shadow: inset -1px 0 0 var(--line);
+  user-select: none;
+}
+
+/* prose (a decision, a plan, notes) wraps at the width it is read in, its number beside its first line */
+.wrap .line {
+  display: flex;
+  min-width: 0;
+  white-space: normal;
+}
+
+.wrap .n {
+  flex: none;
+  align-self: stretch;
+}
+
+.wrap .text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* the lines the agent named: a reader's highlight */
+.named {
+  background: var(--named-line);
+}
+
+.named .n {
+  background: var(--named-gutter);
+  box-shadow: inset -2px 0 0 var(--named-edge);
+  color: var(--named-ink);
+  font-weight: 600;
+}
+
+/* what a peek leaves out: the gutter's chevron, how many lines, and on pointing, what a press shows */
+.gap {
+  position: sticky;
+  left: 0;
+  display: flex;
+  align-items: center;
+  /* as wide as the lines' window, not the longest line, and pinned in it as they scroll sideways */
+  width: var(--box, 100%);
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-block: 1px solid var(--line);
+  background: color-mix(in srgb, var(--n-2) 55%, var(--paper));
+  font: 450 11.5px/16px var(--font);
+  color: var(--t-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.gap:first-child {
+  border-top: 0;
+}
+
+.gap:last-child {
+  border-bottom: 0;
+}
+
+.gapIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  width: 52px;
+  margin-right: 14px;
+  box-shadow: inset -1px 0 0 var(--line);
+}
+
+.gapMore {
+  margin-left: auto;
+  padding: 0 14px;
+  font-weight: 550;
+  color: var(--t-1);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+
+button.gap {
+  cursor: pointer;
+}
+
+button.gap:hover,
+button.gap:focus-visible {
+  background: var(--hover-paper);
+  color: var(--t-2);
+}
+
+button.gap:hover .gapIcon,
+button.gap:focus-visible .gapIcon {
+  color: var(--t-1);
+}
+
+button.gap:hover .gapMore,
+button.gap:focus-visible .gapMore {
+  opacity: 1;
+}
+
+button.gap:focus-visible {
+  outline: 2px solid var(--signal-line);
+  outline-offset: -2px;
+}
+
+.diff {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 24px;
+}
+
+/* what isn't a file's lines to read: not there, one of several, not text */
+.say {
+  padding: 18px 18px 22px;
+  font-size: 12.5px;
+  line-height: 19px;
+  color: var(--t-2);
+}
+
+.say h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+.say p {
+  margin: 0 0 12px;
+}
+
+.say code {
+  font: 11.5px var(--mono);
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.choices li {
+  max-width: 100%;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 9px 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font: 11.5px var(--mono);
+  color: var(--t-1);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.choice svg {
+  flex: none;
+  color: var(--t-3);
+}
+
+.choice:hover {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+
+.choice:focus-visible {
+  outline: 2px solid var(--signal-line);
+  outline-offset: 1px;
+}
+
+.choiceFolder {
+  color: var(--t-3);
+}
+
+.reading {
+  display: grid;
+  gap: 9px;
+  padding: 16px 18px 16px 66px;
+}
+
+/* the panel: its head's steps through the conversation's references */
+.nav {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  font-size: 11px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+
+.nav span {
+  padding: 0 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* the peek, on a hover popover: a head, the lines, a foot, its edges in line with the lines' gutter */
+.peek {
+  --code-surface: var(--paper);
+  overflow: hidden;
+}
+
+.peekHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 6px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.peekHead .copy {
+  margin-left: auto;
+}
+
+.peekBody {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(440px, 56vh);
+}
+
+.peekFoot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  padding: 0 8px 0 18px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+}
+
+.from {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+
+.from > * + *::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--t-4);
+}
+
+.fromBranch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 550;
+  color: var(--t-2);
+}
+
+.fromBranch svg {
+  color: var(--t-4);
+}
+
+.peekActions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* a reference in what an agent wrote: the file's chip, its name and lines */
+.ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 21px;
+  padding: 0 6px 0 5px;
+  margin: 0 1px;
+  vertical-align: baseline;
+  border: 0;
+  border-radius: 5px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font: 11.5px/21px var(--mono);
+  color: var(--t-2);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.ref > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ref svg {
+  flex: none;
+  color: var(--t-3);
+}
+
+.ref:hover,
+.ref[data-state='open'] {
+  color: var(--t-1);
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+
+.ref:active {
+  background: var(--n-3);
+}
+
+.ref:focus-visible,
+.plain:focus-visible {
+  outline: 2px solid var(--signal-line);
+  outline-offset: 1px;
+}
+
+.refLines {
+  color: var(--t-3);
+}
+
+/* a name in code, not a path: its words, without a file's mark */
+.symbol {
+  padding-left: 6px;
+}
+
+/* a path that isn't there: the same chip, dashed and quieter */
+.missing {
+  color: var(--t-3);
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed var(--line-3);
+  outline-offset: -1px;
+}
+
+.missing svg {
+  color: var(--t-4);
+}
+
+/* a path written into the words without backticks: the words, underlined as a link in them is */
+.plain {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted var(--line-3);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.plain:hover {
+  text-decoration-color: currentColor;
+}
+
+/* the one open beside the conversation */
+.ref[data-open],
+.plain[data-open] {
+  color: var(--t-1);
+  background: var(--named-line);
+  box-shadow: inset 0 0 0 1px var(--named-edge);
+}

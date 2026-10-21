@@ -1,0 +1,91 @@
+.made {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+}
+.part {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.count {
+  font: 500 11px/1 var(--font);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* what it is: its first paragraph a size up, the rest at reading size under it */
+.story {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 76ch;
+  color: var(--t-1);
+  text-wrap: pretty;
+}
+.lede {
+  font-size: var(--lede-size);
+  line-height: 1.55;
+}
+.more {
+  align-self: flex-start;
+  font-size: 12.5px;
+}
+
+/* its pictures large, two across, each at its own shape */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 18px;
+  align-items: start;
+}
+.one {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 880px;
+}
+.shot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+.image {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  cursor: zoom-in;
+}
+.frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+}
+.frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.caption {
+  padding: 0 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+  text-wrap: pretty;
+}

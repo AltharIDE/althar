@@ -15,4 +15,6 @@ export const doing = {
   mergeHere: 'merge-here',
   pushHere: 'push-here',
   pushBranch: 'push-branch',
+  markDone: 'mark-done',
+  keep: 'keep',
 } as const

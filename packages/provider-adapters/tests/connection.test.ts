@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber, Ref, Stream } from 'effect'
 
@@ -141,7 +143,7 @@ describe('AgentConnection', () => {
       assert.strictEqual(shot?.content?.[1]?._tag, 'Image')
       const wrote = find(events, 'ToolCall').find((event) => event.toolCallId === 'write-doc')
       assert.deepStrictEqual(wrote?.content, [
-        { _tag: 'Diff', path: '/tmp/docs/notes.md', created: true, change: changeOf(null, HANDED_DOCUMENT.body) },
+        { _tag: 'Diff', path: join('/tmp', 'docs', 'notes.md'), created: true, change: changeOf(null, HANDED_DOCUMENT.body) },
       ])
       const handed = find(events, 'AgentContent').map((event) => event.content._tag)
       assert.deepStrictEqual(handed, ['Link', 'Image'])
@@ -472,7 +474,9 @@ describe('AgentConnection', () => {
 
     it.live('resumes a turn a rejection stopped, telling the agent why', () =>
       Effect.gen(function* () {
-        const { events } = yield* turn(scenarios.fileEdit, () => Effect.succeed({ decision: 'reject', reason: 'edits wait for review' }))
+        const { events } = yield* turn(scenarios.fileEdit, () =>
+          Effect.succeed({ decision: 'reject', reason: 'edits wait for review', decidedBy: 'rules' }),
+        )
         assert.deepStrictEqual(tags(events), [
           'ToolCall',
           'PermissionAnswered',
@@ -492,10 +496,39 @@ describe('AgentConnection', () => {
         })
         assert.strictEqual(
           find(events, 'Resumed')[0]?.reason,
-          "Edit app.ts was not allowed by the project's rules: edits wait for review. Carry on without it.",
+          "Althar's rules refused this (Edit app.ts): edits wait for review. Carry on without it.",
         )
         assert.strictEqual(text(events), 'chosen=cancelcarrying on without it')
         assert.strictEqual(stopReason(events), 'end_turn')
+      }),
+    )
+
+    for (const scenario of [scenarios.commandChoices, scenarios.fileEdit])
+      it.live(`says a rule's refusal as Althar's, with its reason, even when refusal carries on: ${scenario}`, () =>
+        Effect.gen(function* () {
+          const { events } = yield* turn(scenario, () =>
+            Effect.succeed({ decision: 'reject', reason: 'Force pushes are never allowed in this project.', decidedBy: 'rules' }),
+          )
+          assert.lengthOf(find(events, 'Resumed'), 1)
+          const said = find(events, 'Resumed')[0]?.reason ?? ''
+          assert.include(said, "Althar's rules refused this")
+          assert.include(said, 'Force pushes are never allowed in this project.')
+          assert.notInclude(said, 'declined')
+          assert.strictEqual(stopReason(events), 'end_turn')
+        }),
+      )
+
+    it.live('says the person declined only for a decline on a card that stopped the turn', () =>
+      Effect.gen(function* () {
+        const { events } = yield* turn(scenarios.fileEdit, () => Effect.succeed({ decision: 'reject', reason: 'not now' }))
+        assert.strictEqual(find(events, 'Resumed')[0]?.reason, 'The person declined Edit app.ts: not now. Carry on without it.')
+      }),
+    )
+
+    it.live('does not explain a person who declined where the provider carries on', () =>
+      Effect.gen(function* () {
+        const { events } = yield* turn(scenarios.commandChoices, () => Effect.succeed({ decision: 'reject', reason: 'not now' }))
+        assert.lengthOf(find(events, 'Resumed'), 0)
       }),
     )
 

@@ -51,6 +51,9 @@ export const repository = () => {
         },
       })
     run('init', '-q', '-b', 'main')
+    // A commit starts `git maintenance run --auto --detach`, which can take and drop a lock in .git/objects after the
+    // commit returns, so a copy made then fails on the lock that went. Off here, it is off in every copy too.
+    run('config', 'maintenance.auto', 'false')
     writeFileSync(join(template, 'README.md'), '# Meridian\n')
     run('add', '.')
     run('commit', '-q', '-m', 'Start')
@@ -130,6 +133,7 @@ export const definition = (
           sessionMetas.push({ role, options })
           return { fake: { asks: true } }
         },
+        upFront: true as const,
       }
     : {}),
   // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
@@ -257,6 +261,8 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
+    /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
+    readonly disk?: RuntimeOptions['disk']
   } = {},
 ) =>
   Runtime.layer({
@@ -285,7 +291,11 @@ export const runtime = (
     ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     busy: { machine: ROOMY, ...more.busy },
+    disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
   })
+
+/** A disk with half of its 1 TB free: room enough that no finished task's folder goes for want of space. */
+export const ROOMY_DISK = { total: 1024 ** 4, free: 1024 ** 4 / 2, used: 1024 ** 4 / 2 }
 
 /** A machine with room for as many agents at once as Althar runs: 64 cores and 256 GB. */
 export const ROOMY = { cores: 64, memory: 256 * 1024 ** 3 }

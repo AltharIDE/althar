@@ -31,7 +31,7 @@ export const signInCheck = (
     const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
     // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
-    execFile(launched.command, [...launched.args], { timeout: 15_000, env }, (error, stdout, stderr) => {
+    execFile(launched.command, [...launched.args], { timeout: 15_000, env, windowsHide: true }, (error, stdout, stderr) => {
       if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed({ status: 'unknown', paidBy: 'unknown' }))
       const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
       const output = `${stdout}\n${stderr}`
@@ -65,6 +65,8 @@ export const signOut = (
     const spec = logout.run(node)
     const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
-    execFile(launched.command, [...launched.args], { timeout: 15_000, env }, (error) => resume(Effect.succeed(error === null)))
+    execFile(launched.command, [...launched.args], { timeout: 15_000, env, windowsHide: true }, (error) =>
+      resume(Effect.succeed(error === null)),
+    )
   })
 }

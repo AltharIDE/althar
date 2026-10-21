@@ -79,7 +79,7 @@
   cursor: pointer;
 }
 .fold:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
   color: var(--t-1);
 }
 .fold:focus-visible {

@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { Brand } from '@althar/ui'
 import { describe, expect, it, vi } from 'vitest'
 
-import { agentLineOf, brandOf, pinnedOf, signInCautionOf, signInWordsOf } from '../src/renderer/shared/agents'
+import { agentLineOf, brandOf, inLineWords, pinnedOf, signInCautionOf, signInWordsOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor, type Unfurl } from '@althar/contracts'
 import { isSending, mergeItems, newestReads, queueShown, readingNow, sending, unsent, waiting } from '../src/renderer/shared/items'
 import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
@@ -34,12 +34,37 @@ describe('agents', () => {
     expect(signInCautionOf('codex')).toBeUndefined()
   })
 
+  it('signs an agent with no words of its own in with its account, on its sign-in page', () => {
+    expect(signInWordsOf('aider')).toEqual({ plan: 'your account', host: 'the sign-in page' })
+  })
+
   it('says a download of one version is that version, from its maker', () => {
     const download = { size: '115 MB', installing: false, pinned: '1.3.0' }
     expect(pinnedOf({ id: 'antigravity', name: 'Google Antigravity', download })).toEqual({ from: 'Google', version: '1.3.0' })
     // Its latest release on GitHub, or none: nothing pinned.
     expect(pinnedOf({ id: 'opencode', name: 'OpenCode', download: { ...download, pinned: null } })).toBeUndefined()
     expect(pinnedOf({ id: 'opencode', name: 'OpenCode', download: null })).toBeUndefined()
+  })
+
+  it('names one version from a maker Althar has no name for by the agent’s own', () => {
+    const download = { size: '20 MB', installing: false, pinned: '0.4.0' }
+    expect(pinnedOf({ id: 'aider', name: 'Aider', download })).toEqual({ from: 'Aider', version: '0.4.0' })
+  })
+
+  it('says where a task waits in its line: next, then 2nd, 3rd, 11th, 21st', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 111].map(inLineWords)).toEqual([
+      'Next in line',
+      '2nd in line',
+      '3rd in line',
+      '4th in line',
+      '11th in line',
+      '12th in line',
+      '13th in line',
+      '21st in line',
+      '22nd in line',
+      '23rd in line',
+      '111th in line',
+    ])
   })
 })
 

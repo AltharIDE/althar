@@ -8,6 +8,9 @@ import { device } from './device'
  * model, from the agent's own list (see models.ts and modelNames.ts).
  */
 
+/** Whether the person can pick the agent for work: it is installed here, and not signed out (one that doesn't say is let through). */
+export const canPick = (agent: AgentStatus): boolean => agent.installed && agent.signIn !== 'signed_out'
+
 const BRANDS: Readonly<Record<string, Brand>> = {
   'claude-code': Brand.Anthropic,
   codex: Brand.OpenAI,

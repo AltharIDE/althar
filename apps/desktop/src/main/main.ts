@@ -7,6 +7,7 @@ import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
+import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { keepingAwake } from './awake'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
@@ -43,6 +44,7 @@ import {
   Menu,
   MessageChannelMain,
   nativeImage,
+  nativeTheme,
   net,
   Notification,
   powerMonitor,
@@ -54,8 +56,8 @@ import {
   utilityProcess,
 } from 'electron'
 
-import { appMenu, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
+import { appMenu, PAGE, windowOptions } from './windowOptions'
+import { keyringIsSafe, keyringUnavailable, passwordStore, sealWithPortal, sealsWithPortal, withPortalFeature } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -65,10 +67,11 @@ import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
  * runtime to stop its sessions before the app goes. Folders reach the runtime
  * from here, never from the window, which gets a grant for each: one the
  * person picked or dropped, or one of the repositories it found where people
- * keep code (repositories.ts), for the first screen and a new project to offer. It seals and
- * opens the runtime's secrets, such as a code host's token, with Electron's
- * safeStorage, whose key the keychain keeps for this app alone: the runtime
- * keeps them sealed and never holds the key. It gives the Dock the icon the
+ * keep code (repositories.ts), for the first screen and a new project to
+ * offer. It seals and opens the runtime's secrets, such as a code host's
+ * token, with Electron's safeStorage; in a Flatpak it prefers the app-specific
+ * Secret portal key and falls back only to a safe session keyring. The runtime keeps secrets sealed and never
+ * holds the key. It gives the Dock the icon the
  * person chose, and puts Althar at the edge of the screen (edgeWindows.ts):
  * round the notch, or in the menu bar. It keeps the app's own preferences
  * (appPreferences.ts) and acts on them: the Mac kept awake while work runs
@@ -138,6 +141,9 @@ if (process.platform !== 'darwin') app.on('browser-window-created', (_event, win
 // Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
 const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
+// In any Linux Flatpak, sign-ins prefer the app-specific Secret portal key (keyring.ts).
+const portal = sealsWithPortal(process.env.FLATPAK_ID !== undefined, process.platform)
+if (portal) app.commandLine.appendSwitch('enable-features', withPortalFeature(app.commandLine.getSwitchValue('enable-features')))
 
 /*
  * Where the window keeps what it remembers, its tabs and pinned models. A
@@ -242,9 +248,29 @@ let waiting = 0
  * as kept. A change waits for that read, so the read can't undo it.
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
+
+/*
+ * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
+ * follows the scheme that gives, and its paper with it (paintPaper). On Linux, where Electron has no word of the
+ * desktop's own setting, the Settings portal's is followed while Appearance is as the system is (themeSourceFor).
+ */
+let linuxScheme: Scheme | undefined
+const applyAppearance = () => {
+  nativeTheme.themeSource = themeSourceFor(preferences.appearance, process.platform, linuxScheme)
+}
+if (process.platform === 'linux') {
+  const stop = followDesktopScheme((scheme) => {
+    linuxScheme = scheme
+    applyAppearance()
+  })
+  // On the process's exit, as the tray's watch: quitting ends in app.exit, which skips will-quit.
+  process.once('exit', stop)
+}
+
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
   awake.wants(kept)
+  applyAppearance()
   // A count the runtime gave before the file was read is shown again as the person has it.
   if (waiting > 0) app.setBadgeCount(dockCount(waiting, kept))
 })
@@ -415,6 +441,10 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
 const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
+  if (portal)
+    return void sealWithPortal(message.type === 'seal', value, safeStorage, process.platform).then((reply) =>
+      child.postMessage({ type: 'sealed', requestId, ...reply }),
+    )
   // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
   const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
   if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend)) {
@@ -448,7 +478,9 @@ const startRuntime = () => {
       ALTHAR_APP_VERSION: app.getVersion(),
       ALTHAR_LOGS: logs.dir,
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
-      ...(app.isPackaged ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', 'node') } : {}),
+      ...(app.isPackaged
+        ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
+        : {}),
     },
   })
   logs.keepOutput(child)
@@ -562,6 +594,13 @@ const openOutside = (url: string) => {
 /** Althar's picture for the window's icon on Linux, at the size X11 takes: the full-size file would silently overflow the property and leave the window iconless. */
 const windowIcon = () => nativeImage.createFromPath(join(here, '../../resources/icons/cobalt.png')).resize({ width: 128, height: 128 })
 
+/** The paper under every window's page, in the scheme's shade: what shows as it resizes, or before the page draws. */
+const paintPaper = () => {
+  const paper = nativeTheme.shouldUseDarkColors ? PAGE.dark : PAGE.light
+  for (const window of windows) if (!window.isDestroyed()) window.setBackgroundColor(paper)
+}
+nativeTheme.on('updated', paintPaper)
+
 const openWindow = () => {
   const window = new BrowserWindow({
     width: 1280,
@@ -570,7 +609,7 @@ const openWindow = () => {
     minHeight: 600,
     show: false,
     // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), and on Linux it carries Althar's icon.
-    ...windowOptions(process.platform, windowIcon()),
+    ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
       sandbox: true,
@@ -707,6 +746,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
   awake.wants(preferences)
+  if (key === 'appearance') applyAppearance()
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })
@@ -777,8 +817,11 @@ void ready.then(() => {
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   if (!noRuntime) startRuntime()
   // A packaged app looks for updates, and tells every window as one is ready.
-  // electron-updater supports the Linux AppImage feed; deb/rpm use their package managers.
-  if (app.isPackaged && (process.platform === 'darwin' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined)))
+  // electron-updater supports the Mac's zip, Windows' NSIS installer and the Linux AppImage; deb/rpm use their package managers.
+  if (
+    app.isPackaged &&
+    (process.platform === 'darwin' || process.platform === 'win32' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined))
+  )
     updates = startUpdates((glance: UpdateGlance) => {
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
     })
@@ -795,7 +838,16 @@ void ready.then(() => {
     const menu = appMenu(process.platform, !app.isPackaged)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
-  openWindow()
+  // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
+  // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
+  void preferencesRead
+    .catch(() => undefined)
+    .then(() =>
+      process.platform === 'linux' && preferences.appearance === 'system' ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT) : undefined,
+    )
+    .then(() => {
+      if (windows.size === 0) openWindow()
+    })
   startReports({
     profile: () => locations().profile,
     // The install's one id, the one usage data keeps (usageData.ts), whether or not its switch is on.

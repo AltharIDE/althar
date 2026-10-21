@@ -258,12 +258,11 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     // Ready, it opens on its pull request: its files and checks, and marking it ready.
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByText('change.txt')).toBeVisible()
-    await expect(page.getByText('None have run yet')).toBeVisible()
+    await expect(page.getByText('No checks have run yet')).toBeVisible()
     await page.screenshot({ path: 'test-results/change.png', animations: 'disabled' })
 
     // Marked ready here, it is ready on GitHub, and accepting it is the person's.
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
-    await expect(page.getByText('Nothing merges until you accept it')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Accept and merge' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark ready for review' })).toHaveCount(0)
     await toConversation(page)
