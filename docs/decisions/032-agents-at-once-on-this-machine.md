@@ -1,6 +1,6 @@
 # ADR-032: A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn
 
-- **Status:** Accepted; its order of what waits amended by [ADR-037](037-what-the-person-does-goes-first.md)
+- **Status:** Accepted; its order of what waits amended by [ADR-037](037-what-the-person-does-goes-first.md); a task's own servers count once for it (follow-up of 2026-10-21)
 - **Date:** 2026-10-13
 - **Owner:** Repository maintainers
 - **Context:** Althar set no limit on tasks at once, and had no queue
@@ -28,9 +28,8 @@
     follow-up below).
   - **A step after another on the same task** (the review after the lead's
     step, the lead settling after a review) takes the place of the agent
-    before it, unless what that agent left running is at work: then the two
-    would be two agents at work, and the next step waits for a place of its
-    own.
+    before it, what that agent left running going on in it (see the
+    follow-up of 21 October below).
   - **The default is worked out at each launch, from this machine,** and
     isn't stored: the lower of a figure from its cores (`os.cpus()`) and one
     from its memory (`os.totalmem()`), at least 1 and at most 16, the active
@@ -160,3 +159,41 @@
   last. The 5% line is a guess: a server that always burns a little (a
   watcher polling), or whose tree keeps starting a process, counts, which
   errs toward waiting, not toward load.
+
+## Follow-up: one task, one place, whatever its lead left running (2026-10-21)
+
+- **What went wrong.** A task waited behind itself. After a follow-up round
+  on "Dark mode", its lead left a dev server running and reported; the
+  server had worked in the last 30 seconds, so the lead didn't hand its
+  place to the review. The review waited for a place of its own, as work
+  under way, while the lead's place stayed held under the task by that
+  server. The card said "Waiting · 7 agents busy on this Mac, which runs 6
+  at once", and listed the task itself, "(a server it left running)", among
+  those holding it up.
+- **Decision.** What a task's agents left running is part of the task's
+  place, not another one:
+  - **Kept only by what its agents left running, a task holds one place,**
+    and none beside an agent of its own at work. Other tasks' servers count
+    as before, while they work.
+  - **A task's next work takes the place the task holds:** the step after
+    another on the same task (the review after the lead's step, the lead
+    settling after a review, a follow-up's review) takes the place of the
+    agent before it whatever that agent left running, and any work of a task
+    kept only by what it left running (a step carried on after a restart, a
+    turn Althar tells it) starts in that place, ahead of whatever waits. Its
+    servers keep running in it.
+  - **Work of a task that does have to wait** (another of its agents is at
+    work, in a turn the person started) **has the task's place first** once
+    that agent's frees, before other work that waited longer.
+  - **A waiting task is left out of its own count and holders,** on its card
+    and in its view: it never waits behind itself. Over the number, the
+    words say how many more: "Waiting: 6 of 6 agents busy on this Mac, and 1
+    more".
+- **Alternatives.** *Count a task's lead and reviewer under one key
+  always:* a lead in a turn the person started and its reviewer at work
+  would count as one, though both use the machine. Only what is left
+  running folds into the task's place.
+- **Trade-off.** A task's server and its next step share one place, so a
+  heavy test run left by the lead and its review run together while another
+  task waits. The two belong to the same piece of work, which the person
+  expects to go on.
