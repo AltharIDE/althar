@@ -13,7 +13,13 @@ import {
   MERIDIAN_TITLES,
 } from '../../fixtures/rules'
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd } from '../../foundations/vocabulary'
-import { type CommandPlace, ProjectRules, type ProjectRulesProps, type RuleCommand } from './ProjectRules'
+import { type CommandPlace, ProjectRules, type ProjectRulesProps, type RuleCommand, type SandboxList } from './ProjectRules'
+
+/** What Meridian's leads' sandboxes let through: what its packages, scripts and setup say, and its code host, registry and tracker. */
+const MERIDIAN_SANDBOX = {
+  commands: ['bunx playwright', 'bun run test', 'bun run test:e2e', 'bun install', 'ps', 'env -i'],
+  hosts: ['github.com', 'api.github.com', 'registry.npmjs.org', 'linear.app', 'api.linear.app'],
+}
 
 /** The screen with its values kept as they are changed, as the app keeps them; each change also goes to its spy. */
 function Live(args: ProjectRulesProps) {
@@ -26,6 +32,11 @@ function Live(args: ProjectRulesProps) {
   const [rotate, setRotate] = useState(args.rotate)
   const [allowed, setAllowed] = useState(args.allowed)
   const [branch, setBranch] = useState(args.branches.value)
+  const [lists, setLists] = useState<Record<SandboxList, readonly string[]>>({
+    commands: args.sandbox?.commands ?? [],
+    hosts: args.sandbox?.hosts ?? [],
+  })
+  const sandbox = args.sandbox
   return (
     <ProjectRules
       {...args}
@@ -75,6 +86,22 @@ function Live(args: ProjectRulesProps) {
         setAllowed({ ...allowed, [agent]: ids })
         args.onAllowedChange(agent, ids)
       }}
+      {...(sandbox === undefined
+        ? {}
+        : {
+            sandbox: {
+              ...lists,
+              onAdd: (list: SandboxList, typed: string) => {
+                const problem = sandbox.onAdd(list, typed)
+                if (problem === undefined) setLists({ ...lists, [list]: [...lists[list], typed.trim()] })
+                return problem
+              },
+              onRemove: (list: SandboxList, value: string) => {
+                setLists({ ...lists, [list]: lists[list].filter((each) => each !== value) })
+                sandbox.onRemove(list, value)
+              },
+            },
+          })}
     />
   )
 }
@@ -108,6 +135,7 @@ const meta = {
     onRotateChange: fn(),
     allowed: {},
     onAllowedChange: fn(),
+    sandbox: { ...MERIDIAN_SANDBOX, onAdd: fn((): string | undefined => undefined), onRemove: fn() },
   },
 } satisfies Meta<typeof ProjectRules>
 export default meta
@@ -385,4 +413,41 @@ export const LongCommands: Story = {
       } satisfies RuleCommand,
     ],
   },
+}
+
+/** What leads' sandboxes let through while the rest is allowed: known commands outside it, known hosts without asking. */
+export const Sandbox: Story = { args: { mode: PermissionPolicy.Rules } }
+
+/** Adding a host: typed where it will sit, Enter adds it, and focus goes back to the +. */
+export const AddingAHost: Story = {
+  args: { mode: PermissionPolicy.Rules },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Add a host leads reach without asking' }))
+    const field = c.getByRole('textbox', { name: 'A host' })
+    await waitFor(() => expect(field).toHaveFocus())
+    await expect(field).toHaveAccessibleDescription(/A host such as registry.npmjs.org/)
+    await userEvent.type(field, 'pypi.org')
+    await expect(field).toHaveAccessibleDescription('Reached without asking')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.sandbox?.onAdd).toHaveBeenCalledWith('hosts', 'pypi.org')
+    const sandbox = c.getByRole('listitem', { name: 'Sandbox' })
+    await expect(within(sandbox).getByText('pypi.org')).toBeInTheDocument()
+    await waitFor(() => expect(c.getByRole('button', { name: 'Add a host leads reach without asking' })).toHaveFocus())
+  },
+}
+
+/** Taking a command out of what runs outside the sandbox: it goes, and focus moves to the next one's ×. */
+export const RemovingAnOutsideCommand: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Remove env -i' }))
+    await expect(args.sandbox?.onRemove).toHaveBeenCalledWith('commands', 'env -i')
+    await expect(c.queryByRole('button', { name: 'Remove env -i' })).toBeNull()
+  },
+}
+
+/** A project that has nothing outside the sandbox: every command in it first, every host asking. */
+export const NothingOutside: Story = {
+  args: { sandbox: { commands: [], hosts: [], onAdd: fn((): string | undefined => undefined), onRemove: fn() } },
 }

@@ -28,6 +28,7 @@ import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
+import { withChange } from '../src/renderer/features/rules/useRules'
 import type { Host } from '../src/renderer/data/services'
 
 /* What the runtime would say, as plain values, and a client that says it. */
@@ -64,6 +65,11 @@ export const projectRules: ProjectRulesView = {
   titlePattern: null,
   moveIssues: true,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
+  sandbox: {
+    commands: ['bunx playwright', 'bun run test', 'ps', 'env -i'],
+    hosts: ['github.com', 'registry.npmjs.org'],
+    edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
+  },
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [
@@ -949,7 +955,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     dropProjectNote: vi.fn(async () => {}),
     editProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
-    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
+    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({
+      ...withChange(projectRules, change),
+      projectId,
+    })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
       ...usual('acc_added', 'signed_out'),
       name: input.name,
