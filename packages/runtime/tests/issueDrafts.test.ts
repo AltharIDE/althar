@@ -170,7 +170,7 @@ describe('issue drafts', () => {
       // Its card as a thread kept it before priorities: it reads as nothing, until the store is migrated.
       yield* sql`UPDATE thread_items SET content = json_remove(content, '$.priority') WHERE kind = 'issue_draft'`
       assert.lengthOf(yield* cardsOf(projectId), 0)
-      const changes = migrations.find((migration) => migration.key === '0039_issue_changes') ?? assert.fail('no migration')
+      const changes = migrations.find((migration) => migration.key === '0040_issue_changes') ?? assert.fail('no migration')
       for (const statement of changes.statements.filter((each) => each.startsWith('UPDATE thread_items'))) yield* sql.unsafe(statement)
       const [card] = yield* cardsOf(projectId)
       assert.deepInclude(card, { title: 'Refunds skip the rate limiter', priority: null, state: 'pending' })

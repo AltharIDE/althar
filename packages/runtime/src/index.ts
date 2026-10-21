@@ -24,6 +24,7 @@ export { commandIn, commandOf, decide, pathsOf, type RuleContext, type Verdict }
 export * as Runtime from './Runtime'
 export { AcceptedInput, type Disposition, promptFor, Sessions } from './Sessions'
 export { connection, handlers, serve, services } from './Api'
+export { FolderCleanup } from './FolderCleanup'
 export { Folders } from './Folders'
 export { Queries, type ThreadChange } from './Queries'
 export { type NudgeEvent, type NudgeKind, Nudges } from './Nudges'
