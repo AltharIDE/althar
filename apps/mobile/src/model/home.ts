@@ -1,7 +1,7 @@
 import type { BoardCall, BoardTask, HomeCall, HomeSnapshot, HomeTask, ProjectSummary } from '@althar/contracts'
 
 import { callKindOf, needsYou, readyKindOf, standingCalls } from './calls'
-import { whoWorks } from './words'
+import { duration, whoWorks } from './words'
 
 /*
  * The home, as a phone shows it: one column, what needs you first, then
@@ -78,6 +78,24 @@ export const stepWords = (task: Pick<BoardTask, 'step' | 'phase' | 'waits' | 'in
 export const workerOf = (task: Pick<BoardTask, 'step' | 'plan' | 'lead' | 'leadModel'>): string => {
   const step = task.plan?.steps.find((one) => one.key === task.step)
   return step === undefined ? whoWorks(task.lead, task.leadModel) : whoWorks(step.agentId, step.model)
+}
+
+/** Where a task stands, as its screen's header says it: the step and who's on it while it works, else how it ended. */
+export const standingWords = (task: BoardTask, now: number): string => {
+  switch (task.phase) {
+    case 'ready':
+      return readyKindOf(task)
+    case 'waiting':
+      return 'Waiting on you'
+    case 'settled':
+      return task.change?.state === 'merged' ? 'Merged' : 'Settled'
+    case 'kept':
+      return 'Kept for later'
+    case 'stopped':
+      return 'Stopped: resume it on your Mac'
+    default:
+      return `${stepWords(task, now)} · ${workerOf(task)}${task.startedAt === null ? '' : ` · ${duration(now - Date.parse(task.startedAt))}`}`
+  }
 }
 
 /** The plan's steps as a track: done, now, or to come. */

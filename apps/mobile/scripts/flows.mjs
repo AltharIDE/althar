@@ -57,7 +57,8 @@ const FLOWS = {
     await page.getByRole('button', { name: 'Review and merge' }).click()
     await page.getByText('All 14 checks passed').waitFor()
     await page.getByRole('button', { name: 'Merge' }).click()
-    await page.getByText('Merged', { exact: true }).waitFor()
+    await page.getByText('Merged', { exact: true }).first().waitFor()
+    assert.equal(await page.getByText('Working', { exact: false }).count(), 0, 'a merged task says so in its header')
     await page.goBack()
     await page.getByText('5 need you').waitFor()
   },
@@ -65,7 +66,7 @@ const FLOWS = {
   'settle a finished task': async (page) => {
     await open(page, '/')
     await page.getByText('Why does the checkout test flake?').click()
-    await page.getByText('notes/checkout-flake.md').first().waitFor()
+    await page.getByText(/Two ways to fix it/).waitFor()
     await page.getByRole('button', { name: 'Done', exact: true }).last().click()
     await page.waitForTimeout(300)
     await page.goBack()
@@ -95,6 +96,9 @@ const FLOWS = {
     await page.getByLabel('Message to the lead').fill('Also do 2023, the same way.')
     await page.getByRole('button', { name: 'Queue', exact: true }).click()
     await page.getByText('Also do 2023, the same way.').waitFor()
+    await page.waitForTimeout(600)
+    const sent = await page.getByText('Also do 2023, the same way.').boundingBox()
+    assert.ok(sent !== null && sent.y > 0 && sent.y + sent.height < 844, 'the thread follows what you sent into view')
     assert.equal(await page.getByLabel('Message to the lead').inputValue(), '', 'the composer clears once sent')
   },
 

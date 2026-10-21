@@ -1,8 +1,8 @@
 import type { ChangeSummary, HomeCall, ThreadSnapshot } from '@althar/contracts'
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router'
 import { GitMerge, GitPullRequest, Lock, NavArrowRight, Page, Pin } from 'iconoir-react-native'
-import { useEffect, useState } from 'react'
-import { KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, View, type ScrollViewInstance } from 'react-native'
 
 import { useCommand, useConnection, useHome, useNow, useStreaming, useThread } from '../../../client/react'
 import { Composer } from '../../../components/Composer'
@@ -10,9 +10,9 @@ import { NeedCard } from '../../../components/NeedCard'
 import { Thread } from '../../../components/Thread'
 import { Button, Card, Chip, LiveDot, ProjectMark, StepTrack, Text } from '../../../components/ui'
 import { confirmIsYou, tapDone } from '../../../lib/device'
-import { callKindOf, isSettleable, readyKindOf, takesDone } from '../../../model/calls'
-import { stepWords, trackOf, workerOf } from '../../../model/home'
-import { duration, lines, plural } from '../../../model/words'
+import { callKindOf, isSettleable, takesDone } from '../../../model/calls'
+import { standingWords, trackOf } from '../../../model/home'
+import { lines, plural } from '../../../model/words'
 import { useTheme } from '../../../theme/Theme'
 import { radius, space } from '../../../theme/tokens'
 
@@ -134,14 +134,7 @@ function Head({ thread, now }: { readonly thread: ThreadSnapshot; readonly now: 
   const card = home.data?.tasks.find((one) => one.threadId === thread.threadId)
   const project = home.data?.projects.find((one) => one.id === thread.project.id)
   const running = thread.task.phase === 'running'
-  const status =
-    card === undefined
-      ? (thread.task.phase ?? '')
-      : card.phase === 'ready'
-        ? readyKindOf(card)
-        : card.phase === 'waiting'
-          ? 'Waiting on you'
-          : `${stepWords(card, now)} · ${workerOf(card)}${card.startedAt === null ? '' : ` · ${duration(now - Date.parse(card.startedAt))}`}`
+  const status = card === undefined ? (thread.task.phase ?? '') : standingWords(card, now)
   return (
     <View style={{ gap: space.md }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -226,6 +219,8 @@ export default function TaskScreen() {
   const home = useHome()
   const streamed = useStreaming(threadId)
   const stop = useCommand((client, taskId: string) => client.stopTask(taskId))
+  const scroll = useRef<ScrollViewInstance>(null)
+  const follow = useRef(false)
   const data = thread.data
   const project = home.data?.projects.find((one) => one.id === data?.project.id) ?? null
   const calls: ReadonlyArray<HomeCall> =
@@ -256,7 +251,16 @@ export default function TaskScreen() {
             ) : null,
         }}
       />
-      <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xxl }}>
+      <ScrollView
+        ref={scroll}
+        contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xxl }}
+        onContentSizeChange={() => {
+          // What you sent shows at the thread's end: follow it there once it arrives.
+          if (!follow.current) return
+          follow.current = false
+          scroll.current?.scrollToEnd({ animated: true })
+        }}
+      >
         {data === undefined ? (
           <Text kind="sub" ink="t3">
             {thread.isError ? thread.error.message : 'Reading the task…'}
@@ -283,7 +287,7 @@ export default function TaskScreen() {
           </>
         )}
       </ScrollView>
-      {data === undefined ? null : <Composer threadId={data.threadId} leadWorking={working} />}
+      {data === undefined ? null : <Composer threadId={data.threadId} leadWorking={working} onSent={() => (follow.current = true)} />}
     </KeyboardAvoidingView>
   )
 }

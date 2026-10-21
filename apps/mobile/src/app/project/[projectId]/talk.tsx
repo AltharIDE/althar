@@ -1,5 +1,6 @@
 import { Stack, useLocalSearchParams } from 'expo-router'
-import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native'
+import { useRef } from 'react'
+import { KeyboardAvoidingView, Platform, ScrollView, View, type ScrollViewInstance } from 'react-native'
 
 import { useCoordinator, useNow } from '../../../client/react'
 import { Composer } from '../../../components/Composer'
@@ -20,6 +21,8 @@ export default function Talk() {
   const now = useNow()
   const coordinator = useCoordinator(projectId)
   const data = coordinator.data
+  const scroll = useRef<ScrollViewInstance>(null)
+  const follow = useRef(false)
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.page }}
@@ -27,7 +30,14 @@ export default function Talk() {
       keyboardVerticalOffset={90}
     >
       <Stack.Screen options={{ title: data === undefined ? 'Coordinator' : `${data.project.name} · Coordinator` }} />
-      <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xxl }}>
+      <ScrollView
+        ref={scroll}
+        contentContainerStyle={{ padding: space.lg, gap: space.lg, paddingBottom: space.xxl }}
+        onContentSizeChange={() => {
+          // What you asked, and the plan that answers it, show at the end: follow them there.
+          if (follow.current) scroll.current?.scrollToEnd({ animated: true })
+        }}
+      >
         {data === undefined ? (
           <Text kind="sub" ink="t3">
             {coordinator.isError ? coordinator.error.message : 'Reading the conversation…'}
@@ -44,7 +54,9 @@ export default function Talk() {
           <Thread threadId={data.threadId} items={data.items} now={now} streamed={null} />
         )}
       </ScrollView>
-      {data === undefined ? null : <Composer threadId={data.threadId} leadWorking={false} placeholder="Ask the coordinator…" />}
+      {data === undefined ? null : (
+        <Composer threadId={data.threadId} leadWorking={false} placeholder="Ask the coordinator…" onSent={() => (follow.current = true)} />
+      )}
     </KeyboardAvoidingView>
   )
 }

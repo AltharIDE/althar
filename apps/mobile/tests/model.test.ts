@@ -74,6 +74,18 @@ describe('what is at work', () => {
     expect(stepWords({ ...secret, plan: { ...secret.plan, startsAt: null } }, NOW)).toBe('Held: starts when you say')
   })
 
+  it('says how a task ended in its header, and who is on it while it works', async () => {
+    const { standingWords } = await import('../src/model/home')
+    const tasks = homeOf(NOW).tasks
+    const stripe = tasks.find((one) => one.taskId === 'task_stripe')
+    const backfill = tasks.find((one) => one.taskId === 'task_backfill')
+    if (stripe?.change == null || backfill === undefined) throw new Error('no task')
+    expect(standingWords({ ...stripe, phase: 'settled', change: { ...stripe.change, state: 'merged' } }, NOW)).toBe('Merged')
+    expect(standingWords({ ...stripe, phase: 'settled', change: null }, NOW)).toBe('Settled')
+    expect(standingWords(stripe, NOW)).toBe('Ready to accept')
+    expect(standingWords(backfill, NOW)).toBe('Implementing · Opus 5 · 12m')
+  })
+
   it('says where a task waits in line', () => {
     const next = homeOf(NOW).tasks.find((one) => one.phase === 'planned')
     if (next === undefined) throw new Error('no task')

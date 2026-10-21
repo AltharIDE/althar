@@ -19,10 +19,13 @@ export function Composer({
   threadId,
   leadWorking,
   placeholder = 'Tell the lead…',
+  onSent,
 }: {
   readonly threadId: string
   readonly leadWorking: boolean
   readonly placeholder?: string
+  /** Once the Mac has it: the screen follows it to the thread's end. */
+  readonly onSent?: () => void
 }) {
   const theme = useTheme()
   const reachable = useConnection().state === 'online'
@@ -43,6 +46,7 @@ export function Composer({
           setBody('')
           setNow(false)
           tapDone()
+          onSent?.()
         },
         onError: (failure) => setError(`Not sent: ${failure.message}. It’s still here to send again.`),
       },
