@@ -78,7 +78,7 @@ describe('slots', () => {
     assert.strictEqual(nextToCome(WEEKDAYS, utc('2026-10-21T08:02'), LONDON, stagger), '2026-10-21T09:00')
   })
 
-  it('keeps 9:00 where the Mac is: a day the clock skips comes once, in the new zone', () => {
+  it('keeps 9:00 where the computer is: a day the clock skips comes once, in the new zone', () => {
     // Asleep in London on Tuesday evening, awake in New York: Wednesday's 9:00 is 9:00 there.
     assert.strictEqual(nextToCome(WEEKDAYS, utc('2026-10-20T20:00'), 'America/New_York'), '2026-10-21T09:00')
     assert.strictEqual(instantOf('2026-10-21T09:00', 'America/New_York'), utc('2026-10-21T13:00'))

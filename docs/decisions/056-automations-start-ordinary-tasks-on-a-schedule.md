@@ -1,4 +1,4 @@
-# ADR-055: Automations start ordinary tasks on a schedule, on this Mac
+# ADR-056: Automations start ordinary tasks on a schedule, on this computer
 
 - **Status:** Accepted
 - **Date:** 2026-10-21
@@ -18,7 +18,7 @@
 - **Decision:** an automation is a kept request and a schedule; each time it
   fires, Althar keeps an occurrence and starts an ordinary task for it.
   - **Three records, three lifetimes.** The automation is the person's, on
-    the Mac it was made on (`automations`: where it stands, the definition it
+    the computer it was made on (`automations`: where it stands, the definition it
     runs, when it was turned on, whether its reviews post themselves). Its
     definitions are kept, one for every change, never changed after
     (`automation_definitions`). An occurrence is one time it was due, run or
@@ -26,7 +26,7 @@
     store, so a day's 9:00 runs once however often the clock is read; it
     names its task in the transaction that makes the task, so a restart in
     between never makes a second.
-  - **A slot is a local time,** read in the Mac's zone of the moment, with a
+  - **A slot is a local time,** read in the computer's zone of the moment, with a
     time daylight saving skips run an hour later and one it repeats run the
     first time (`slots.ts`). Never more often than once an hour. Each
     automation starts a fixed few minutes after its time, from its id.
@@ -38,7 +38,7 @@
     every slot it missed. Its lead is told when it was due and when it is.
   - **What a run does is fixed when it fires,** never asked of the
     coordinator: a task from its prompt, its plan held then started (a report
-    on this Mac, or a draft or ready pull request), or a review of each pull
+    on this computer, or a draft or ready pull request), or a review of each pull
     request opened by anyone but the person that no task reviews yet, a few
     a run, one review task each.
   - **It waits its turn and keeps small.** A run's work waits after
@@ -68,18 +68,18 @@
     each fire, but a coordinator turn every time, nothing to do or not; a
     coordinator that can't start misses everything quietly; and a machine's
     message lands in the person's conversation every morning.
-  - **A daemon that outlives Quit, or waking the Mac to run.** Runs after
+  - **A daemon that outlives Quit, or waking the computer to run.** Runs after
     Quit or while asleep, but at the cost of a second process and its
     upgrades, or a root helper, for a laptop that still won't wake with its
     lid shut. Open at login, in the background, covers a restart.
   - **Files in the repository, as GitHub Actions keeps them.** Shareable,
-    but each would fire on every teammate's Mac, spending each one's plan in
+    but each would fire on every teammate's computer, spending each one's plan in
     their name; automations for a team need one runner, in the cloud.
   - **Catching up every slot missed, or holding one for the person,** as a
     plan that came due while Althar was closed is held. Every slot floods the
     board on waking; holding asks the person every morning, which undoes
     "starts by itself".
-- **Trade-off:** nothing runs after Quit or while the Mac is asleep, and the
+- **Trade-off:** nothing runs after Quit or while the computer is asleep, and the
   screen says so. A run goes ahead without asking, so its floor is what no
   switch passes: the default branch, the code host's writes being Althar's,
   credentials. Being picky about when a run may start means some mornings a

@@ -2614,7 +2614,7 @@ export const Api = RpcGroup.make(
   call('GetAutomations', { projectId: Schema.String }, AutomationsSnapshot),
   /** One automation, for its own page: its definition, its limits and its runs. */
   call('GetAutomation', { automationId: Schema.String }, AutomationSnapshot),
-  /** Makes an automation in a project, on this Mac: proposed, waiting for the person to turn it on, unless `on`. */
+  /** Makes an automation in a project, on this computer: proposed, waiting for the person to turn it on, unless `on`. */
   command(
     'MakeAutomation',
     { projectId: Schema.String, definition: AutomationDefinition, on: Schema.optional(Schema.Boolean) },

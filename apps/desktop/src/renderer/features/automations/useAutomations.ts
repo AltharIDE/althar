@@ -165,7 +165,7 @@ export const useAutomation = (automationId: string): AutomationModel => {
   }
 }
 
-/** What a new automation starts as: blank, the person's usual lead, every weekday at 9:00, its task ending on this Mac, with every limit's default. */
+/** What a new automation starts as: blank, the person's usual lead, every weekday at 9:00, its task ending on this computer, with every limit's default. */
 export const blankDefinition = (
   lead: AutomationStep,
   zone: string = Intl.DateTimeFormat().resolvedOptions().timeZone,

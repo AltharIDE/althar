@@ -157,7 +157,7 @@ const When = Schema.Struct({
   at: Schema.optional(Schema.String),
   every_hour_at: Schema.optional(Schema.Int),
 })
-/* What each run ends in: nothing outside this Mac, a draft pull request, one ready for review, or a review of each new pull request. */
+/* What each run ends in: nothing outside this computer, a draft pull request, one ready for review, or a review of each new pull request. */
 const EndsIn = Schema.Literals(['nothing', 'draft', 'ready', 'reviews'])
 /* An automation the coordinator proposes. */
 const ProposedAutomation = Schema.Struct({
@@ -1245,7 +1245,7 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const all = yield* automations.list(access.projectId)
           if (all.length === 0) return 'The project has no automations.'
-          return ['The project’s automations, on this Mac:', ...all.map(automationLine)].join('\n')
+          return ['The project’s automations, on this computer:', ...all.map(automationLine)].join('\n')
         })
 
       const proposeAutomation = (access: ToolAccess, input: unknown) =>
@@ -1583,13 +1583,13 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'list_automations',
-          "The project's automations on this Mac: work Althar starts by itself on a schedule. Each with its id, when it runs, what each run does, where it stands (on with its next time, paused, paused itself and why, or waiting for the person to turn it on), and how its last run went.",
+          "The project's automations on this computer: work Althar starts by itself on a schedule. Each with its id, when it runs, what each run does, where it stands (on with its next time, paused, paused itself and why, or waiting for the person to turn it on), and how its last run went.",
           nothing,
           (access) => listAutomations(access),
         ),
         tool(
           'propose_automation',
-          'Proposes an automation, when the person asks for work that should start by itself on a schedule ("every weekday at 9, review the new pull requests", "every Friday write release notes from what merged"). It runs on this Mac while Althar is open, each run an ordinary task, starting after the person\'s own work. Give it a name of a few words; the prompt each run is asked, as the person said it, with what a lead needs; when (days and a time where the Mac is, or every hour at a minute, never more often); the lead, as list_models writes it; and what each run ends in: nothing outside this Mac (a report), a draft pull request, one ready for review, or reviews (one review of each pull request opened by anyone but the person and not reviewed yet, its lead only reading, its review waiting for the person until they let it post). Nothing runs until the person turns it on from its card. Its task allows everything but pushing to the default branch.',
+          'Proposes an automation, when the person asks for work that should start by itself on a schedule ("every weekday at 9, review the new pull requests", "every Friday write release notes from what merged"). It runs on this computer while Althar is open, each run an ordinary task, starting after the person\'s own work. Give it a name of a few words; the prompt each run is asked, as the person said it, with what a lead needs; when (days and a time where the computer is, or every hour at a minute, never more often); the lead, as list_models writes it; and what each run ends in: nothing outside this computer (a report), a draft pull request, one ready for review, or reviews (one review of each pull request opened by anyone but the person and not reviewed yet, its lead only reading, its review waiting for the person until they let it post). Nothing runs until the person turns it on from its card. Its task allows everything but pushing to the default branch.',
           {
             type: 'object',
             properties: {

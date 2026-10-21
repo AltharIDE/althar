@@ -82,7 +82,7 @@ export interface AtOnce {
 /**
  * Where work that waits for a place stands (ADR-037): what the person did,
  * which starts at once; the work of a task already under way; new work; and
- * last, an automation's run, every step of it (ADR-055).
+ * last, an automation's run, every step of it (ADR-056).
  */
 export type Order = 'person' | 'underway' | 'new' | 'automation'
 
@@ -424,7 +424,7 @@ export class Busy extends Context.Service<
         return all
           .map((waiter): Ranked => {
             const inLine = waiter.order !== 'person' && waiter.review !== true && line.has(waiter.taskId)
-            // An automation's run waits after everything else, in the line or not (ADR-055).
+            // An automation's run waits after everything else, in the line or not (ADR-056).
             const order = orderIn(waiter.order, waiter.taskId, tasks)
             return {
               waiter,

@@ -19,7 +19,7 @@ page.
 
 - [x] **While Althar is closed.** While Althar runs, windows or not, with an
   opt-in "Open Althar at login, in the background"; no daemon.
-- [x] **A run the Mac slept through.** Once on waking, within its window.
+- [x] **A run the computer slept through.** Once on waking, within its window.
 - [x] **What a fire does.** Althar starts the kept plan; the coordinator
   isn't asked.
 - [x] **Each run: a new task, or the open one carried on.** A choice on the
@@ -40,11 +40,11 @@ page.
   first, which leaves OpenCode out; at most five pull requests open.
 - [x] **The coordinator's reach.** Pause in words; resume and Run now on a
   small card; any other change on a card.
-- [x] **Where they live.** In Althar, the person's own, on the Mac they were
+- [x] **Where they live.** In Althar, the person's own, on the computer they were
   made on; no files in the repository.
 - [x] **Rules or automations** for what needs no agent, such as closing an
   issue when its pull request merges. Rules.
-- [x] **The cloud.** This Mac only now; a webhook relay later; then runs in
+- [x] **The cloud.** This computer only now; a webhook relay later; then runs in
   the cloud, a product of their own, paid per use.
 - [x] **A run's worktree.** Its task's own, as any task's; the clean-up of
   finished task folders (DEV-143) removes them.

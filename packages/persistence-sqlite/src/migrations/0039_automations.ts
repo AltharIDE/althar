@@ -17,7 +17,7 @@ import {
 
 /*
  * Automations (docs/plans/automations.md): work Althar starts by itself on a
- * schedule. An automation is the person's, on the Mac it was made on: its
+ * schedule. An automation is the person's, on the computer it was made on: its
  * name, where it stands (proposed and waiting to be turned on, on, paused by
  * the person or by itself and why, or deleted), the definition it runs, when
  * it was last turned on (no slot before counts), and whether its reviews post

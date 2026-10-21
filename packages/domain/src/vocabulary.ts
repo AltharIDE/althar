@@ -261,7 +261,7 @@ export type AutomationOccurrenceCause = typeof AutomationOccurrenceCause.Type
 /**
  * One time an automation ran, or didn't: starting (its task being made),
  * running (its task under way), made something, nothing to do (it found
- * nothing, so no task), failed, missed (the Mac was asleep or Althar closed
+ * nothing, so no task), failed, missed (the computer was asleep or Althar closed
  * past its window), or skipped (paused, busy, its last run still going, or
  * too many of its pull requests open).
  */

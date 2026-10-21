@@ -24,7 +24,7 @@ import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } fr
 
 /*
  * Automations (docs/plans/automations.md): work that starts by itself on a
- * schedule, on this Mac. Each slot runs once, as an ordinary task; one the
+ * schedule, on this computer. Each slot runs once, as an ordinary task; one the
  * Mac slept through runs once on waking, within its window, or is missed;
  * one that can't start now is skipped and says why; three failures in a row
  * pause it. The clock here is the test's, in London.
@@ -45,7 +45,7 @@ const clockAt = (iso: string) => {
   return { now, options, set: (to: string) => void (now.at = Date.parse(to)) }
 }
 
-/** Release notes every weekday at 9:00: a report, nothing outside this Mac. */
+/** Release notes every weekday at 9:00: a report, nothing outside this computer. */
 const NOTES: AutomationDefinition = {
   name: 'Release notes',
   prompt: 'Write release notes from what merged this week. [lead:finish] [lead:terse]',
@@ -125,7 +125,7 @@ describe('automations', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { automations: clock.options })))))
   })
 
-  it.live('run a slot the Mac slept through once on waking, within its window, and miss one past it; never every slot', () => {
+  it.live('run a slot the computer slept through once on waking, within its window, and miss one past it; never every slot', () => {
     const clock = clockAt('2026-10-20T07:00:00Z')
     return Effect.gen(function* () {
       const automations = yield* Automations
@@ -138,17 +138,17 @@ describe('automations', () => {
       const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'made', Duration.seconds(20))
       assert.strictEqual(ran?.slot, '2026-10-21T09:00')
       const [task] = yield* sql<{ description: string }>`SELECT description FROM tasks WHERE id = ${ran?.taskId ?? ''}`
-      assert.include(task?.description, 'It was due at 9:00; it is 13:00, since the Mac was asleep or Althar was closed.')
+      assert.include(task?.description, 'It was due at 9:00; it is 13:00, since the computer was asleep or Althar was closed.')
       // Asleep until Thursday 21:30: Thursday's 9:00 is past its window, so it is missed, and says so.
       clock.set('2026-10-22T20:30:00Z')
       const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2)
       assert.deepInclude(rows[1], {
         slot: '2026-10-22T09:00',
         state: 'missed',
-        reason: 'Missed: the Mac was asleep, or Althar closed, at 9:00.',
+        reason: 'Missed: the computer was asleep, or Althar closed, at 9:00.',
         taskId: null,
       })
-      // One that skips what the Mac slept through skips it.
+      // One that skips what the computer slept through skips it.
       yield* automations.change(automationId, { ...NOTES, late: 'skip' }, instance.personId)
       clock.set('2026-10-23T09:30:00Z')
       const later = yield* until(occurrencesOf(automationId), (all) => all.length === 3)

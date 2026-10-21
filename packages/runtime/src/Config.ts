@@ -100,11 +100,11 @@ export interface RuntimeOptions {
 export interface AutomationOptions {
   /** The time now, in epoch milliseconds: the wall clock's. */
   readonly now?: () => number
-  /** The zone the Mac is in now: its clock's. */
+  /** The zone the computer is in now: its clock's. */
   readonly zone?: () => string
   /** How often the clock is looked at, besides whenever an automation changes: every 30 seconds. */
   readonly tick?: Duration.Duration
-  /** How long a run the Mac slept through, or Althar was closed for, waits after waking or launching: two minutes. */
+  /** How long a run the computer slept through, or Althar was closed for, waits after waking or launching: two minutes. */
   readonly settle?: Duration.Duration
   /** Whether each automation starts its few minutes after its time: yes. */
   readonly stagger?: boolean

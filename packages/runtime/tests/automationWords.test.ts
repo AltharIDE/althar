@@ -46,7 +46,7 @@ describe('an automation’s words', () => {
     assert.include(brief, 'allows everything but pushing to the default branch')
     // Late, it says when it is.
     const late = briefOf(NIGHTLY, due, due + 7 * 3_600_000, LONDON)
-    assert.include(late, 'It was due at 2:00; it is 9:00, since the Mac was asleep or Althar was closed.')
+    assert.include(late, 'It was due at 2:00; it is 9:00, since the computer was asleep or Althar was closed.')
     // Its asks wait for the person where it doesn't allow everything.
     assert.include(briefOf({ ...NIGHTLY, allowEverything: false }, due, due, LONDON), 'what you ask waits for the person')
   })

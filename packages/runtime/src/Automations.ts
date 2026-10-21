@@ -34,14 +34,14 @@ import { addItem, updateItem } from './threads'
 
 /*
  * Automations (docs/plans/automations.md): work Althar starts by itself on a
- * schedule, on this Mac, while Althar runs. An automation is a kept request
+ * schedule, on this computer, while Althar runs. An automation is a kept request
  * and a schedule; each time its schedule says, Althar keeps an occurrence,
  * once for each slot whoever reads the clock, and starts an ordinary task for
  * it: a task from its prompt, or a review of each new pull request. Nothing
  * here runs agents: it only decides when the tasks Althar knows how to run
  * start, and keeps how each went.
  *
- * A slot the Mac slept through runs once when it wakes, within its window,
+ * A slot the computer slept through runs once when it wakes, within its window,
  * never as a backlog; one past its window is missed, and says so. A run
  * waits after the person's own work, one automation's task at a time
  * (`Busy.ts`), works at most its minutes, and three failures in a row pause
@@ -68,7 +68,7 @@ const ALL_PAUSED = 'automations_paused'
 /** A task's title at most, as every screen shows one. */
 const TITLE_LENGTH = 60
 
-/** How far past its time, and its stagger, a run counts as late: one the Mac slept through, or Althar was closed for. */
+/** How far past its time, and its stagger, a run counts as late: one the computer slept through, or Althar was closed for. */
 const LATE = Duration.minutes(5)
 
 /** A refusal in words the person or the coordinator reads: why an automation can't do that now. */
@@ -133,7 +133,7 @@ interface Subject {
 /** A command id made from an occurrence's, so asking again for the same occurrence is the same command. */
 const commandOf = (occurrenceId: string) => `cmd_${occurrenceId.slice(occurrenceId.indexOf('_') + 1)}`
 
-/** A time of day where the Mac is: 9:00. */
+/** A time of day where the computer is: 9:00. */
 const clockOf = (at: number, zone: string) => timeWords(localOf(at, zone).slice(11))
 
 /** A day as a title says it: 23 Oct. */
@@ -156,7 +156,7 @@ export const briefOf = (definition: AutomationDefinition, due: number, at: numbe
   [
     definition.prompt.trim(),
     '---',
-    `This is a run of the automation “${definition.name}”, which runs ${scheduleInLine(definition.schedule)} on the person's Mac. It was due at ${clockOf(due, zone)}${at - due > Duration.toMillis(LATE) ? `; it is ${clockOf(at, zone)}, since the Mac was asleep or Althar was closed` : ''}.`,
+    `This is a run of the automation “${definition.name}”, which runs ${scheduleInLine(definition.schedule)} on the person's computer. It was due at ${clockOf(due, zone)}${at - due > Duration.toMillis(LATE) ? `; it is ${clockOf(at, zone)}, since the computer was asleep or Althar was closed` : ''}.`,
     definition.allowEverything
       ? 'Nobody is watching it run: decide what you can yourself rather than asking. Its task allows everything but pushing to the default branch, which is never allowed.'
       : 'Nobody is watching it run: decide what you can yourself rather than asking, since what you ask waits for the person. Pushing to the default branch is never allowed.',
@@ -182,7 +182,7 @@ const slotOutcome = (states: ReadonlyArray<AutomationRun['state']>): 'made' | 'n
 export class Automations extends Context.Service<
   Automations,
   {
-    /** Makes an automation on this Mac: proposed, waiting for the person to turn it on, unless `on`. Its id. */
+    /** Makes an automation on this computer: proposed, waiting for the person to turn it on, unless `on`. Its id. */
     make(input: {
       readonly projectId: string
       readonly definition: AutomationDefinition
@@ -879,19 +879,19 @@ export class Automations extends Context.Service<
 
       /* ---- The clock ---- */
 
-      /** When the clock last looked, to tell a Mac that slept; and until when a run that came while it did waits. */
+      /** When the clock last looked, to tell a computer that slept; and until when a run that came while it did waits. */
       let lookedAt = nowOf()
       let settledAt = nowOf() + settle
 
       /**
-       * Looks at every automation on, on this Mac: a slot that came starts,
-       * once; one the Mac slept through starts once it has settled, if its
+       * Looks at every automation on, on this computer: a slot that came starts,
+       * once; one the computer slept through starts once it has settled, if its
        * window is still open, or is missed. When the clock should look again.
        */
       const look = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const at = nowOf()
-        // Asleep, the clock didn't look: what came meanwhile waits for the Mac to settle.
+        // Asleep, the clock didn't look: what came meanwhile waits for the computer to settle.
         if (at - lookedAt > 3 * tick + 60_000) settledAt = at + settle
         lookedAt = at
         const zone = zoneOf()
@@ -923,11 +923,11 @@ export class Automations extends Context.Service<
                 slot,
                 dueAt: time,
                 state: 'missed',
-                reason: `Missed: the Mac was asleep, or Althar closed, at ${clockOf(time, zone)}.`,
+                reason: `Missed: the computer was asleep, or Althar closed, at ${clockOf(time, zone)}.`,
               })
               return coming
             }
-            // Come while the Mac slept: it waits for the Mac to settle, then runs once.
+            // Come while the computer slept: it waits for the computer to settle, then runs once.
             if (late && at < settledAt) return settledAt
             yield* fire(row, definition, 'schedule', slot, time)
             return coming

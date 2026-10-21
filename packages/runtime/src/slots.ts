@@ -5,7 +5,7 @@ import { DateTime, Duration, Option } from 'effect'
  * An automation's slots (docs/plans/automations.md, "Schedules"). A slot is
  * the local date and time its schedule says, `2026-10-21T09:00`, not when it
  * starts: it is how an occurrence is told apart from every other, so a day's
- * 9:00 runs once however the clock moves. Its time comes in the Mac's zone of
+ * 9:00 runs once however the clock moves. Its time comes in the computer's zone of
  * the moment, as Calendar's floating times do: a 2:30 a daylight-saving
  * change skips comes at 3:30, a 1:30 it repeats comes the first time, and
  * flying across zones never brings a day's 9:00 twice.
@@ -86,7 +86,7 @@ export const slotAtOrBefore = (schedule: Schedule, local: Slot): Slot => {
   return atTime(moved(local, -7), hour, minute)
 }
 
-/** The zone the Mac is in now, as its clock says. */
+/** The zone the computer is in now, as its clock says. */
 export const localZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
 
 /** When a slot comes in a zone, in epoch milliseconds: a time the zone skips comes as much later, one it repeats the first time. */

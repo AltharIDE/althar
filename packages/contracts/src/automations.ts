@@ -17,7 +17,7 @@ export const AutomationStep = Schema.Struct({
 })
 export type AutomationStep = typeof AutomationStep.Type
 
-/** What a run that makes a change ends in: a draft pull request, one ready for review, or nothing that leaves this Mac (null). */
+/** What a run that makes a change ends in: a draft pull request, one ready for review, or nothing that leaves this computer (null). */
 export const AutomationEnd = Schema.NullOr(Schema.Literals(['draft', 'ready']))
 export type AutomationEnd = typeof AutomationEnd.Type
 
@@ -38,7 +38,7 @@ export type AutomationWork = typeof AutomationWork.Type
 /** How long a run may work, in minutes of its agents' work over all its steps. */
 export const AutomationMinutes = Schema.Int.check(Schema.isBetween({ minimum: 5, maximum: 240 }))
 
-/** What a time the Mac slept through does: runs once on waking, within its window, or is skipped for the next. */
+/** What a time the computer slept through does: runs once on waking, within its window, or is skipped for the next. */
 export const AutomationLate = Schema.Literals(['once', 'skip'])
 export type AutomationLate = typeof AutomationLate.Type
 
@@ -49,7 +49,7 @@ export const AutomationDefinition = Schema.Struct({
   /** What each run is asked, as the person would say it to the coordinator. */
   prompt: Schema.String,
   schedule: Schedule,
-  /** The zone it was made in, kept for later; its times come where the Mac is. */
+  /** The zone it was made in, kept for later; its times come where the computer is. */
   zone: Schema.String,
   lead: AutomationStep,
   work: AutomationWork,

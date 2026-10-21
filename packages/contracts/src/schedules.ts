@@ -3,7 +3,7 @@ import { Schema } from 'effect'
 /*
  * When an automation runs (docs/plans/automations.md, "Schedules"): on some
  * days of the week at a time, or every hour at a minute. Never more often
- * than once an hour. The runtime works out its slots in the Mac's zone of the
+ * than once an hour. The runtime works out its slots in the computer's zone of the
  * moment; the window says it in words. Both read the same shape, so the card,
  * the page and the coordinator say it the same way.
  */
@@ -16,7 +16,7 @@ export type Weekday = typeof Weekday.Type
 export const TimeOfDay = Schema.String.check(Schema.isPattern(/^([01]\d|2[0-3]):[0-5]\d$/))
 
 export const Schedule = Schema.Union([
-  /** On the days named, at the time, where the Mac is. */
+  /** On the days named, at the time, where the computer is. */
   Schema.Struct({ every: Schema.Literal('week'), days: Schema.Array(Weekday).check(Schema.isMinLength(1)), at: TimeOfDay }),
   /** Every hour, at the minute past. */
   Schema.Struct({ every: Schema.Literal('hour'), minute: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 59 })) }),

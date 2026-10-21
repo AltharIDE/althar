@@ -23,7 +23,7 @@
   each thing it found (each new pull request, the issue that got its label).
   The coordinator writes and changes automations, in the conversation, on a
   card the person turns on.
-- **It runs on this Mac, in the runtime, while Althar runs.** On a Mac,
+- **It runs on this computer, in the runtime, while Althar runs.** On a Mac,
   Althar already keeps running with every window closed. Add one opt-in,
   "Open Althar at login, in the background". No daemon, and no waking the
   Mac, which needs root. A run missed while the Mac slept runs once when it
@@ -158,7 +158,7 @@ in one task. The connectors mostly list with filters already (`listChanges`
 takes an author, review requested and draft); "opened since" is missing.
 
 "Since the last time" means since the last listing that came back whole,
-not the last fire: a slot skipped because the Mac was busy, or a listing
+not the last fire: a slot skipped because the computer was busy, or a listing
 that failed, moves nothing on. "Not reviewed by a task already" is what
 keeps a pull request from being reviewed twice; "since" only keeps the
 listing short. A listing holds at most its `limit`, newest first, and says
@@ -199,7 +199,7 @@ does. The test: if no agent runs, it is a rule.
 | **2. And open at login, in the background** | Also after a restart, with nobody opening Althar | `app.setLoginItemSettings` (`SMAppService`), a switch in Settings, the "requires approval" state, starting with no window | macOS's "background item added" notice; must start quiet and light |
 | **3. A daemon that outlives Quit** | After Quit too | The runtime as a LaunchAgent, the app a client of it over a local socket (the CLI wants one too, `apps/cli/ARCHITECTURE.md`); the daemon stays the one writer | Install, upgrades in step, two lifecycles, support. Rejected for the MVP ([02](../architecture/02-desktop-runtime.md)); the runtime still leans on Electron's `net` and on main for secrets |
 | **4. Wake the Mac to run** | Asleep too, lid open or on power | A privileged LaunchDaemon, since scheduling a wake needs root (`IOPMSchedulePowerEvent`, `pmset`) | An administrator's approval and a root helper, for a laptop that still won't wake with its lid shut. Not worth it |
-| **5. A clock in the cloud, the Mac's hands** | On time even with the Mac off; runs when a Mac is up | An Althar account, a server, leases to devices ([07](../architecture/07-persistence-security-and-cloud.md)) | A cloud product; the run still needs a Mac awake |
+| **5. A clock in the cloud, the computer's hands** | On time even with the computer off; runs when a computer is up | An Althar account, a server, leases to devices ([07](../architecture/07-persistence-security-and-cloud.md)) | A cloud product; the run still needs a computer awake |
 | **6. Hands in the cloud too** | Always | Cloud machines, clones, secrets, pay-per-use agents | A different product (see The cloud) |
 
 **1 now, with 2 offered** the first time a scheduled automation is turned
@@ -219,7 +219,7 @@ countdown running.
 - **Power Nap is Apple's own** (Mail, Calendar, Time Machine). A run that
   starts in a dark wake can be cut off when the Mac sleeps again: Codex's
   scheduled tasks stalled that way. Start catch-ups once the person is back
-  (screen unlocked, `unlock-screen`) or after the Mac has been up for a few
+  (screen unlocked, `unlock-screen`) or after the computer has been up for a few
   minutes, never at the instant of waking.
 - **Don't wait for 9:00 on one long timer.** A timer that came due during
   sleep is overdue at wake, but whether it fires at once couldn't be
@@ -234,8 +234,8 @@ countdown running.
   Call 2 decided against holding: it runs once, within its window, as
   Claude's desktop tasks and Orca do, and says so in its history.
 
-So the promise on screen is honest: "Runs on this Mac while Althar is open.
-If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
+So the promise on screen is honest: "Runs on this computer while Althar is open.
+If the computer is asleep at 2:00, it runs when it wakes, until 14:00."
 
 ## Schedules
 
@@ -248,7 +248,7 @@ If the Mac is asleep at 2:00, it runs when it wakes, until 14:00."
   Mac's zone of the moment, as Calendar's floating times do, so travelling
   doesn't move the morning review to 3:00. The zone is still kept, for a
   server that has none. So the next time, kept as an instant, is worked out
-  again when the Mac's zone changes; and since a slot is its local date and
+  again when the computer's zone changes; and since a slot is its local date and
   time, flying across zones never runs a day's 9:00 twice, and a day the
   flight skips is missed, as any (call 14).
 - **Daylight saving:** a 2:30 that doesn't exist runs at 3:30 (Temporal's
@@ -447,7 +447,7 @@ and signs what it does. So:
   count of an automation's agents at work, not a rank: a rank only says who
   goes first.
 - **A deadline to start:** an occurrence that can't start inside its window,
-  because the Mac was busy all day, is skipped and says so ("the Mac was
+  because the computer was busy all day, is skipped and says so ("the computer was
   busy"), not queued for ever.
 - **Plans (Claude Max, ChatGPT Pro):** Althar can't read how much of a plan
   is left; it learns of a limit only from the agent's error
@@ -494,7 +494,7 @@ and signs what it does. So:
 | Made something | A pull request, a review (drafted, or posted), a held plan, a report |
 | Nothing to do | Its query found nothing, so no task; or its lead looked and found nothing, and its task settled out of sight |
 | Failed | Its task stopped without finishing, or Althar couldn't start one: a query or a connector failed |
-| Missed | The Mac was asleep or Althar closed, past its window |
+| Missed | The computer was asleep or Althar closed, past its window |
 | Skipped | Paused, busy past its deadline, still running, or no longer needed |
 | Running | Its task is under way |
 
@@ -532,10 +532,10 @@ and signs what it does. So:
 
 - **In Althar's database, the person's own, not as files in the
   repository.** An automation spends this person's plan and acts as them. A
-  file in the repository would fire on every teammate's Mac, and every pull
+  file in the repository would fire on every teammate's computer, and every pull
   request would get two reviews. Automations for a team need one runner,
   which means the cloud.
-- **On the Mac they were made on.** Each names its device, so two Macs never
+- **On the computer they were made on.** Each names its device, so two Macs never
   both run it: cheap now, and what a lease needs later. Device-only data
   stays in device-keyed tables, as the schema rules ask.
 - **Later, perhaps, as a file to share:** `.althar/automations/<name>.md`, a
@@ -589,7 +589,7 @@ is kept now costs nothing and keeps the way open:
 
 | Kept now | Why it matters later |
 |---|---|
-| An occurrence is a record with an idempotency key, made by whoever noticed | A server can write occurrences in place of the Mac, and dedupe still holds |
+| An occurrence is a record with an idempotency key, made by whoever noticed | A server can write occurrences in place of the computer, and dedupe still holds |
 | Starting an occurrence's task is a step of its own | It becomes a lease to a device, with a fencing token ([07](../architecture/07-persistence-security-and-cloud.md), local runner leases) |
 | Definitions hold no paths, and name their device | They can sync; the device is the runner's claim |
 | Triggers and schedules are data, with a zone | A server can evaluate them |
@@ -603,20 +603,20 @@ Then three steps, each a decision of its own:
    Althar's server.
 2. **A clock in the cloud, and leases to devices.** It fires on time and
    offers the run to whichever of the person's Macs is up; with two Macs,
-   one runs it. It still needs a Mac awake.
+   one runs it. It still needs a computer awake.
 3. **Runs in the cloud.** Agents in cloud machines: a clone every run, setup
    baked into an image, secrets through a proxy, a network allowlist. Plans
    like Claude Max are for the person's own use on their own machine, so
    these runs pay per use; architecture 03 already says running on a plan
    stays on the device. The screens barely change: the card gains "Runs on:
-   this Mac or Althar's cloud", and the page stays. What a run can do
-   changes: nothing runs on the Mac, and results come back only as branches
+   this computer or Althar's cloud", and the page stays. What a run can do
+   changes: nothing runs on the computer, and results come back only as branches
    and pull requests.
 
 Superset, Claude's routines, Cursor and Copilot went to the cloud first for
 automations, because events and always-on are free there. Factory and
 Claude Code's desktop tasks show that local works for schedules. **The
-person's roadmap (call 12):** this Mac only now; the relay later, with an
+person's roadmap (call 12):** this computer only now; the relay later, with an
 Althar account; then runs in the cloud, as a product of their own, paid per
 use, with the clock and leases coming with them. Nothing in the first
 version waits on either.
@@ -650,7 +650,7 @@ version waits on either.
 
 ## In what order
 
-1. **Schedules and Althar's own events, on this Mac.** The tab, the page,
+1. **Schedules and Althar's own events, on this computer.** The tab, the page,
    the card, the coordinator's tools; occurrences and their keys; catching
    up once; the still-wanted check, since four reviews in one place start
    one after another, and a pull request can merge while its review waits;
@@ -663,7 +663,7 @@ version waits on either.
    release notes, the nightly bump, the weekly polish and flaky sweeps, and
    the morning review, a schedule with a pull request query.
 
-   **Built** ([ADR-055](../decisions/055-automations-start-ordinary-tasks-on-a-schedule.md)):
+   **Built** ([ADR-056](../decisions/056-automations-start-ordinary-tasks-on-a-schedule.md)):
    schedules (days at a time, or hourly), the three tables, the clock with
    catching up once and missing past the window, one place after the
    person's work for every step, a run's minutes over its turns, the skips
@@ -710,7 +710,7 @@ The person's:
   everything, on by default and switchable on its page; pushing to the
   default branch is never allowed, and allow everything doesn't go past
   that.
-- **12. The cloud:** this Mac only now; a relay for GitHub's webhooks later,
+- **12. The cloud:** this computer only now; a relay for GitHub's webhooks later,
   with an Althar account; then runs in the cloud, a product of their own,
   paid per use.
 - **13. A run's worktree:** its task's own, as any task's. The clean-up of
@@ -723,7 +723,7 @@ Taken where the other tools agree:
   or not, with an opt-in "Open Althar at login, in the background"; no
   daemon. Claude Code's desktop tasks, Codex and Orca run only while their
   app is open.
-- **2. A run the Mac slept through:** once on waking, within its window,
+- **2. A run the computer slept through:** once on waking, within its window,
   said in its history. Claude's desktop tasks run "exactly one catch-up run
   for the most recently missed time"; Orca keeps a window for each
   automation, 12 hours by default.
@@ -740,14 +740,14 @@ Taken where the other tools agree:
 - **9. The coordinator's reach:** it pauses one in words; resuming and Run
   now go on a small card, since both spend and the coordinator reads text
   from outside. Any other change is on a card.
-- **10. Where they live:** in Althar, the person's own, on the Mac they were
+- **10. Where they live:** in Althar, the person's own, on the computer they were
   made on; no files in the repository. Claude's desktop tasks and Orca keep
   theirs on the machine that runs them.
 - **11. Rules for what needs no agent,** such as closing an issue when its
   pull request merges. GitHub already closes an issue a merged pull request
   names, and Linear moves its own.
-- **14. 9:00 where the person is,** in the Mac's zone of the moment. Claude
-  uses the local time; Orca the Mac's, unless a zone is pinned.
+- **14. 9:00 where the person is,** in the computer's zone of the moment. Claude
+  uses the local time; Orca the computer's, unless a zone is pinned.
 - **15. Pause all** stops only what would start; runs under way finish.
   Cursor cancelling running work is what its users complain about.
 
@@ -777,7 +777,7 @@ other tools says Run now and runs.
 - **Review fatigue.** In dotnet/runtime, 44% of the agent's closed pull
   requests were drafts nobody reviewed. How many open automation pull
   requests are too many? Five for each automation, to begin with.
-- **Two Macs, travel, holidays.** Does the person use more than one Mac?
+- **Two Macs, travel, holidays.** Does the person use more than one computer?
   Should there be "Pause all until Monday"?
 
 ## Sources
