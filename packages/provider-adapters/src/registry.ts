@@ -696,6 +696,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
       'Usage limits reach the Agent SDK but are not forwarded over ACP; only errors show them.',
+      "As the coordinator, its sandbox has to start where Althar asks for it (macOS, and Linux with bubblewrap and socat): where it can't, the coordinator's session fails rather than running commands outside it.",
+      "As the coordinator, a command it can't read itself, such as one with `$?`, asks rather than running in its sandbox, and meets Althar's reader rules.",
     ],
   },
   codex: {
