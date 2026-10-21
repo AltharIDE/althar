@@ -1738,7 +1738,13 @@ export class Sessions extends Context.Service<
                       taskBranch: thread.branch,
                     },
                   }
-                : { role: 'reader', cwd: cwdOf(thread), ...(offline ? { offline } : {}) },
+                : {
+                    role: 'reader',
+                    cwd: cwdOf(thread),
+                    ...(offline ? { offline } : {}),
+                    // The coordinator reads its own copies of the project's repositories (ADR-056): never a review's lead.
+                    ...(thread.role === 'coordinator' ? { trusted: true } : {}),
+                  },
           }
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
@@ -1780,7 +1786,11 @@ export class Sessions extends Context.Service<
                   : {
                       meta: definition.sessionMeta(
                         reads ? 'reader' : 'lead',
-                        untrusted ? { untrusted, ...(offline ? { offline } : {}) } : undefined,
+                        untrusted
+                          ? { untrusted, ...(offline ? { offline } : {}) }
+                          : thread.role === 'coordinator'
+                            ? { contained: thread.folder.folder }
+                            : undefined,
                       ),
                     }),
               })

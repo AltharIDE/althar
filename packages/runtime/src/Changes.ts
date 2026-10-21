@@ -38,7 +38,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
 import { touchCard } from './cards'
-import { logForLead, readLog } from './checkLogs'
+import { logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import {
@@ -350,9 +350,6 @@ const RERUN_SHOWS = Duration.minutes(3)
 
 /** How long `push_tag` waits for the person before it returns, and the lead is told later: well within what agents wait for a tool. */
 export const TAG_ANSWERED_WITHIN = Duration.seconds(30)
-
-/** How many lines of a check's log `read_check_log` gives at a time. */
-const LOG_PAGE = 300
 
 /** A change in Althar's hands: how often its checks failed since its work came back, whether they run now, and whether it gave up. */
 export interface Hands {
@@ -4417,19 +4414,7 @@ export class Changes extends Context.Service<
           // A log its host keeps but wouldn't give is refused, with why; a check it keeps none of is said, with what it reported.
           if (read.log === null)
             return read.kept ? yield* new ToolRefused({ message: logForLead(read) }) : `${nameOf(snapshot)}: ${logForLead(read)}`
-          const lines = read.log.trimEnd().split('\n')
-          const from = Math.min(Math.max(1, Math.floor(asked.from_line ?? lines.length - LOG_PAGE + 1)), lines.length)
-          const to = Math.min(lines.length, from + LOG_PAGE - 1)
-          const around = [
-            ...(from > 1 ? [`from_line ${Math.max(1, from - LOG_PAGE)} reads the page before`] : []),
-            ...(to < lines.length ? [`from_line ${to + 1} reads on`] : []),
-          ]
-          return [
-            `Lines ${from} to ${to} of ${lines.length} of ${check.name}'s log on ${nameOf(snapshot)}${around.length === 0 ? '' : `; ${around.join(', ')}`}:`,
-            '```',
-            lines.slice(from - 1, to).join('\n'),
-            '```',
-          ].join('\n')
+          return logPage(read.log, asked.from_line, check.name, nameOf(snapshot))
         })
 
       /** Whether the lead names this pull request: by its repository and number, as read_pull_request does (web#3), its whole path, or its number. */

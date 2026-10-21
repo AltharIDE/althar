@@ -1,0 +1,112 @@
+import type { PermissionRequest } from '@althar/provider-adapters'
+import { assert, describe, it } from '@effect/vitest'
+
+import { decideReader } from '../src/rules'
+
+/*
+ * The coordinator as a trusted reader (ADR-056): in its own copies of the
+ * project's repositories it may run more than a review's lead, which reads
+ * a repository it doesn't trust. Where its agent has no sandbox Althar can
+ * hold it in, these rules are what holds it.
+ */
+
+const request = (command: string): PermissionRequest => ({
+  sessionId: 's',
+  toolCallId: 't',
+  title: command,
+  kind: 'execute',
+  paths: [],
+  options: [],
+  rawInput: { command },
+})
+
+const cwd = '/work/meridian/.coordinator'
+const as = (trusted: boolean) => (command: string) => {
+  const decided = decideReader(request(command), { cwd, ...(trusted ? { trusted } : {}) })
+  return decided.verdict === 'deny' ? decided.reason : 'allowed'
+}
+const coordinator = as(true)
+const reviewLead = as(false)
+
+describe('the coordinator, a trusted reader in its own copies', () => {
+  it('runs a substitution whose command only looks, as a line of its own', () => {
+    for (const command of [
+      'git log --oneline "$(git describe --tags --abbrev=0)..HEAD" -- src',
+      'echo "Last tag: $(git describe --tags --abbrev=0)"',
+      'cat $(git ls-files "*.md" | head -1)',
+      'git grep -n retry -- $(git ls-files src)',
+      'echo `git rev-parse --short HEAD`',
+      'echo "$(git log -1 --format=%s) on $(git rev-parse --abbrev-ref HEAD)"',
+      'echo $(echo $(uptime))',
+    ])
+      assert.strictEqual(coordinator(command), 'allowed', command)
+  })
+
+  it('refuses a substitution that does more than look, wherever it stands', () => {
+    assert.include(coordinator('echo $(rm -rf src)'), 'It would write to src')
+    assert.include(coordinator('echo "$(git push origin main)"'), '`git push` can change the repository')
+    assert.include(coordinator('echo `curl https://evil.example`'), '`curl` isn')
+    assert.include(coordinator('ls $(echo $(git reset --hard))'), '`git reset` can change')
+    assert.include(coordinator('echo $(security find-generic-password -s x -w)'), 'credentials')
+    assert.include(coordinator('echo $(cat ~/.ssh/id_ed25519)'), '.ssh')
+    // Its output is words the shell expands: never the program, nor a flag of a program whose flags can write.
+    assert.include(coordinator('$(echo rm) -rf src'), "can't be the command to run")
+    assert.include(coordinator('git log $(cat flags.txt) -1'), 'could start with a dash')
+    assert.include(coordinator('echo $(( 1 + 2 ))'), 'arithmetic')
+    assert.include(coordinator('echo $(git log'), "can't tell where")
+    assert.include(coordinator('echo hi > $(echo out.txt)'), 'It would write to')
+  })
+
+  it('says how the computer stands, and lists tags by pattern', () => {
+    for (const command of [
+      'uptime',
+      'uname -a',
+      'sw_vers',
+      'nproc',
+      'df -h .',
+      'hostname -s',
+      'git tag',
+      'git tag -l "v0.*"',
+      'git tag --sort=-v:refname | head -5',
+      'git tag --list --sort -creatordate --format "%(refname:short) %(creatordate:short)"',
+      'git tag --contains HEAD~3',
+      'git tag -n3 v0.1.0',
+      'git tag --points-at HEAD',
+    ])
+      assert.strictEqual(coordinator(command), 'allowed', command)
+    for (const command of [
+      'git tag v9.9.9',
+      'git tag -d v0.1.0',
+      'git tag -a v1 -m x',
+      'git tag -v v0.1.0',
+      'git tag -s v1',
+      'git tag -F ~/notes v1',
+    ])
+      assert.include(coordinator(command), 'tag', command)
+    assert.include(coordinator('hostname evil'), 'hostname')
+  })
+
+  it("leaves a review's lead to the strict list: none of that is its", () => {
+    for (const command of [
+      'echo $(git describe --tags)',
+      'echo `git rev-parse HEAD`',
+      'uptime',
+      'uname -a',
+      'git tag -l "v*"',
+      'git tag --sort=-v:refname',
+    ])
+      assert.notStrictEqual(reviewLead(command), 'allowed', command)
+  })
+
+  it('still fetches nothing, writes nothing and leaves the code host alone outside a sandbox', () => {
+    for (const command of [
+      'git fetch origin',
+      'git tag v1 && git push origin v1',
+      'gh pr list',
+      'bun test src/rules.test.ts',
+      'echo x > ../../notes.md',
+      'cd ~/Projects/meridian && git fetch',
+    ])
+      assert.notStrictEqual(coordinator(command), 'allowed', command)
+  })
+})

@@ -1,21 +1,29 @@
-import { existsSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
-import { NotFound } from './errors'
-import { commitOf, fetchBranch, git } from './git'
+import { GitFailed, NotFound } from './errors'
+import { commitOf, git, gitWithin } from './git'
 import { Instance } from './Instance'
 
 /*
  * The coordinator's working folder (docs/architecture/04): an Althar-owned
- * folder with a worktree of each of the project's repositories, detached at
- * its default branch. Each is brought up to date with the remote before the
+ * folder with a copy of each of the project's repositories, detached at its
+ * default branch. Each is brought up to date with the remote before the
  * coordinator's turn, and anything written there is thrown away when it is:
  * nothing the coordinator writes survives or reaches a task. A project with
  * no repositories gets an empty folder.
+ *
+ * A copy is a repository of its own (ADR-056): its git folder, made again
+ * for every turn, borrows the person's repository's objects to read and has
+ * that repository for its only remote, so the coordinator's `git fetch` and
+ * `git tag` write only the copy, and reach no network. Althar fetches the
+ * project's remote into the person's repository first; the copy's fetch
+ * brings what that has. Nothing the coordinator left in the git folder, its
+ * config, hooks or refs, is ever read by Althar's own git.
  */
 
 export interface CoordinatorFolder {
@@ -34,22 +42,69 @@ export interface CoordinatorFolder {
   }>
 }
 
+/** What a copy's fetch brings from the person's repository: its branches, each remote's as last fetched, and its tags. */
+const MIRRORED = ['+refs/heads/*:refs/heads/*', '+refs/remotes/*:refs/remotes/*', '+refs/tags/*:refs/tags/*']
+
+/** What a path is now, without following a link: the coordinator may have left anything there. */
+const kindOf = (path: string): 'none' | 'folder' | 'other' => {
+  try {
+    return lstatSync(path).isDirectory() ? 'folder' : 'other'
+  } catch {
+    return 'none'
+  }
+}
+
 /**
- * A worktree of `repository` at `path`, detached at its default branch as the
- * remote has it, or offline as this Mac has it: made if it isn't there, and
- * anything written in it since thrown away, but what git ignores, such as
- * installed packages.
+ * A folder of its own at `path`, and no git folder in it: a link or a file
+ * left there goes (only it, never what it points at), and so does the git
+ * folder, whatever it is. One a worktree of the repository's left behind, as
+ * copies were made before, is dropped from the repository's worktrees too.
+ */
+const clearedFor = (repository: string, path: string) =>
+  Effect.gen(function* () {
+    if (kindOf(path) === 'other') rmSync(path, { force: true })
+    mkdirSync(path, { recursive: true })
+    const dotGit = join(path, '.git')
+    const linked = kindOf(dotGit) === 'other' && readFileSync(dotGit, 'utf8').slice(0, 8).startsWith('gitdir: ')
+    rmSync(dotGit, { recursive: true, force: true })
+    if (linked) yield* git(repository, 'worktree', 'prune').pipe(Effect.ignore)
+  }).pipe(Effect.catchDefect((error) => Effect.fail(new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }))))
+
+/**
+ * A copy of `repository` at `path`, detached at its default branch as the
+ * remote has it, or offline as this Mac has it: made if it isn't there, its
+ * git folder made again, and anything written in it since thrown away, but
+ * what git ignores, such as installed packages.
  */
 export const freshCopy = (repository: string, path: string, base: string) =>
   Effect.gen(function* () {
-    const fetched = yield* fetchBranch(repository, base)
+    // Every branch of the remote, so the copy's `git fetch` has them all as of this turn; offline, the repository as it is.
+    const fetched = yield* gitWithin(60_000, repository, 'fetch', '--quiet', 'origin').pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    )
     const remote = fetched ? yield* commitOf(repository, `origin/${base}`).pipe(Effect.option) : Option.none()
     const commit = Option.isSome(remote) ? remote.value : yield* commitOf(repository, base)
-    if (!existsSync(path)) yield* git(repository, 'worktree', 'add', '--detach', path, commit)
-    else {
-      yield* git(path, 'checkout', '--detach', '--force', commit)
-      yield* git(path, 'clean', '-fdq')
-    }
+    const objects = resolve(repository, yield* git(repository, 'rev-parse', '--git-path', 'objects'))
+    yield* clearedFor(repository, path)
+    // No template: no sample hooks, nothing but what git needs.
+    yield* git(path, 'init', '--quiet', '--template=', ...(commit.length === 64 ? ['--object-format=sha256'] : []))
+    yield* Effect.try({
+      try: () => {
+        mkdirSync(join(path, '.git', 'objects', 'info'), { recursive: true })
+        writeFileSync(join(path, '.git', 'objects', 'info', 'alternates'), `${objects}\n`)
+      },
+      catch: (error) => new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }),
+    })
+    yield* git(path, 'config', 'remote.origin.url', repository)
+    for (const refspec of MIRRORED) yield* git(path, 'config', '--add', 'remote.origin.fetch', refspec)
+    // A tag made in the copy isn't signed with the person's key, whatever their own config says.
+    yield* git(path, 'config', 'tag.gpgSign', 'false')
+    yield* git(path, 'config', 'commit.gpgSign', 'false')
+    // Its unborn branch may be one it fetches.
+    yield* git(path, 'fetch', '--quiet', '--update-head-ok', 'origin')
+    yield* git(path, 'checkout', '--quiet', '--detach', '--force', commit)
+    yield* git(path, 'clean', '-fdq')
   })
 
 /** The project's coordinator folder, made if it isn't there, and each repository fresh from its default branch. */

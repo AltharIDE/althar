@@ -1,6 +1,7 @@
 import type { InAppSignIn } from './signInFlow'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
 import { secretReadRules } from './secrets'
 
@@ -259,6 +260,13 @@ export interface AgentDefinition {
 export interface SessionOptions {
   readonly offline?: boolean
   readonly untrusted?: boolean
+  /**
+   * The folder a trusted reader, the coordinator, may write in (ADR-056):
+   * where the agent has a sandbox Althar can hold to it, its commands run
+   * there without asking, writing only there and reaching no network; else
+   * it is started as any reader, and Althar's rules hold it.
+   */
+  readonly contained?: string
 }
 
 export interface AgentCli {
@@ -563,6 +571,55 @@ const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => 
   },
 })
 
+/**
+ * Whether Claude Code's sandbox can start here: macOS's own, or bubblewrap
+ * and socat on Linux, outside a Flatpak (no nested user namespaces there).
+ * Not yet on Windows, where Althar hasn't tried it.
+ */
+const claudeSandboxStarts = (): boolean => {
+  if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec')
+  if (process.platform !== 'linux' || process.env.FLATPAK_ID !== undefined) return false
+  const onPath = (name: string) =>
+    (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
+  return onPath('bwrap') && onPath('socat')
+}
+
+/**
+ * Claude Code for the coordinator, a trusted reader in its own copies of the
+ * project's repositories (ADR-056): its shell commands run in its sandbox
+ * without asking, held to the coordinator's folder. They write only there
+ * (and in the sandbox's own temporary folder), reach no network
+ * (`strictAllowlist` with no domain refuses every host without asking) and
+ * no socket, read nothing where the person keeps keys and sign-ins, and
+ * never run outside it (`allowUnsandboxedCommands: false`, which also drops
+ * the project's own sandbox settings). One that would run outside anyway, as
+ * one the person's own settings exempt does, asks, and meets Althar's reader
+ * rules, unless the person's own allow rules let it through, as they would
+ * in their own Claude Code. Its edit tools stay denied: a change is a task.
+ * Where the sandbox can't start, the session doesn't either
+ * (`failIfUnavailable`), so it is asked for only where it can
+ * (`claudeSandboxStarts`); elsewhere the coordinator is started as any reader.
+ */
+const claudeContains = (folder: string) => ({
+  claudeCode: {
+    options: {
+      allowDangerouslySkipPermissions: false,
+      strictMcpConfig: true,
+      settings: {
+        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['WebFetch'] },
+        sandbox: {
+          enabled: true,
+          autoAllowBashIfSandboxed: true,
+          allowUnsandboxedCommands: false,
+          failIfUnavailable: true,
+          network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+          filesystem: { allowWrite: [folder] },
+        },
+      },
+    },
+  },
+})
+
 // claude-agent-acp 0.88.0 forwards this explicit tools array to the SDK.
 // Removing the tool set also removes Read/Grep/Glob, which never ask in plan mode.
 const claudeJudges = {
@@ -620,9 +677,11 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * a Flatpak, where the sandbox can't start, the rules are what holds it.
      */
     sessionMeta: (role = 'lead', options = {}) =>
-      role === 'reader'
-        ? claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true)
-        : claudeAsks,
+      role !== 'reader'
+        ? claudeAsks
+        : options.contained !== undefined && options.untrusted !== true && options.offline !== true && claudeSandboxStarts()
+          ? claudeContains(options.contained)
+          : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true),
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
