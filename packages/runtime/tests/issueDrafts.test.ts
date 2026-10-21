@@ -113,6 +113,7 @@ describe('issue drafts', () => {
         title: 'Refunds skip the rate limiter',
         body: 'Charges go through it; refunds don’t.',
         labels: ['payments'],
+        priority: null,
         state: 'pending',
         error: null,
         issue: null,

@@ -405,7 +405,53 @@ describe('a task', () => {
     expect(client.fileIssueDraft).toHaveBeenCalledTimes(3)
     expect(screen.getByRole('link', { name: /MER-3/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-3')
     // The header says what it waits for, though no call does.
-    expect(statusOf(thread({ task: { ...base.task, phase: 'waiting' } }))).toEqual({ status: TaskStatus.Yours, state: 'Issues to file' })
+    expect(statusOf(thread({ items: [items.draft()], task: { ...base.task, phase: 'waiting' } }))).toEqual({
+      status: TaskStatus.Yours,
+      state: 'Issues to file',
+    })
+  })
+
+  it('applies or discards a change to its issue from its card, comments show as a line, and the header says it waits', async () => {
+    const base = snapshot()
+    const one = (key: string, changes: ReadonlyArray<{ field: 'status' | 'comment'; to: string }>) => ({
+      product: 'linear' as const,
+      tracker: 'Linear',
+      key,
+      url: `https://linear.app/m/issue/${key}`,
+      title: 'Rate-limit refunds like charges',
+      changes,
+      applied: null,
+      error: null,
+    })
+    const waiting = thread({
+      items: [
+        items.changes({
+          changesId: 'ich_1',
+          note: 'PR #1 opened.',
+          issues: [one('MER-231', [{ field: 'status', to: 'In Review' }])],
+        }),
+        items.changes({
+          changesId: 'ich_2',
+          state: 'applied',
+          direct: true,
+          issues: [one('MER-231', [{ field: 'comment', to: 'Refunds share the charge limiter now.' }])],
+        }),
+      ],
+      task: { ...base.task, phase: 'waiting' },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => waiting) })
+    withServices(<Task />, client)
+    const card = within(await screen.findByRole('article', { name: 'Issue changes · Linear' }))
+    expect(card.getByText('PR #1 opened.')).toBeTruthy()
+    expect(card.getByText('Status → In Review')).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Apply' }))
+    expect(client.applyIssueChanges).toHaveBeenCalledWith('ich_1')
+    await userEvent.click(card.getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueChanges).toHaveBeenCalledWith('ich_1')
+    // The lead's comment, posted at once: a line.
+    expect(screen.getByText('Commented on')).toBeTruthy()
+    expect(screen.getByText('Refunds share the charge limiter now.')).toBeTruthy()
+    expect(statusOf(waiting)).toEqual({ status: TaskStatus.Yours, state: 'Issue changes to apply' })
   })
 
   it('posts a review draft whose verdict stands chosen, and folds a posted one to its link', async () => {

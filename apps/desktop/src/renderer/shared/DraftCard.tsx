@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { IssueDraftState as State } from '@althar/contracts'
+import type { IssuePriority, IssueDraftState as State } from '@althar/contracts'
 import { IssueDraft, IssueDraftState, Markdown } from '@althar/ui'
 
 import { productBrand } from './products'
@@ -21,6 +21,15 @@ export interface DraftActions {
     edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
   ) => Promise<void>
   readonly onDiscard: (draftId: string) => void
+}
+
+/** A priority as trackers show it; none shows nothing. */
+const PRIORITIES: Readonly<Record<IssuePriority, string | null>> = {
+  urgent: 'Urgent',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+  none: null,
 }
 
 /** The kit's state, from the runtime's. */
@@ -45,6 +54,7 @@ export function DraftCard({ draft, actions }: { draft: IssueDraftContent; action
       body={draft.body}
       bodyView={<Markdown source={draft.body} />}
       labels={draft.labels}
+      {...(draft.priority === null || PRIORITIES[draft.priority] === null ? {} : { priority: PRIORITIES[draft.priority] ?? '' })}
       state={STATES[draft.state]}
       {...(draft.error === null ? {} : { error: draft.error })}
       {...(draft.issue === null ? {} : { issue: { key: draft.issue.key, href: draft.issue.url } })}

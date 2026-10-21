@@ -4,7 +4,7 @@ import type { FoundPart, FoundTask, TaskPhase } from '@althar/contracts'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { issueDraftsWaiting } from './kinds'
+import { issueCardsWaiting } from './kinds'
 
 /*
  * Finding a task by what it was about (ADR-035). Each task has one row of
@@ -313,7 +313,7 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
   const standing = sql`
     r.id AS row_id, t.id AS thread_id, k.id AS task_id, k.project_id, k.title, k.slug, k.state, k.kept_at, ${recency} AS changed_at,
     p.state AS plan_state, p.starts_at,
-    (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueDraftsWaiting('k'))} AS waiting,
+    (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
     (SELECT count(*) FROM review_drafts v WHERE v.task_id = k.id AND v.state IN ('pending', 'failed', 'uncertain')) AS drafted,
     n.state AS run_state,
     (SELECT count(*) FROM node_attempts a JOIN nodes d ON d.id = a.node_id JOIN workflow_executions e ON e.id = d.execution_id

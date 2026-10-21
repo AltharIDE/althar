@@ -49,6 +49,7 @@ import { connectionsNeedYou } from '../projectSettings/standing'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
+import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
 import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
@@ -265,6 +266,10 @@ export function ProjectView({
     onFile: (draftId) => void model.fileIssueDraft(draftId),
     onChange: (draftId, edit) => model.changeIssueDraft(draftId, edit),
     onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+  }
+  const changesActions: ChangesActions = {
+    onApply: (changesId) => void model.applyIssueChanges(changesId),
+    onDiscard: (changesId) => void model.discardIssueChanges(changesId),
   }
 
   // The agent what the person says goes to, and whether it takes images.
@@ -496,6 +501,7 @@ export function ProjectView({
                         session={session}
                         card={(card) => <Card card={card} actions={actions} />}
                         draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
+                        changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
                         run={(run) => (
                           <RunOf
                             run={run}

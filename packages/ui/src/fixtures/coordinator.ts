@@ -172,3 +172,63 @@ export const DRAFT_LONG = {
 }
 
 export const FILED_LINEAR = { key: 'MER-244', href: 'https://linear.app/meridian/issue/MER-244' }
+
+/** Changes the coordinator proposed to two issues on Linear, on one card. */
+export const CHANGES_LINEAR = {
+  issues: [
+    {
+      mark: Brand.Linear,
+      source: 'Linear',
+      key: 'DEV-67',
+      href: 'https://linear.app/meridian/issue/DEV-67',
+      title: 'Refunds skip the rate limiter',
+      changes: [{ field: 'status' as const, to: 'Done' }],
+    },
+    {
+      mark: Brand.Linear,
+      source: 'Linear',
+      key: 'DEV-142',
+      href: 'https://linear.app/meridian/issue/DEV-142',
+      title: 'Nightly partner export takes 40 minutes',
+      changes: [
+        { field: 'priority' as const, to: 'Low' },
+        { field: 'labels' as const, add: ['perf'], remove: ['bug'] },
+        { field: 'assignee' as const, to: 'Ana Ruiz' },
+      ],
+    },
+  ],
+}
+
+/** Althar's offer to move a task's issue to review, as its pull request opened. */
+export const CHANGES_IN_REVIEW = {
+  note: 'PR #212 opened.',
+  issues: [
+    {
+      mark: Brand.Linear,
+      source: 'Linear',
+      key: 'MER-231',
+      href: 'https://linear.app/meridian/issue/MER-231',
+      title: 'Rate-limit refunds like charges',
+      changes: [{ field: 'status' as const, to: 'In Review' }],
+    },
+  ],
+}
+
+/** A task's lead commented on its issue, at once. */
+export const COMMENTED_LINEAR = {
+  issues: [
+    {
+      mark: Brand.Linear,
+      source: 'Linear',
+      key: 'MER-231',
+      href: 'https://linear.app/meridian/issue/MER-231',
+      title: 'Rate-limit refunds like charges',
+      changes: [
+        {
+          field: 'comment' as const,
+          to: 'Refunds now share the charge limiter: 20 a second per account. The partner export is left out, since it batches its own.',
+        },
+      ],
+    },
+  ],
+}

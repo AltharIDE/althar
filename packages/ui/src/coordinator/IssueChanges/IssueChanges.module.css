@@ -1,0 +1,150 @@
+/* the changes, framed as an issue draft is: paper, a hairline, a foot of buttons */
+.card {
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.head {
+  padding: 12px 16px 4px;
+}
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.mark {
+  flex: none;
+  color: var(--t-2);
+}
+.why {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+
+.issues {
+  margin: 0;
+  padding: 4px 0 6px;
+  list-style: none;
+}
+.issue {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 16px;
+}
+.which {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.issueTitle {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--t-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.changes {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.comment {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.done {
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.error {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--danger);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 16px;
+  border-top: 1px solid var(--line);
+}
+.note {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.noteFailed {
+  color: var(--danger);
+}
+
+.key {
+  flex: none;
+  font: 11.5px var(--mono);
+  color: var(--t-1);
+}
+a.key {
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+a.key:hover {
+  text-decoration-color: currentColor;
+}
+
+/* applied or discarded: one quiet line */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.line:focus-visible {
+  outline-offset: 2px;
+}
+.lineMark {
+  flex: none;
+  color: var(--t-2);
+}
+.said {
+  flex: none;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.lineWhat {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lineIssue {
+  white-space: nowrap;
+}
+.sep {
+  color: var(--t-4);
+}
+.quote {
+  color: var(--t-3);
+}
+.struck {
+  text-decoration: line-through;
+}
