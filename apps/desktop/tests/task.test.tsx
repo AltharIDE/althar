@@ -1162,6 +1162,45 @@ describe('a task', () => {
     expect(screen.getByRole('region', { name: 'Queued; the lead reads it next' })).toBeTruthy()
   })
 
+  it('sends a queued message now, with its images by their digests: out of the queue, and said again to interrupt the lead', async () => {
+    const picture = { digest: 'f'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }
+    const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Send now' }))
+    expect(client.takeBack).toHaveBeenCalledWith(queued.id)
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Like this',
+        disposition: 'interrupt_and_continue',
+        images: [{ digest: 'f'.repeat(64), name: 'shot.png' }],
+      }),
+    )
+    expect(screen.queryByRole('region', { name: /queued/ })).toBeNull()
+  })
+
+  it('sends nothing, and leaves the queue as it was, where the lead has the queued message already', async () => {
+    const queued = items.you('Use the helper', { state: 'queued', interrupting: false })
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    vi.mocked(client.takeBack).mockRejectedValueOnce(new Error('The lead has read it already.'))
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Send now' }))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalledWith(expect.objectContaining({ disposition: 'interrupt_and_continue' }))
+    expect(screen.getByRole('region', { name: 'Queued; the lead reads it next' })).toBeTruthy()
+  })
+
+  it('puts a queued message sent now back in the composer where Althar doesn’t take it', async () => {
+    const queued = items.you('Use the helper', { state: 'queued', interrupting: false })
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    vi.mocked(client.send).mockRejectedValueOnce(new Error('Althar is restarting.'))
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Send now' }))
+    await waitFor(() => expect((busy as HTMLTextAreaElement).value).toBe('Use the helper'))
+  })
+
   it('changes how hard its lead thinks and its model, hands it to another agent, and stops it', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     withServices(<Task />, client)
