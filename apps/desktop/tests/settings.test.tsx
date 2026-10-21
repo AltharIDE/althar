@@ -366,6 +366,25 @@ describe('the Settings tab', () => {
     expect((await screen.findByRole('tab', { name: 'OpenCode, needs you' })).getAttribute('aria-selected')).toBe('true')
     expect(await alert()).toBe(openCode2.unsupported)
     expect(screen.getByRole('list', { name: 'OpenCode accounts' })).toBeTruthy()
+    // Its accounts stay, but none is signed in or added from here: OpenCode 2's login can keep it in another account.
+    expect(screen.queryByRole('button', { name: /Sign in|Add/ })).toBeNull()
+    // The person's own copy is theirs to change: nothing replaces it.
+    expect(screen.queryByRole('button', { name: 'Replace OpenCode' })).toBeNull()
+  })
+
+  it('replaces Althar’s own copy of an agent at a version no session starts on with one it runs', async () => {
+    const kept = { ...openCode2, kept: true, download: { size: '45 MB', installing: false, pinned: null } }
+    const { client } = fakeClient({
+      status: vi.fn(async () => ({
+        apiVersion: 1,
+        appVersion: '0.0.0',
+        agents: agents.map((agent) => (agent.id === 'opencode' ? kept : agent)),
+      })),
+    })
+    withServices(<Settings />, client, fakeHost())
+    expect(await screen.findByText('Althar’s copy of OpenCode is one it doesn’t run')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Replace OpenCode' }))
+    expect(client.installAgent).toHaveBeenCalledWith('opencode')
   })
 
   it('downloads an agent in its tab, says why a download stopped, and opens the page of one only its maker installs', async () => {

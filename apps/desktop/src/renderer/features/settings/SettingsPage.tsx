@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
 import {
   AgentInstall,
+  type AgentInstallText,
   AgentsAtOnce,
   type AgentTab,
   AgentTabList,
@@ -234,6 +235,25 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
       </>
     )
   const brand = brandOf(chosen.id)
+  /* Downloading it, where Althar can: in place of none, or of its own copy at a version no session starts on. */
+  const install = (words: Partial<AgentInstallText>) => (
+    <AgentInstall
+      name={chosen.name}
+      text={words}
+      {...(brand === undefined ? {} : { brand })}
+      {...(chosen.download === null ? {} : { size: chosen.download.size })}
+      {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
+      state={
+        chosen.download?.installing === true
+          ? { kind: 'installing' }
+          : start.installFailed[chosen.id] === undefined
+            ? { kind: 'idle' }
+            : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
+      }
+      onInstall={() => void start.install(chosen.id)}
+      {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
+    />
+  )
   return (
     <AgentTabs value={chosen.id} onValueChange={setAgentId} className={s.agents}>
       <AgentTabList label={text.agents} agents={agents.map(tabOf)} text={{ away: `not on ${device.this}` }} />
@@ -250,25 +270,12 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
           <>
             {/* Why no session starts on the version it has, above its accounts, which still stand. */}
             <Failed when={chosen.unsupported !== null}>{chosen.unsupported ?? ''}</Failed>
+            {/* Althar's own copy is Althar's to change: the newest release it runs can replace it. */}
+            {chosen.unsupported !== null && chosen.kept && chosen.download !== null && install(text.agentReplace)}
             <AgentAccounts agent={chosen} start={start} signIn={accounts} />
           </>
         ) : (
-          <AgentInstall
-            name={chosen.name}
-            text={{ missing: text.agentHere }}
-            {...(brand === undefined ? {} : { brand })}
-            {...(chosen.download === null ? {} : { size: chosen.download.size })}
-            {...(pinnedOf(chosen) === undefined ? {} : { pinned: pinnedOf(chosen) })}
-            state={
-              chosen.download?.installing === true
-                ? { kind: 'installing' }
-                : start.installFailed[chosen.id] === undefined
-                  ? { kind: 'idle' }
-                  : { kind: 'failed', why: start.installFailed[chosen.id] ?? '' }
-            }
-            onInstall={() => void start.install(chosen.id)}
-            {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
-          />
+          install({ missing: text.agentHere })
         )}
       </AgentTabPanel>
     </AgentTabs>

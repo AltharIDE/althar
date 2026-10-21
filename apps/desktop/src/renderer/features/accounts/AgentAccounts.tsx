@@ -41,6 +41,7 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
   const accounts = agent.accounts.filter((account) => account.id !== flow?.made)
   const again = flow?.again == null ? undefined : accounts.find((account) => account.id === flow.again)
   const caution = signInCautionOf(agent.id)
+  const signable = agent.unsupported === null
   const node = flow && (
     <AccountSignIn
       agent={agent.name}
@@ -72,9 +73,10 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
     <Accounts
       agent={agent.name}
       accounts={accounts.map((account) => accountEntry(account))}
-      // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
-      {...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {})}
-      onSignIn={(accountId) => signIn.again(agent.id, accountId)}
+      // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`). None is added or
+      // signed in at a version no session starts on: OpenCode 2's login can keep it in another account's home.
+      {...(agent.addsAccounts && signable ? { onAdd: () => signIn.add(agent.id) } : {})}
+      {...(signable ? { onSignIn: (accountId: string) => signIn.again(agent.id, accountId) } : {})}
       onRename={(accountId, name) => void start.renameAccount(accountId, name)}
       onMove={(accountId, to) => void start.moveAccount(agent.id, accountId, to)}
       onRemove={(accountId) => void start.removeAccount(accountId)}

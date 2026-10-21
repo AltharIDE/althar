@@ -132,6 +132,15 @@ const ofMajor =
     typeof release.tag_name === 'string' &&
     majorOf(release.tag_name.replace(/^v/, '')) === major
 
+/** How many pages of 100 releases are read looking for one of the major: OpenCode makes several a week. */
+const PAGES = 10
+
+/** The next page GitHub's `Link` header names, if any, and only on GitHub's API. */
+const nextPage = (link: string | null): string | undefined => {
+  const next = link?.match(/<([^>]+)>;\s*rel="next"/)?.[1]
+  return next?.startsWith('https://api.github.com/') === true ? next : undefined
+}
+
 /** A download from its maker's own address, pinned, rather than a GitHub release. */
 const pinned = (download: AgentDownload): download is PinnedDownload => 'version' in download
 
@@ -296,22 +305,33 @@ export class Installs extends Context.Service<
             const asset = assetOf(install.assets)
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
             const major = definition.supported?.major
-            const response = yield* Effect.tryPromise({
-              try: () =>
-                fetch(`https://api.github.com/repos/${install.repository}/releases${major === undefined ? '/latest' : '?per_page=100'}`, {
-                  headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Althar' },
-                }),
-              catch: (error) => fail(definition.id, `GitHub couldn't be reached to find ${definition.name}.`, error),
-            })
-            if (!response.ok)
-              return yield* fail(definition.id, `GitHub didn't say where ${definition.name}'s latest release is.`, response.status)
-            const answer = yield* Effect.tryPromise({
-              try: () => response.json() as Promise<unknown>,
-              catch: (error) => fail(definition.id, `GitHub's answer about ${definition.name} couldn't be read.`, error),
-            })
-            const body = (major === undefined ? answer : Array.isArray(answer) ? answer.find(ofMajor(major)) : undefined) as
-              | GitHubRelease
-              | undefined
+            /* One page of what GitHub says: the latest release, or a page of the list. */
+            const ask = (url: string) =>
+              Effect.gen(function* () {
+                const response = yield* Effect.tryPromise({
+                  try: () => fetch(url, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Althar' } }),
+                  catch: (error) => fail(definition.id, `GitHub couldn't be reached to find ${definition.name}.`, error),
+                })
+                if (!response.ok)
+                  return yield* fail(definition.id, `GitHub didn't say where ${definition.name}'s latest release is.`, response.status)
+                const answer = yield* Effect.tryPromise({
+                  try: () => response.json() as Promise<unknown>,
+                  catch: (error) => fail(definition.id, `GitHub's answer about ${definition.name} couldn't be read.`, error),
+                })
+                return { answer, next: nextPage(response.headers.get('link')) }
+              })
+            const releases = `https://api.github.com/repos/${install.repository}/releases`
+            let body: GitHubRelease | undefined
+            if (major === undefined) body = (yield* ask(`${releases}/latest`)).answer as GitHubRelease | undefined
+            else {
+              // Newest first, a page at a time, until one of the major: the other major's releases may fill pages before it.
+              let url: string | undefined = `${releases}?per_page=100`
+              for (let read = 0; body === undefined && url !== undefined && read < PAGES; read++) {
+                const page: { readonly answer: unknown; readonly next: string | undefined } = yield* ask(url)
+                body = Array.isArray(page.answer) ? (page.answer as ReadonlyArray<GitHubRelease>).find(ofMajor(major)) : undefined
+                url = page.next
+              }
+            }
             if (body === undefined) return yield* fail(definition.id, `GitHub has no release of ${definition.name} ${major} to download.`)
             const found = body.assets?.find((each) => each.name === asset)
             const digest = typeof found?.digest === 'string' ? /^sha256:([0-9a-f]{64})$/.exec(found.digest)?.[1] : undefined

@@ -430,6 +430,45 @@ describe('accounts', () => {
     })
   })
 
+  it.effect(
+    'read an agent’s version once for all its accounts checked together, which Settings reads too, and give no sign-in line on 2.x',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'althar-versions-'))
+      const said = join(dir, 'version')
+      const versions = join(dir, 'asked')
+      const plain = definition('too-new')
+      /* The fake `too-new` at the version in a file, each time it is asked leaving a line in another. */
+      const entry = {
+        definition: { ...plain, version: () => ({ command: 'sh', args: ['-c', `echo >> ${versions}; cat ${said}`] }) },
+        transport: () => {
+          throw new Error('Not started here')
+        },
+      }
+      const agents = Layer.succeed(Agents, Agents.of({ list: [entry], get: () => Effect.succeed(entry) }))
+      const asked = () => (existsSync(versions) ? readFileSync(versions, 'utf8').split('\n').length - 1 : 0)
+      writeFileSync(said, '1.19.0')
+      return Effect.gen(function* () {
+        const accounts = yield* Accounts
+        const signIns = yield* SignIns
+        yield* accounts.add({ agentId: 'too-new', name: 'Work' })
+        yield* accounts.add({ agentId: 'too-new', name: 'Side' })
+        assert.strictEqual(yield* signIns.of('too-new', true), 'signed_in')
+        assert.strictEqual(asked(), 1)
+        // Settings reads the same reading within the minute; asked again, it is read again.
+        assert.strictEqual(yield* signIns.version('too-new'), '1.19.0')
+        assert.strictEqual(asked(), 1)
+        writeFileSync(said, 'opencode v2.0.29')
+        assert.strictEqual(yield* signIns.version('too-new', true), '2.0.29')
+        assert.strictEqual(asked(), 2)
+        // On 2.x no account is signed in from a terminal: its login could keep the sign-in in another account's home.
+        const [usual] = yield* accounts.of('too-new')
+        assert.deepInclude(yield* Effect.flip(accounts.login(usual!.id)), { _tag: 'AccountRefused', reason: 'unsupported' })
+        writeFileSync(said, '1.19.0')
+        assert.strictEqual(yield* accounts.login(usual!.id), 'fake-login too-new')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents })))))
+    },
+  )
+
   it.live('offer no model of an agent whose only account a project allows is signed out', () => {
     const away = folder('away')
     return Effect.gen(function* () {

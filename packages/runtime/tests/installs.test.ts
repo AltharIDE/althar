@@ -346,6 +346,43 @@ describe('downloading an agent', () => {
     assert.isTrue(Exit.isSuccess(await unpinned.run(Effect.flatMap(Installs, (installs) => installs.install(anyVersion)))))
     assert.strictEqual(latest.asked[0], 'https://api.github.com/repos/anomalyco/opencode/releases/latest')
   })
+
+  it.skipIf(windows)('reads page after page of releases for the newest of the major, as far as GitHub’s next page goes', async () => {
+    const bytes = archive('1.19.0')
+    const LIST = 'https://api.github.com/repos/anomalyco/opencode/releases'
+    const twos = (page: number) => Array.from({ length: 100 }, (_, n) => ({ tag_name: `v2.${page}.${n}`, assets: [] }))
+    const one = {
+      tag_name: 'v1.19.0',
+      assets: [{ name: ASSET, browser_download_url: 'https://github.example/download', digest: `sha256:${sha(bytes)}` }],
+    }
+    /* GitHub with two pages of OpenCode 2 before 1.19.0, each naming the next as GitHub does; `next` where the second points. */
+    const paged = (next: string) => {
+      const asked: Array<string> = []
+      const fetch = async (url: string) => {
+        asked.push(url)
+        if (url === `${LIST}?per_page=100`)
+          return Response.json(twos(1), { headers: { link: `<${LIST}?per_page=100&page=2>; rel="next"` } })
+        if (url === `${LIST}?per_page=100&page=2`)
+          return Response.json(twos(2), { headers: { link: `<${next}>; rel="next", <${LIST}?page=9>; rel="last"` } })
+        if (url === `${LIST}?per_page=100&page=3`) return Response.json([one])
+        return new Response(new Uint8Array(bytes))
+      }
+      return { fetch, asked }
+    }
+    const deep = paged(`${LIST}?per_page=100&page=3`)
+    const { root, run } = using({ fetch: deep.fetch })
+    assert.isTrue(Exit.isSuccess(await run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))))
+    assert.deepStrictEqual(deep.asked.slice(0, 3), [`${LIST}?per_page=100`, `${LIST}?per_page=100&page=2`, `${LIST}?per_page=100&page=3`])
+    assert.strictEqual(readlinkSync(join(root, 'opencode', 'current')), 'v1.19.0')
+    // A next page anywhere but GitHub's API isn't followed: there is no 1.x where it may look.
+    const elsewhere = paged('https://elsewhere.example/releases?page=3')
+    const lost = using({ fetch: elsewhere.fetch })
+    assert.include(
+      JSON.stringify(await lost.run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))),
+      'GitHub has no release of OpenCode 1',
+    )
+    assert.lengthOf(elsewhere.asked, 2)
+  })
 })
 
 /*

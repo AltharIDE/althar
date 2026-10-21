@@ -17,6 +17,13 @@ export const text = {
   agents: 'Agents',
   connecting: `Looking at the agents on ${device.this}…`,
   agentHere: (name: string) => `${name} isn’t on ${device.this}`,
+  /** Althar's own copy, at a version no session starts on: one it runs can take its place. */
+  agentReplace: {
+    missing: (name: string) => `Althar’s copy of ${name} is one it doesn’t run`,
+    can: (name: string, size: string) =>
+      `Althar can replace it with ${name}’s newest release that it runs, from GitHub, about ${size}, checked against the release. Your terminal stays as it is.`,
+    download: (name: string) => `Replace ${name}`,
+  },
   version: (version: string) => `Althar ${version}`,
   /** Report a problem (DEV-61), in the quick settings' foot and About Althar. */
   report: 'Report a problem',

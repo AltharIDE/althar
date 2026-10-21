@@ -48,6 +48,15 @@ export const EVERY_STATE: RuntimeEntry[] = [
   { id: 'amp', name: 'Amp', state: RuntimeState.Unchecked, why: 'Althar couldn’t check Amp. Its log has the details.' },
 ]
 
+/** Althar's own copy of OpenCode, downloaded while GitHub's latest was 2.x: one it runs can replace it. */
+export const KEPT_TOO_NEW: RuntimeEntry = {
+  ...OPENCODE,
+  state: RuntimeState.Unsupported,
+  version: '2.0.29',
+  download: '45 MB',
+  why: 'OpenCode 2 isn’t supported yet: Althar can’t yet keep your own MCP servers out of its sessions. Use OpenCode 1 with Althar for now.',
+}
+
 export const ROLES: SelectOption<string>[] = [
   { value: 'service', label: 'Service' },
   { value: 'frontend', label: 'Frontend' },

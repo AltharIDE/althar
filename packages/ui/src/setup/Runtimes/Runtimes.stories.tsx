@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { ACCOUNTS, EVERY_STATE, FIRST_RUN } from '../../fixtures/setup'
+import { ACCOUNTS, EVERY_STATE, FIRST_RUN, KEPT_TOO_NEW } from '../../fixtures/setup'
 import { Accounts } from '../Accounts/Accounts'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
@@ -43,6 +43,15 @@ export const WithAccounts: Story = {
 
 /** Once work runs on them: out of usage with the work moved, signed out with tasks waiting (a call of yours), too old, too new to run yet, being checked. */
 export const EveryState: Story = { args: { runtimes: EVERY_STATE } }
+
+/** Althar's own copy at a version no session starts on: the newest release it runs can replace it. The person's own has only Check again. */
+export const ReplaceKept: Story = {
+  args: { runtimes: [KEPT_TOO_NEW], onInstall: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Replace it' }))
+    await expect(args.onInstall).toHaveBeenCalledWith('opencode')
+  },
+}
 
 /* Signing in, and changing your mind: the row follows. */
 function Signing(args: RuntimesProps) {
