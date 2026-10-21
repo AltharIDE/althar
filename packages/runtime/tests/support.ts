@@ -17,6 +17,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   Agents,
   type AgentEntry,
+  type AutomationOptions,
   type BusyOptions,
   Connectors,
   type IdleOptions,
@@ -236,6 +237,8 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
+    /** The clock and zone automations are read by, and how often they are looked at. */
+    readonly automations?: AutomationOptions
   } = {},
 ) =>
   Runtime.layer({
@@ -264,6 +267,7 @@ export const runtime = (
     ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     busy: { machine: ROOMY, ...more.busy },
+    ...(more.automations === undefined ? {} : { automations: more.automations }),
   })
 
 /** A machine with room for as many agents at once as Althar runs: 64 cores and 256 GB. */

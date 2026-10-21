@@ -5,6 +5,7 @@ import { Cause, Clock, Context, Duration, Effect, Layer, Queue, Semaphore, Strea
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type AtOnceDefault, atOnceFor, clamp } from './atOnce'
+import { automatedTasks } from './automated'
 import { touchTask } from './cards'
 import { RuntimeConfig } from './Config'
 import { Live } from './Live'
@@ -75,11 +76,19 @@ export interface AtOnce {
 
 /**
  * Where work that waits for a place stands (ADR-037): what the person did,
- * which starts at once; the work of a task already under way; new work.
+ * which starts at once; the work of a task already under way; new work; and
+ * last, an automation's run, every step of it (docs/plans/automations.md).
  */
-export type Order = 'person' | 'underway' | 'new'
+export type Order = 'person' | 'underway' | 'new' | 'automation'
 
-const RANK: Readonly<Record<Order, number>> = { person: 0, underway: 1, new: 2 }
+const RANK: Readonly<Record<Order, number>> = { person: 0, underway: 1, new: 2, automation: 3 }
+
+/** How many automations' tasks may be at work at once, unless a test says: one, so nothing of the person's waits behind them. */
+const AUTOMATIONS_AT_ONCE = 1
+
+/** Where work stands, as its task makes it: an automation's run's waits last, unless the person did it. */
+export const orderIn = (order: Order, taskId: string, automated: ReadonlySet<string>): Order =>
+  order === 'person' ? 'person' : automated.has(taskId) ? 'automation' : order
 
 /** Which of a task's agents: its lead, or its reviewer. */
 export interface Agent {
@@ -131,8 +140,10 @@ const keyOf = (taskId: string, review?: boolean) => (review === true ? `${taskId
 const waiterKey = (waiter: Agent) => keyOf(waiter.taskId, waiter.review)
 
 /** What waits, in the order it starts: by where it stands, then what waited longest. */
-const inOrder = (waiters: ReadonlyArray<Waiter>) =>
-  waiters.toSorted((a, b) => RANK[a.order] - RANK[b.order] || a.since.localeCompare(b.since))
+const inOrder = (waiters: ReadonlyArray<Waiter>, automated: ReadonlySet<string>) =>
+  waiters.toSorted(
+    (a, b) => RANK[orderIn(a.order, a.taskId, automated)] - RANK[orderIn(b.order, b.taskId, automated)] || a.since.localeCompare(b.since),
+  )
 
 export class Busy extends Context.Service<
   Busy,
@@ -184,6 +195,16 @@ export class Busy extends Context.Service<
       const sampleEvery = options.sample ?? Duration.seconds(2)
       const quiet = Duration.toMillis(options.quiet ?? Duration.seconds(30))
       const askGrace = Duration.toMillis(options.askGrace ?? Duration.minutes(5))
+      const automationsAtOnce = options.automations ?? AUTOMATIONS_AT_ONCE
+      /** The tasks automations' runs started that are under way; none where they can't be read, so nothing waits for that. */
+      const automated = provide(automatedTasks).pipe(
+        Effect.catchCause((cause) =>
+          Effect.as(Effect.logWarning('Could not read which tasks are automations’ runs', cause), new Set<string>() as ReadonlySet<string>),
+        ),
+      )
+      /** How many automations' tasks are at work, of those at work. */
+      const automationsAt = (at: ReadonlySet<string>, tasks: ReadonlySet<string>) =>
+        new Set([...at].map((key) => key.replace(/ review$/, '')).filter((taskId) => tasks.has(taskId))).size
       const cpuOf =
         options.cpuOf ??
         ((agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>) =>
@@ -337,25 +358,30 @@ export class Busy extends Context.Service<
       })
 
       /** Everything waiting, in the order it starts. */
-      const waiting = Effect.map(
-        Effect.forEach(sources, (source) =>
+      const waiting = Effect.gen(function* () {
+        const all = yield* Effect.forEach(sources, (source) =>
           source.pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what waits for a place', cause), []))),
-        ),
-        (all) => inOrder([...all.flat(), ...turns.values()]),
-      )
+        )
+        return inOrder([...all.flat(), ...turns.values()], yield* automated)
+      })
 
       /**
        * Whether `key` has a place now: what the person did always has; its agent at work already has; otherwise one free,
        * with nothing waiting that stands before it.
        */
-      const roomFor = (key: string, at: ReadonlySet<string>, order: Order) =>
+      const roomFor = (key: string, at: ReadonlySet<string>, asked: Order) =>
         Effect.gen(function* () {
+          const tasks = yield* automated
+          const order = orderIn(asked, key.replace(/ review$/, ''), tasks)
           if (order === 'person' || at.has(key)) return true
           if (at.size >= (yield* atOnce).count) return false
+          // An automation's run takes a place only while fewer automations than it may have are at work.
+          if (order === 'automation' && automationsAt(at, tasks) >= automationsAtOnce) return false
           // Work waiting for a place of its own, standing where this does or before it, goes first; what waits on an agent at
           // work, or is on its way, takes none.
           return !(yield* waiting).some(
-            (waiter) => waiterKey(waiter) !== key && !at.has(waiterKey(waiter)) && RANK[waiter.order] <= RANK[order],
+            (waiter) =>
+              waiterKey(waiter) !== key && !at.has(waiterKey(waiter)) && RANK[orderIn(waiter.order, waiter.taskId, tasks)] <= RANK[order],
           )
         })
 
@@ -380,12 +406,18 @@ export class Busy extends Context.Service<
           if (queue.length === 0) return false
           const { at: busy, holders } = yield* atWork
           const most = (yield* atOnce).count
+          const tasks = yield* automated
           const left: Array<string> = []
           for (const waiter of queue) {
             const key = waiterKey(waiter)
             // On its way already: it is counted, and not started twice.
             if (starting.has(key)) continue
-            if (waiter.order !== 'person' && !busy.has(key) && busy.size >= most) {
+            const order = orderIn(waiter.order, waiter.taskId, tasks)
+            if (
+              order !== 'person' &&
+              !busy.has(key) &&
+              (busy.size >= most || (order === 'automation' && automationsAt(busy, tasks) >= automationsAtOnce))
+            ) {
               left.push(waiter.taskId)
               continue
             }

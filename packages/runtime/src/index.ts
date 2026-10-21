@@ -36,6 +36,7 @@ export { type ConnectionInfo, Connections, NotConnected, SignInUnavailable } fro
 export { Issues, type IssueSummary, type Unfurl } from './Issues'
 export { DraftClosed, type DraftCard, DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
 export { ReviewDraftClosed, ReviewDraftIncomplete, ReviewRefused, reviewBriefOf, Reviews } from './Reviews'
+export { AutomationRefused, Automations } from './Automations'
 export { Secrets, SecretsUnavailable } from './Secrets'
 export { type AgentModels, Models } from './Models'
 export { factFor, factsIn, type ModelFact, ModelFacts, type ModelFactsOptions } from './ModelFacts'

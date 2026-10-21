@@ -52,6 +52,12 @@ export const daysWords = (days: ReadonlyArray<Weekday>) => {
   return `Every ${names.slice(0, -1).join(', ')} and ${names.at(-1) ?? ''}`
 }
 
+/** The schedule in words, inside a sentence: "runs every weekday at 9:00", its days' names as they are. */
+export const scheduleInLine = (schedule: Schedule) => {
+  const words = scheduleWords(schedule)
+  return `${words.charAt(0).toLowerCase()}${words.slice(1)}`
+}
+
 /** The schedule in words, as the card and the page say it: "Every weekday at 9:00", "Every hour at :15". */
 export const scheduleWords = (schedule: Schedule) =>
   schedule.every === 'hour'

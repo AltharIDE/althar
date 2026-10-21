@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   AllowedBy,
   AttentionRequest,
+  AutomationCard,
   type BoardSnapshot,
   type ChangeSummary,
   CheckLogShown,
@@ -335,6 +336,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
 const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
+const decodeAutomation = Schema.decodeUnknownOption(AutomationCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
@@ -537,6 +539,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeDraft(content), {
         onNone: () => undefined,
         onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
+      })
+    // An automation's card, written whole as the coordinator proposes or changes it, and kept current with where it stands.
+    case 'automation':
+      return Option.match(decodeAutomation(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'automation', content: card }),
       })
     // A review draft's card, written whole with each change to the draft, as an issue draft's is.
     case 'review_draft':
@@ -1630,7 +1638,19 @@ export class Queries extends Context.Service<
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true, place: yield* placeOf(taskId) } : {}),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
+            automation: yield* fromAutomation(taskId),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
+        })
+
+      /** The automation whose run a task is, by its name now; null where none started it. */
+      const fromAutomation = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ id: string; name: string }>`
+            SELECT a.id, d.name FROM automation_occurrences o JOIN automations a ON a.id = o.automation_id
+            JOIN automation_definitions d ON d.automation_id = a.id AND d.number = a.definition
+            WHERE o.task_id = ${taskId} LIMIT 1`
+          return row === undefined ? null : { id: row.id, name: row.name }
         })
 
       /** What a held step waits for: the agent out of usage, and when it is back. */

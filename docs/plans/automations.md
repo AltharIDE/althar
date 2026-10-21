@@ -662,6 +662,22 @@ version waits on either.
    login, offered the first time a schedule is turned on. That covers
    release notes, the nightly bump, the weekly polish and flaky sweeps, and
    the morning review, a schedule with a pull request query.
+
+   **Built** ([ADR-055](../decisions/055-automations-start-ordinary-tasks-on-a-schedule.md)):
+   schedules (days at a time, or hourly), the three tables, the clock with
+   catching up once and missing past the window, one place after the
+   person's work for every step, a run's minutes over its turns, the skips
+   (still going, all paused, five pull requests open, 24 a day, per-use
+   agents), pausing itself after three failures, allow everything with the
+   default branch never, signed reviews and pull requests, the review that
+   asks once, the coordinator's six tools with their cards, and the tab, the
+   page and the card. **Still to build of it:** Althar's own events (a
+   task's pull request merged, checks failed on it), the still-wanted check
+   (Reviews refuses a pull request no longer open, and a task reviewing it
+   already, but nothing looks again at a run's own task while it waits), a
+   Needs you call when one pauses itself (the tab says it, violet), and a
+   wake signal from main's `powerMonitor` (the clock notices a sleep within
+   its 30-second look).
 2. **Events polled from GitHub:** review requested, checks failing on main,
    a label added, a pull request opened or merged; shared pollers with
    their cursors, ETags and answers kept on disk; who may trigger, for

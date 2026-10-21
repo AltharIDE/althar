@@ -103,6 +103,7 @@ const kinds: Readonly<Record<string, string>> = {
   'task thread with a ready worktree': 'task’s worktree',
   'thread item': 'message',
   plan: 'plan',
+  automation: 'automation',
   attention_request: 'call',
   provider_session: 'agent',
   folder: 'folder',
@@ -211,6 +212,8 @@ export const words = (
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
       case 'LaunchRefused':
+        return text(error, 'message')
+      case 'AutomationRefused':
         return text(error, 'message')
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."

@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Schema } from 'effect'
 
 import { AutomationDefinition } from '../src/automations'
-import { daysWords, Schedule, scheduleWords, timeWords } from '../src/schedules'
+import { daysWords, Schedule, scheduleInLine, scheduleWords, timeWords } from '../src/schedules'
 
 describe('schedules', () => {
   it('says a schedule in words', () => {
@@ -15,6 +15,7 @@ describe('schedules', () => {
     assert.strictEqual(scheduleWords({ every: 'hour', minute: 0 }), 'Every hour')
     assert.strictEqual(scheduleWords({ every: 'hour', minute: 5 }), 'Every hour at :05')
     assert.strictEqual(timeWords('22:30'), '22:30')
+    assert.strictEqual(scheduleInLine({ every: 'week', days: [5], at: '16:00' }), 'every Friday at 16:00')
   })
 
   it('takes only times of day, at least a day, and minutes past the hour', () => {

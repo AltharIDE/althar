@@ -92,6 +92,22 @@ export interface RuntimeOptions {
   readonly idle?: IdleOptions
   /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
   readonly busy?: BusyOptions
+  /** When automations run, and the clock and zone they are read by (`Automations.ts`). */
+  readonly automations?: AutomationOptions
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface AutomationOptions {
+  /** The time now, in epoch milliseconds: the wall clock's. */
+  readonly now?: () => number
+  /** The zone the Mac is in now: its clock's. */
+  readonly zone?: () => string
+  /** How often the clock is looked at, besides whenever an automation changes: every 30 seconds. */
+  readonly tick?: Duration.Duration
+  /** How long a run the Mac slept through, or Althar was closed for, waits after waking or launching: two minutes. */
+  readonly settle?: Duration.Duration
+  /** Whether each automation starts its few minutes after its time: yes. */
+  readonly stagger?: boolean
 }
 
 /** Each is the default unless a test says otherwise. */
@@ -117,6 +133,8 @@ export interface BusyOptions {
   readonly quiet?: Duration.Duration
   /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
   readonly askGrace?: Duration.Duration
+  /** How many automations' tasks may be at work at once: one. */
+  readonly automations?: number
   /**
    * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
    * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:
