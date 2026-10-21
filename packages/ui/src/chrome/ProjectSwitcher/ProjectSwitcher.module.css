@@ -94,7 +94,7 @@
 }
 .row:active,
 .row[aria-current='true'] {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .main {
   flex: 1;

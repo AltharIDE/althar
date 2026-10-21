@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { cx } from '../../lib/cx'
 import { reducedMotion } from '../../lib/motion'
 import type { RootProps } from '../../lib/props'
+import { useTheme } from '../../lib/theme'
 import { BORE, DOTS, POINT_RADIUS } from './halftone'
 import s from './HalftoneMark.module.css'
 
@@ -60,19 +61,25 @@ export const drawHalftone = (context: CanvasRenderingContext2D, k: number, t: nu
 
 export function HalftoneMark({ size = 136, rise = true, className, style, ...rest }: HalftoneMarkProps) {
   const canvas = useRef<HTMLCanvasElement>(null)
+  // Drawn again, risen already, in another theme: its ink and cobalt are the theme's.
+  const theme = useTheme()
+  const drawn = useRef<string | null>(null)
   useEffect(() => {
     const element = canvas.current
     const context = element?.getContext('2d')
     if (!element || !context) return
     const css = getComputedStyle(element)
-    const ink = css.getPropertyValue('--t-1').trim() || '#141417'
+    // The ink as a fill: the words' own black on paper, a softer light on dark, so the mark never glares.
+    const ink = css.getPropertyValue('--ink-fill').trim() || '#141417'
     const live = css.getPropertyValue('--live').trim() || '#2b3bff'
     const ratio = window.devicePixelRatio || 1
     element.width = Math.round(size * ratio)
     element.height = Math.round(size * ratio)
     const k = (size * ratio) / 24
     const end = HALFTONE_RISE.point.start + HALFTONE_RISE.point.length
-    if (!rise || reducedMotion()) {
+    const again = drawn.current !== null && drawn.current !== theme
+    drawn.current = theme
+    if (!rise || again || reducedMotion()) {
       drawHalftone(context, k, end, ink, live)
       return
     }
@@ -86,7 +93,7 @@ export function HalftoneMark({ size = 136, rise = true, className, style, ...res
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [size, rise])
+  }, [size, rise, theme])
   return (
     <canvas ref={canvas} className={cx(s.mark, className)} style={{ width: size, height: size, ...style }} aria-hidden="true" {...rest} />
   )

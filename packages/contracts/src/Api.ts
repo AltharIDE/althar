@@ -354,6 +354,27 @@ export const RepositoryConventions = Schema.Struct({
 })
 export type RepositoryConventions = typeof RepositoryConventions.Type
 
+/** What the person added to a list Althar works out for a project, and took from it. */
+export const SandboxEdits = Schema.Struct({ added: Schema.Array(Schema.String), removed: Schema.Array(Schema.String) })
+export type SandboxEdits = typeof SandboxEdits.Type
+
+/**
+ * What a project's leads' sandboxes let through from the start: commands
+ * they run outside it rather than failing inside it first, and hosts they
+ * reach without asking. Each list is what Althar works out from the project,
+ * with the person's edits; a command still meets the rules, and the hosts
+ * apply only while the rules let the rest through.
+ */
+export const SandboxReachView = Schema.Struct({
+  /** Commands by how they start: `bunx playwright`, `bun run test:e2e`. */
+  commands: Schema.Array(Schema.String),
+  /** Hosts by name: `github.com`, `registry.npmjs.org`. */
+  hosts: Schema.Array(Schema.String),
+  /** What the person changed of each, kept over what is worked out later. */
+  edits: Schema.Struct({ commands: SandboxEdits, hosts: SandboxEdits }),
+})
+export type SandboxReachView = typeof SandboxReachView.Type
+
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
@@ -385,6 +406,8 @@ export const ProjectRulesView = Schema.Struct({
   moveIssues: Schema.Boolean,
   /** What each of the project's repositories says, in the project's order. */
   conventions: Schema.Array(RepositoryConventions),
+  /** What its leads' sandboxes let through from the start. */
+  sandbox: SandboxReachView,
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
 
@@ -2676,11 +2699,6 @@ export const Api = RpcGroup.make(
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
   /**
-   * Sends a message still waiting its turn now: it goes first, and a turn running is interrupted for it, as a draft's send now does.
-   * The same message, kept as it is in the thread. One a turn has already is AlreadyDelivered.
-   */
-  command('SendQueuedNow', { itemId: Schema.String }, Schema.Void),
-  /**
    * The person's answer to a step that needs them: tell its agent what to do,
    * hand it to an agent (on an account and model, where they picked one), or
    * abandon it (a review is gone on without). A step a usage limit stopped
@@ -2833,6 +2851,8 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      /** What the person changed of what leads' sandboxes let through, each list whole. */
+      sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
       /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */
       expectedRevision: Schema.optional(Schema.Number),
     },

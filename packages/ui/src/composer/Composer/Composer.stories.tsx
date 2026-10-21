@@ -166,8 +166,12 @@ function Example(
           if (q) setValue(q.text)
           setQueue(queue.filter((x) => x.id !== id))
         }}
+        onSendQueuedNow={(id) => {
+          const q = queue.find((x) => x.id === id)
+          if (q) onSendNow(q.text)
+          setQueue(queue.filter((x) => x.id !== id))
+        }}
         onUnqueue={(id) => setQueue(queue.filter((x) => x.id !== id))}
-        onSendQueuedNow={(id) => setQueue(queue.filter((x) => x.id !== id))}
         {...rest}
         onSendNow={(text) => {
           onSendNow(text)
@@ -519,18 +523,25 @@ export const QueueingAndEditing: Story = {
     await expect(c.getByRole('textbox', { name: 'Tell the lead' })).toHaveValue('And keep the limiter where it is.')
   },
 }
-/** Send now beside Edit: the first queued message goes at once, and the rest wait in their order. */
+/** Each queued message has Send now beside its Edit: it interrupts the lead with that one, and leaves the queue. */
 export const SendingQueuedNow: Story = {
-  render: () => (
-    <Example busy onStopAgent={() => {}} waiting={['Also check the webhook retry path.', 'Use the fixture log, not staging.']} />
+  args: { onSendNow: fn() },
+  render: (args) => (
+    <Example
+      busy
+      onStopAgent={() => {}}
+      onSendNow={args.onSendNow}
+      waiting={['Also check the webhook retry path.', 'Use the fixture log, not staging.']}
+    />
   ),
-  play: async ({ canvasElement }) => {
+  play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    const row = c.getByText('Also check the webhook retry path.').closest('li')
-    if (row === null) throw new Error('the first queued message has no row')
-    await userEvent.click(within(row).getByRole('button', { name: 'Send now' }))
+    await expect(c.getAllByRole('button', { name: 'Send now' })).toHaveLength(2)
+    await userEvent.click(c.getAllByRole('button', { name: 'Send now' })[1]!)
+    await expect(args.onSendNow).toHaveBeenCalledTimes(1)
+    await expect(args.onSendNow).toHaveBeenCalledWith('Use the fixture log, not staging.')
     await expect(c.getByText('Queued; the lead reads it next')).toBeInTheDocument()
-    await expect(c.queryByText('Also check the webhook retry path.')).not.toBeInTheDocument()
+    await expect(c.queryByText('Use the fixture log, not staging.')).toBeNull()
   },
 }
 export const SeveralQueued: Story = {

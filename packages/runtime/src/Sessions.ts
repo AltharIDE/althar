@@ -64,6 +64,7 @@ import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
 import { change, fact, timestamp } from './records'
+import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
@@ -247,6 +248,22 @@ const askedFor = (thread: { readonly title: string; readonly description: string
 
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
+
+/**
+ * What a lead is told of what its sandbox lets through from the start: as
+ * Claude Code 2.1 runs it, a line runs outside the sandbox only where every
+ * command in it is one of these, never one that changes folder, and never
+ * one that starts with `bun`, so a Bun script is listed by what it runs.
+ */
+export const upFrontSaid = (upFront: Reach): string =>
+  [
+    upFront.commands.length === 0
+      ? ''
+      : `These commands run outside your sandbox from the start, so they don't fail inside it first: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, \`cd\` included, stays in the sandbox, so change folder in a call of its own first. A line that starts with \`bun\` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here.`,
+    upFront.hosts.length === 0 ? '' : `Your sandbox reaches these hosts without asking: ${upFront.hosts.join(', ')}.`,
+  ]
+    .filter((said) => said !== '')
+    .join(' ')
 
 interface Running {
   readonly sessionId: string
@@ -534,11 +551,6 @@ export class Sessions extends Context.Service<
     compact(input: { readonly envelope: CommandEnvelope; readonly threadId: string }): Effect.Effect<void, NotFound | Failure>
     /** Takes back a message still waiting its turn, by its thread item: the agent never reads it. One the agent has stays. */
     takeBack(input: {
-      readonly envelope: CommandEnvelope
-      readonly itemId: string
-    }): Effect.Effect<void, NotFound | AlreadyDelivered | Failure>
-    /** Sends a message still waiting its turn now: it goes first, and a turn running is interrupted for it. One the agent has is AlreadyDelivered. */
-    sendQueuedNow(input: {
       readonly envelope: CommandEnvelope
       readonly itemId: string
     }): Effect.Effect<void, NotFound | AlreadyDelivered | Failure>
@@ -1745,6 +1757,13 @@ export class Sessions extends Context.Service<
                   }
                 : { role: 'reader', cwd: cwdOf(thread), ...(offline ? { offline } : {}) },
           }
+          // What a lead's sandbox lets through from the start, as the rules stand now; nothing for a role that only reads.
+          const upFront =
+            requestContext.rules.role === 'task' && definition.upFront === true && definition.sessionMeta !== undefined
+              ? yield* permissions
+                  .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
+                  .pipe(Effect.orElseSucceed(() => undefined))
+              : undefined
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
             role: toolRoleOf(thread),
@@ -1785,7 +1804,11 @@ export class Sessions extends Context.Service<
                   : {
                       meta: definition.sessionMeta(
                         reads ? 'reader' : 'lead',
-                        untrusted ? { untrusted, ...(offline ? { offline } : {}) } : undefined,
+                        untrusted
+                          ? { untrusted, ...(offline ? { offline } : {}) }
+                          : upFront === undefined
+                            ? undefined
+                            : { sandbox: upFront },
                       ),
                     }),
               })
@@ -1849,14 +1872,14 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
-          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext }
+          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, upFront }
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
       const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext } = connected
+          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, upFront } = connected
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -1885,7 +1908,8 @@ export class Sessions extends Context.Service<
             delivering: yield* Semaphore.make(1),
             stopRequest: yield* Deferred.make<StopRequest>(),
             ended: yield* Deferred.make<void>(),
-            brief,
+            // A lead is told what its sandbox lets through from the start, and how a command runs outside it.
+            brief: upFront === undefined ? brief : { ...brief, text: `${brief.text}\n\n${upFrontSaid(upFront)}` },
             revokeTools,
             requestContext,
             turnRunning: false,
@@ -2068,52 +2092,6 @@ export class Sessions extends Context.Service<
               })
             }),
           })
-        })
-
-      /*
-       * A message still waiting, sent now: the same input, put first, and a turn running is interrupted for it, as a draft's send now is.
-       * Its check is takeBack's, in the same transaction, so a turn that takes it first wins and it is AlreadyDelivered.
-       */
-      const sendQueuedNow = (input: { readonly envelope: CommandEnvelope; readonly itemId: string }) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const commands = yield* Commands
-          const [item] = yield* sql<{
-            inputId: string
-            projectId: ProjectId
-            threadId: string
-          }>`SELECT user_input_id AS input_id, project_id, thread_id FROM thread_items WHERE id = ${input.itemId} AND user_input_id IS NOT NULL`
-          if (item === undefined) return yield* new NotFound({ kind: 'thread item', id: input.itemId })
-          yield* commands.execute({
-            envelope: input.envelope,
-            projectId: item.projectId,
-            result: Schema.Void,
-            handle: Effect.gen(function* () {
-              const [waiting] = yield* sql<{ id: string }>`
-                SELECT u.id FROM user_inputs u
-                WHERE u.id = ${item.inputId} AND u.state = 'queued'
-                  AND NOT EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
-                    WHERE di.user_input_id = u.id AND d.state = 'pending')`
-              if (waiting === undefined) return yield* new AlreadyDelivered({ itemId: input.itemId })
-              const revision = yield* change('user_inputs', item.inputId, { disposition: 'interrupt_and_continue' })
-              yield* fact({
-                projectId: item.projectId,
-                aggregateType: 'user_input',
-                aggregateId: item.inputId,
-                revision,
-                type: 'user_input.interrupt_requested',
-                payload: { disposition: 'interrupt_and_continue' },
-                actorId: input.envelope.actorId,
-                commandId: input.envelope.commandId,
-              })
-            }),
-          })
-          // Asked for once the input is queued, as a send's is: the queue puts it first. With no turn running, the loop takes it now.
-          const running = threads.get(item.threadId)
-          if (running !== undefined) {
-            if (running.turnRunning) yield* Effect.forkIn(Effect.ignore(running.agent.interrupt), sessionsScope)
-            yield* Queue.offer(running.wake, undefined)
-          }
         })
 
       const send = (input: {
@@ -2786,7 +2764,6 @@ export class Sessions extends Context.Service<
             }),
           ),
         takeBack: (input) => run(takeBack(input)),
-        sendQueuedNow: (input) => run(sendQueuedNow(input)),
         setModel: (input) => run(setModel(input)),
         setEffort: (input) => run(setEffort(input)),
         wake: (threadId) =>

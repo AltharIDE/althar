@@ -130,6 +130,7 @@ export const definition = (
           sessionMetas.push({ role, options })
           return { fake: { asks: true } }
         },
+        upFront: true as const,
       }
     : {}),
   // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.

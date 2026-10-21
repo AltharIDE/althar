@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
-import { ApiError, type AgentStatus, type NameKind, patternProblem, type ProjectRulesView } from '@althar/contracts'
+import { ApiError, type AgentStatus, type NameKind, patternProblem, type ProjectRulesView, type SandboxReachView } from '@althar/contracts'
 
 import { messageOf, type ProjectRulesChange } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -24,7 +24,7 @@ import { useServices } from '../../data/services'
  */
 
 /** What of the rules is replaced whole when it changes: a list. */
-const LISTS = ['alwaysAsk', 'never', 'alwaysAllow', 'commands'] as const
+const LISTS = ['alwaysAsk', 'never', 'alwaysAllow', 'commands', 'sandbox'] as const
 
 type Change = Omit<ProjectRulesChange, 'projectId'>
 
@@ -39,7 +39,30 @@ interface Saving {
 }
 
 const resolve = (edit: RulesEdit, rules: ProjectRulesView) => (typeof edit === 'function' ? edit(rules) : edit)
-const applied = (rules: ProjectRulesView, edit: RulesEdit): ProjectRulesView => ({ ...rules, ...resolve(edit, rules) })
+
+/** What the sandbox's lists show with the person's edits changed: what they added there, short of what they took out. */
+const sandboxShown = (shown: SandboxReachView, change: NonNullable<Change['sandbox']>): SandboxReachView => {
+  const listed = (list: 'commands' | 'hosts') => {
+    const edits = change[list]
+    if (edits === undefined) return { [list]: shown[list] }
+    const removed = new Set(edits.removed)
+    return { [list]: [...new Set([...shown[list], ...edits.added])].filter((each) => !removed.has(each)) }
+  }
+  return {
+    ...shown,
+    ...listed('commands'),
+    ...listed('hosts'),
+    edits: { commands: change.commands ?? shown.edits.commands, hosts: change.hosts ?? shown.edits.hosts },
+  }
+}
+
+/** The rules with a change made, as the runtime keeps it: what it gives in place of what was, the sandbox's lists by their edits. */
+export const withChange = (rules: ProjectRulesView, change: Change | null): ProjectRulesView => {
+  const { sandbox, ...rest } = change ?? {}
+  return { ...rules, ...rest, ...(sandbox === undefined ? {} : { sandbox: sandboxShown(rules.sandbox, sandbox) }) }
+}
+
+const applied = (rules: ProjectRulesView, edit: RulesEdit): ProjectRulesView => withChange(rules, resolve(edit, rules))
 
 export interface RulesModel {
   readonly project: string | null

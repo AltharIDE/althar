@@ -10,6 +10,7 @@ import {
   type FoundAccount,
   type ProjectNote,
   type ProjectRulesView,
+  type SandboxEdits,
   Api,
   ApiError,
   type BoardSnapshot,
@@ -72,7 +73,9 @@ import { RpcClient } from 'effect/rpc'
  */
 
 /** What may change of a project's rules at once: any of it. */
-export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision'>> & {
+export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox'>> & {
+    /** What the person changed of what leads' sandboxes let through: each list's edits, whole. */
+    readonly sandbox?: { readonly commands?: SandboxEdits; readonly hosts?: SandboxEdits }
     /** The revision a change that replaces a list was made against: refused where the rules have moved on since. */
     readonly expectedRevision?: number
   }
@@ -203,7 +206,6 @@ export interface Client {
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
-  readonly sendQueuedNow: (itemId: string) => Promise<void>
   /** The person's answer to a permission; with `always`, kept in the project's rules by that scope, one of those offered. */
   readonly answer: (input: {
     readonly attentionId: string
@@ -557,7 +559,6 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
-    sendQueuedNow: (itemId) => command((commandId) => api.SendQueuedNow({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),

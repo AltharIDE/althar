@@ -41,7 +41,7 @@
 }
 .open,
 .open:hover {
-  background: var(--n-1);
+  background: var(--chosen);
   box-shadow:
     0 0 0 1px var(--line-2),
     var(--lift);

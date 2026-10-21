@@ -503,7 +503,6 @@ describe('the API', () => {
                   ? Effect.void
                   : Effect.fail(new ApiError({ reason: 'Echo', message: `${body}: ${images.map((image) => image.name ?? '').join(',')}` })),
               TakeBack: () => Effect.die('unused'),
-              SendQueuedNow: () => Effect.die('unused'),
               AnswerQuestion: () => Effect.void,
               Answer: () => Effect.void,
               ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [], places: [] }),
