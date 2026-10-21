@@ -32,7 +32,7 @@ import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
-import { bringBack } from './bringBack'
+import { bringBackThen } from './bringBack'
 import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
 import { vocabulary } from './vocabulary'
@@ -172,13 +172,14 @@ export const handlers = Api.toLayer(
     const setups = yield* Setups
     /**
      * A task's folder about to open: brought back first, where it was removed
-     * to free the disk, and set up again; and kept as opened, which holds it
-     * back from removal for a day and restarts its wait (ADR-055).
+     * to free the disk, and set up again; and kept as opened before anything
+     * can remove it again, which holds it back from removal for a day and
+     * restarts its wait (ADR-055).
      */
     const openingFolder = (taskId: string) =>
       Effect.gen(function* () {
-        if (yield* Effect.provideContext(bringBack(taskId, instance.personId), folderStore)) yield* setups.begin(taskId)
-        yield* sql`UPDATE tasks SET opened_at = ${yield* timestamp} WHERE id = ${taskId}`
+        const opened = Effect.flatMap(timestamp, (at) => sql`UPDATE tasks SET opened_at = ${at} WHERE id = ${taskId}`)
+        if (yield* Effect.provideContext(bringBackThen(taskId, instance.personId, opened), folderStore)) yield* setups.begin(taskId)
       })
     const agents = yield* Agents
     const config = yield* RuntimeConfig
@@ -741,7 +742,7 @@ export const handlers = Api.toLayer(
       SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
       GetTaskFolders: () => api(cleanup.list),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(instance.personId))),
-      RemoveTaskFolder: ({ commandId, taskId }) => once(commandId, api(cleanup.remove(taskId, instance.personId))),
+      RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, instance.personId))),
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { TaskFolders } from '@althar/contracts'
+import { ApiError, type TaskFolders } from '@althar/contracts'
 
 import type { Section } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
@@ -93,7 +93,7 @@ describe('finished tasks’ folders under Work on this Mac', () => {
     const held = await screen.findByRole('region', { name: 'Held back' })
     await userEvent.click(within(held).getByRole('button', { name: 'Remove' }))
     await userEvent.click(within(held).getByRole('button', { name: 'Remove anyway' }))
-    expect(client.removeTaskFolder).toHaveBeenLastCalledWith('t2')
+    expect(client.removeTaskFolder).toHaveBeenLastCalledWith('t2', { why: 'uncommitted', count: 3 })
     expect(await within(page).findByText('Freed 4.1 GB just now')).toBeTruthy()
     // A row opens its task.
     await userEvent.click(within(screen.getByRole('region', { name: 'Goes with Clean up' })).getByText('CI on Windows'))
@@ -120,6 +120,22 @@ describe('finished tasks’ folders under Work on this Mac', () => {
     withServices(<Settings />, client)
     expect(await within(screen.getByRole('main')).findByText('Measuring…')).toBeTruthy()
     expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Clean up' })).toBeNull()
+  })
+
+  it('says so where more would be lost than it said, and reads the folders again', async () => {
+    const said = 'What is in the task’s folder changed since you looked at it, so it stays. Have another look before you remove it.'
+    const { client } = fakeClient({
+      getTaskFolders: vi.fn(async () => FOLDERS),
+      removeTaskFolder: vi.fn(async () => Promise.reject(new ApiError({ reason: 'ChangedSinceSeen', message: said }))),
+    })
+    withServices(<Settings />, client)
+    const page = screen.getByRole('main')
+    await userEvent.click(await within(page).findByRole('button', { name: /Can go now/ }))
+    const held = await screen.findByRole('region', { name: 'Held back' })
+    await userEvent.click(within(held).getByRole('button', { name: 'Remove' }))
+    await userEvent.click(within(held).getByRole('button', { name: 'Remove anyway' }))
+    expect((await within(page).findByRole('alert')).textContent).toBe(said)
+    await waitFor(() => expect(client.getTaskFolders).toHaveBeenCalledTimes(2))
   })
 
   it('says why a removal failed outright', async () => {

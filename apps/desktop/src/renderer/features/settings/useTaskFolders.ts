@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
-import type { AppSettings, FinishedFolder, FolderWait } from '@althar/contracts'
+import { ApiError, type AppSettings, type FinishedFolder, type FolderWait } from '@althar/contracts'
 import type { FinishedFolder as FolderRow, HeldFolder } from '@althar/ui'
 
 import { keys, reads } from '../../data/reads'
@@ -13,7 +13,10 @@ import { ago } from '../../shared/time'
  * they go, the disk they are on, those Clean up takes and those held back,
  * each with why. A new choice of when shows at once; one the runtime can't
  * keep reads again, and says so, as the other settings do. Clean up and
- * Remove say what they freed, measured after, until the next change.
+ * Remove say what they freed, measured after, until the next change. Remove
+ * sends what the person was told holds the folder: where more would be lost
+ * now, or something runs from it, the runtime's words say so, and the list
+ * reads again.
  */
 
 export interface TaskFoldersModel {
@@ -90,9 +93,13 @@ export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFolders
           if (done.failed > 0) setError(text.someFailed(done.failed))
           void cache.invalidateQueries({ queryKey: keys.folders })
         },
-        () => {
+        (failure: unknown) => {
           setBusy(null)
-          setError(text.failed)
+          setError(
+            failure instanceof ApiError && (failure.reason === 'ChangedSinceSeen' || failure.reason === 'TaskRefused')
+              ? failure.message
+              : text.failed,
+          )
           void cache.invalidateQueries({ queryKey: keys.folders })
         },
       )
@@ -112,7 +119,8 @@ export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFolders
     ),
     measuring: folders.measuring,
     cleanUp: () => removing('clean', () => client.cleanUpFolders()),
-    remove: (taskId) => removing(taskId, () => client.removeTaskFolder(taskId)),
+    remove: (taskId) =>
+      removing(taskId, () => client.removeTaskFolder(taskId, folders.folders.find((one) => one.taskId === taskId)?.held ?? null)),
     ...(onTask === undefined
       ? {}
       : {

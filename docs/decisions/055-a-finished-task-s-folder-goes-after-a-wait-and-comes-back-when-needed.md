@@ -41,8 +41,10 @@
   - **What goes:** the folder, with everything in it, the reviewer's copy
     beside it (`.review/<task>`), and the task's folder once it is empty.
     The branch stays. The folder's last commit is kept under
-    `refs/althar/kept/<workspace>`. The workspace becomes `cleaned`, with
-    `cleaned_at`, and its thread says so as a line across it (a notice
+    `refs/althar/kept/<workspace>`, and nothing of it goes until it is.
+    The workspace becomes `cleaned`, with `cleaned_at`, only once nothing
+    of the folder is left; one that stays counts as one that couldn't go,
+    and is tried again. Its thread says so as a line across it (a notice
     with the role `folder`): "Folder removed 3 days after the task
     finished · 2.3 GB". An idle lead held on the task stops first.
   - **What is held back.** A folder is held back where:
@@ -50,13 +52,21 @@
     - it is an abandoned change whose commits were pushed nowhere. A quick
       task is never pushed, and its branch keeps its commits, so this
       doesn't hold one;
-    - something runs from it, or it is being set up again;
+    - something runs from it, or is starting to, or it is being set up
+      again;
     - it was opened from Althar today;
     - git can't say what is in it.
 
-    Clean up skips a held-back folder too. The person can still remove one
-    by hand, but not while something runs from it; Remove says first what
-    goes with it, or what stays.
+    Where several hold it, the gravest shows: running, then what would be
+    lost (changes not committed, what git can't read, commits pushed
+    nowhere), then opened today. Clean up skips a held-back folder too.
+    What holds a folder is asked again just before it goes, under the
+    lock that bringing it back, opening it and starting a run take
+    (`withFolder`), so nothing that happens after the folders are chosen
+    is lost. The person can still remove one by hand, but not while
+    something runs from it; Remove says first what goes with it, or what
+    stays, and sends what it said: where more would be lost by then, the
+    folder stays and the list reads again (`ChangedSinceSeen`).
   - **Coming back.** A task whose folder went reads as it did:
     - its changed files, their diff and its commits, from the kept commit
       in its repository (two commits, never the person's working tree);
@@ -71,11 +81,13 @@
     - as it is reopened.
 
     It comes back on its branch, else detached at the kept commit; a
-    review's copy is made again. It is set up again, and its thread says
-    "Folder back from its branch". Its header's chip says "Bringing its
-    folder back", in blue, until it is set up. A removal and a return wait
-    for each other (`withFolder`), and a removal waits for the task's
-    thread to be quiet (`Sessions.quiet`).
+    review's copy is made again. Something else at its path is never
+    taken for it, nor removed: it doesn't come back, and says so. It is
+    set up again, an abandoned task's too, and Run waits for that however
+    it came back. Its thread says "Folder back from its branch". Its
+    header's chip says "Bringing its folder back", in blue, until it is
+    set up. A removal and a return wait for each other (`withFolder`), and
+    a removal waits for the task's thread to be quiet (`Sessions.quiet`).
   - **Where the person sees it.** One row in Settings › Work on this Mac,
     "Remove finished tasks' folders", with the choice at its end.
     - **Under it:** this Mac's disk as one bar, with what is held back

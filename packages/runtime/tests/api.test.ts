@@ -1063,7 +1063,7 @@ describe('finished tasks’ folders, through the API', () => {
         )
         assert.isTrue((listed.folders[0]?.bytes ?? 0) > 0)
         assert.isNotNull(listed.disk)
-        const removed = yield* client.RemoveTaskFolder({ commandId: commandId(), taskId: task.id })
+        const removed = yield* client.RemoveTaskFolder({ commandId: commandId(), taskId: task.id, seen: null })
         assert.strictEqual(removed.failed, 0)
         assert.isFalse(existsSync(worktree))
         assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).task.folder, 'removed')

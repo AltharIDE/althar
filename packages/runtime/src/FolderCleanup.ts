@@ -3,7 +3,7 @@ import { existsSync, readdirSync, rmdirSync, rmSync } from 'node:fs'
 import { statfs } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-import type { FolderHold, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
+import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Duration, Effect, Layer, Scope, Semaphore } from 'effect'
@@ -12,7 +12,7 @@ import type { SqlError } from 'effect/sql/SqlError'
 
 import { Changes } from './Changes'
 import { RuntimeConfig } from './Config'
-import { TaskRefused } from './errors'
+import { ChangedSinceSeen, FolderStayed, TaskRefused } from './errors'
 import { contained } from './Failures'
 import { KEPT, taskThreadOf, withFolder } from './bringBack'
 import { git, uncommittedFiles } from './git'
@@ -39,15 +39,19 @@ import { addItem } from './threads'
  * changes not committed, an abandoned change's commits pushed nowhere,
  * something running from it, or opened in an editor within the day, or one
  * git can't read, is held back, and the person can still remove it by hand,
- * but while something runs from it. Before a folder goes, its last commit
- * is kept under `refs/althar/kept/<workspace>`, so its changes still read
- * and it comes back from there (`bringBack.ts`); its branch stays. An idle
+ * but while something runs from it. What holds a folder is asked again just
+ * before it goes, while nothing can start on its thread, bring it back, open
+ * it or start running from it (`withFolder`); by hand, it stays where more
+ * would be lost with it than the person was told. A folder goes only once
+ * its last commit is kept under `refs/althar/kept/<workspace>`, so its
+ * changes still read and it comes back from there (`bringBack.ts`), and
+ * counts as gone only once nothing of it is left; its branch stays. An idle
  * lead still held on it stops first. Its thread says it went, as a line.
  *
  * What each folder takes on the disk, and what holds it, is measured in
- * the background as Settings asks, kept a while, and asked again for each
- * folder just before it goes. A sweep runs a while after Althar starts,
- * every hour after, and at once when the person chooses another wait.
+ * the background as Settings asks, and kept a while. A sweep runs a while
+ * after Althar starts, every hour after, and at once when the person
+ * chooses another wait.
  */
 
 /** Smart's waits, in days, by how a task ended. */
@@ -111,19 +115,29 @@ interface Candidate {
   readonly workspaces: ReadonlyArray<Workspace>
 }
 
-interface Held {
-  readonly why: FolderHold
-  readonly count: number | null
+/** A folder to remove: why it goes, the wait it had, and, by hand, what the person was told holds it as they chose to. */
+interface Chosen {
+  readonly candidate: Candidate
+  readonly why: Why
+  readonly days: number
+  readonly seen?: FolderHeld | null
 }
 
-/** What a folder takes on the disk, what holds it of what is in it, and whether it isn't finished after all: measured, and when. */
+/** What a folder takes on the disk, what of what is in it would be lost with it, and whether it isn't finished after all: measured, and when. */
 interface Facts {
   readonly bytes: number | null
-  readonly held: Held | null
+  readonly lost: FolderHeld | null
   /** A merged change with commits after its pull request: it waits in Needs you, not Settled. */
   readonly unshipped: boolean
   readonly at: number
 }
+
+/** What would be lost with a folder, the gravest first: files not committed, then what git can't read, then commits pushed nowhere. */
+const GRAVITY: ReadonlyArray<FolderHeld['why']> = ['uncommitted', 'unreadable', 'unpushed']
+
+/** What holds a folder, the gravest where several do: something running from it, then what would be lost with it, then its being opened lately. */
+const holdOf = (running: boolean, lost: FolderHeld | null, opened: boolean): FolderHeld | null =>
+  running ? { why: 'running', count: null } : (lost ?? (opened ? { why: 'opened', count: null } : null))
 
 /** A folder's size on the disk, as `du` counts it, in bytes; null where it can't say. */
 const sizeOf = (path: string) =>
@@ -172,9 +186,28 @@ export const goneWords = (why: Why, days: number, bytes: number | null) => {
   }
 }
 
-/** Removes a folder that isn't a worktree, or one git won't remove: whatever is in it. */
+/** Fails unless nothing of a folder is left. */
+const gone = (path: string) => Effect.suspend(() => (existsSync(path) ? Effect.fail(new FolderStayed({ path })) : Effect.void))
+
+/** Removes a folder that isn't a worktree, or one git won't remove: whatever is in it. Fails unless nothing of it is left. */
 const erase = (path: string) =>
-  Effect.try({ try: () => rmSync(path, { recursive: true, force: true }), catch: (cause) => cause }).pipe(Effect.ignore)
+  Effect.try({ try: () => rmSync(path, { recursive: true, force: true }), catch: () => new FolderStayed({ path }) }).pipe(
+    Effect.andThen(gone(path)),
+  )
+
+/** Removes a worktree, or, where git won't, whatever is in its folder. Fails unless nothing of it is left. */
+const removeWorktree = (repository: string, path: string) =>
+  git(repository, 'worktree', 'remove', '--force', '--force', path).pipe(
+    Effect.catch(() => erase(path)),
+    Effect.andThen(gone(path)),
+  )
+
+/** Keeps a checkout's last commit under `ref`, in the repository it shares its refs with. Fails where it can't. */
+const keep = (checkout: string, ref: string) =>
+  Effect.gen(function* () {
+    const head = yield* git(checkout, 'rev-parse', '--verify', 'HEAD^{commit}')
+    yield* git(checkout, 'update-ref', ref, head)
+  })
 
 /** Removes a folder once nothing is left in it: the task's own, beside its repositories' worktrees. */
 const eraseEmpty = (path: string) =>
@@ -197,8 +230,12 @@ export class FolderCleanup extends Context.Service<
     readonly list: Effect.Effect<TaskFolders, unknown>
     /** Removes every finished task's folder nothing holds, whatever its wait. */
     cleanUp(actorId: ActorId): Effect.Effect<FoldersFreed, unknown>
-    /** Removes one finished task's folder by hand, though something of what is in it holds it; refused while something runs from it. */
-    remove(taskId: string, actorId: ActorId): Effect.Effect<FoldersFreed, unknown>
+    /**
+     * Removes one finished task's folder by hand, though something of what is
+     * in it holds it: refused while something runs from it, and where more
+     * would be lost with it than `seen`, what the person was told holds it.
+     */
+    remove(taskId: string, seen: FolderHeld | null, actorId: ActorId): Effect.Effect<FoldersFreed, unknown>
     /** Removes the folders whose wait is up, and, with Smart, makes room when the disk runs low. */
     readonly sweep: Effect.Effect<void, unknown>
   }
@@ -280,36 +317,32 @@ export class FolderCleanup extends Context.Service<
         })
       })
 
-      /** What holds a task's folder that can be told at once: something running from it, or opened within the day. */
-      const heldNow = (candidate: Candidate) =>
+      /** Something runs from a task's folder, or is starting to; an agent works in it; or it is coming back, not set up again yet. */
+      const runningFrom = (candidate: Candidate) =>
         Effect.gen(function* () {
-          const launched = (yield* launches.processes()).some((process) => process.taskId === candidate.taskId)
+          if (yield* launches.using(candidate.taskId)) return true
           const working = (yield* sessions.onTasks).some(
             (session) => session.taskId === candidate.taskId && (session.turnRunning || session.background),
           )
-          if (launched || working || candidate.workspaces.some((workspace) => workspace.comingBack === 1))
-            return { why: 'running', count: null } satisfies Held
-          if (candidate.opened !== null && Date.now() - candidate.opened < OPENED) return { why: 'opened', count: null } satisfies Held
-          return null
+          return working || candidate.workspaces.some((workspace) => workspace.comingBack === 1)
         })
 
-      /** What a task's folder takes, and what of what is in it holds it: changes not committed, an abandoned change's commits pushed nowhere, or git can't say. */
-      const measure = (candidate: Candidate) =>
+      /** Opened from Althar within the day. */
+      const openedLately = (candidate: Candidate) => candidate.opened !== null && Date.now() - candidate.opened < OPENED
+
+      /**
+       * What of what is in a task's folders would be lost with them, the
+       * gravest where several repositories differ: changes not committed,
+       * what git can't read, or an abandoned change's commits pushed nowhere.
+       */
+      const lostWith = (candidate: Candidate) =>
         Effect.gen(function* () {
-          let bytes = 0
-          let known = true
-          let held: Held | null = null
+          const found: Array<FolderHeld> = []
           for (const workspace of candidate.workspaces) {
-            if (!existsSync(workspace.path)) continue
-            const size = yield* sizeOf(workspace.path)
-            const copy = reviewCopyOf(workspace.path)
-            const copied = workspace.access === 'write' && existsSync(copy) ? yield* sizeOf(copy) : 0
-            if (size === null) known = false
-            bytes += (size ?? 0) + (copied ?? 0)
-            if (workspace.access !== 'write' || held !== null) continue
+            if (workspace.access !== 'write' || !existsSync(workspace.path)) continue
             const changed = yield* uncommittedFiles(workspace.path).pipe(Effect.option)
-            if (changed._tag === 'None') held = { why: 'unreadable', count: null }
-            else if (changed.value.length > 0) held = { why: 'uncommitted', count: changed.value.length }
+            if (changed._tag === 'None') found.push({ why: 'unreadable', count: null })
+            else if (changed.value.length > 0) found.push({ why: 'uncommitted', count: changed.value.length })
             else if (candidate.kind === 'abandoned' && !candidate.quick && workspace.branched === 1) {
               const ahead = yield* git(
                 workspace.path,
@@ -324,12 +357,47 @@ export class FolderCleanup extends Context.Service<
                 Effect.map(Number),
                 Effect.orElseSucceed(() => 0),
               )
-              if (ahead > 0) held = { why: 'unpushed', count: ahead }
+              if (ahead > 0) found.push({ why: 'unpushed', count: ahead })
             }
           }
-          const unshipped =
-            candidate.kind === 'merged' && (yield* changes.unshipped(candidate.taskId).pipe(Effect.orElseSucceed(() => []))).length > 0
-          const measured: Facts = { bytes: known ? bytes : null, held, unshipped, at: Date.now() }
+          const gravest = GRAVITY.find((why) => found.some((one) => one.why === why))
+          if (gravest === undefined) return null
+          const counts = found.filter((one) => one.why === gravest).map((one) => one.count)
+          return {
+            why: gravest,
+            count: counts.includes(null) ? null : counts.reduce<number>((sum, count) => sum + (count ?? 0), 0),
+          } satisfies FolderHeld
+        })
+
+      /** What a task's folders take on the disk, as `du` counts them, their review copies too; null where it can't say. */
+      const sizeOfAll = (candidate: Candidate) =>
+        Effect.gen(function* () {
+          let bytes = 0
+          for (const workspace of candidate.workspaces) {
+            if (!existsSync(workspace.path)) continue
+            const size = yield* sizeOf(workspace.path)
+            if (size === null) return null
+            const copy = reviewCopyOf(workspace.path)
+            bytes += size + (workspace.access === 'write' && existsSync(copy) ? ((yield* sizeOf(copy)) ?? 0) : 0)
+          }
+          return bytes
+        })
+
+      /** A merged change with commits after its pull request: not finished after all. */
+      const unshippedOf = (candidate: Candidate) =>
+        candidate.kind === 'merged'
+          ? changes.unshipped(candidate.taskId).pipe(
+              Effect.map((after) => after.length > 0),
+              Effect.orElseSucceed(() => false),
+            )
+          : Effect.succeed(false)
+
+      /** What a task's folder takes, what of what is in it would be lost with it, and whether it is finished after all; kept a while. */
+      const measure = (candidate: Candidate) =>
+        Effect.gen(function* () {
+          const bytes = yield* sizeOfAll(candidate)
+          const lost = yield* lostWith(candidate)
+          const measured: Facts = { bytes, lost, unshipped: yield* unshippedOf(candidate), at: Date.now() }
           facts.set(candidate.taskId, measured)
           return measured
         })
@@ -359,7 +427,6 @@ export class FolderCleanup extends Context.Service<
         for (const candidate of all) {
           const known = facts.get(candidate.taskId)
           if (known?.unshipped === true) continue
-          const held = (yield* heldNow(candidate)) ?? known?.held ?? null
           folders.push({
             taskId: candidate.taskId,
             threadId: candidate.threadId ?? '',
@@ -368,7 +435,7 @@ export class FolderCleanup extends Context.Service<
             kind: candidate.kind,
             settledAt: candidate.settledAt,
             bytes: known?.bytes ?? null,
-            held,
+            held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, openedLately(candidate)),
           })
         }
         return {
@@ -378,75 +445,100 @@ export class FolderCleanup extends Context.Service<
         } satisfies TaskFolders
       })
 
-      /** What holds a task's folder now, asked afresh just before it goes; `unshipped` where it isn't finished after all. */
-      const holdOf = (candidate: Candidate) =>
+      /** Whether a folder stays by itself as things stand: something holds it, or it isn't finished after all. */
+      const staysBy = (candidate: Candidate) =>
         Effect.gen(function* () {
-          const now = yield* heldNow(candidate)
-          if (now !== null) return now
-          const measured = yield* measure(candidate)
-          return measured.unshipped ? ('unshipped' as const) : measured.held
+          if (yield* runningFrom(candidate)) return true
+          if (holdOf(false, yield* lostWith(candidate), openedLately(candidate)) !== null) return true
+          return yield* unshippedOf(candidate)
+        })
+
+      /** Those of `all` nothing holds as things stand, chosen to go so; each is asked again as it goes. */
+      const free = (all: ReadonlyArray<Candidate>, why: Exclude<Why, 'hand'>, wait: FolderWait) =>
+        Effect.filter(all, (candidate) => Effect.map(staysBy(candidate), (stays) => !stays)).pipe(
+          Effect.map((chosen) => chosen.map((candidate): Chosen => ({ candidate, why, days: waitDays(wait, candidate.kind) }))),
+        )
+
+      /**
+       * Removes a task's folders, each once its last commit is kept, and
+       * marks each removed once nothing of it is left: a review copy beside
+       * a worktree goes with it. Where the person removes one git can't read,
+       * knowing whatever is in it goes, it goes though its commit can't be
+       * kept. Fails at the first that stays; those before it are removed.
+       */
+      const removeFolders = (candidate: Candidate, unreadable: boolean, why: Why, bytes: number | null, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const kept = (checkout: string, ref: string) => (unreadable ? Effect.ignore(keep(checkout, ref)) : keep(checkout, ref))
+          for (const workspace of candidate.workspaces) {
+            if (workspace.access === 'write') {
+              if (existsSync(workspace.path)) {
+                // Its last commit is kept, so its changes still read and it comes back from there; its branch stays.
+                yield* kept(workspace.path, `${KEPT}${workspace.id}`)
+                const copy = reviewCopyOf(workspace.path)
+                if (existsSync(copy)) {
+                  yield* kept(copy, `${KEPT}${workspace.id}-review`)
+                  yield* removeWorktree(workspace.repository, copy)
+                }
+                yield* removeWorktree(workspace.repository, workspace.path)
+              }
+              yield* git(workspace.repository, 'worktree', 'prune').pipe(Effect.ignore)
+            } else yield* erase(workspace.path)
+            yield* eraseEmpty(dirname(workspace.path))
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const at = yield* timestamp
+                const revision = yield* change('workspaces', workspace.id, { state: 'cleaned', cleanedAt: at })
+                yield* fact({
+                  projectId: workspace.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: workspace.id,
+                  revision,
+                  type: 'workspace.cleaned',
+                  payload: { why, bytes },
+                  actorId,
+                })
+              }),
+            )
+          }
+          // What its reviews read, beside its folders: their copies went with them, and what is left is the reviewers' evidence.
+          const [first] = candidate.workspaces
+          if (first !== undefined && first.access === 'write') yield* erase(dirname(reviewCopyOf(first.path))).pipe(Effect.ignore)
         })
 
       /**
-       * Removes a finished task's folders, by hand or not: an idle lead held
-       * on it stops first, and the task's thread is kept from starting while
-       * they go. What went, in bytes as `du` counted it; null where nothing
-       * did, as when the task went back to work meanwhile.
+       * Removes a finished task's folders, by hand or not. What holds them is
+       * asked again while nothing can start on its thread, bring them back,
+       * open them or start running from them: by itself, one held stays; by
+       * hand, one something runs from is refused, as is one where more would
+       * be lost than the person was told. An idle lead held on it stops
+       * first. What went, in bytes as `du` counted it; null where nothing
+       * did, as when the task went back to work meanwhile; the refusal, by
+       * hand.
        */
-      const removeTask = (candidate: Candidate, why: Why, actorId: ActorId, days: number) =>
+      const removeTask = ({ candidate, why, days, seen = null }: Chosen, actorId: ActorId) =>
         Effect.gen(function* () {
+          const bytes = facts.get(candidate.taskId)?.bytes ?? (yield* sizeOfAll(candidate))
           const held = (yield* sessions.onTasks).filter((session) => session.taskId === candidate.taskId)
-          if (held.some((session) => session.turnRunning || session.background)) return null
+          if (held.some((session) => session.turnRunning || session.background))
+            return why === 'hand' ? new TaskRefused({ taskId: candidate.taskId, why: 'folder_in_use' }) : null
           for (const session of held) yield* sessions.stop(session.threadId).pipe(Effect.ignore)
           const go = withFolder(
             candidate.taskId,
             Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              // Still finished, and still here: it may have gone back to work, or been brought back, meanwhile.
-              const [still] = yield* sql<{ settled: number }>`
-                SELECT state IN ('done', 'abandoned') AND settled_at IS NOT NULL AS settled FROM tasks WHERE id = ${candidate.taskId}`
-              if (still?.settled !== 1) return null
-              const bytes = facts.get(candidate.taskId)?.bytes ?? null
-              for (const workspace of candidate.workspaces) {
-                const [here] = yield* sql<{ state: string }>`SELECT state FROM workspaces WHERE id = ${workspace.id}`
-                if (here?.state !== 'ready') continue
-                if (workspace.access === 'write') {
-                  if (existsSync(workspace.path)) {
-                    // Its last commit is kept, so its changes still read and it comes back from there; its branch stays.
-                    yield* git(workspace.path, 'update-ref', `${KEPT}${workspace.id}`, 'HEAD').pipe(Effect.ignore)
-                    const copy = reviewCopyOf(workspace.path)
-                    if (existsSync(copy)) {
-                      yield* git(copy, 'update-ref', `${KEPT}${workspace.id}-review`, 'HEAD').pipe(Effect.ignore)
-                      yield* git(workspace.repository, 'worktree', 'remove', '--force', '--force', copy).pipe(
-                        Effect.catch(() => erase(copy)),
-                      )
-                      yield* erase(dirname(copy))
-                    }
-                    yield* git(workspace.repository, 'worktree', 'remove', '--force', '--force', workspace.path).pipe(
-                      Effect.catch(() => erase(workspace.path)),
-                    )
-                  }
-                  yield* git(workspace.repository, 'worktree', 'prune').pipe(Effect.ignore)
-                } else yield* erase(workspace.path)
-                yield* eraseEmpty(dirname(workspace.path))
-                yield* sql.withTransaction(
-                  Effect.gen(function* () {
-                    const at = yield* timestamp
-                    const revision = yield* change('workspaces', workspace.id, { state: 'cleaned', cleanedAt: at })
-                    yield* fact({
-                      projectId: workspace.projectId,
-                      aggregateType: 'workspace',
-                      aggregateId: workspace.id,
-                      revision,
-                      type: 'workspace.cleaned',
-                      payload: { why, bytes },
-                      actorId,
-                    })
-                  }),
-                )
-              }
-              facts.delete(candidate.taskId)
-              const thread = yield* taskThreadOf(candidate.taskId)
+              // As it is now: it may have gone back to work, come back, been opened, changed or started running meanwhile.
+              const now = (yield* candidates).find((one) => one.taskId === candidate.taskId)
+              if (now === undefined) return null
+              const lost = yield* lostWith(now)
+              if (why === 'hand') {
+                if (yield* runningFrom(now)) return new TaskRefused({ taskId: now.taskId, why: 'folder_in_use' })
+                if (lost !== null && (lost.why !== seen?.why || lost.count !== seen.count))
+                  return new ChangedSinceSeen({ taskId: now.taskId, what: 'folder' })
+              } else if ((yield* runningFrom(now)) || holdOf(false, lost, openedLately(now)) !== null || (yield* unshippedOf(now)))
+                return null
+              yield* removeFolders(now, why === 'hand' && lost?.why === 'unreadable', why, bytes, actorId)
+              facts.delete(now.taskId)
+              const thread = yield* taskThreadOf(now.taskId)
               if (thread !== null)
                 yield* addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
                   source: 'runtime',
@@ -462,22 +554,25 @@ export class FolderCleanup extends Context.Service<
           return candidate.threadId === null ? yield* go : yield* sessions.quiet(candidate.threadId, go)
         })
 
-      /** Removes what it is given, one by one, by what the disk says it freed; how many couldn't go. */
-      const removeAll = (
-        chosen: ReadonlyArray<{ readonly candidate: Candidate; readonly why: Why; readonly days: number }>,
-        actorId: ActorId,
-        enough?: () => Effect.Effect<boolean>,
-      ) =>
+      /**
+       * Removes what it is given, one by one, by what the disk says it freed;
+       * how many couldn't go, as a folder that stays. A refusal, by hand, is
+       * said instead.
+       */
+      const removeAll = (chosen: ReadonlyArray<Chosen>, actorId: ActorId, enough?: () => Effect.Effect<boolean>) =>
         Effect.gen(function* () {
           const before = yield* diskAt(config.worktreeRoot)
           let failed = 0
-          for (const { candidate, why, days } of chosen) {
+          for (const one of chosen) {
             if (enough !== undefined && (yield* enough())) break
-            const went = yield* removeTask(candidate, why, actorId, days).pipe(
-              contained('Folders.remove', () => null),
-              Effect.catch(() => Effect.succeed(null)),
+            const went = yield* removeTask(one, actorId).pipe(
+              Effect.catch((error) =>
+                Effect.as(Effect.logWarning('A finished task’s folder couldn’t be removed', error), 'failed' as const),
+              ),
+              contained('Folders.remove', () => 'failed' as const),
             )
-            if (went === null) failed += 1
+            if (went === 'failed') failed += 1
+            else if (went instanceof TaskRefused || went instanceof ChangedSinceSeen) return yield* went
           }
           const after = yield* diskAt(config.worktreeRoot)
           const freed = before === null || after === null ? 0 : Math.max(0, after.free - before.free)
@@ -488,25 +583,20 @@ export class FolderCleanup extends Context.Service<
         Effect.gen(function* () {
           const chosen = yield* wait
           if (chosen === 'never') return
-          const all = yield* candidates
           const now = Date.now()
-          const oldest = all.toSorted((a, b) => a.clock - b.clock)
-          const due = []
-          for (const candidate of oldest) {
-            const days = waitDays(chosen, candidate.kind)
-            if (candidate.clock + days * DAY > now) continue
-            if ((yield* holdOf(candidate)) === null) due.push({ candidate, why: 'wait' as const, days })
-          }
-          yield* removeAll(due, instance.systemId)
+          const oldest = (yield* candidates).toSorted((a, b) => a.clock - b.clock)
+          const up = oldest.filter((candidate) => candidate.clock + waitDays(chosen, candidate.kind) * DAY <= now)
+          yield* removeAll(yield* free(up, 'wait', chosen), instance.systemId)
           if (chosen !== 'smart') return
           // Smart makes room when the disk runs low: the oldest finished folders first, whatever their wait, until there is enough.
           const disk = yield* diskAt(config.worktreeRoot)
           if (disk === null || disk.free / disk.total >= LOW) return
-          const gone = new Set(due.map((one) => one.candidate.taskId))
-          const rest = []
-          for (const candidate of oldest)
-            if (!gone.has(candidate.taskId) && (yield* holdOf(candidate)) === null)
-              rest.push({ candidate, why: 'low' as const, days: waitDays(chosen, candidate.kind) })
+          const tried = new Set(up.map((candidate) => candidate.taskId))
+          const rest = yield* free(
+            oldest.filter((candidate) => !tried.has(candidate.taskId)),
+            'low',
+            chosen,
+          )
           yield* removeAll(rest, instance.systemId, () =>
             diskAt(config.worktreeRoot).pipe(Effect.map((now) => now === null || now.free / now.total >= ROOMY)),
           )
@@ -516,24 +606,17 @@ export class FolderCleanup extends Context.Service<
       const cleanUp = (actorId: ActorId) =>
         one.withPermits(1)(
           Effect.gen(function* () {
-            const chosen = yield* wait
-            const all = yield* candidates
-            const free = []
-            for (const candidate of all)
-              if ((yield* holdOf(candidate)) === null)
-                free.push({ candidate, why: 'clean' as const, days: waitDays(chosen, candidate.kind) })
-            return yield* removeAll(free, actorId)
+            return yield* removeAll(yield* free(yield* candidates, 'clean', yield* wait), actorId)
           }),
         )
 
-      const remove = (taskId: string, actorId: ActorId) =>
+      const remove = (taskId: string, seen: FolderHeld | null, actorId: ActorId) =>
         one.withPermits(1)(
           Effect.gen(function* () {
             const candidate = (yield* candidates).find((one) => one.taskId === taskId)
             if (candidate === undefined) return { freed: 0, failed: 0 } satisfies FoldersFreed
-            if ((yield* heldNow(candidate))?.why === 'running') return yield* new TaskRefused({ taskId, why: 'left_running' })
             const chosen = yield* wait
-            return yield* removeAll([{ candidate, why: 'hand', days: waitDays(chosen, candidate.kind) }], actorId)
+            return yield* removeAll([{ candidate, why: 'hand', days: waitDays(chosen, candidate.kind), seen }], actorId)
           }),
         )
 
@@ -572,7 +655,7 @@ export class FolderCleanup extends Context.Service<
         setWait: (next) => provide(setWait(next)),
         list: provide(list),
         cleanUp: (actorId) => provide(cleanUp(actorId)),
-        remove: (taskId, actorId) => provide(remove(taskId, actorId)),
+        remove: (taskId, seen, actorId) => provide(remove(taskId, seen, actorId)),
         sweep: provide(sweep),
       })
     }),

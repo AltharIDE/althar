@@ -1,20 +1,23 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Deferred, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { KEPT } from '../src/bringBack'
+import { bringBack, folderOf, KEPT } from '../src/bringBack'
 import { FolderCleanup, goneWords, sizeWords, waitDays } from '../src/FolderCleanup'
 import { Instance } from '../src/Instance'
+import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
+import { Setups } from '../src/Setups'
 import { Tasks } from '../src/Tasks'
-import { repository, runtime, until } from './support'
+import { repository, ROOMY_DISK, runtime, until } from './support'
 
 /*
  * Finished tasks' folders (ADR-055): one goes once its wait is up, keeping
@@ -40,6 +43,13 @@ const commit = (cwd: string, file: string, text: string) => {
 
 const DAY = 86_400_000
 
+const windows = process.platform === 'win32'
+
+/** A run that keeps running until it is stopped. */
+const LONG = `node -e "setTimeout(() => {}, 60000)"`
+
+const person = Effect.map(Instance, (instance) => instance.personId)
+
 /** A task in a new repository, with a file committed on its branch, settled `days` ago as `state`. */
 const finished = (state: 'done' | 'abandoned', days: number, title = 'Add a retry') =>
   Effect.gen(function* () {
@@ -57,6 +67,7 @@ const finished = (state: 'done' | 'abandoned', days: number, title = 'Add a retr
     yield* sql`UPDATE tasks SET state = ${state}, settled_at = ${at} WHERE id = ${task.taskId}`
     return {
       root,
+      projectId: project.projectId,
       taskId: task.taskId,
       threadId: task.threadId,
       worktree,
@@ -155,7 +166,7 @@ describe('finished tasks’ folders', () => {
       assert.deepStrictEqual(listed.folders[0]?.held, { why: 'uncommitted', count: 1 })
       yield* cleanup.cleanUp(yield* Effect.map(Instance, (instance) => instance.personId))
       assert.isTrue(existsSync(task.worktree))
-      yield* cleanup.remove(task.taskId, yield* Effect.map(Instance, (instance) => instance.personId))
+      yield* cleanup.remove(task.taskId, { why: 'uncommitted', count: 1 }, yield* person)
       assert.isFalse(existsSync(task.worktree))
       assert.strictEqual((yield* folderLines(task.threadId))[0]?.title.startsWith('You removed its folder'), true)
     }).pipe(Effect.provide(withCleanup())),
@@ -226,7 +237,7 @@ describe('finished tasks’ folders', () => {
       const cleanup = yield* FolderCleanup
       const person = yield* Effect.map(Instance, (instance) => instance.personId)
       // Its commit pushed nowhere holds it back; by hand it goes.
-      yield* cleanup.remove(task.taskId, person)
+      yield* cleanup.remove(task.taskId, { why: 'unpushed', count: 1 }, person)
       assert.isFalse(existsSync(task.worktree))
       yield* (yield* Tasks).reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task.taskId })
       assert.isTrue(existsSync(join(task.worktree, 'retry.ts')))
@@ -237,6 +248,130 @@ describe('finished tasks’ folders', () => {
         ['You removed its folder', 'Folder back from its branch'],
       )
     }).pipe(Effect.provide(withCleanup())),
+  )
+})
+
+describe('a folder going, asked again as it goes', () => {
+  it.live('keeps one changed, opened or run from after it was chosen to go', () => {
+    // What happens between choosing the folders and removing them, as the disk is read before they go.
+    let between: Effect.Effect<void> = Effect.void
+    const disk = () =>
+      Effect.suspend(() => {
+        const now = between
+        between = Effect.void
+        return Effect.as(now, ROOMY_DISK)
+      })
+    return Effect.gen(function* () {
+      const changed = yield* finished('done', 10, 'Changed')
+      const opened = yield* finished('done', 10, 'Opened')
+      const run = yield* finished('done', 10, 'Run')
+      const sql = yield* SqlClient.SqlClient
+      const launches = yield* Launches
+      yield* launches.keep({ projectId: run.projectId, run: { command: LONG, setup: null }, actorId: yield* person })
+      const at = new Date().toISOString()
+      let started = ''
+      between = Effect.gen(function* () {
+        writeFileSync(join(changed.worktree, 'draft.ts'), 'draft\n')
+        yield* sql`UPDATE tasks SET opened_at = ${at} WHERE id = ${opened.taskId}`
+        started = (yield* launches.start({ projectId: run.projectId, taskId: run.taskId, threadId: null })).id
+      }).pipe(Effect.orDie)
+      yield* (yield* FolderCleanup).sweep
+      for (const task of [changed, opened, run]) assert.isTrue(existsSync(join(task.worktree, 'retry.ts')))
+      for (const task of [changed, opened, run]) assert.deepStrictEqual(yield* folderLines(task.threadId), [])
+      const listed = yield* measured
+      assert.deepStrictEqual(
+        listed.folders.toSorted((a, b) => a.title.localeCompare(b.title)).map((folder) => [folder.title, folder.held?.why]),
+        [
+          ['Changed', 'uncommitted'],
+          ['Opened', 'opened'],
+          ['Run', 'running'],
+        ],
+      )
+      yield* launches.stop(started)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk })))))
+  })
+
+  it.live('holds a folder opened today and changed for its changes, and by hand removes it only as far as the person was told', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 10)
+      const sql = yield* SqlClient.SqlClient
+      const cleanup = yield* FolderCleanup
+      yield* sql`UPDATE tasks SET opened_at = ${new Date().toISOString()} WHERE id = ${task.taskId}`
+      writeFileSync(join(task.worktree, 'draft.ts'), 'draft\n')
+      // What would be lost with it comes before its being opened.
+      assert.deepStrictEqual((yield* measured).folders[0]?.held, { why: 'uncommitted', count: 1 })
+      // Told only that it was opened, the person didn't choose to lose its changes.
+      assert.deepInclude(yield* Effect.flip(cleanup.remove(task.taskId, { why: 'opened', count: null }, yield* person)), {
+        _tag: 'ChangedSinceSeen',
+        what: 'folder',
+      })
+      // Nor, told of one file not committed, two.
+      writeFileSync(join(task.worktree, 'more.ts'), 'more\n')
+      assert.deepInclude(yield* Effect.flip(cleanup.remove(task.taskId, { why: 'uncommitted', count: 1 }, yield* person)), {
+        _tag: 'ChangedSinceSeen',
+      })
+      // While something runs from it, it stays, whatever they were told.
+      const launches = yield* Launches
+      yield* launches.keep({ projectId: task.projectId, run: { command: LONG, setup: null }, actorId: yield* person })
+      const started = yield* launches.start({ projectId: task.projectId, taskId: task.taskId, threadId: null })
+      assert.deepInclude(yield* Effect.flip(cleanup.remove(task.taskId, { why: 'uncommitted', count: 2 }, yield* person)), {
+        _tag: 'TaskRefused',
+        why: 'folder_in_use',
+      })
+      yield* launches.stop(started.id)
+      assert.isTrue(existsSync(join(task.worktree, 'more.ts')))
+      yield* cleanup.remove(task.taskId, { why: 'uncommitted', count: 2 }, yield* person)
+      assert.isFalse(existsSync(task.worktree))
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
+  it.live('keeps a folder whose last commit can’t be kept, counted as one that couldn’t go', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 4)
+      const cleanup = yield* FolderCleanup
+      // Another git holds the ref it would be kept under.
+      const refs = join(task.root, '.git', 'refs', 'althar', 'kept')
+      mkdirSync(refs, { recursive: true })
+      const lock = join(refs, `${task.workspaceId}.lock`)
+      writeFileSync(lock, '')
+      assert.strictEqual((yield* cleanup.cleanUp(yield* person)).failed, 1)
+      assert.isTrue(existsSync(join(task.worktree, 'retry.ts')))
+      assert.strictEqual((yield* stateOf(task.workspaceId))?.state, 'ready')
+      assert.deepStrictEqual(yield* folderLines(task.threadId), [])
+      rmSync(lock)
+      yield* cleanup.sweep
+      assert.isFalse(existsSync(task.worktree))
+      assert.strictEqual(git(task.root, 'rev-parse', `${KEPT}${task.workspaceId}`), task.head)
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
+  it.live.skipIf(windows || process.getuid?.() === 0)(
+    'keeps a folder it can’t delete marked as here, and never takes something else in its place for it',
+    () =>
+      Effect.gen(function* () {
+        const task = yield* finished('done', 4)
+        const cleanup = yield* FolderCleanup
+        const locked = join(task.worktree, 'locked')
+        mkdirSync(locked)
+        commit(task.worktree, 'locked/kept.txt', 'kept\n')
+        chmodSync(locked, 0o555)
+        const freed = yield* cleanup.cleanUp(yield* person).pipe(Effect.ensuring(Effect.sync(() => chmodSync(locked, 0o755))))
+        assert.strictEqual(freed.failed, 1)
+        assert.isTrue(existsSync(join(locked, 'kept.txt')))
+        assert.strictEqual((yield* stateOf(task.workspaceId))?.state, 'ready')
+        assert.deepStrictEqual(yield* folderLines(task.threadId), [])
+        // Still listed, as whatever is left of it: removed by hand, it goes.
+        const [left] = (yield* measured).folders
+        yield* cleanup.remove(task.taskId, left?.held ?? null, yield* person)
+        assert.isFalse(existsSync(task.worktree))
+        assert.strictEqual((yield* stateOf(task.workspaceId))?.state, 'cleaned')
+        // Something else where its folder goes isn't taken for it, nor removed.
+        mkdirSync(task.worktree, { recursive: true })
+        writeFileSync(join(task.worktree, 'mine.txt'), 'mine\n')
+        assert.deepInclude(yield* Effect.flip(bringBack(task.taskId, yield* person)), { _tag: 'TaskRefused', why: 'folder_in_way' })
+        assert.isTrue(existsSync(join(task.worktree, 'mine.txt')))
+        assert.strictEqual((yield* stateOf(task.workspaceId))?.state, 'cleaned')
+      }).pipe(Effect.provide(withCleanup())),
   )
 })
 
@@ -258,6 +393,48 @@ describe('a task whose folder was removed', () => {
   )
 })
 
+describe('a task of several repositories whose folders were removed', () => {
+  it.live('reads a document from the repository it is in, removed or not', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const sql = yield* SqlClient.SqlClient
+      const queries = yield* Queries
+      // Two repositories, api and web, in one folder.
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-two-')))
+      for (const name of ['api', 'web']) {
+        mkdirSync(join(folder, name))
+        git(join(folder, name), 'init', '-q', '-b', 'main')
+        commit(join(folder, name), 'README.md', `# ${name}\n`)
+      }
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Notes',
+        repositories: ['api', 'web'],
+      })
+      const [api, web] = yield* sql<{ id: string; path: string }>`
+        SELECT w.id, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${task.taskId} ORDER BY b.created_at, b.rowid`
+      commit(web?.path ?? '', 'NOTES.md', '# Web notes\n')
+      const at = new Date(Date.now() - 4 * DAY).toISOString()
+      yield* sql`UPDATE tasks SET state = 'done', settled_at = ${at} WHERE id = ${task.taskId}`
+      yield* (yield* FolderCleanup).sweep
+      assert.isFalse(existsSync(web?.path ?? ''))
+      // Web's, by where it was, from web's kept commit; a relative path is the first repository's, which has none.
+      assert.strictEqual((yield* queries.document(task.threadId, join(web?.path ?? '', 'NOTES.md'))).body, '# Web notes\n')
+      assert.strictEqual((yield* Effect.flip(queries.document(task.threadId, 'NOTES.md')))._tag, 'NotFound')
+      // Api's folder back by itself: its documents read from it, web's still from its kept commit.
+      git(join(folder, 'api'), 'worktree', 'add', '-q', '--detach', api?.path ?? '', `${KEPT}${api?.id ?? ''}`)
+      yield* sql`UPDATE workspaces SET state = 'ready' WHERE id = ${api?.id ?? ''}`
+      writeFileSync(join(api?.path ?? '', 'PLAN.md'), '# Api plan\n')
+      assert.strictEqual((yield* queries.document(task.threadId, 'PLAN.md')).body, '# Api plan\n')
+      assert.strictEqual((yield* queries.document(task.threadId, join(api?.path ?? '', 'README.md'))).body, '# api\n')
+      assert.strictEqual((yield* queries.document(task.threadId, join(web?.path ?? '', 'NOTES.md'))).body, '# Web notes\n')
+      assert.strictEqual((yield* queries.document(task.threadId, join(web?.path ?? '', 'README.md'))).body, '# web\n')
+    }).pipe(Effect.provide(withCleanup())),
+  )
+})
+
 describe('a removed folder coming back', () => {
   it.live('comes back on its branch before an agent starts on its task, and is set up again', () =>
     Effect.gen(function* () {
@@ -273,6 +450,62 @@ describe('a removed folder coming back', () => {
         ['Folder removed 3 days after the task finished', 'Folder back from its branch'],
       )
       yield* sessions.stop(task.threadId)
+    }).pipe(Effect.provide(withCleanup())),
+  )
+})
+
+describe('a removed folder set up again', () => {
+  it.live('runs only once it is set up, whichever brought it back, and nothing removes it meanwhile', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 4)
+      const cleanup = yield* FolderCleanup
+      const launches = yield* Launches
+      const setups = yield* Setups
+      const sql = yield* SqlClient.SqlClient
+      // Its setup waits until the test says.
+      const go = join(realpathSync(mkdtempSync(join(tmpdir(), 'althar-go-'))), 'go')
+      yield* launches.keep({
+        projectId: task.projectId,
+        run: { command: LONG, setup: `while [ ! -f '${go}' ]; do sleep 0.05; done` },
+        actorId: yield* person,
+      })
+      yield* cleanup.sweep
+      assert.isFalse(existsSync(task.worktree))
+      // Open in brings it back and begins its setup, without waiting; Run, pressed meanwhile, waits for it.
+      assert.isTrue(yield* bringBack(task.taskId, yield* person))
+      yield* setups.begin(task.taskId)
+      const ran = yield* Deferred.make<void>()
+      const running = yield* Effect.forkChild(
+        launches
+          .start({ projectId: task.projectId, taskId: task.taskId, threadId: null })
+          .pipe(Effect.ensuring(Deferred.succeed(ran, undefined))),
+      )
+      yield* Effect.sleep('1 second')
+      assert.isFalse(yield* Deferred.isDone(ran))
+      assert.isTrue(yield* launches.using(task.taskId))
+      assert.strictEqual(yield* folderOf(task.taskId), 'returning')
+      assert.strictEqual((yield* cleanup.cleanUp(yield* person)).failed, 0)
+      assert.isTrue(existsSync(join(task.worktree, 'retry.ts')))
+      writeFileSync(go, '')
+      const started = yield* Fiber.join(running)
+      const [setUp] = yield* sql<{ setup: string }>`SELECT setup FROM workspaces WHERE id = ${task.workspaceId}`
+      const [launched] = yield* sql<{ launchedAt: string }>`SELECT launched_at FROM processes WHERE id = ${started.id}`
+      assert.isTrue((JSON.parse(setUp?.setup ?? '{}') as { at: string }).at <= (launched?.launchedAt ?? ''))
+      assert.isUndefined(yield* folderOf(task.taskId))
+      yield* launches.stop(started.id)
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
+  it.live('sets up an abandoned task’s folder that came back, so it isn’t said to be coming back for ever', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('abandoned', 3)
+      const cleanup = yield* FolderCleanup
+      yield* cleanup.remove(task.taskId, { why: 'unpushed', count: 1 }, yield* person)
+      assert.isTrue(yield* bringBack(task.taskId, yield* person))
+      assert.strictEqual(yield* folderOf(task.taskId), 'returning')
+      yield* (yield* Setups).ready(task.taskId)
+      assert.isUndefined(yield* folderOf(task.taskId))
+      assert.deepStrictEqual((yield* measured).folders[0]?.held, { why: 'unpushed', count: 1 })
     }).pipe(Effect.provide(withCleanup())),
   )
 })

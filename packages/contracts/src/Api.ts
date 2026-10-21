@@ -210,6 +210,15 @@ export type FolderKind = typeof FolderKind.Type
 export const FolderHold = Schema.Literals(['uncommitted', 'unpushed', 'running', 'opened', 'unreadable'])
 export type FolderHold = typeof FolderHold.Type
 
+/**
+ * What holds a finished task's folder, the gravest where several do:
+ * something running from it, then what would be lost with it, then its
+ * being opened lately; and how many of what (files not committed, commits
+ * pushed nowhere).
+ */
+export const FolderHeld = Schema.Struct({ why: FolderHold, count: Schema.NullOr(Schema.Int) })
+export type FolderHeld = typeof FolderHeld.Type
+
 /** A finished task's folder still on this Mac: its task, how and when it ended, its size, and what holds it, if anything. */
 export const FinishedFolder = Schema.Struct({
   taskId: Schema.String,
@@ -220,8 +229,8 @@ export const FinishedFolder = Schema.Struct({
   settledAt: Schema.String,
   /** On disk, in bytes, as `du` counts it, its repositories' folders together; null until measured. */
   bytes: Schema.NullOr(Schema.Number),
-  /** Why it stays, and how many of what (files not committed, commits pushed nowhere); null where nothing holds it. */
-  held: Schema.NullOr(Schema.Struct({ why: FolderHold, count: Schema.NullOr(Schema.Int) })),
+  /** Why it stays; null where nothing holds it. */
+  held: Schema.NullOr(FolderHeld),
 })
 export type FinishedFolder = typeof FinishedFolder.Type
 
@@ -2665,8 +2674,13 @@ export const Api = RpcGroup.make(
   call('GetTaskFolders', {}, TaskFolders),
   /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */
   command('CleanUpFolders', {}, FoldersFreed),
-  /** Removes one finished task's folder by hand, though something holds it, but while something runs from it. */
-  command('RemoveTaskFolder', { taskId: Schema.String }, FoldersFreed),
+  /**
+   * Removes one finished task's folder by hand, though something holds it,
+   * but while something runs from it. `seen` is what the person was told
+   * holds it as they chose to: where more would be lost with it now, it
+   * stays, refused (`ChangedSinceSeen`).
+   */
+  command('RemoveTaskFolder', { taskId: Schema.String, seen: Schema.NullOr(FolderHeld) }, FoldersFreed),
   /**
    * Puts a task waiting for a free agent before any has worked on it at a
    * place in its project's line, from 0 the front, the rest keeping their

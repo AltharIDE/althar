@@ -29,6 +29,7 @@ import {
   type DomMessagePort,
   domPort,
   type FileDiff,
+  type FolderHeld,
   type FolderReading,
   type FoldersFreed,
   type FolderWait,
@@ -167,8 +168,8 @@ export interface Client {
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
   readonly cleanUpFolders: () => Promise<FoldersFreed>
-  /** Removes one finished task's folder by hand, though something holds it. */
-  readonly removeTaskFolder: (taskId: string) => Promise<FoldersFreed>
+  /** Removes one finished task's folder by hand, though something holds it: refused where more would be lost than `seen`, what the person was told holds it. */
+  readonly removeTaskFolder: (taskId: string, seen: FolderHeld | null) => Promise<FoldersFreed>
   /** Puts a task waiting for a free agent at a place in its project's line, from 0 the front; the line starts in that order. */
   readonly moveInLine: (taskId: string, to: number) => Promise<void>
   /** Puts a project's line back in the order its tasks began waiting. */
@@ -554,7 +555,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
-    removeTaskFolder: (taskId) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId })),
+    removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),
     moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
     lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),

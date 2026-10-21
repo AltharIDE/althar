@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 
 import type { ActorId, ProjectId } from '@althar/domain'
 import { Effect, Semaphore } from 'effect'
@@ -6,7 +6,7 @@ import { SqlClient } from 'effect/sql'
 
 import { TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
-import { branchExists, commitOf, restoreDetachedWorktree, restoreWorktree } from './git'
+import { branchExists, commitOf, git, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
 import { change, fact } from './records'
 import { copyReviewed, reviewOf } from './reviewing'
@@ -52,6 +52,13 @@ interface Removed {
   readonly repository: string
 }
 
+/** Whether a folder is a checkout of its own, at its top: one put back by hand, rather than whatever else came to be there. */
+const worktreeAt = (path: string) =>
+  git(path, 'rev-parse', '--show-toplevel').pipe(
+    Effect.map((top) => top === realpathSync(path)),
+    Effect.orElseSucceed(() => false),
+  )
+
 /** A task's own thread, where what happens to its folder is said. */
 export const taskThreadOf = (taskId: string) =>
   Effect.gen(function* () {
@@ -74,8 +81,10 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
       ORDER BY b.created_at, b.rowid`
     if (removed.length === 0) return false
     for (const one of removed) {
-      // Put back by hand already, it is only marked so.
-      if (!existsSync(one.path)) {
+      // Put back by hand already, it is only marked so; anything else where it goes is never taken for it, nor removed.
+      if (existsSync(one.path)) {
+        if (!(yield* worktreeAt(one.path))) return yield* new TaskRefused({ taskId, why: 'folder_in_way' })
+      } else {
         if (one.access === 'read') {
           const review = yield* reviewOf(taskId)
           if (review === null) return yield* new TaskRefused({ taskId, why: 'branch_gone' })
@@ -130,6 +139,17 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
  * waits for.
  */
 export const bringBack = (taskId: string, actorId: ActorId) => withFolder(taskId, bringingBack(taskId, actorId))
+
+/**
+ * As `bringBack`, then `then`, before anything can remove the folders
+ * again: for what opens them or runs from them to say so first, as the
+ * removal asks again under the same lock (`FolderCleanup.ts`).
+ */
+export const bringBackThen = <A, E, R>(taskId: string, actorId: ActorId, then: Effect.Effect<A, E, R>) =>
+  withFolder(
+    taskId,
+    Effect.flatMap(bringingBack(taskId, actorId), (back) => Effect.as(then, back)),
+  )
 
 /** Brings back the folders of the task a thread is on, if any were removed: the task's id where they came back, else null. */
 export const bringBackFor = (threadId: string, actorId: ActorId) =>

@@ -1,6 +1,6 @@
 import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, sep } from 'node:path'
 
 import {
   AllowedBy,
@@ -2626,16 +2626,19 @@ export class Queries extends Context.Service<
               const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
               if (thread?.taskId == null) return yield* new NotFound({ kind: 'document', id: path })
               const worktrees = yield* worktreesOf(thread.taskId)
+              // Whose it is: the worktree an absolute path is in, else the first.
+              const owner = isAbsolute(path)
+                ? worktrees.find((worktree) => path === worktree.path || path.startsWith(`${worktree.path}${sep}`))
+                : worktrees[0]
               // Its folder removed once it finished, a document it committed reads from the commit kept as it went (ADR-055).
-              const [first] = worktrees
-              if (first !== undefined && first.state === 'cleaned' && first.root !== null && !existsSync(first.path)) {
-                const [kept = null, branch = null] = yield* commitsOf(first.root, [
-                  `${KEPT}${first.workspaceId}`,
-                  `refs/heads/${first.branch}`,
+              if (owner !== undefined && owner.state === 'cleaned' && owner.root !== null && !existsSync(owner.path)) {
+                const [kept = null, branch = null] = yield* commitsOf(owner.root, [
+                  `${KEPT}${owner.workspaceId}`,
+                  `refs/heads/${owner.branch}`,
                 ])
                 const head = kept ?? branch
                 if (head === null) return yield* new NotFound({ kind: 'document', id: path })
-                return yield* documentKept(path, { root: first.root, head, worktree: first.path })
+                return yield* documentKept(path, { root: owner.root, head, worktree: owner.path })
               }
               return yield* documentText(
                 path,
