@@ -22,6 +22,22 @@ bun run web                              # in a browser, at a phone's width
 bun run ios                              # in the iOS simulator, on a Mac
 ```
 
+### On a phone
+
+Notifications, Face ID and the camera need a build of the app, not Expo Go.
+On a Mac with Xcode, `bun run ios` builds and runs it in the simulator
+(`npx expo run:ios --device` for a phone on the cable). Without one, EAS
+builds it ([eas.json](eas.json)); the Apple developer account and signing
+are the person's:
+
+```bash
+npx eas-cli build --profile development --platform ios   # a development build, installed from a link
+npx eas-cli build --profile preview --platform ios       # the demo, to hand to someone
+```
+
+It runs on the demo. Settings › Diagnostics checks, on the phone's own
+Hermes, the way it will talk to Althar once the relay exists.
+
 | Command | What it does |
 | --- | --- |
 | `bun run check` | Type checks, the contract's types included |

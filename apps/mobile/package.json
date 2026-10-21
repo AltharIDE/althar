@@ -7,8 +7,8 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "ios": "expo start --ios",
-    "android": "expo start --android",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
     "web": "expo start --web",
     "export:web": "expo export --platform web --output-dir dist",
     "check": "tsc --noEmit",
@@ -29,6 +29,7 @@
     "expo-camera": "~58.0.11",
     "expo-constants": "~58.0.12",
     "expo-crypto": "~58.0.7",
+    "expo-dev-client": "~58.0.14",
     "expo-font": "~58.0.9",
     "expo-haptics": "~58.0.7",
     "expo-linking": "~58.0.13",

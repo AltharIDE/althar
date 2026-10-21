@@ -17,7 +17,11 @@
     },
     "android": {
       "package": "dev.althar.mobile",
-      "edgeToEdgeEnabled": true
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "output": "single",
@@ -27,8 +31,20 @@
       "expo-router",
       "expo-font",
       "expo-secure-store",
-      ["expo-camera", { "cameraPermission": "Althar uses the camera to scan the pairing code on your Mac." }],
-      ["expo-local-authentication", { "faceIDPermission": "Althar asks for Face ID before it answers an agent for you." }],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Althar uses the camera to scan the pairing code on your Mac.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Althar asks for Face ID before it answers an agent for you."
+        }
+      ],
       "expo-notifications"
     ],
     "experiments": {
