@@ -10,6 +10,7 @@ import {
   Round,
   shotName,
   Thinking,
+  ThreadDivider,
   WorkLine,
   WorkNote,
   WorkSaid,
@@ -191,6 +192,12 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
           <AltharLine key={block.id} tone={block.tone}>
             {block.text}
           </AltharLine>
+        )
+      case 'folder':
+        return (
+          <ThreadDivider key={block.id} icon="folder">
+            {block.text}
+          </ThreadDivider>
         )
       case 'verdict':
         return (

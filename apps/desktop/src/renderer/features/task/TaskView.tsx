@@ -60,7 +60,7 @@ import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { roundsOf } from '../../shared/rounds'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
-import { type Outgoing, takesImages, useImages } from '../../shared/useImages'
+import { type Outgoing, outgoingOf, takesImages, useImages } from '../../shared/useImages'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
@@ -138,6 +138,8 @@ export const text = {
   /** A task that isn't a change, its lead done: the person settles it, or keeps it for later. */
   finished: 'Finished',
   kept: 'Kept for later',
+  /** Its folder coming back from its branch, and set up again, before its lead goes on (ADR-056). */
+  returning: 'Bringing its folder back',
   /** What the composer suggests to a task that finished and isn't a change, in grey: Tab takes it, Enter sends it to its lead. */
   suggest: 'Mark this as done',
   /** Issues its lead drafted wait for the person to file. */
@@ -174,6 +176,8 @@ export const statusOf = (
   const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
+  // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
+  if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
@@ -591,6 +595,17 @@ export function TaskView({
     }
   }
 
+  // A queued message goes to the lead now, interrupting it, rather than when the lead is done: out of the queue, and said again. One the lead has already read stays as it was.
+  const sendQueuedNow = async (id: string) => {
+    const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
+    if (said === undefined || !(await model.takeBack(id))) return
+    if (await model.sendNow(said.text, outgoingOf(said))) return
+    // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
+    setDraft((current) => withQueued(current, said.text))
+    if (said.dictated === true) setDraftDictated(kept, true)
+    images.restore(said.pictures)
+  }
+
   const issue = snapshot.task.issue
   // What it can do as a whole, where it stands, as the runtime says: each in its menu only when it applies.
   const can = (action: TaskAction) => snapshot.task.actions.includes(action)
@@ -758,6 +773,7 @@ export function TaskView({
         busy={busy}
         queued={queuedOf(snapshot.items, queue)}
         onEditQueued={(id) => void edit(id)}
+        onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(receiver.name)}
         meter={contextMeter(session, named, model.compact)}

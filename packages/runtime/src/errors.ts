@@ -202,10 +202,12 @@ export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
  * The pull request moved on since the person looked: accepting it would merge
  * what they didn't see. Or, for a push (`branch`), the commit they saw isn't
  * on the task's branch any more: pushing would send what they didn't see.
+ * Or, for a finished task's folder (`folder`), more of what is in it would
+ * be lost with it than the person was told as they chose to remove it.
  */
 export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
   taskId: Schema.String,
-  what: Schema.optional(Schema.Literal('branch')),
+  what: Schema.optional(Schema.Literals(['branch', 'folder'])),
 }) {}
 
 /**
@@ -235,11 +237,26 @@ export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefus
  * its branch can't be reopened on it; and an abandoned one has no agent on
  * it until it is reopened. A title can't be empty or longer than a title may be.
  * And a finished task isn't done while what its agents left running, such as
- * a page, wouldn't stop.
+ * a page, wouldn't stop. Its folder isn't removed by hand while something
+ * runs from it, and doesn't come back where something else is in its place.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long', 'left_running']),
+  why: Schema.Literals([
+    'merged',
+    'branch_gone',
+    'abandoned',
+    'no_title',
+    'title_too_long',
+    'left_running',
+    'folder_in_use',
+    'folder_in_way',
+  ]),
+}) {}
+
+/** A finished task's folder that couldn't be removed: its last commit couldn't be kept, or something of it is left (ADR-056). */
+export class FolderStayed extends Schema.TaggedError<FolderStayed>()('FolderStayed', {
+  path: Schema.String,
 }) {}
 
 /** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */

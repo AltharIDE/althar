@@ -40,6 +40,18 @@ export const sentWith = (images: Outgoing | undefined): { readonly images?: Read
   ...(images?.dictated === true ? { dictated: true } : {}),
 })
 
+/** What goes again with a queued message: its images by their digests, the store keeping them, and its being dictated. */
+export const outgoingOf = (said: { readonly pictures: ReadonlyArray<Picture>; readonly dictated?: boolean }): Outgoing => {
+  const kept = said.pictures.flatMap((picture, index) =>
+    picture.digest === null ? [] : [{ picture: { ...picture, digest: picture.digest }, name: picture.name ?? text.image(index + 1) }],
+  )
+  return {
+    sent: kept.map(({ picture, name }) => sentOf({ data: null, digest: picture.digest, name })),
+    pictures: kept.map(({ picture }) => picture),
+    ...(said.dictated === true ? { dictated: true } : {}),
+  }
+}
+
 /** An image waiting in a thread's draft. */
 export interface Waiting {
   readonly id: string

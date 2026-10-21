@@ -33,6 +33,8 @@ export const keys = {
   settings: ['settings'] as const,
   /** The skills store: read before the skills show, and again as a skill changes, in this window or another (feed.ts). */
   skills: ['skills'] as const,
+  /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
+  folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
   search: (projectId: string | null, text: string) => ['search', projectId, text] as const,
   /** What a command printed: kept once it ended, so it never changes. */
@@ -120,6 +122,13 @@ export const reads = (client: Client) => ({
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
   skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
+  // Read again every second or so while their sizes are still being measured; after that, as the feed says.
+  folders: () =>
+    queryOptions({
+      queryKey: keys.folders,
+      queryFn: () => client.getTaskFolders(),
+      refetchInterval: (query) => (query.state.data?.measuring === true ? 1500 : false),
+    }),
   // What is found changes with everything a task holds, and nothing on the feed says when: read again as the finder opens, and kept a moment.
   search: (projectId: string | null, text: string) =>
     queryOptions({

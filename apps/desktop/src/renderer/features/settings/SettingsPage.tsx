@@ -35,6 +35,7 @@ import {
   SkillInstall,
   SkillList,
   SkillReview,
+  TaskFolders,
   UpdateReady,
   UsageData,
 } from '@althar/ui'
@@ -71,6 +72,7 @@ import { useEdgeGlance } from './useEdgeGlance'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { useSkills } from './useSkills'
+import { useTaskFolders } from './useTaskFolders'
 
 /*
  * Althar's settings, as a tab of the window beside the home's. Down the
@@ -89,9 +91,11 @@ export interface SettingsPageProps {
   /** The section open, as the tab's address says it. */
   section: Section
   onSection: (section: Section) => void
+  /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
+  onTask?: (threadId: string) => void
 }
 
-export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, onTask }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -131,7 +135,14 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
         </>
       }
     >
-      <SectionBody section={section} start={start} accounts={accounts} connections={connections} looks={looks} />
+      <SectionBody
+        section={section}
+        start={start}
+        accounts={accounts}
+        connections={connections}
+        looks={looks}
+        {...(onTask === undefined ? {} : { onTask })}
+      />
     </SettingsLayout>
   )
 }
@@ -148,12 +159,14 @@ function SectionBody({
   accounts,
   connections,
   looks,
+  onTask,
 }: {
   section: Section
   start: StartModel
   accounts: AccountSignInModel
   connections: ConnectionsModel
   looks: Looks
+  onTask?: (threadId: string) => void
 }) {
   switch (section) {
     case 'agents':
@@ -163,7 +176,7 @@ function SectionBody({
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
-      return <ThisMacSection />
+      return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
     case 'reviews':
       return <ReviewsSection connections={connections} />
     case 'notifications':
@@ -306,9 +319,10 @@ function SkillsSection() {
 
 /* ---- work on this computer --------------------------------------------------------- */
 
-function ThisMacSection() {
+function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
   const { preferences, set, failed } = usePreferences()
   const atOnce = useAgentsAtOnce()
+  const folders = useTaskFolders(onTask)
   return (
     <>
       <SettingList>
@@ -336,6 +350,23 @@ function ThisMacSection() {
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
         />
+        {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-056). */}
+        {folders !== null && (
+          <TaskFolders
+            wait={folders.wait}
+            onWait={folders.setWait}
+            disk={folders.disk}
+            goes={folders.goes}
+            held={folders.held}
+            onCleanUp={folders.cleanUp}
+            onRemove={folders.remove}
+            {...(folders.open === undefined ? {} : { onOpen: folders.open })}
+            measuring={folders.measuring}
+            freed={folders.freed}
+            busy={folders.busy}
+            {...(folders.error === null ? {} : { error: folders.error })}
+          />
+        )}
       </SettingList>
       <Failed when={failed || atOnce?.failed === true} />
     </>
