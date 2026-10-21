@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -107,6 +108,13 @@ describe('a reader, on real agents', () => {
       git(repository, 'branch', '-qD', 'feature/retry')
       git(repository, 'update-ref', '-d', 'refs/remotes/origin/feature/retry')
       const outside = join(home, 'outside-probe.txt')
+      // A socket outside its folder, as the person's SSH agent's is: what reaches it is heard here.
+      const heard: Array<string> = []
+      const socket = join(home, 'probe.sock')
+      const listening = createServer((connection) => {
+        heard.push('connected')
+        connection.end()
+      }).listen(socket)
       const layer = Runtime.layer({
         database: join(home, 'althar.sqlite'),
         worktreeRoot: join(home, 'worktrees'),
@@ -127,6 +135,9 @@ describe('a reader, on real agents', () => {
           'echo "$(git describe --tags --abbrev=0) $(uptime)" > substituted.txt',
           'node --test sum.test.mjs > tested.txt 2>&1',
           `touch ${outside}`,
+          `touch ${join(repository, 'written-probe.txt')}`,
+          `git -C ${repository} tag reached-the-checkout`,
+          `echo hi | nc -U ${socket}`,
           'curl -sS -m 10 -o page.html https://example.com',
           'head -c 1 ~/.ssh/config > /dev/null && echo readable > keys.txt',
         ]
@@ -168,6 +179,10 @@ describe('a reader, on real agents', () => {
         assert.isFalse(existsSync(outside), 'it wrote outside its folder')
         assert.notInclude(read('page.html'), 'Example Domain', 'it reached the network')
         assert.isFalse(existsSync(join(copy, 'keys.txt')), 'it read where the person keeps keys')
+        assert.isFalse(existsSync(join(repository, 'written-probe.txt')), 'it wrote in the person’s checkout')
+        assert.notInclude(git(repository, 'tag', '-l'), 'reached-the-checkout', 'it tagged the person’s repository')
+        assert.deepStrictEqual(heard, [], 'it reached a socket')
+        listening.close()
       }).pipe(Effect.scoped, Effect.provide(layer))
     },
     8 * 60_000,
