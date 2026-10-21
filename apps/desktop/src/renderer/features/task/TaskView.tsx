@@ -758,6 +758,7 @@ export function TaskView({
         busy={busy}
         queued={queuedOf(snapshot.items, queue)}
         onEditQueued={(id) => void edit(id)}
+        onSendQueuedNow={(id) => void model.sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(receiver.name)}
         meter={contextMeter(session, named, model.compact)}

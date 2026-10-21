@@ -351,6 +351,7 @@ export function ProjectView({
         busy={busy}
         queued={queuedOf(coordinator?.items ?? [], queue)}
         onEditQueued={(id) => void edit(id)}
+        onSendQueuedNow={(id) => void model.sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}

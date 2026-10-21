@@ -537,6 +537,11 @@ export class Sessions extends Context.Service<
       readonly envelope: CommandEnvelope
       readonly itemId: string
     }): Effect.Effect<void, NotFound | AlreadyDelivered | Failure>
+    /** Sends a message still waiting its turn now: it goes first, and a turn running is interrupted for it. One the agent has is AlreadyDelivered. */
+    sendQueuedNow(input: {
+      readonly envelope: CommandEnvelope
+      readonly itemId: string
+    }): Effect.Effect<void, NotFound | AlreadyDelivered | Failure>
     /** Changes the session's model; the session and its context carry on. */
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
     /** How hard the running session's agent thinks, from here on. */
@@ -2065,6 +2070,52 @@ export class Sessions extends Context.Service<
           })
         })
 
+      /*
+       * A message still waiting, sent now: the same input, put first, and a turn running is interrupted for it, as a draft's send now is.
+       * Its check is takeBack's, in the same transaction, so a turn that takes it first wins and it is AlreadyDelivered.
+       */
+      const sendQueuedNow = (input: { readonly envelope: CommandEnvelope; readonly itemId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const commands = yield* Commands
+          const [item] = yield* sql<{
+            inputId: string
+            projectId: ProjectId
+            threadId: string
+          }>`SELECT user_input_id AS input_id, project_id, thread_id FROM thread_items WHERE id = ${input.itemId} AND user_input_id IS NOT NULL`
+          if (item === undefined) return yield* new NotFound({ kind: 'thread item', id: input.itemId })
+          yield* commands.execute({
+            envelope: input.envelope,
+            projectId: item.projectId,
+            result: Schema.Void,
+            handle: Effect.gen(function* () {
+              const [waiting] = yield* sql<{ id: string }>`
+                SELECT u.id FROM user_inputs u
+                WHERE u.id = ${item.inputId} AND u.state = 'queued'
+                  AND NOT EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                    WHERE di.user_input_id = u.id AND d.state = 'pending')`
+              if (waiting === undefined) return yield* new AlreadyDelivered({ itemId: input.itemId })
+              const revision = yield* change('user_inputs', item.inputId, { disposition: 'interrupt_and_continue' })
+              yield* fact({
+                projectId: item.projectId,
+                aggregateType: 'user_input',
+                aggregateId: item.inputId,
+                revision,
+                type: 'user_input.interrupt_requested',
+                payload: { disposition: 'interrupt_and_continue' },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+            }),
+          })
+          // Asked for once the input is queued, as a send's is: the queue puts it first. With no turn running, the loop takes it now.
+          const running = threads.get(item.threadId)
+          if (running !== undefined) {
+            if (running.turnRunning) yield* Effect.forkIn(Effect.ignore(running.agent.interrupt), sessionsScope)
+            yield* Queue.offer(running.wake, undefined)
+          }
+        })
+
       const send = (input: {
         readonly envelope: CommandEnvelope
         readonly threadId: string
@@ -2735,6 +2786,7 @@ export class Sessions extends Context.Service<
             }),
           ),
         takeBack: (input) => run(takeBack(input)),
+        sendQueuedNow: (input) => run(sendQueuedNow(input)),
         setModel: (input) => run(setModel(input)),
         setEffort: (input) => run(setEffort(input)),
         wake: (threadId) =>

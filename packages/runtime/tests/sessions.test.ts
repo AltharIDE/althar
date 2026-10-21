@@ -48,6 +48,19 @@ const takeBack = (itemId: string) =>
     return yield* sessions.takeBack({ envelope: yield* Runtime.envelope('thread.take_back', { itemId }), itemId })
   })
 
+const sendQueuedNow = (itemId: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions
+    return yield* sessions.sendQueuedNow({ envelope: yield* Runtime.envelope('thread.send_queued_now', { itemId }), itemId })
+  })
+
+const dispositionOf = (inputId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ disposition: string }>`SELECT disposition FROM user_inputs WHERE id = ${inputId}`
+    return row?.disposition
+  })
+
 const done = (row: { readonly state: string }) => !['pending', 'delivered'].includes(row.state)
 const withInput = <A extends { readonly inputs: number }>(rows: ReadonlyArray<A>) => rows.filter((row) => row.inputs > 0)
 
@@ -257,6 +270,48 @@ describe('sessions', () => {
       assert.instanceOf(yield* Effect.flip(takeBack(droppedItem)), AlreadyDelivered)
       assert.instanceOf(yield* Effect.flip(takeBack('item_missing')), NotFound)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
+  it.live('sends a queued message now: its turn is interrupted, it goes first once, and the rest stay queued in order', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, scenarios.slow)
+      yield* until(threadItems(created.threadId), (rows) => rows.some((item) => item.content.text === 'Starting'))
+      const waiting = yield* say(created.threadId, 'drop the cache')
+      const sent = yield* say(created.threadId, 'keep the retry')
+      const later = yield* say(created.threadId, 'then check the docs')
+      const sentItem = (yield* message(sent.inputId)).itemId
+      yield* sendQueuedNow(sentItem)
+      // The same input and item, switched to go first; the others keep their place and their order.
+      assert.strictEqual(yield* dispositionOf(sent.inputId), 'interrupt_and_continue')
+      assert.strictEqual(yield* dispositionOf(waiting.inputId), 'after_current')
+      assert.strictEqual((yield* message(sent.inputId)).itemId, sentItem)
+      assert.deepStrictEqual([(yield* message(waiting.inputId)).state, (yield* message(later.inputId)).state], ['queued', 'queued'])
+      const [interrupted, next] = yield* ended(created.threadId, 2)
+      assert.deepStrictEqual([interrupted?.state, interrupted?.stopReason], ['interrupted', 'cancelled'])
+      const prompt = next?.prompt ?? ''
+      assert.isTrue(prompt.includes('The person interrupted your last turn to say:\n\nkeep the retry'))
+      assert.isTrue(prompt.indexOf('keep the retry') < prompt.indexOf('drop the cache'))
+      assert.isTrue(prompt.indexOf('drop the cache') < prompt.indexOf('then check the docs'))
+      // Once in the thread, not twice.
+      const said = (yield* threadItems(created.threadId)).filter(
+        (item) => item.kind === 'user_message' && item.content.text === 'keep the retry',
+      )
+      assert.strictEqual(said.length, 1)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('sends a queued message now only while it waits: one a turn has already is AlreadyDelivered', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      const given = yield* say(created.threadId, 'already read')
+      yield* ended(created.threadId, 1)
+      assert.instanceOf(yield* Effect.flip(sendQueuedNow((yield* message(given.inputId)).itemId)), AlreadyDelivered)
+      assert.strictEqual(yield* dispositionOf(given.inputId), 'after_current')
+      assert.instanceOf(yield* Effect.flip(sendQueuedNow('item_missing')), NotFound)
+    }).pipe(Effect.provide(runtime())),
   )
 
   it.live('never both gives a message to the agent and takes it back', () =>

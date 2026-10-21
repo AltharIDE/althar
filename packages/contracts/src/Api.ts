@@ -2676,6 +2676,11 @@ export const Api = RpcGroup.make(
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
   /**
+   * Sends a message still waiting its turn now: it goes first, and a turn running is interrupted for it, as a draft's send now does.
+   * The same message, kept as it is in the thread. One a turn has already is AlreadyDelivered.
+   */
+  command('SendQueuedNow', { itemId: Schema.String }, Schema.Void),
+  /**
    * The person's answer to a step that needs them: tell its agent what to do,
    * hand it to an agent (on an account and model, where they picked one), or
    * abandon it (a review is gone on without). A step a usage limit stopped

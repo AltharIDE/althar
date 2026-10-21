@@ -93,6 +93,8 @@ export interface TaskModel {
   readonly sendNow: (body: string, images?: Outgoing) => Promise<boolean>
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
+  /** Sends a queued message now: the agent's turn is interrupted for it. One it has already is dropped from the queue quietly. */
+  readonly sendQueuedNow: (itemId: string) => Promise<void>
   readonly interrupt: () => Promise<void>
   /** Has the agent on the task compact its context, after what it was told before. */
   readonly compact: () => Promise<void>
@@ -507,6 +509,16 @@ export const useTask = (threadId: string): TaskModel => {
       } catch (failure) {
         fail(failure)
         return false
+      }
+    },
+    sendQueuedNow: async (itemId) => {
+      setError(null)
+      try {
+        await client.sendQueuedNow(itemId)
+      } catch (failure) {
+        // The agent has it already: the thread shows it where it was read, so there is nothing to say.
+        if (failure instanceof ApiError && failure.reason === 'AlreadyDelivered') return
+        fail(failure)
       }
     },
     interrupt: () => act(() => client.interrupt(threadId)),

@@ -167,6 +167,7 @@ function Example(
           setQueue(queue.filter((x) => x.id !== id))
         }}
         onUnqueue={(id) => setQueue(queue.filter((x) => x.id !== id))}
+        onSendQueuedNow={(id) => setQueue(queue.filter((x) => x.id !== id))}
         {...rest}
         onSendNow={(text) => {
           onSendNow(text)
@@ -516,6 +517,20 @@ export const QueueingAndEditing: Story = {
     await userEvent.click(c.getByRole('button', { name: 'Take “Also check the webhook retry path.” out of the queue' }))
     await userEvent.click(c.getByRole('button', { name: 'Edit' }))
     await expect(c.getByRole('textbox', { name: 'Tell the lead' })).toHaveValue('And keep the limiter where it is.')
+  },
+}
+/** Send now beside Edit: the first queued message goes at once, and the rest wait in their order. */
+export const SendingQueuedNow: Story = {
+  render: () => (
+    <Example busy onStopAgent={() => {}} waiting={['Also check the webhook retry path.', 'Use the fixture log, not staging.']} />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const row = c.getByText('Also check the webhook retry path.').closest('li')
+    if (row === null) throw new Error('the first queued message has no row')
+    await userEvent.click(within(row).getByRole('button', { name: 'Send now' }))
+    await expect(c.getByText('Queued; the lead reads it next')).toBeInTheDocument()
+    await expect(c.queryByText('Also check the webhook retry path.')).not.toBeInTheDocument()
   },
 }
 export const SeveralQueued: Story = {

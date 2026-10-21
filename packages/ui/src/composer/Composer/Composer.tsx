@@ -116,6 +116,10 @@ export interface ComposerText {
   queued: (n: number) => string
   /** Takes a queued message back into the field. */
   editQueued: string
+  /** Interrupts the agent's turn and sends a queued message at once. */
+  sendQueuedNow: string
+  /** Its tooltip: what the button does to the agent. */
+  sendQueuedNowTip: string
   unqueue: (text: string) => string
   /** The button that picks images from the computer. */
   addImages: string
@@ -150,6 +154,8 @@ export const composerText: ComposerText = {
   dictatedAway: 'What you said was written down while you were away.',
   queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
   editQueued: 'Edit',
+  sendQueuedNow: 'Send now',
+  sendQueuedNowTip: 'Interrupts the agent and sends this message next',
   unqueue: (text) => `Take “${text}” out of the queue`,
   addImages: 'Add images',
   dropImages: 'Drop to add them to your message',
@@ -179,6 +185,8 @@ export interface ComposerProps {
   queued?: readonly QueuedMessage[]
   /** Take a queued message back into the field. Without it, a queued message has no Edit. */
   onEditQueued?: (id: string) => void
+  /** Interrupt the agent's turn and send a queued message at once, next. Without it, a queued message has no Send now. */
+  onSendQueuedNow?: (id: string) => void
   /** Take a queued message out of the queue. */
   onUnqueue?: (id: string) => void
   /** The shortcut that focuses the composer, shown when there is nothing to send. */
@@ -237,6 +245,7 @@ export function Composer({
   dictation,
   queued = [],
   onEditQueued,
+  onSendQueuedNow,
   onUnqueue,
   hint,
   suggestion,
@@ -390,6 +399,11 @@ export function Composer({
                   {onEditQueued && (
                     <LinkButton className={s.queuedEdit} onClick={() => onEditQueued(q.id)}>
                       {t.editQueued}
+                    </LinkButton>
+                  )}
+                  {onSendQueuedNow && (
+                    <LinkButton className={s.queuedSend} title={t.sendQueuedNowTip} onClick={() => onSendQueuedNow(q.id)}>
+                      {t.sendQueuedNow}
                     </LinkButton>
                   )}
                   {onUnqueue && <IconButton icon="close" size="small" label={t.unqueue(q.text)} onClick={() => onUnqueue(q.id)} />}

@@ -134,7 +134,8 @@
   white-space: pre-line;
 }
 
-.queuedEdit {
+.queuedEdit,
+.queuedSend {
   flex: none;
 }
 

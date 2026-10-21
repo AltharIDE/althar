@@ -854,6 +854,12 @@ export const handlers = Api.toLayer(
             yield* sessions.takeBack({ envelope: yield* envelope('thread.take_back', { itemId }, commandId), itemId })
           }),
         ),
+      SendQueuedNow: ({ commandId, itemId }) =>
+        api(
+          Effect.gen(function* () {
+            yield* sessions.sendQueuedNow({ envelope: yield* envelope('thread.send_queued_now', { itemId }, commandId), itemId })
+          }),
+        ),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
       StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories }) =>

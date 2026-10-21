@@ -906,6 +906,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     renameTask: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
+    sendQueuedNow: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
     answerQuestion: vi.fn(async () => {}),
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
