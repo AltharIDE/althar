@@ -123,7 +123,7 @@ export const weeklyOf = (time: { readonly days: ReadonlyArray<number>; readonly 
 const isoDay = (at: Date) => ((at.getDay() + 6) % 7) + 1
 
 /**
- * When a schedule comes next after `now`, in this Mac's zone, as the
+ * When a schedule comes next after `now`, in this computer's zone, as the
  * window works it out where the runtime hasn't said: for a card not turned
  * on yet. The runtime staggers a run a few minutes after it; this is the
  * time its rule says.
@@ -162,17 +162,20 @@ const startOf = (at: Date) => {
 /** How many days `at` is after `now`'s day: 0 today, 1 tomorrow, -1 yesterday. */
 const daysFrom = (now: Date, at: Date) => Math.round((startOf(at).getTime() - startOf(now).getTime()) / DAY)
 
-/** A day ahead, read in a sentence: today, tonight, tomorrow, Friday, or the date. */
+/**
+ * A day ahead, read in a sentence: today, tonight, tomorrow, on Friday, or on
+ * the date. "Runs next Friday" would read as a week later; "on" keeps it this one.
+ */
 const dayAhead = (at: Date, now: Date): string => {
   const days = daysFrom(now, at)
   if (days === 0) return at.getHours() >= 18 ? 'tonight' : 'today'
   if (days === 1 && at.getHours() < 5) return 'tonight'
   if (days === 1) return 'tomorrow'
-  if (days > 1 && days < 7) return at.toLocaleDateString(undefined, { weekday: 'long' })
-  return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  if (days > 1 && days < 7) return `on ${at.toLocaleDateString(undefined, { weekday: 'long' })}`
+  return `on ${at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
 }
 
-/** When it runs next, read in a sentence: tomorrow at 9:00, tonight at 2:00, Friday at 16:00. */
+/** When it runs next, read in a sentence: tomorrow at 9:00, tonight at 2:00, on Friday at 16:00. */
 export const nextWords = (iso: string | Date, now: Date = new Date()): string => {
   const at = new Date(iso)
   return `${dayAhead(at, now)} at ${clockOf(at)}`
@@ -330,7 +333,7 @@ export const MINUTES = [15, 30, 45, 90, 120] as const
 export const minuteChoices = (minutes: number) =>
   [...new Set([...MINUTES, minutes])].toSorted((a, b) => a - b).map((n) => ({ value: String(n), label: text.minutes(n) }))
 
-/** If the Mac is asleep's choices. */
+/** If the computer is asleep's choices. */
 export const LATE = [
   { value: 'once', label: text.lateOnce },
   { value: 'skip', label: text.lateSkip },

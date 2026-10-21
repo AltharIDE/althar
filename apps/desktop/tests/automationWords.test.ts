@@ -89,14 +89,15 @@ describe('when an automation runs, in words', () => {
     expect(nextSlot({ every: 'week', days: [], at: '09:00' }, NOON)).toEqual(NOON)
   })
 
-  it('says when it runs next as a sentence reads it: today, tonight, tomorrow, a weekday, or the date', () => {
+  it('says when it runs next as a sentence reads it: today, tonight, tomorrow, on a weekday, or on the date', () => {
     expect(nextWords(local(29, 14), NOON)).toBe('today at 14:00')
     expect(nextWords(local(29, 22, 5), NOON)).toBe('tonight at 22:05')
     expect(nextWords(local(30, 2), NOON)).toBe('tonight at 2:00')
     expect(nextWords(local(30, 9), NOON)).toBe('tomorrow at 9:00')
-    expect(nextWords(local(32, 16), NOON)).toBe(`${weekday(local(32, 16), 'long')} at 16:00`)
-    expect(nextWords(local(40, 9), NOON)).toBe(`${date(local(40, 9))} at 9:00`)
+    expect(nextWords(local(32, 16), NOON)).toBe(`on ${weekday(local(32, 16), 'long')} at 16:00`)
+    expect(nextWords(local(40, 9), NOON)).toBe(`on ${date(local(40, 9))} at 9:00`)
     expect(nextShort(local(30, 9).toISOString(), NOON)).toBe('Next tomorrow 9:00')
+    expect(nextShort(local(32, 16).toISOString(), NOON)).toBe(`Next on ${weekday(local(32, 16), 'long')} 16:00`)
   })
 
   it('says when a run was: today, yesterday, a weekday this week, or the date', () => {

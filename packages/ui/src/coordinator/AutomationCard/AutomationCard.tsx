@@ -103,7 +103,7 @@ export interface AutomationCardText {
 export const automationCardText: AutomationCardText = {
   kicker: (project, changed) => `Automation${changed ? ', changed' : ''} · ${project}`,
   promptLabel: 'What each run is asked',
-  promptPlaceholder: 'Say what each run should do, as you would to the coordinator.',
+  promptPlaceholder: 'What should each run do?',
   edit: 'Edit',
   done: 'Done',
   when: 'When',

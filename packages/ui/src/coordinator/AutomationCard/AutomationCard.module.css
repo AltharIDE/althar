@@ -46,7 +46,10 @@
   margin-top: 0;
 }
 
+/* The prompt's field, blank or in an edit, as wide as the card: the kit's field takes its width from where it sits. */
 .area {
+  display: block;
+  width: 100%;
   font-size: 12.5px;
   line-height: 1.55;
 }
