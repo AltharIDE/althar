@@ -167,3 +167,23 @@ export const Failed: Story = {
     await expect(within(canvasElement).getByRole('alert')).toHaveTextContent('Althar couldn’t remove 1 folder: it is in use.')
   },
 }
+
+/** The legend open: what Clean up takes, then what is held back, apart. */
+export const ListOpen: Story = {
+  render: () => <Row />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Can go now/ }))
+    await expect(await within(document.body).findByRole('region', { name: 'Held back' })).toBeVisible()
+  },
+}
+
+/** Remove on a folder with changes not committed, asking first, in red. */
+export const Asking: Story = {
+  render: () => <Row />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Can go now/ }))
+    const held = within(await within(document.body).findByRole('region', { name: 'Held back' }))
+    await userEvent.click(held.getAllByRole('button', { name: 'Remove' })[1]!)
+    await expect(held.getByRole('button', { name: 'Remove anyway' })).toBeVisible()
+  },
+}
