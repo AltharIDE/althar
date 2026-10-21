@@ -199,6 +199,150 @@ describe('a new step on an agent nearly out', () => {
   })
 })
 
+describe('a settle step on a lead that fell nearly out since it worked', () => {
+  /* The lead's plan reviewed slowly, so its agent's reading can fall while the review runs, between the lead's steps. */
+  const reviewed = <E, R>(lowered: (projectId: string) => Effect.Effect<void, E, R>, policy?: 'wait' | 'ask') =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const steps = [lead('claude-code'), { key: 'review', agentId: 'codex', model: null, skipped: false } as const]
+      const { projectId, task, start } = yield* planned(
+        steps,
+        'Retry the checkout [lead:finish] [lead:edit] [review:findings] [review:slowly]',
+      )
+      // A run goes by the rule it started under.
+      if (policy !== undefined) yield* rule(policy)(projectId)
+      yield* start
+      yield* until(
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'review' AND a.state = 'running'`,
+        (rows) => rows.length === 1,
+        Duration.seconds(20),
+      )
+      yield* lowered(projectId)
+      return { projectId, task }
+    })
+
+  const sessionsOn = (threadId: string) =>
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) => sql<{ agentId: string; accountId: string }>`
+      SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at, rowid`,
+    )
+
+  it.live('goes to an agent with room where the project moves on, and the thread says why', () => {
+    const resetsAt = second(Date.now() + HOUR)
+    return Effect.gen(function* () {
+      const { projectId, task } = yield* reviewed(() =>
+        Effect.flatMap(first('claude-code'), (claude) => reading(claude, 'claude-code', left(3, resetsAt))),
+      )
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      assert.strictEqual(ready?.lead, 'opencode')
+      assert.include(
+        yield* said(task.threadId),
+        `Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt)}, so Fake opencode takes the fixes instead.`,
+      )
+      assert.deepStrictEqual(
+        (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
+        ['claude-code', 'opencode'],
+      )
+    }).pipe(Effect.provide(withAgents()))
+  })
+
+  it.live('waits for the reset where the project waits, starting nothing meanwhile, and settles then on the same lead', () =>
+    Effect.gen(function* () {
+      let back = 0
+      const { projectId, task } = yield* reviewed(
+        () =>
+          Effect.gen(function* () {
+            back = Date.now() + 8000
+            yield* reading(yield* first('claude-code'), 'claude-code', left(3, new Date(back).toISOString()))
+          }),
+        'wait',
+      )
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null, Duration.seconds(10))
+      assert.deepStrictEqual([held?.step, held?.waits?.agentId, held?.waits?.left, held?.waits?.why], ['settle', 'claude-code', 3, 'waits'])
+      assert.isTrue(
+        (yield* said(task.threadId)).some((title) =>
+          title.startsWith('Fake claude-code has 3% of its five-hour limit left, so the fixes wait until '),
+        ),
+      )
+      assert.isBelow(Date.now(), back)
+      assert.deepStrictEqual(
+        (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
+        ['claude-code'],
+      )
+      const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      assert.deepStrictEqual([ready?.lead, ready?.waits], ['claude-code', null])
+    }).pipe(Effect.provide(withAgents())),
+  )
+
+  it.live('asks the person where the project asks, with the lead itself among the ways on', () => {
+    const resetsAt = second(Date.now() + HOUR)
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* reviewed(
+        () => Effect.flatMap(first('claude-code'), (claude) => reading(claude, 'claude-code', left(4, resetsAt))),
+        'ask',
+      )
+      const [call] = yield* until(
+        sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE kind = 'stuck' AND state = 'open'`,
+        (rows) => rows.length === 1,
+        Duration.seconds(10),
+      )
+      const payload = JSON.parse(call?.payload ?? '{}') as {
+        step: string
+        why: string
+        limit: { left: number; resetsAt: string; choices: ReadonlyArray<{ agentId: string }> }
+      }
+      assert.deepStrictEqual(
+        [payload.step, payload.why, payload.limit.left, payload.limit.resetsAt],
+        ['settle', 'usage_limit', 4, resetsAt],
+      )
+      assert.include(
+        payload.limit.choices.map((choice) => choice.agentId),
+        'claude-code',
+      )
+      assert.deepStrictEqual(
+        (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
+        ['claude-code'],
+      )
+    }).pipe(Effect.provide(withAgents()))
+  })
+
+  it.live('goes on on the lead’s account with room where the project rotates, and says so', () => {
+    const resetsAt = second(Date.now() + HOUR)
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const usual = yield* first('claude-code')
+      const work = yield* accounts.add({ agentId: 'claude-code', name: 'work', folder: mkdtempSync(join(tmpdir(), 'althar-settle-')) })
+      yield* reading(usual, 'claude-code', left(80, resetsAt))
+      const { projectId, task } = yield* reviewed((projectId) =>
+        Effect.gen(function* () {
+          yield* policies.setAccounts(projectId, { rotate: true }, instance.personId)
+          yield* reading(usual, 'claude-code', left(3, resetsAt))
+        }),
+      )
+      yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready', Duration.seconds(30))
+      assert.deepStrictEqual(
+        (yield* sessionsOn(task.threadId)).map((session) => [session.agentId, session.accountId]),
+        [
+          ['claude-code', usual],
+          ['claude-code', work.id],
+        ],
+      )
+      assert.isTrue(
+        (yield* said(task.threadId)).some((title) =>
+          /^Fake claude-code \(.+\) has 3% of its five-hour limit left, until .+, so Fake claude-code \(work\) takes the fixes instead\.$/.test(
+            title,
+          ),
+        ),
+      )
+    }).pipe(Effect.provide(withAgents()))
+  })
+})
+
 describe('the account work starts on', () => {
   it.live('has the most room for the model asked for, where the model has a window of its own, and the coordinator is told it', () =>
     Effect.gen(function* () {

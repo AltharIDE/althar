@@ -3,7 +3,9 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Accounts } from '../src/Accounts'
 import { Instance } from '../src/Instance'
+import { whenWords } from '../src/Limits'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -190,4 +192,45 @@ describe('a step whose usage limit resets while every place is taken', () => {
       assert.deepStrictEqual([...new Set(ran.map((row) => row.agentId))], ['claude-code'])
     }).pipe(Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: { until: back } } } })))
   })
+})
+
+describe('a review that waited for a place while its reviewer fell nearly out', () => {
+  it.live('goes by the project’s rule once it has one, as a review starting at once would: elsewhere, where it moves on', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:pass]', [
+        { key: 'implement', agentId: 'claude-code' },
+        { key: 'review', agentId: 'codex' },
+      ])
+      // The lead left its server running, so its review waits for a place of its own; meanwhile Codex falls to 3%.
+      assert.strictEqual((yield* waitingStep(task.taskId)).step, 'review')
+      const [codex] = yield* (yield* Accounts).of('codex')
+      const resetsAt = new Date(Math.ceil((Date.now() + 3_600_000) / 1000) * 1000).toISOString()
+      yield* sql`INSERT INTO plan_usage_readings ${sql.insert({
+        accountId: codex?.id ?? '',
+        agentId: 'codex',
+        source: 'agent',
+        plan: null,
+        windows: JSON.stringify([{ kind: 'five_hour', usedPercent: 97, resetsAt }]),
+        observedAt: new Date().toISOString(),
+      })}`
+      // The lead and its server stop: the place frees, and the review goes to an agent with room, as the project moves on.
+      yield* sessions.stop(task.threadId)
+      yield* readyIs(projectId, task.taskId)
+      const reviewers = yield* sql<{ agentId: string }>`
+        SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
+      assert.deepStrictEqual(
+        reviewers.map((row) => row.agentId),
+        ['opencode'],
+      )
+      const notices = yield* sql<{ title: string }>`
+        SELECT json_extract(content, '$.title') AS title FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'notice'`
+      assert.include(
+        notices.map((row) => row.title),
+        `Fake codex has 3% of its five-hour limit left, until ${whenWords(resetsAt)}, so Fake opencode takes the review instead.`,
+      )
+    }).pipe(Effect.provide(oneAtOnce())),
+  )
 })
