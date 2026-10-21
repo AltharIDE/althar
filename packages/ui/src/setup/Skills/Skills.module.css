@@ -17,6 +17,9 @@
   color: var(--t-3);
   font-variant-numeric: tabular-nums;
 }
+.all {
+  font-size: 12px;
+}
 .list {
   display: grid;
   margin: 0;

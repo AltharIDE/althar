@@ -84,7 +84,7 @@ const meta = {
   component: SkillList,
   parameters: { layout: 'padded' },
   decorators: [(Story) => <div style={{ maxWidth: 560 }}>{Story()}</div>],
-  args: { skills: SKILLS, onToggle: fn(), onRollBack: fn(), onRemove: fn() },
+  args: { skills: SKILLS, onToggle: fn(), onRollBack: fn(), onRemove: fn(), onToggleAll: fn() },
 } satisfies Meta<typeof SkillList>
 export default meta
 type Story = StoryObj<typeof meta>
@@ -98,6 +98,10 @@ function Kept(args: SkillListProps) {
       onToggle={(id, on) => {
         args.onToggle(id, on)
         setSkills((now) => now.map((skill) => (skill.id === id ? { ...skill, on } : skill)))
+      }}
+      onToggleAll={(on) => {
+        args.onToggleAll?.(on)
+        setSkills((now) => now.map((skill) => (skill.problem === undefined ? { ...skill, on } : skill)))
       }}
     />
   )
@@ -117,6 +121,20 @@ export const List: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Previous version' }))
     await expect(args.onRollBack).toHaveBeenCalledWith('release-notes')
     await expect(canvas.getAllByRole('button', { name: 'Remove' })).toHaveLength(1)
+  },
+}
+
+/** Every skill at once: on while any is off, then off. */
+export const AllAtOnce: Story = {
+  render: (args) => <Kept {...args} />,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Turn all on' }))
+    await expect(args.onToggleAll).toHaveBeenCalledWith(true)
+    await expect(canvas.getByText('all 4 on')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Turn all off' }))
+    await expect(args.onToggleAll).toHaveBeenCalledWith(false)
+    await expect(canvas.getByText('0 of 4 on')).toBeVisible()
   },
 }
 

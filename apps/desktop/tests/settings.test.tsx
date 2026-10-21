@@ -345,6 +345,26 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-notes' }), true))
   })
 
+  it('turns every skill on at once, then every one off, and reads the store again where one isn’t kept', async () => {
+    const { client } = fakeClient({
+      listSkills: vi.fn(async () => ({
+        enabled: true,
+        catalogRevision: 'fixture-1',
+        skills: [installedSkill, { ...installedSkill, id: 'systematic-debugging', active: false }],
+      })),
+    })
+    withServices(<Settings at="skills" />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Turn all on' }))
+    expect(client.setSkillActive).toHaveBeenCalledTimes(1)
+    expect(client.setSkillActive).toHaveBeenCalledWith('systematic-debugging', true)
+    expect(screen.getByText('all 2 on')).toBeTruthy()
+    vi.mocked(client.setSkillActive).mockRejectedValueOnce(new Error('brainstorming couldn’t be turned off'))
+    await userEvent.click(screen.getByRole('button', { name: 'Turn all off' }))
+    expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false)
+    expect(client.setSkillActive).toHaveBeenCalledWith('systematic-debugging', false)
+    await waitFor(() => expect(vi.mocked(client.listSkills).mock.calls.length).toBeGreaterThan(1))
+  })
+
   it('shows a skill switched in another window, as the feed says it changed', async () => {
     const { client, emit } = fakeClient()
     withServices(<Settings at="skills" />, client)

@@ -40,6 +40,8 @@ export interface SkillListText {
   rollBack: string
   remove: string
   count: (on: number, all: number) => string
+  allOn: string
+  allOff: string
 }
 
 export const skillListText: SkillListText = {
@@ -49,6 +51,8 @@ export const skillListText: SkillListText = {
   rollBack: 'Previous version',
   remove: 'Remove',
   count: (on, all) => (on === all ? `all ${all} on` : `${on} of ${all} on`),
+  allOn: 'Turn all on',
+  allOff: 'Turn all off',
 }
 
 /** A list this long is found in by name. */
@@ -61,13 +65,17 @@ export type SkillListProps = RootProps<
     onToggle: (id: string, on: boolean) => void
     onRollBack: (id: string) => void
     onRemove: (id: string) => void
+    /** Turns every skill on, or off once every one that can be is: one with a problem is left as it is. */
+    onToggleAll?: (on: boolean) => void
     text?: Partial<SkillListText>
   }
 >
 
-/** The skills, each on or off, with where it is from; found by name where there are many. */
-export function SkillList({ skills, onToggle, onRollBack, onRemove, text, className, ...rest }: SkillListProps) {
+/** The skills, each on or off, with where it is from, and all at once; found by name where there are many. */
+export function SkillList({ skills, onToggle, onRollBack, onRemove, onToggleAll, text, className, ...rest }: SkillListProps) {
   const t = { ...skillListText, ...text }
+  const sound = skills.filter((skill) => skill.problem === undefined)
+  const allOn = sound.length > 0 && sound.every((skill) => skill.on)
   const [query, setQuery] = useState('')
   const wanted = skills.length > LONG ? query.trim().toLowerCase() : ''
   const shown = skills.filter((skill) => `${skill.id} ${skill.description ?? ''}`.toLowerCase().includes(wanted))
@@ -85,6 +93,11 @@ export function SkillList({ skills, onToggle, onRollBack, onRemove, text, classN
           />
         )}
         <span className={s.count}>{t.count(skills.filter((skill) => skill.on).length, skills.length)}</span>
+        {onToggleAll !== undefined && sound.length > 0 && (
+          <LinkButton className={s.all} onClick={() => onToggleAll(!allOn)}>
+            {allOn ? t.allOff : t.allOn}
+          </LinkButton>
+        )}
       </div>
       {shown.length === 0 && <p className={s.quiet}>{t.none}</p>}
       <ul className={s.list}>

@@ -311,7 +311,13 @@ function SkillsSection() {
           </span>
         ))}
       </div>
-      <SkillList skills={skills.rows} onToggle={skills.toggle} onRollBack={skills.rollBack} onRemove={skills.remove} />
+      <SkillList
+        skills={skills.rows}
+        onToggle={skills.toggle}
+        onToggleAll={skills.toggleAll}
+        onRollBack={skills.rollBack}
+        onRemove={skills.remove}
+      />
       {skills.catalogRevision !== null && <p className={s.quiet}>{text.skillsCatalog(skills.catalogRevision)}</p>}
     </div>
   )

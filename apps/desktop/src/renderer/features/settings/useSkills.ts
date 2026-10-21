@@ -15,7 +15,7 @@ import { text } from './text'
  * at a time, of a skill to install from GitHub or an update to one
  * installed. It says, for each card, whether installing it updates the
  * version installed or replaces one of the same name from elsewhere. A
- * switch shows at once and reads the store again if it isn't kept;
+ * switch, one or all at once, shows at once and reads the store again if it isn't kept;
  * everything else waits on the runtime and says in words what it couldn't
  * do. An update check only runs when the person asks.
  */
@@ -52,6 +52,8 @@ export interface SkillsModel {
   readonly cancel: () => void
   readonly checkUpdates: () => void
   readonly toggle: (id: string, on: boolean) => void
+  /** Turns every skill on or off at once, as the first screen asks and Settings offers; one with a problem is left as it is. */
+  readonly toggleAll: (on: boolean) => void
   readonly rollBack: (id: string) => void
   readonly remove: (id: string) => void
 }
@@ -184,6 +186,19 @@ export const useSkills = (): SkillsModel => {
       )
       client.setSkillActive(id, on).then(kept, (failure: unknown) => {
         setError(said(failure))
+        reread()
+      })
+    },
+    toggleAll: (on) => {
+      const ids = (query.data?.skills ?? []).flatMap((one) => (one.active !== on && one.problem === undefined ? [one.id] : []))
+      if (ids.length === 0) return
+      cache.setQueryData<SkillList>(keys.skills, (was) =>
+        was === undefined ? was : { ...was, skills: was.skills.map((one) => (ids.includes(one.id) ? { ...one, active: on } : one)) },
+      )
+      void Promise.allSettled(ids.map((id) => client.setSkillActive(id, on).then(kept))).then((settled) => {
+        const failed = settled.find((one) => one.status === 'rejected')
+        if (failed === undefined) return
+        setError(said(failed.reason))
         reread()
       })
     },
