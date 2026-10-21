@@ -111,7 +111,8 @@ There are two ways to screenshot this repository's interface, both headless:
 
   ```bash
   cd packages/ui && bunx storybook dev --port 6116 --ci --no-open &
-  cd apps/desktop && bunx playwright screenshot --viewport-size=900,900 --full-page \
+  cd apps/desktop
+  bunx playwright screenshot --viewport-size=900,900 --full-page \
     --wait-for-selector "#storybook-root > *" --wait-for-timeout 800 \
     "http://localhost:6116/iframe.html?id=thread-evidence--shown&viewMode=story" test-results/evidence.png
   ```
@@ -138,7 +139,13 @@ once.
 Shots go in `test-results/`, which git ignores. In an agent's sandbox on a
 Mac, Chromium and Electron can't start (Chromium exits with `SIGTRAP`), so run
 the shooting command outside the sandbox; Storybook itself runs inside it,
-since a lead may listen on localhost.
+since a lead may listen on localhost. A lead in Althar runs `bunx playwright`
+and the end-to-end run's own `node scripts/e2e.ts` (in `apps/desktop`)
+outside its sandbox from the start (the project's rules, under Sandbox), but
+only on a line of their own: change folder in a command of its own first, as
+above. Claude Code keeps a line that starts with `bun` in its sandbox
+whatever its settings say, so `bun run test:e2e` fails there: run
+`node scripts/e2e.ts e2e/your.spec.ts` from `apps/desktop` instead.
 
 ## Reviewing on Linux
 
@@ -162,8 +169,8 @@ change promises.
 
 Work on a branch and open a pull request to `main`. On a pull request:
 
-- **GitHub Actions** runs a package's workflow when its files change: `site` for `apps/site` and the UI kit it uses, `report` for `apps/report`, `ui` for `packages/ui`, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. For `ui`, `harness` and `desktop` that is the fast part only: checks and unit tests (and the Storybook build). The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
+- **GitHub Actions** runs a package's workflow when its files change: `site` for `apps/site` and the UI kit it uses, `report` for `apps/report`, `ui` for `packages/ui`, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. For `ui`, `harness` and `desktop` that is the fast part only: checks and unit tests (and the Storybook build). `desktop` runs them on Windows too, for the desktop app and every package it builds on, with one end-to-end smoke test there (`e2e/smoke.spec.ts`: the app starts and makes a project), since no one here works on Windows day to day. The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes. `windows-installer` builds the Windows installer on `windows-2025`, installs and uninstalls it, and uploads it as the artifact `desktop-windows-installer` when how the desktop app is packaged changes (`apps/desktop/scripts`, its `package.json`, its main process or `bun.lock`); run it on any branch with `gh workflow run windows-installer.yml --ref <branch>`.
 
 Merge only when every check is green.
 
-After merge, `post-merge` runs the heavy part of `ui`, `harness` and `desktop` on `main`: their checks again, the coverage gates, the Storybook build, the desktop app's end-to-end tests (with the fake agent, under a virtual display) and its Linux packages. `site`, `brand` and `report` still run in full on their own. Merges in quick succession share a run. When it fails, an issue titled "Main is red" links the run and the merges since the last green one; fix or revert, and it closes itself when `main` is green again. `main` may be red for a while; a release may not: `release` cuts only a commit `post-merge` passed on. To run the heavy suites on a branch before merging, `gh workflow run post-merge.yml --ref <branch>`.
+After merge, `post-merge` runs the heavy part of `ui`, `harness` and `desktop` on `main`: their checks again, the coverage gates, the Storybook build, the desktop app's end-to-end tests (with the fake agent, under a virtual display) and its Linux packages and Windows installer. `site`, `brand` and `report` still run in full on their own. Merges in quick succession share a run. When it fails, an issue titled "Main is red" links the run and the merges since the last green one; fix or revert, and it closes itself when `main` is green again. `main` may be red for a while; a release may not: `release` cuts only a commit `post-merge` passed on. To run the heavy suites on a branch before merging, `gh workflow run post-merge.yml --ref <branch>`.

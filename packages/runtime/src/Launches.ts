@@ -7,9 +7,10 @@ import { spawnOwned } from '@althar/provider-adapters'
 import { Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { thisDevice } from './device'
 import { RuntimeConfig } from './Config'
 import { freshCopy } from './coordinatorFolder'
+import { bringBackThen } from './bringBack'
+import { thisDevice } from './device'
 import { Instance } from './Instance'
 import { printedMore, servingAt, uncoloured } from './leftRunning'
 import { addItem, updateItem } from './threads'
@@ -17,6 +18,7 @@ import { Live } from './Live'
 import { change, fact, timestamp } from './records'
 import { shortCommand } from './rules'
 import { lineOf, type RunCommand, runOf, type Script, scriptsIn, setupIn } from './runCommand'
+import { Setups } from './Setups'
 import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
 /*
@@ -151,6 +153,8 @@ export class Launches extends Context.Service<
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
     /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
     processes(): Effect.Effect<ReadonlyArray<{ readonly pid: number; readonly projectId: string; readonly taskId: string | null }>>
+    /** Whether something runs from the task's folder, or is starting to: it stays while it does (ADR-056). */
+    using(taskId: string): Effect.Effect<boolean>
     /** What the project runs, in its order, as run for the task or the default branch: those that say how they run there. */
     runnables(projectId: string, taskId: string | null): Effect.Effect<ReadonlyArray<ShownRunnable>, unknown>
     /** Keeps how a repository runs, or, with null, goes back to working it out. Says which repository. */
@@ -185,12 +189,13 @@ export class Launches extends Context.Service<
     scripts(projectId: string): Effect.Effect<ReadonlyArray<Script & { readonly repository: string }>, unknown>
   }
 >()('@althar/runtime/Launches') {
-  static readonly layer: Layer.Layer<Launches, never, Store | ToolServer> = Layer.effect(
+  static readonly layer: Layer.Layer<Launches, never, Store | ToolServer | Setups> = Layer.effect(
     Launches,
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const instance = yield* Instance
+      const setups = yield* Setups
       const live = yield* Live
       const config = yield* RuntimeConfig
       const toolServer = yield* ToolServer
@@ -310,7 +315,10 @@ export class Launches extends Context.Service<
             const places = yield* placesOf(projectId, taskId, undefined)
             return (yield* keptOf(projectId)).flatMap((kept): ReadonlyArray<ShownRunnable> => {
               const place = places.find(({ binding }) => binding.id === kept.bindingId)
-              const run = place === undefined ? null : runOfKept(kept, place.binding, place.root)
+              // A finished task's folder that was removed says how it runs from its repository's own folder, until running
+              // brings it back (ADR-056).
+              const root = place === undefined ? null : existsSync(place.root) ? place.root : place.binding.repository
+              const run = place === undefined || root === null ? null : runOfKept(kept, place.binding, root)
               return place === undefined || run === null
                 ? []
                 : [
@@ -401,6 +409,32 @@ export class Launches extends Context.Service<
           return lock.withPermits(1)(effect)
         })
 
+      /** Tasks something is starting to run from, by how many: their folders stay while it does (ADR-056). */
+      const startingFrom = new Map<string, number>()
+      /**
+       * Runs `effect`, which starts something from the task's folder: a
+       * folder removed once it finished comes back first, and is marked as
+       * being started from before anything can remove it again, until what
+       * starts runs, or doesn't (ADR-056).
+       */
+      const fromFolder = <A, E, R>(taskId: string | null, effect: Effect.Effect<A, E, R>) =>
+        taskId === null
+          ? effect
+          : Effect.acquireUseRelease(
+              bringBackThen(
+                taskId,
+                instance.personId,
+                Effect.sync(() => void startingFrom.set(taskId, (startingFrom.get(taskId) ?? 0) + 1)),
+              ),
+              () => effect,
+              () =>
+                Effect.sync(() => {
+                  const left = (startingFrom.get(taskId) ?? 1) - 1
+                  if (left > 0) startingFrom.set(taskId, left)
+                  else startingFrom.delete(taskId)
+                }),
+            )
+
       const start = (input: {
         readonly projectId: string
         readonly taskId: string | null
@@ -412,157 +446,164 @@ export class Launches extends Context.Service<
         provide(
           onePlace(
             `${input.projectId}:${input.taskId ?? ''}`,
-            Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              const places = yield* placesOf(input.projectId, input.taskId, input.repository)
-              if (places.length === 0)
-                return yield* new LaunchRefused({
-                  why: 'elsewhere',
-                  message:
-                    input.taskId === null
-                      ? `The project has no repository on ${thisDevice()} to run.`
-                      : 'The task has no worktree here to run.',
-                })
-              const kept = yield* keptOf(input.projectId)
-              const asked = input.runnableId === undefined ? undefined : kept.find((one) => one.id === input.runnableId)
-              if (input.runnableId !== undefined && asked === undefined)
-                return yield* new LaunchRefused({ why: 'which', message: 'The project has nothing like that to run any more.' })
-              if (asked !== undefined && !places.some(({ binding }) => binding.id === asked.bindingId))
-                return yield* new LaunchRefused({
-                  why: 'elsewhere',
-                  message:
-                    input.taskId === null
-                      ? `Its repository has no copy on ${thisDevice()} to run it in.`
-                      : 'The task has no worktree of its repository here to run it in.',
-                })
-              // The one asked for, else the first of those here that says how it runs, as the place's copy is now.
-              let chosen: { readonly kept: Kept; readonly binding: Binding } | undefined
-              for (const one of asked === undefined ? kept : [asked]) {
-                const place = places.find(({ binding }) => binding.id === one.bindingId)
-                if (place !== undefined && runOfKept(one, place.binding, place.root) !== null) {
-                  chosen = { kept: one, binding: place.binding }
-                  break
-                }
-              }
-              if (chosen === undefined)
-                return yield* new LaunchRefused({
-                  why: 'unknown',
-                  message: `Althar can't tell how ${places.map(({ binding }) => binding.name).join(' or ')} runs: it has no dev, start or serve script, Procfile or Makefile target. Ask the coordinator to keep how it runs.`,
-                })
-              // A run of it already going in the same place is the one there is: two would want the same port.
-              const running = [...launches.values()].find(
-                (launch) => launch.taskId === input.taskId && launch.runnableId === chosen.kept.id && launch.ended === null,
-              )
-              if (running !== undefined) return shown(running)
-              const { binding } = chosen
-              const at =
-                input.taskId === null
-                  ? yield* runCopy(input.projectId, binding)
-                  : (places.find((place) => place.binding.id === binding.id)?.root ?? '')
-              const folder = within(binding, at)
-              const run = runOfKept(chosen.kept, binding, at)
-              if (run === null)
-                return yield* new LaunchRefused({
-                  why: 'unknown',
-                  message: `Althar can't tell how ${binding.name} runs: it has no dev, start or serve script, Procfile or Makefile target. Ask the coordinator to keep how it runs.`,
-                })
-              const line = lineOf(run)
-              const spec =
-                process.platform === 'win32'
-                  ? { command: 'cmd.exe', args: ['/d', '/s', '/c', line] }
-                  : { command: '/bin/sh', args: ['-c', line] }
-              const id = yield* newId(Ids.process)
-              // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
-              yield* sql`INSERT INTO processes ${sql.insert({
-                id,
-                projectId: input.projectId,
-                deviceId: instance.deviceId,
-                runtimeInstanceId: instance.id,
-                purpose: 'run',
-                executable: spec.command,
-                argsRedacted: JSON.stringify(spec.args),
-                controllerGeneration: 1,
-                state: 'launching',
-                launchedAt: yield* timestamp,
-              })}`
-              const scope = yield* Scope.fork(launchesScope, 'sequential')
-              const owned = yield* spawnOwned(spec, folder).pipe(
-                Scope.provide(scope),
-                Effect.tapError(() =>
-                  Effect.andThen(
-                    Scope.close(scope, Exit.void),
-                    change('processes', id, { state: 'unknown', endedAt: new Date().toISOString() }),
-                  ),
-                ),
-              )
-              yield* change('processes', id, {
-                pid: owned.pid,
-                processGroupId: owned.pid,
-                osStartedAt: owned.osStartedAt ?? null,
-                environmentDigest: owned.environmentDigest,
-                state: 'running',
-              })
-              // Where it runs, in words: what the task is, or the default branch it is a copy of.
-              const [task] = input.taskId === null ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${input.taskId}`
-              const launch: Launch = {
-                id,
-                projectId: input.projectId,
-                taskId: input.taskId,
-                runnableId: chosen.kept.id,
-                name: chosen.kept.name,
-                where: task?.title ?? binding.base ?? 'main',
-                bindingId: binding.id,
-                command: run.command,
-                startedAt: yield* timestamp,
-                scope,
-                pid: owned.pid,
-                card: null,
-                printed: '',
-                url: null,
-                ended: null,
-                stopped: false,
-              }
-              launches.set(id, launch)
-              // Its card goes in the thread it was asked for in; a run doesn't wait on its card.
-              if (input.threadId !== null)
-                launch.card = yield* addItem(
-                  { projectId: input.projectId as ProjectId, threadId: input.threadId },
-                  'run',
-                  cardOf(launch),
-                ).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not post a run’s card', cause), null)))
-              // What it prints is read as it comes, so it never waits on a full pipe.
-              yield* Effect.forkIn(
-                Effect.promise(async () => {
-                  const reader = owned.stdout.getReader()
-                  const decoder = new TextDecoder()
-                  for (;;) {
-                    const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }))
-                    if (done || value === undefined) return
-                    launch.printed = printedMore(launch.printed, decoder.decode(value, { stream: true }))
+            fromFolder(
+              input.taskId,
+              Effect.gen(function* () {
+                const sql = yield* SqlClient.SqlClient
+                // A task's folder is set up before anything runs from it, however it came back: here, or as it opened, or before (ADR-056).
+                if (input.taskId !== null) yield* setups.ready(input.taskId)
+                const places = yield* placesOf(input.projectId, input.taskId, input.repository)
+                if (places.length === 0)
+                  return yield* new LaunchRefused({
+                    why: 'elsewhere',
+                    message:
+                      input.taskId === null
+                        ? `The project has no repository on ${thisDevice()} to run.`
+                        : 'The task has no worktree here to run.',
+                  })
+                const kept = yield* keptOf(input.projectId)
+                const asked = input.runnableId === undefined ? undefined : kept.find((one) => one.id === input.runnableId)
+                if (input.runnableId !== undefined && asked === undefined)
+                  return yield* new LaunchRefused({ why: 'which', message: 'The project has nothing like that to run any more.' })
+                if (asked !== undefined && !places.some(({ binding }) => binding.id === asked.bindingId))
+                  return yield* new LaunchRefused({
+                    why: 'elsewhere',
+                    message:
+                      input.taskId === null
+                        ? `Its repository has no copy on ${thisDevice()} to run it in.`
+                        : 'The task has no worktree of its repository here to run it in.',
+                  })
+                // The one asked for, else the first of those here that says how it runs, as the place's copy is now.
+                let chosen: { readonly kept: Kept; readonly binding: Binding } | undefined
+                for (const one of asked === undefined ? kept : [asked]) {
+                  const place = places.find(({ binding }) => binding.id === one.bindingId)
+                  if (place !== undefined && runOfKept(one, place.binding, place.root) !== null) {
+                    chosen = { kept: one, binding: place.binding }
+                    break
                   }
-                }),
-                scope,
-              )
-              yield* Effect.forkIn(watchServing(launch, owned.stderrTail), scope)
-              // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
-              yield* Effect.forkIn(
-                provide(
-                  Effect.gen(function* () {
-                    const exit = yield* Deferred.await(owned.exited)
-                    if (!launches.has(id)) return
-                    const at = yield* timestamp
-                    launch.ended = { at, code: exit.code }
-                    yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
-                    yield* toldCard(launch)
-                    yield* told(input.projectId)
-                    yield* Scope.close(scope, Exit.void)
+                }
+                if (chosen === undefined)
+                  return yield* new LaunchRefused({
+                    why: 'unknown',
+                    message: `Althar can't tell how ${places.map(({ binding }) => binding.name).join(' or ')} runs: it has no dev, start or serve script, Procfile or Makefile target. Ask the coordinator to keep how it runs.`,
+                  })
+                // A run of it already going in the same place is the one there is: two would want the same port.
+                const running = [...launches.values()].find(
+                  (launch) => launch.taskId === input.taskId && launch.runnableId === chosen.kept.id && launch.ended === null,
+                )
+                if (running !== undefined) return shown(running)
+                const { binding } = chosen
+                const at =
+                  input.taskId === null
+                    ? yield* runCopy(input.projectId, binding)
+                    : (places.find((place) => place.binding.id === binding.id)?.root ?? '')
+                const folder = within(binding, at)
+                const run = runOfKept(chosen.kept, binding, at)
+                if (run === null)
+                  return yield* new LaunchRefused({
+                    why: 'unknown',
+                    message: `Althar can't tell how ${binding.name} runs: it has no dev, start or serve script, Procfile or Makefile target. Ask the coordinator to keep how it runs.`,
+                  })
+                const line = lineOf(run)
+                const spec =
+                  process.platform === 'win32'
+                    ? // The line as it is: cmd.exe takes off the outer quotes (/s).
+                      { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true as const }
+                    : { command: '/bin/sh', args: ['-c', line] }
+                const id = yield* newId(Ids.process)
+                // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
+                yield* sql`INSERT INTO processes ${sql.insert({
+                  id,
+                  projectId: input.projectId,
+                  deviceId: instance.deviceId,
+                  runtimeInstanceId: instance.id,
+                  purpose: 'run',
+                  executable: spec.command,
+                  argsRedacted: JSON.stringify(spec.args),
+                  controllerGeneration: 1,
+                  state: 'launching',
+                  launchedAt: yield* timestamp,
+                })}`
+                const scope = yield* Scope.fork(launchesScope, 'sequential')
+                const owned = yield* spawnOwned(spec, folder).pipe(
+                  Scope.provide(scope),
+                  Effect.tapError(() =>
+                    Effect.andThen(
+                      Scope.close(scope, Exit.void),
+                      change('processes', id, { state: 'unknown', endedAt: new Date().toISOString() }),
+                    ),
+                  ),
+                )
+                yield* change('processes', id, {
+                  pid: owned.pid,
+                  processGroupId: owned.pid,
+                  osStartedAt: owned.osStartedAt ?? null,
+                  environmentDigest: owned.environmentDigest,
+                  state: 'running',
+                })
+                // Where it runs, in words: what the task is, or the default branch it is a copy of.
+                const [task] =
+                  input.taskId === null ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${input.taskId}`
+                const launch: Launch = {
+                  id,
+                  projectId: input.projectId,
+                  taskId: input.taskId,
+                  runnableId: chosen.kept.id,
+                  name: chosen.kept.name,
+                  where: task?.title ?? binding.base ?? 'main',
+                  bindingId: binding.id,
+                  command: run.command,
+                  startedAt: yield* timestamp,
+                  scope,
+                  pid: owned.pid,
+                  card: null,
+                  printed: '',
+                  url: null,
+                  ended: null,
+                  stopped: false,
+                }
+                launches.set(id, launch)
+                // Its card goes in the thread it was asked for in; a run doesn't wait on its card.
+                if (input.threadId !== null)
+                  launch.card = yield* addItem(
+                    { projectId: input.projectId as ProjectId, threadId: input.threadId },
+                    'run',
+                    cardOf(launch),
+                  ).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not post a run’s card', cause), null)))
+                // What it prints is read as it comes, so it never waits on a full pipe.
+                yield* Effect.forkIn(
+                  Effect.promise(async () => {
+                    const reader = owned.stdout.getReader()
+                    const decoder = new TextDecoder()
+                    for (;;) {
+                      const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }))
+                      if (done || value === undefined) return
+                      launch.printed = printedMore(launch.printed, decoder.decode(value, { stream: true }))
+                    }
                   }),
-                ),
-                launchesScope,
-              )
-              yield* told(input.projectId)
-              return shown(launch)
-            }),
+                  scope,
+                )
+                yield* Effect.forkIn(watchServing(launch, owned.stderrTail), scope)
+                // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
+                yield* Effect.forkIn(
+                  provide(
+                    Effect.gen(function* () {
+                      const exit = yield* Deferred.await(owned.exited)
+                      if (!launches.has(id)) return
+                      const at = yield* timestamp
+                      launch.ended = { at, code: exit.code }
+                      yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
+                      yield* toldCard(launch)
+                      yield* told(input.projectId)
+                      yield* Scope.close(scope, Exit.void)
+                    }),
+                  ),
+                  launchesScope,
+                )
+                yield* told(input.projectId)
+                return shown(launch)
+              }),
+            ),
           ),
         )
 
@@ -998,6 +1039,10 @@ export class Launches extends Context.Service<
             [...launches.values()].flatMap((launch) =>
               launch.ended === null ? [{ pid: launch.pid, projectId: launch.projectId, taskId: launch.taskId }] : [],
             ),
+          ),
+        using: (taskId) =>
+          Effect.sync(
+            () => startingFrom.has(taskId) || [...launches.values()].some((launch) => launch.ended === null && launch.taskId === taskId),
           ),
         runnables,
         keep,

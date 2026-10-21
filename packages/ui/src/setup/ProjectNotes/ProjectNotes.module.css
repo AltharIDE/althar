@@ -1,50 +1,52 @@
-/* What they are, then a card each, as many across as the width holds. */
+/* The notes, a card each, as many across as the width holds, each as tall as its words. */
 .notes {
   display: grid;
   gap: 12px;
 }
-.line {
+.none {
   margin: 0;
   outline: none;
   font-size: 12.5px;
   line-height: 1.5;
-  color: var(--t-2);
+  color: var(--t-3);
 }
 
 .list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
-  gap: 12px;
+  columns: 280px;
+  column-gap: 12px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* a note: its mark, what was decided set to be read, who kept it and when at its foot, its × in the corner */
+/* a note: what was decided, set to be read; who kept it and when at its foot, with its pencil and × */
 .note {
-  position: relative;
   display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
-  padding: 14px 16px 12px;
+  margin-bottom: 12px;
+  padding: 14px 12px 8px 16px;
   border-radius: 10px;
   background: var(--paper);
   box-shadow:
     inset 0 0 0 1px var(--line-2),
     var(--lift);
+  break-inside: avoid;
 }
-.mark {
-  color: var(--t-3);
-}
-.body {
-  margin: 0;
-  padding-right: 18px;
+.note .body {
+  padding-right: 4px;
   font-size: 13.5px;
   line-height: 1.5;
   color: var(--t-1);
   overflow-wrap: anywhere;
   text-wrap: pretty;
+}
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
 }
 .kept {
   margin: 0;
@@ -52,25 +54,49 @@
   color: var(--t-3);
 }
 
-/* The ×, quiet until its card is pointed at or has focus. */
-.remove {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+/* The pencil and the ×, quiet until their card is pointed at or has focus. */
+.actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
   color: var(--t-3);
-  opacity: 0.4;
+  opacity: 0.45;
   transition: opacity var(--fast) var(--ease);
 }
-.note:hover .remove,
-.note:focus-within .remove {
+.note:hover .actions,
+.note:focus-within .actions {
   opacity: 1;
 }
-.remove:hover {
-  color: var(--t-1);
+
+/* changing one, where it is */
+.editor {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+.field {
+  min-height: 0;
+  resize: none;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.editorFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.left {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.buttons {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .remove {
+  .actions {
     transition: none;
   }
 }

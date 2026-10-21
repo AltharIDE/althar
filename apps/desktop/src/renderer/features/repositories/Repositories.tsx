@@ -22,7 +22,6 @@ import type { RepositoriesModel } from './useRepositories'
 export const text = {
   /** The project, where its name isn't known. */
   project: 'The project',
-  note: `Its folders on ${device.this}, and where each one’s work goes.`,
   /** The kit's words for this computer. */
   map: {
     here: `On ${device.this}`,
@@ -141,7 +140,6 @@ export function Repositories({
       }}
       {...(model.error === null ? {} : { error: model.error })}
       headingLevel={HEADING.part}
-      text={{ note: text.note }}
       mapText={text.map}
     />
   )

@@ -70,7 +70,7 @@ const POSIX = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh'])
  * sh. On Windows, cmd.
  */
 export const shellFor = (line: string, platform: NodeJS.Platform, shell: string | undefined): LaunchSpec => {
-  if (platform === 'win32') return { command: 'cmd.exe', args: ['/d', '/s', '/c', `(${line}) 2>&1`] }
+  if (platform === 'win32') return { command: 'cmd.exe', args: ['/d', '/s', '/c', `"(${line}) 2>&1"`], verbatim: true }
   const own = shell !== undefined && isAbsolute(shell) && POSIX.has(basename(shell)) ? shell : undefined
   return { command: own ?? (platform === 'darwin' ? '/bin/zsh' : '/bin/sh'), args: ['-i', '-l', '-c', `exec 2>&1\n(\n${line}\n)`] }
 }
@@ -278,13 +278,13 @@ export class Setups extends Context.Service<
             provide(
               Effect.gen(function* () {
                 const sql = yield* SqlClient.SqlClient
-                // Not for an abandoned task, or one whose project was removed.
+                // Not for an abandoned task, but one whose folder came back once it was removed (ADR-056); nor one whose project was removed.
                 const [unset] = yield* sql<Unset>`
                   SELECT w.id, w.project_id, t.id AS thread_id, w.path AS worktree, b.folder AS within, b.display_name AS name,
                     b.run_setup AS kept
                   FROM workspaces w
                   JOIN repository_bindings b ON b.id = w.binding_id
-                  JOIN tasks k ON k.id = w.task_id AND k.state <> 'abandoned'
+                  JOIN tasks k ON k.id = w.task_id AND (k.state <> 'abandoned' OR w.cleaned_at IS NOT NULL)
                   JOIN projects p ON p.id = w.project_id AND p.archived_at IS NULL
                   JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
                   WHERE w.id = ${workspaceId} AND w.state = 'ready' AND w.access = 'write' AND w.setup IS NULL`

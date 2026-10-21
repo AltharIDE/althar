@@ -184,6 +184,8 @@ export interface AccountSignInProps {
   ways: AccountSignInWays
   /** Who the browser may still be signed in as, when adding one: said once, under the ways. */
   holds?: string
+  /** What the agent's maker puts on signing in from another app, said under the ways before one is picked. */
+  caution?: string
   /** Goes one way in. */
   onWay: (way: SignInWay) => void
   /** Opens the code's page, or the terminal sign-in again. */
@@ -334,6 +336,7 @@ function Under({
   ways,
   account,
   holds,
+  caution,
   onWay,
   onOpen,
   onCheck,
@@ -379,6 +382,7 @@ function Under({
             ))}
           </div>
           {holds && !account && <p className={s.hint}>{t.holds(holds)}</p>}
+          {caution && <p className={s.hint}>{caution}</p>}
         </div>
       )
     }

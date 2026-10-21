@@ -189,6 +189,41 @@ describe('a plain task', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('tells a lead whose turn on a follow-up did nothing to carry on with what it was asked, and asks no report of it', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const tasks = yield* Tasks
+      const place = yield* opened
+      const task = yield* started(place, 'Check the partners', 'Look. [lead:finish] [lead:terse]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      // Finished, it waits for the person to settle it (ADR-051): they do, once it can be.
+      const markDone = Effect.flatMap(Runtime.envelope('task.mark_done', { taskId: task.id }), (envelope) =>
+        Effect.map(tasks.markDone({ envelope, taskId: task.id }), (done) => [done]),
+      )
+      const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
+      yield* until(markDone, ([done]) => done === true)
+      yield* until(state, (rows) => rows[0]?.state === 'done')
+      // A question, whose first turn does nothing: told to carry on, the lead answers it, and the task waits in Needs you again, to be settled.
+      yield* say(task.threadId, 'And the v2 ones?')
+      const [told] = yield* until(
+        sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual(told?.body, 'Your last turn ended before you could do anything. Carry on with what you were last asked.')
+      yield* until(
+        sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
+        (rows) => (rows[0]?.n ?? 0) === 1,
+        Duration.seconds(20),
+      )
+      yield* until(markDone, ([done]) => done === true)
+      yield* until(state, (rows) => rows[0]?.state === 'done')
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { blank: [2] }, { idle: { blank: Duration.millis(100) } }))),
+      ),
+    ),
+  )
+
   it.live('stays plain for what its lead throws away and the pictures it hands back', () =>
     Effect.gen(function* () {
       const place = yield* opened
@@ -281,7 +316,7 @@ describe('a plain task', () => {
   )
 
   it.live(
-    'done, goes back to work as a follow-up in the same folder: one that writes nothing has no branch, one that writes has one, and both stay plain',
+    'done, goes back to work as a follow-up in the same folder, and waits in Needs you after: one that writes nothing has no branch, one that writes has one, and both stay plain',
     () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -290,17 +325,18 @@ describe('a plain task', () => {
         const place = yield* opened
         const task = yield* started(place, 'Check the partners', 'Look. [lead:finish] [lead:terse]')
         yield* cardOnce(task.id, (one) => one.phase === 'ready')
-        yield* tasks.see({ taskId: task.id, finished: true })
+        assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
         const state = Effect.map(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`, (rows) => rows)
         yield* until(state, (rows) => rows[0]?.state === 'done')
-        // A question: the follow-up changes nothing, and it is done again, still with no branch.
+        // A question: the follow-up changes nothing, and it waits in Needs you, not settled again, still with no branch.
         yield* say(task.threadId, 'And the v2 ones?')
         yield* until(
           sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL AND state <> 'running'`,
           (rows) => (rows[0]?.n ?? 0) === 1,
           Duration.seconds(20),
         )
-        yield* until(state, (rows) => rows[0]?.state === 'done')
+        assert.strictEqual((yield* state)[0]?.state, 'open')
+        assert.strictEqual((yield* cardOnce(task.id, (one) => one.phase === 'ready')).kind, 'plain')
         assert.isNull((yield* worktreeOf(task.id)).branchedAt)
         // Asked to write: as its turn ends, its branch is made with what it wrote, and it is open again.
         yield* say(task.threadId, 'Write it down. [lead:write]')
@@ -333,7 +369,7 @@ describe('a plain task', () => {
         const worktree = yield* worktreeOf(task.id)
         assert.isNotNull(worktree.branchedAt)
         assert.deepStrictEqual([card.kind, card.change, card.branch], ['plain', null, worktree.branch])
-        assert.deepStrictEqual([...(yield* (yield* Queries).finished)], [task.id])
+        assert.deepStrictEqual([...(yield* (yield* Queries).kept)], [])
         // Nothing went to the host: no push, no pull request, and nothing in its thread says it ends on its branch.
         assert.lengthOf(github.changes, 0)
         assert.isNull(gitIn(bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${worktree.branch}`))
@@ -341,8 +377,9 @@ describe('a plain task', () => {
         const sql = yield* SqlClient.SqlClient
         const [plan] = yield* sql<{ parameters: string }>`SELECT parameters FROM task_plans WHERE task_id = ${task.id}`
         assert.include(plan?.parameters, '"here":true')
-        // Seen, it is done, its branch kept.
-        yield* (yield* Tasks).see({ taskId: task.id, finished: true })
+        // Marked done, it settles, its branch kept.
+        const tasks = yield* Tasks
+        assert.isTrue(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
         assert.deepInclude(yield* cardOnce(task.id, (one) => one.phase === 'settled'), { kind: 'plain', branch: worktree.branch })
         // Asked for more, it commits again in a round of its own, Finished again: nothing offers a pull request for it.
         yield* say(task.threadId, 'One more thing. [lead:commit] [lead:finish]')
@@ -369,7 +406,8 @@ describe('a plain task', () => {
       for (const task of [quiet, wrote]) {
         yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { task }), taskId: task.id })
         const worktree = yield* worktreeOf(task.id)
-        rmSync(worktree.path, { recursive: true, force: true })
+        // Again a moment later where Windows won't yet, while its lead's process, which worked in it, is still going.
+        rmSync(worktree.path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
         yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', { task }), taskId: task.id })
       }
       const plain = yield* worktreeOf(quiet.id)
@@ -674,6 +712,13 @@ describe('making a quick task a change', () => {
       yield* say(task.threadId, 'I really like it: can we make it a real thing? [lead:make-change] [lead:finish]')
       const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
       assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'implement', 'review', 'publish'])
+      // Its thread says when it became a change, between what the quick task showed and what the change did, and the
+      // description its lead wrote for the pull request, which its Outputs says it is with.
+      const read = yield* (yield* Queries).thread(task.threadId)
+      const [quick, made] = read.items.flatMap((item) => (item.kind === 'step_result' && item.content.step === 'implement' ? [item] : []))
+      const at = read.task.madeChangeAt ?? ''
+      assert.isTrue(quick !== undefined && made !== undefined && quick.createdAt <= at && at <= made.createdAt, at)
+      assert.isAbove(Object.values(made?.content.descriptions ?? {}).join('').length, 0)
       // Renamed for what it does, with its review and its ending in its plan, and nothing of staying here.
       assert.strictEqual(card.title, 'Make the sketch real')
       assert.deepStrictEqual(
@@ -793,8 +838,8 @@ describe('making a quick task a change', () => {
       assert.notInclude(said.map((notice) => notice.title).join('\n'), `stays on ${thisDevice()}`)
       const [branched] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(branched?.payload ?? '{}'), { from: null, to: worktree.branch, made: true })
-      // A change now, it isn't settled by being seen.
-      yield* tasks.see({ taskId: task.id, finished: true })
+      // A change now, Done doesn't settle it: it waits to be accepted.
+      assert.isFalse(yield* tasks.markDone({ envelope: yield* Runtime.envelope('task.mark_done', { taskId: task.id }), taskId: task.id }))
       const [still] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`
       assert.strictEqual(still?.state, 'open')
     }).pipe(Effect.provide(withQueries())),
@@ -827,6 +872,16 @@ describe('making a quick task a change', () => {
         SELECT g.graph FROM execution_graph_revisions g JOIN workflow_executions e ON e.id = g.execution_id
         JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND g.cause = 'patch'`
       assert.include(patched?.graph, '"review"')
+      // Its graph says the change came, and that it put the review in: the work was the quick task's own.
+      const [round] = (yield* (yield* Queries).thread(task.threadId)).task.graph ?? []
+      assert.isNotNull(round?.changedAt)
+      assert.deepStrictEqual(
+        round?.steps.map((step) => [step.key, step.state, step.added]),
+        [
+          ['implement', 'done', false],
+          ['review', 'done', true],
+        ],
+      )
       // With no host Althar knows, it ends on its branch, and says so.
       const said = (yield* notices(task.threadId)).map((notice) => notice.title)
       assert.include(

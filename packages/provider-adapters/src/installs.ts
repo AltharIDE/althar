@@ -1,6 +1,6 @@
 import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join, win32 } from 'node:path'
+import { delimiter, dirname, isAbsolute, posix, win32 } from 'node:path'
 
 import type { AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
 
@@ -25,17 +25,22 @@ export const usualDirs = (
     return [
       at(home, '.local', 'bin'),
       at(home, '.opencode', 'bin'),
+      at(home, '.grok', 'bin'),
+      at(home, '.kimi-code', 'bin'),
       at(home, '.bun', 'bin'),
       at(home, 'scoop', 'shims'),
       ...(env.APPDATA === undefined ? [] : [at(env.APPDATA, 'npm')]),
     ]
   }
+  const at = (...parts: ReadonlyArray<string>) => posix.join(...parts)
   return [
     ...(platform === 'darwin' ? ['/opt/homebrew/bin'] : ['/home/linuxbrew/.linuxbrew/bin']),
     '/usr/local/bin',
-    join(home, '.local', 'bin'),
-    join(home, '.opencode', 'bin'),
-    join(home, '.bun', 'bin'),
+    at(home, '.local', 'bin'),
+    at(home, '.opencode', 'bin'),
+    at(home, '.grok', 'bin'),
+    at(home, '.kimi-code', 'bin'),
+    at(home, '.bun', 'bin'),
   ]
 }
 
@@ -108,11 +113,11 @@ export const locate = (
   const env = options.env ?? process.env
   const isExecutable = options.isExecutable ?? executable
   const names = namesOf(command, platform, env, options.scripts === true)
-  const separator = platform === 'win32' ? ';' : delimiter
-  const at = (dir: string, name: string) => (platform === 'win32' ? win32.join(dir, name) : join(dir, name))
+  // Each system's own: the one asked about, not necessarily this one.
+  const paths = platform === 'win32' ? win32 : posix
   const inDirs = (dirs: ReadonlyArray<string>) =>
-    dirs.flatMap((dir) => (dir === '' ? [] : names.map((name) => at(dir, name)))).find(isExecutable)
-  const onPath = inDirs((env.PATH ?? env.Path ?? '').split(separator))
+    dirs.flatMap((dir) => (dir === '' ? [] : names.map((name) => paths.join(dir, name)))).find(isExecutable)
+  const onPath = inDirs((env.PATH ?? env.Path ?? '').split(paths.delimiter))
   if (onPath !== undefined) return { command: platform === 'win32' ? onPath : command, whose: 'theirs' }
   const usual = inDirs(options.dirs ?? usualDirs(platform, homedir(), env))
   if (usual !== undefined) return { command: usual, whose: 'theirs' }
@@ -162,7 +167,17 @@ export const usingLocated = (
       const spec = make(...args)
       const found = spec.command === cli.name ? find() : null
       if (found === null) return spec
-      const named = { ...spec, command: found.command }
+      // An npm-installed Node script found off the PATH finds the Node beside it, as it would in the terminal that installed it.
+      const path =
+        cli.node === true && found.whose === 'theirs' && isAbsolute(found.command)
+          ? {
+              env: {
+                ...spec.env,
+                PATH: [dirname(found.command), process.env.PATH].filter((part) => part !== undefined && part !== '').join(delimiter),
+              },
+            }
+          : {}
+      const named = { ...spec, command: found.command, ...path }
       return found.out === undefined ? named : { ...named, onDevice: found.out(named) }
     }
   const { signIn } = definition
@@ -177,7 +192,7 @@ export const usingLocated = (
           ? signIn.login
           : `${inATerminal(found, flatpakId)}${signIn.login.slice(cli.name.length)}`
       },
-      status: pointed(signIn.status),
+      ...(signIn.status === undefined ? {} : { status: pointed(signIn.status) }),
       ...(signIn.inApp === undefined ? {} : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
       ...(signIn.logout === undefined ? {} : { logout: { ...signIn.logout, run: pointed(signIn.logout.run) } }),
     },

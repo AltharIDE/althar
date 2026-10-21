@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-import type { AgentStatus, AttentionRequest, LimitCall as Limit } from '@althar/contracts'
+import type { AgentStatus, AttentionRequest, HeldForLimit, LimitCall as Limit, StuckStep } from '@althar/contracts'
 import { RateLimit, type RateLimitOption } from '@althar/ui'
 
 import type { StuckAnswer } from '../../data/client'
@@ -9,24 +9,67 @@ import { useServices } from '../../data/services'
 import { type NameModel, useModelNames } from '../../shared/modelNames'
 import { viaOf } from '../../shared/models'
 import { clock } from '../../shared/time'
+import { text as stuckText } from './StuckCall'
 
 /*
  * A step a usage limit stopped, where the project asks or the agent didn't
- * say when it resets (ADR-013): whose limit and until when, the models that
- * could take the step over, and waiting for the reset, or trying the agent
- * again where the reset isn't known. The runtime names every account that
- * could, as they stood; which are free is read here, from the accounts as
- * they stand now, read again as the call shows, since the window otherwise
- * keeps what it first read of them. One out of usage is marked, and one
- * signed out isn't offered.
+ * say when it resets (ADR-013): whose limit, on which step, and until when,
+ * the models that could take the step over, and waiting for the reset, or
+ * trying the agent again where the reset isn't known; a review can be
+ * skipped. A step held for the reset on its own, as the project waits or
+ * nothing else was free, offers the same as a way on rather than an ask
+ * (`HeldLimit`). The runtime names every account that could, as they stood;
+ * which are free is read here, from the accounts as they stand now, read
+ * again as the call shows, since the window otherwise keeps what it first
+ * read of them. One out of usage is marked, and one signed out isn't offered.
  */
 
+type Step = StuckStep['step']
+
+/** The step a usage limit stopped, in a sentence: while it was at it, and the work that waits, which may be plural. */
+const stepWords: Readonly<Record<Step, { readonly during: string; readonly work: string; readonly plural?: true }>> = {
+  implement: { during: ' while working on the task', work: 'the work' },
+  settle: { during: ' while fixing what the review found', work: 'the fixes', plural: true },
+  review: { during: ' during the review', work: 'the review' },
+  publish: { during: '', work: 'the step' },
+}
+
+const capital = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
+
+/** The step's work with its verb agreeing: "the review waits", "the fixes wait". */
+const workThat = (step: Step, one: string, many: string) => `${stepWords[step].work} ${stepWords[step].plural === true ? many : one}`
+
 export const limitText = {
-  /** Whose limit, and until when; the same words wherever the call shows. */
-  what: (agent: string, resets: string | null) =>
-    resets === null
-      ? `${agent} reached its usage limit and didn't say when it resets.`
-      : `${agent} reached its usage limit, until ${resets}.`,
+  /** The call: whose limit, on which step, until when, and the ways on; the same words wherever the call shows. */
+  what: (agent: string, resets: string | null, step: Step = 'publish') => {
+    const { during } = stepWords[step]
+    const ways = (first: string, second: string) =>
+      step === 'review' ? `${first}, ${second}, or skip the review.` : `${first}, or ${second}.`
+    return resets === null
+      ? `${agent} ran out of usage${during} and didn't say when it's back. ${ways('Pick another model to carry on', `try ${agent} again`)}`
+      : `${agent} ran out of usage${during}. It's back at ${resets}. ${ways('Pick another model to carry on now', 'wait until then')}`
+  },
+  /** Held for the reset on its own: whose limit, on which step, why it waits rather than moving on, until when, and that it can move now. */
+  held: (agent: string, at: string, step: Step, why: HeldForLimit['why']) => {
+    const { during } = stepWords[step]
+    const waits = workThat(step, 'waits', 'wait')
+    const now = step === 'review' ? 'To carry on now, pick another model, or skip the review.' : 'To carry on now, pick another model.'
+    const out = `${agent} ran out of usage${during}.`
+    switch (why) {
+      case 'nothing_free':
+        return `${out} No other model was free, so ${waits} until ${at}, when it's back. ${now}`
+      case 'waits':
+        return `${out} This project waits for usage to reset, so ${waits} until ${at}. ${now}`
+      case 'asked':
+        return `${out} ${capital(waits)} until ${at}, as you said. ${now}`
+      default:
+        return `${out} ${capital(waits)} until ${at}, when it's back. ${now}`
+    }
+  },
+  /** Kept waiting from the card: it folds, and the step runs again at the reset. */
+  waitingNote: (step: Step) => `${workThat(step, 'runs', 'run')} again then`,
+  /** Moved to another model from the card: the step carries on with it. */
+  movedNote: (step: Step) => `${workThat(step, 'carries', 'carry')} on there`,
   out: (at: string) => `out until ${at}`,
   perUse: 'paid per use',
 }
@@ -71,28 +114,11 @@ export const limitOptionsOf = (
     ]
   })
 
-export function LimitCall({
-  request,
-  step,
-  agentId,
-  limit,
-  agents,
-  agentName,
-  onAnswer,
-}: {
-  request: AttentionRequest
-  /** The step it stopped, as its call names it. */
-  step: string
-  /** The agent whose account reached the limit. */
-  agentId: string | null
-  limit: Limit
-  agents: ReadonlyArray<AgentStatus>
-  agentName: (id: string | null) => string
-  onAnswer: (attentionId: string, answer: StuckAnswer) => void
-}) {
+/** Reads the accounts again as a card about a limit shows, and once the soonest of those out is back, so it can be picked. */
+const useFreshOptions = (limit: Limit, agents: ReadonlyArray<AgentStatus>, shown: string) => {
   const { cache } = useServices()
   // The accounts as they are now: one may have run out since the window read them, the one this call is about included.
-  useEffect(() => void cache.invalidateQueries({ queryKey: keys.status }), [cache, request.id])
+  useEffect(() => void cache.invalidateQueries({ queryKey: keys.status }), [cache, shown])
   const named = useModelNames()
   const options = limitOptionsOf(limit, agents, named)
   // One out of usage is back at its reset: read them again then, a second after, so it can be picked.
@@ -110,29 +136,119 @@ export function LimitCall({
     )
     return () => clearTimeout(timer)
   }, [cache, back])
+  return options
+}
+
+/** The account a choice picked would hand the step to, as the runtime takes it. */
+const handedTo = (picked: Limit['choices'][number]) => ({
+  agentId: picked.agentId,
+  accountId: picked.accountId,
+  ...(picked.model === null ? {} : { model: picked.model }),
+})
+
+export function LimitCall({
+  request,
+  step,
+  agentId,
+  limit,
+  agents,
+  agentName,
+  onAnswer,
+}: {
+  request: AttentionRequest
+  /** The step it stopped. */
+  step: Step
+  /** The agent whose account reached the limit. */
+  agentId: string | null
+  limit: Limit
+  agents: ReadonlyArray<AgentStatus>
+  agentName: (id: string | null) => string
+  onAnswer: (attentionId: string, answer: StuckAnswer) => void
+}) {
+  const options = useFreshOptions(limit, agents, request.id)
   const resets = limit.resetsAt === null ? null : clock(limit.resetsAt)
   return (
     <RateLimit
       runtime={limitedOf(agents, agentName(agentId) || 'The agent', limit.accountId)}
       resets={resets}
-      step={step}
-      text={{ what: limitText.what }}
+      step={stuckText.step[step]}
+      text={{ what: (runtime, at) => limitText.what(runtime, at, step) }}
       options={options}
       onSwap={(id) => {
         const picked = options.find((option) => option.id === id)?.choice
         if (picked === undefined) return
-        onAnswer(request.id, {
-          kind: 'retry',
-          agentId: picked.agentId,
-          accountId: picked.accountId,
-          ...(picked.model === null ? {} : { model: picked.model }),
-        })
+        onAnswer(request.id, { kind: 'retry', ...handedTo(picked) })
       }}
       {...(resets === null
         ? agentId === null
           ? {}
           : { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId }) }
         : { onWait: () => onAnswer(request.id, { kind: 'wait' }) })}
+      // A review can be gone on without, as any stuck review can.
+      {...(step === 'review' ? { onSkip: () => onAnswer(request.id, { kind: 'abandon' }) } : {})}
+    />
+  )
+}
+
+/**
+ * Who could take over a held step, where its hold didn't keep them, as one
+ * held before Althar kept those: every account of every agent but the one
+ * out, on its own model.
+ */
+const choicesOf = (waits: HeldForLimit, agents: ReadonlyArray<AgentStatus>): Limit['choices'] =>
+  waits.choices ??
+  agents.flatMap((agent) =>
+    agent.accounts
+      .filter((account) => account.id !== waits.accountId && !(waits.accountId == null && agent.id === waits.agentId))
+      .map((account) => ({ agentId: agent.id, accountId: account.id, model: null })),
+  )
+
+/**
+ * A step held for a usage limit, waiting for the reset on its own: whose
+ * limit, on which step, why it waits and until when, and, since nothing
+ * waits on the person, in ink, the models that could carry it on now, keeping
+ * it waiting, and, for a review, skipping it. Kept waiting, it folds.
+ */
+export function HeldLimit({
+  waits,
+  step,
+  agents,
+  agentName,
+  onHandOver,
+  onSkip,
+}: {
+  waits: HeldForLimit
+  /** The step held. */
+  step: Step
+  agents: ReadonlyArray<AgentStatus>
+  agentName: (id: string | null) => string
+  /** Hands the step to the agent, account and model picked. */
+  onHandOver: (to: ReturnType<typeof handedTo>) => void
+  /** Goes on without the review. Only for a review. */
+  onSkip?: () => void
+}) {
+  const limit: Limit = { accountId: waits.accountId ?? null, resetsAt: waits.until, choices: choicesOf(waits, agents) }
+  const options = useFreshOptions(limit, agents, `${waits.agentId}:${waits.until}`)
+  const at = clock(waits.until)
+  return (
+    <RateLimit
+      held
+      runtime={limitedOf(agents, agentName(waits.agentId) || 'The agent', limit.accountId)}
+      resets={at}
+      step={stuckText.step[step]}
+      text={{
+        what: (runtime) => limitText.held(runtime, at, step, waits.why),
+        waitingNote: limitText.waitingNote(step),
+        movedNote: limitText.movedNote(step),
+      }}
+      options={options}
+      onSwap={(id) => {
+        const picked = options.find((option) => option.id === id)?.choice
+        if (picked !== undefined) onHandOver(handedTo(picked))
+      }}
+      // It waits already: keeping it so only folds the card.
+      onWait={() => {}}
+      {...(step === 'review' && onSkip !== undefined ? { onSkip } : {})}
     />
   )
 }

@@ -26,7 +26,7 @@ export interface Asset {
   browser_download_url: string
 }
 
-/** Each system's installer among a release's files, and the chips it runs on. Windows is x64 when it comes, which Windows on ARM runs emulated. */
+/** Each system's installer among a release's files, and the chips it runs on. Windows is x64, which Windows on ARM runs emulated. */
 const BUILDS: Record<Os, { file: RegExp; chips: readonly Exclude<Arch, null>[] }> = {
   mac: { file: /\.dmg$/, chips: ['arm'] },
   linux: { file: /\.AppImage$/, chips: ['x86'] },

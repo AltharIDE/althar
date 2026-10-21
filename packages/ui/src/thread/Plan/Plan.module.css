@@ -44,7 +44,7 @@
   box-shadow: inset 0 0 0 1.3px var(--n-5);
 }
 .done .mark {
-  background: var(--t-1);
+  background: var(--ink-fill);
   box-shadow: none;
   color: var(--on-ink);
 }

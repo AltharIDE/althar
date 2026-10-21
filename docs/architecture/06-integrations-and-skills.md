@@ -366,11 +366,12 @@ own, switched by "Resolve conflicts automatically" in its settings. Off, a confl
 for the person, as above.
 
 - **A task can say otherwise.** Its ⋯ menu offers "Resolve conflicts
-  automatically": use the project setting, on for this task, or off for it. It is
-  kept on the task; where it differs from the project's, a quiet word beside
-  the menu says so, and otherwise nothing shows. Each conflict found goes by
-  what the task and its project say then, and the lead's brief by what they
-  said as it started.
+  automatically" as three choices side by side, changed in place: as the
+  project (on or off), on for this task, or off for it. It is kept on the
+  task; where it differs from the project's, a dot on the menu's button says
+  so, and its tooltip how, and otherwise nothing shows. Each conflict found
+  goes by what the task and its project say then, and the lead's brief by
+  what they said as it started.
 - **Turned on, it acts at once.** The project's switch going on, or a task's
   menu where the task wasn't resolving its conflicts, has Althar look at
   each open task with a branch here, rather than waiting for a new
@@ -491,6 +492,18 @@ now. Nothing reaches the tracker on its word:
   goes there (a container), its title, body and labels. The person files it,
   changes it first, or discards it. There is no countdown: a draft left
   alone files nothing.
+- **A task's lead can draft too**, with `draft_issue`, and look for what is
+  tracked already with `find_issues`: a bug or follow-up it comes across, or
+  several the person asks it to file. The card is in the task's thread, and
+  the task stands in Needs you while any wait (as a call does, though no
+  `attention_requests` row stands for it); a task with several offers File
+  all. Unnamed, a lead's draft goes beside the issue its task came from,
+  then where the project's issues come from. Once the person files or
+  discards one, the lead is told in its thread, with the key and link, as
+  the coordinator hears it as news (a lead's drafts aren't the
+  coordinator's news). Leads never file on their own: that is the one flag
+  `leadsNeedTheCard` in `IssueDrafts.ts`. A review's lead has no such tool,
+  and a reviewer only reads.
 - **Where it goes** is what the coordinator names, a tracker by its name and
   a container by its id, key or name; or, without them, where the project's
   issues already come from (the newest issue a task came from, or a draft

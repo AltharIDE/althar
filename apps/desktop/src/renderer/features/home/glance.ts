@@ -41,14 +41,14 @@ export const homeGlanceOf = (
 ): HomeGlance => {
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
-  // In progress is every task not ready to accept; a plain task that finished waits on its board, not here.
+  // In progress is every task not ready for the person; one kept for later waits on its board, not here.
   const ready = readyOf(tasks)
   // A task that waits on several calls is one thing to answer, as on its board (`standingCalls`).
   const standing = standingCalls(tasks, home?.calls ?? [])
   const calls = standing.filter((call) => !answered.some((one) => one.call.id === call.id))
   // What has a card above isn't listed again under it.
   const carded = new Set(calls.map((call) => call.threadId))
-  const working = tasks.filter((task) => task.phase !== 'ready' && !carded.has(task.threadId))
+  const working = tasks.filter((task) => task.phase !== 'ready' && task.phase !== 'kept' && !carded.has(task.threadId))
   const waiting = calls.length + ready.length
   const needs = needsOf({ calls: standing, answered, ready, refs, agentName, modelName })
   return {

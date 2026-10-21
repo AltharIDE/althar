@@ -52,11 +52,14 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const tasks = home?.tasks ?? []
   const standing = standingCalls(tasks, home?.calls ?? [])
   const calls = standing.filter((call) => !model.answered.some((one) => one.call.id === call.id))
-  // Ready to accept: a plain task that finished waits on its board instead.
+  // What waits on the person as work ready for them (`needsYou`).
   const ready = readyOf(tasks)
   // What has a call above isn't counted again in the work.
   const called = new Set((home?.calls ?? []).map((call) => call.threadId))
-  const working = tasks.filter((task) => task.phase !== 'ready' && !called.has(task.threadId) && refs.has(task.projectId))
+  // Nor is a task kept for later, which waits for the person to write to it.
+  const working = tasks.filter(
+    (task) => task.phase !== 'ready' && task.phase !== 'kept' && !called.has(task.threadId) && refs.has(task.projectId),
+  )
   const waiting = calls.length + ready.length
   const openThread = (threadId: string) => host.openInWindow(threadId)
 

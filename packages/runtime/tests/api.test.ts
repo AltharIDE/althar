@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, win32 } from 'node:path'
+import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
@@ -49,7 +49,7 @@ import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 
-import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY } from './support'
+import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY, ROOMY_DISK } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
@@ -92,6 +92,8 @@ const connected = (
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
         busy: { machine: options.machine ?? ROOMY },
+        // A roomy disk, so no finished task's folder goes for the Mac running the tests being full.
+        disk: () => Effect.succeed(ROOMY_DISK),
         // A pull request with no checks has none: no test waits for a host to show them.
         checksAppear: Duration.zero,
       }),
@@ -216,7 +218,7 @@ describe('the API', () => {
         assert.deepInclude(shot?.content.pictures[0], { mediaType: 'image/png', width: 480, height: 300, unkept: null })
         const wrote = tools.find((item) => item.content.files.some((file) => file.how === 'wrote'))
         const path = wrote?.content.files[0]?.path ?? ''
-        assert.isTrue(path.endsWith('/docs/notes.md'))
+        assert.match(path, /[/\\]docs[/\\]notes\.md$/)
         const document = yield* client.ReadDocument({ threadId: task.threadId, path })
         assert.deepStrictEqual([document.lines, document.body.startsWith('# Notes')], [8, true])
         assert.deepStrictEqual((yield* client.ReadDocument({ threadId: task.threadId, path: 'docs/notes.md' })).body, document.body)
@@ -411,6 +413,25 @@ describe('the API', () => {
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
         assert.isNull((yield* client.GetThread({ threadId: task.threadId })).session)
+      }),
+    ),
+  )
+
+  it.live('says which agents more accounts can be added to: none whose sign-in every folder shares', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({ ...definition, home: { ...definition.home, accounts: 'one' } })),
+        })
+        const status = yield* client.Status({})
+        assert.deepStrictEqual(
+          status.agents.map((agent) => [agent.id, agent.addsAccounts]),
+          [
+            ['claude-code', true],
+            ['codex', false],
+            ['opencode', true],
+          ],
+        )
       }),
     ),
   )
@@ -650,6 +671,49 @@ describe('the API', () => {
         assert.strictEqual(missing.reason, 'NotFound')
         const gone = yield* Effect.flip(client.GetProjectNotes({ projectId: 'proj_gone' }))
         assert.strictEqual(gone.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live("says a project's note in the person's words, as the coordinator then reads it, within a note's bounds", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, context } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const access = { role: 'coordinator' as const, projectId: project.id, threadId: 'none', sessionId: 'none', taskId: null }
+        yield* callTool(access, 'keep_note', { note: 'Issue drafts need an approval card.' }).pipe(Effect.provideContext(context))
+        const [note] = yield* client.GetProjectNotes({ projectId: project.id })
+        const noteId = note?.id ?? ''
+        yield* client.EditProjectNote({
+          commandId: commandId(),
+          projectId: project.id,
+          noteId,
+          body: '  Issue drafts need an approval card,\n on every tracker. ',
+        })
+        // Kept as one line, by whoever kept it first, and the coordinator reads the new words.
+        assert.deepInclude((yield* client.GetProjectNotes({ projectId: project.id }))[0], {
+          id: noteId,
+          body: 'Issue drafts need an approval card, on every tracker.',
+          keptBy: 'coordinator',
+        })
+        assert.include(yield* callTool(access, 'list_notes').pipe(Effect.provideContext(context)), 'on every tracker.')
+        // Empty or too long, it says so and stays as it was.
+        const empty = yield* Effect.flip(client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: ' ' }))
+        assert.strictEqual(empty.reason, 'NoteRefused')
+        const long = yield* Effect.flip(
+          client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: 'x'.repeat(301) }),
+        )
+        assert.match(long.message, /at most 300 characters/)
+        assert.strictEqual(
+          (yield* client.GetProjectNotes({ projectId: project.id }))[0]?.body,
+          'Issue drafts need an approval card, on every tracker.',
+        )
+        // A dropped one can't be changed.
+        yield* client.DropProjectNote({ commandId: commandId(), projectId: project.id, noteId })
+        const dropped = yield* Effect.flip(
+          client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: 'Again.' }),
+        )
+        assert.strictEqual(dropped.message, "That note isn't there any more.")
       }),
     ),
   )
@@ -966,6 +1030,66 @@ describe('settings, through the API', () => {
   )
 })
 
+describe('finished tasks’ folders, through the API', () => {
+  it.live('keeps when they go, lists one with its size, removes it by hand, and brings it back as it opens in an editor', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<string> = []
+        const { client, grant, store } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (_editor, folder) => Effect.sync(() => void opens.push(folder)).pipe(Effect.as(true)),
+          },
+        })
+        assert.strictEqual((yield* client.GetSettings({})).folderWait, 'smart')
+        yield* client.SetFolderWait({ commandId: commandId(), wait: 'never' })
+        assert.strictEqual((yield* client.GetSettings({})).folderWait, 'never')
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
+        const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
+        execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'Retry'], {
+          cwd: worktree,
+        })
+        yield* store(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) =>
+              sql`UPDATE tasks SET state = 'done', settled_at = ${new Date(Date.now() - 86_400_000).toISOString()} WHERE id = ${task.id}`,
+          ),
+        )
+        const listed = yield* eventually(client.GetTaskFolders({}), (folders) => !folders.measuring && folders.folders.length === 1)
+        assert.deepStrictEqual(
+          listed.folders.map((folder) => [folder.taskId, folder.threadId, folder.title, folder.kind, folder.held]),
+          [[task.id, task.threadId, 'Add a retry', 'merged', null]],
+        )
+        assert.isTrue((listed.folders[0]?.bytes ?? 0) > 0)
+        assert.isNotNull(listed.disk)
+        const removed = yield* client.RemoveTaskFolder({ commandId: commandId(), taskId: task.id, seen: null })
+        assert.strictEqual(removed.failed, 0)
+        assert.isFalse(existsSync(worktree))
+        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).task.folder, 'removed')
+        assert.deepStrictEqual((yield* client.CleanUpFolders({ commandId: commandId() })).failed, 0)
+        // Opened in an editor, it comes back first, and counts as opened.
+        assert.isTrue(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed' }))
+        assert.isTrue(existsSync(worktree))
+        assert.strictEqual(opens.length, 1)
+        const opened = yield* store(
+          Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ openedAt: string | null }>`SELECT opened_at FROM tasks WHERE id = ${task.id}`),
+        )
+        assert.isNotNull(opened[0]?.openedAt)
+        const items = (yield* client.GetThread({ threadId: task.threadId })).items
+        assert.deepStrictEqual(
+          items.flatMap((item) => (item.kind === 'notice' && item.content.role === 'folder' ? [item.content.title.split(' · ')[0]] : [])),
+          ['You removed its folder', 'Folder back from its branch'],
+        )
+        // Opened today, it is held back.
+        const again = yield* eventually(client.GetTaskFolders({}), (folders) => folders.folders.length === 1)
+        assert.strictEqual(again.folders[0]?.held?.why, 'opened')
+      }),
+    ),
+  )
+})
+
 describe('this computer’s load, through the API', () => {
   it.live('says how hard this computer works, read as it is, checked on the way', () =>
     Effect.scoped(
@@ -1006,6 +1130,12 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // A repository with no packages, on no host: only what every lead runs outside its sandbox.
+          sandbox: {
+            commands: ['ps', 'env -i'],
+            hosts: [],
+            edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
+          },
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
@@ -1046,6 +1176,20 @@ describe('project rules, through the API', () => {
             { codex: ['acc_x'] },
           ],
         )
+        // What leads' sandboxes let through, changed in part: a list given is kept whole, tidied, and the other stays.
+        const reached = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          // Never a wildcard: the rules couldn't check each host under it.
+          sandbox: { hosts: { added: ['https://Registry.Acme.dev/npm', 'not a host', '*.acme.dev'], removed: [] } },
+        })
+        assert.deepStrictEqual(reached.sandbox.hosts, ['registry.acme.dev'])
+        const trimmed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          sandbox: { commands: { added: ['bunx  playwright *'], removed: ['env -i'] } },
+        })
+        assert.deepStrictEqual([trimmed.sandbox.commands, trimmed.sandbox.hosts], [['ps', 'bunx playwright'], ['registry.acme.dev']])
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(
@@ -1207,6 +1351,77 @@ describe('editors, through the API', () => {
       }),
     ),
   )
+
+  it.live('finds, reads and opens the code an agent names: a task’s in its worktree, the coordinator’s on the default branch', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<[string, string, string | null, number | null]> = []
+        const { client, grant } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (editor, folder, file, line) => Effect.sync(() => void opens.push([editor, folder, file, line])).pipe(Effect.as(true)),
+          },
+        })
+        const folder = realpathSync(repository())
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry later' })
+        const worktree = realpathSync((yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? '')
+        mkdirSync(join(worktree, 'src'))
+        writeFileSync(join(worktree, 'src', 'retry.ts'), 'export function retryLater() {\n  return 1\n}\n')
+
+        // The lead's names, in its worktree as it is: what it hasn't committed, and a name in code it declared there.
+        const named = yield* client.FindCode({
+          threadId: task.threadId,
+          messages: [{ names: ['src/retry.ts:2', 'retry.ts', 'README.md', 'retryLater', 'npm test'] }],
+        })
+        assert.deepStrictEqual(
+          [named.place.kind, named.place.repositories.length, named.place.repositories[0]?.branch.startsWith('althar/')],
+          ['task', 1, true],
+        )
+        assert.deepStrictEqual(
+          named.messages[0]?.found.map((found) => (found.kind === 'file' ? [found.path, found.line, found.changed] : [found.kind])),
+          [
+            ['src/retry.ts', 2, { add: 3, del: 0 }],
+            ['src/retry.ts', undefined, { add: 3, del: 0 }],
+            ['README.md', undefined, null],
+            ['src/retry.ts', 1, { add: 3, del: 0 }],
+          ],
+        )
+        assert.deepInclude(yield* client.ReadCode({ threadId: task.threadId, path: 'src/retry.ts' }), { from: 1, total: 3, cut: false })
+        assert.strictEqual(
+          (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path: '../outside.ts' }))).message,
+          "That file isn't there any more.",
+        )
+        assert.isTrue(
+          yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: 'src/retry.ts', line: 2 }),
+        )
+        // A file that isn't there opens its folder alone; one out of it, nothing.
+        assert.isTrue(
+          yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: 'src/gone.ts', line: 4 }),
+        )
+        assert.isFalse(yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: '../x.ts' }))
+
+        // The coordinator's, on the default branch: what the task wrote isn't there, and opens in the person's own checkout.
+        const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
+        const said = yield* client.FindCode({ threadId, messages: [{ names: ['README.md:1', 'src/retry.ts'] }] })
+        assert.deepStrictEqual([said.place.kind, said.place.repositories[0]?.branch], ['default', 'main'])
+        assert.deepStrictEqual(
+          said.messages[0]?.found.map((found) => [found.kind, found.name]),
+          [
+            ['file', 'README.md:1'],
+            ['missing', 'src/retry.ts'],
+          ],
+        )
+        assert.deepInclude(yield* client.ReadCode({ threadId, path: 'README.md' }), { text: '# Meridian\n', total: 1 })
+        assert.isTrue(yield* client.OpenCode({ commandId: commandId(), threadId, editor: 'zed', path: 'README.md', line: 1 }))
+        assert.deepStrictEqual(opens, [
+          ['zed', worktree, join(worktree, 'src/retry.ts'), 2],
+          ['zed', worktree, null, null],
+          ['zed', folder, join(folder, 'README.md'), 1],
+        ])
+      }),
+    ),
+  )
 })
 
 describe('a project’s menu, through the API', () => {
@@ -1339,7 +1554,7 @@ describe('a project’s menu, through the API', () => {
         assert.lengthOf(yield* client.GetRepositories({ projectId: project.id }), 3)
         // Its tasks' worktrees are in a folder named for it, as it was made.
         assert.strictEqual(
-          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`/${named?.slug}`),
+          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`${sep}${named?.slug}`),
           true,
         )
         assert.isNull(named?.worktrees)
@@ -1541,7 +1756,7 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
-  it.live('settles a plain task that finished once the person opens it, and leaves a change ready', () =>
+  it.live('leaves a plain task that finished in Needs you once the person opens it, until they mark it done or keep it for later', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
@@ -1577,14 +1792,26 @@ describe('the coordinator, through the API', () => {
         assert.isNotNull(question?.branch)
         yield* client.SeeTask({ commandId: commandId(), taskId: question?.taskId ?? '' })
         yield* client.SeeTask({ commandId: commandId(), taskId: change.id })
-        const board = yield* client.GetBoard({ projectId: project.id })
-        assert.sameDeepMembers(
-          board.tasks.map((one) => [one.title, one.phase]),
-          [
-            ['Which partners still call v1', 'settled'],
-            ['Retry', 'ready'],
-          ],
-        )
+        const phases = Effect.map(client.GetBoard({ projectId: project.id }), (board) => board.tasks.map((one) => [one.title, one.phase]))
+        // Opened, both still wait on the person.
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'ready'],
+          ['Retry', 'ready'],
+        ])
+        // Kept for later, the plain task is out of Needs you; a change can't be kept, nor marked done.
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'kept'],
+          ['Retry', 'ready'],
+        ])
+        // Marked done, it settles.
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'settled'],
+          ['Retry', 'ready'],
+        ])
         const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
         assert.strictEqual(unknown.reason, 'NotFound')
       }),
@@ -2085,6 +2312,68 @@ describe('code hosts and trackers, through the API', () => {
 describe('words', () => {
   const name = (agentId: string) => (agentId === 'codex' ? 'Codex' : agentId)
 
+  it('says the rest of what can go wrong as the window shows it, and a reason it has no words for in general ones', () => {
+    const said = (error: unknown) => words(error, name).message
+    const cases: ReadonlyArray<readonly [unknown, string]> = [
+      [
+        { _tag: 'InstallFailed', agentId: 'opencode', summary: 'GitHub couldn’t be reached to find OpenCode.' },
+        'GitHub couldn’t be reached to find OpenCode.',
+      ],
+      [{ _tag: 'AlwaysNotOffered' }, "That can't be kept as a rule for this request. Answer it once instead."],
+      [{ _tag: 'QuestionUnanswered' }, 'Answer each question: pick an option, or write your own.'],
+      [{ _tag: 'NotHeld' }, "The step isn't waiting for its usage limit any more: it carried on, or was stopped."],
+      [{ _tag: 'LaunchRefused', message: 'Codex needs Node 20 or later.' }, 'Codex needs Node 20 or later.'],
+      [
+        { _tag: 'SignOutFailed', line: 'codex logout' },
+        "Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.",
+      ],
+      [{ _tag: 'DraftClosed', state: 'filed' }, 'That issue is filed already. Change it on its tracker.'],
+      [{ _tag: 'DraftClosed', state: 'archived' }, 'That issue draft can’t change now.'],
+      [{ _tag: 'DraftUntitled' }, 'An issue needs a title.'],
+      [{ _tag: 'CliUnanswered', tool: 'gh' }, "gh didn't answer in time. Try again in a moment."],
+      [
+        { _tag: 'CliElsewhere', tool: 'glab', address: 'http://git.example' },
+        "Althar only gives glab's sign-in to a server it knows, over HTTPS. http://git.example isn't one.",
+      ],
+      [
+        { _tag: 'OtherAccount', login: 'dana', expected: 'meridian-bot' },
+        "This token is dana's. Make one as meridian-bot, or connect dana as well from the list.",
+      ],
+      [
+        { _tag: 'RuleOnAnotherList', exact: true, pattern: 'rm -rf build', list: 'ask' },
+        '“rm -rf build” is on “Always ask me”, which comes first, so nothing changed. Take it off “Always ask me” first.',
+      ],
+      [
+        { _tag: 'PushRefused', remote: 'origin', why: 'refused', said: 'pre-receive hook declined.' },
+        'origin refused the push: pre-receive hook declined.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: 'src/a.ts' },
+        'The lead left changes it didn’t commit, in src/a.ts. Ask it to commit them or clear them away, then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: '' },
+        'The lead left changes it didn’t commit. Ask it to commit them or clear them away, then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'conflicts', detail: 'README.md' },
+        'The new commits don’t apply on the default branch as it is now: they conflict in README.md. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'conflicts', detail: '' },
+        'The new commits don’t apply on the default branch as it is now: they conflict. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+      ],
+      // A reason added since, with no words of its own yet: the general sentence for its kind.
+      [{ _tag: 'ProjectRefused', reason: 'new_reason' }, "Althar can't change the project that way."],
+      [{ _tag: 'DocumentRefused', reason: 'new_reason' }, 'Althar can’t show that file here.'],
+      [{ _tag: 'ImageRefused', reason: 'new_reason', name: 'shot.png' }, "Althar can't send that image."],
+      [{ _tag: 'NoteRefused', why: 'new_reason' }, 'Althar can’t keep that note.'],
+      [{ _tag: 'CantMerge', why: 'new_reason', detail: 'It moved.' }, "Althar couldn't merge it. It moved."],
+      [{ _tag: 'AccountRefused', reason: 'new_reason' }, "Althar can't add that account."],
+    ]
+    for (const [error, words] of cases) assert.strictEqual(said(error), words, JSON.stringify(error))
+  })
+
   it("says each of the runtime's errors as the window shows it", () => {
     const said = (error: unknown) => words(error, name).message
     assert.strictEqual(
@@ -2270,6 +2559,13 @@ describe('words', () => {
     assert.isUndefined(agentSaid('nothing'))
     assert.strictEqual(summarize(Cause.fail(new AgentExited({ code: 1, signal: null, stderr: '' }))), 'The agent stopped.')
     assert.strictEqual(summarize(Cause.die(new Error('It broke'))), 'It broke.')
+    // An agent that couldn't start says why, as Althar put it then, and nothing more where it had nothing to say.
+    const unstarted = (summary: string) => new SessionFailed({ agentId: 'codex', reason: 'spawn codex ENOENT', summary })
+    assert.strictEqual(
+      summarize(Cause.fail(unstarted("codex isn't installed, or isn't on this computer's PATH."))),
+      "codex isn't installed, or isn't on this computer's PATH.",
+    )
+    assert.strictEqual(summarize(Cause.fail(unstarted(''))), '')
     assert.strictEqual(summarize(Cause.empty), '')
     // A command the sandbox could not take out to the device says what to put right, not that it is missing.
     assert.include(

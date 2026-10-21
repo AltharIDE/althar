@@ -11,8 +11,11 @@ import { describe, expect, it } from 'vitest'
 const PLAIN: Readonly<Record<string, string>> = {
   /* the whole card or row is the target */
   'board/Board/CardTitle.tsx': 'a card’s or row’s title, stretched over it',
+  'board/Board/Board.tsx': 'a collapsed lane’s rail, the whole of which opens it',
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
+  'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
+  'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
@@ -25,6 +28,9 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview',
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
   'chrome/ProjectFront/ProjectFront.tsx': 'a repository’s or tracker’s mark and name, which opens it',
+  'thread/StepGraph/StepGraph.tsx': 'a step’s card, the whole of which opens its report; a round’s marker, a pill over the lanes',
+  'setup/TaskFolders/TaskFolders.tsx':
+    'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
@@ -35,6 +41,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Document/Document.tsx': 'the fold at the foot of a document',
   'thread/Step/Step.tsx': 'the caret that opens a step',
   'thread/Diff/Diff.tsx': 'a folded stretch of unchanged lines, which opens in place',
+  'thread/Code/CodeLines.tsx': 'a gap in a file’s lines, stretched across them, which shows more of them in place',
   'thread/Evidence/Evidence.tsx': 'the row of a run or a response, which folds what it printed',
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
   /* an option in a list or a rail */
@@ -51,6 +58,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
   'thread/Gallery/Gallery.tsx': 'a screenshot, large, which opens full size',
   'thread/Inline/Inline.tsx': 'a reference or citation inside prose',
+  'thread/Code/CodeRef.tsx': 'a name that names code inside prose, as a chip or as its underlined words',
+  'thread/Code/CodeView.tsx': 'a file to open instead, as a path’s chip; the way to the other version, a word at the end of a note',
   'thread/You/You.tsx': 'an attachment’s chip',
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',
   'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
@@ -60,6 +69,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
   'setup/ControlCenter/ControlCenter.tsx': 'a module, the whole of which opens it out, and a round switch',
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
+  'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

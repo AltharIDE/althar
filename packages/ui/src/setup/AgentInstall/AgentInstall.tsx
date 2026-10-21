@@ -3,6 +3,7 @@ import { BrandChip } from '../../foundations/Marks/Marks'
 import type { Brand } from '../../foundations/brands/brands'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import type { PinnedDownload } from '../Runtimes/Runtimes'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
 import { Spinner } from '../../primitives/Spinner/Spinner'
@@ -19,6 +20,7 @@ import s from './AgentInstall.module.css'
 export interface AgentInstallText {
   missing: (name: string) => string
   can: (name: string, size: string) => string
+  canPinned: (name: string, size: string, pinned: PinnedDownload) => string
   cannot: (name: string) => string
   download: (name: string) => string
   downloading: (name: string, size: string) => string
@@ -30,6 +32,8 @@ export const agentInstallText: AgentInstallText = {
   missing: (name) => `${name} isn’t on ${device.this}`,
   can: (name, size) =>
     `Althar can fetch ${name}’s latest release from GitHub, about ${size}, check it against the release, and keep it in its own folder. Your terminal stays as it is.`,
+  canPinned: (name, size, { from, version }) =>
+    `Althar can fetch ${name} ${version} from ${from}, about ${size}, check it against what it was pinned with, and keep it in its own folder. Your terminal stays as it is.`,
   cannot: (name) => `Install ${name} with its own installer, then come back here.`,
   download: (name) => `Download ${name}`,
   downloading: (name, size) => `Downloading ${name}, about ${size}, and checking it…`,
@@ -50,6 +54,8 @@ export type AgentInstallProps = RootProps<
     brand?: Brand
     /** About how big the download is; without it, Althar can't fetch this one. */
     size?: string
+    /** The one version it fetches, from its maker rather than a latest release on GitHub. */
+    pinned?: PinnedDownload
     state?: AgentInstallState
     /** Downloads it. Without it, there is no button. */
     onInstall?: () => void
@@ -63,6 +69,7 @@ export function AgentInstall({
   name,
   brand,
   size,
+  pinned,
   state = { kind: 'idle' },
   onInstall,
   onHelp,
@@ -89,7 +96,7 @@ export function AgentInstall({
                 {state.why}
               </p>
             )}
-            <p className={s.note}>{can ? t.can(name, size) : t.cannot(name)}</p>
+            <p className={s.note}>{can ? (pinned === undefined ? t.can(name, size) : t.canPinned(name, size, pinned)) : t.cannot(name)}</p>
             <div className={s.ways}>
               {can && (
                 <Button variant="default" onClick={onInstall}>

@@ -31,6 +31,7 @@ import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
+import { SaidIn } from './code/CodeHost'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
 import type {
@@ -188,7 +189,12 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
 export function PartView({ part, threadId }: { part: Part; threadId: string }) {
   switch (part.kind) {
     case 'message':
-      return <Markdown source={part.text} />
+      // Its names are read as they were when it was said.
+      return (
+        <SaidIn.Provider value={part.id}>
+          <Markdown source={part.text} />
+        </SaidIn.Provider>
+      )
     case 'thought':
       return (
         <Reasoning took="" text={{ thought: () => text.thought }}>
@@ -437,6 +443,7 @@ export function ThreadBlocks({
         return (
           <You
             key={block.id}
+            data-item={block.id}
             at={block.at}
             delivery={block.delivery}
             {...(queued === undefined ? {} : { text: { queued } })}

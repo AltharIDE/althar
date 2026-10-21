@@ -151,12 +151,13 @@ export const download = async (dir: string, model: SpeechModel, options: Downloa
       const stalled = new AbortController()
       let timer = setTimeout(() => stalled.abort(), STALL)
       const signal = options.signal === undefined ? stalled.signal : AbortSignal.any([options.signal, stalled.signal])
-      const out = await open(part, 'a')
+      let out = await open(part, 'a')
       try {
         const response = await get(`${model.base}/${file.name}`, { signal, ...(have > 0 ? { headers: { Range: `bytes=${have}-` } } : {}) })
         if (response.status === 200 && have > 0) {
-          // The server sent all of it rather than the rest: start the file again.
-          await out.truncate(0)
+          // The server sent all of it rather than the rest: start the file again (written afresh, as Windows won't cut short a file opened to append).
+          await out.close()
+          out = await open(part, 'w')
           have = 0
           hash = createHash('sha256')
         } else if (response.status !== 200 && response.status !== 206) throw new DownloadStopped({ reason: 'network' }, done + have)

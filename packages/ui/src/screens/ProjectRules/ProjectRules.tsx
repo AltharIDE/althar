@@ -39,11 +39,20 @@ import s from './ProjectRules.module.css'
  *
  * Over the sentences, one switch allows everything: what asks, what goes
  * ahead and the rest say they are off while it is on, and are kept for
- * when it's off again. Never still holds.
+ * when it's off again. Never still holds, and what could lose work still
+ * asks (docs/plans/safety-pass.md).
  */
 
 /** Where a command rule can sit: never with the rest, which is for what no rule names. */
 export type CommandPlace = RulePlace.Never | RulePlace.Ask | RulePlace.Allow
+
+/** What leads' sandboxes let through from the start: commands they run outside them, and hosts they reach without asking. */
+export type SandboxList = 'commands' | 'hosts'
+
+/** Where something is being added: a command rule's sentence, or one of the sandbox's lists. */
+type DraftPlace = CommandPlace | SandboxList
+
+const isSandboxList = (place: DraftPlace): place is SandboxList => place === 'commands' || place === 'hosts'
 
 /** What the rest can get: allowing everything is the switch over every sentence, not one of them. */
 export type RestMode = Exclude<PermissionPolicy, PermissionPolicy.AllowAll>
@@ -87,7 +96,7 @@ export interface ProjectRulesText {
   lede: (project: string) => string
   key: Partial<CharterKeyText>
   /** Each sentence's word in the margin. */
-  label: { always: string; never: string; ask: string; allow: string; rest: string; finished: string; limits: string }
+  label: { always: string; never: string; ask: string; allow: string; rest: string; sandbox: string; finished: string; limits: string }
   /** What no project can change. */
   fixed: string
   /** Who the sentences are about: first named, then again. */
@@ -116,6 +125,23 @@ export interface ProjectRulesText {
   /** Enter on an empty field. */
   typeFirst: string
   rest: { like: string; alone: string; colon: string; label: string; mode: Record<RestMode, Worded & { after: string }> }
+  /** What leads' sandboxes let through from the start, in two sentences, and what still holds. */
+  sandbox: {
+    runs: string
+    outside: string
+    noCommands: string
+    reach: string
+    withoutAsking: string
+    /** After the hosts, while the rest isn't allowed: they ask until it is. */
+    once: string
+    noHosts: string
+    holds: string
+    add: Record<SandboxList, string>
+    field: Record<SandboxList, string>
+    /** Under the field, before anything is typed, and once something is. */
+    empty: Record<SandboxList, string>
+    typed: Record<SandboxList, string>
+  }
   finished: {
     opens: string
     pushes: string
@@ -157,10 +183,11 @@ export const projectRulesText: ProjectRulesText = {
     ask: 'Ask me',
     allow: 'Go ahead',
     rest: 'The rest',
+    sandbox: 'Sandbox',
     finished: 'Finished',
     limits: 'Limits',
   },
-  fixed: 'No agent, in any project, reads your credentials or reaches the code host except through Althar.',
+  fixed: 'No agent, in any project, reads your credentials or keys, or reaches the code host except through Althar.',
   agents: 'Agents',
   they: 'They',
   and: 'and',
@@ -233,7 +260,7 @@ export const projectRulesText: ProjectRulesText = {
   allowAll: {
     title: 'Allow everything',
     note: (project) =>
-      `Nothing in ${project} waits for you, and the rules below are kept for when it’s off. Never still holds: while it lists anything, a command Althar can’t read is refused too.`,
+      `Nothing in ${project} waits for you but what could lose work, such as a force push or deleting outside the task, and the rules below are kept for when it’s off. Never still holds: while it lists anything, a command Althar can’t read is refused too.`,
   },
   add: {
     [RulePlace.Never]: 'Add a command to Never',
@@ -267,6 +294,23 @@ export const projectRulesText: ProjectRulesText = {
         after: 'Reads and the task’s own files still go ahead.',
       },
     },
+  },
+  sandbox: {
+    runs: 'Leads run ',
+    outside: ' outside their sandbox from the start',
+    noCommands: 'Leads run every command in their sandbox first.',
+    reach: ' They reach ',
+    withoutAsking: ' without asking',
+    once: ', once everything else is allowed',
+    noHosts: ' Every host they reach asks first.',
+    holds: ' Each command still meets these rules.',
+    add: { commands: 'Add a command leads run outside their sandbox', hosts: 'Add a host leads reach without asking' },
+    field: { commands: 'A command, as it starts', hosts: 'A host' },
+    empty: {
+      commands: 'How the command starts. Run outside the sandbox, it still asks, and meets these rules',
+      hosts: 'A host such as registry.npmjs.org',
+    },
+    typed: { commands: 'Runs outside the sandbox', hosts: 'Reached without asking' },
   },
   finished: {
     opens: 'A finished task opens ',
@@ -305,12 +349,12 @@ export const projectRulesText: ProjectRulesText = {
       [LimitPolicy.Move]: {
         word: 'moves to the next agent free',
         title: 'Move the work to the next agent free',
-        note: 'To the next agent signed in, in the order of your agents. It takes the work over from where it stands',
+        note: 'To the next agent signed in, in the order of your agents. It takes the work over from where it stands. With none free, it waits for the reset, and you can move it to another model meanwhile',
       },
       [LimitPolicy.Wait]: {
         word: 'waits for the reset',
         title: 'Wait for the reset',
-        note: 'The step keeps its place and runs again at the reset',
+        note: 'The step keeps its place and runs again at the reset, unless you move it to another model meanwhile',
       },
       [LimitPolicy.Ask]: {
         word: 'waits for you',
@@ -390,13 +434,25 @@ export type ProjectRulesProps = RootProps<
     /** The accounts the project may use, by agent; an agent not named may use every one. */
     allowed: Readonly<Record<string, readonly string[]>>
     onAllowedChange: (agentId: string, accountIds: readonly string[]) => void
+    /**
+     * What leads' sandboxes let through from the start: commands they run
+     * outside them and hosts they reach without asking, each list in its
+     * order. Without it, the sentence isn't said.
+     */
+    sandbox?: {
+      commands: readonly string[]
+      hosts: readonly string[]
+      /** Adds to a list; returns why it can't be, said under it, where the field stays. */
+      onAdd: (list: SandboxList, typed: string) => string | undefined
+      onRemove: (list: SandboxList, value: string) => void
+    }
     text?: Partial<ProjectRulesText>
   }
 >
 
 /** The command being added: in which sentence, how it matches, and why it wasn't added. What is typed is kept apart (`Typed`). */
 interface Draft {
-  place: CommandPlace
+  place: DraftPlace
   match: CommandMatch
   error: string | null
 }
@@ -497,6 +553,7 @@ export function ProjectRules({
   onRotateChange,
   allowed,
   onAllowedChange,
+  sandbox,
   text,
   className,
   ...rest
@@ -510,9 +567,9 @@ export function ProjectRules({
   const field = useRef<HTMLInputElement>(null)
   const noteId = useId()
   const errorId = useId()
-  const clauses = useRef<Partial<Record<CommandPlace, HTMLLIElement | null>>>({})
+  const clauses = useRef<Partial<Record<DraftPlace, HTMLElement | null>>>({})
   // Where focus goes once the page has what changed: back to a sentence's +, or to the next command's ×.
-  const refocus = useRef<{ place: CommandPlace; index: number | null } | null>(null)
+  const refocus = useRef<{ place: DraftPlace; index: number | null } | null>(null)
   useEffect(() => {
     const to = refocus.current
     if (to === null) return
@@ -542,7 +599,7 @@ export function ProjectRules({
     if (draft !== null) refocus.current = { place: draft.place, index: null }
     setDraft(null)
   }
-  const open = (place: CommandPlace) => {
+  const open = (place: DraftPlace) => {
     typed.set('')
     setDraft({ place, match: CommandMatch.Prefix, error: null })
   }
@@ -550,7 +607,7 @@ export function ProjectRules({
     if (draft === null) return
     const pattern = typed.get().trim()
     if (pattern === '') return setDraft({ ...draft, error: t.typeFirst })
-    const problem = onAddCommand(draft.place, pattern, draft.match)
+    const problem = isSandboxList(draft.place) ? sandbox?.onAdd(draft.place, pattern) : onAddCommand(draft.place, pattern, draft.match)
     if (problem !== undefined) return setDraft({ ...draft, error: problem })
     leave()
   }
@@ -600,27 +657,49 @@ export function ProjectRules({
   const kindsAt = (place: RulePlace) => KINDS.filter((kind) => kinds[kind] === place)
 
   /** A sentence's commands, with the one being added at its end. */
-  const commandsAt = (place: CommandPlace) => {
-    const named = commands.filter((command) => command.place === place)
-    const tokens: ReactNode[] = named.map((command, index) => (
-      <CommandToken
-        key={command.id}
-        pattern={command.pattern}
-        match={command.match}
-        text={t.token}
-        onRemove={() => {
-          refocus.current = { place, index }
-          onRemoveCommand(command.id)
-        }}
-      />
-    ))
+  const commandsAt = (place: CommandPlace) =>
+    withDraft(
+      place,
+      commands
+        .filter((command) => command.place === place)
+        .map((command, index) => (
+          <CommandToken
+            key={command.id}
+            pattern={command.pattern}
+            match={command.match}
+            text={t.token}
+            onRemove={() => {
+              refocus.current = { place, index }
+              onRemoveCommand(command.id)
+            }}
+          />
+        )),
+    )
+  /** One of the sandbox's lists, with what is being added at its end. */
+  const listed = (list: SandboxList) =>
+    withDraft(
+      list,
+      (sandbox?.[list] ?? []).map((value, index) => (
+        <CommandToken
+          key={value}
+          pattern={value}
+          text={t.token}
+          onRemove={() => {
+            refocus.current = { place: list, index }
+            sandbox?.onRemove(list, value)
+          }}
+        />
+      )),
+    )
+  /** Tokens, with the field for what is being added at their end where it is added there. */
+  const withDraft = (place: DraftPlace, tokens: ReactNode[]) => {
     if (draft?.place === place)
       tokens.push(
         <DraftField
           key="new"
           ref={field}
           typed={typed}
-          aria-label={t.field}
+          aria-label={isSandboxList(place) ? t.sandbox.field[place] : t.field}
           aria-describedby={[noteId, draft.error === null ? '' : errorId].filter(Boolean).join(' ')}
           invalid={draft.error !== null}
           // Typing again takes the reason back: it may no longer hold.
@@ -633,11 +712,32 @@ export function ProjectRules({
     return tokens
   }
   /** The + at a sentence's end, or, while one is added there, how it matches under it. */
-  const adding = (place: CommandPlace) => (draft?.place === place ? null : <AddCommand label={t.add[place]} onClick={() => open(place)} />)
+  const adding = (place: DraftPlace) =>
+    draft?.place === place ? null : (
+      <AddCommand label={isSandboxList(place) ? t.sandbox.add[place] : t.add[place]} onClick={() => open(place)} />
+    )
   /** How a sentence of commands ends: its full stop, and its +. */
   const ending = (place: CommandPlace) => <>.{adding(place)}</>
-  const hint = (place: CommandPlace) =>
-    draft?.place === place ? (
+  const hint = (place: DraftPlace) => {
+    if (draft?.place !== place) return null
+    // The sandbox's lists have no choice of match: a command by how it starts, a host by its name.
+    if (isSandboxList(place))
+      return (
+        <DraftHint
+          typed={typed}
+          match={place === 'hosts' ? CommandMatch.Exact : CommandMatch.Prefix}
+          error={draft.error}
+          errorId={errorId}
+          noteId={noteId}
+          text={{
+            ...t.hint,
+            holds: t.sandbox.typed[place],
+            holdsLine: t.sandbox.typed[place],
+            empty: { [CommandMatch.Prefix]: t.sandbox.empty[place], [CommandMatch.Exact]: t.sandbox.empty[place] },
+          }}
+        />
+      )
+    return (
       <DraftHint
         typed={typed}
         match={draft.match}
@@ -651,8 +751,9 @@ export function ProjectRules({
         noteId={noteId}
         text={t.hint}
       />
-    ) : null
-  const clauseRef = (place: CommandPlace) => (element: HTMLLIElement | null) => {
+    )
+  }
+  const clauseRef = (place: DraftPlace) => (element: HTMLElement | null) => {
     clauses.current[place] = element
   }
 
@@ -666,6 +767,10 @@ export function ProjectRules({
   const goAhead = [...kindsAt(RulePlace.Allow).map((kind) => kindWord(kind, 'doing')), ...commandsAt(RulePlace.Allow)]
   const restKinds = kindsAt(RulePlace.Rest).map((kind) => kindWord(kind, 'doing'))
 
+  const outsideCommands = listed('commands')
+  const reachedHosts = listed('hosts')
+  // Hosts go in only while the rules let the rest through: with everything allowed, or allowed as the rest.
+  const hostsHeld = !allowAll && mode !== PermissionPolicy.Rules
   const branchName = nameShown(branches)
   const titleName = nameShown(titles)
   const withTemplate = templates.filter((repository) => repository.path !== null).length
@@ -796,6 +901,60 @@ export function ProjectRules({
           />
           . {modeWords.after}
         </Clause>
+
+        {sandbox !== undefined && (
+          <Clause
+            label={t.label.sandbox}
+            headingLevel={sub}
+            below={
+              <>
+                {hint('commands')}
+                {hint('hosts')}
+              </>
+            }
+          >
+            <span ref={clauseRef('commands')}>
+              {outsideCommands.length > 0 ? (
+                <>
+                  {t.sandbox.runs}
+                  {join(
+                    outsideCommands,
+                    t.and,
+                    <>
+                      {t.sandbox.outside}.{adding('commands')}
+                    </>,
+                  )}
+                </>
+              ) : (
+                <>
+                  {t.sandbox.noCommands}
+                  {adding('commands')}
+                </>
+              )}
+            </span>
+            <span ref={clauseRef('hosts')}>
+              {reachedHosts.length > 0 ? (
+                <>
+                  {t.sandbox.reach}
+                  {join(
+                    reachedHosts,
+                    t.and,
+                    <>
+                      {t.sandbox.withoutAsking}
+                      {hostsHeld ? t.sandbox.once : ''}.{adding('hosts')}
+                    </>,
+                  )}
+                </>
+              ) : (
+                <>
+                  {t.sandbox.noHosts}
+                  {adding('hosts')}
+                </>
+              )}
+            </span>
+            {t.sandbox.holds}
+          </Clause>
+        )}
 
         <Clause label={t.label.finished} headingLevel={sub} apart>
           {pushOnly ? t.finished.pushes : t.finished.opens}

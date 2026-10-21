@@ -12,6 +12,7 @@ import { makeQueryClient } from './data/reads'
 import { ServicesProvider } from './data/services'
 import { EdgeView, type EdgePlaceShown } from './features/edge/EdgeView'
 import { edgeKey, edgeRead, followEdge, useEdge } from './features/edge/useEdge'
+import { followScheme } from './shared/scheme'
 
 /*
  * The edge's entry (features/edge): a page of its own, in the island round
@@ -20,6 +21,9 @@ import { edgeKey, edgeRead, followEdge, useEdge } from './features/edge/useEdge'
  * notch's size, in the address. It shows nothing until the first read: the
  * island stays the notch's black, and the sheet is only seen once clicked.
  */
+
+// The menu bar's sheet is paper, light or dark as the window's scheme; the island is the notch's black either way.
+followScheme()
 
 const asked = new URLSearchParams(window.location.search)
 const shown: EdgePlaceShown =

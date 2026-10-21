@@ -107,6 +107,11 @@ export class NothingToWaitFor extends Schema.TaggedError<NothingToWaitFor>()('No
   attentionId: Schema.String,
 }) {}
 
+/** Handing over a step held for a usage limit, for a task with none: it carried on at the reset, or was stopped, meanwhile. */
+export class NotHeld extends Schema.TaggedError<NotHeld>()('NotHeld', {
+  taskId: Schema.String,
+}) {}
+
 /** The message went to the agent before it could be taken back, or was taken back already. */
 export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
   itemId: Schema.String,
@@ -174,6 +179,17 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
   said: Schema.optional(Schema.String),
 }) {}
 
+/**
+ * A pull request can't be attached to the task (ADR-052), in words for the
+ * person or the coordinator: it isn't one, it's closed, its branch is
+ * somewhere the task doesn't push to, another task follows it, or its
+ * branch couldn't start from its head.
+ */
+export class AttachRefused extends Schema.TaggedError<AttachRefused>()('AttachRefused', {
+  taskId: Schema.String,
+  message: Schema.String,
+}) {}
+
 /** A link given for an issue points at something else on its host: `what` is it, in the host's words ("pull request", "merge request"). */
 export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
   link: Schema.String,
@@ -184,10 +200,12 @@ export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
  * The pull request moved on since the person looked: accepting it would merge
  * what they didn't see. Or, for a push (`branch`), the commit they saw isn't
  * on the task's branch any more: pushing would send what they didn't see.
+ * Or, for a finished task's folder (`folder`), more of what is in it would
+ * be lost with it than the person was told as they chose to remove it.
  */
 export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
   taskId: Schema.String,
-  what: Schema.optional(Schema.Literal('branch')),
+  what: Schema.optional(Schema.Literals(['branch', 'folder'])),
 }) {}
 
 /**
@@ -216,10 +234,27 @@ export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefus
  * good, so it is never abandoned or reopened; one whose worktree went with
  * its branch can't be reopened on it; and an abandoned one has no agent on
  * it until it is reopened. A title can't be empty or longer than a title may be.
+ * And a finished task isn't done while what its agents left running, such as
+ * a page, wouldn't stop. Its folder isn't removed by hand while something
+ * runs from it, and doesn't come back where something else is in its place.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long']),
+  why: Schema.Literals([
+    'merged',
+    'branch_gone',
+    'abandoned',
+    'no_title',
+    'title_too_long',
+    'left_running',
+    'folder_in_use',
+    'folder_in_way',
+  ]),
+}) {}
+
+/** A finished task's folder that couldn't be removed: its last commit couldn't be kept, or something of it is left (ADR-056). */
+export class FolderStayed extends Schema.TaggedError<FolderStayed>()('FolderStayed', {
+  path: Schema.String,
 }) {}
 
 /** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */

@@ -13,7 +13,7 @@ import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
 import type { Section } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
-import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
+import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
 import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
@@ -82,6 +82,18 @@ describe('accounts in settings', () => {
     const own = { ...usual('acc_3', 'signed_in'), home: '/Users/me/profile/accounts/acc_3', outUntil: '2026-10-03T14:00:00' }
     expect(accountEntry(own, now)).toMatchObject({ place: { kind: 'own' }, state: { kind: 'out' } })
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
+  })
+
+  it('offers no second account for an agent whose sign-in every folder shares', async () => {
+    const one: Status = {
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: [{ ...agents[1]!, accounts: [usual('acc_usual', 'signed_in')], addsAccounts: false }],
+    }
+    const { client } = fakeClient({ status: vi.fn(async () => one) })
+    withServices(<Settings />, client)
+    await codexAccounts()
+    expect(screen.queryByRole('button', { name: 'Add an account' })).toBeNull()
   })
 
   it(
@@ -487,7 +499,9 @@ describe('the start', () => {
       status: vi.fn(async () => ({
         apiVersion: 1,
         appVersion: '0.0.0',
-        agents: withoutOpenCode.map((agent) => (agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing } } : agent)),
+        agents: withoutOpenCode.map((agent) =>
+          agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing, pinned: null } } : agent,
+        ),
       })),
       // The download runs until the test lets it end, so its row is seen downloading however slow the machine.
       installAgent: vi.fn(async () => {
@@ -498,14 +512,16 @@ describe('the start', () => {
       }),
     })
     withServices(<Start onProject={vi.fn()} />, client, fakeHost())
-    expect(await screen.findByText('Not installed on this Mac')).toBeTruthy()
-    expect(screen.getByText(/latest release from GitHub, about 45 MB/)).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Download' }))
+    // Under those on this Mac, a tile of its own: its size on its button, and no long note.
+    const away = await screen.findByRole('list', { name: 'Agents not on this Mac' })
+    expect(within(away).getByText('OpenCode')).toBeTruthy()
+    expect(screen.queryByText(/latest release from GitHub/)).toBeNull()
+    await userEvent.click(within(away).getByRole('button', { name: 'Download OpenCode, 45 MB' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
-    expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it…')).toBeTruthy()
+    expect(await screen.findByText('Downloading, 45 MB…')).toBeTruthy()
     finish()
     expect((await screen.findByRole('alert')).textContent).toBe('GitHub couldn’t be reached to find OpenCode.')
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again to download OpenCode, 45 MB' })).toBeTruthy()
   })
 
   it('offers the repositories found where people keep code, and makes the first project of those ticked', async () => {
@@ -785,6 +801,63 @@ describe('the start', () => {
       state: RuntimeState.Unchecked,
       why: problem,
     })
+  })
+
+  it('gives an agent not on this Mac its way in: a download, which version from whom, or only its maker’s page', () => {
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    // One with no mark Althar knows, and only its maker's page to install it from.
+    const aider = { ...codex, id: 'aider', name: 'Aider', installed: false, guide: 'https://aider.chat/docs/install.html' }
+    expect(runtimeEntry(aider)).toEqual({ id: 'aider', name: 'Aider', state: RuntimeState.Missing })
+    expect(runtimeEntry({ ...aider, download: { size: '45 MB', installing: true, pinned: null } })).toEqual({
+      id: 'aider',
+      name: 'Aider',
+      state: RuntimeState.Installing,
+      download: '45 MB',
+    })
+    expect(runtimeEntry({ ...aider, problem: 'Althar couldn’t check Aider.' })).toEqual({
+      id: 'aider',
+      name: 'Aider',
+      state: RuntimeState.Unchecked,
+      why: 'Althar couldn’t check Aider.',
+    })
+    // One version from its maker, with no page of its own, after a download that didn't finish.
+    const antigravity = {
+      ...aider,
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      guide: null,
+      download: { size: '330 MB', installing: false, pinned: '1.3.0' },
+    }
+    expect(runtimeEntry(antigravity, undefined, 'Google couldn’t be reached.')).toEqual({
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      brand: expect.any(String),
+      guide: false,
+      state: RuntimeState.Missing,
+      download: '330 MB',
+      pinned: { from: 'Google', version: '1.3.0' },
+      failed: 'Google couldn’t be reached.',
+    })
+    // Here, with no page to open: none offered.
+    expect(runtimeEntry({ ...antigravity, installed: true })).toMatchObject({ id: 'antigravity', guide: false })
+  })
+
+  it('opens an agent’s page on installing it, where it has one', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    const model = {
+      status: {
+        agents: [
+          { ...codex, id: 'junie', guide: 'https://junie.jetbrains.com/' },
+          { ...codex, id: 'antigravity', guide: null },
+        ],
+      },
+    } as unknown as StartModel
+    for (const id of ['junie', 'antigravity', 'nobody']) openGuide(model, id)
+    expect(open.mock.calls).toEqual([['https://junie.jetbrains.com/', '_blank']])
+    open.mockRestore()
   })
 
   it('needs its services', () => {

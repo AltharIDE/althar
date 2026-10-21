@@ -21,7 +21,7 @@ import {
   takingBackground,
 } from './background'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
-import { type Question, type QuestionAnswer, questionFields } from './questions'
+import { type Question, type QuestionAnswer, type QuestionField, questionFields } from './questions'
 import type { LaunchSpec, PermissionMeanings } from './registry'
 
 /*
@@ -72,11 +72,25 @@ export interface PermissionRequest {
   readonly options: ReadonlyArray<PermissionOption>
 }
 
-/** Althar's permission decision. Coordinator denials are explained at the next turn boundary, even when the provider's rejection carries on. */
+/**
+ * Althar's permission decision. A refusal by the project's rules or the coordinator is explained at the next turn
+ * boundary, even when the provider's rejection carries on: the agent's own message says only that the person refused.
+ * No `decidedBy` is the person's answer on a card.
+ */
 export interface PermissionDecision {
   readonly decision: 'allow' | 'reject'
   readonly reason?: string
-  readonly decidedBy?: 'coordinator'
+  readonly decidedBy?: 'coordinator' | 'rules'
+}
+
+/** What an agent is told when a request was refused and its provider could not say who by or why. */
+export const refusalSaid = (title: string, decided: PermissionDecision): string => {
+  const why = decided.reason === undefined || decided.reason === '' ? '' : `: ${decided.reason.replace(/\.$/, '')}`
+  return decided.decidedBy === 'rules'
+    ? `Althar's rules refused this (${title})${why}. Carry on without it.`
+    : decided.decidedBy === 'coordinator'
+      ? `${title} was not allowed by the coordinator${why}. Carry on without it.`
+      : `The person declined ${title}${why}. Carry on without it.`
 }
 
 /** What was sent back for a decision: an option (and how far it reaches), or a cancelled request. */
@@ -157,14 +171,27 @@ export type McpServer =
 
 export interface NewSessionOptions {
   readonly cwd: string
-  /** The mode to start in. Required: a session never runs in the mode the agent defaults to (ADR-007). */
-  readonly mode: string
+  /**
+   * The mode to start in: a session never runs in the mode the agent
+   * defaults to (ADR-007). Null only for an agent that has no modes and asks
+   * by what `meta` holds it to (the registry's entry says so): one that
+   * offers modes after all is refused, as its entry no longer says what it is.
+   */
+  readonly mode: string | null
   /** The id of the agent's mode option (the registry's `options.mode`). Without it, the option in the `mode` category is used. */
   readonly modeOptionId?: string
   readonly mcpServers?: ReadonlyArray<McpServer>
   readonly additionalDirectories?: ReadonlyArray<string>
   /** Extra `_meta` for `session/new`: the registry's `sessionMeta`. */
   readonly meta?: Readonly<Record<string, unknown>>
+  /**
+   * Config options held at a value for the session's whole life, such as one
+   * that approves every request while on (Copilot's `allow_all`): set as it
+   * starts, where the agent offers them, and set back whenever the agent says
+   * one moved. Where it can't be set back, the turn is stopped as failed, and
+   * the session takes no more prompts.
+   */
+  readonly held?: Readonly<Record<string, string>>
 }
 
 type Failure = AgentRequestFailed | AgentExited
@@ -359,17 +386,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       const answer = (decided: PermissionDecision): acp.RequestPermissionResponse => {
         if (settled) return CANCELLED
         settled = true
-        const { decision, reason } = decided
+        const { decision } = decided
         const chosen = answerFor(request.options, decision, options.permissions)
-        const explain = decision === 'reject' && (chosen.stopsTurn || decided.decidedBy === 'coordinator')
+        const explain = decision === 'reject' && (chosen.stopsTurn || decided.decidedBy !== undefined)
         receive(params.sessionId, {
           _tag: 'Event',
           event: { _tag: 'PermissionAnswered', toolCallId: request.toolCallId, decision, ...chosen },
-          ...(explain
-            ? {
-                resumeWith: `${request.title} was not allowed by ${decided.decidedBy === 'coordinator' ? 'the coordinator' : "the project's rules"}${reason === undefined ? '' : `: ${reason}`}. Carry on without it.`,
-              }
-            : {}),
+          ...(explain ? { resumeWith: refusalSaid(request.title, decided) } : {}),
         })
         return chosen.optionId === null ? CANCELLED : { outcome: { outcome: 'selected', optionId: chosen.optionId } }
       }
@@ -392,18 +415,63 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
      * when the session ends (ADR-021).
      */
     const askQuestion = (params: acp.CreateElicitationRequest, fromAgent: AbortSignal): Promise<acp.CreateElicitationResponse> => {
-      const ask = options.onQuestion
-      if (ask === undefined || params.mode !== 'form' || !('requestedSchema' in params)) return Promise.resolve({ action: 'cancel' })
+      if (options.onQuestion === undefined || params.mode !== 'form' || !('requestedSchema' in params))
+        return Promise.resolve({ action: 'cancel' })
       const sessionId = 'sessionId' in params && typeof params.sessionId === 'string' ? params.sessionId : undefined
       const toolCallId = 'toolCallId' in params && typeof params.toolCallId === 'string' ? params.toolCallId : undefined
+      return asked(sessionId, toolCallId, params.message, questionFields(params.requestedSchema, params.message), fromAgent).then(
+        (answer): acp.CreateElicitationResponse =>
+          answer.action === 'accept'
+            ? { action: 'accept', content: { ...answer.content } as Record<string, string | number | boolean | Array<string>> }
+            : { action: answer.action },
+      )
+    }
+
+    /*
+     * A permission request that is the model asking the person (the registry's
+     * `questions`: Antigravity's `interaction_` tool calls, one option for each
+     * answer, all `allow_once`): a question of one choice, never the rules', as
+     * the rules would allow the first answer. With no one to ask, it is cancelled.
+     */
+    const askChoice = (params: acp.RequestPermissionRequest, fromAgent: AbortSignal): Promise<acp.RequestPermissionResponse> => {
+      if (options.onQuestion === undefined) return Promise.resolve(CANCELLED)
+      const toolCall = params.toolCall as { readonly toolCallId: string; readonly title?: string | null }
+      const known = calls.get(`${params.sessionId}\u0000${toolCall.toolCallId}`)
+      const asking = toolCall.title?.trim() || known?.title?.trim() || 'The agent asks you to choose.'
+      const field: QuestionField = {
+        id: 'answer',
+        question: asking,
+        type: 'choice',
+        options: params.options.map((option) => ({ value: option.optionId, label: option.name })),
+        multiple: false,
+        required: true,
+      }
+      return asked(params.sessionId, toolCall.toolCallId, asking, [field], fromAgent).then((answer) => {
+        const chosen = answer.action === 'accept' ? answer.content.answer : undefined
+        return typeof chosen === 'string' && params.options.some((option) => option.optionId === chosen)
+          ? { outcome: { outcome: 'selected', optionId: chosen } }
+          : CANCELLED
+      })
+    }
+
+    /** Asks the person, until the agent withdraws the question or the connection closes; a cancel where no one could. */
+    const asked = (
+      sessionId: string | undefined,
+      toolCallId: string | undefined,
+      message: string,
+      fields: ReadonlyArray<QuestionField>,
+      fromAgent: AbortSignal,
+    ): Promise<QuestionAnswer> => {
+      const ask = options.onQuestion
+      if (ask === undefined) return Promise.resolve({ action: 'cancel' })
       // What it said just before: since its last tool call, or else the last it said before that, in this turn.
       const heard = sessionId === undefined ? undefined : said.get(sessionId)
       const before = heard?.current.trim() || heard?.last.trim() || ''
       const question: Question = {
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(toolCallId === undefined ? {} : { toolCallId }),
-        message: params.message,
-        fields: questionFields(params.requestedSchema, params.message),
+        message,
+        fields,
         ...(before === '' ? {} : { said: before }),
       }
       const dropped = new AbortController()
@@ -417,13 +485,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       fromAgent.addEventListener('abort', withdrawn, { once: true })
       return Effect.runPromiseWith(context)(ask(question), { signal: dropped.signal })
         .then(
-          (answer): acp.CreateElicitationResponse =>
-            dropped.signal.aborted
-              ? { action: 'cancel' }
-              : answer.action === 'accept'
-                ? { action: 'accept', content: { ...answer.content } as Record<string, string | number | boolean | Array<string>> }
-                : { action: answer.action },
-          (): acp.CreateElicitationResponse => ({ action: 'cancel' }),
+          (answer): QuestionAnswer => (dropped.signal.aborted ? { action: 'cancel' } : answer),
+          (): QuestionAnswer => ({ action: 'cancel' }),
         )
         .finally(() => {
           pending?.delete(drop)
@@ -487,7 +550,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         hear(params.sessionId, params.update)
         receive(params.sessionId, { _tag: 'Update', update: params.update })
       })
-      .onRequest(acp.methods.client.session.requestPermission, (request) => answerPermission(described(request.params), request.signal))
+      .onRequest(acp.methods.client.session.requestPermission, (request) =>
+        options.permissions?.questions !== undefined && request.params.toolCall.toolCallId.startsWith(options.permissions.questions)
+          ? askChoice(request.params, request.signal)
+          : answerPermission(described(request.params), request.signal),
+      )
       .onRequest(acp.methods.client.elicitation.create, (request) => askQuestion(request.params, request.signal))
 
     let owned: OwnedProcess | undefined
@@ -665,27 +732,79 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         /*
          * The mode is set before anything else, and checked. Agents expose it
          * as a config option, or as legacy session modes; an agent with
-         * neither can't be made to ask, so the session is refused.
+         * neither can't be made to ask, so the session is refused, unless it
+         * is one that asks by its `_meta` and is started with no mode.
          */
         const modeOption = modeOptionOf(yield* Ref.get(current))
         const legacy = started.modes
-        if (modeOption !== undefined) {
+        const legacyIds = legacy?.availableModes.map((candidate) => candidate.id) ?? []
+        if (sessionOptions.mode === null) {
+          if (modeOption !== undefined || legacyIds.length > 0) {
+            return yield* new OptionUnavailable({
+              configId: modeOption?.id ?? 'mode',
+              value: '',
+              available: modeOption?.values ?? legacyIds,
+            })
+          }
+        } else if (modeOption !== undefined) {
           yield* setOption(modeOption.id, sessionOptions.mode)
           if ((yield* Ref.get(mode)) !== sessionOptions.mode) {
             return yield* new OptionUnavailable({ configId: modeOption.id, value: sessionOptions.mode, available: modeOption.values })
           }
         } else if (legacy !== null && legacy !== undefined) {
-          const available = legacy.availableModes.map((candidate) => candidate.id)
-          if (!available.includes(sessionOptions.mode)) {
-            return yield* new OptionUnavailable({ configId: 'mode', value: sessionOptions.mode, available })
-          }
-          yield* call('session/set_mode', () =>
-            connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId: sessionOptions.mode }),
-          )
-          yield* Ref.set(mode, sessionOptions.mode)
+          const modeId = sessionOptions.mode
+          if (!legacyIds.includes(modeId)) return yield* new OptionUnavailable({ configId: 'mode', value: modeId, available: legacyIds })
+          yield* call('session/set_mode', () => connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId }))
+          yield* Ref.set(mode, modeId)
         } else {
           return yield* new OptionUnavailable({ configId: 'mode', value: sessionOptions.mode, available: [] })
         }
+
+        /** Each held option the agent offers that isn't where it is held, as it now says. */
+        const held = Object.entries(sessionOptions.held ?? {})
+        const loose = (all: ReadonlyArray<ConfigOption>) =>
+          held.filter(([configId, value]) => {
+            const option = all.find((candidate) => candidate.id === configId)
+            return option !== undefined && String(option.currentValue) !== value
+          })
+        // Where the agent can't be held there, the session is refused, as for a mode it can't be put in: an agent that
+        // answers yes and leaves the option where it was is held no more than one that answers no.
+        for (const [configId, value] of loose(yield* Ref.get(current))) yield* setOption(configId, value)
+        const [stillLoose] = loose(yield* Ref.get(current))
+        if (stillLoose !== undefined) {
+          const [configId, value] = stillLoose
+          const option = (yield* Ref.get(current)).find((candidate) => candidate.id === configId)
+          return yield* new OptionUnavailable({ configId, value, available: option?.type === 'select' ? option.values : [] })
+        }
+
+        const cancel = Effect.gen(function* () {
+          const turn = yield* Ref.get(state.current)
+          if (Option.isSome(turn)) turn.value.cancelled = true
+          yield* call('session/cancel', () => connection.agent.notify(acp.methods.agent.session.cancel, { sessionId }))
+          for (const drop of waiting.get(sessionId) ?? []) drop()
+        })
+
+        /**
+         * A held option the agent moved and Althar couldn't set back: the
+         * session no longer asks as it was started to, so its turn is stopped
+         * and it takes no more prompts. A new one is held from its start.
+         */
+        let unheld: { readonly configId: string; readonly value: string } | undefined
+        const unheldWords = (moved: { readonly configId: string; readonly value: string }) =>
+          `The agent's ${moved.configId} moved, and Althar couldn't set it back to ${moved.value}, so it stopped the session.`
+        /** Leaves the session unheld: its turn fails and stops, and it takes no more prompts. */
+        const letGo = (configId: string, value: string) =>
+          Effect.gen(function* () {
+            unheld ??= { configId, value }
+            const turn = Option.getOrUndefined(yield* Ref.get(state.current))
+            if (turn !== undefined) turn.failure = { failure: 'unknown', message: unheldWords(unheld) }
+            yield* Effect.ignore(cancel)
+            const said: SessionEvent = { _tag: 'Notice', severity: 'error', title: unheldWords(unheld) }
+            return said
+          })
+        /** A mode held where the agent offers only its legacy modes, no option to hold it by: set back by `session/set_mode`. */
+        const modeKey = sessionOptions.modeOptionId ?? 'mode'
+        const heldMode = modeOption === undefined && legacyIds.length > 0 ? sessionOptions.held?.[modeKey] : undefined
 
         /** What an update means here: the mode it changes, and a failure the agent reported in structured form. */
         const interpret = (update: acp.SessionUpdate) =>
@@ -694,13 +813,43 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             const events: Array<SessionEvent> = [event]
             if (event._tag === 'OptionsChanged') {
               yield* Ref.set(current, event.options)
-              const changed = modeOptionOf(event.options)
+              // A held option the agent moved goes back before anything else it says is read, for as long as an agent
+              // that answers one request at a time may take; nothing Althar answers waits on this reader meanwhile.
+              for (const [configId, value] of loose(event.options)) {
+                const restored = yield* Effect.exit(setOption(configId, value).pipe(Effect.timeout(Duration.seconds(10))))
+                // Set back only where the agent says it is: a yes that leaves it where it was is no.
+                if (Exit.isSuccess(restored) && !loose(restored.value).some(([id]) => id === configId)) {
+                  events.push({ _tag: 'Notice', severity: 'info', title: `Althar set the agent's ${configId} back to ${value}.` })
+                  continue
+                }
+                // Left where it approves without asking, it goes no further: the turn fails, and nothing more is sent.
+                events.push(yield* letGo(configId, value))
+              }
+              const changed = modeOptionOf(yield* Ref.get(current))
               if (changed !== undefined && String(changed.currentValue) !== (yield* Ref.get(mode))) {
                 yield* Ref.set(mode, String(changed.currentValue))
                 events.push({ _tag: 'ModeChanged', modeId: String(changed.currentValue), byAgent: true })
               }
             } else if (event._tag === 'ModeChanged') {
               if (event.modeId === (yield* Ref.get(mode))) return []
+              if (heldMode !== undefined && event.modeId !== heldMode) {
+                const restored = yield* Effect.exit(
+                  call('session/set_mode', () =>
+                    connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId: heldMode }),
+                  ).pipe(Effect.timeout(Duration.seconds(10))),
+                )
+                if (Exit.isSuccess(restored)) {
+                  yield* Ref.set(mode, heldMode)
+                  const back: SessionEvent = {
+                    _tag: 'Notice',
+                    severity: 'info',
+                    title: `Althar set the agent's ${modeKey} back to ${heldMode}.`,
+                  }
+                  return [back]
+                }
+                yield* Ref.set(mode, event.modeId)
+                return [event, yield* letGo(modeKey, heldMode)]
+              }
               yield* Ref.set(mode, event.modeId)
             } else if (update.sessionUpdate === 'session_info_update') {
               const reported = structuredFailure(update._meta, yield* DateTime.nowAsDate)
@@ -805,6 +954,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         ): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
           Stream.unwrap(
             Effect.gen(function* () {
+              if (unheld !== undefined)
+                return yield* new AgentRequestFailed({
+                  method: 'session/set_config_option',
+                  failure: 'unknown',
+                  message: unheldWords(unheld),
+                })
               const turn: Turn = {
                 queue: yield* Queue.unbounded<SessionEvent, Failure | Cause.Done>(),
                 done: yield* Deferred.make<void>(),
@@ -824,13 +979,6 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               return Stream.fromQueue(turn.queue)
             }),
           )
-
-        const cancel = Effect.gen(function* () {
-          const turn = yield* Ref.get(state.current)
-          if (Option.isSome(turn)) turn.value.cancelled = true
-          yield* call('session/cancel', () => connection.agent.notify(acp.methods.agent.session.cancel, { sessionId }))
-          for (const drop of waiting.get(sessionId) ?? []) drop()
-        })
 
         const interrupt = Effect.gen(function* () {
           const turn = yield* Ref.get(state.current)

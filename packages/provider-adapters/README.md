@@ -1,6 +1,6 @@
 # @althar/provider-adapters
 
-How Althar talks to coding agents: one adapter over the [Agent Client Protocol](https://agentclientprotocol.com), the registry of agents it runs (Claude Code, Codex and OpenCode), and a scripted fake agent that lets the adapter's contract run in CI. Written with [Effect](https://effect.website).
+How Althar talks to coding agents: one adapter over the [Agent Client Protocol](https://agentclientprotocol.com), the registry of agents it runs (Claude Code, Codex, OpenCode, GitHub Copilot, Junie, Grok Build, Kimi Code, Mistral Vibe and Qwen Code), and a scripted fake agent that lets the adapter's contract run in CI. Written with [Effect](https://effect.website).
 
 ## Use it
 

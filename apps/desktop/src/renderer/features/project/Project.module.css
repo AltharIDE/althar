@@ -6,9 +6,26 @@
 }
 
 .rooms {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
+}
+
+/* a file the conversation beside the board names: over the board, against the conversation */
+.over {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: var(--z-float);
+  height: auto;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    12px 0 32px -8px var(--shadow);
+}
+
+.over aside {
+  border-left: 0;
 }
 
 /* its settings, in the views' place: their page scrolls under the front page */
@@ -46,7 +63,7 @@
 .board > .failure {
   padding: 16px 16px 0 0;
 }
-/* Beside the conversation, the lanes narrow before the board scrolls. */
+/* Beside the conversation, the lanes narrow, then collapse to rails, before the board scrolls. */
 .both .board {
   --lane-min: 186px;
 }
