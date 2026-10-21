@@ -145,5 +145,27 @@ export const portsBelow = (roots: ReadonlyArray<number>): Effect.Effect<Readonly
     return ports
   })
 
+/**
+ * The port one is found to listen on, from what listens in the tree it can be
+ * told apart in. `found` are the ports in that tree; `claimed`, those another
+ * entry answers on. Where the tree is its own (`own`: the processes holding
+ * its output file), its first port not claimed is it. Where it is the agent's
+ * whole tree, which every other command shares, it is only the one new port
+ * (not in `known`, what listened before it started) where no other command is
+ * left without an address: a second could as well be the one that listens.
+ */
+export const portFor = (input: {
+  readonly found: ReadonlyArray<number>
+  readonly claimed: ReadonlySet<number>
+  readonly own: boolean
+  readonly known: ReadonlySet<number>
+  readonly rivals: number
+}): number | null => {
+  const free = input.found.filter((port) => !input.claimed.has(port))
+  if (input.own) return free[0] ?? null
+  const fresh = free.filter((port) => !input.known.has(port))
+  return input.rivals === 0 && fresh.length === 1 ? (fresh[0] ?? null) : null
+}
+
 /** Where a server on `port` answers, as a browser opens it. */
 export const localAddress = (port: number) => `http://localhost:${port}/`

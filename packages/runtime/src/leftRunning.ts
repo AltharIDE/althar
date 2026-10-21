@@ -2,6 +2,7 @@ import { open } from 'node:fs/promises'
 
 import { Duration, Effect } from 'effect'
 
+import { localAddress } from './ports'
 import { commandIn, shortCommand } from './rules'
 
 /*
@@ -25,9 +26,27 @@ export interface LeftRunning {
   printed: string
   /** Where it answers, as its output said: http://localhost:5173/. */
   url: string | null
+  /** `url` was worked out from a port, not said by its output: its output, once it says, replaces it. */
+  inferred: boolean
   readonly startedAt: string
   /** It ended by itself: when, and its exit code where its output says. */
   ended: { readonly at: string; readonly code: number | null } | null
+}
+
+/**
+ * Where one answers, given what it printed and the port found for it, if any:
+ * what it printed is authoritative and replaces an address worked out from a
+ * port; a port only gives one where it has none. Null where nothing changes.
+ */
+export const addressOf = (
+  left: Pick<LeftRunning, 'url' | 'inferred'>,
+  printed: string,
+  port: number | null,
+): { readonly url: string; readonly inferred: boolean } | null => {
+  const said = servingAt(printed)
+  if (said !== null) return left.url === said && !left.inferred ? null : { url: said, inferred: false }
+  if (left.url === null && port !== null) return { url: localAddress(port), inferred: true }
+  return null
 }
 
 /**

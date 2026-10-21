@@ -47,10 +47,15 @@
     listen on, from `lsof` (`ss` where there is none) on macOS and Linux and
     `netstat` on Windows, with the processes' tree from `ps` or PowerShell.
     The processes are those holding the file its output goes to open where
-    the agent gives one (Claude Code), else any the agent started; a port
-    another entry already answers on is left to it. A server that writes to
-    a log file, holds its output back or starts slowly is found by its port,
-    shown as `localhost:5173`, which the row opens.
+    the agent gives one (Claude Code), whose tree is the command's own; a
+    port another entry answers on is left to it. Where none does (Windows,
+    Codex), the only tree is the agent's, shared by every command, so a port
+    is taken only if it is the one new port since the command began and no
+    other command is still without an address; otherwise it is left unknown.
+    An address from a port stands until the output says its own, which
+    replaces it. A server that writes to a log file, holds its output back or
+    starts slowly is found by its port, shown as `localhost:5173`, which the
+    row opens.
   - **A row says what the command is and where it answers,** not the line
     that started it: its name and address first, the command at a glance
     (`vp dev`, ADR-044's last meaningful part, without `node_modules/.bin/`,
@@ -81,9 +86,9 @@
     until it does.
 - **Trade-off:**
   - **OpenCode's leads show nothing they leave running.**
-  - **An address is found only in a server's first ten minutes,** and a
-    port is the agent's whole tree's, so with several servers started
-    together one may be given another's port until it says its own.
+  - **An address is found only in a server's first ten minutes,** and
+    where only the agent's whole tree is known, several commands started
+    together stay without an address from ports, until their output says it.
   - **Claude Code starts a turn of its own** when something it left running
     ends; that turn's work shows in the thread like any other.
 - **Revisit when:**

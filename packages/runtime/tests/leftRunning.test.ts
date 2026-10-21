@@ -1,7 +1,17 @@
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect } from 'effect'
 
-import { commandOfCall, exitCodeIn, type InHand, type LeftRunning, servingAt, shownOf, stillBusy, tailOf } from '../src/leftRunning'
+import {
+  addressOf,
+  commandOfCall,
+  exitCodeIn,
+  type InHand,
+  type LeftRunning,
+  servingAt,
+  shownOf,
+  stillBusy,
+  tailOf,
+} from '../src/leftRunning'
 
 /*
  * What is read from a command left running: where it answers, as servers
@@ -59,6 +69,7 @@ describe('what a client is shown of one', () => {
     outputPath: null,
     printed: '',
     url: null,
+    inferred: false,
     startedAt: '2026-10-21T09:00:00.000Z',
     ended: null,
   }
@@ -73,6 +84,28 @@ describe('what a client is shown of one', () => {
   it('has no name where the agent only gave the command', () => {
     assert.notProperty(shownOf({ ...left, name: '' }), 'name')
     assert.notProperty(shownOf({ ...left, name: left.command }), 'name')
+  })
+})
+
+describe('where one answers, from what it prints and the port found for it', () => {
+  const said = 'VITE ready\n  ➜  Local:   http://localhost:5173/\n'
+
+  it('takes a port’s address only where it has none, and marks it as worked out', () => {
+    assert.deepStrictEqual(addressOf({ url: null, inferred: false }, '', 3000), { url: 'http://localhost:3000/', inferred: true })
+    assert.isNull(addressOf({ url: null, inferred: false }, '', null))
+    assert.isNull(addressOf({ url: 'http://localhost:3000/', inferred: true }, '', 4000))
+  })
+
+  it('lets what it prints replace the address worked out, even late', () => {
+    assert.deepStrictEqual(addressOf({ url: 'http://localhost:3000/', inferred: true }, said, null), {
+      url: 'http://localhost:5173/',
+      inferred: false,
+    })
+    assert.deepStrictEqual(addressOf({ url: null, inferred: false }, said, 3000), { url: 'http://localhost:5173/', inferred: false })
+  })
+
+  it('has nothing to change once its output has said it', () => {
+    assert.isNull(addressOf({ url: 'http://localhost:5173/', inferred: false }, said, 3000))
   })
 })
 

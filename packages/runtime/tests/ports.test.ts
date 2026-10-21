@@ -3,7 +3,7 @@ import { createServer } from 'node:net'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { listenersOfLsof, listenersOfNetstat, listenersOfSs, localAddress, parentsOf, portsBelow, treeOf } from '../src/ports'
+import { listenersOfLsof, listenersOfNetstat, listenersOfSs, localAddress, parentsOf, portFor, portsBelow, treeOf } from '../src/ports'
 
 /*
  * Where something left running listens, found from the machine: its
@@ -63,6 +63,29 @@ describe('the ports listened on, as each tool says them', () => {
 
   it('says where a port answers as a browser opens it', () => {
     assert.strictEqual(localAddress(5173), 'http://localhost:5173/')
+  })
+})
+
+describe('which port is its own', () => {
+  const none = new Set<number>()
+  const base = { claimed: none, known: none, rivals: 0 }
+
+  it('takes the first port not claimed in a tree of its own, whatever its siblings do', () => {
+    assert.strictEqual(portFor({ ...base, found: [5173, 24678], own: true }), 5173)
+    assert.strictEqual(portFor({ ...base, found: [5173, 24678], own: true, claimed: new Set([5173]) }), 24678)
+    assert.isNull(portFor({ ...base, found: [5173], own: true, claimed: new Set([5173]) }))
+    // A watcher with a tree of its own that listens on nothing is left without one.
+    assert.isNull(portFor({ ...base, found: [], own: true, rivals: 2 }))
+  })
+
+  it('takes one new port from the agent’s whole tree only where no other command waits for one', () => {
+    assert.strictEqual(portFor({ ...base, found: [9000, 5173], own: false, known: new Set([9000]) }), 5173)
+    // A server and a watcher, both without an address: the port could be either's.
+    assert.isNull(portFor({ ...base, found: [5173], own: false, rivals: 1 }))
+    // Two new ports, as two servers started together: neither is told apart.
+    assert.isNull(portFor({ ...base, found: [5173, 3000], own: false }))
+    // Only what listened before it began, as the agent's own: no server's.
+    assert.isNull(portFor({ ...base, found: [9000], own: false, known: new Set([9000]) }))
   })
 })
 

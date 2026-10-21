@@ -76,6 +76,7 @@ import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
 import { addItem, betweenTurns, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
+  addressOf,
   commandOfCall,
   exitCodeIn,
   type LeftRunning,
@@ -89,7 +90,7 @@ import {
   uncoloured,
   WAKE_FOR,
 } from './leftRunning'
-import { holding, localAddress, portsBelow } from './ports'
+import { holding, portFor, portsBelow } from './ports'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -746,37 +747,50 @@ export class Sessions extends Context.Service<
             })
 
       /**
-       * The port one listens on that no other is known by: found from the
-       * processes it started, which the file its output goes to leads to where
-       * the agent says (Claude Code), else any the agent started.
+       * The port one listens on, found from the processes it started: those
+       * holding the file its output goes to (Claude Code), whose tree is its
+       * own; else the agent's whole tree, where only one new port with no
+       * other command left without an address is taken as it (`portFor`).
+       * `known` is what the agent's tree listened on before the command began.
        */
-      const listeningPort = (running: Running, left: LeftRunning) =>
+      const listeningPort = (running: Running, left: LeftRunning, known: ReadonlySet<number>) =>
         Effect.gen(function* () {
           const held = left.outputPath === null ? [] : yield* holding(left.outputPath)
           const agent = running.connection.process?.pid
           const roots = held.length > 0 ? held : agent === undefined ? [] : [agent]
-          const claimed = new Set(
-            [...running.background.values()].flatMap((other) =>
-              other === left || other.url === null ? [] : [Number(new URL(other.url).port)],
-            ),
-          )
-          return (yield* portsBelow(roots)).find((port) => !claimed.has(port)) ?? null
+          const found = yield* portsBelow(roots)
+          // Taken after the lookup, which others ran at the same time: a port is claimed by one only.
+          const others = [...running.background.values()].filter((other) => other !== left)
+          const claimed = new Set(others.flatMap((other) => (other.url === null ? [] : [Number(new URL(other.url).port)])))
+          const rivals = others.filter((other) => other.ended === null && other.url === null).length
+          return portFor({ found, claimed, own: held.length > 0, known, rivals })
         })
 
       /**
        * Reads what one prints, now and then, and where its processes listen,
-       * until it says where it answers, ends, or ten minutes go by.
+       * until what it prints says where it answers, it ends, or ten minutes
+       * go by. An address from a port stands until its output says another.
        */
       const watchServing = (running: Running, id: string) =>
         Effect.gen(function* () {
+          const agent = running.connection.process?.pid
+          const known = new Set(agent === undefined ? [] : yield* portsBelow([agent]))
           for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
             const left = running.background.get(id)
             if (left === undefined || left.ended !== null) return
-            const port = tries % PORTS_EVERY === PORTS_EVERY - 1 ? yield* listeningPort(running, left) : null
-            const url = servingAt(yield* printedBy(left)) ?? (port === null ? null : localAddress(port))
-            if (url !== null) {
-              left.url = url
-              return yield* toldBackground(running)
+            const printed = yield* printedBy(left)
+            const port =
+              left.url === null && servingAt(printed) === null && tries % PORTS_EVERY === PORTS_EVERY - 1
+                ? yield* listeningPort(running, left, known)
+                : null
+            const now = running.background.get(id)
+            if (now === undefined || now.ended !== null) return
+            const found = addressOf(now, printed, port)
+            if (found !== null) {
+              now.url = found.url
+              now.inferred = found.inferred
+              yield* toldBackground(running)
+              if (!found.inferred) return
             }
             yield* Effect.sleep(SERVING_EVERY)
           }
@@ -798,6 +812,7 @@ export class Sessions extends Context.Service<
                   outputPath: event.outputPath ?? null,
                   printed: yield* printedBefore(running, item?.id),
                   url: null,
+                  inferred: false,
                   startedAt: yield* timestamp,
                   ended: null,
                 })
