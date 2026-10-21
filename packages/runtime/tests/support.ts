@@ -130,6 +130,7 @@ export const definition = (
           sessionMetas.push({ role, options })
           return { fake: { asks: true } }
         },
+        upFront: true as const,
       }
     : {}),
   // Given a run's skills as the registry's agents of the same id are: in its session, as an added directory, in its environment; the rest none.

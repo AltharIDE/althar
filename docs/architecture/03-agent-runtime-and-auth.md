@@ -823,10 +823,44 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
   also connect to any localhost port, including an unauthenticated local
   service outside the sandbox such as a debugger or proxy, and can listen on
   non-loopback addresses that other machines may reach. We accept that for
-  leads. It adds no hosts to the network allowlist and no writable paths, and
-  readers don't get it.
+  leads. It adds no writable paths, and readers don't get it.
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
+
+**Known commands and hosts, from the start.** Some commands can't work inside
+Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`), and
+some hosts every lead reaches (the code host, the package registry). Each
+used to cost a failed try inside the sandbox, then a retry outside it that
+the rules allowed anyway. A lead's Claude Code session now starts with both
+in its settings (`sandboxReach.ts`, `Permissions.upFront`):
+
+- commands that run outside the sandbox from the start
+  (`sandbox.excludedCommands`). Each still goes through Claude Code's
+  permission flow, so it asks and meets the rules as its second try would
+  have. Claude Code 2.1 runs a line outside only where every command in it
+  is on the list, never one with `cd`, and never one that starts with `bun`
+  (`bunx` it does), so a lead is told to run them on a line of their own,
+  and a Bun script is listed by what it runs (`node scripts/e2e.ts`, not
+  `bun run test:e2e`);
+- hosts its sandboxed commands reach without asking
+  (`sandbox.network.allowedDomains`), only those the rules would let a
+  request for them through without anyone: none while the rest asks the
+  person or the coordinator decides it, none the project never allows. A
+  host is named on its own, never `*.` for every host under one: the rules
+  judge a request by the host it names, and a wildcard would let through
+  hosts under it that they ask about or refuse.
+
+Both are worked out from the project: the tools its packages bring, its
+test and end-to-end scripts, what is kept for how it runs and is set up,
+its repositories' code hosts, its package managers' registries and what
+its packages download, and the trackers Althar is connected to (Linear's
+hosts, for one). The person adds to them and takes from them in the
+project's rules, under Sandbox, and those edits hold over what is worked
+out later. A change applies from a lead's next session. Codex's
+`workspace-write` has no list of commands to run outside it, and its list
+of hosts belongs to its experimental permission profiles, which codex-acp's
+modes don't use, so its leads are given neither; OpenCode has no sandbox.
+Every network request keeps its host on the record.
 
 Installing a worktree's dependencies would have to leave it, and needn't:
 Althar does it before the lead starts ([below](#setting-up-a-worktree)).

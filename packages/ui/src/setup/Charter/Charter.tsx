@@ -342,8 +342,8 @@ export type NewCommandHintProps = RootProps<
     /** What is typed so far. */
     pattern: string
     match: CommandMatch
-    /** A match chosen. Focus is the consumer's to put back, in the field being typed in. */
-    onMatchChange: (match: CommandMatch) => void
+    /** A match chosen. Focus is the consumer's to put back, in the field being typed in. Without it, there is no choice. */
+    onMatchChange?: (match: CommandMatch) => void
     /** Why it wasn't added, under the rest. */
     error?: string | null
     /** The id the field points `aria-describedby` at for the error. */
@@ -356,7 +356,7 @@ export type NewCommandHintProps = RootProps<
 
 const MATCHES = [CommandMatch.Prefix, CommandMatch.Exact] as const
 
-/** Under a command being added: how it matches, what it holds for, the keys, and why it wasn't added. */
+/** Under a command being added: how it matches, where it can be chosen, what it holds for, the keys, and why it wasn't added. */
 export function NewCommandHint({ pattern, match, onMatchChange, error, errorId, noteId, text, className, ...rest }: NewCommandHintProps) {
   const t = { ...newCommandHintText, ...text }
   const ownErrorId = useId()
@@ -365,21 +365,23 @@ export function NewCommandHint({ pattern, match, onMatchChange, error, errorId, 
   const chosen = useRef(false)
   return (
     <div className={cx(s.hint, className)} {...rest}>
-      <Select
-        label={t.match}
-        variant="quiet"
-        options={MATCHES.map((value) => ({ value, label: t.matches[value] }))}
-        value={match}
-        onChange={(next) => {
-          chosen.current = true
-          onMatchChange(next)
-        }}
-        returnFocus={() => {
-          const back = !chosen.current
-          chosen.current = false
-          return back
-        }}
-      />
+      {onMatchChange !== undefined && (
+        <Select
+          label={t.match}
+          variant="quiet"
+          options={MATCHES.map((value) => ({ value, label: t.matches[value] }))}
+          value={match}
+          onChange={(next) => {
+            chosen.current = true
+            onMatchChange(next)
+          }}
+          returnFocus={() => {
+            const back = !chosen.current
+            chosen.current = false
+            return back
+          }}
+        />
+      )}
       <span id={noteId} className={s.holds}>
         {typed === '' ? (
           t.empty[match]

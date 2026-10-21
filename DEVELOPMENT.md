@@ -112,7 +112,8 @@ There are two ways to screenshot this repository's interface, both headless:
 
   ```bash
   cd packages/ui && bunx storybook dev --port 6116 --ci --no-open &
-  cd apps/desktop && bunx playwright screenshot --viewport-size=900,900 --full-page \
+  cd apps/desktop
+  bunx playwright screenshot --viewport-size=900,900 --full-page \
     --wait-for-selector "#storybook-root > *" --wait-for-timeout 800 \
     "http://localhost:6116/iframe.html?id=thread-evidence--shown&viewMode=story" test-results/evidence.png
   ```
@@ -139,7 +140,13 @@ once.
 Shots go in `test-results/`, which git ignores. In an agent's sandbox on a
 Mac, Chromium and Electron can't start (Chromium exits with `SIGTRAP`), so run
 the shooting command outside the sandbox; Storybook itself runs inside it,
-since a lead may listen on localhost.
+since a lead may listen on localhost. A lead in Althar runs `bunx playwright`
+and the end-to-end run's own `node scripts/e2e.ts` (in `apps/desktop`)
+outside its sandbox from the start (the project's rules, under Sandbox), but
+only on a line of their own: change folder in a command of its own first, as
+above. Claude Code keeps a line that starts with `bun` in its sandbox
+whatever its settings say, so `bun run test:e2e` fails there: run
+`node scripts/e2e.ts e2e/your.spec.ts` from `apps/desktop` instead.
 
 ## Reviewing on Linux
 

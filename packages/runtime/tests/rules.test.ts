@@ -22,6 +22,7 @@ import {
   type RuleContext,
   sayRules,
   shortCommand,
+  withoutQuotedHeredocs,
 } from '../src/rules'
 
 const worktree = '/work/meridian/retry/app'
@@ -1985,3 +1986,189 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
 })
 
 const reasonOf = (verdict: ReturnType<typeof decide>) => ('reason' in verdict ? verdict.reason : '')
+
+describe('a quoted heredoc is text, not a command', () => {
+  const body = 'Fix the `merge` of the retry queue, then push it.\n\nUses `git push` and `$(rm -rf /)` as examples.'
+  const heredoc = (head: string, quote: string, text: string = body, end = 'EOF') => `${head} <<${quote}\n${text}\n${end}`
+
+  it('is allowed with backticks and words like push in its body', () => {
+    for (const line of [
+      heredoc('git commit -F -', "'EOF'"),
+      heredoc('git commit -F -', '"EOF"'),
+      heredoc('git commit -F -', '\\EOF'),
+      `git commit -m "title" -F - <<'EOF'\nSays "quoted" and 'single' and \`ticks\` and don't.\nEOF`,
+      `cd packages && git commit -F - <<-'EOF'\n\tpush the \`merge\`\n\tEOF`,
+    ])
+      assert.strictEqual(run(line).verdict, 'allow', line)
+  })
+
+  it('drops the body of each of several heredocs on one line, and what follows', () => {
+    const line = `cat <<'A' <<"B" > notes.txt\nfirst \`push\`\nA\nsecond \`merge\`\nB\ngit status`
+    assert.deepStrictEqual(
+      parseCommandLine(line).commands.map((words) => words[0]),
+      ['cat', 'git'],
+    )
+    assert.isFalse(parseCommandLine(line).opaque)
+    assert.strictEqual(run(line).verdict, 'allow')
+  })
+
+  it('leaves a code host command to the code host rule, not to "can\'t tell"', () => {
+    const verdict = run(heredoc('gh pr create --body-file -', "'EOF'"))
+    assert.strictEqual(verdict.verdict, 'deny')
+    assert.notInclude('reason' in verdict ? verdict.reason : '', "can't tell")
+  })
+
+  it('still reads the commands around it', () => {
+    assert.notStrictEqual(run(heredoc('git push --force origin main', "'EOF'")).verdict, 'allow')
+    assert.notStrictEqual(run(`${heredoc('cat', "'EOF'")}\ngit push --force origin main`).verdict, 'allow')
+  })
+
+  it('keeps an unquoted heredoc as shell, which expands $(…) and backticks', () => {
+    const unquoted = heredoc('cat', '', 'now $(rm -rf /) and `git push`')
+    assert.isTrue(parseCommandLine(unquoted).opaque)
+    assert.notStrictEqual(run(unquoted).verdict, 'allow')
+    assert.notStrictEqual(run(heredoc('cat', '-', '\t$(git push --force origin main)', 'EOF')).verdict, 'allow')
+    assert.strictEqual(run(heredoc('cat', "-'EOF'", '\t$(git push --force origin main)', 'EOF')).verdict, 'allow')
+    assert.strictEqual(withoutQuotedHeredocs(unquoted), unquoted)
+  })
+
+  it('reads a heredoc operator inside quotes as text, and <<< as a here-string', () => {
+    assert.strictEqual(withoutQuotedHeredocs(`echo "<<'EOF'"\ngit status`), `echo "<<'EOF'"\ngit status`)
+    assert.strictEqual(withoutQuotedHeredocs(`cat <<< 'x'\ngit status`), `cat <<< 'x'\ngit status`)
+  })
+
+  it('keeps the rest of the text where a heredoc is never closed', () => {
+    const open = `cat <<'EOF'\nstill text\ngit push --force origin main`
+    assert.strictEqual(withoutQuotedHeredocs(open), open)
+    assert.notStrictEqual(run(open).verdict, 'allow')
+  })
+
+  it('opens no heredoc in a comment, whole-line or trailing, quotes in it or not', () => {
+    for (const line of [
+      "# <<'EOF'\ngit push --force origin main",
+      "git status # <<'EOF'\ngit push --force origin main",
+      "git status # it's <<'EOF'\ngit push --force origin main\nEOF",
+      'echo hi # <<"EOF"\ngit push --force origin main',
+    ]) {
+      assert.strictEqual(withoutQuotedHeredocs(line), line, line)
+      assert.notStrictEqual(run(line).verdict, 'allow', line)
+      assert.notStrictEqual(decideReader(request({ title: line }), { offline: false }).verdict, 'allow', line)
+    }
+  })
+
+  it('still opens a heredoc after a # that is not a comment', () => {
+    assert.strictEqual(run("cat a#b <<'EOF'\npush `merge`\nEOF").verdict, 'allow')
+  })
+
+  it('keeps the body of a heredoc a shell or interpreter reads, as that is a script it runs', () => {
+    for (const line of [
+      "sh <<'EOF'\ngit push --force origin main\nEOF",
+      "bash -s <<'EOF'\ngit push --force origin main\nEOF",
+      "/bin/zsh <<-'EOF'\n\tgit push --force origin main\n\tEOF",
+      "cat <<'EOF' | sh\ngit push --force origin main\nEOF",
+      "ssh host <<'EOF'\ngit push --force origin main\nEOF",
+      "$SHELL <<'EOF'\ngit push --force origin main\nEOF",
+      "source /dev/stdin <<'EOF'\ngit push --force origin main\nEOF",
+      'eval "$(cat <<\'EOF\'\ngit push --force origin main\nEOF\n)"',
+    ]) {
+      assert.include(withoutQuotedHeredocs(line), 'git push --force', line)
+      assert.notStrictEqual(run(line).verdict, 'allow', line)
+    }
+  })
+
+  it('keeps the body wherever the reader is not known to take only text, across lines, pipes and groups', () => {
+    const script = '\ngit push --force origin althar/retry\nEOF'
+    for (const head of [
+      'sh \\\n',
+      'sh \\\n  -s \\\n',
+      '{ sh; } ',
+      '(sh; git status) ',
+      'f() { sh; }; f ',
+      './run.sh ',
+      'FOO=1 bash ',
+      'cat 2>&1 | sh ',
+    ]) {
+      const line = `${head}<<'EOF'${script}`
+      assert.include(withoutQuotedHeredocs(line), 'git push --force', line)
+    }
+    for (const line of [
+      `cat <<'EOF' 2>&1 | sh${script}`,
+      `cat <<'EOF' |${script}\nsh`,
+      `cat <<'EOF' | tee out |& bash${script}`,
+      `cat <<'EOF' >| out | sh${script}`,
+    ])
+      assert.include(withoutQuotedHeredocs(line), 'git push --force', line)
+  })
+
+  it('keeps the body where a name may not be the program it seems: compact git options, shadowing functions, PATH', () => {
+    const script = "<<'EOF'\ngit push --force origin althar/retry\nEOF"
+    for (const head of [
+      "git -calias.run='!sh' run ",
+      "git -c alias.run='!sh' run ",
+      "git -C . -calias.run='!sh' run ",
+      'git run ',
+      'gh run ',
+      'cat() { sh; }; cat ',
+      'cat () { sh; }; cat ',
+      'function cat { sh; }; cat ',
+      'git() { sh; }\ngit commit -F - ',
+      'alias cat=sh; cat ',
+      'PATH=/tmp/evil cat ',
+      'PATH=/tmp/evil; cat ',
+      'export PATH=/tmp/evil && cat ',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.run GIT_CONFIG_VALUE_0="!sh" git run ',
+    ])
+      assert.include(withoutQuotedHeredocs(`${head}${script}`), 'git push --force', head)
+  })
+
+  it('refuses what a project never rule names, behind a compact git option or a shadowing function', () => {
+    const project: ProjectRuleSet = { mode: 'allow', ask: [], never: ['force-push'], allow: [], commands: [] }
+    for (const head of ["git -calias.run='!sh' run ", 'cat() { sh; }; cat ', 'PATH=/tmp/evil cat '])
+      assert.strictEqual(run(`${head}<<'EOF'\ngit push --force origin main\nEOF`, { project }).verdict, 'deny', head)
+  })
+
+  it('still drops the body of the built-in subcommands and the text readers, with a $(…) beside them', () => {
+    const body = '\npush `merge`\nEOF'
+    for (const line of [
+      `git commit -F - <<'EOF'${body}`,
+      `git tag -F - v1 <<'EOF'${body}`,
+      `gh pr create --body-file - <<'EOF'${body}`,
+      `gh issue comment 3 -F - <<'EOF'${body}`,
+      `x=$(date) && git commit -F - <<'EOF'${body}`,
+      `GIT_AUTHOR_NAME=x; FOO=1 cat <<'EOF'${body}`.replace('GIT_AUTHOR_NAME=x; ', ''),
+    ])
+      assert.notInclude(withoutQuotedHeredocs(line), '`merge`', line)
+  })
+
+  it('still drops the body of a text reader beside a shell in another command', () => {
+    const body = '\npush `merge`\nEOF'
+    for (const line of [
+      `bash build.sh && git commit -F - <<'EOF'${body}`,
+      `sh -c true; cat > notes.md <<'EOF'${body}`,
+      `cd app && FOO=1 git commit -F - <<'EOF' 2>&1 | tee log${body}`,
+      `x=$(git commit -F - <<'EOF'${body}\n)`,
+    ])
+      assert.notInclude(withoutQuotedHeredocs(line), '`merge`', line)
+  })
+
+  it('refuses what a project never rule names, in the script a shell reads', () => {
+    const project: ProjectRuleSet = { mode: 'allow', ask: [], never: ['force-push'], allow: [], commands: [] }
+    const script = "<<'EOF'\ngit push --force origin althar/retry\nEOF"
+    for (const head of ['sh ', 'sh \\\n', 'bash \\\n  -s \\\n', '(sh; git status) ', '{ sh; } '])
+      assert.strictEqual(run(`${head}${script}`, { project }).verdict, 'deny', head)
+    assert.strictEqual(run("cat <<'EOF' |\ngit push --force origin althar/retry\nEOF\nsh", { project }).verdict, 'deny')
+    assert.strictEqual(run("# <<'EOF'\ngit push --force origin althar/retry", { project }).verdict, 'deny')
+    assert.strictEqual(run("git commit -F - <<'EOF'\nnever `git push --force` it\nEOF", { project }).verdict, 'allow')
+  })
+
+  it('also reads for a role that only reads', () => {
+    assert.strictEqual(decideReader(request({ title: heredoc('cat', "'EOF'") }), { offline: false }).verdict, 'allow')
+  })
+})
+
+describe('a quoted heredoc with a subshell beside it', () => {
+  it('asks for a push in the command, not for words in the heredoc', () => {
+    assert.strictEqual(run("cat <<'EOF'\npush `merge`\nEOF").verdict, 'allow')
+    assert.notStrictEqual(run("cat <<'EOF'\nhi\nEOF\n$(git push origin x)").verdict, 'allow')
+  })
+})
