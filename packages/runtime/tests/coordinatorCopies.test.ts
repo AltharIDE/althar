@@ -125,4 +125,20 @@ describe("the coordinator's copies", () => {
       assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
     }),
   )
+
+  it.effect('leave every other worktree’s record alone, even one the copy’s git file names', () =>
+    Effect.gen(function* () {
+      const { home, person, copy } = place()
+      const task = join(home, 'worktrees', 'meridian', 'retry')
+      git(person, 'worktree', 'add', '-q', '-b', 'althar/retry', task, 'main')
+      yield* freshCopy(person, copy, 'main')
+      // The coordinator's git file names the task's worktree.
+      rmSync(join(copy, '.git'), { recursive: true })
+      writeFileSync(join(copy, '.git'), readFileSync(join(task, '.git'), 'utf8'))
+      yield* freshCopy(person, copy, 'main')
+      assert.include(git(person, 'worktree', 'list'), task)
+      assert.strictEqual(git(task, 'branch', '--show-current'), 'althar/retry')
+      assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), join(copy, '.git'))
+    }),
+  )
 })

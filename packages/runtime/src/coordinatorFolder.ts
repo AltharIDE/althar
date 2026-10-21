@@ -1,5 +1,5 @@
-import { lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -56,19 +56,37 @@ const kindOf = (path: string): 'none' | 'folder' | 'file' | 'other' => {
 }
 
 /**
+ * The repository's record of the worktree a copy was made as before, where
+ * the copy's git file names one that names the copy back: its folder in the
+ * repository's `worktrees`. Any other it names, a task's worktree's or the
+ * repository's own git folder, is none of the copy's.
+ */
+const formerWorktree = (common: string, path: string, dotGit: string): string | undefined => {
+  if (kindOf(dotGit) !== 'file') return undefined
+  const named = /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim()
+  if (named === undefined) return undefined
+  const record = resolve(path, named)
+  if (dirname(record) !== join(common, 'worktrees') || kindOf(join(record, 'gitdir')) !== 'file') return undefined
+  const back = readFileSync(join(record, 'gitdir'), 'utf8').trim()
+  return realpathSync(dirname(back)) === realpathSync(path) ? record : undefined
+}
+
+/**
  * A folder of its own at `path`, and no git folder in it: a link or a file
  * left there goes (only it, never what it points at), and so does the git
  * folder, whatever it is. One a worktree of the repository's left behind, as
- * copies were made before, is dropped from the repository's worktrees too.
+ * copies were made before, is dropped from the repository's worktrees too,
+ * and no other worktree's record is touched.
  */
 const clearedFor = (repository: string, path: string) =>
   Effect.gen(function* () {
+    const common = realpathSync(resolve(repository, yield* git(repository, 'rev-parse', '--git-common-dir')))
     if (kindOf(path) !== 'folder') rmSync(path, { force: true })
     mkdirSync(path, { recursive: true })
     const dotGit = join(path, '.git')
-    const linked = kindOf(dotGit) === 'file' && readFileSync(dotGit, 'utf8').startsWith('gitdir: ')
+    const former = formerWorktree(common, path, dotGit)
     rmSync(dotGit, { recursive: true, force: true })
-    if (linked) yield* git(repository, 'worktree', 'prune').pipe(Effect.ignore)
+    if (former !== undefined) rmSync(former, { recursive: true, force: true })
   }).pipe(Effect.catchDefect((error) => Effect.fail(new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }))))
 
 /**
