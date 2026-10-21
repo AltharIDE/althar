@@ -1,11 +1,12 @@
 import { readFile, stat } from 'node:fs/promises'
-import { extname, isAbsolute, join } from 'node:path'
+import { extname, isAbsolute, join, relative, sep } from 'node:path'
 
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Artifacts } from './Artifacts'
 import { DocumentRefused, NotFound } from './errors'
+import { gitExactly } from './git'
 import { countLines, inside } from './handed'
 
 /*
@@ -54,4 +55,29 @@ export const documentText = (path: string, worktrees: ReadonlyArray<string>) =>
     if (found.size > DOCUMENT_READ) return yield* new DocumentRefused({ path, reason: 'too_large' })
     const body = yield* Effect.promise(() => readFile(real, 'utf8'))
     return { path, body, bytes: found.size, lines: countLines(body) }
+  })
+
+/**
+ * A markdown document an agent wrote, for a task whose folder was removed
+ * (ADR-055): from `head`, the commit kept as its folder went, in its
+ * repository at `root`, by its path in the worktree that was at `worktree`.
+ * One it committed still reads; one it never committed went with the folder.
+ */
+export const documentKept = (path: string, kept: { readonly root: string; readonly head: string; readonly worktree: string }) =>
+  Effect.gen(function* () {
+    if (!MARKDOWN.has(extname(path).toLowerCase())) return yield* new DocumentRefused({ path, reason: 'not_markdown' })
+    const within = isAbsolute(path) ? relative(kept.worktree, path) : path
+    if (within === '' || isAbsolute(within) || within.split(sep).includes('..'))
+      return yield* new DocumentRefused({ path, reason: 'outside' })
+    const object = `${kept.head}:${within.split(sep).join('/')}`
+    const bytes = yield* gitExactly(kept.root, 'cat-file', '-s', object).pipe(
+      Effect.map((size) => Number(size.trim())),
+      Effect.orElseSucceed(() => null),
+    )
+    if (bytes === null) return yield* new NotFound({ kind: 'document', id: path })
+    if (bytes > DOCUMENT_READ) return yield* new DocumentRefused({ path, reason: 'too_large' })
+    const body = yield* gitExactly(kept.root, 'cat-file', 'blob', object).pipe(
+      Effect.mapError(() => new NotFound({ kind: 'document', id: path })),
+    )
+    return { path, body, bytes, lines: countLines(body) }
   })

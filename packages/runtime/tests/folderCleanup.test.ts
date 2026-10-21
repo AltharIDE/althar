@@ -240,6 +240,24 @@ describe('finished tasks’ folders', () => {
   )
 })
 
+describe('a task whose folder was removed', () => {
+  it.live('still reads a document its agent committed, from the commit kept as its folder went', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 4)
+      commit(task.worktree, 'NOTES.md', '# Notes\n\nRetry three times.\n')
+      yield* (yield* FolderCleanup).sweep
+      assert.isFalse(existsSync(task.worktree))
+      const queries = yield* Queries
+      const document = yield* queries.document(task.threadId, 'NOTES.md')
+      assert.deepStrictEqual([document.body, document.lines], ['# Notes\n\nRetry three times.\n', 3])
+      assert.strictEqual((yield* queries.document(task.threadId, join(task.worktree, 'NOTES.md'))).bytes, document.bytes)
+      assert.strictEqual((yield* Effect.flip(queries.document(task.threadId, 'GONE.md')))._tag, 'NotFound')
+      assert.strictEqual((yield* Effect.flip(queries.document(task.threadId, '../outside.md')))._tag, 'DocumentRefused')
+      assert.strictEqual((yield* Effect.flip(queries.document(task.threadId, 'retry.ts')))._tag, 'DocumentRefused')
+    }).pipe(Effect.provide(withCleanup())),
+  )
+})
+
 describe('a removed folder coming back', () => {
   it.live('comes back on its branch before an agent starts on its task, and is set up again', () =>
     Effect.gen(function* () {

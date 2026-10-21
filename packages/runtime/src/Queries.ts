@@ -52,7 +52,7 @@ import { builtIn, descriptionsIn, evidenceOf, evidencePaths, unverifiedIn } from
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueDraftsWaiting, kindOf } from './kinds'
-import { documentText, outputText } from './reading'
+import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
@@ -2626,6 +2626,17 @@ export class Queries extends Context.Service<
               const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
               if (thread?.taskId == null) return yield* new NotFound({ kind: 'document', id: path })
               const worktrees = yield* worktreesOf(thread.taskId)
+              // Its folder removed once it finished, a document it committed reads from the commit kept as it went (ADR-055).
+              const [first] = worktrees
+              if (first !== undefined && first.state === 'cleaned' && first.root !== null && !existsSync(first.path)) {
+                const [kept = null, branch = null] = yield* commitsOf(first.root, [
+                  `${KEPT}${first.workspaceId}`,
+                  `refs/heads/${first.branch}`,
+                ])
+                const head = kept ?? branch
+                if (head === null) return yield* new NotFound({ kind: 'document', id: path })
+                return yield* documentKept(path, { root: first.root, head, worktree: first.path })
+              }
               return yield* documentText(
                 path,
                 worktrees.map((worktree) => worktree.path),
