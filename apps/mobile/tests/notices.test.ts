@@ -42,7 +42,7 @@ describe('notices', () => {
   })
 
   it('says how many calls wait on a Mac gone away', () => {
-    expect(awayNotice('Balazs’s MacBook Pro', 2).body).toBe('2 calls wait there. Wake it to answer.')
+    expect(awayNotice('Sam’s MacBook Pro', 2).body).toBe('2 calls wait there. Wake it to answer.')
   })
 })
 

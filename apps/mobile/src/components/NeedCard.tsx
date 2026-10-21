@@ -24,7 +24,8 @@ function Where({
   now,
 }: {
   readonly project: ProjectSummary | null
-  readonly task: string | null
+  /** The task a call waits in; null for the coordinator's own question; absent for a task's own card. */
+  readonly task?: string | null
   readonly at: string
   readonly now: number
 }) {
@@ -32,7 +33,7 @@ function Where({
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       {project === null ? null : <ProjectMark name={project.name} ink={project.ink} size={16} />}
       <Text kind="sub" ink="t3" lines={1} style={{ flexShrink: 1 }}>
-        {[project?.name, task ?? 'Coordinator'].filter(Boolean).join(' · ')}
+        {[project?.name, task === undefined ? null : (task ?? 'Coordinator')].filter(Boolean).join(' · ')}
       </Text>
       <Text kind="sub" ink="t4" style={{ flexShrink: 0 }}>
         · {since(at, now)}
@@ -308,7 +309,7 @@ function ReadyCard({
             ))}
           </Well>
         )}
-        <Where project={project} task={null} at={task.startedAt ?? task.createdAt} now={now} />
+        <Where project={project} at={task.startedAt ?? task.createdAt} now={now} />
       </Pressable>
       {task.kind === 'plain' ? (
         <View style={{ flexDirection: 'row', gap: space.sm }}>

@@ -58,7 +58,7 @@ export const stepWords = (task: Pick<BoardTask, 'step' | 'phase' | 'waits' | 'in
       const seconds = Math.max(0, Math.round((Date.parse(starts) - now) / 1000))
       return seconds < 60 ? `Starts in ${seconds}s` : `Starts in ${Math.round(seconds / 60)}m`
     }
-    return 'Planned'
+    return 'Held: starts when you say'
   }
   switch (task.step) {
     case 'implement':

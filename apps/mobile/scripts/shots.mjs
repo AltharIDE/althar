@@ -34,6 +34,7 @@ const SHOTS = [
   { name: 'diff', url: '/task/thr_task_stripe/diff?taskId=task_stripe&path=src%2Fwebhooks%2Fhandle.ts' },
   { name: 'diff-dark', url: '/task/thr_task_stripe/diff?taskId=task_stripe&path=src%2Fwebhooks%2Fhandle.ts', theme: 'dark' },
   { name: 'projects', url: '/projects' },
+  { name: 'find', url: '/projects', type: { label: 'Find a task', text: 'webhook' } },
   { name: 'project', url: '/project/proj_meridian' },
   { name: 'new-task', url: '/new' },
   { name: 'pair', url: '/pair' },
@@ -76,6 +77,10 @@ try {
     await page.goto(`http://localhost:${port}${shot.url}${separator}live=0${shot.theme ? `&theme=${shot.theme}` : ''}`)
     await page.waitForLoadState('networkidle')
     await page.waitForTimeout(700)
+    if (shot.type) {
+      await page.getByLabel(shot.type.label).fill(shot.type.text)
+      await page.waitForTimeout(800)
+    }
     if (shot.press) {
       await page.getByRole('button', { name: shot.press }).click()
       await page.waitForTimeout(2500)

@@ -57,6 +57,32 @@ describe('the demo client', () => {
     expect(thread.items[0]).toMatchObject({ kind: 'user_message', content: { text: 'Add an RSS feed for the shifts.' } })
   })
 
+  it('finds tasks by their title and by what their lead said, with what matched marked', async () => {
+    const demo = client()
+    const byTitle = await demo.searchTasks({ text: 'stripe' })
+    expect(byTitle.tasks.map((one) => one.title)).toEqual(['Upgrade the Stripe SDK to v19'])
+    const bySaid = await demo.searchTasks({ text: 'batch' })
+    expect(bySaid.tasks[0]?.title).toBe('Backfill invoice totals for 2024')
+    expect(bySaid.tasks[0]?.matched?.some((part) => part.hit && part.text === 'batch')).toBe(true)
+    expect((await demo.searchTasks({ text: '', projectId: 'proj_site' })).tasks.every((one) => one.projectId === 'proj_site')).toBe(true)
+  })
+
+  it('starts a plan now, or holds its countdown', async () => {
+    const demo = client()
+    await demo.holdPlan('plan_secret')
+    expect((await demo.home()).tasks.find((one) => one.taskId === 'task_secret')).toMatchObject({
+      phase: 'planned',
+      plan: { startsAt: null },
+    })
+    await demo.startPlan('plan_secret')
+    expect((await demo.home()).tasks.find((one) => one.taskId === 'task_secret')).toMatchObject({
+      phase: 'running',
+      step: 'implement',
+      lead: 'claude-code',
+    })
+    await expect(demo.startPlan('plan_secret')).rejects.toThrow('already started')
+  })
+
   it('streams the lead’s words and brings a new call in, live', async () => {
     vi.useFakeTimers()
     const demo = new DemoClient({ latency: 0, live: true })

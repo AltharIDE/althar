@@ -56,7 +56,7 @@ describe('what is at work', () => {
   it('lists running work newest first and what is next by its place', () => {
     const home = homeOf(NOW)
     expect(atWorkOf(home).map((one) => one.title)).toEqual(['Backfill invoice totals for 2024', 'Dark mode for the docs pages'])
-    expect(upNextOf(home).map((one) => one.title)).toEqual(['Per-customer rate limits on /charges'])
+    expect(upNextOf(home).map((one) => one.title)).toEqual(['Per-customer rate limits on /charges', 'Rotate the webhook signing secret'])
   })
 
   it('says the step and who is on it: the reviewer while it reviews', () => {
@@ -65,6 +65,13 @@ describe('what is at work', () => {
     expect(stepWords(docs, NOW)).toBe('Reviewing')
     expect(workerOf(docs)).toBe('GPT-5.5')
     expect(trackOf(docs).map((step) => `${step.label}:${step.state}`)).toEqual(['Implement:done', 'Review:now', 'Pull request:next'])
+  })
+
+  it('counts a plan down to its start, and says when it’s held', () => {
+    const secret = homeOf(NOW).tasks.find((one) => one.taskId === 'task_secret')
+    if (secret?.plan == null) throw new Error('no plan')
+    expect(stepWords(secret, NOW)).toBe('Starts in 2m')
+    expect(stepWords({ ...secret, plan: { ...secret.plan, startsAt: null } }, NOW)).toBe('Held: starts when you say')
   })
 
   it('says where a task waits in line', () => {
@@ -92,15 +99,13 @@ describe('words', () => {
   it('says nothing while online, and how things stood while the Mac is away', () => {
     expect(connectionWords({ state: 'online', mac: DEMO_MAC }, NOW)).toBeNull()
     const away = connectionWords({ state: 'away', mac: DEMO_MAC, lastSeen: new Date(NOW - 7 * 60_000).toISOString() }, NOW)
-    expect(away?.title).toBe('Balazs’s MacBook Pro is away')
+    expect(away?.title).toBe('Sam’s MacBook Pro is away')
     expect(away?.detail).toContain('7m ago')
   })
 
   it('says which side needs updating when the two speak different versions', () => {
     expect(connectionWords({ state: 'outdated', mac: DEMO_MAC, ours: 1, theirs: 2 }, NOW)?.title).toBe('Update Althar on this phone')
-    expect(connectionWords({ state: 'outdated', mac: DEMO_MAC, ours: 2, theirs: 1 }, NOW)?.title).toBe(
-      'Update Althar on Balazs’s MacBook Pro',
-    )
+    expect(connectionWords({ state: 'outdated', mac: DEMO_MAC, ours: 2, theirs: 1 }, NOW)?.title).toBe('Update Althar on Sam’s MacBook Pro')
   })
 })
 

@@ -17,7 +17,7 @@ const bytes = (fill: number, length = 32) => new Uint8Array(length).fill(fill)
 const code: PairingCode = {
   relay: 'wss://relay.althar.dev',
   mac: 'mac_01',
-  name: 'Balazs’s MacBook Pro',
+  name: 'Sam’s MacBook Pro',
   key: bytes(7),
   nonce: bytes(9, 16),
   expires: '2026-10-21T15:05:00.000Z',

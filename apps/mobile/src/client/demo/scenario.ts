@@ -185,7 +185,21 @@ export const scenario = (now: number): Scenario => {
     },
   })
 
-  const tasks = [backfill, darkDocs, webhooks, shifts, cron, stripe, flaky, review, queuedTask]
+  const secret = task({
+    taskId: 'task_secret',
+    projectId: meridian.id,
+    title: 'Rotate the webhook signing secret',
+    phase: 'planned',
+    createdAt: ago(now, 1),
+    plan: {
+      ...implementThenReview('claude-code', OPUS, 'codex', GPT),
+      id: 'plan_secret',
+      startsAt: ahead(now, 2),
+      reason: 'Opus 5 wrote the webhook code this week; Codex reviews security changes here.',
+    },
+  })
+
+  const tasks = [backfill, darkDocs, webhooks, shifts, cron, stripe, flaky, review, queuedTask, secret]
 
   /* ---- Calls ---- */
   const migrate = call({

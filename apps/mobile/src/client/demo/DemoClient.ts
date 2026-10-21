@@ -1,4 +1,13 @@
-import type { BoardSnapshot, FileDiff, HomeSnapshot, HomeTask, TaskSummary, ThreadSnapshot, WatchEvent } from '@althar/contracts'
+import type {
+  BoardSnapshot,
+  FileDiff,
+  FoundTasks,
+  HomeSnapshot,
+  HomeTask,
+  TaskSummary,
+  ThreadSnapshot,
+  WatchEvent,
+} from '@althar/contracts'
 
 import type { AltharClient, Connection, PairedMac, Unsubscribe } from '../AltharClient'
 import { ago, call, file, say, slugOf, task, thread } from './builders'
@@ -12,7 +21,7 @@ import { scenario, type Scenario } from './scenario'
  */
 
 export const DEMO_MAC: PairedMac = {
-  name: 'Balazs’s MacBook Pro',
+  name: 'Sam’s MacBook Pro',
   pairedAt: '2026-10-20T09:12:00.000Z',
   words: ['harbor', 'velvet', 'quarry', 'lantern'],
 }
@@ -154,6 +163,40 @@ export class DemoClient implements AltharClient {
     }
   }
 
+  /** Finds by title and what the lead last said, a word at a time; with no words, the tasks changed last. */
+  async searchTasks(input: { readonly text: string; readonly projectId?: string }): Promise<FoundTasks> {
+    await this.wait()
+    const words = input.text
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word !== '')
+    const scoped = this.state.tasks.filter((one) => input.projectId === undefined || one.projectId === input.projectId)
+    const found = scoped
+      .map((one) => {
+        const title = one.title.toLowerCase()
+        const said = (one.summary ?? '').toLowerCase()
+        const inTitle = words.filter((word) => title.includes(word)).length
+        const inSaid = words.filter((word) => !title.includes(word) && said.includes(word))
+        return { one, score: inTitle * 2 + inSaid.length, all: words.every((word) => title.includes(word) || said.includes(word)), inSaid }
+      })
+      .filter((hit) => words.length === 0 || hit.all)
+      .sort((a, b) => b.score - a.score || (b.one.startedAt ?? b.one.createdAt).localeCompare(a.one.startedAt ?? a.one.createdAt))
+    return {
+      tasks: found.slice(0, 30).map(({ one, inSaid }) => ({
+        taskId: one.taskId,
+        threadId: one.threadId,
+        projectId: one.projectId,
+        title: one.title,
+        slug: one.slug,
+        phase: one.phase,
+        state: one.state,
+        pullRequest: one.change === null ? null : `#${one.change.number}`,
+        changedAt: one.startedAt ?? one.createdAt,
+        matched: inSaid.length === 0 || one.summary === null ? null : matchedParts(one.summary, inSaid),
+      })),
+    }
+  }
+
   watch(listener: (event: WatchEvent) => void): Unsubscribe {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -230,6 +273,28 @@ export class DemoClient implements AltharClient {
       waiting: 0,
       createdAt: at,
     }
+  }
+
+  async startPlan(planId: string): Promise<void> {
+    await this.wait()
+    const found = this.state.tasks.find((one) => one.plan?.id === planId && one.phase === 'planned')
+    if (found?.plan == null) throw new Error('That plan already started')
+    this.update(found.taskId, {
+      phase: 'running',
+      step: 'implement',
+      inLine: false,
+      lead: found.plan.steps[0]?.agentId ?? null,
+      leadModel: found.plan.steps[0]?.model ?? null,
+      startedAt: new Date(this.now()).toISOString(),
+      plan: { ...found.plan, startsAt: null },
+    })
+  }
+
+  async holdPlan(planId: string): Promise<void> {
+    await this.wait()
+    const found = this.state.tasks.find((one) => one.plan?.id === planId && one.phase === 'planned')
+    if (found?.plan == null) throw new Error('That plan already started')
+    this.update(found.taskId, { plan: { ...found.plan, startsAt: null } })
   }
 
   async stopTask(taskId: string): Promise<void> {
@@ -346,4 +411,29 @@ export class DemoClient implements AltharClient {
   private emit(event: WatchEvent): void {
     for (const listener of this.listeners) listener(event)
   }
+}
+
+/** What matched in `text`, a few words either side, with the words found marked, as the runtime's search says it. */
+const matchedParts = (text: string, words: ReadonlyArray<string>): Array<{ text: string; hit: boolean }> => {
+  const lower = text.toLowerCase()
+  const at = Math.min(...words.map((word) => lower.indexOf(word)).filter((index) => index >= 0))
+  const start = Math.max(0, lower.lastIndexOf(' ', Math.max(0, at - 24)) + 1)
+  const window = text.slice(start, start + 90)
+  const parts: Array<{ text: string; hit: boolean }> = start > 0 ? [{ text: '…', hit: false }] : []
+  let rest = window
+  while (rest !== '') {
+    const next = words
+      .map((word) => ({ word, index: rest.toLowerCase().indexOf(word) }))
+      .filter((hit) => hit.index >= 0)
+      .sort((a, b) => a.index - b.index)[0]
+    if (next === undefined) {
+      parts.push({ text: rest, hit: false })
+      break
+    }
+    if (next.index > 0) parts.push({ text: rest.slice(0, next.index), hit: false })
+    parts.push({ text: rest.slice(next.index, next.index + next.word.length), hit: true })
+    rest = rest.slice(next.index + next.word.length)
+  }
+  if (start + 90 < text.length) parts.push({ text: '…', hit: false })
+  return parts
 }

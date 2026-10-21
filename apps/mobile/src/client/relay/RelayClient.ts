@@ -76,6 +76,7 @@ export const connectRelay = async (port: PortLike, link: RelayLink): Promise<Alt
     board: (projectId) => settle(api.GetBoard({ projectId })),
     thread: (threadId) => settle(api.GetThread({ threadId, limit: 100 })),
     fileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
+    searchTasks: (input) => settle(api.SearchTasks({ ...input, limit: 30 })),
     watch: (listener: (event: WatchEvent) => void) => {
       let cursor: number | undefined
       const heard = Effect.suspend(() =>
@@ -94,6 +95,8 @@ export const connectRelay = async (port: PortLike, link: RelayLink): Promise<Alt
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
+    startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     markTaskDone: (taskId) => command((commandId) => api.MarkTaskDone({ commandId, taskId })),
     keepTaskForLater: (taskId) => command((commandId) => api.KeepTaskForLater({ commandId, taskId })),

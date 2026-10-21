@@ -4,6 +4,7 @@ import type {
   Disposition,
   FieldAnswer,
   FileDiff,
+  FoundTasks,
   HomeSnapshot,
   TaskSummary,
   ThreadSnapshot,
@@ -62,6 +63,8 @@ export interface AltharClient {
   thread(threadId: string): Promise<ThreadSnapshot>
   /** GetFileDiff: one file a task changed. */
   fileDiff(taskId: string, path: string): Promise<FileDiff>
+  /** SearchTasks: tasks found by what they were about, best first; with no words, the ones changed last. */
+  searchTasks(input: { readonly text: string; readonly projectId?: string }): Promise<FoundTasks>
   /** Watch: what changes, as it happens. */
   watch(listener: (event: WatchEvent) => void): Unsubscribe
 
@@ -92,6 +95,10 @@ export interface AltharClient {
   }): Promise<void>
   /** CreateTask: a new task in a project, which the coordinator plans. */
   createTask(input: { readonly projectId: string; readonly title: string; readonly description?: string }): Promise<TaskSummary>
+  /** StartPlan: a plan waiting to start, now. */
+  startPlan(planId: string): Promise<void>
+  /** HoldPlan: a plan's countdown stops; it starts when the person says. */
+  holdPlan(planId: string): Promise<void>
   stopTask(taskId: string): Promise<void>
   markTaskDone(taskId: string): Promise<void>
   keepTaskForLater(taskId: string): Promise<void>

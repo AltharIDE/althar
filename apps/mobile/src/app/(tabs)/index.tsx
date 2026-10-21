@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useConnection, useHome, useNow } from '../../client/react'
 import { ConnectionBanner } from '../../components/ConnectionBanner'
 import { NeedCard } from '../../components/NeedCard'
+import { PlanActions } from '../../components/PlanActions'
 import { TaskRow } from '../../components/TaskRow'
 import { Card, Divider, LiveDot, SectionHead, Text } from '../../components/ui'
 import { atWorkOf, needsOf, upNextOf } from '../../model/home'
@@ -195,6 +196,7 @@ export default function HomeScreen() {
                     <View key={task.taskId}>
                       {index === 0 ? null : <Divider inset={52} />}
                       <TaskRow task={task} project={projectOf(task.projectId)} now={now} />
+                      <PlanActions task={task} />
                     </View>
                   ))}
                 </Card>

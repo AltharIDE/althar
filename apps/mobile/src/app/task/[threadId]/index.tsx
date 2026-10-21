@@ -1,7 +1,7 @@
 import type { ChangeSummary, HomeCall, ThreadSnapshot } from '@althar/contracts'
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router'
 import { GitMerge, GitPullRequest, Lock, NavArrowRight, Page, Pin } from 'iconoir-react-native'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, View } from 'react-native'
 
 import { useCommand, useConnection, useHome, useNow, useStreaming, useThread } from '../../../client/react'
@@ -164,6 +164,29 @@ function Head({ thread, now }: { readonly thread: ThreadSnapshot; readonly now: 
   )
 }
 
+/**
+ * Stop, asked twice: every agent on the task stops, and its step waits until
+ * it's resumed on the Mac. A second tap within a few seconds says yes.
+ */
+function StopButton({ busy, onStop }: { readonly busy: boolean; readonly onStop: () => void }) {
+  const [sure, setSure] = useState(false)
+  useEffect(() => {
+    if (!sure) return
+    const timer = setTimeout(() => setSure(false), 4_000)
+    return () => clearTimeout(timer)
+  }, [sure])
+  return (
+    <Button
+      label={sure ? 'Stop the task?' : 'Stop'}
+      tone={sure ? 'danger' : 'quiet'}
+      small
+      busy={busy}
+      accessibilityHint="Stops every agent on the task; tap twice"
+      onPress={() => (sure ? (setSure(false), onStop()) : setSure(true))}
+    />
+  )
+}
+
 /** A finished task that isn't a change: the person's to settle, here as in its card (ADR-051). */
 function Settle({ taskId, kept }: { readonly taskId: string; readonly kept: boolean }) {
   const reachable = useConnection().state === 'online'
@@ -229,7 +252,7 @@ export default function TaskScreen() {
           title: '',
           headerRight: () =>
             data !== undefined && data.task.actions.includes('stop') ? (
-              <Button label="Stop" tone="quiet" small busy={stop.isPending} onPress={() => stop.mutate(data.task.id)} />
+              <StopButton busy={stop.isPending} onStop={() => stop.mutate(data.task.id)} />
             ) : null,
         }}
       />

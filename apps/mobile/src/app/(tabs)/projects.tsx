@@ -1,9 +1,11 @@
 import { useRouter } from 'expo-router'
 import { NavArrowRight } from 'iconoir-react-native'
+import { useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useHome, useNow } from '../../client/react'
+import { FindField, FoundList } from '../../components/FindTasks'
 import { Card, Divider, LiveDot, ProjectMark, SignalDot, Text } from '../../components/ui'
 import { since } from '../../model/words'
 import { useTheme } from '../../theme/Theme'
@@ -19,13 +21,16 @@ export default function Projects() {
   const insets = useSafeAreaInsets()
   const now = useNow()
   const home = useHome()
+  const [find, setFind] = useState('')
   const projects = [...(home.data?.projects ?? [])].sort((a, b) => (b.lastWorkAt ?? '').localeCompare(a.lastWorkAt ?? ''))
   return (
     <ScrollView contentContainerStyle={{ paddingTop: insets.top + space.md, padding: space.lg, gap: space.md }}>
       <Text kind="largeTitle" style={{ paddingHorizontal: 4 }}>
         Projects
       </Text>
-      <Card style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
+      <FindField value={find} onChange={setFind} />
+      {find.trim() === '' ? null : <FoundList text={find.trim()} projects={projects} />}
+      <Card style={{ padding: 0, gap: 0, overflow: 'hidden', display: find.trim() === '' ? 'flex' : 'none' }}>
         {projects.map((project, index) => {
           const needs = project.waiting + project.ready
           return (
@@ -76,9 +81,11 @@ export default function Projects() {
           )
         })}
       </Card>
-      <Text kind="sub" ink="t3" style={{ paddingHorizontal: 4 }}>
-        A new project starts on your Mac, where its folders are.
-      </Text>
+      {find.trim() === '' ? (
+        <Text kind="sub" ink="t3" style={{ paddingHorizontal: 4 }}>
+          A new project starts on your Mac, where its folders are.
+        </Text>
+      ) : null}
     </ScrollView>
   )
 }

@@ -179,7 +179,7 @@ function Island() {
       <View style={{ alignSelf: 'stretch', backgroundColor: '#000', borderRadius: 28, padding: space.lg, gap: space.sm }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <Text kind="subMedium" style={{ color: '#fff' }}>
-            Balazs’s MacBook Pro
+            Sam’s MacBook Pro
           </Text>
           <Text kind="caption" style={{ color: '#a68aff' }}>
             3 need you
