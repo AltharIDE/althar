@@ -14,7 +14,7 @@ import { Projects } from '../src/Projects'
 import { essentials } from '../src/rules'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS, commandsIn, hostsIn, hostsOfRemote, hostsOfTracker, runCommandsOf, setupCommandsOf, withEdits } from '../src/sandboxReach'
-import { Sessions } from '../src/Sessions'
+import { Sessions, upFrontSaid } from '../src/Sessions'
 import { repository, runtime, sessionMetas, turns, until } from './support'
 
 /*
@@ -278,4 +278,14 @@ describe('a lead’s session', () => {
       }).pipe(Effect.provide(runtime())),
     20_000,
   )
+})
+
+describe('a lead’s brief', () => {
+  it('names what runs outside its sandbox, how one does, and the hosts it reaches', () => {
+    assert.strictEqual(
+      upFrontSaid({ commands: ['bunx playwright', 'ps'], hosts: ['github.com', 'registry.npmjs.org'] }),
+      "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` included, stays in the sandbox, so change folder in a call of its own first. Your sandbox reaches these hosts without asking: github.com, registry.npmjs.org.",
+    )
+    assert.strictEqual(upFrontSaid({ commands: ['ps'], hosts: [] }).includes('hosts'), false)
+  })
 })

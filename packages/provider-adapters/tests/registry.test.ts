@@ -179,7 +179,13 @@ describe('the agent registry', () => {
     const reader = sandboxOf('reader', { sandbox: upFront }).sandbox
     assert.isUndefined(reader.excludedCommands)
     assert.isUndefined(reader.network)
-    // Codex and OpenCode have nowhere to put them: their sessions start as they did.
+    // Only Claude Code takes them: Codex and OpenCode have nowhere to put them, and the rest aren't known to.
+    assert.deepStrictEqual(
+      Object.values(agents)
+        .filter((agent) => agent.upFront === true)
+        .map((agent) => agent.id),
+      ['claude-code'],
+    )
     assert.isUndefined(agents.codex.sessionMeta)
     assert.isUndefined(agents.opencode.sessionMeta)
   })

@@ -210,6 +210,13 @@ export interface AgentDefinition {
    */
   readonly sessionMeta?: (role?: 'lead' | 'reader', options?: SessionOptions) => Readonly<Record<string, unknown>>
   /**
+   * Its session settings take what a lead's sandbox lets through from the
+   * start (`SessionOptions.sandbox`): commands it runs outside it, and hosts
+   * it reaches without asking. Without it, none are worked out for its
+   * leads, as it has nowhere to put them.
+   */
+  readonly upFront?: true
+  /**
    * How it is held as the lead of a review of someone else's pull request
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
    * `env`, what its environment adds over `withoutOwnTools`' (which it is
@@ -657,6 +664,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       role === 'reader'
         ? claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true)
         : claudeAsks(options.sandbox),
+    upFront: true,
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are

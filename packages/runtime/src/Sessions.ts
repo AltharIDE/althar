@@ -64,6 +64,7 @@ import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
 import { change, fact, timestamp } from './records'
+import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
@@ -247,6 +248,21 @@ const askedFor = (thread: { readonly title: string; readonly description: string
 
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
+
+/**
+ * What a lead is told of what its sandbox lets through from the start: as
+ * Claude Code 2.1 runs it, a line runs outside the sandbox only where every
+ * command in it is one of these, and never one that changes folder.
+ */
+export const upFrontSaid = (upFront: Reach): string =>
+  [
+    upFront.commands.length === 0
+      ? ''
+      : `These commands run outside your sandbox from the start, so they don't fail inside it first: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, \`cd\` included, stays in the sandbox, so change folder in a call of its own first.`,
+    upFront.hosts.length === 0 ? '' : `Your sandbox reaches these hosts without asking: ${upFront.hosts.join(', ')}.`,
+  ]
+    .filter((said) => said !== '')
+    .join(' ')
 
 interface Running {
   readonly sessionId: string
@@ -1742,7 +1758,7 @@ export class Sessions extends Context.Service<
           }
           // What a lead's sandbox lets through from the start, as the rules stand now; nothing for a role that only reads.
           const upFront =
-            requestContext.rules.role === 'task' && definition.sessionMeta !== undefined
+            requestContext.rules.role === 'task' && definition.upFront === true && definition.sessionMeta !== undefined
               ? yield* permissions
                   .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
                   .pipe(Effect.orElseSucceed(() => undefined))
@@ -1855,14 +1871,14 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
-          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext }
+          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, upFront }
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
       const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext } = connected
+          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, upFront } = connected
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -1891,7 +1907,8 @@ export class Sessions extends Context.Service<
             delivering: yield* Semaphore.make(1),
             stopRequest: yield* Deferred.make<StopRequest>(),
             ended: yield* Deferred.make<void>(),
-            brief,
+            // A lead is told what its sandbox lets through from the start, and how a command runs outside it.
+            brief: upFront === undefined ? brief : { ...brief, text: `${brief.text}\n\n${upFrontSaid(upFront)}` },
             revokeTools,
             requestContext,
             turnRunning: false,
