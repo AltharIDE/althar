@@ -86,8 +86,10 @@ import {
   shownOf,
   stillBusy,
   tailOf,
+  uncoloured,
   WAKE_FOR,
 } from './leftRunning'
+import { holding, localAddress, portsBelow } from './ports'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -304,9 +306,14 @@ interface Running {
 /** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
 const IDLE_EVERY = Duration.millis(250)
 
-/** How often, and for how long, what one left running is read for where it answers. */
+/**
+ * How often, and for how long, what one left running is read for where it
+ * answers: as long as Althar's own runs are (Launches.ts). Its output is read
+ * each time; the ports its processes listen on, every few.
+ */
 const SERVING_EVERY = Duration.millis(500)
-const SERVING_TRIES = 240
+const SERVING_TRIES = 1_200
+const PORTS_EVERY = 4
 
 /** Keeps what the agent last said of its context, from an event it streamed. */
 const heardContext = (running: Running, event: SessionEvent) => {
@@ -574,6 +581,8 @@ export class Sessions extends Context.Service<
     stopBackground(threadId: string, id: string): Effect.Effect<void, AgentRequestFailed | AgentExited>
     /** Clears one that ended by itself from the list. */
     clearBackground(threadId: string, id: string): Effect.Effect<void>
+    /** What one left running has printed, as far as it is read: the end of it. */
+    backgroundOutput(threadId: string, id: string): Effect.Effect<{ readonly text: string; readonly dropped: number }, NotFound>
     /** The session running on a thread, if there is one. */
     running(threadId: string): Effect.Effect<
       Option.Option<{
@@ -736,13 +745,35 @@ export class Sessions extends Context.Service<
                 ),
             })
 
-      /** Reads what one prints, now and then, until it says where it answers, ends, or a couple of minutes go by. */
+      /**
+       * The port one listens on that no other is known by: found from the
+       * processes it started, which the file its output goes to leads to where
+       * the agent says (Claude Code), else any the agent started.
+       */
+      const listeningPort = (running: Running, left: LeftRunning) =>
+        Effect.gen(function* () {
+          const held = left.outputPath === null ? [] : yield* holding(left.outputPath)
+          const agent = running.connection.process?.pid
+          const roots = held.length > 0 ? held : agent === undefined ? [] : [agent]
+          const claimed = new Set(
+            [...running.background.values()].flatMap((other) =>
+              other === left || other.url === null ? [] : [Number(new URL(other.url).port)],
+            ),
+          )
+          return (yield* portsBelow(roots)).find((port) => !claimed.has(port)) ?? null
+        })
+
+      /**
+       * Reads what one prints, now and then, and where its processes listen,
+       * until it says where it answers, ends, or ten minutes go by.
+       */
       const watchServing = (running: Running, id: string) =>
         Effect.gen(function* () {
           for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
             const left = running.background.get(id)
             if (left === undefined || left.ended !== null) return
-            const url = servingAt(yield* printedBy(left))
+            const port = tries % PORTS_EVERY === PORTS_EVERY - 1 ? yield* listeningPort(running, left) : null
+            const url = servingAt(yield* printedBy(left)) ?? (port === null ? null : localAddress(port))
             if (url !== null) {
               left.url = url
               return yield* toldBackground(running)
@@ -762,6 +793,7 @@ export class Sessions extends Context.Service<
                 running.background.set(event.id, {
                   id: event.id,
                   command: commandOfCall(item?.content, event.name),
+                  name: event.name,
                   toolCallId: event.toolCallId ?? null,
                   outputPath: event.outputPath ?? null,
                   printed: yield* printedBefore(running, item?.id),
@@ -2795,6 +2827,12 @@ export class Sessions extends Context.Service<
             if (running === undefined || running.background.get(id)?.ended == null) return
             running.background.delete(id)
             yield* toldBackground(running)
+          }),
+        backgroundOutput: (threadId, id) =>
+          Effect.gen(function* () {
+            const left = threads.get(threadId)?.background.get(id)
+            if (left === undefined) return yield* Effect.fail(new NotFound({ kind: 'background command', id }))
+            return { text: uncoloured(yield* printedBy(left)), dropped: 0 }
           }),
         outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
         busy: (threadId) => busyNow(threadId),

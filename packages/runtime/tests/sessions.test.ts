@@ -627,7 +627,7 @@ describe('sessions', () => {
           yield* ended(created.threadId, 1)
           // By its tool call's command, not by what the call says it does; where it answers, from what it printed, colours and all.
           const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
-          assert.deepInclude(serving, { command: 'bun dev', url: 'http://localhost:5173/', ended: null })
+          assert.deepInclude(serving, { command: 'bun dev', name: 'Start the dev server', url: 'http://localhost:5173/', ended: null })
           // Background work that isn't a command isn't kept.
           assert.lengthOf(yield* shown(created.threadId), 1)
           yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
@@ -643,6 +643,20 @@ describe('sessions', () => {
           yield* sessions.clearBackground(created.threadId, exited?.id ?? '')
           assert.lengthOf(yield* shown(created.threadId), 0)
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('finds where one answers from its port when its output never says, and it keeps its name', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'claude-code')
+        yield* say(created.threadId, scenarios.backgroundQuiet)
+        yield* ended(created.threadId, 1)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+        assert.strictEqual(serving?.name, 'Start the dev server')
+        yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     )
 
     it.live(

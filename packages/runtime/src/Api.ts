@@ -1277,6 +1277,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
+      ReadBackgroundOutput: ({ threadId, id }) => api(sessions.backgroundOutput(threadId, id)),
       ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
       RunProject: ({ commandId, projectId, taskId, threadId, runnableId }) =>
         once(commandId, api(launches.start({ projectId, taskId, threadId, ...(runnableId === undefined ? {} : { runnableId }) }))),

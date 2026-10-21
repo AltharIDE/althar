@@ -1,7 +1,7 @@
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect } from 'effect'
 
-import { commandOfCall, exitCodeIn, type InHand, servingAt, stillBusy, tailOf } from '../src/leftRunning'
+import { commandOfCall, exitCodeIn, type InHand, type LeftRunning, servingAt, shownOf, stillBusy, tailOf } from '../src/leftRunning'
 
 /*
  * What is read from a command left running: where it answers, as servers
@@ -48,6 +48,32 @@ describe('what a command left running says', () => {
       assert.strictEqual(yield* tailOf('/nonexistent/althar/output'), '')
     }),
   )
+})
+
+describe('what a client is shown of one', () => {
+  const left: LeftRunning = {
+    id: 'bg1',
+    command: 'cd /w/site && node_modules/.bin/vp dev --config ../../a/vite.config.ts 2>&1 | tail -20',
+    name: 'Site dev server',
+    toolCallId: null,
+    outputPath: null,
+    printed: '',
+    url: null,
+    startedAt: '2026-10-21T09:00:00.000Z',
+    ended: null,
+  }
+
+  it('keeps what the agent calls it, and the command at a glance as `vp dev`', () => {
+    const shown = shownOf(left)
+    assert.strictEqual(shown.name, 'Site dev server')
+    assert.strictEqual(shown.label, 'vp dev')
+    assert.strictEqual(shown.command, left.command)
+  })
+
+  it('has no name where the agent only gave the command', () => {
+    assert.notProperty(shownOf({ ...left, name: '' }), 'name')
+    assert.notProperty(shownOf({ ...left, name: left.command }), 'name')
+  })
 })
 
 describe('whether an agent that ended its turn is still at work', () => {

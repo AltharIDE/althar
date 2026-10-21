@@ -15,6 +15,8 @@ import { commandIn, shortCommand } from './rules'
 export interface LeftRunning {
   readonly id: string
   readonly command: string
+  /** What the agent says it does, as it named the command: "Site dev server". Empty where it only gave the command. */
+  readonly name: string
   /** The tool call that started it, whose output may say where it answers. */
   readonly toolCallId: string | null
   /** The file its output goes to, where the agent says (Claude Code). */
@@ -144,12 +146,15 @@ export const commandOfCall = (call: Readonly<Record<string, unknown>> | undefine
 
 /** What a client shows of one. */
 export type ShownLeftRunning = Pick<LeftRunning, 'id' | 'command' | 'url' | 'startedAt' | 'ended'> & {
+  /** What the agent calls it, where that says more than the command does. */
+  readonly name?: string
   /** The command as it reads at a glance: without its `cd`, environment and output plumbing. */
   readonly label?: string
 }
 export const shownOf = (left: LeftRunning): ShownLeftRunning => ({
   id: left.id,
   command: left.command,
+  ...(left.name === '' || left.name === left.command ? {} : { name: left.name }),
   label: shortCommand(left.command),
   url: left.url,
   startedAt: left.startedAt,

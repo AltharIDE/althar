@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -108,6 +108,12 @@ export const scenarios = {
   background: 'background',
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
   backgroundCodex: 'background-codex',
+  /**
+   * Leaves `bun dev` running as `background` does, but its output says
+   * nothing of where it serves: a real process, started with its output going
+   * to that file, listens on a port of its own. Stopping it ends it.
+   */
+  backgroundQuiet: 'background-quiet',
   /**
    * Commands the agent starts of its own, with no tool call: `npm run watch`
    * keeps running, `npm test` ends well and `npm run lint` badly, neither
@@ -277,7 +283,7 @@ interface SessionState {
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
   /** What it left running, by its task's id. */
-  background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
+  background: Map<string, { readonly toolCallId: string; readonly outputPath?: string; readonly process?: ChildProcess }>
   /** How many commands it has left running, so each has an id of its own. */
   served: number
   /** Its approve-everything option, where it has one (`allowAll`). */
@@ -308,7 +314,7 @@ const leaveRunning = async (
   session: SessionState,
   client: acp.AgentContext,
   as: 'claude' | 'codex',
-  options: { readonly exits?: boolean } = {},
+  options: { readonly exits?: boolean; readonly quiet?: boolean } = {},
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -335,8 +341,15 @@ const leaveRunning = async (
   const folder = join(tmpdir(), 'althar-fake-agent')
   mkdirSync(folder, { recursive: true })
   const outputPath = join(folder, `${sessionId}-${id}.output`)
-  writeFileSync(outputPath, SERVING)
-  session.background.set(id, { toolCallId, outputPath })
+  writeFileSync(outputPath, options.quiet === true ? '' : SERVING)
+  let server: ChildProcess | undefined
+  if (options.quiet === true) {
+    // A server whose output says nothing: its own process holds the file open and listens on a port it chose.
+    const out = openSync(outputPath, 'a')
+    server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: ['ignore', out, out] })
+    closeSync(out)
+  }
+  session.background.set(id, { toolCallId, outputPath, ...(server === undefined ? {} : { process: server }) })
   await notify({
     sessionUpdate: 'async_task_spawned',
     asyncTaskId: id,
@@ -1229,6 +1242,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (session === undefined || left === undefined) return { stopped: false }
         if (options.refusesStop?.() === true) throw new Error('The agent could not stop it.')
         session.background.delete(params.asyncTaskId)
+        left.process?.kill()
         options.stoppedBackground?.(params.asyncTaskId)
         await client.notify(acp.methods.client.session.update, {
           sessionId: params.sessionId,
@@ -1644,7 +1658,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.background:
         case scenarios.backgroundCodex:
-          await leaveRunning(params.sessionId, session, client, scenario === scenarios.background ? 'claude' : 'codex')
+        case scenarios.backgroundQuiet:
+          await leaveRunning(params.sessionId, session, client, scenario === scenarios.backgroundCodex ? 'codex' : 'claude', {
+            quiet: scenario === scenarios.backgroundQuiet,
+          })
           await say('serving')
           return ended()
         case scenarios.backgroundOwn: {

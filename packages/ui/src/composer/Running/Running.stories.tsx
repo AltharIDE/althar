@@ -28,6 +28,24 @@ const CRASHED: RunningProcess = {
   exited: 1,
 }
 
+/** What a lead's `vite dev` is, as it named it, with the command it ran, and where it was found to answer. */
+const SITE: RunningProcess = {
+  id: 'site',
+  name: 'Site dev server',
+  command: 'cd /Users/balazs/Charrette/althar/site/althar && node_modules/.bin/vp dev --config ../../a/vite.config.ts 2>&1 | tail -20',
+  label: 'vp dev',
+  url: 'localhost:5173',
+  since: '6m',
+}
+/** Named, and no address yet: it hasn't printed one, or hasn't started listening. */
+const API: RunningProcess = {
+  id: 'api',
+  name: 'API server, writing to a log file',
+  command: 'bun run api --log /tmp/api.log',
+  label: 'bun run api --log /tmp/api.log',
+  since: '2m',
+}
+
 const meta = {
   title: 'Composer/Running',
   component: Running,
@@ -88,6 +106,39 @@ export const LongCommand: Story = {
     await expect(within(canvasElement).getByTitle(LONG.command)).toBeVisible()
   },
 }
+/** A server as its lead named it: the name and where it answers lead; the command at a glance and how long it has run are the quiet line under. */
+export const Named: Story = {
+  args: { processes: [SITE], defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const pill = within(canvasElement).getByRole('button', { name: /Running/ })
+    await expect(pill).toHaveTextContent('RunningSite dev server· localhost:5173')
+    const page = within(document.body)
+    await expect(page.getByText('vp dev')).toBeVisible()
+    // The whole command is on hover, on the pill and on the row.
+    await expect(page.getAllByTitle(SITE.command)).toHaveLength(3)
+  },
+}
+/** Named but with no address, as a server that logs to a file is: Output is the way to see it. */
+export const NamedNoAddress: Story = { args: { processes: [API], defaultOpen: true } }
+/** Several named servers, each with its address or without, and one exited. */
+export const NamedSeveral: Story = { args: { processes: [SITE, API, { ...CRASHED, name: 'Queue worker' }], defaultOpen: true } }
+/** A name or an address too long for the popover wraps, and the long command under it wraps too: nothing is cut off. */
+export const NamedLong: Story = {
+  args: {
+    defaultOpen: true,
+    processes: [
+      {
+        ...SITE,
+        name: 'Marketing site dev server for the new landing page, with the pricing calculator and the docs preview mounted under it',
+        label: 'vp dev --host 0.0.0.0 --port 5173 --strictPort --mode staging --open /pricing/calculator?plan=team&seats=25',
+        url: 'my-very-long-branch-name.preview.localhost:5173',
+      },
+    ],
+  },
+}
+/** Its output isn't kept anywhere to read, as an Althar run's isn't: no Output button on its row. */
+export const NoOutput: Story = { args: { processes: [{ ...SITE, output: false }], defaultOpen: true } }
+
 /** A command that can't be shortened still can't stretch the pill: it ends in an ellipsis. */
 export const LongUnshortened: Story = {
   args: {
@@ -133,6 +184,8 @@ export const AllStates: Story = {
       cells={[
         ...['rest', 'hover', 'focus', 'pressed'].map((state) => ({ state, node: <Running processes={[DEV]} /> })),
         { state: 'several', node: <Running processes={[DEV, WATCH, STRIPE]} /> },
+        { state: 'named', node: <Running processes={[SITE]} /> },
+        { state: 'named, no address', node: <Running processes={[API]} /> },
         { state: 'exited', node: <Running processes={[CRASHED]} /> },
         { state: 'running and exited', node: <Running processes={[DEV, CRASHED]} /> },
         { state: 'ended, code unknown', node: <Running processes={[{ ...CRASHED, exited: null }]} /> },
