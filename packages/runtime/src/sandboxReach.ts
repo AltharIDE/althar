@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseRemote, type Product, products } from '@althar/connectors'
+import { runsOutside } from '@althar/contracts'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -76,18 +77,29 @@ const tidy = (line: string) => line.trim().replace(/\s+/g, ' ')
  * The commands the repository in `folder` runs outside a lead's sandbox, as
  * what is in it says: the tools its packages bring that start a browser,
  * Electron or a test runner, run by its package manager, and its test and
- * end-to-end scripts, run from where they are.
+ * end-to-end scripts, run from where they are. Bun's scripts by what they
+ * run, as Claude Code keeps a line that starts with `bun` in its sandbox:
+ * `node scripts/e2e.ts`, `bunx vp test run`.
  */
 export const commandsIn = (folder: string, root: string = folder): ReadonlyArray<string> => {
   const manager = managerIn(folder, root) ?? 'npm'
   const runner = RUNNERS[manager] ?? 'npx'
   const packages = packagesIn(folder)
-  const tools = TOOLS.filter((tool) => tool.packages.some((name) => packages.has(name))).map((tool) => `${runner} ${tool.bin}`)
+  const brought = TOOLS.filter((tool) => tool.packages.some((name) => packages.has(name)))
+  const tools = brought.map((tool) => `${runner} ${tool.bin}`)
+  const tests = scriptsIn(folder, root).filter((script) => testing(script.name))
+  // A package's own command as a lead types it, through the runner; anything else, `node scripts/e2e.ts`, as it is.
+  const ownCommand = (program: string) =>
+    packages.has(program) ||
+    brought.some((tool) => tool.bin === program) ||
+    [folder, root].some((at) => existsSync(join(at, 'node_modules', '.bin', program)))
+  const typed = (part: string) => (ownCommand(part.split(' ')[0] ?? '') ? `${runner} ${part}` : part)
   // By name, as run where the script is: a workspace's in its folder runs as the root's does.
-  const scripts = [...new Set(scriptsIn(folder, root).flatMap((script) => (testing(script.name) ? [script.name] : [])))].map(
-    (name) => `${manager} run ${name}`,
-  )
-  return [...tools, ...scripts]
+  const scripts =
+    manager === 'bun' ? tests.flatMap((script) => partsOf(script.body).map(typed)) : tests.map((script) => `${manager} run ${script.name}`)
+  // Without what a tool already covers: `bunx playwright test` runs outside as `bunx playwright` does.
+  const covered = (command: string) => tools.some((tool) => command.startsWith(`${tool} `))
+  return [...new Set([...tools, ...scripts])].filter((command) => runsOutside(command) && !covered(command))
 }
 
 /** Words that only test or change folder before what a line runs: `test -d node_modules ||`, `cd web &&`. */
@@ -260,7 +272,7 @@ export const workedOutReach = (projectId: string, taskId: string | null) =>
         }),
         ...kept.map((runnable) => runCommandsOf(runnable.command)),
         ALWAYS,
-      ]),
+      ]).filter(runsOutside),
       hosts: once([
         ...places.map(({ binding }) => remotesOf(binding.remotes).flatMap(hostsOfRemote)),
         ...places.map(({ folder, root }) => hostsIn(folder, root)),

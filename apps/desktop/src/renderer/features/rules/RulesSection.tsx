@@ -5,6 +5,7 @@ import {
   fillPattern,
   hostOf,
   type ProjectRulesView,
+  runsOutside,
   type SandboxEdits,
 } from '@althar/contracts'
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd, unreachable } from '@althar/ui'
@@ -38,6 +39,9 @@ export const text = {
     'Name each host on its own, such as pkgs.example.com: the rules check every host a lead reaches, and can’t check every host under a *.',
   /** Enter on nothing but spaces or a lone *. */
   noCommand: 'Type how the command starts first.',
+  /** A command Claude Code keeps in its sandbox whatever the list says. */
+  bunStays:
+    'Claude Code runs a command that starts with bun in its sandbox whatever this list says. Add what it runs instead, such as node scripts/e2e.ts.',
   /** The task names are shown for: its key from the project's name. */
   example: (project: string) => {
     const letters = project
@@ -249,7 +253,8 @@ export const sandboxEdited = (edits: SandboxEdits, value: string, to: 'add' | 'r
 const sandboxEntryOf = (list: SandboxList, typed: string): { readonly value: string } | { readonly problem: string } => {
   const value = list === 'hosts' ? hostOf(typed) : commandStartOf(typed)
   if (value !== null) return { value }
-  return { problem: list === 'commands' ? text.noCommand : typed.includes('*') ? text.wildHost : text.notAHost(typed) }
+  if (list === 'commands') return { problem: runsOutside(typed) ? text.noCommand : text.bunStays }
+  return { problem: typed.includes('*') ? text.wildHost : text.notAHost(typed) }
 }
 
 /** Althar's own patterns, where a repository's docs say nothing and the person set none. */

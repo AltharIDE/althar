@@ -140,9 +140,12 @@ Shots go in `test-results/`, which git ignores. In an agent's sandbox on a
 Mac, Chromium and Electron can't start (Chromium exits with `SIGTRAP`), so run
 the shooting command outside the sandbox; Storybook itself runs inside it,
 since a lead may listen on localhost. A lead in Althar runs `bunx playwright`
-and `bun run test:e2e` outside its sandbox from the start (the project's
-rules, under Sandbox), but only on a line of their own: change folder in a
-command of its own first, as above.
+and the end-to-end run's own `node scripts/e2e.ts` (in `apps/desktop`)
+outside its sandbox from the start (the project's rules, under Sandbox), but
+only on a line of their own: change folder in a command of its own first, as
+above. Claude Code keeps a line that starts with `bun` in its sandbox
+whatever its settings say, so `bun run test:e2e` fails there: run
+`node scripts/e2e.ts e2e/your.spec.ts` from `apps/desktop` instead.
 
 ## Reviewing on Linux
 

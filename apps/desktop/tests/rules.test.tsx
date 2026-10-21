@@ -117,7 +117,7 @@ describe('a project’s rules', () => {
     withServices(<Rules />, client)
     await screen.findByRole('heading', { name: 'Sandbox', level: 3 })
     expect(says('Sandbox')).toBe(
-      'Leads run bunx playwright, bun run test, ps and env -i outside their sandbox from the start. They reach github.com and registry.npmjs.org without asking. Each command still meets these rules.',
+      'Leads run bunx playwright, node scripts/e2e.ts, ps and env -i outside their sandbox from the start. They reach github.com and registry.npmjs.org without asking. Each command still meets these rules.',
     )
     await choose(screen.getByRole('button', { name: 'allowed' }), 'Ask me')
     await waitFor(() => expect(says('Sandbox')).toContain('registry.npmjs.org without asking, once everything else is allowed.'))
@@ -159,6 +159,12 @@ describe('a project’s rules', () => {
       }),
     )
     expect(screen.queryByRole('button', { name: 'Remove env -i' })).toBeNull()
+    // Claude Code keeps a line that starts with bun in its sandbox, whatever the list says.
+    const calls = vi.mocked(client.setProjectRules).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Add a command leads run outside their sandbox' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A command, as it starts' }), 'bun run test:e2e{Enter}')
+    expect(screen.getByRole('textbox', { name: 'A command, as it starts', description: /starts with bun/ })).toBeTruthy()
+    expect(client.setProjectRules).toHaveBeenCalledTimes(calls)
   })
 
   it('takes a command out at once, and adds one where its sentence ends', async () => {

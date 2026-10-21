@@ -1,4 +1,4 @@
-import { hostOf } from '@althar/contracts'
+import { hostOf, runsOutside } from '@althar/contracts'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -48,7 +48,7 @@ const desktopApp = () => {
     join(path, 'package.json'),
     JSON.stringify({
       name: 'meridian',
-      scripts: { dev: 'vite', test: 'vitest', 'test:e2e': 'playwright test', check: 'tsc' },
+      scripts: { dev: 'vite', test: 'vitest', 'test:e2e': 'node scripts/e2e.ts', check: 'tsc' },
       devDependencies: { '@playwright/test': '1', electron: '38', vitest: '4' },
     }),
   )
@@ -84,6 +84,31 @@ describe('what a repository says its leads run outside the sandbox', () => {
       'pnpm run test',
       'pnpm run e2e',
     ])
+  })
+
+  it('names Bun’s scripts by what they run, as Claude Code keeps a line that starts with bun in its sandbox', () => {
+    const root = folder(
+      { name: 'althar', workspaces: ['apps/*'], scripts: { test: "bun --filter '*' test", 'test:e2e': "bun --filter '*' test:e2e" } },
+      {
+        'bun.lock': '{}',
+        'node_modules/.bin/vp': '',
+        'apps/desktop/package.json': JSON.stringify({
+          name: '@althar/desktop',
+          scripts: {
+            test: 'vp test run',
+            'test:e2e': 'node scripts/e2e.ts',
+            screenshots: 'playwright test shots',
+            dev: 'bun run build && electron .',
+          },
+          devDependencies: { '@playwright/test': '1' },
+        }),
+      },
+    )
+    assert.deepStrictEqual(commandsIn(root), ['bunx playwright', 'bunx vp test run', 'node scripts/e2e.ts'])
+    assert.deepStrictEqual(
+      ['bun run test:e2e', '/opt/bin/bun x', 'bunx playwright', 'node scripts/e2e.ts', 'bundle exec rspec'].map(runsOutside),
+      [false, false, true, true, true],
+    )
   })
 
   it('names none where it has no packages, and npm’s where no lockfile says', () => {
@@ -213,14 +238,12 @@ describe('a lead’s session', () => {
     () =>
       Effect.gen(function* () {
         const sandbox = yield* leading({ permissions: 'rules' })
+        // Not `bun run dev` or `bun install`, which Claude Code would run in the sandbox anyway.
         assert.deepStrictEqual(sandbox?.commands, [
           'bunx playwright',
           'bunx electron',
           'bunx vitest',
-          'bun run test',
-          'bun run test:e2e',
-          'bun run dev',
-          'bun install',
+          'node scripts/e2e.ts',
           'ps',
           'env -i',
         ])
@@ -250,7 +273,7 @@ describe('a lead’s session', () => {
         const sandbox = yield* leading({
           permissions: 'ask',
           sandbox: {
-            commands: { added: ['make  e2e *'], removed: ['bun run dev', 'env -i'] },
+            commands: { added: ['make  e2e *', 'bun run test:e2e'], removed: ['env -i'] },
             hosts: { added: ['https://Pkgs.Acme.dev:8443/simple'], removed: [] },
           },
         })
@@ -258,9 +281,7 @@ describe('a lead’s session', () => {
           'bunx playwright',
           'bunx electron',
           'bunx vitest',
-          'bun run test',
-          'bun run test:e2e',
-          'bun install',
+          'node scripts/e2e.ts',
           'ps',
           'make e2e',
         ])
@@ -301,7 +322,7 @@ describe('a lead’s brief', () => {
   it('names what runs outside its sandbox, how one does, and the hosts it reaches', () => {
     assert.strictEqual(
       upFrontSaid({ commands: ['bunx playwright', 'ps'], hosts: ['github.com', 'registry.npmjs.org'] }),
-      "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` included, stays in the sandbox, so change folder in a call of its own first. Your sandbox reaches these hosts without asking: github.com, registry.npmjs.org.",
+      "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` included, stays in the sandbox, so change folder in a call of its own first. A line that starts with `bun` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here. Your sandbox reaches these hosts without asking: github.com, registry.npmjs.org.",
     )
     assert.strictEqual(upFrontSaid({ commands: ['ps'], hosts: [] }).includes('hosts'), false)
   })

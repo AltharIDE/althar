@@ -66,7 +66,7 @@ export const projectRules: ProjectRulesView = {
   moveIssues: true,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
   sandbox: {
-    commands: ['bunx playwright', 'bun run test', 'ps', 'env -i'],
+    commands: ['bunx playwright', 'node scripts/e2e.ts', 'ps', 'env -i'],
     hosts: ['github.com', 'registry.npmjs.org'],
     edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
   },

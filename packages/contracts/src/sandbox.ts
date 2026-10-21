@@ -21,8 +21,22 @@ export const hostOf = (typed: string): string | null => {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(name) || name === 'localhost' ? name : null
 }
 
-/** A command as a sandbox's list takes it: how it starts, its words with single spaces; null for nothing. */
+/**
+ * Whether Claude Code runs a line that starts so outside its sandbox where
+ * its list names it. As 2.1 does, never one that starts with `bun`, though
+ * `bunx` it does: such a line runs in the sandbox whatever the list says.
+ */
+export const runsOutside = (command: string): boolean => {
+  const program = command.trim().split(/\s+/)[0] ?? ''
+  return program.slice(program.lastIndexOf('/') + 1) !== 'bun'
+}
+
+/**
+ * A command as a sandbox's list takes it: how it starts, its words with
+ * single spaces. Null for nothing, and for what never runs outside the
+ * sandbox however it is listed (`runsOutside`).
+ */
 export const commandStartOf = (typed: string): string | null => {
   const words = typed.trim().replace(/\s+/g, ' ').replace(/ \*$/, '')
-  return words === '' || words === '*' ? null : words
+  return words === '' || words === '*' || !runsOutside(words) ? null : words
 }

@@ -252,13 +252,14 @@ const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' :
 /**
  * What a lead is told of what its sandbox lets through from the start: as
  * Claude Code 2.1 runs it, a line runs outside the sandbox only where every
- * command in it is one of these, and never one that changes folder.
+ * command in it is one of these, never one that changes folder, and never
+ * one that starts with `bun`, so a Bun script is listed by what it runs.
  */
 export const upFrontSaid = (upFront: Reach): string =>
   [
     upFront.commands.length === 0
       ? ''
-      : `These commands run outside your sandbox from the start, so they don't fail inside it first: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, \`cd\` included, stays in the sandbox, so change folder in a call of its own first.`,
+      : `These commands run outside your sandbox from the start, so they don't fail inside it first: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, \`cd\` included, stays in the sandbox, so change folder in a call of its own first. A line that starts with \`bun\` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here.`,
     upFront.hosts.length === 0 ? '' : `Your sandbox reaches these hosts without asking: ${upFront.hosts.join(', ')}.`,
   ]
     .filter((said) => said !== '')

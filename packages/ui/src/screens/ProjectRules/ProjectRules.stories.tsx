@@ -17,7 +17,7 @@ import { type CommandPlace, ProjectRules, type ProjectRulesProps, type RuleComma
 
 /** What Meridian's leads' sandboxes let through: what its packages, scripts and setup say, and its code host, registry and tracker. */
 const MERIDIAN_SANDBOX = {
-  commands: ['bunx playwright', 'bun run test', 'bun run test:e2e', 'bun install', 'ps', 'env -i'],
+  commands: ['bunx playwright', 'bunx vp test run', 'node scripts/e2e.ts', 'ps', 'env -i'],
   hosts: ['github.com', 'api.github.com', 'registry.npmjs.org', 'linear.app', 'api.linear.app'],
 }
 

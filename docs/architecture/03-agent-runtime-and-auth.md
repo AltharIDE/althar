@@ -838,8 +838,10 @@ in its settings (`sandboxReach.ts`, `Permissions.upFront`):
   (`sandbox.excludedCommands`). Each still goes through Claude Code's
   permission flow, so it asks and meets the rules as its second try would
   have. Claude Code 2.1 runs a line outside only where every command in it
-  is on the list, and never one with `cd`, so a lead is told to run them on
-  a line of their own;
+  is on the list, never one with `cd`, and never one that starts with `bun`
+  (`bunx` it does), so a lead is told to run them on a line of their own,
+  and a Bun script is listed by what it runs (`node scripts/e2e.ts`, not
+  `bun run test:e2e`);
 - hosts its sandboxed commands reach without asking
   (`sandbox.network.allowedDomains`), only those the rules would let a
   request for them through without anyone: none while the rest asks the
