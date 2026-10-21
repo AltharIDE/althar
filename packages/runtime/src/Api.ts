@@ -64,6 +64,7 @@ import { Queries } from './Queries'
 import { Busy } from './Busy'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
+import { withEdits, workedOutReach } from './sandboxReach'
 import { Coordinator } from './Coordinator'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
@@ -266,6 +267,9 @@ export const handlers = Api.toLayer(
     const issueFor = (projectId: string, issue: string | undefined) =>
       issue === undefined ? Effect.succeed(undefined) : issues.read(issue, projectId)
 
+    /** A list Althar works out that the person hasn't changed. */
+    const UNEDITED = { added: [], removed: [] }
+
     /** A project's rules as its rules screen shows them, with what each of its repositories says on its default branch. */
     const rulesView = (projectId: string, { rules, revision }: { readonly rules: ProjectRules; readonly revision: number }) =>
       Effect.gen(function* () {
@@ -284,10 +288,21 @@ export const handlers = Api.toLayer(
             })),
           { concurrency: 4 },
         )
-        return { ...rulesFields(projectId, rules), revision, conventions }
+        // What its leads' sandboxes let through, as worked out from its repositories here, with what the person changed of it.
+        const reach = yield* workedOutReach(projectId, null).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.provideService(Instance, instance),
+        )
+        const edits = { commands: rules.sandbox?.commands ?? UNEDITED, hosts: rules.sandbox?.hosts ?? UNEDITED }
+        const sandbox = {
+          commands: withEdits(reach.commands, edits.commands),
+          hosts: withEdits(reach.hosts, edits.hosts),
+          edits,
+        }
+        return { ...rulesFields(projectId, rules), revision, conventions, sandbox }
       })
 
-    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions' | 'revision'> => {
+    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
