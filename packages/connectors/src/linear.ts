@@ -141,17 +141,14 @@ const Project = Schema.Struct({ id: Schema.String, name: Schema.String })
 
 /** An issue's team, with its id and one of its lists, as `items`: each asked for only when a change needs it. */
 const TeamOf = <A>(node: Schema.Codec<A, unknown>) =>
-  Schema.Struct({
-    issue: Schema.Struct({ team: Schema.Struct({ id: Schema.String, items: Schema.Struct({ nodes: Schema.Array(node) }) }) }),
-  })
+  Schema.Struct({ issue: Schema.Struct({ team: Schema.Struct({ id: Schema.String, items: Connection(node) }) }) })
 
-/** What is read of each of a team's lists. */
-const FIELDS_OF: Readonly<Record<string, string>> = {
-  'states(first: 100)': 'id name type position',
-  'members(first: 250)': 'id name displayName email active',
-  'projects(first: 100)': 'id name',
-  'projects(first: 1)': 'id name',
-}
+/** Each of a team's lists Althar reads: how many to a page, and what of each. */
+const LISTS = {
+  states: { first: 100, fields: 'id name type position' },
+  members: { first: 250, fields: 'id name displayName email active' },
+  projects: { first: 100, fields: 'id name' },
+} as const
 
 /** A key as Linear writes it, however it was typed: mer-231 is MER-231. Anything else goes as it is. */
 const keyOf = (ref: string) => (/^[A-Z][A-Z0-9]*-\d+$/i.test(ref) ? ref.toUpperCase() : ref)
@@ -209,23 +206,34 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
       ({ issue }) => issueOf(issue),
     )
 
-  /** An issue's team: its id, and one of its lists (its states, its people, its projects). */
-  const ofTeam = <A>(issue: Issue, node: Schema.Codec<A, unknown>, list: string) =>
+  /** One of an issue's team's lists (its states, its people, its projects), page by page. */
+  const ofTeam = <A>(issue: Issue, node: Schema.Codec<A, unknown>, list: keyof typeof LISTS) =>
+    paged<A, string | null>(null, (after) =>
+      Effect.map(
+        http.graphql(
+          TeamOf(node),
+          url,
+          `query($id: String!, $after: String) { issue(id: $id) { team { id items: ${list}(first: ${LISTS[list].first}, after: $after) { nodes { ${LISTS[list].fields} } pageInfo { hasNextPage endCursor } } } } }`,
+          { id: issue.id, after },
+        ),
+        ({ issue: found }) => pageOf(found.team.items),
+      ),
+    )
+
+  /** An issue's team, by its id. */
+  const teamOf = (issue: Issue) =>
     Effect.map(
       http.graphql(
-        TeamOf(node),
+        Schema.Struct({ issue: Schema.Struct({ team: Schema.Struct({ id: Schema.String }) }) }),
         url,
-        `query($id: String!) { issue(id: $id) { team { id items: ${list} { nodes { ${FIELDS_OF[list]} } } } } }`,
-        {
-          id: issue.id,
-        },
+        'query($id: String!) { issue(id: $id) { team { id } } }',
+        { id: issue.id },
       ),
-      ({ issue: found }) => ({ teamId: found.team.id, items: found.team.items.nodes }),
+      ({ issue: found }) => found.team.id,
     )
 
   /** An issue's team's states, in their order on its board. */
-  const states = (issue: Issue) =>
-    Effect.map(ofTeam(issue, State, 'states(first: 100)'), ({ items }) => items.toSorted((a, b) => a.position - b.position))
+  const states = (issue: Issue) => Effect.map(ofTeam(issue, State, 'states'), (all) => all.toSorted((a, b) => a.position - b.position))
 
   const choices: Tracker['choices'] = (issue, field) => {
     switch (field) {
@@ -234,14 +242,13 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
       // Its team's and the workspace's; a group only holds labels.
       case 'labels':
         return Effect.gen(function* () {
-          const { teamId } = yield* ofTeam(issue, Project, 'projects(first: 1)')
-          return (yield* teamLabels(teamId))
+          return (yield* teamLabels(yield* teamOf(issue)))
             .filter((label) => label.isGroup !== true)
             .map((label): Choice => ({ id: label.id, name: label.name }))
         })
       // Its team's people, still active: who Linear lets it be assigned to.
       case 'assignee':
-        return Effect.map(ofTeam(issue, Member, 'members(first: 250)'), ({ items }) =>
+        return Effect.map(ofTeam(issue, Member, 'members'), (items) =>
           items
             .filter((member) => member.active !== false)
             .map((member): Choice => ({
@@ -251,7 +258,7 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
             })),
         )
       case 'project':
-        return Effect.map(ofTeam(issue, Project, 'projects(first: 100)'), ({ items }) =>
+        return Effect.map(ofTeam(issue, Project, 'projects'), (items) =>
           items.map((project): Choice => ({ id: project.id, name: project.name })),
         )
     }
@@ -316,23 +323,32 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
         ),
         ({ viewer }) => viewer.assignedIssues.nodes.map(issueOf),
       ),
+    // Linear says whether it took each: one it says it didn't is refused, never taken as done.
     comment: (issue, body) =>
-      Effect.asVoid(
+      Effect.flatMap(
         http.graphql(
           Schema.Struct({ commentCreate: Success }),
           url,
           'mutation($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success } }',
           { issueId: issue.id, body },
         ),
+        ({ commentCreate }) =>
+          commentCreate.success
+            ? Effect.void
+            : Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not post the comment' })),
       ),
     link: (issue, link) =>
-      Effect.asVoid(
+      Effect.flatMap(
         http.graphql(
           Schema.Struct({ attachmentLinkURL: Success }),
           url,
           'mutation($issueId: String!, $url: String!, $title: String) { attachmentLinkURL(issueId: $issueId, url: $url, title: $title) { success } }',
           { issueId: issue.id, url: link.url, title: link.title },
         ),
+        ({ attachmentLinkURL }) =>
+          attachmentLinkURL.success
+            ? Effect.void
+            : Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not link it' })),
       ),
     // A team is where a Linear issue is filed.
     containers: () =>

@@ -56,4 +56,6 @@ export const statements: ReadonlyArray<string> = [
   index('issue_changes_by_project', 'issue_changes (project_id)'),
   index('issue_changes_by_thread', 'issue_changes (thread_id, state)'),
   "ALTER TABLE issue_drafts ADD COLUMN priority TEXT CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none'))",
+  // A draft's card, as its thread keeps it, says its priority too: none, for one drafted before priorities.
+  "UPDATE thread_items SET content = json_set(content, '$.priority', json('null')) WHERE kind = 'issue_draft' AND json_type(content, '$.priority') IS NULL",
 ]

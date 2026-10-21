@@ -1,4 +1,5 @@
 import type { IssueChangesCard } from '@althar/contracts'
+import { ConnectorFailed } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
@@ -255,6 +256,38 @@ describe('changes to issues', () => {
       assert.strictEqual(again.state, 'applied')
       assert.strictEqual((yield* tracker.issue('MER-232')).priority?.level, 'urgent')
     }).pipe(Effect.provide(withQueries({ linear: tracker })))
+  })
+
+  it.live('never post a comment twice whose answer couldn’t be read: the card says to look on the tracker', () => {
+    const tracker = linear()
+    let calls = 0
+    // Linear takes the comment, then answers with what Althar can't read.
+    const unreadable: FakeService = {
+      ...tracker,
+      comment: (issue, body) =>
+        Effect.andThen(tracker.comment(issue, body), () =>
+          calls++ === 0
+            ? Effect.fail(new ConnectorFailed({ product: 'linear', reason: 'invalid_response', message: 'Unexpected token <' }))
+            : Effect.void,
+        ),
+    }
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { threadId, access } = yield* project()
+      const instance = yield* Instance
+      assert.strictEqual(
+        yield* callTool(access, 'comment_on_issue', { issue: 'MER-231', body: 'Fixed in #12.' }),
+        "The comment on MER-231 wasn't posted: Its answer was lost, so Althar can’t tell whether Linear took the comment. Look on Linear before you try again.",
+      )
+      const [card] = yield* cardsIn(threadId)
+      assert.strictEqual(card?.state, 'failed')
+      // Applied again, Linear isn't asked again: the comment stays one.
+      const again = yield* (yield* IssueChanges).apply(card?.changesId ?? '', instance.personId)
+      assert.strictEqual(again.state, 'failed')
+      assert.match(again.issues[0]?.error ?? '', /Look on Linear before you try again\.$/)
+      assert.deepStrictEqual(tracker.issueComments('MER-231'), ['Fixed in #12.'])
+      assert.strictEqual(calls, 1)
+    }).pipe(Effect.provide(withQueries({ linear: unreadable })))
   })
 
   it.live('are told to the coordinator as the person decides them', () => {

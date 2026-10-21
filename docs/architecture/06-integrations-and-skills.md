@@ -575,7 +575,11 @@ Leads and the coordinator change issues that already exist
 - **Applying is per issue,** each a receipt in the outbound ledger: what
   applied stays applied, and a card where not all of it did says why for
   each and applies again only the rest. A card being applied as Althar
-  closed is failed on its next start, to apply again. The lead hears what
+  closed is failed on its next start, to apply again. A comment whose
+  answer was lost or couldn't be read is never posted again: its card says
+  to look on the tracker. A tracker that answers it didn't take a comment or
+  a link (Linear's `success: false`) has its refusal shown, never a line
+  saying it was done. The lead hears what
   the person decided in its thread; the coordinator hears it as news, as it
   hears of its drafts.
 - **A lead's waiting card** holds its task in Needs you, as its drafts do.

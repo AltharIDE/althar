@@ -183,6 +183,42 @@ describe('Linear', () => {
     }),
   )
 
+  it.effect('refuses a comment or a link Linear says it didn’t take, never taking it as done', () =>
+    Effect.gen(function* () {
+      const { tracker } = linear([
+        [
+          'POST',
+          URL,
+          (request) => ({
+            json: {
+              data: String((request.body as { query: string }).query).includes('commentCreate')
+                ? { commentCreate: { success: false } }
+                : { attachmentLinkURL: { success: false } },
+            },
+          }),
+        ],
+      ])
+      const found = {
+        id: 'uuid-231',
+        ref: 'MER-231',
+        key: 'MER-231',
+        title: 't',
+        body: '',
+        url: '',
+        status: { name: 'Todo', category: 'todo' as const },
+        priority: null,
+        assignees: [],
+        labels: [],
+        container: null,
+        updatedAt: '',
+      }
+      const commented = yield* Effect.flip(tracker.comment(found, 'Picked up'))
+      assert.deepInclude(commented, { reason: 'rejected', message: 'Linear did not post the comment' })
+      const linked = yield* Effect.flip(tracker.link(found, { url: 'https://github.com/meridian/api/pull/12', title: 'PR #12' }))
+      assert.deepInclude(linked, { reason: 'rejected', message: 'Linear did not link it' })
+    }),
+  )
+
   describe('moving an issue to In Progress', () => {
     const todo = {
       id: 'uuid-231',
@@ -483,8 +519,17 @@ describe('Linear', () => {
       updatedAt: '2026-10-01T08:00:00.000Z',
     }
     const queryOf = (request: { readonly body: unknown }) => String((request.body as { query: string }).query)
-    const team = (items: ReadonlyArray<Record<string, unknown>>) => ({
-      json: { data: { issue: { team: { id: 'team-mer', items: { nodes: items } } } } },
+    const team = (items: ReadonlyArray<Record<string, unknown>>, next?: string) => ({
+      json: {
+        data: {
+          issue: {
+            team: {
+              id: 'team-mer',
+              items: { nodes: items, pageInfo: next === undefined ? { hasNextPage: false } : { hasNextPage: true, endCursor: next } },
+            },
+          },
+        },
+      },
     })
     const states = [
       { id: 'state-done', name: 'Done', type: 'completed', position: 4 },
@@ -540,8 +585,41 @@ describe('Linear', () => {
         assert.deepStrictEqual(yield* tracker.choices(found, 'project'), [{ id: 'project-q4', name: 'Q4 launch' }])
         // Its team's labels and the workspace's: a group holds labels, and takes none.
         assert.deepStrictEqual(yield* tracker.choices(found, 'labels'), [{ id: 'label-bug', name: 'Bug' }])
-        assert.deepStrictEqual(variablesOf(sent[0]), { id: 'uuid-231' })
+        assert.deepStrictEqual(variablesOf(sent[0]), { id: 'uuid-231', after: null })
         assert.deepStrictEqual(variablesOf(sent.at(-1)), { teamId: 'team-mer', after: null })
+      }),
+    )
+
+    it.effect('reads its team’s people and projects page by page, so one past the first page is there', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([
+          [
+            'POST',
+            URL,
+            (request) => {
+              const after = (variablesOf(request) as { after?: string | null }).after ?? null
+              if (queryOf(request).includes('members('))
+                return after === null
+                  ? team([{ id: 'u1', name: 'You Person', active: true }], 'cursor-1')
+                  : team([{ id: 'u251', name: 'Ana Ruiz', displayName: 'ana', active: true }])
+              return after === null ? team([{ id: 'project-q4', name: 'Q4 launch' }], 'cursor-1') : team([{ id: 'project-q5', name: 'Q5' }])
+            },
+          ],
+        ])
+        assert.deepStrictEqual(
+          (yield* tracker.choices(found, 'assignee')).map((one) => one.name),
+          ['You Person', 'Ana Ruiz'],
+        )
+        assert.deepStrictEqual(
+          (yield* tracker.choices(found, 'project')).map((one) => one.name),
+          ['Q4 launch', 'Q5'],
+        )
+        assert.deepStrictEqual(sent.map(variablesOf), [
+          { id: 'uuid-231', after: null },
+          { id: 'uuid-231', after: 'cursor-1' },
+          { id: 'uuid-231', after: null },
+          { id: 'uuid-231', after: 'cursor-1' },
+        ])
       }),
     )
 
