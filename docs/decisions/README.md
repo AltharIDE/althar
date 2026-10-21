@@ -62,5 +62,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md) | A task can be attached to an open pull request it didn't open, and follows it as one it opened |
 | [053](053-the-code-an-agent-names-opens-beside-the-conversation.md) | The code an agent names opens beside the conversation, read where the agent works, and never edited |
 | [054](054-a-task-s-steps-are-a-graph-in-a-lane-for-each-agent.md) | A task's steps are a graph of its own face, in a lane for each agent, read from the runtime's runs |
-| [055](055-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
-| [056](056-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [055](055-light-dark-or-as-the-system-is.md) | Althar is light, dark, or as the system is: one warm dark set of tokens, followed from nativeTheme |
+| [056](056-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [057](057-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
