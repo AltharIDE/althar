@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { ConnectorFailed } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
@@ -265,5 +266,95 @@ describe('a task’s pull request across a restart', () => {
         assert.deepInclude(heard?.content, { kind: 'comment', from: 'dana' })
       }).pipe(Effect.provide(launch(Duration.millis(100))))
     })
+  })
+})
+
+describe('rerun_check, on the task’s own pull request', () => {
+  it.live('runs the failed checks again, or the one named, and says which can’t be run again here, with where the person can', () => {
+    const { working, bare } = hosted()
+    let checks: Parameters<FakeService['setChecks']>[1] = []
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => checks })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { lead, taskId } = yield* withPullRequest(working)
+      assert.strictEqual(
+        yield* callTool(lead, 'rerun_check', {}),
+        "None of PR #1's checks failed, so there's nothing to run again. Name one with check to run it again all the same.",
+      )
+      checks = [
+        { name: 'test', state: 'failed', log: 'FAIL limit.test.ts' },
+        { name: 'Workers Builds: meridian', state: 'failed', url: 'https://dash.cloudflare.com/builds/7', rerun: false },
+        { name: 'lint', state: 'passed' },
+        { name: 'e2e', state: 'running' },
+      ]
+      // Each that failed: the GitHub Actions job runs again; the build another service reported is the person's to run, from its page.
+      assert.strictEqual(
+        yield* callTool(lead, 'rerun_check', {}),
+        [
+          "Running test on PR #1 again. If it fails again, you'll be told, as for any checks; read_pull_request shows how it goes meanwhile.",
+          "Workers Builds: meridian can't be run again here: only a GitHub Actions job runs again from Althar, and it comes from another service. The person can run it again from its page: https://dash.cloudflare.com/builds/7",
+        ].join('\n\n'),
+      )
+      assert.lengthOf(github.reruns, 1)
+      // The thread says so, and its outcome is heard afresh, as a rerun's.
+      const notices = Effect.map(items(lead.threadId), (rows) =>
+        rows.flatMap((row) => (row.kind === 'notice' ? [String(row.content.title)] : [])),
+      )
+      assert.include(yield* notices, 'Running test on PR #1 again, as its lead asked.')
+      const sql = yield* SqlClient.SqlClient
+      const kept = yield* sql<{ id: string }>`
+        SELECT json_extract(o.payload, '$.id') AS id FROM observations o JOIN external_links l ON l.id = o.subject_id
+        WHERE l.task_id = ${taskId} AND o.kind = 'checks_rerun'`
+      assert.match(kept[0]?.id ?? '', /^rerun:[0-9a-f]+:1$/)
+
+      // One named, passed or not; one still running has nothing to run again; one it hasn't is said with those it has.
+      assert.match(yield* callTool(lead, 'rerun_check', { check: 'LINT' }), /^Running lint on PR #1 again\./)
+      assert.lengthOf(github.reruns, 2)
+      assert.strictEqual(
+        yield* callTool(lead, 'rerun_check', { check: 'e2e' }),
+        "e2e on PR #1 is still running, so there's nothing to run again yet.",
+      )
+      assert.strictEqual(
+        yield* callTool(lead, 'rerun_check', { check: 'deploy' }),
+        'PR #1 has no check called "deploy". Its checks: test, Workers Builds: meridian, lint, e2e.',
+      )
+      assert.strictEqual(
+        yield* callTool(lead, 'rerun_check', { pull_request: 'web#3' }),
+        "This task's pull requests are api#1. Name one of those.",
+      )
+      // The host's refusal, in its words.
+      checks = [
+        {
+          name: 'test',
+          state: 'failed',
+          rerun: new ConnectorFailed({ product: 'github', reason: 'forbidden', status: 403, message: 'Must have admin rights' }),
+        },
+      ]
+      assert.strictEqual(yield* callTool(lead, 'rerun_check', {}), 'GitHub refused to run test again: Must have admin rights')
+      assert.lengthOf(github.reruns, 2)
+      // Only a task's lead has a pull request of its own.
+      assert.strictEqual(yield* callTool({ ...lead, taskId: null }, 'rerun_check', {}), 'This tool is for a task’s lead.')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('hears how checks the lead ran again end, after Althar’s own run again: a failure again is told afresh', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts' }],
+    })
+    github.addRepository(['meridian', 'api'])
+    const failures = (threadId: string) =>
+      Effect.map(items(threadId), (rows) => rows.filter((row) => row.kind === 'arrival' && row.content.kind === 'checks'))
+    return Effect.gen(function* () {
+      const { lead } = yield* withPullRequest(working, true)
+      // Failed, run again once by Althar, failed again: two arrivals.
+      yield* until(failures(lead.threadId), (heard) => heard.length === 2 && github.reruns.length === 1, Duration.seconds(30))
+      assert.match(yield* callTool(lead, 'rerun_check', { check: 'test' }), /^Running test on PR #1 again\./)
+      // Run again by the lead, it shows running, then fails: heard again, as its own.
+      yield* until(failures(lead.threadId), (heard) => heard.length === 3, Duration.seconds(30))
+      assert.lengthOf(github.reruns, 2)
+    }).pipe(Effect.provide(runtimeWith(github, Duration.millis(100))))
   })
 })
