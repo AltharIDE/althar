@@ -95,3 +95,34 @@ describe('words', () => {
     expect(away?.detail).toContain('7m ago')
   })
 })
+
+describe('a thread, as rounds', () => {
+  it('folds the lead’s tools into one line a round, still working at the end', async () => {
+    const { blocksOf } = await import('../src/model/thread')
+    const state = scenario(NOW)
+    const backfill = state.threads.get('thr_task_backfill')
+    if (backfill === undefined) throw new Error('no thread')
+    const blocks = blocksOf(backfill.items, NOW)
+    expect(blocks.map((block) => (block.kind === 'work' ? block.words : block.item.kind))).toEqual([
+      'user_message',
+      'notice',
+      'agent_message',
+      'Worked 8m · edited 1 file, ran 1 command',
+      'agent_message',
+      'Working 1m · ran 1 command',
+    ])
+  })
+})
+
+describe('a diff line, cut', () => {
+  it('marks the stretches that changed, and leaves the rest', async () => {
+    const { pieces } = await import('../src/model/diff')
+    expect(pieces("export const API_VERSION = '2026-09-30'", ['export ', "'2026-09-30'"])).toEqual([
+      { text: 'export ', changed: true },
+      { text: 'const API_VERSION = ', changed: false },
+      { text: "'2026-09-30'", changed: true },
+    ])
+    expect(pieces('unchanged', undefined)).toEqual([{ text: 'unchanged', changed: false }])
+    expect(pieces('a b', ['zzz'])).toEqual([{ text: 'a b', changed: false }])
+  })
+})

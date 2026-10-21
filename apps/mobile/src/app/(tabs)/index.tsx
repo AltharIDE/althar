@@ -76,6 +76,43 @@ export default function HomeScreen() {
   const upNext = data === undefined ? [] : upNextOf(data)
   const projectOf = (id: string) => data?.projects.find((one) => one.id === id) ?? null
 
+  if (connection.state === 'unpaired') {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.page, paddingTop: insets.top + space.xxl, paddingHorizontal: space.xl, gap: space.lg }}>
+        <Text kind="largeTitle">Althar, on your phone</Text>
+        <Text kind="body" ink="t2">
+          See what your agents are doing on your Mac, answer what they ask, and start work, from anywhere your Mac can be reached.
+        </Text>
+        <View style={{ gap: space.md, marginVertical: space.md }}>
+          {[
+            ['Needs you', 'Permissions and questions, answered here: Face ID before you allow.'],
+            ['At work', 'Every task in progress, live, with what its lead is saying.'],
+            ['Ready', 'Read the diff and the review, then merge.'],
+          ].map(([title, detail]) => (
+            <View key={title} style={{ gap: 2 }}>
+              <Text kind="headline">{title}</Text>
+              <Text kind="sub" ink="t2">
+                {detail}
+              </Text>
+            </View>
+          ))}
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/pair')}
+          style={({ pressed }) => ({ height: 50, borderRadius: radius.md, backgroundColor: pressed ? theme.t2 : theme.inkFill, alignItems: 'center', justifyContent: 'center' })}
+        >
+          <Text kind="bodyMedium" ink="onInk">
+            Pair with your Mac
+          </Text>
+        </Pressable>
+        <Text kind="sub" ink="t3">
+          Your Mac keeps your work. The phone sees it through Althar’s relay, encrypted end to end.
+        </Text>
+      </View>
+    )
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.page }}>
       <ScrollView

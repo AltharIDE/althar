@@ -72,12 +72,19 @@ export class DemoClient implements AltharClient {
   }
 
   /** Pairs, as scanning the Mac's code would: reaching it first, then online. */
-  pair(): void {
+  pair(_code: string): Promise<PairedMac> {
     this.setConnection({ state: 'connecting', mac: DEMO_MAC })
-    this.timers.push(setTimeout(() => this.setConnection({ state: 'online', mac: DEMO_MAC }), 900))
+    return new Promise((resolve) => {
+      this.timers.push(
+        setTimeout(() => {
+          this.setConnection({ state: 'online', mac: DEMO_MAC })
+          resolve(DEMO_MAC)
+        }, 900),
+      )
+    })
   }
 
-  unpair(): void {
+  async unpair(): Promise<void> {
     this.setConnection({ state: 'unpaired' })
   }
 

@@ -44,6 +44,13 @@ export type Unsubscribe = () => void
 export interface AltharClient {
   connection(): Connection
   onConnection(listener: (connection: Connection) => void): Unsubscribe
+  /**
+   * Pairs with the Mac whose code was scanned: the relay's, not the
+   * runtime's. The phone makes its own key, which never leaves it; the Mac
+   * keeps its public half, and can unpair it.
+   */
+  pair(code: string): Promise<PairedMac>
+  unpair(): Promise<void>
 
   /** GetHome: every project, what waits on the person, what runs, and what the loop did since they last looked. */
   home(): Promise<HomeSnapshot>

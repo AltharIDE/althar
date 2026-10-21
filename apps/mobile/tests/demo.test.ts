@@ -74,7 +74,7 @@ describe('the demo client', () => {
     const demo = new DemoClient({ latency: 0, connection: 'unpaired' })
     const states: Array<string> = []
     demo.onConnection((connection) => states.push(connection.state))
-    demo.pair()
+    void demo.pair('althar-pair:demo')
     vi.advanceTimersByTime(1_000)
     expect(states).toEqual(['connecting', 'online'])
     vi.useRealTimers()
