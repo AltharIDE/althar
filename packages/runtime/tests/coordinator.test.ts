@@ -24,7 +24,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
-import { callTool, notices, repository, runtime, task as newTask, turns, until } from './support'
+import { callTool, notices, repository, runtime, sessionMetas, task as newTask, turns, until } from './support'
 
 /*
  * The coordinator loop (docs/plans/mvp.md): the person asks the coordinator,
@@ -1408,5 +1408,40 @@ describe('a step whose agent stalls or goes round in circles', () => {
         1,
       )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: { ...FAST, turns: 1 } }))),
+  )
+})
+
+describe('the coordinator, a trusted reader in its own copies (ADR-056)', () => {
+  it.live('is started with its folder as its sandbox’s, and its commands meet the trusted reader’s rules', () =>
+    Effect.gen(function* () {
+      const config = yield* RuntimeConfig
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId } = yield* opened
+      const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${projectId}`
+      // Its first turn carries its brief; the commands come after.
+      yield* say(threadId, 'hello')
+      yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
+      const ran = (command: string) =>
+        Effect.gen(function* () {
+          yield* say(threadId, `${scenarios.run}${command}`)
+          const [decided] = yield* until(
+            sql<{ outcome: string; reason: string | null }>`
+              SELECT d.outcome, d.reason FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
+              WHERE json_extract(r.raw_input, '$.command') = ${command}`,
+            (rows) => rows.length > 0,
+          )
+          return decided
+        })
+      assert.strictEqual((yield* ran('git log --oneline "$(git describe --tags --abbrev=0)..HEAD"'))?.outcome, 'allow')
+      assert.strictEqual((yield* ran('uptime'))?.outcome, 'allow')
+      const fetched = yield* ran('git fetch origin')
+      assert.strictEqual(fetched?.outcome, 'reject')
+      assert.include(fetched?.reason ?? '', 'this role only reads')
+      // Its session's, not the one Althar lists models with.
+      assert.deepInclude(sessionMetas, {
+        role: 'reader',
+        options: { contained: join(config.worktreeRoot, project?.slug ?? '', '.coordinator') },
+      })
+    }).pipe(Effect.provide(runtime())),
   )
 })

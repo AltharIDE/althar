@@ -46,9 +46,10 @@ export interface CoordinatorFolder {
 const MIRRORED = ['+refs/heads/*:refs/heads/*', '+refs/remotes/*:refs/remotes/*', '+refs/tags/*:refs/tags/*']
 
 /** What a path is now, without following a link: the coordinator may have left anything there. */
-const kindOf = (path: string): 'none' | 'folder' | 'other' => {
+const kindOf = (path: string): 'none' | 'folder' | 'file' | 'other' => {
   try {
-    return lstatSync(path).isDirectory() ? 'folder' : 'other'
+    const found = lstatSync(path)
+    return found.isDirectory() ? 'folder' : found.isFile() ? 'file' : 'other'
   } catch {
     return 'none'
   }
@@ -62,17 +63,17 @@ const kindOf = (path: string): 'none' | 'folder' | 'other' => {
  */
 const clearedFor = (repository: string, path: string) =>
   Effect.gen(function* () {
-    if (kindOf(path) === 'other') rmSync(path, { force: true })
+    if (kindOf(path) !== 'folder') rmSync(path, { force: true })
     mkdirSync(path, { recursive: true })
     const dotGit = join(path, '.git')
-    const linked = kindOf(dotGit) === 'other' && readFileSync(dotGit, 'utf8').slice(0, 8).startsWith('gitdir: ')
+    const linked = kindOf(dotGit) === 'file' && readFileSync(dotGit, 'utf8').startsWith('gitdir: ')
     rmSync(dotGit, { recursive: true, force: true })
     if (linked) yield* git(repository, 'worktree', 'prune').pipe(Effect.ignore)
   }).pipe(Effect.catchDefect((error) => Effect.fail(new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }))))
 
 /**
  * A copy of `repository` at `path`, detached at its default branch as the
- * remote has it, or offline as this Mac has it: made if it isn't there, its
+ * remote has it, or offline as this computer has it: made if it isn't there, its
  * git folder made again, and anything written in it since thrown away, but
  * what git ignores, such as installed packages.
  */

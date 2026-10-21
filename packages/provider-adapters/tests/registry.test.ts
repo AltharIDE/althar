@@ -201,6 +201,54 @@ describe('the agent registry', () => {
     assert.isUndefined((metaOf('lead', { untrusted: true }) as { claudeCode: { options: Options } }).claudeCode.options.settingSources)
   })
 
+  it('holds the coordinator’s Claude Code to its folder: commands run sandboxed without asking, writing only there, with no network', () => {
+    type Options = {
+      settings: {
+        permissions: { deny: Array<string>; ask: Array<string> }
+        sandbox: {
+          enabled: boolean
+          autoAllowBashIfSandboxed: boolean
+          allowUnsandboxedCommands: boolean
+          failIfUnavailable: boolean
+          network?: Record<string, unknown>
+          filesystem?: { allowWrite?: Array<string> }
+        }
+      }
+    }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const optionsOf = (options: { contained?: string; untrusted?: boolean; offline?: boolean }) =>
+      (metaOf('reader', options) as { claudeCode: { options: Options } }).claudeCode.options
+    const folder = '/work/meridian/.coordinator'
+    const contained = optionsOf({ contained: folder })
+    // Only where its sandbox can start: there, failing to start it fails the session rather than running commands without it.
+    const starts = process.platform === 'darwin' || (process.platform === 'linux' && process.env.FLATPAK_ID === undefined)
+    if (!starts || contained.settings.sandbox.autoAllowBashIfSandboxed === false) {
+      assert.deepStrictEqual(contained, optionsOf({}))
+      return
+    }
+    assert.deepStrictEqual(contained.settings.sandbox, {
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      failIfUnavailable: true,
+      network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+      filesystem: { allowWrite: [folder] },
+    })
+    // Its edit tools and the person's keys stay denied; no command asks, as each runs in the sandbox.
+    assert.includeMembers(contained.settings.permissions.deny, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()])
+    assert.notInclude(contained.settings.permissions.ask, 'Bash')
+    // A review's lead never gets it, whatever it is passed: it reads a repository it doesn't trust.
+    for (const options of [
+      { contained: folder, untrusted: true },
+      { contained: folder, untrusted: true, offline: true },
+    ]) {
+      const held = optionsOf(options)
+      assert.include(held.settings.permissions.ask, 'Bash', JSON.stringify(options))
+      assert.isFalse(held.settings.sandbox.autoAllowBashIfSandboxed)
+    }
+  })
+
   it('reviews a pull request from outside only on an agent its session holds to reading', () => {
     assert.isTrue(agents['claude-code'].reviewing?.outside)
     assert.isTrue(agents.opencode.reviewing?.outside)
