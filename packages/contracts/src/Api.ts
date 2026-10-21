@@ -176,7 +176,7 @@ export const AgentsAtOnce = Schema.Struct({
 export type AgentsAtOnce = typeof AgentsAtOnce.Type
 
 /**
- * When finished tasks' folders go (ADR-055): by how each task ended
+ * When finished tasks' folders go (ADR-056): by how each task ended
  * (`smart`: a review's at once, a merged change's after 3 days, a done
  * task's after a week, an abandoned one's after 2 weeks, sooner when space
  * runs low), one wait for all, or only when the person cleans up.
@@ -418,6 +418,27 @@ export const RepositoryConventions = Schema.Struct({
 })
 export type RepositoryConventions = typeof RepositoryConventions.Type
 
+/** What the person added to a list Althar works out for a project, and took from it. */
+export const SandboxEdits = Schema.Struct({ added: Schema.Array(Schema.String), removed: Schema.Array(Schema.String) })
+export type SandboxEdits = typeof SandboxEdits.Type
+
+/**
+ * What a project's leads' sandboxes let through from the start: commands
+ * they run outside it rather than failing inside it first, and hosts they
+ * reach without asking. Each list is what Althar works out from the project,
+ * with the person's edits; a command still meets the rules, and the hosts
+ * apply only while the rules let the rest through.
+ */
+export const SandboxReachView = Schema.Struct({
+  /** Commands by how they start: `bunx playwright`, `bun run test:e2e`. */
+  commands: Schema.Array(Schema.String),
+  /** Hosts by name: `github.com`, `registry.npmjs.org`. */
+  hosts: Schema.Array(Schema.String),
+  /** What the person changed of each, kept over what is worked out later. */
+  edits: Schema.Struct({ commands: SandboxEdits, hosts: SandboxEdits }),
+})
+export type SandboxReachView = typeof SandboxReachView.Type
+
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
@@ -449,6 +470,8 @@ export const ProjectRulesView = Schema.Struct({
   moveIssues: Schema.Boolean,
   /** What each of the project's repositories says, in the project's order. */
   conventions: Schema.Array(RepositoryConventions),
+  /** What its leads' sandboxes let through from the start. */
+  sandbox: SandboxReachView,
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
 
@@ -1026,7 +1049,7 @@ export const NoticeItem = Schema.Struct({
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming
-     * back, a line across the thread (ADR-055).
+     * back, a line across the thread (ADR-056).
      */
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
   }),
@@ -1954,7 +1977,7 @@ export const ThreadSnapshot = Schema.Struct({
     worktree: Schema.NullOr(Schema.String),
     /**
      * Its folder, where it isn't on this computer as it should be: removed once
-     * the task finished (ADR-055), or coming back, from its branch, and
+     * the task finished (ADR-056), or coming back, from its branch, and
      * setting up again. Absent while it is here.
      */
     folder: Schema.optional(Schema.Literals(['removed', 'returning'])),
@@ -2916,6 +2939,8 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      /** What the person changed of what leads' sandboxes let through, each list whole. */
+      sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
       /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */
       expectedRevision: Schema.optional(Schema.Number),
     },

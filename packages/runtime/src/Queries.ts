@@ -1112,7 +1112,7 @@ export class Queries extends Context.Service<
               Effect.gen(function* () {
                 const owner = { path: worktree.path, taskId: worktree.taskId, projectId: worktree.projectId }
                 const there = existsSync(worktree.path)
-                // Its folder removed once it finished, what it changed is read in its repository, from the commit kept as it went (ADR-055).
+                // Its folder removed once it finished, what it changed is read in its repository, from the commit kept as it went (ADR-056).
                 if (!there && worktree.state === 'cleaned')
                   return { worktree, changed: wants.changed ? yield* removedChanges(worktree) : nothingChanged, here: [], merged: [] }
                 const branch = `refs/heads/${worktree.defaultBranch}`
@@ -1209,7 +1209,7 @@ export class Queries extends Context.Service<
           return { files: yield* changedBetween(root, fork, head), commits: yield* commitsAhead(root, fork, head) }
         }).pipe(Effect.orElseSucceed(() => nothingChanged))
 
-      /** One file's diff for a task whose folder was removed, read in its repository as `removedChanges` reads its files (ADR-055). */
+      /** One file's diff for a task whose folder was removed, read in its repository as `removedChanges` reads its files (ADR-056). */
       const removedDiff = (
         worktree: {
           readonly root: string | null
@@ -2412,7 +2412,7 @@ export class Queries extends Context.Service<
           const planned = card?.plan?.steps.find((step) => step.key === 'implement')
           // What the person can do to it as a whole, from where it stands.
           const standing = yield* standingOf(head.taskId)
-          // Its folder, removed once it finished or on its way back (ADR-055).
+          // Its folder, removed once it finished or on its way back (ADR-056).
           const folder = yield* folderOf(head.taskId)
           // Whether its run under way still has a review to come or under way, which the person can skip (ADR-034).
           const [reviewing] = yield* sql<{ left: number }>`
@@ -2630,7 +2630,7 @@ export class Queries extends Context.Service<
               const owner = isAbsolute(path)
                 ? worktrees.find((worktree) => path === worktree.path || path.startsWith(`${worktree.path}${sep}`))
                 : worktrees[0]
-              // Its folder removed once it finished, a document it committed reads from the commit kept as it went (ADR-055).
+              // Its folder removed once it finished, a document it committed reads from the commit kept as it went (ADR-056).
               if (owner !== undefined && owner.state === 'cleaned' && owner.root !== null && !existsSync(owner.path)) {
                 const [kept = null, branch = null] = yield* commitsOf(owner.root, [
                   `${KEPT}${owner.workspaceId}`,

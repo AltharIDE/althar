@@ -252,7 +252,7 @@ export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused'
   ]),
 }) {}
 
-/** A finished task's folder that couldn't be removed: its last commit couldn't be kept, or something of it is left (ADR-055). */
+/** A finished task's folder that couldn't be removed: its last commit couldn't be kept, or something of it is left (ADR-056). */
 export class FolderStayed extends Schema.TaggedError<FolderStayed>()('FolderStayed', {
   path: Schema.String,
 }) {}

@@ -3,7 +3,7 @@
   gap: 2px;
   padding: 2px;
   border-radius: 8px;
-  background: var(--n-2);
+  background: var(--segment-track);
 }
 .option {
   display: flex;
@@ -27,10 +27,10 @@
   color: var(--t-1);
 }
 .option:active:not(:disabled) {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .option[aria-checked='true'] {
-  background: var(--paper);
+  background: var(--segment-on);
   color: var(--t-1);
   font-weight: 550;
   box-shadow: var(--lift);
@@ -52,4 +52,8 @@
 }
 .kbd {
   margin-right: -3px;
+}
+/* the chosen one's key: on dark a step brighter, to read on the lighter choice (dark.css) */
+.option[aria-checked='true'] .kbd {
+  color: var(--kbd-ink-chosen, var(--kbd-ink, var(--t-3)));
 }

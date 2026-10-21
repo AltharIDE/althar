@@ -9,7 +9,7 @@ import { useServices } from '../../data/services'
 import { ago } from '../../shared/time'
 
 /*
- * Finished tasks' folders, as Work on this computer shows them (ADR-055): when
+ * Finished tasks' folders, as Work on this computer shows them (ADR-056): when
  * they go, the disk they are on, those Clean up takes and those held back,
  * each with why. A new choice of when shows at once; one the runtime can't
  * keep reads again, and says so, as the other settings do. Clean up and

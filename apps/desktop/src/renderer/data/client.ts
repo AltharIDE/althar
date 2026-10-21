@@ -10,6 +10,7 @@ import {
   type FoundAccount,
   type ProjectNote,
   type ProjectRulesView,
+  type SandboxEdits,
   Api,
   ApiError,
   type BoardSnapshot,
@@ -76,7 +77,9 @@ import { RpcClient } from 'effect/rpc'
  */
 
 /** What may change of a project's rules at once: any of it. */
-export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision'>> & {
+export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox'>> & {
+    /** What the person changed of what leads' sandboxes let through: each list's edits, whole. */
+    readonly sandbox?: { readonly commands?: SandboxEdits; readonly hosts?: SandboxEdits }
     /** The revision a change that replaces a list was made against: refused where the rules have moved on since. */
     readonly expectedRevision?: number
   }
@@ -162,7 +165,7 @@ export interface Client {
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
-  /** When finished tasks' folders go from now on (ADR-055). */
+  /** When finished tasks' folders go from now on (ADR-056). */
   readonly setFolderWait: (wait: FolderWait) => Promise<void>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>

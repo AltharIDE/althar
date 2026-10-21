@@ -346,11 +346,11 @@
     color var(--fast) var(--ease);
 }
 .inputs:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
   color: var(--t-1);
 }
 .inputs[aria-expanded='true'] {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 
@@ -369,7 +369,7 @@
 }
 
 .recButton:hover {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 
 .wave {

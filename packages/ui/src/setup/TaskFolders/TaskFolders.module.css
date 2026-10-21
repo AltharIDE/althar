@@ -34,16 +34,16 @@
 /* held back: Althar's, its wait up, but kept: a paler cobalt */
 .heldPart,
 .pale {
-  background: rgba(43, 59, 255, 0.32);
+  background: color-mix(in srgb, var(--live) 32%, transparent);
 }
 
 /* what could go now: cobalt, hatched */
 .goesPart {
-  background: repeating-linear-gradient(-45deg, var(--live) 0 2px, rgba(43, 59, 255, 0.28) 2px 5px);
+  background: repeating-linear-gradient(-45deg, var(--live) 0 2px, color-mix(in srgb, var(--live) 28%, transparent) 2px 5px);
 }
 
 .hatch {
-  background: repeating-linear-gradient(-45deg, var(--live) 0 1.5px, rgba(43, 59, 255, 0.28) 1.5px 3.5px);
+  background: repeating-linear-gradient(-45deg, var(--live) 0 1.5px, color-mix(in srgb, var(--live) 28%, transparent) 1.5px 3.5px);
 }
 
 .hatch,

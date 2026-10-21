@@ -133,7 +133,7 @@ export const baseOf = (worktree: string, baseRef: string | null, started: string
  * The files git tracks that a task changed since `base`, committed or not:
  * without reading any of them. Its three diffs run at once. With `head`, a
  * commit, what changed between the two in a repository rather than a
- * worktree, as for a task whose folder was removed (ADR-055): nothing is
+ * worktree, as for a task whose folder was removed (ADR-056): nothing is
  * uncommitted there, and the working tree, the person's own, isn't read.
  */
 const trackedFiles = (worktree: string, base: string, head?: string) =>
@@ -212,7 +212,7 @@ const newEntry = (path: string, content: NewFile): ChangedFile | null =>
 /** How many new files are looked at at once. */
 const NEW_FILES_AT_ONCE = 16
 
-/** The files a task changed between two commits in a repository, in path order: a task's whose folder was removed (ADR-055). */
+/** The files a task changed between two commits in a repository, in path order: a task's whose folder was removed (ADR-056). */
 export const changedBetween = (repository: string, base: string, head: string): Effect.Effect<ReadonlyArray<ChangedFile>, unknown> =>
   Effect.map(trackedFiles(repository, base, head), (files) => files.toSorted((a, b) => (a.path < b.path ? -1 : 1)))
 

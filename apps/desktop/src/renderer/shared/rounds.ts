@@ -74,7 +74,7 @@ export type RoundBlock =
   | { readonly kind: 'relayed'; readonly id: string; readonly title: string | null; readonly body: string }
   /** Althar, saying something the person should know: a conflict, checks. */
   | { readonly kind: 'althar'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' }
-  /** Its folder went, or came back: a line across the thread, a change of scene (ADR-055). */
+  /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
   /** A reviewer's verdict and findings, in its own voice. */
   | { readonly kind: 'verdict'; readonly id: string; readonly at: string; readonly result: StepResult }

@@ -91,7 +91,7 @@
 }
 .past,
 .now {
-  background: var(--t-1);
+  background: var(--ink-fill);
 }
 .now {
   width: 24px;

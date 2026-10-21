@@ -152,7 +152,7 @@ export class Launches extends Context.Service<
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
     /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
     processes(): Effect.Effect<ReadonlyArray<{ readonly pid: number; readonly projectId: string; readonly taskId: string | null }>>
-    /** Whether something runs from the task's folder, or is starting to: it stays while it does (ADR-055). */
+    /** Whether something runs from the task's folder, or is starting to: it stays while it does (ADR-056). */
     using(taskId: string): Effect.Effect<boolean>
     /** What the project runs, in its order, as run for the task or the default branch: those that say how they run there. */
     runnables(projectId: string, taskId: string | null): Effect.Effect<ReadonlyArray<ShownRunnable>, unknown>
@@ -315,7 +315,7 @@ export class Launches extends Context.Service<
             return (yield* keptOf(projectId)).flatMap((kept): ReadonlyArray<ShownRunnable> => {
               const place = places.find(({ binding }) => binding.id === kept.bindingId)
               // A finished task's folder that was removed says how it runs from its repository's own folder, until running
-              // brings it back (ADR-055).
+              // brings it back (ADR-056).
               const root = place === undefined ? null : existsSync(place.root) ? place.root : place.binding.repository
               const run = place === undefined || root === null ? null : runOfKept(kept, place.binding, root)
               return place === undefined || run === null
@@ -408,13 +408,13 @@ export class Launches extends Context.Service<
           return lock.withPermits(1)(effect)
         })
 
-      /** Tasks something is starting to run from, by how many: their folders stay while it does (ADR-055). */
+      /** Tasks something is starting to run from, by how many: their folders stay while it does (ADR-056). */
       const startingFrom = new Map<string, number>()
       /**
        * Runs `effect`, which starts something from the task's folder: a
        * folder removed once it finished comes back first, and is marked as
        * being started from before anything can remove it again, until what
-       * starts runs, or doesn't (ADR-055).
+       * starts runs, or doesn't (ADR-056).
        */
       const fromFolder = <A, E, R>(taskId: string | null, effect: Effect.Effect<A, E, R>) =>
         taskId === null
@@ -449,7 +449,7 @@ export class Launches extends Context.Service<
               input.taskId,
               Effect.gen(function* () {
                 const sql = yield* SqlClient.SqlClient
-                // A task's folder is set up before anything runs from it, however it came back: here, or as it opened, or before (ADR-055).
+                // A task's folder is set up before anything runs from it, however it came back: here, or as it opened, or before (ADR-056).
                 if (input.taskId !== null) yield* setups.ready(input.taskId)
                 const places = yield* placesOf(input.projectId, input.taskId, input.repository)
                 if (places.length === 0)

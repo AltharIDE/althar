@@ -67,6 +67,7 @@ import { Busy } from './Busy'
 import { timestamp } from './records'
 import { Setups } from './Setups'
 import * as Runtime from './Runtime'
+import { withEdits, workedOutReach } from './sandboxReach'
 import { Coordinator } from './Coordinator'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
@@ -166,7 +167,7 @@ export const handlers = Api.toLayer(
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
     const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands>()
-    // What bringing a task's removed folder back needs (ADR-055).
+    // What bringing a task's removed folder back needs (ADR-056).
     const folderStore = yield* Effect.context<SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto>()
     const cleanup = yield* FolderCleanup
     const setups = yield* Setups
@@ -174,7 +175,7 @@ export const handlers = Api.toLayer(
      * A task's folder about to open: brought back first, where it was removed
      * to free the disk, and set up again; and kept as opened before anything
      * can remove it again, which holds it back from removal for a day and
-     * restarts its wait (ADR-055).
+     * restarts its wait (ADR-056).
      */
     const openingFolder = (taskId: string) =>
       Effect.gen(function* () {
@@ -284,6 +285,9 @@ export const handlers = Api.toLayer(
     const issueFor = (projectId: string, issue: string | undefined) =>
       issue === undefined ? Effect.succeed(undefined) : issues.read(issue, projectId)
 
+    /** A list Althar works out that the person hasn't changed. */
+    const UNEDITED = { added: [], removed: [] }
+
     /** A project's rules as its rules screen shows them, with what each of its repositories says on its default branch. */
     const rulesView = (projectId: string, { rules, revision }: { readonly rules: ProjectRules; readonly revision: number }) =>
       Effect.gen(function* () {
@@ -302,10 +306,21 @@ export const handlers = Api.toLayer(
             })),
           { concurrency: 4 },
         )
-        return { ...rulesFields(projectId, rules), revision, conventions }
+        // What its leads' sandboxes let through, as worked out from its repositories here, with what the person changed of it.
+        const reach = yield* workedOutReach(projectId, null).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.provideService(Instance, instance),
+        )
+        const edits = { commands: rules.sandbox?.commands ?? UNEDITED, hosts: rules.sandbox?.hosts ?? UNEDITED }
+        const sandbox = {
+          commands: withEdits(reach.commands, edits.commands),
+          hosts: withEdits(reach.hosts, edits.hosts),
+          edits,
+        }
+        return { ...rulesFields(projectId, rules), revision, conventions, sandbox }
       })
 
-    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions' | 'revision'> => {
+    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {

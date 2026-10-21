@@ -25,6 +25,7 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
+  Segmented,
   SettingList,
   SettingRow,
   SettingsLayout,
@@ -36,6 +37,7 @@ import {
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
+import type { Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
 import { useServices } from '../../data/services'
@@ -298,7 +300,7 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
         />
-        {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-055). */}
+        {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-056). */}
         {folders !== null && (
           <TaskFolders
             wait={folders.wait}
@@ -415,71 +417,89 @@ function AppearanceSection({ appIcon, edge }: Looks) {
   const icon = appIcons.find((one) => one.value === appIcon.icon)
   const { spot } = edge
   const words = spot === null ? null : edgeWords(spot)
+  const { preferences, set, failed } = usePreferences()
   return (
-    <SettingList>
-      {spot !== null && words !== null && (
-        <SettingRow
-          title={text.edge}
-          note={glance === EXAMPLE ? text.examples : text.edgeNote}
-          glyph={<Icon name="globe" size={15} />}
-          under={
-            <div className={s.under}>
-              {choosing(spot) && edge.place !== null ? (
-                <EdgePlaces
-                  label={text.edge}
-                  options={edgePlaces.map((one) => ({
-                    value: one.value,
-                    title: one.title,
-                    note: one.note,
-                    picture:
-                      one.value === 'island' ? (
-                        <IslandPicture glance={glance} height={260} />
-                      ) : (
-                        <MenuPicture glance={glance} height={260} />
-                      ),
-                  }))}
-                  value={edge.place}
-                  onChange={edge.choose}
-                />
-              ) : (
-                <EdgeHere
-                  title={words.title}
-                  note={words.note}
-                  {...(words.why === undefined ? {} : { why: words.why })}
-                  // A Mac's menu bar as it would be, the sheet open; elsewhere the system's edge, larger.
-                  picture={spot === EdgeSpot.MenuBar ? <MenuPicture glance={glance} /> : <EdgeMini spot={spot} scale={2.6} />}
-                />
-              )}
-              <Failed when={edge.failed} />
-            </div>
-          }
-        >
-          {() => null}
+    <>
+      <SettingList>
+        <SettingRow title={text.theme} note={text.themeNote} glyph={<Icon name="theme" size={15} />}>
+          {() => (
+            <Segmented<Appearance>
+              label={text.theme}
+              value={preferences.appearance}
+              onChange={(appearance) => set('appearance', appearance)}
+              options={[
+                { value: 'light', label: text.themeLight },
+                { value: 'dark', label: text.themeDark },
+                { value: 'system', label: text.themeSystem },
+              ]}
+            />
+          )}
         </SettingRow>
-      )}
-      {icon !== undefined && (
-        <SettingRow
-          title={text.icon}
-          note={icon.title}
-          glyph={<Icon name="image" size={15} />}
-          under={
-            <div className={s.under}>
-              <DockPreview name={icon.title} picture={<img src={icon.picture} alt="" />} />
-              <Choices
-                label={text.icon}
-                layout="tiles"
-                options={appIcons.map((one) => ({ value: one.value, title: one.title, picture: <img src={one.picture} alt="" /> }))}
-                value={appIcon.icon}
-                onChange={appIcon.choose}
-              />
-              <Failed when={appIcon.failed}>{text.iconFailed}</Failed>
-            </div>
-          }
-        >
-          {() => null}
-        </SettingRow>
-      )}
-    </SettingList>
+        {spot !== null && words !== null && (
+          <SettingRow
+            title={text.edge}
+            note={glance === EXAMPLE ? text.examples : text.edgeNote}
+            glyph={<Icon name="globe" size={15} />}
+            under={
+              <div className={s.under}>
+                {choosing(spot) && edge.place !== null ? (
+                  <EdgePlaces
+                    label={text.edge}
+                    options={edgePlaces.map((one) => ({
+                      value: one.value,
+                      title: one.title,
+                      note: one.note,
+                      picture:
+                        one.value === 'island' ? (
+                          <IslandPicture glance={glance} height={260} />
+                        ) : (
+                          <MenuPicture glance={glance} height={260} />
+                        ),
+                    }))}
+                    value={edge.place}
+                    onChange={edge.choose}
+                  />
+                ) : (
+                  <EdgeHere
+                    title={words.title}
+                    note={words.note}
+                    {...(words.why === undefined ? {} : { why: words.why })}
+                    // A Mac's menu bar as it would be, the sheet open; elsewhere the system's edge, larger.
+                    picture={spot === EdgeSpot.MenuBar ? <MenuPicture glance={glance} /> : <EdgeMini spot={spot} scale={2.6} />}
+                  />
+                )}
+                <Failed when={edge.failed} />
+              </div>
+            }
+          >
+            {() => null}
+          </SettingRow>
+        )}
+        {icon !== undefined && (
+          <SettingRow
+            title={text.icon}
+            note={icon.title}
+            glyph={<Icon name="image" size={15} />}
+            under={
+              <div className={s.under}>
+                <DockPreview name={icon.title} picture={<img src={icon.picture} alt="" />} />
+                <Choices
+                  label={text.icon}
+                  layout="tiles"
+                  options={appIcons.map((one) => ({ value: one.value, title: one.title, picture: <img src={one.picture} alt="" /> }))}
+                  value={appIcon.icon}
+                  onChange={appIcon.choose}
+                />
+                <Failed when={appIcon.failed}>{text.iconFailed}</Failed>
+              </div>
+            }
+          >
+            {() => null}
+          </SettingRow>
+        )}
+      </SettingList>
+      <Failed when={failed} />
+    </>
   )
 }
 

@@ -12,7 +12,7 @@ import { fakeClient } from './fixtures'
 import { withServices } from './render'
 
 /*
- * Finished tasks' folders under Work on this computer (ADR-055): when they go,
+ * Finished tasks' folders under Work on this computer (ADR-056): when they go,
  * the disk they take, what Clean up takes and what is held back, each with
  * why; Clean up, a folder removed by hand, a task opened from its row, and
  * what couldn't be done.

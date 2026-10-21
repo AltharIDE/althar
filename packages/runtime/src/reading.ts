@@ -59,7 +59,7 @@ export const documentText = (path: string, worktrees: ReadonlyArray<string>) =>
 
 /**
  * A markdown document an agent wrote, for a task whose folder was removed
- * (ADR-055): from `head`, the commit kept as its folder went, in its
+ * (ADR-056): from `head`, the commit kept as its folder went, in its
  * repository at `root`, by its path in the worktree that was at `worktree`.
  * One it committed still reads; one it never committed went with the folder.
  */

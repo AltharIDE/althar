@@ -444,8 +444,9 @@ const COMMAND_KEPT = 4_000
 
 /**
  * What of a tool call's input the store keeps (docs/architecture/07: no file
- * contents, and so no secrets, in the record): the command, the paths, and
- * which files a patch touches, without what it writes. What is left out is
+ * contents, and so no secrets, in the record): the command, the paths, the
+ * host a network request is for, and which files a patch touches, without
+ * what it writes. What is left out is
  * named, so the record says it was cut. The rules decide on the whole input;
  * this is only what is written down.
  */
@@ -465,6 +466,8 @@ export const essentials = (
       } else if (whole !== undefined) input[key] = whole
       else cut.push(key)
     } else if (PATH_KEYS.includes(key) && typeof value === 'string') input[key] = value
+    // The host a network request is for (Claude Code's sandbox asks by it): a name, never a secret.
+    else if (key === 'host' && typeof value === 'string') input.host = value.slice(0, 253)
     else if (key === 'changes' && typeof value === 'object' && value !== null) {
       // A patch's files, without their contents.
       input.changes = Array.isArray(value)
@@ -739,8 +742,271 @@ const evaluates = (text: string, at: number) => {
   return /^[#=~^+]*[A-Za-z_][A-Za-z0-9_]*\[/.test(rest)
 }
 
+/** Programs that take what they read as text, never as a script they run (and none of them runs a program of their own from it). */
+const readsTextOnly = new Set(['cat', 'tee', 'head', 'tail', 'sort', 'uniq', 'wc', 'tr', 'cut', 'grep', 'jq', 'diff', 'base64'])
+
+/**
+ * Programs with subcommands, and the built-in ones that take text: a configured alias (`git -calias.run='!sh' run`) can
+ * run anything but can never shadow a built-in, so only these are text. Anything else, or an option before the
+ * subcommand, is not known to be.
+ */
+const textSubcommands: Readonly<Record<string, ReadonlySet<string>>> = {
+  git: new Set(['commit', 'tag', 'notes', 'merge', 'stash', 'am', 'apply', 'commit-tree', 'hash-object', 'mktag']),
+  gh: new Set(['pr', 'issue', 'release', 'gist', 'api', 'discussion']),
+  glab: new Set(['mr', 'issue', 'release', 'api']),
+}
+
+/** Variables that change which program, or which configuration, a later command runs with. */
+const changesWhatRuns = /^(?:PATH|IFS|ENV|BASH_ENV|BASH_FUNC_.*|SHELL|LD_.*|DYLD_.*|GIT_.*|GH_.*|GLAB_.*|XDG_CONFIG_HOME|HOME)$/
+
+/** Builtins that redefine, or may redefine, what a name runs for the commands after them. */
+const redefinesNames = new Set([
+  'alias',
+  'function',
+  'export',
+  'declare',
+  'typeset',
+  'readonly',
+  'unalias',
+  'hash',
+  'set',
+  'shopt',
+  'enable',
+  'source',
+  '.',
+  'eval',
+  'exec',
+])
+
+const assignment = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/
+
+/** Whether a command (as words) changes what a name runs afterwards, or what it runs with: a variable such as PATH, or a builtin that defines names. */
+const changesNames = (words: ReadonlyArray<string>): boolean => {
+  const at = words.findIndex((word) => !assignment.test(word))
+  return (
+    words.slice(0, at === -1 ? words.length : at).some((word) => changesWhatRuns.test(assignment.exec(word)?.[1] ?? '')) ||
+    (at !== -1 && redefinesNames.has(words[at] ?? ''))
+  )
+}
+
+/** Whether a command's input is text to it: nothing to run, or a bare name from the list, or a built-in subcommand that takes text. */
+const takesText = (words: ReadonlyArray<string>): boolean => {
+  if (changesNames(words)) return false
+  const at = words.findIndex((word) => !assignment.test(word))
+  if (at === -1) return true
+  const name = words[at] ?? ''
+  const subcommands = textSubcommands[name]
+  return subcommands === undefined ? readsTextOnly.has(name) : subcommands.has(words[at + 1] ?? '')
+}
+
+/**
+ * A command line without the bodies of its quoted heredocs (`<<'EOF'`,
+ * `<<"EOF"`, `<<-'EOF'`, `<<\EOF`): the shell takes that text literally, so it
+ * runs nothing, whatever backticks or words like `push` it holds. A body stays
+ * wherever it could be more than text: an unquoted heredoc's (the shell expands
+ * `$(…)` and backticks in it), one that is never closed, and one read by any
+ * command not known to take only text, anywhere in its pipeline (`sh <<'EOF'`,
+ * `cat <<'EOF' | sh`, a function or script, a continued line): there the rules
+ * judge it as they would have, as a command. The operator and the line it is on
+ * stay; the body and its closing line go. Comments are skipped, as `# <<'EOF'`
+ * opens nothing.
+ */
+export const withoutQuotedHeredocs = (text: string): string => {
+  if (!text.includes('<<')) return text
+  /** The commands of a pipeline, and of what is grouped with it in parentheses: the readers a heredoc's body can reach. */
+  interface Group {
+    readonly commands: Array<Array<string>>
+  }
+  interface Heredoc {
+    readonly end: string
+    readonly tabs: boolean
+    readonly quoted: boolean
+    readonly group: Group
+    /** An earlier command defined a function or alias or changed PATH or the like, so a bare name may not be the program it seems. */
+    readonly shadowed: boolean
+  }
+  /** A body and its closing line, dropped at the end if its heredoc is quoted and only text readers are in its group. */
+  interface Held {
+    readonly text: string
+    readonly heredoc: Heredoc
+    readonly closed: boolean
+  }
+  const chunks: Array<string | Held> = []
+  let out = ''
+  let pending: Array<Heredoc> = []
+  let group: Group = { commands: [] }
+  let command: Array<string> = []
+  let word = ''
+  let inWord = false
+  /** Parentheses open outside quotes: what is in them is grouped with whatever they are redirected to. */
+  let depth = 0
+  /** A `|` ended the last command, so a newline goes on with the same pipeline. */
+  let piped = false
+  /** Some command so far may have changed what a name runs. */
+  let shadowed = false
+  const endWord = () => {
+    if (inWord) {
+      command.push(word)
+      piped = false
+    }
+    word = ''
+    inWord = false
+  }
+  const endCommand = () => {
+    endWord()
+    group.commands.push(command)
+    if (changesNames(command)) shadowed = true
+    command = []
+  }
+  const endGroup = () => {
+    endCommand()
+    if (depth === 0) group = { commands: [] }
+  }
+  let quote = ''
+  let index = 0
+  while (index < text.length) {
+    const char = text[index] ?? ''
+    const before = text[index - 1] ?? ''
+    if (quote !== '') {
+      out += char
+      if (char === '\\' && quote === '"' && index + 1 < text.length) {
+        out += text[++index]
+        word += text[index]
+      } else if (char === quote) quote = ''
+      else word += char
+      index++
+      continue
+    }
+    if (char === '\\') {
+      out += char + (text[index + 1] ?? '')
+      // A backslash before a newline joins the lines: the word goes on, and so does the command.
+      if (text[index + 1] !== '\n') {
+        word += text[index + 1] ?? ''
+        inWord = true
+      }
+      index += 2
+      continue
+    }
+    if (char === '#' && (index === 0 || /[\s;&|(]/.test(before))) {
+      const stop = text.indexOf('\n', index)
+      const end = stop === -1 ? text.length : stop
+      out += text.slice(index, end)
+      index = end
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+      inWord = true
+      out += char
+      index++
+      continue
+    }
+    if (text.startsWith('<<<', index)) {
+      endWord()
+      out += '<<<'
+      index += 3
+      continue
+    }
+    if (char === '<' && text.startsWith('<<', index) && text[index + 2] !== '(') {
+      const opener = /^<<(-?)[ \t]*((?:[^\s;&|<>()'"\\]|'[^']*'|"[^"]*"|\\.)+)/.exec(text.slice(index))
+      if (opener !== null) {
+        endWord()
+        const written = opener[2] ?? ''
+        pending.push({
+          end: written.replace(/'([^']*)'|"([^"]*)"|\\(.)/g, '$1$2$3'),
+          tabs: opener[1] === '-',
+          quoted: /['"\\]/.test(written),
+          group,
+          shadowed,
+        })
+        out += opener[0]
+        index += opener[0].length
+        continue
+      }
+    }
+    out += char
+    index++
+    if (char === ' ' || char === '\t') endWord()
+    else if (char === ';') endGroup()
+    else if (char === '&') {
+      // `2>&1`, `>&2` and `&>` are redirects; `&&` and a lone `&` end a command list.
+      if (before === '>' || before === '<' || text[index] === '>') endWord()
+      else {
+        if (text[index] === '&') out += text[index++]
+        endGroup()
+      }
+    } else if (char === '|') {
+      if (before === '>') endWord()
+      else if (text[index] === '|') {
+        out += text[index++]
+        endGroup()
+      } else {
+        if (text[index] === '&') out += text[index++]
+        endCommand()
+        piped = true
+      }
+    } else if (char === '(') {
+      // A word right before `(` that is not `$(` or `<(` is a function being defined (`cat() { sh; }`).
+      if (inWord && !word.endsWith('$') && command.length === 0) shadowed = true
+      if (!inWord && command.length === 1 && text.slice(index).trimStart().startsWith(')')) shadowed = true
+      endCommand()
+      depth++
+    } else if (char === ')') {
+      endCommand()
+      depth = Math.max(0, depth - 1)
+    } else if (char === '<' || char === '>') endWord()
+    else if (char === '\n') {
+      if (piped) endCommand()
+      else endGroup()
+    } else {
+      word += char
+      inWord = true
+    }
+    if (char === '\n' && pending.length > 0) {
+      for (const heredoc of pending) {
+        // Up to and including the line that closes it, or the end of the text where nothing does.
+        const from = index
+        let body = ''
+        let closing = ''
+        let closed = false
+        while (index < text.length) {
+          const stop = text.indexOf('\n', index)
+          const line = text.slice(index, stop === -1 ? text.length : stop)
+          index = stop === -1 ? text.length : stop + 1
+          if ((heredoc.tabs ? line.replace(/^\t+/, '') : line) === heredoc.end) {
+            closing = `${line}\n`
+            closed = true
+            break
+          }
+          body += `${line}\n`
+        }
+        chunks.push(out)
+        out = ''
+        chunks.push({ text: closed ? `${body}${closing}` : text.slice(from), heredoc, closed })
+      }
+      pending = []
+    }
+  }
+  endCommand()
+  chunks.push(out)
+  return chunks
+    .map((chunk) =>
+      typeof chunk === 'string' ||
+      !chunk.closed ||
+      !chunk.heredoc.quoted ||
+      chunk.heredoc.shadowed ||
+      !chunk.heredoc.group.commands.every(takesText)
+        ? typeof chunk === 'string'
+          ? chunk
+          : chunk.text
+        : '',
+    )
+    .join('')
+}
+
 /** A command line's commands as written, with the separator that ends each ('' for the last). */
-const splitCommandLine = (text: string) => {
+const splitCommandLine = (source: string) => {
+  const text = withoutQuotedHeredocs(source)
   const commands: Array<Array<string>> = []
   const ends: Array<string> = []
   /** For each command, which of its words are redirect operators, not arguments that look like them (`echo '>'`). */
@@ -2155,9 +2421,11 @@ const unseenReadings = (words: ReadonlyArray<string>, where: Places, context: Ru
 /** What a command line does that the rules keep for the person: every kind, in every command of it. */
 const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> => {
   const { commands, opaque } = eachCommand(text, context)
+  // What a quoted heredoc holds is text: words in it say nothing of what the command does.
+  const read = withoutQuotedHeredocs(text)
   return [
-    ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(text)
-      ? [kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear', /\bpush\b/.test(text))]
+    ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(read)
+      ? [kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear', /\bpush\b/.test(read))]
       : []),
     ...commands.flatMap((command) => command.kinds),
   ]
@@ -2209,7 +2477,7 @@ const commandRule = (text: string, rules: ProjectRuleSet['commands'], system: Sy
       : exactly(rule)
         ? text.trim() === rule.pattern
         : commands.some((words) => startsAs(rule.pattern, words)) ||
-          (opaque && namesProgram(text, rule.pattern.trim().split(/\s+/)[0] ?? '')),
+          (opaque && namesProgram(withoutQuotedHeredocs(text), rule.pattern.trim().split(/\s+/)[0] ?? '')),
   )
   return met.find((rule) => rule.decision === 'never') ?? met[0]
 }

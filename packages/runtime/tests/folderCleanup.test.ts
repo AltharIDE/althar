@@ -20,7 +20,7 @@ import { Tasks } from '../src/Tasks'
 import { repository, ROOMY_DISK, runtime, until } from './support'
 
 /*
- * Finished tasks' folders (ADR-055): one goes once its wait is up, keeping
+ * Finished tasks' folders (ADR-056): one goes once its wait is up, keeping
  * its branch and the commit it was at, and its task still reads what it
  * changed; one with work only in it is held back, and goes by hand; Clean
  * up takes what nothing holds, whatever its wait; the person's choice of

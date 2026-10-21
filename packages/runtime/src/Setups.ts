@@ -278,7 +278,7 @@ export class Setups extends Context.Service<
             provide(
               Effect.gen(function* () {
                 const sql = yield* SqlClient.SqlClient
-                // Not for an abandoned task, but one whose folder came back once it was removed (ADR-055); nor one whose project was removed.
+                // Not for an abandoned task, but one whose folder came back once it was removed (ADR-056); nor one whose project was removed.
                 const [unset] = yield* sql<Unset>`
                   SELECT w.id, w.project_id, t.id AS thread_id, w.path AS worktree, b.folder AS within, b.display_name AS name,
                     b.run_setup AS kept

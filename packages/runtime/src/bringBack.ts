@@ -14,7 +14,7 @@ import { addItem } from './threads'
 
 /*
  * A finished task's folder, removed to free the disk (FolderCleanup.ts),
- * comes back by itself when the task needs it (ADR-055): before an agent
+ * comes back by itself when the task needs it (ADR-056): before an agent
  * starts on it, before it opens in an editor or runs, and as it is reopened.
  * It comes back at the same path: a change's on its branch, else detached
  * at the commit it was removed at, kept under `refs/althar/kept/<workspace>`;

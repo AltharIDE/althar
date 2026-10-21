@@ -25,7 +25,7 @@ import { Sessions } from './Sessions'
 import { addItem } from './threads'
 
 /*
- * Finished tasks' folders, removed to free the disk (ADR-055). A task is
+ * Finished tasks' folders, removed to free the disk (ADR-056). A task is
  * finished once it is in Settled: done or abandoned, and not a merged one
  * with commits after its pull request. Its folders go after a wait that
  * suits how it ended, as the person chose: Smart to start, a review's at

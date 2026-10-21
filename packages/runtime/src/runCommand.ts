@@ -257,3 +257,22 @@ export const scriptsIn = (folder: string, root: string = folder): ReadonlyArray<
   }
   return scripts
 }
+
+/** The package manager the lockfile in `folder`, or at its repository's root, names: `bun`; null where none does. */
+export const managerIn = (folder: string, root: string = folder): string | null => managerOf(folder, root)?.name ?? null
+
+/** The package.json in `folder` and each of its workspaces', read: none where it has no package.json. */
+export const manifestsIn = (folder: string): ReadonlyArray<Readonly<Record<string, unknown>>> => {
+  const manifest = manifestIn(folder)
+  if (manifest === undefined) return []
+  const folders = new Set(
+    workspacesOf(manifest).flatMap((pattern) => (typeof pattern === 'string' ? workspaceFolders(folder, pattern) : [])),
+  )
+  return [
+    manifest,
+    ...[...folders].flatMap((workspace) => {
+      const inner = manifestIn(workspace)
+      return inner === undefined ? [] : [inner]
+    }),
+  ]
+}

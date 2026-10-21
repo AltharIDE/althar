@@ -1,4 +1,4 @@
-# ADR-055: A finished task's folder goes after a wait that suits how it ended, and comes back when the task needs it
+# ADR-056: A finished task's folder goes after a wait that suits how it ended, and comes back when the task needs it
 
 - **Status:** Accepted
 - **Date:** 2026-10-21

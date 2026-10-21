@@ -8,7 +8,7 @@ import { roundsOf } from '../src/renderer/shared/rounds'
 import { items, snapshot } from './fixtures'
 
 /*
- * A task whose folder went (ADR-055): its thread marks the folder going and
+ * A task whose folder went (ADR-056): its thread marks the folder going and
  * coming back as lines across it, apart from Althar's own words and from
  * any round; and while it comes back, the header's chip says so, in blue.
  */

@@ -9,7 +9,7 @@ import { author, repository } from '../tests/repository'
 import { launch, openFirstProject, say } from './support'
 
 /*
- * A finished task's folder (ADR-055), in a real window with the fake agent,
+ * A finished task's folder (ADR-056), in a real window with the fake agent,
  * on a profile and worktrees of the test's own: a quick task that committed
  * a change is marked Done; Settings › Work on this computer lists its folder as
  * one that can go, and Clean up removes it; its thread says so as a line,
