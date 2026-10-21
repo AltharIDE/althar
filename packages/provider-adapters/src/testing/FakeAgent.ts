@@ -115,6 +115,12 @@ export const scenarios = {
    */
   backgroundQuiet: 'background-quiet',
   /**
+   * As `backgroundQuiet`, but as Codex reports one: no file its output goes
+   * to, and said only after the turn, when its server is already listening.
+   * Only when the agent runs as a process, for the server is then in its tree.
+   */
+  backgroundCodexQuiet: 'background-codex-quiet',
+  /**
    * Commands the agent starts of its own, with no tool call: `npm run watch`
    * keeps running, `npm test` ends well and `npm run lint` badly, neither
    * saying an exit code, and `npm run dev`, which it stops itself. Output
@@ -330,12 +336,19 @@ const leaveRunning = async (
     rawInput: { command: 'bun dev' },
   })
   if (as === 'codex') {
-    session.background.set(id, { toolCallId })
+    let server: ChildProcess | undefined
+    if (options.quiet === true)
+      server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: 'ignore' })
+    session.background.set(id, { toolCallId, ...(server === undefined ? {} : { process: server }) })
     // Codex says it once its list of background terminals names it, after the turn, and streams its output on its tool call.
-    setTimeout(() => {
-      void notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: id, name: 'bun dev', taskType: 'shell', canStop: true, toolCallId })
-      void notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: SERVING } } })
-    }, 20)
+    setTimeout(
+      () => {
+        void notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: id, name: 'bun dev', taskType: 'shell', canStop: true, toolCallId })
+        if (options.quiet !== true)
+          void notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: SERVING } } })
+      },
+      options.quiet === true ? 1500 : 20,
+    )
     return
   }
   const folder = join(tmpdir(), 'althar-fake-agent')
@@ -1659,9 +1672,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.background:
         case scenarios.backgroundCodex:
         case scenarios.backgroundQuiet:
-          await leaveRunning(params.sessionId, session, client, scenario === scenarios.backgroundCodex ? 'codex' : 'claude', {
-            quiet: scenario === scenarios.backgroundQuiet,
-          })
+        case scenarios.backgroundCodexQuiet:
+          await leaveRunning(
+            params.sessionId,
+            session,
+            client,
+            scenario === scenarios.backgroundCodex || scenario === scenarios.backgroundCodexQuiet ? 'codex' : 'claude',
+            { quiet: scenario === scenarios.backgroundQuiet || scenario === scenarios.backgroundCodexQuiet },
+          )
           await say('serving')
           return ended()
         case scenarios.backgroundOwn: {

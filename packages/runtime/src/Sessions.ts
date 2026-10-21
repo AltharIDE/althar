@@ -281,6 +281,12 @@ interface Running {
   settleBetween: Effect.Effect<void, never, Store>
   /** What records its events now: its turn's, or the one between turns. */
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
+  /**
+   * The ports its process tree listened on as its latest turn began, once
+   * read: what a command it leaves running in that turn is told apart from
+   * where only the agent's whole tree is known (`portFor`).
+   */
+  listeningBefore: Deferred.Deferred<ReadonlySet<number>>
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
   readonly background: Map<string, LeftRunning>
   /** Tool calls it began outside a turn Althar sent, as Claude Code does when something it left running ends, and hasn't finished. */
@@ -751,7 +757,9 @@ export class Sessions extends Context.Service<
        * holding the file its output goes to (Claude Code), whose tree is its
        * own; else the agent's whole tree, where only one new port with no
        * other command left without an address is taken as it (`portFor`).
-       * `known` is what the agent's tree listened on before the command began.
+       * `known` is what the agent's tree listened on before the turn the
+       * command began in, not when it was reported: Codex reports one after
+       * the turn, by when a quiet server is already listening.
        */
       const listeningPort = (running: Running, left: LeftRunning, known: ReadonlySet<number>) =>
         Effect.gen(function* () {
@@ -766,15 +774,28 @@ export class Sessions extends Context.Service<
           return portFor({ found, claimed, own: held.length > 0, known, rivals })
         })
 
+      /** Reads where the agent's tree listens as its turn begins, in the background: the turn doesn't wait for it. */
+      const notingListening = (running: Running) =>
+        Effect.gen(function* () {
+          const before = yield* Deferred.make<ReadonlySet<number>>()
+          running.listeningBefore = before
+          const agent = running.connection.process?.pid
+          yield* Effect.forkIn(
+            Effect.andThen(agent === undefined ? Effect.succeed([]) : portsBelow([agent]), (ports) =>
+              Deferred.succeed(before, new Set(ports)),
+            ),
+            running.scope,
+          )
+        })
+
       /**
        * Reads what one prints, now and then, and where its processes listen,
        * until what it prints says where it answers, it ends, or ten minutes
        * go by. An address from a port stands until its output says another.
        */
-      const watchServing = (running: Running, id: string) =>
+      const watchServing = (running: Running, id: string, before: Deferred.Deferred<ReadonlySet<number>>) =>
         Effect.gen(function* () {
-          const agent = running.connection.process?.pid
-          const known = new Set(agent === undefined ? [] : yield* portsBelow([agent]))
+          const known = yield* Deferred.await(before)
           for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
             const left = running.background.get(id)
             if (left === undefined || left.ended !== null) return
@@ -819,7 +840,7 @@ export class Sessions extends Context.Service<
                 // Left running, its call is no longer one the agent has open.
                 if (event.toolCallId !== undefined) running.callsOpen.delete(event.toolCallId)
                 yield* toldBackground(running)
-                yield* Effect.forkIn(watchServing(running, event.id), running.scope)
+                yield* Effect.forkIn(watchServing(running, event.id, running.listeningBefore), running.scope)
                 return
               }
               case 'ToolCallUpdate': {
@@ -1365,6 +1386,7 @@ export class Sessions extends Context.Service<
             )
           })
           const images = inputs.flatMap((input) => sent.images.get(input.id) ?? [])
+          yield* notingListening(running)
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, images, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
@@ -1935,6 +1957,9 @@ export class Sessions extends Context.Service<
             context: null,
             recording: undefined,
             settleBetween: Effect.void,
+            listeningBefore: yield* Deferred.make<ReadonlySet<number>>().pipe(
+              Effect.tap((before) => Deferred.succeed(before, new Set<number>())),
+            ),
             background: new Map(),
             callsOpen: new Set(),
             workedAt: null,

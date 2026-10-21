@@ -50,7 +50,9 @@
     the agent gives one (Claude Code), whose tree is the command's own; a
     port another entry answers on is left to it. Where none does (Windows,
     Codex), the only tree is the agent's, shared by every command, so a port
-    is taken only if it is the one new port since the command began and no
+    is taken only if it is the one new port since the turn the command began
+    in started (read as the turn begins, for Codex reports one after the
+    turn, by when a quiet server already listens) and no
     other command is still without an address; otherwise it is left unknown.
     An address from a port stands until the output says its own, which
     replaces it. A server that writes to a log file, holds its output back or

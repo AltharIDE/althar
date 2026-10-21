@@ -659,6 +659,20 @@ describe('sessions', () => {
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     )
 
+    it.live('finds a silent server in the agent’s tree that was already listening when the agent reported it', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        // A process, so its tree is known; no file its output goes to, so that is all there is to tell it by.
+        yield* begin(created.threadId, 'process')
+        yield* say(created.threadId, scenarios.backgroundCodexQuiet)
+        yield* ended(created.threadId, 1)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+        yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
     it.live(
       'keeps commands an agent starts of its own by their names; one that ended by itself says how, with or without a code; one it stopped goes',
       () =>
