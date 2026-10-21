@@ -11,7 +11,8 @@ import type { ReviewDraftContent } from '../../shared/thread'
  * thread: the verdict, the summary and each comment, kept or dropped, and
  * where it stands. Nothing is posted until the person posts it here. A
  * verdict chosen or a comment kept shows at once, and gives way to what the
- * runtime kept once the change has been read back.
+ * runtime kept once the change has been read back. An automation's first
+ * review can also let that automation's next ones post themselves.
  */
 
 export interface ReviewActions {
@@ -24,6 +25,8 @@ export interface ReviewActions {
     },
   ) => Promise<void>
   readonly onPost: (draftId: string) => void
+  /** An automation drafted it: post it, and let that automation's next reviews post themselves. */
+  readonly onPostFromNow?: (draftId: string, automationId: string) => void
   readonly onDiscard: (draftId: string) => void
 }
 
@@ -56,6 +59,10 @@ export function ReviewCard({ draft, actions }: { draft: ReviewDraftContent; acti
   const [kept, setKept] = useState<Readonly<Record<string, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const shown = verdict ?? draft.verdict
+  // An automation's first review waits for the person, who can let its next ones post themselves from here.
+  const automation = draft.automation ?? null
+  const fromNow = actions.onPostFromNow
+  const asksOnce = automation !== null && !automation.postsReviews && draft.state === 'pending' && fromNow !== undefined
   return (
     <ReviewDraft
       mark={productBrand(draft.product)}
@@ -98,6 +105,7 @@ export function ReviewCard({ draft, actions }: { draft: ReviewDraftContent; acti
         void actions.onChange(draft.draftId, { summary: edit.summary, comments: edit.comments }).finally(() => setSaving(false))
       }}
       onPost={() => actions.onPost(draft.draftId)}
+      {...(asksOnce ? { onPostFromNow: () => fromNow(draft.draftId, automation.id) } : {})}
       onDiscard={() => actions.onDiscard(draft.draftId)}
       saving={saving}
     />

@@ -4,6 +4,9 @@ import {
   type AgentModels,
   type AlwaysScope,
   type AppSettings,
+  type AutomationDefinition,
+  type AutomationSnapshot,
+  type AutomationsSnapshot,
   type BoardTask,
   type FieldAnswer,
   type FoundAccount,
@@ -147,6 +150,32 @@ export interface Client {
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
+  /** A project's automations, for its Automations tab. */
+  readonly getAutomations: (projectId: string) => Promise<AutomationsSnapshot>
+  /** One automation, for its own page: its definition, its limits and its runs. */
+  readonly getAutomation: (automationId: string) => Promise<AutomationSnapshot>
+  /** Makes an automation in a project, on this Mac: proposed, waiting for the person to turn it on, unless `on`. Its id. */
+  readonly makeAutomation: (input: {
+    readonly projectId: string
+    readonly definition: AutomationDefinition
+    readonly on?: boolean
+  }) => Promise<string>
+  /** The person changes an automation, the whole of it: it holds from its next run, and stays on where it is. */
+  readonly changeAutomation: (automationId: string, definition: AutomationDefinition) => Promise<void>
+  /** Turns an automation on, or back on; `itemId`, where the person did it from the coordinator's card asking it. */
+  readonly turnOnAutomation: (automationId: string, itemId?: string) => Promise<void>
+  /** Pauses an automation: nothing of it starts until it is turned on again. A run under way finishes. */
+  readonly pauseAutomation: (automationId: string) => Promise<void>
+  /** Runs an automation once now, with every limit a run has, whether it is on or not yet; `itemId`, from the coordinator's card asking it. */
+  readonly runAutomationNow: (automationId: string, itemId?: string) => Promise<void>
+  /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
+  readonly deleteAutomation: (automationId: string) => Promise<void>
+  /** Puts back what the coordinator changed an automation from, as its card in the thread shows it. */
+  readonly undoAutomationChange: (itemId: string) => Promise<void>
+  /** Whether an automation's reviews post themselves once drafted; an outside pull request's still waits. */
+  readonly setAutomationPostsReviews: (automationId: string, on: boolean) => Promise<void>
+  /** Pauses every automation, or lets them run again. Runs under way finish. */
+  readonly setAutomationsPaused: (paused: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   /** Asks the thread's agent to compact its context, after what it was told before. */
   readonly compact: (threadId: string) => Promise<void>
@@ -488,6 +517,22 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getSettings: () => settle(api.GetSettings({})),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
+    getAutomations: (projectId) => settle(api.GetAutomations({ projectId })),
+    getAutomation: (automationId) => settle(api.GetAutomation({ automationId })),
+    makeAutomation: ({ projectId, definition, on }) =>
+      command((commandId) => api.MakeAutomation({ commandId, projectId, definition, ...(on === undefined ? {} : { on }) })).then(
+        (made) => made.automationId,
+      ),
+    changeAutomation: (automationId, definition) => command((commandId) => api.ChangeAutomation({ commandId, automationId, definition })),
+    turnOnAutomation: (automationId, itemId) =>
+      command((commandId) => api.TurnOnAutomation({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
+    pauseAutomation: (automationId) => command((commandId) => api.PauseAutomation({ commandId, automationId })),
+    runAutomationNow: (automationId, itemId) =>
+      command((commandId) => api.RunAutomationNow({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
+    deleteAutomation: (automationId) => command((commandId) => api.DeleteAutomation({ commandId, automationId })),
+    undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),
+    setAutomationPostsReviews: (automationId, on) => command((commandId) => api.SetAutomationPostsReviews({ commandId, automationId, on })),
+    setAutomationsPaused: (paused) => command((commandId) => api.SetAutomationsPaused({ commandId, paused })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),

@@ -13,6 +13,7 @@ import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
+import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
 import { setAppMenu } from './menu'
 import { dockCount, soundOf, tells } from './notify'
@@ -671,6 +672,14 @@ ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
   await writeAppIcon(locations().profile, icon)
 })
 
+/*
+ * Althar opening at login, in the background, as the person's switch says (loginItem.ts): told to the system as it
+ * changes, only from a packaged app, since a development build would open Electron itself at every login.
+ */
+const startAtLogin = (on: boolean) => {
+  if (app.isPackaged && opensAtLogin(process.platform)) app.setLoginItemSettings(loginItemOf(on, process.platform))
+}
+
 // The app's own preferences, as kept; and a change to one, kept, then acted on at once. Anything a key can't hold fails, and the window says so.
 ipcMain.handle('althar:preferences', async () => {
   await preferencesRead
@@ -682,6 +691,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   // Merged into the preferences as they stand once it is kept, so changes made together each stay.
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
+  if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
   awake.wants(preferences)
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
@@ -771,7 +781,9 @@ void app.whenReady().then(() => {
     const menu = appMenu(process.platform, !app.isPackaged)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
-  openWindow()
+  // Opened at login, it starts in the background, with no window: the runtime and its automations run, and a window opens as the person asks.
+  const background = app.isPackaged && openedAtLogin(process.platform, process.argv, app.getLoginItemSettings().wasOpenedAtLogin)
+  if (!background) openWindow()
   startReports({
     profile: () => locations().profile,
     // The install's one id, the one usage data keeps (usageData.ts), whether or not its switch is on.

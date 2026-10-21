@@ -31,6 +31,26 @@ export const SettingsNeedYou: Story = {
     await expect(within(canvasElement).getByRole('radio', { name: 'Settings, needs you' })).toBeVisible()
   },
 }
+/** The project's automations, each opening as its own page. */
+export const Automations: Story = { args: { value: Room.Automations } }
+/** An automation paused itself after failing: Automations carries the violet dot, and says so to a screen reader. */
+export const AutomationsNeedYou: Story = {
+  args: { automationsNeedYou: true },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('radio', { name: 'Automations, needs you' })).toBeVisible()
+    await expect(c.getByRole('radio', { name: 'Settings' })).toBeVisible()
+  },
+}
+/** Its views in order, its automations between the work and its settings. */
+export const InOrder: Story = {
+  play: async ({ canvasElement }) => {
+    const names = within(canvasElement)
+      .getAllByRole('radio')
+      .map((radio) => radio.textContent)
+    await expect(names).toEqual(['Conversation', 'Board', 'Both', 'Automations', 'Settings'])
+  },
+}
 /** What waits on you in the work is the bar's to say: no view carries a dot for it. */
 export const Switching: Story = {
   play: async ({ canvasElement }) => {
@@ -63,6 +83,7 @@ export const AllStates: Story = {
         { state: 'conversation', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
         { state: 'board, news', node: <RoomSwitch value={Room.Board} onChange={() => {}} news /> },
         { state: 'both', node: <RoomSwitch value={Room.Both} onChange={() => {}} /> },
+        { state: 'automations, needs you', node: <RoomSwitch value={Room.Automations} onChange={() => {}} automationsNeedYou /> },
         { state: 'settings, needs you', node: <RoomSwitch value={Room.Settings} onChange={() => {}} needsYou /> },
         { state: 'hover', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
         { state: 'focus', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },

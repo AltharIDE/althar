@@ -24,6 +24,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview',
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
   'chrome/ProjectFront/ProjectFront.tsx': 'a repository’s or tracker’s mark and name, which opens it',
+  'screens/Automations/Automations.tsx': 'an automation’s name, stretched over its card, which opens its page',
+  'screens/Automations/AutomationPage.tsx': 'a run’s row, which opens its task',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
@@ -53,6 +55,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/You/You.tsx': 'an attachment’s chip',
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',
   'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
+  'coordinator/AutomationCard/AutomationCard.tsx': 'a day of the week, toggled in a row of seven',
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
   'composer/Listening/Listening.tsx': 'the listening pill, and stop on its sunk bar',
   'composer/DictationPill/DictationPill.tsx': 'the words carried in the pill, stretched across it, which open it',

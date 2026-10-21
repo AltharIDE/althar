@@ -1,6 +1,6 @@
 import { hashKey, type QueryClient, type QueryKey } from '@tanstack/react-query'
 
-import type { CoordinatorSnapshot, ThreadSnapshot, WatchEvent } from '@althar/contracts'
+import type { AutomationSnapshot, CoordinatorSnapshot, ThreadSnapshot, WatchEvent } from '@althar/contracts'
 
 import type { Client } from './client'
 import { keys } from './reads'
@@ -66,6 +66,13 @@ export const CONNECTIONS = new Set(['connection', 'project'])
 /** Changes elsewhere in a project that move what a card in its coordinator's thread shows. */
 export const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
 
+/**
+ * What changes a project's automations: one of them, or one of its runs.
+ * Each moves the Automations tab, the page of the automation it is of, and
+ * the automation's cards in the coordinator's thread, which say where it stands.
+ */
+export const AUTOMATIONS = new Set(['automation', 'automation_occurrence'])
+
 export interface Feed {
   /** Calls `listener` with every change from now on, until the returned function is called. */
   readonly listen: (listener: (event: WatchEvent) => void) => () => void
@@ -108,7 +115,21 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
   ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
   // Its notes, which the coordinator keeps as the person decides, only while they show.
   ...(event.projectId !== null && event.aggregateType === 'project_note' ? [{ key: keys.notes(event.projectId), offScreen: false }] : []),
+  // Its automations, and the page of the one that changed or ran, only while they show: what doesn't is read as it next opens.
+  ...(event.projectId !== null && AUTOMATIONS.has(event.aggregateType)
+    ? [{ key: keys.automations(event.projectId), offScreen: false }, ...automationReads(cache, event)]
+    : []),
 ]
+
+/** The automations' pages a change moves: the one it is, or, for a run, every one of its project's, as a run names its occurrence. */
+const automationReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> =>
+  event.aggregateType === 'automation'
+    ? [{ key: keys.automation(event.aggregateId), offScreen: false }]
+    : cache
+        .getQueryCache()
+        .findAll({ queryKey: ['automation'] })
+        .filter((query) => (query.state.data as AutomationSnapshot | undefined)?.automation.projectId === event.projectId)
+        .map((query) => ({ key: query.queryKey, offScreen: false }))
 
 /**
  * The threads in the cache a change moves: its own, a coordinator's whose
@@ -132,7 +153,8 @@ const threadReads = (cache: QueryClient, event: Changed): ReadonlyArray<QueryKey
       return (
         data?.threadId === event.threadId ||
         event.aggregateType === 'connection' ||
-        (event.projectId === query.queryKey[1] && (CARDS.has(event.aggregateType) || event.aggregateType === 'project'))
+        (event.projectId === query.queryKey[1] &&
+          (CARDS.has(event.aggregateType) || AUTOMATIONS.has(event.aggregateType) || event.aggregateType === 'project'))
       )
     })
     .map((query) => query.queryKey)

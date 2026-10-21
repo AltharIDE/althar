@@ -169,6 +169,8 @@ export interface TaskModel {
   ) => Promise<void>
   /** Posts that review, as it stands; or again, after it wasn't posted. */
   readonly postReview: (draftId: string) => Promise<void>
+  /** An automation's review: lets its next reviews post themselves, then posts this one. */
+  readonly postReviewsFromNow: (draftId: string, automationId: string) => Promise<void>
   readonly discardReview: (draftId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
@@ -621,6 +623,11 @@ export const useTask = (threadId: string): TaskModel => {
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
     changeReview: (draftId, edit) => act(() => client.changeReviewDraft(draftId, edit)),
     postReview: (draftId) => act(() => client.postReviewDraft(draftId)),
+    postReviewsFromNow: (draftId, automationId) =>
+      act(async () => {
+        await client.setAutomationPostsReviews(automationId, true)
+        await client.postReviewDraft(draftId)
+      }),
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),

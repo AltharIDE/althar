@@ -35,6 +35,7 @@ import { issuePriority, issueStatus, productBrand, productName } from './product
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
 import type {
   ArrivalContent,
+  AutomationCardContent,
   Block,
   IssueDraftContent,
   ReviewDraftContent,
@@ -386,6 +387,7 @@ export function ThreadBlocks({
   draft,
   push,
   review,
+  automation,
   queued,
   onPassOn,
   onAnswerQuestion,
@@ -419,6 +421,8 @@ export function ThreadBlocks({
   push?: (request: PushRequestContent, at: string) => ReactNode
   /** Draws a review the lead drafted of someone else's pull request, in a review task's thread. */
   review?: (review: ReviewDraftContent) => ReactNode
+  /** Draws an automation's card in the coordinator's thread, by its item, which turning it on, undoing and answering it name. */
+  automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
 }) {
@@ -480,6 +484,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
       case 'review':
         return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
+      case 'automation':
+        return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'waiting':
         return (
           <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>

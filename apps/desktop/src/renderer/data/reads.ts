@@ -31,6 +31,10 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
+  /** A project's automations, for its Automations tab and the dot on it. */
+  automations: (projectId: string) => ['automations', projectId] as const,
+  /** One automation, for its own page. */
+  automation: (automationId: string) => ['automation', automationId] as const,
   /** Tasks found by words, in a project or (null) in every one. */
   search: (projectId: string | null, text: string) => ['search', projectId, text] as const,
   /** What a command printed: kept once it ended, so it never changes. */
@@ -117,6 +121,10 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  automations: (projectId: string) =>
+    queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
+  automation: (automationId: string) =>
+    queryOptions({ queryKey: keys.automation(automationId), queryFn: () => client.getAutomation(automationId), gcTime: 5 * 60_000 }),
   // What is found changes with everything a task holds, and nothing on the feed says when: read again as the finder opens, and kept a moment.
   search: (projectId: string | null, text: string) =>
     queryOptions({
