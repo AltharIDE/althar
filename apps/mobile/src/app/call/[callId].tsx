@@ -78,7 +78,14 @@ function Permission({ call }: { readonly call: HomeCall }) {
             Always allow, in the project’s rules
           </Text>
           {call.always?.allow.map((scope) => (
-            <Button key={scope} label={scopeWords(scope, call)} tone="plain" small disabled={!reachable} onPress={() => void allow(scope)} />
+            <Button
+              key={scope}
+              label={scopeWords(scope, call)}
+              tone="plain"
+              small
+              disabled={!reachable}
+              onPress={() => void allow(scope)}
+            />
           ))}
         </Card>
       ) : null}
@@ -134,14 +141,20 @@ function Permission({ call }: { readonly call: HomeCall }) {
   )
 }
 
-const triedWords = { carried_on: 'told the agent to carry on', restarted: 'started it afresh', redirected: 'told it to try another way' } as const
+const triedWords = {
+  carried_on: 'told the agent to carry on',
+  restarted: 'started it afresh',
+  redirected: 'told it to try another way',
+} as const
 
 function Stuck({ call }: { readonly call: HomeCall }) {
   const router = useRouter()
   const theme = useTheme()
   const reachable = useConnection().state === 'online'
   const [note, setNote] = useState('')
-  const answer = useCommand((client, input: Parameters<typeof client.answerStuck>[0]['answer']) => client.answerStuck({ attentionId: call.id, answer: input }))
+  const answer = useCommand((client, input: Parameters<typeof client.answerStuck>[0]['answer']) =>
+    client.answerStuck({ attentionId: call.id, answer: input }),
+  )
   const done = { onSuccess: () => (tapDone(), router.back()) }
   const stuck = call.stuck
   const other = stuck?.agentId === 'codex' ? 'claude-code' : 'codex'
@@ -176,10 +189,22 @@ function Stuck({ call }: { readonly call: HomeCall }) {
             fontSize: 15,
           }}
         />
-        <Button label="Send to the lead" tone="signal" disabled={!reachable || note.trim() === ''} onPress={() => answer.mutate({ kind: 'tell', note: note.trim() }, done)} />
+        <Button
+          label="Send to the lead"
+          tone="signal"
+          disabled={!reachable || note.trim() === ''}
+          onPress={() => answer.mutate({ kind: 'tell', note: note.trim() }, done)}
+        />
       </Card>
-      <Button label={`Hand it to ${agentName(other)}`} tone="plain" disabled={!reachable} onPress={() => answer.mutate({ kind: 'retry', agentId: other }, done)} />
-      {stuck?.why === 'usage_limit' ? <Button label="Wait for the reset" tone="plain" disabled={!reachable} onPress={() => answer.mutate({ kind: 'wait' }, done)} /> : null}
+      <Button
+        label={`Hand it to ${agentName(other)}`}
+        tone="plain"
+        disabled={!reachable}
+        onPress={() => answer.mutate({ kind: 'retry', agentId: other }, done)}
+      />
+      {stuck?.why === 'usage_limit' ? (
+        <Button label="Wait for the reset" tone="plain" disabled={!reachable} onPress={() => answer.mutate({ kind: 'wait' }, done)} />
+      ) : null}
       <Button label="Abandon the task" tone="danger" disabled={!reachable} onPress={() => answer.mutate({ kind: 'abandon' }, done)} />
     </View>
   )

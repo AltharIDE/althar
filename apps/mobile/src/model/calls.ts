@@ -21,8 +21,10 @@ type Reviewing = { readonly posted: unknown; readonly waiting?: boolean | undefi
 /** A review whose review was posted, written to again, that its lead answered drafting nothing to post. */
 export const isAnswered = (reviewing: Reviewing): boolean => reviewing != null && reviewing.posted != null && reviewing.waiting === false
 
-export const isUnshipped = (task: { readonly unshipped?: unknown; readonly change?: { readonly state: string } | null | undefined }): boolean =>
-  task.unshipped != null && task.change?.state !== 'open'
+export const isUnshipped = (task: {
+  readonly unshipped?: unknown
+  readonly change?: { readonly state: string } | null | undefined
+}): boolean => task.unshipped != null && task.change?.state !== 'open'
 
 /** The word for work that is ready: to accept, a review drafted, a plain task finished, or handed back (stuck). */
 export const readyKindOf = (task: {

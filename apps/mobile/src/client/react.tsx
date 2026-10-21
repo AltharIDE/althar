@@ -19,14 +19,14 @@ const streaming = (() => {
   let byThread = new Map<string, Streamed>()
   const listeners = new Set<() => void>()
   return {
-    set(threadId: string, streamed: Streamed | null) {
+    set: (threadId: string, streamed: Streamed | null) => {
       byThread = new Map(byThread)
       if (streamed === null) byThread.delete(threadId)
       else byThread.set(threadId, streamed)
       for (const listener of listeners) listener()
     },
     get: (threadId: string) => byThread.get(threadId) ?? null,
-    subscribe(listener: () => void) {
+    subscribe: (listener: () => void) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },

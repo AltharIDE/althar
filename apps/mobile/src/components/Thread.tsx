@@ -24,7 +24,16 @@ export function ReportCard({ report }: { readonly report: Report }) {
   const { content } = report
   const passed = content.verdict === 'pass'
   return (
-    <View style={{ gap: space.sm, padding: space.md, borderRadius: radius.md, backgroundColor: theme.raised, borderWidth: 1, borderColor: theme.line2 }}>
+    <View
+      style={{
+        gap: space.sm,
+        padding: space.md,
+        borderRadius: radius.md,
+        backgroundColor: theme.raised,
+        borderWidth: 1,
+        borderColor: theme.line2,
+      }}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         <Text kind="label" ink="t3">
           {stepNames[content.step]}
@@ -136,7 +145,17 @@ function Item({ item, now }: { readonly item: ThreadItem; readonly now: number }
   switch (item.kind) {
     case 'user_message':
       return (
-        <View style={{ alignSelf: 'flex-end', maxWidth: '88%', backgroundColor: theme.pressed, borderRadius: radius.lg, borderBottomRightRadius: 6, padding: space.md, gap: 4 }}>
+        <View
+          style={{
+            alignSelf: 'flex-end',
+            maxWidth: '88%',
+            backgroundColor: theme.pressed,
+            borderRadius: radius.lg,
+            borderBottomRightRadius: 6,
+            padding: space.md,
+            gap: 4,
+          }}
+        >
           <Text kind="body">{item.content.text}</Text>
           <Text kind="caption" ink="t4" style={{ alignSelf: 'flex-end' }}>
             {item.input?.state === 'queued' ? 'Queued · ' : ''}
@@ -193,7 +212,9 @@ export function Thread({
   const blocks = blocksOf(items, now)
   return (
     <View style={{ gap: space.lg }}>
-      {blocks.map((block) => (block.kind === 'work' ? <Work key={block.id} block={block} /> : <Item key={block.item.id} item={block.item} now={now} />))}
+      {blocks.map((block) =>
+        block.kind === 'work' ? <Work key={block.id} block={block} /> : <Item key={block.item.id} item={block.item} now={now} />,
+      )}
       {streamed === null ? null : (
         <View style={{ gap: 4 }} accessibilityLiveRegion="polite">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>

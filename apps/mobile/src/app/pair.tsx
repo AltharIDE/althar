@@ -28,7 +28,15 @@ function Steps({ at }: { readonly at: Step }) {
   return (
     <View style={{ flexDirection: 'row', gap: 6 }}>
       {order.map((step) => (
-        <View key={step} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: order.indexOf(step) <= order.indexOf(at) ? theme.t1 : theme.line2 }} />
+        <View
+          key={step}
+          style={{
+            flex: 1,
+            height: 3,
+            borderRadius: 2,
+            backgroundColor: order.indexOf(step) <= order.indexOf(at) ? theme.t1 : theme.line2,
+          }}
+        />
       ))}
     </View>
   )
@@ -63,7 +71,16 @@ function Scan({ onScanned }: { readonly onScanned: (code: string) => void }) {
         ) : (
           <QrCode width={72} height={72} color="rgba(255,255,255,0.35)" />
         )}
-        <View style={{ position: 'absolute', width: '62%', aspectRatio: 1, borderRadius: radius.lg, borderWidth: 3, borderColor: 'rgba(255,255,255,0.9)' }} />
+        <View
+          style={{
+            position: 'absolute',
+            width: '62%',
+            aspectRatio: 1,
+            borderRadius: radius.lg,
+            borderWidth: 3,
+            borderColor: 'rgba(255,255,255,0.9)',
+          }}
+        />
       </View>
       {Platform.OS !== 'web' && permission?.granted !== true ? (
         <Button label="Let Althar use the camera" tone="ink" onPress={() => void ask()} />
@@ -90,7 +107,10 @@ function Verify({ mac, onMatch, onMismatch }: { readonly mac: PairedMac; readonl
       </Text>
       <Card style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, justifyContent: 'center', paddingVertical: space.xl }}>
         {mac.words.map((word) => (
-          <View key={word} style={{ paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.md, backgroundColor: theme.pressed }}>
+          <View
+            key={word}
+            style={{ paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.md, backgroundColor: theme.pressed }}
+          >
             <Text kind="headline" style={{ fontSize: 20, lineHeight: 26 }}>
               {word}
             </Text>
@@ -162,7 +182,8 @@ export default function Pair() {
           <CheckCircle width={44} height={44} color={theme.ok} />
           <Text kind="title">Paired with {mac.name}</Text>
           <Text kind="body" ink="t2">
-            Althar taps you here when an agent asks or work is ready, while your Mac is awake. Allowing asks for Face ID first; denying never does.
+            Althar taps you here when an agent asks or work is ready, while your Mac is awake. Allowing asks for Face ID first; denying
+            never does.
           </Text>
           <Button label="Done" tone="ink" onPress={() => router.replace('/')} />
         </View>

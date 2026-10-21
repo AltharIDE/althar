@@ -14,14 +14,30 @@ import { space } from '../../theme/tokens'
  * you, and what taps you. Everything about the work itself is the Mac's.
  */
 
-function Row({ icon, title, detail, onPress }: { readonly icon: ReactNode; readonly title: string; readonly detail?: string; readonly onPress?: () => void }) {
+function Row({
+  icon,
+  title,
+  detail,
+  onPress,
+}: {
+  readonly icon: ReactNode
+  readonly title: string
+  readonly detail?: string
+  readonly onPress?: () => void
+}) {
   const theme = useTheme()
   return (
     <Pressable
       accessibilityRole={onPress === undefined ? 'text' : 'button'}
       disabled={onPress === undefined}
       onPress={onPress}
-      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, backgroundColor: pressed ? theme.pressed : 'transparent' })}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.md,
+        padding: space.lg,
+        backgroundColor: pressed ? theme.pressed : 'transparent',
+      })}
     >
       {icon}
       <View style={{ flex: 1, gap: 2 }}>
@@ -51,7 +67,12 @@ export default function Settings() {
       </Text>
       <Card style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
         {mac === null ? (
-          <Row icon={<Laptop width={22} height={22} color={theme.t2} />} title="Not paired" detail="Pair with Althar on your Mac" onPress={() => router.push('/pair')} />
+          <Row
+            icon={<Laptop width={22} height={22} color={theme.t2} />}
+            title="Not paired"
+            detail="Pair with Althar on your Mac"
+            onPress={() => router.push('/pair')}
+          />
         ) : (
           <>
             <Row
@@ -60,7 +81,11 @@ export default function Settings() {
               detail={`${connection.state === 'online' ? 'Connected' : connection.state === 'away' ? 'Away' : 'Reaching it…'} · paired ${new Date(mac.pairedAt).toLocaleDateString()}`}
             />
             <Divider inset={50} />
-            <Row icon={<ShieldCheck width={22} height={22} color={theme.ok} />} title="Encrypted end to end" detail={`Paired with the words ${mac.words.join(' · ')}`} />
+            <Row
+              icon={<ShieldCheck width={22} height={22} color={theme.ok} />}
+              title="Encrypted end to end"
+              detail={`Paired with the words ${mac.words.join(' · ')}`}
+            />
             <View style={{ padding: space.lg, paddingTop: 0 }}>
               <Button label="Unpair this phone" tone="danger" small onPress={() => void client.unpair()} />
             </View>
@@ -75,7 +100,12 @@ export default function Settings() {
           detail="Allowing a permission, always-allowing, and merging ask for Face ID. Denying never does: saying no is always safe."
         />
         <Divider inset={50} />
-        <Row icon={<Bell width={22} height={22} color={theme.t2} />} title="Notifications" detail="What taps you, and what waits for you to look" onPress={() => router.push('/notifications')} />
+        <Row
+          icon={<Bell width={22} height={22} color={theme.t2} />}
+          title="Notifications"
+          detail="What taps you, and what waits for you to look"
+          onPress={() => router.push('/notifications')}
+        />
       </Card>
 
       <Text kind="caption" ink="t4" style={{ paddingHorizontal: 4 }}>

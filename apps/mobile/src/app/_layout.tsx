@@ -34,7 +34,10 @@ function Screens() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="call/[callId]" options={{ presentation: 'formSheet', title: 'Call', sheetGrabberVisible: true, sheetAllowedDetents: [0.75, 1] }} />
+        <Stack.Screen
+          name="call/[callId]"
+          options={{ presentation: 'formSheet', title: 'Call', sheetGrabberVisible: true, sheetAllowedDetents: [0.75, 1] }}
+        />
         <Stack.Screen name="new" options={{ presentation: 'modal', title: 'New task' }} />
         <Stack.Screen name="pair" options={{ presentation: 'fullScreenModal', headerShown: false }} />
         <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />

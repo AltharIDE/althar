@@ -20,7 +20,15 @@ import { radius, space } from '../../theme/tokens'
  * newest at the top of each, as the desktop's home reads.
  */
 
-function EventRow({ event, projects, now }: { readonly event: HomeEvent; readonly projects: ReadonlyArray<ProjectSummary>; readonly now: number }) {
+function EventRow({
+  event,
+  projects,
+  now,
+}: {
+  readonly event: HomeEvent
+  readonly projects: ReadonlyArray<ProjectSummary>
+  readonly now: number
+}) {
   const theme = useTheme()
   const router = useRouter()
   const project = event.kind === 'answered' ? null : projects.find((one) => one.id === event.projectId)
@@ -45,7 +53,12 @@ function EventRow({ event, projects, now }: { readonly event: HomeEvent; readonl
     <Pressable
       disabled={event.kind === 'answered'}
       onPress={() => (event.kind === 'answered' ? undefined : router.push(`/task/${event.task.threadId}`))}
-      style={({ pressed }) => ({ flexDirection: 'row', gap: space.md, padding: space.lg, backgroundColor: pressed ? theme.pressed : 'transparent' })}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        gap: space.md,
+        padding: space.lg,
+        backgroundColor: pressed ? theme.pressed : 'transparent',
+      })}
     >
       <View style={{ paddingTop: 2 }}>{icon}</View>
       <View style={{ flex: 1, gap: 2 }}>
@@ -78,7 +91,9 @@ export default function HomeScreen() {
 
   if (connection.state === 'unpaired') {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.page, paddingTop: insets.top + space.xxl, paddingHorizontal: space.xl, gap: space.lg }}>
+      <View
+        style={{ flex: 1, backgroundColor: theme.page, paddingTop: insets.top + space.xxl, paddingHorizontal: space.xl, gap: space.lg }}
+      >
         <Text kind="largeTitle">Althar, on your phone</Text>
         <Text kind="body" ink="t2">
           See what your agents are doing on your Mac, answer what they ask, and start work, from anywhere your Mac can be reached.
@@ -100,7 +115,13 @@ export default function HomeScreen() {
         <Pressable
           accessibilityRole="button"
           onPress={() => router.push('/pair')}
-          style={({ pressed }) => ({ height: 50, borderRadius: radius.md, backgroundColor: pressed ? theme.t2 : theme.inkFill, alignItems: 'center', justifyContent: 'center' })}
+          style={({ pressed }) => ({
+            height: 50,
+            borderRadius: radius.md,
+            backgroundColor: pressed ? theme.t2 : theme.inkFill,
+            alignItems: 'center',
+            justifyContent: 'center',
+          })}
         >
           <Text kind="bodyMedium" ink="onInk">
             Pair with your Mac

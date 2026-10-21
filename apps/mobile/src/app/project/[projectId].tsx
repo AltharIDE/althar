@@ -55,7 +55,10 @@ export default function Board() {
         style={{ flexDirection: 'row', backgroundColor: theme.pressed, borderRadius: radius.md, padding: 3, gap: 2 }}
       >
         {LANES.map(([key, label]) => {
-          const count = key === 'needsYou' ? calls.length + (lanes?.needsYou.filter((task) => task.phase === 'ready').length ?? 0) : (lanes?.[key].length ?? 0)
+          const count =
+            key === 'needsYou'
+              ? calls.length + (lanes?.needsYou.filter((task) => task.phase === 'ready').length ?? 0)
+              : (lanes?.[key].length ?? 0)
           const chosen = lane === key
           return (
             <Pressable
@@ -63,7 +66,13 @@ export default function Board() {
               accessibilityRole="tab"
               accessibilityState={{ selected: chosen }}
               onPress={() => setLane(key)}
-              style={{ flex: 1, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: chosen ? theme.paper : 'transparent', alignItems: 'center' }}
+              style={{
+                flex: 1,
+                paddingVertical: 7,
+                borderRadius: radius.sm,
+                backgroundColor: chosen ? theme.paper : 'transparent',
+                alignItems: 'center',
+              }}
             >
               <Text kind="caption" ink={chosen ? 't1' : 't2'} lines={1}>
                 {label}
@@ -76,12 +85,20 @@ export default function Board() {
       {lane === 'needsYou' ? (
         <>
           {calls.map((call) => (
-            <NeedCard key={call.id} need={{ kind: 'call', id: call.id, call: { ...call, projectId }, word: callKindOf(call), project }} now={now} />
+            <NeedCard
+              key={call.id}
+              need={{ kind: 'call', id: call.id, call: { ...call, projectId }, word: callKindOf(call), project }}
+              now={now}
+            />
           ))}
           {(lanes?.needsYou ?? [])
             .filter((task) => task.phase === 'ready')
             .map((task) => (
-              <NeedCard key={task.taskId} need={{ kind: 'ready', id: task.taskId, task: { ...task, projectId }, word: readyKindOf(task), project }} now={now} />
+              <NeedCard
+                key={task.taskId}
+                need={{ kind: 'ready', id: task.taskId, task: { ...task, projectId }, word: readyKindOf(task), project }}
+                now={now}
+              />
             ))}
         </>
       ) : shown.length === 0 ? (

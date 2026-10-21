@@ -41,7 +41,14 @@ const SHOTS = [
   { name: 'notifications-full', url: '/notifications', full: true },
 ]
 
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.ttf': 'font/ttf', '.png': 'image/png', '.css': 'text/css' }
+const types = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.json': 'application/json',
+  '.ttf': 'font/ttf',
+  '.png': 'image/png',
+  '.css': 'text/css',
+}
 
 const server = createServer((request, response) => {
   const asked = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname)
@@ -68,9 +75,7 @@ try {
     await page.waitForTimeout(700)
     if (shot.full) {
       /* A phone scrolls; to show a whole screen, the page grows to its content. */
-      const height = await page.evaluate(() =>
-        Math.max(...[...document.querySelectorAll('div')].map((element) => element.scrollHeight)),
-      )
+      const height = await page.evaluate(() => Math.max(...[...document.querySelectorAll('div')].map((element) => element.scrollHeight)))
       await page.setViewportSize({ width: 390, height: Math.min(Math.max(height, 844), 4000) })
       await page.waitForTimeout(300)
     }

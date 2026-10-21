@@ -40,11 +40,17 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="projects"
-        options={{ title: 'Projects', tabBarIcon: ({ color, size }) => <Folder color={color} width={size} height={size} strokeWidth={1.8} /> }}
+        options={{
+          title: 'Projects',
+          tabBarIcon: ({ color, size }) => <Folder color={color} width={size} height={size} strokeWidth={1.8} />,
+        }}
       />
       <Tabs.Screen
         name="settings"
-        options={{ title: 'Settings', tabBarIcon: ({ color, size }) => <Settings color={color} width={size} height={size} strokeWidth={1.8} /> }}
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color, size }) => <Settings color={color} width={size} height={size} strokeWidth={1.8} />,
+        }}
       />
     </Tabs>
   )

@@ -11,20 +11,21 @@ const NOW = Date.parse('2026-10-21T15:00:00.000Z')
 
 const homeOf = (now: number) => {
   const state = scenario(now)
-  return { cursor: 0, looked: state.looked, since: state.looked, tasks: state.tasks, calls: state.calls, events: state.events, projects: state.projects }
+  return {
+    cursor: 0,
+    looked: state.looked,
+    since: state.looked,
+    tasks: state.tasks,
+    calls: state.calls,
+    events: state.events,
+    projects: state.projects,
+  }
 }
 
 describe('what needs you', () => {
   it('puts permissions first, then questions, then stuck steps, then ready work, newest first', () => {
     const needs = needsOf(homeOf(NOW))
-    expect(needs.map((need) => need.word)).toEqual([
-      'Permission',
-      'Question',
-      'Stuck',
-      'Review drafted',
-      'Finished',
-      'Ready to accept',
-    ])
+    expect(needs.map((need) => need.word)).toEqual(['Permission', 'Question', 'Stuck', 'Review drafted', 'Finished', 'Ready to accept'])
   })
 
   it('counts a task with two calls once', () => {

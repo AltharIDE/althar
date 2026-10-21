@@ -199,7 +199,13 @@ export const scenario = (now: number): Scenario => {
     title: 'Run the database migration on staging',
     reason: 'Commands that reach staging always ask, in meridian’s rules',
     command: 'bun run db:migrate --env staging',
-    always: { command: 'bun run db:migrate --env staging', prefix: 'bun run db:migrate', kind: null, allow: ['exact', 'prefix'], deny: ['exact', 'prefix'] },
+    always: {
+      command: 'bun run db:migrate --env staging',
+      prefix: 'bun run db:migrate',
+      kind: null,
+      allow: ['exact', 'prefix'],
+      deny: ['exact', 'prefix'],
+    },
     createdAt: ago(now, 2),
   })
   const breakpoint = call({
@@ -300,13 +306,22 @@ export const scenario = (now: number): Scenario => {
       backfill,
       meridian.name,
       [
-        say.person('Backfill invoice totals for every 2024 invoice: the totals column was added in March and older rows are null.', ago(now, 14)),
+        say.person(
+          'Backfill invoice totals for every 2024 invoice: the totals column was added in March and older rows are null.',
+          ago(now, 14),
+        ),
         say.notice('Installed dependencies in meridian', ago(now, 13)),
-        say.agent('claude-code', 'I’ll read the invoices schema and the existing totals calculation first, then write an idempotent batch job.', ago(now, 12)),
+        say.agent(
+          'claude-code',
+          'I’ll read the invoices schema and the existing totals calculation first, then write an idempotent batch job.',
+          ago(now, 12),
+        ),
         say.tool('claude-code', ago(now, 12), 'Read src/billing/totals.ts', 'read', { path: 'src/billing/totals.ts' }),
         say.tool('claude-code', ago(now, 11), 'Search for invoice_total', 'search'),
         say.tool('claude-code', ago(now, 10), 'Edit jobs/backfill-totals.ts', 'edit', { path: 'jobs/backfill-totals.ts' }),
-        say.tool('claude-code', ago(now, 7), 'Run the job dry', 'execute', { command: 'bun jobs/backfill-totals.ts --dry-run --month 2024-01' }),
+        say.tool('claude-code', ago(now, 7), 'Run the job dry', 'execute', {
+          command: 'bun jobs/backfill-totals.ts --dry-run --month 2024-01',
+        }),
         say.agent(
           'claude-code',
           'The dry run for January matches the ledger to the cent on 4,112 invoices. Batching by month keeps each transaction under a second; doing February to May next.',
@@ -355,7 +370,12 @@ export const scenario = (now: number): Scenario => {
           verdict: 'changes_requested',
           summary: 'Two webhook events fall through to the default branch silently.',
           findings: [
-            { severity: 'major', file: 'src/webhooks/handle.ts', line: 88, claim: '`charge.dispute.funds_reinstated` isn’t handled and is now dropped without a log.' },
+            {
+              severity: 'major',
+              file: 'src/webhooks/handle.ts',
+              line: 88,
+              claim: '`charge.dispute.funds_reinstated` isn’t handled and is now dropped without a log.',
+            },
             { severity: 'minor', file: 'src/stripe.ts', line: 12, claim: 'The API version is pinned in two places.' },
           ],
         }),
@@ -386,10 +406,19 @@ export const scenario = (now: number): Scenario => {
       meridian.name,
       [
         say.person('Webhook deliveries that fail are dropped. Retry them with exponential backoff, at most 8 tries.', ago(now, 30)),
-        say.agent('codex', 'Adding a `delivery_attempts` table and a retry worker. The migration needs to run on staging before the integration tests can.', ago(now, 5)),
-        say.tool('codex', ago(now, 4), 'Edit migrations/0042_delivery_attempts.sql', 'edit', { path: 'migrations/0042_delivery_attempts.sql' }),
+        say.agent(
+          'codex',
+          'Adding a `delivery_attempts` table and a retry worker. The migration needs to run on staging before the integration tests can.',
+          ago(now, 5),
+        ),
+        say.tool('codex', ago(now, 4), 'Edit migrations/0042_delivery_attempts.sql', 'edit', {
+          path: 'migrations/0042_delivery_attempts.sql',
+        }),
       ],
-      { attention: [attentionOf(migrate)], files: [file('migrations/0042_delivery_attempts.sql', 31, 0), file('src/webhooks/retry.ts', 88, 4)] },
+      {
+        attention: [attentionOf(migrate)],
+        files: [file('migrations/0042_delivery_attempts.sql', 31, 0), file('src/webhooks/retry.ts', 88, 4)],
+      },
     ),
   )
   threads.set(
@@ -399,13 +428,25 @@ export const scenario = (now: number): Scenario => {
       site.name,
       [
         say.person('The shifts table overflows on phones. Fix it.', ago(now, 9)),
-        say.agent('claude-code', 'The table has 7 columns and needs about 820px. I can fold it into cards or keep it scrolling sideways.', ago(now, 6)),
+        say.agent(
+          'claude-code',
+          'The table has 7 columns and needs about 820px. I can fold it into cards or keep it scrolling sideways.',
+          ago(now, 6),
+        ),
       ],
       { attention: [attentionOf(breakpoint)] },
     ),
   )
-  threads.set(cron.threadId, thread(cron, meridian.name, [say.person('Move every cron job onto the queue, with retries.', ago(now, 100))], { attention: [attentionOf(rounds)] }))
-  threads.set(darkDocs.threadId, thread(darkDocs, site.name, [say.person('Add dark mode to the docs pages, following the app’s dark palette.', ago(now, 45))]))
+  threads.set(
+    cron.threadId,
+    thread(cron, meridian.name, [say.person('Move every cron job onto the queue, with retries.', ago(now, 100))], {
+      attention: [attentionOf(rounds)],
+    }),
+  )
+  threads.set(
+    darkDocs.threadId,
+    thread(darkDocs, site.name, [say.person('Add dark mode to the docs pages, following the app’s dark palette.', ago(now, 45))]),
+  )
   threads.set(
     flaky.threadId,
     thread(flaky, meridian.name, [
@@ -439,7 +480,11 @@ export const scenario = (now: number): Scenario => {
     { kind: 'context', old: 87, new: 90, text: '  }' },
     { kind: 'context', old: 88, new: 91, text: '}' },
   ]
-  diffs.set(`${stripe.taskId}:src/webhooks/handle.ts`, { file: file('src/webhooks/handle.ts', 96, 54), lines: handleLines, truncated: false })
+  diffs.set(`${stripe.taskId}:src/webhooks/handle.ts`, {
+    file: file('src/webhooks/handle.ts', 96, 54),
+    lines: handleLines,
+    truncated: false,
+  })
   diffs.set(`${stripe.taskId}:src/stripe.ts`, {
     file: file('src/stripe.ts', 18, 31),
     lines: [
@@ -448,7 +493,7 @@ export const scenario = (now: number): Scenario => {
       { kind: 'added', new: 1, text: "import { Stripe } from 'stripe'", changed: ["import { Stripe } from 'stripe'"] },
       { kind: 'context', old: 2, new: 2, text: '' },
       { kind: 'removed', old: 3, text: "const API_VERSION = '2023-10-16'", changed: ["'2023-10-16'"] },
-      { kind: 'added', new: 3, text: "export const API_VERSION = '2026-09-30.acacia'", changed: ["export ", "'2026-09-30.acacia'"] },
+      { kind: 'added', new: 3, text: "export const API_VERSION = '2026-09-30.acacia'", changed: ['export ', "'2026-09-30.acacia'"] },
       { kind: 'context', old: 4, new: 4, text: '' },
       { kind: 'context', old: 5, new: 5, text: 'export const stripe = new Stripe(env.STRIPE_KEY, {' },
       { kind: 'context', old: 6, new: 6, text: '  apiVersion: API_VERSION,' },

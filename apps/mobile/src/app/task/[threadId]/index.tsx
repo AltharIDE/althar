@@ -22,7 +22,17 @@ import { radius, space } from '../../../theme/tokens'
  * composer under it. Merging asks for Face ID, at the head you saw.
  */
 
-function PullRequest({ change, taskId, files, threadId }: { readonly change: ChangeSummary; readonly taskId: string; readonly files: number; readonly threadId: string }) {
+function PullRequest({
+  change,
+  taskId,
+  files,
+  threadId,
+}: {
+  readonly change: ChangeSummary
+  readonly taskId: string
+  readonly files: number
+  readonly threadId: string
+}) {
   const theme = useTheme()
   const router = useRouter()
   const reachable = useConnection().state === 'online'
@@ -40,12 +50,19 @@ function PullRequest({ change, taskId, files, threadId }: { readonly change: Cha
     <Card>
       <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(change.url)} style={{ gap: space.sm }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-          {change.state === 'merged' ? <GitMerge width={18} height={18} color={theme.signal} /> : <GitPullRequest width={18} height={18} color={theme.ok} />}
+          {change.state === 'merged' ? (
+            <GitMerge width={18} height={18} color={theme.signal} />
+          ) : (
+            <GitPullRequest width={18} height={18} color={theme.ok} />
+          )}
           <Text kind="headline" style={{ flex: 1 }} lines={1}>
             {change.short} {change.prefix}
             {change.number}
           </Text>
-          <Chip label={change.state === 'merged' ? 'Merged' : change.draft ? 'Draft' : 'Open'} tone={change.state === 'merged' ? 'signal' : 'plain'} />
+          <Chip
+            label={change.state === 'merged' ? 'Merged' : change.draft ? 'Draft' : 'Open'}
+            tone={change.state === 'merged' ? 'signal' : 'plain'}
+          />
         </View>
         <Text kind="sub" ink="t2" lines={2}>
           {change.title}
@@ -78,7 +95,13 @@ function PullRequest({ change, taskId, files, threadId }: { readonly change: Cha
       <Pressable
         accessibilityRole="button"
         onPress={() => router.push({ pathname: '/task/[threadId]/changes', params: { threadId, taskId } })}
-        style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: space.sm,
+          paddingVertical: 6,
+          opacity: pressed ? 0.6 : 1,
+        })}
       >
         <Page width={18} height={18} color={theme.t2} />
         <Text kind="bodyMedium" style={{ flex: 1 }}>
@@ -165,7 +188,11 @@ export default function TaskScreen() {
   const change = data?.task.changes.at(-1) ?? null
   const working = data?.session?.turnRunning === true || data?.task.phase === 'running'
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.page }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: theme.page }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={90}
+    >
       <Stack.Screen
         options={{
           title: '',
@@ -186,12 +213,16 @@ export default function TaskScreen() {
             {calls.map((call) => (
               <NeedCard key={call.id} need={{ kind: 'call', id: call.id, call, word: callKindOf(call), project }} now={now} />
             ))}
-            {change === null ? null : <PullRequest change={change} taskId={data.task.id} files={data.task.files.length} threadId={data.threadId} />}
+            {change === null ? null : (
+              <PullRequest change={change} taskId={data.task.id} files={data.task.files.length} threadId={data.threadId} />
+            )}
             {change === null && data.task.files.length > 0 ? (
               <Button
                 label={`${plural(data.task.files.length, 'file')} changed so far`}
                 tone="plain"
-                onPress={() => router.push({ pathname: '/task/[threadId]/changes', params: { threadId: data.threadId, taskId: data.task.id } })}
+                onPress={() =>
+                  router.push({ pathname: '/task/[threadId]/changes', params: { threadId: data.threadId, taskId: data.task.id } })
+                }
               />
             ) : null}
             <Thread items={data.items} now={now} streamed={streamed} />

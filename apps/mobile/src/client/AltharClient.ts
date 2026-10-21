@@ -82,7 +82,12 @@ export interface AltharClient {
       | { readonly kind: 'abandon' }
   }): Promise<void>
   /** Send: a message to a task's lead, or to a project's coordinator. */
-  send(input: { readonly threadId: string; readonly body: string; readonly disposition: typeof Disposition.Type; readonly dictated?: boolean }): Promise<void>
+  send(input: {
+    readonly threadId: string
+    readonly body: string
+    readonly disposition: typeof Disposition.Type
+    readonly dictated?: boolean
+  }): Promise<void>
   /** CreateTask: a new task in a project, which the coordinator plans. */
   createTask(input: { readonly projectId: string; readonly title: string; readonly description?: string }): Promise<TaskSummary>
   stopTask(taskId: string): Promise<void>

@@ -17,7 +17,17 @@ import { Button, Card, Chip, ProjectMark, Text, Well } from './ui'
  * answered in place where it can be, with the rest a tap away.
  */
 
-function Where({ project, task, at, now }: { readonly project: ProjectSummary | null; readonly task: string | null; readonly at: string; readonly now: number }) {
+function Where({
+  project,
+  task,
+  at,
+  now,
+}: {
+  readonly project: ProjectSummary | null
+  readonly task: string | null
+  readonly at: string
+  readonly now: number
+}) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       {project === null ? null : <ProjectMark name={project.name} ink={project.ink} size={16} />}
@@ -43,7 +53,17 @@ function Head({ word, icon }: { readonly word: string; readonly icon: (color: st
   )
 }
 
-function PermissionCard({ call, word, project, now }: { readonly call: HomeCall; readonly word: string; readonly project: ProjectSummary | null; readonly now: number }) {
+function PermissionCard({
+  call,
+  word,
+  project,
+  now,
+}: {
+  readonly call: HomeCall
+  readonly word: string
+  readonly project: ProjectSummary | null
+  readonly now: number
+}) {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const answer = useCommand((client, decision: 'allow' | 'reject') => client.answer({ attentionId: call.id, decision }))
@@ -57,7 +77,11 @@ function PermissionCard({ call, word, project, now }: { readonly call: HomeCall;
   return (
     <Card tone="signal">
       <Head word={word} icon={(color) => <Terminal width={14} height={14} color={color} strokeWidth={2} />} />
-      <Pressable accessibilityRole="button" accessibilityHint="Opens the call, with always and never" onPress={() => router.push(`/call/${call.id}`)}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityHint="Opens the call, with always and never"
+        onPress={() => router.push(`/call/${call.id}`)}
+      >
         <View style={{ gap: space.sm }}>
           <Text kind="headline">{call.title}</Text>
           {call.command === null ? null : (
@@ -102,7 +126,17 @@ function PermissionCard({ call, word, project, now }: { readonly call: HomeCall;
   )
 }
 
-function QuestionCard({ call, word, project, now }: { readonly call: HomeCall; readonly word: string; readonly project: ProjectSummary | null; readonly now: number }) {
+function QuestionCard({
+  call,
+  word,
+  project,
+  now,
+}: {
+  readonly call: HomeCall
+  readonly word: string
+  readonly project: ProjectSummary | null
+  readonly now: number
+}) {
   const theme = useTheme()
   const field = call.question?.fields[0]
   const [picked, setPicked] = useState<string | null>(null)
@@ -176,7 +210,17 @@ function QuestionCard({ call, word, project, now }: { readonly call: HomeCall; r
   )
 }
 
-function StuckCard({ call, word, project, now }: { readonly call: HomeCall; readonly word: string; readonly project: ProjectSummary | null; readonly now: number }) {
+function StuckCard({
+  call,
+  word,
+  project,
+  now,
+}: {
+  readonly call: HomeCall
+  readonly word: string
+  readonly project: ProjectSummary | null
+  readonly now: number
+}) {
   const router = useRouter()
   return (
     <Card tone="signal">
@@ -196,7 +240,17 @@ function StuckCard({ call, word, project, now }: { readonly call: HomeCall; read
   )
 }
 
-function ReadyCard({ task, word, project, now }: { readonly task: HomeTask; readonly word: string; readonly project: ProjectSummary | null; readonly now: number }) {
+function ReadyCard({
+  task,
+  word,
+  project,
+  now,
+}: {
+  readonly task: HomeTask
+  readonly word: string
+  readonly project: ProjectSummary | null
+  readonly now: number
+}) {
   const router = useRouter()
   const theme = useTheme()
   const done = useCommand((client, id: string) => client.markTaskDone(id))
@@ -226,7 +280,11 @@ function ReadyCard({ task, word, project, now }: { readonly task: HomeTask; read
             </Text>
             {change.checks === null ? null : (
               <Chip
-                label={change.checks.outcome === 'passed' ? `Checks ${change.checks.passed}/${change.checks.total}` : `${change.checks.failed} failing`}
+                label={
+                  change.checks.outcome === 'passed'
+                    ? `Checks ${change.checks.passed}/${change.checks.total}`
+                    : `${change.checks.failed} failing`
+                }
                 tone={change.checks.outcome === 'passed' ? 'ok' : change.checks.outcome === 'failed' ? 'danger' : 'plain'}
               />
             )}

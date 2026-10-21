@@ -88,7 +88,6 @@ export default function NewTask() {
             accessibilityLabel="What should be done"
             value={body}
             onChangeText={setBody}
-            autoFocus
             multiline
             placeholder="Add per-customer rate limits to /charges, with a 429 that says when to retry."
             placeholderTextColor={theme.t4}
@@ -116,7 +115,13 @@ export default function NewTask() {
         <Text kind="sub" ink="t2">
           The coordinator on your Mac plans it: who leads, who reviews. It starts on its own unless you hold it.
         </Text>
-        <Button label="Plan it" tone="ink" disabled={!reachable || chosen === null || body.trim() === ''} busy={create.isPending} onPress={go} />
+        <Button
+          label="Plan it"
+          tone="ink"
+          disabled={!reachable || chosen === null || body.trim() === ''}
+          busy={create.isPending}
+          onPress={go}
+        />
         {error === null ? null : (
           <Text kind="sub" ink="danger">
             {error}

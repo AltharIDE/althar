@@ -173,7 +173,10 @@ export class DemoClient implements AltharClient {
     this.resume(answered.taskId)
   }
 
-  async answerQuestion(input: { readonly attentionId: string; readonly answers: Readonly<Record<string, { readonly values: ReadonlyArray<string> }>> }) {
+  async answerQuestion(input: {
+    readonly attentionId: string
+    readonly answers: Readonly<Record<string, { readonly values: ReadonlyArray<string> }>>
+  }) {
     await this.wait()
     const answered = this.close(input.attentionId)
     if (answered?.taskId == null) return
@@ -258,7 +261,15 @@ export class DemoClient implements AltharClient {
     STREAM.forEach((text, index) => {
       this.timers.push(
         setTimeout(
-          () => this.emit({ _tag: 'Streaming', threadId: 'thr_task_backfill', itemId: 'item_stream', kind: 'agent_message', agentId: 'claude-code', text }),
+          () =>
+            this.emit({
+              _tag: 'Streaming',
+              threadId: 'thr_task_backfill',
+              itemId: 'item_stream',
+              kind: 'agent_message',
+              agentId: 'claude-code',
+              text,
+            }),
           2_000 + index * 1_600,
         ),
       )

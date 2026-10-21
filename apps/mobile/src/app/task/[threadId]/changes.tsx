@@ -28,7 +28,13 @@ function FileRow({ file, onPress }: { readonly file: ChangedFile; readonly onPre
       accessibilityRole="button"
       accessibilityLabel={`${file.path}, ${file.status}, ${lines(file.add, file.del)}`}
       onPress={onPress}
-      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, backgroundColor: pressed ? theme.pressed : 'transparent' })}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: space.md,
+        padding: space.lg,
+        backgroundColor: pressed ? theme.pressed : 'transparent',
+      })}
     >
       <Text kind="monoSmall" style={{ color: tone, width: 12 }}>
         {letters[file.status]}
@@ -70,7 +76,10 @@ export default function Changes() {
         {files.map((file, index) => (
           <View key={file.path}>
             {index === 0 ? null : <Divider inset={40} />}
-            <FileRow file={file} onPress={() => router.push({ pathname: '/task/[threadId]/diff', params: { threadId, taskId, path: file.path } })} />
+            <FileRow
+              file={file}
+              onPress={() => router.push({ pathname: '/task/[threadId]/diff', params: { threadId, taskId, path: file.path } })}
+            />
           </View>
         ))}
       </Card>

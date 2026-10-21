@@ -32,7 +32,9 @@ function Line({ line, wrap }: { readonly line: DiffLine; readonly wrap: boolean 
   return (
     <View style={{ flexDirection: 'row', backgroundColor: bg }}>
       <NativeText style={[type.monoSmall, { color: theme.t4, width: 40, textAlign: 'right', paddingRight: 6 }]}>{number}</NativeText>
-      <NativeText style={[type.monoSmall, { color: line.kind === 'added' ? theme.ok : line.kind === 'removed' ? theme.danger : theme.t4, width: 14 }]}>
+      <NativeText
+        style={[type.monoSmall, { color: line.kind === 'added' ? theme.ok : line.kind === 'removed' ? theme.danger : theme.t4, width: 14 }]}
+      >
         {mark}
       </NativeText>
       <NativeText style={[type.mono, { color: theme.t1, flexShrink: wrap ? 1 : 0, paddingRight: space.md }]}>
@@ -61,8 +63,21 @@ export default function Diff() {
   )
   return (
     <View style={{ flex: 1, backgroundColor: theme.paper }}>
-      <Stack.Screen options={{ title: name, headerRight: () => <Button label={wrap ? 'Scroll' : 'Wrap'} tone="quiet" small onPress={() => setWrap(!wrap)} /> }} />
-      <View style={{ paddingHorizontal: space.lg, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: theme.line2, backgroundColor: theme.page }}>
+      <Stack.Screen
+        options={{
+          title: name,
+          headerRight: () => <Button label={wrap ? 'Scroll' : 'Wrap'} tone="quiet" small onPress={() => setWrap(!wrap)} />,
+        }}
+      />
+      <View
+        style={{
+          paddingHorizontal: space.lg,
+          paddingVertical: space.sm,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.line2,
+          backgroundColor: theme.page,
+        }}
+      >
         <Text kind="monoSmall" ink="t2" lines={1}>
           {path}
         </Text>

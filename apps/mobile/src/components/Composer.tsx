@@ -101,7 +101,14 @@ export function Composer({ threadId, leadWorking }: { readonly threadId: string;
         {body.trim() === '' ? (
           <View
             accessibilityLabel="Dictate"
-            style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.pressed }}
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 21,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: theme.pressed,
+            }}
           >
             <Microphone width={20} height={20} color={theme.t2} />
           </View>
@@ -111,7 +118,14 @@ export function Composer({ threadId, leadWorking }: { readonly threadId: string;
             accessibilityLabel={now ? 'Send now' : 'Queue'}
             disabled={send.isPending || !reachable}
             onPress={go}
-            style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.inkFill }}
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 21,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: theme.inkFill,
+            }}
           >
             <ArrowUp width={20} height={20} color={theme.onInk} strokeWidth={2.2} />
           </Pressable>

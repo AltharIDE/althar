@@ -3,7 +3,10 @@
  */
 
 /** A line's text, cut into what changed and what didn't, by the stretches the diff names. */
-export const pieces = (text: string, changed: ReadonlyArray<string> | undefined): ReadonlyArray<{ readonly text: string; readonly changed: boolean }> => {
+export const pieces = (
+  text: string,
+  changed: ReadonlyArray<string> | undefined,
+): ReadonlyArray<{ readonly text: string; readonly changed: boolean }> => {
   if (changed === undefined || changed.length === 0) return [{ text, changed: false }]
   const out: Array<{ text: string; changed: boolean }> = []
   let rest = text

@@ -14,7 +14,15 @@ import { LiveDot, ProjectMark, Text } from './ui'
  * A task at work, in a row: cobalt while an agent is on it, what step and
  * who, for how long, and what its lead says as it says it.
  */
-export function TaskRow({ task, project, now }: { readonly task: HomeTask; readonly project: ProjectSummary | null; readonly now: number }) {
+export function TaskRow({
+  task,
+  project,
+  now,
+}: {
+  readonly task: HomeTask
+  readonly project: ProjectSummary | null
+  readonly now: number
+}) {
   const router = useRouter()
   const theme = useTheme()
   const streamed = useStreaming(task.threadId)

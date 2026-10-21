@@ -14,13 +14,31 @@ import { fonts, radius, space } from '../theme/tokens'
  * ciphertext; the phone opens them itself, so the relay never reads one.
  */
 
-type Category = { readonly key: string; readonly title: string; readonly detail: string; readonly group: 'needs' | 'fyi'; readonly on: boolean }
+type Category = {
+  readonly key: string
+  readonly title: string
+  readonly detail: string
+  readonly group: 'needs' | 'fyi'
+  readonly on: boolean
+}
 
 const CATEGORIES: ReadonlyArray<Category> = [
-  { key: 'permission', group: 'needs', on: true, title: 'Permissions', detail: 'With Deny and Allow on the notification; Allow asks for Face ID' },
+  {
+    key: 'permission',
+    group: 'needs',
+    on: true,
+    title: 'Permissions',
+    detail: 'With Deny and Allow on the notification; Allow asks for Face ID',
+  },
   { key: 'question', group: 'needs', on: true, title: 'Questions', detail: 'Opens the question, its choices in hand' },
   { key: 'stuck', group: 'needs', on: true, title: 'Stuck', detail: 'A step that can’t go on without you' },
-  { key: 'away', group: 'needs', on: true, title: 'Your Mac went away with calls waiting', detail: 'So an agent doesn’t wait on a sleeping Mac unseen' },
+  {
+    key: 'away',
+    group: 'needs',
+    on: true,
+    title: 'Your Mac went away with calls waiting',
+    detail: 'So an agent doesn’t wait on a sleeping Mac unseen',
+  },
   { key: 'ready', group: 'fyi', on: true, title: 'Ready to accept', detail: 'Checks passed, a review drafted, a task finished' },
   { key: 'steps', group: 'fyi', on: false, title: 'Steps finishing', detail: 'Each implement and review step, as it reports' },
 ]
@@ -37,11 +55,21 @@ function Group({ title, children }: { readonly title: string; readonly children:
 }
 
 /** A notification as the lock screen shows it, drawn here as a preview. */
-function Banner({ title, body, actions }: { readonly title: string; readonly body: string; readonly actions?: ReadonlyArray<{ label: string; lock?: boolean; strong?: boolean }> }) {
+function Banner({
+  title,
+  body,
+  actions,
+}: {
+  readonly title: string
+  readonly body: string
+  readonly actions?: ReadonlyArray<{ label: string; lock?: boolean; strong?: boolean }>
+}) {
   return (
     <View style={{ borderRadius: 22, backgroundColor: 'rgba(245,245,247,0.92)', overflow: 'hidden' }}>
       <View style={{ flexDirection: 'row', gap: 10, padding: 12 }}>
-        <View style={{ width: 36, height: 36, borderRadius: 9, backgroundColor: '#141417', alignItems: 'center', justifyContent: 'center' }}>
+        <View
+          style={{ width: 36, height: 36, borderRadius: 9, backgroundColor: '#141417', alignItems: 'center', justifyContent: 'center' }}
+        >
           <Text kind="headline" style={{ color: '#fff', fontFamily: fonts.bold }}>
             A
           </Text>
@@ -90,7 +118,15 @@ function Banner({ title, body, actions }: { readonly title: string; readonly bod
 
 function LockScreen() {
   return (
-    <View style={{ borderRadius: 36, padding: space.lg, gap: 10, backgroundColor: '#2a2350', experimental_backgroundImage: 'linear-gradient(160deg, #3b2f7a 0%, #1d2a5e 55%, #0f1530 100%)' }}>
+    <View
+      style={{
+        borderRadius: 36,
+        padding: space.lg,
+        gap: 10,
+        backgroundColor: '#2a2350',
+        experimental_backgroundImage: 'linear-gradient(160deg, #3b2f7a 0%, #1d2a5e 55%, #0f1530 100%)',
+      }}
+    >
       <Text kind="largeTitle" style={{ color: '#fff', textAlign: 'center', fontSize: 52, lineHeight: 58, fontFamily: fonts.semibold }}>
         14:32
       </Text>
@@ -102,7 +138,10 @@ function LockScreen() {
         body={'Run the database migration on staging?\nbun run db:migrate --env staging'}
         actions={[{ label: 'Deny' }, { label: 'Allow once', lock: true, strong: true }]}
       />
-      <Banner title="Opus 5 · althar-site" body="Where should the shifts table fold into cards? Below 640px, below 768px, or scroll sideways." />
+      <Banner
+        title="Opus 5 · althar-site"
+        body="Where should the shifts table fold into cards? Below 640px, below 768px, or scroll sideways."
+      />
       <Banner title="billing-api · Ready to accept" body="Upgrade the Stripe SDK to v19: checks 14/14, +312 −198" />
     </View>
   )
@@ -111,7 +150,19 @@ function LockScreen() {
 function Island() {
   return (
     <View style={{ alignItems: 'center', gap: space.md }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#000', borderRadius: 24, paddingHorizontal: 14, height: 38, minWidth: 220, justifyContent: 'space-between' }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: '#000',
+          borderRadius: 24,
+          paddingHorizontal: 14,
+          height: 38,
+          minWidth: 220,
+          justifyContent: 'space-between',
+        }}
+      >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#8a95ff' }} />
           <Text kind="caption" style={{ color: '#fff' }}>
@@ -200,7 +251,9 @@ export default function Notifications() {
             While agents work
           </Text>
         </View>
-        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: theme.raised, borderWidth: 1, borderColor: theme.line2 }}>
+        <View
+          style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: theme.raised, borderWidth: 1, borderColor: theme.line2 }}
+        >
           <Island />
         </View>
         <Text kind="sub" ink="t3" style={{ paddingHorizontal: 4 }}>

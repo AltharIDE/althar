@@ -26,7 +26,9 @@ const shown = (item: ThreadItem): boolean => item.kind !== 'agent_thought' && it
 
 /** What a round of work did, counted: edited 3 files, ran 6 commands, read 2. */
 export const workWords = (tools: ReadonlyArray<Tool>, ms: number, working: boolean): string => {
-  const edited = new Set(tools.filter((tool) => tool.content.toolKind === 'edit').flatMap((tool) => tool.content.locations.map((place) => place.path)))
+  const edited = new Set(
+    tools.filter((tool) => tool.content.toolKind === 'edit').flatMap((tool) => tool.content.locations.map((place) => place.path)),
+  )
   const ran = tools.filter((tool) => tool.content.toolKind === 'execute').length
   const read = tools.filter((tool) => tool.content.toolKind === 'read' || tool.content.toolKind === 'search').length
   const did = [
@@ -46,7 +48,13 @@ export const blocksOf = (items: ReadonlyArray<ThreadItem>, now: number): Readonl
     if (first === undefined || last === undefined) return
     const working = last.content.status === 'in_progress' || last.content.status === 'pending'
     const end = until === null ? (working ? now : Date.parse(last.createdAt)) : Date.parse(until)
-    blocks.push({ kind: 'work', id: `work_${first.id}`, tools: run, working, words: workWords(run, Math.max(end - Date.parse(first.createdAt), 60_000), working) })
+    blocks.push({
+      kind: 'work',
+      id: `work_${first.id}`,
+      tools: run,
+      working,
+      words: workWords(run, Math.max(end - Date.parse(first.createdAt), 60_000), working),
+    })
     run = []
   }
   for (const item of items) {

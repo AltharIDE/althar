@@ -35,7 +35,13 @@ export default function Projects() {
                 accessibilityRole="button"
                 accessibilityLabel={`${project.name}: ${needs} need you, ${project.working} at work`}
                 onPress={() => router.push(`/project/${project.id}`)}
-                style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, backgroundColor: pressed ? theme.pressed : 'transparent' })}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: space.md,
+                  padding: space.lg,
+                  backgroundColor: pressed ? theme.pressed : 'transparent',
+                })}
               >
                 <ProjectMark name={project.name} ink={project.ink} size={32} />
                 <View style={{ flex: 1, gap: 3 }}>

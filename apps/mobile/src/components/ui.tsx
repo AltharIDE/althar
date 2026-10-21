@@ -1,5 +1,5 @@
 import type { ProjectInk } from '@althar/contracts'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -148,7 +148,9 @@ export function Button({
         ) : (
           <>
             {icon?.(colors.fg)}
-            <NativeText style={[small ? type.subMedium : type.bodyMedium, { color: colors.fg, fontFamily: fonts.semibold }]}>{label}</NativeText>
+            <NativeText style={[small ? type.subMedium : type.bodyMedium, { color: colors.fg, fontFamily: fonts.semibold }]}>
+              {label}
+            </NativeText>
           </>
         )
       }}
@@ -157,7 +159,13 @@ export function Button({
 }
 
 /** A small word on a fill: what kind of call, where a task stands. */
-export function Chip({ label, tone = 'plain' }: { readonly label: string; readonly tone?: 'signal' | 'live' | 'ok' | 'plain' | 'danger' | 'warm' }) {
+export function Chip({
+  label,
+  tone = 'plain',
+}: {
+  readonly label: string
+  readonly tone?: 'signal' | 'live' | 'ok' | 'plain' | 'danger' | 'warm'
+}) {
   const theme = useTheme()
   const colors = {
     signal: { bg: theme.signalDim, fg: theme.signal },
@@ -168,7 +176,9 @@ export function Chip({ label, tone = 'plain' }: { readonly label: string; readon
     plain: { bg: theme.pressed, fg: theme.t2 },
   }[tone]
   return (
-    <View style={{ backgroundColor: colors.bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start' }}>
+    <View
+      style={{ backgroundColor: colors.bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start' }}
+    >
       <NativeText style={[type.caption, { color: colors.fg, fontFamily: fonts.semibold }]}>{label}</NativeText>
     </View>
   )
@@ -200,7 +210,7 @@ export function ProjectMark({ name, ink, size = 20 }: { readonly name: string; r
 /** Cobalt, breathing: an agent at work now. */
 export function LiveDot({ size = 8 }: { readonly size?: number }) {
   const theme = useTheme()
-  const pulse = useRef(new Animated.Value(0)).current
+  const [pulse] = useState(() => new Animated.Value(0))
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
@@ -258,7 +268,19 @@ export function SectionHead({ title, count, action }: { readonly title: string; 
 export function Well({ children, style }: { readonly children: ReactNode; readonly style?: StyleProp<ViewStyle> }) {
   const theme = useTheme()
   return (
-    <View style={[{ backgroundColor: theme.well, borderRadius: radius.sm, paddingHorizontal: space.md, paddingVertical: 10, borderWidth: 1, borderColor: theme.line }, style]}>
+    <View
+      style={[
+        {
+          backgroundColor: theme.well,
+          borderRadius: radius.sm,
+          paddingHorizontal: space.md,
+          paddingVertical: 10,
+          borderWidth: 1,
+          borderColor: theme.line,
+        },
+        style,
+      ]}
+    >
       {children}
     </View>
   )
@@ -277,7 +299,12 @@ export function StepTrack({
 }) {
   const theme = useTheme()
   return (
-    <View style={{ flexDirection: 'row', gap: 6 }} accessibilityLabel={steps.map((step) => `${step.label}: ${step.state === 'done' ? 'done' : step.state === 'now' ? 'now' : 'to come'}`).join(', ')}>
+    <View
+      style={{ flexDirection: 'row', gap: 6 }}
+      accessibilityLabel={steps
+        .map((step) => `${step.label}: ${step.state === 'done' ? 'done' : step.state === 'now' ? 'now' : 'to come'}`)
+        .join(', ')}
+    >
       {steps.map((step) => (
         <View key={step.key} style={{ flex: 1, gap: 6 }}>
           <View

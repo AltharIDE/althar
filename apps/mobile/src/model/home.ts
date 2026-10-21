@@ -18,15 +18,23 @@ const urgency = (call: { readonly kind: string }): number => (call.kind === 'per
 
 export const needsOf = (home: HomeSnapshot): ReadonlyArray<Need> => {
   const projects = new Map(home.projects.map((project) => [project.id, project]))
-  const calls = [...standingCalls(home.tasks, home.calls)].sort(
-    (a, b) => urgency(a) - urgency(b) || a.createdAt.localeCompare(b.createdAt),
-  )
+  const calls = [...standingCalls(home.tasks, home.calls)].sort((a, b) => urgency(a) - urgency(b) || a.createdAt.localeCompare(b.createdAt))
   const ready = home.tasks.filter(needsYou).sort((a, b) => (b.startedAt ?? b.createdAt).localeCompare(a.startedAt ?? a.createdAt))
   return [
-    ...calls.map((call): Need => ({ kind: 'call', id: call.id, call, word: callKindOf(call), project: projects.get(call.projectId) ?? null })),
-    ...ready.map(
-      (task): Need => ({ kind: 'ready', id: task.taskId, task, word: readyKindOf(task), project: projects.get(task.projectId) ?? null }),
-    ),
+    ...calls.map((call): Need => ({
+      kind: 'call',
+      id: call.id,
+      call,
+      word: callKindOf(call),
+      project: projects.get(call.projectId) ?? null,
+    })),
+    ...ready.map((task): Need => ({
+      kind: 'ready',
+      id: task.taskId,
+      task,
+      word: readyKindOf(task),
+      project: projects.get(task.projectId) ?? null,
+    })),
   ]
 }
 
@@ -80,7 +88,8 @@ export const trackOf = (
   const labels = { implement: 'Implement', review: 'Review', publish: 'Pull request' } as const
   const hasReview = task.plan?.steps.some((step) => step.key === 'review' && !step.skipped) ?? false
   const shown = keys.filter((key) => key !== 'review' || hasReview)
-  const at = task.phase === 'ready' || task.phase === 'settled' ? shown.length : Math.max(0, shown.indexOf(task.step as (typeof keys)[number]))
+  const at =
+    task.phase === 'ready' || task.phase === 'settled' ? shown.length : Math.max(0, shown.indexOf(task.step as (typeof keys)[number]))
   return shown.map((key, index) => ({ key, label: labels[key], state: index < at ? 'done' : index === at ? 'now' : 'next' }))
 }
 

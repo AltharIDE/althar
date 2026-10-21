@@ -210,7 +210,12 @@ export const say = {
       readonly summary: string
       readonly change?: ChangeSummary | null
       readonly verdict?: 'pass' | 'changes_requested' | null
-      readonly findings?: ReadonlyArray<{ severity: 'blocking' | 'major' | 'minor' | 'nit'; file: string | null; line: number | null; claim: string }>
+      readonly findings?: ReadonlyArray<{
+        severity: 'blocking' | 'major' | 'minor' | 'nit'
+        file: string | null
+        line: number | null
+        claim: string
+      }>
       readonly checked?: ReadonlyArray<{ caption: string; command: string; exit: number }>
       readonly unverified?: ReadonlyArray<string>
     },
