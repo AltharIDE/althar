@@ -14,6 +14,7 @@ import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { profileInUse } from './profileInUse'
+import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
 
@@ -87,6 +88,9 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
   open: (sealed) => askMain('open', sealed),
 })
 
+/* Screenshots agents ask for, which the main process draws, with Chromium (screenshots.ts). */
+const screenshots = screenshotsWith((message) => parent.postMessage(message))
+
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const appFetch: Fetch = appFetchOf(net)
 
@@ -118,6 +122,7 @@ const options = {
   agentsRoot: join(profile, 'agents'),
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
+  screenshot: screenshots.ask,
   editors: {
     list: () =>
       device === undefined
@@ -296,11 +301,13 @@ parent.on('message', (message) => {
     readonly error?: string
     readonly keyring?: boolean
     readonly threadId?: string
+    readonly shot?: unknown
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
     answerSealed(data.requestId, data)
   }
+  if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)

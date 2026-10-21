@@ -448,7 +448,7 @@ export const toldOf = (ran: ReadonlyArray<{ readonly name: string; readonly setU
     ...(failed.length === 0
       ? []
       : [
-          "Its dependencies may not all be installed: see why first, and install what's missing. If the setup is wrong for the repository, keep the right one with set_run_command, so the next task's worktree gets it.",
+          "Its dependencies may not all be installed: see why first, then install what's missing, or, where your sandbox was in the way, have Althar run the setup again with install_dependencies. If the setup is wrong for the repository, keep the right one with set_run_command, so the next task's worktree gets it.",
         ]),
   ].join('\n\n')
 }

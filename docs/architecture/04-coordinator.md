@@ -117,12 +117,19 @@ provisional.
 | `rename_task` | Gives a task another title, as the person can, where its title no longer says what it does; its slug and branch stay, and what the person asked stays in its thread | Command |
 | `make_it_a_change` | A lead's, not the coordinator's: offered only on a quick task not made a change yet, and refused, with why, on any other. Called when the person asks to turn what the lead made into a real thing: a title for what it does now, a reviewer named as `propose_plan` names one (none only where the person said so), and a pull request, a draft or ready for review. Makes its branch where it has none; renames the task and gives its plan, and the run under way, the review and the ending, or opens a round with them where its last run had ended; its thread and the coordinator's news say so. The lead's next `finish_step` goes through the review, then the pull request opens ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)) | Command |
 | `run_project` | Runs the project with no agent, its default or one of what it runs by name: the default branch in a copy of its own, or a task's worktree (ADR-023, ADR-044) | Command |
+| `screenshot` | A picture of a page served on this computer, a run's or a dev server's, drawn offscreen by the desktop app at a viewport, whole or one element; leads have it too (ADR-055) | Read |
 | `set_run_command` | Keeps how a repository runs, its own way to run, for Althar to run it; leads have it too (ADR-023) | Command |
 | `keep_run` | Keeps something more for the project to run by a name and a command, or drops it; leads have it too (ADR-044) | Command |
 | `order_tasks` | Orders a batch | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |
 | `keep_note`, `list_notes`, `drop_note` | The project's notes: a decision the person made, in a sentence; at most 40 (ADR-031) | Command |
 | `recommend_lead` | Records a lead recommendation and its reasons | Command |
+
+A lead's own tools, beside `finish_step` and its pull request's, do what its
+sandbox would refuse, outside it (ADR-055): `install_dependencies` runs its
+worktree's setup again; `run_project` and `stop_project` run the project in
+its worktree, as the run the person sees; `screenshot`, as above; and
+`rerun_check` runs checks on its pull request again.
 
 The same server serves every session. The read tools are how a lead, a step,
 or an agent that took over a task reads the record its brief left out. Command

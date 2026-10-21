@@ -19,6 +19,9 @@ import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
+import type { Shot } from '@althar/runtime'
+import { pageWindow } from './screenshotWindow'
+import { takeScreenshot } from './screenshots'
 import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
@@ -214,6 +217,8 @@ interface RuntimeMessage {
   readonly usage?: unknown
   /** What the runtime couldn't handle (runtime/crashes.ts); crashReports.ts reads it. */
   readonly crash?: unknown
+  /** A screenshot an agent asked for (screenshots.ts). */
+  readonly shot?: Shot
   readonly event?: {
     readonly _tag?: string
     readonly kind?: unknown
@@ -443,6 +448,17 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   }
 }
 
+/** Takes a screenshot an agent asked for, offscreen, and answers with it or why not (screenshots.ts). */
+const screenshot = (child: UtilityProcess, message: RuntimeMessage) => {
+  const { requestId, shot } = message
+  if (requestId === undefined || shot === undefined) return
+  void takeScreenshot(shot, pageWindow).then(
+    (value) => child.postMessage({ type: 'screenshot-taken', requestId, value }),
+    (error: unknown) =>
+      child.postMessage({ type: 'screenshot-taken', requestId, error: error instanceof Error ? error.message : String(error) }),
+  )
+}
+
 const startRuntime = () => {
   const { profile, worktrees } = locations()
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
@@ -465,6 +481,7 @@ const startRuntime = () => {
   child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
+    if (message.type === 'screenshot') return screenshot(child, message)
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
