@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,7 +10,7 @@ import type { RuntimeOptions } from '../src/Config'
 import { SqlClient } from 'effect/sql'
 
 import { type Failure, Failures, failuresLayer } from '../src/Failures'
-import { Sessions } from '../src/Sessions'
+import { onlyReads, Sessions } from '../src/Sessions'
 import { runSkills } from '../src/Skills'
 import { launches, notices, runtime, sessionMetas, task } from './support'
 
@@ -23,14 +23,34 @@ const skill = (name: string) => ({
   'SKILL.md': `---\nname: ${name}\ndescription: Use when testing ${name}.\n---\nDo ${name}.\n`,
 })
 
-const makeStore = async (skills: Record<string, Record<string, string>>, needs: Record<string, Array<string>> = {}) => {
+const makeStore = async (
+  skills: Record<string, Record<string, string>>,
+  needs: Record<string, Array<string>> = {},
+  off: ReadonlyArray<string> = [],
+) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-skills-store-'))
   const catalog = mkdtempSync(join(tmpdir(), 'althar-skills-catalog-'))
   await writeCatalog(catalog, skills, needs)
-  // The catalog's skills are off until the person turns them on: here, all of them.
+  // The catalog's skills are off until the person turns them on: here, all of them but those left off.
   await Effect.runPromise(installLocalCatalog(root, catalog))
-  for (const id of Object.keys(skills)) await Effect.runPromise(setActive(root, id, true))
+  for (const id of Object.keys(skills)) if (!off.includes(id)) await Effect.runPromise(setActive(root, id, true))
   return { root, catalog }
+}
+
+/** Every SKILL.md under a folder, however deep. */
+const skillFilesUnder = (folder: string): Array<string> =>
+  existsSync(folder)
+    ? readdirSync(folder, { recursive: true, encoding: 'utf8' })
+        .filter((path) => path.endsWith('SKILL.md'))
+        .map((path) => join(folder, path))
+    : []
+
+/** Where the last session of an agent was given its skills, one folder per skill, as the registry lays them out for it. */
+const skillsFolderOf = (agentId: string, root: string) => {
+  if (agentId === 'claude-code') return join(sessionMetas.at(-1)?.options?.skills ?? '', 'skills')
+  if (agentId === 'opencode') return launches.at(-1)?.options?.skills ?? ''
+  const [run = ''] = readdirSync(join(root, 'runs'))
+  return join(root, 'runs', run, agentId, '.agents', 'skills')
 }
 
 /** The skills a thread's last session was given, as its record of becoming active says. */
@@ -56,9 +76,10 @@ const withStore = <A, E, R>(
   skills: Record<string, Record<string, string>>,
   needs: Record<string, Array<string>>,
   body: (store: NonNullable<RuntimeOptions['skills']>) => Effect.Effect<A, E, R>,
+  off: ReadonlyArray<string> = [],
 ) =>
   Effect.flatMap(
-    Effect.promise(() => makeStore(skills, needs)),
+    Effect.promise(() => makeStore(skills, needs, off)),
     // With failures said to a listener, as the app's are, so a test hears what is reported.
     (store) => body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store }).pipe(Layer.provideMerge(failuresLayer)))),
   )
@@ -110,7 +131,10 @@ describe('skills for a task’s lead', () => {
         assert.isFalse(existsSync(join(folder, '.agents', 'skills', 'beta')))
         const said = yield* notices(created.threadId)
         assert.isTrue(
-          said.some((notice) => notice.description === 'beta needs subagents'),
+          said.some(
+            (notice) =>
+              notice.title?.endsWith("codex wasn't given a skill it can't use.") === true && notice.description === 'beta needs subagents',
+          ),
           JSON.stringify(said),
         )
         // Recorded as given: what it got, not what it couldn't use.
@@ -140,6 +164,115 @@ describe('skills for a task’s lead', () => {
       }),
     ),
   )
+
+  it.live(
+    'gives Claude Code, Codex and OpenCode leads only the skills turned on, read-only, and writes none to a home or the repository',
+    () => {
+      // A home of its own, so what an agent's own folders would get is seen: ~/.agents/skills, ~/.claude/skills and the like.
+      const home = mkdtempSync(join(tmpdir(), 'althar-skills-home-'))
+      const was = process.env.HOME
+      return Effect.acquireUseRelease(
+        Effect.sync(() => void (process.env.HOME = home)),
+        () =>
+          withStore(
+            { alpha: skill('alpha'), beta: skill('beta'), gamma: skill('gamma') },
+            {},
+            (skills) =>
+              Effect.gen(function* () {
+                const sessions = yield* Sessions
+                for (const agentId of ['claude-code', 'codex', 'opencode']) {
+                  const { task: created } = yield* task()
+                  yield* sessions.start({ threadId: created.threadId, agentId })
+                  const folder = skillsFolderOf(agentId, skills.root)
+                  assert.isTrue(folder.startsWith(join(skills.root, 'runs')), `${agentId}: ${folder}`)
+                  // Gamma is off: not given, nor recorded as given.
+                  assert.deepStrictEqual(readdirSync(folder).toSorted(), ['alpha', 'beta'], agentId)
+                  assert.deepStrictEqual(
+                    (yield* givenTo(created.threadId)).map(({ id }) => id),
+                    ['alpha', 'beta'],
+                    agentId,
+                  )
+                  // Read-only copies: the agent can't change what the next session is given.
+                  for (const file of skillFilesUnder(folder)) assert.strictEqual(statSync(file).mode & 0o222, 0, `${agentId}: ${file}`)
+                  const worktree = yield* worktreeOf(created.threadId)
+                  assert.deepStrictEqual(skillFilesUnder(worktree), [], agentId)
+                  // Nor in the account's home the agent was started in.
+                  const launched = launches.at(-1)
+                  for (const [key, value] of Object.entries(launched?.env ?? {}))
+                    if (/HOME|CONFIG_DIR/.test(key) && value.startsWith('/'))
+                      assert.deepStrictEqual(skillFilesUnder(value), [], `${agentId}: ${key}`)
+                  yield* sessions.stop(created.threadId)
+                  assert.isFalse(existsSync(folder), agentId)
+                }
+                // Nothing reached the home: no ~/.agents/skills, nor any agent's own skills folder.
+                assert.deepStrictEqual(skillFilesUnder(home), [])
+                assert.isFalse(existsSync(join(home, '.agents', 'skills')))
+              }),
+            ['gamma'],
+          ),
+        () => Effect.sync(() => void (was === undefined ? delete process.env.HOME : (process.env.HOME = was))),
+      )
+    },
+  )
+
+  it.live('gives a skill turned on while a lead works only to the session after', () =>
+    withStore(
+      { alpha: skill('alpha'), gamma: skill('gamma') },
+      {},
+      (skills) =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
+          const first = skillsFolderOf('claude-code', skills.root)
+          yield* setActive(skills.root, 'gamma', true)
+          // The session under way keeps what it started with.
+          assert.deepStrictEqual(readdirSync(first), ['alpha'])
+          assert.deepStrictEqual(
+            (yield* givenTo(created.threadId)).map(({ id }) => id),
+            ['alpha'],
+          )
+          yield* sessions.stop(created.threadId)
+          yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
+          const next = skillsFolderOf('claude-code', skills.root)
+          assert.notStrictEqual(next, first)
+          assert.deepStrictEqual(readdirSync(next).toSorted(), ['alpha', 'gamma'])
+          assert.deepStrictEqual(
+            (yield* givenTo(created.threadId)).map(({ id }) => id),
+            ['alpha', 'gamma'],
+          )
+          yield* sessions.stop(created.threadId)
+        }),
+      ['gamma'],
+    ),
+  )
+
+  it.live('gives the coordinator none, on any agent', () =>
+    withStore({ alpha: skill('alpha') }, {}, (skills) =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { project } = yield* task()
+        for (const agentId of ['claude-code', 'codex', 'opencode']) {
+          yield* sessions.start({ threadId: project.coordinatorThreadId, agentId })
+          if (agentId === 'claude-code') {
+            assert.strictEqual(sessionMetas.at(-1)?.role, 'reader')
+            assert.isUndefined(sessionMetas.at(-1)?.options?.skills)
+          }
+          assert.isUndefined(launches.at(-1)?.options?.skills, agentId)
+          assert.isFalse(existsSync(join(skills.root, 'runs')) && readdirSync(join(skills.root, 'runs')).length > 0, agentId)
+          assert.deepStrictEqual(yield* givenTo(project.coordinatorThreadId), [], agentId)
+          yield* sessions.stop(project.coordinatorThreadId)
+        }
+      }),
+    ),
+  )
+
+  it('counts the coordinator, a reviewer and a review’s lead as only reading, so none is given skills; a task’s lead is', () => {
+    assert.isTrue(onlyReads({ role: 'coordinator' }))
+    assert.isTrue(onlyReads({ role: 'reviewer' }))
+    assert.isTrue(onlyReads({ role: 'task', review: { outside: false } }))
+    assert.isFalse(onlyReads({ role: 'task', review: null }))
+  })
 
   it.live('gives a Claude Code lead none without a skills store', () =>
     Effect.gen(function* () {

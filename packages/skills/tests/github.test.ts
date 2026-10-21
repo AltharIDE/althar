@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -123,7 +124,7 @@ describe('installing a skill from GitHub as a person reviews it', () => {
     expect(installed).toMatchObject({ id: 'alpha', source: 'github', repo: 'o/r', sha: A, ref: 'main', review: 'reviewed', active: true })
   })
 
-  it('shows a skill that tells the agent to push, but flags it; one with a refused field cannot be approved', async () => {
+  it('shows a skill that tells the agent to push, but flags it; one with allowed-tools or hooks cannot be approved', async () => {
     const { access } = fakeGitHub({
       'o/r': {
         refs: { main: A },
@@ -131,6 +132,7 @@ describe('installing a skill from GitHub as a person reviews it', () => {
           [A]: {
             'pushy/SKILL.md': skill('pushy', 'Then run git push.\n'),
             'grant/SKILL.md': skillMd('name: grant\ndescription: Use when testing.\nallowed-tools: Bash'),
+            'hooky/SKILL.md': skillMd('name: hooky\ndescription: Use when testing.\nhooks:\n  Stop: echo done'),
           },
         },
       },
@@ -141,6 +143,10 @@ describe('installing a skill from GitHub as a person reviews it', () => {
     const grant = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'grant', ref: 'main' }))
     expect(grant.installable).toBe(false)
     await expect(run(approve(root, { id: 'grant', ...grant.source, treeHash: grant.treeHash }))).rejects.toThrow('authorizing-field')
+    const hooky = await run(stageFromGitHub(root, access, { repo: 'o/r', subpath: 'hooky', ref: 'main' }))
+    expect(hooky.installable).toBe(false)
+    await expect(run(approve(root, { id: 'hooky', ...hooky.source, treeHash: hooky.treeHash }))).rejects.toThrow('authorizing-field')
+    expect(await run(readInstalls(root))).toMatchObject({ installs: [] })
   })
 
   it('needs the person’s say-so to put a skill in place of a default of the same name, which the catalog then leaves alone', async () => {
@@ -219,9 +225,13 @@ describe('installing a skill from GitHub as a person reviews it', () => {
       active: false,
       treeHash: update.card.treeHash,
     })
+    // The version it replaced is kept, to go back to.
+    expect((await run(readInstalls(root))).installs[0]?.history).toMatchObject([{ treeHash: first.treeHash, sha: A }])
     const back = await run(rollBack(root, 'alpha'))
     expect(back).toMatchObject({ treeHash: first.treeHash, sha: A, active: false })
     expect(back.history).toBeUndefined()
+    // Both versions' files stay stored: the one rolled back to, and the newer one it left.
+    for (const hash of [first.treeHash, update.card.treeHash]) expect(existsSync(join(root, 'objects', hash, 'SKILL.md'))).toBe(true)
     await expect(run(rollBack(root, 'alpha'))).rejects.toThrow('no earlier version')
     expect(JSON.parse(await readFile(join(root, 'installs.json'), 'utf8')).installs[0].ref).toBe('main')
   })

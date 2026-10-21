@@ -248,6 +248,13 @@ const askedFor = (thread: { readonly title: string; readonly description: string
     ? []
     : [`What the person asked for, in their words:\n\n${thread.request}`]
 
+/**
+ * Whether a thread's agent only reads: the coordinator, a reviewer, and a review's lead. It loads nothing of the
+ * repository's own settings, and is given none of the skills Althar selected, which are a task's lead's alone.
+ */
+export const onlyReads = (thread: { readonly role: ThreadContext['role']; readonly review?: object | null }) =>
+  thread.role !== 'task' || thread.review !== null
+
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
 
@@ -1706,7 +1713,7 @@ export class Sessions extends Context.Service<
           const { definition } = entry
           // A review's lead only reads, as the coordinator and a reviewer do, and loads nothing of the repository's own settings,
           // hooks or plugins (the pull request's to write); offline, for a pull request from outside the project.
-          const reads = thread.role !== 'task' || thread.review !== null
+          const reads = onlyReads(thread)
           const untrusted = thread.role === 'task' && thread.review !== null
           const offline = thread.role === 'task' && thread.review?.outside === true
           // Only an agent its session holds to reading leads a review (the registry's `reviewing`): never one that runs what its
