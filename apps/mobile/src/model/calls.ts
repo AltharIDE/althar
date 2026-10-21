@@ -54,6 +54,14 @@ export const callKindOf = (call: { readonly kind: string; readonly stuck: { read
         ? kindWords.limit
         : kindWords.stuck
 
+/** A finished task that isn't a change, waiting in Needs you or kept for later: the person's to settle (ADR-051). */
+export const isSettleable = (task: { readonly kind: string; readonly phase: string }): boolean =>
+  task.kind !== 'change' && (task.phase === 'ready' || task.phase === 'kept')
+
+/** Whether a settleable task takes Done: a plain one, or a review answered; a review with a draft settles as it is posted. */
+export const takesDone = (task: { readonly kind: string; readonly reviewing?: Reviewing }): boolean =>
+  task.kind === 'plain' || (task.kind === 'review' && isAnswered(task.reviewing))
+
 /** Every ready task waits on the person; one kept for later doesn't. */
 export const needsYou = (task: { readonly phase: string }): boolean => task.phase === 'ready'
 

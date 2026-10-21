@@ -1,6 +1,6 @@
 import type { ChangeSummary, HomeCall, ThreadSnapshot } from '@althar/contracts'
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router'
-import { GitMerge, GitPullRequest, Lock, NavArrowRight, Page } from 'iconoir-react-native'
+import { GitMerge, GitPullRequest, Lock, NavArrowRight, Page, Pin } from 'iconoir-react-native'
 import { useState } from 'react'
 import { KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, View } from 'react-native'
 
@@ -10,7 +10,7 @@ import { NeedCard } from '../../../components/NeedCard'
 import { Thread } from '../../../components/Thread'
 import { Button, Card, Chip, LiveDot, ProjectMark, StepTrack, Text } from '../../../components/ui'
 import { confirmIsYou, tapDone } from '../../../lib/device'
-import { callKindOf, readyKindOf } from '../../../model/calls'
+import { callKindOf, isSettleable, readyKindOf, takesDone } from '../../../model/calls'
 import { stepWords, trackOf, workerOf } from '../../../model/home'
 import { duration, lines, plural } from '../../../model/words'
 import { useTheme } from '../../../theme/Theme'
@@ -159,6 +159,37 @@ function Head({ thread, now }: { readonly thread: ThreadSnapshot; readonly now: 
         </Text>
       </View>
       {card?.plan == null ? null : <StepTrack steps={trackOf(card)} />}
+      {card !== undefined && isSettleable(card) && takesDone(card) ? <Settle taskId={card.taskId} kept={card.phase === 'kept'} /> : null}
+    </View>
+  )
+}
+
+/** A finished task that isn't a change: the person's to settle, here as in its card (ADR-051). */
+function Settle({ taskId, kept }: { readonly taskId: string; readonly kept: boolean }) {
+  const reachable = useConnection().state === 'online'
+  const done = useCommand((client, id: string) => client.markTaskDone(id))
+  const keep = useCommand((client, id: string) => client.keepTaskForLater(id))
+  return (
+    <View style={{ flexDirection: 'row', gap: space.sm }}>
+      {kept ? null : (
+        <Button
+          label="Keep for later"
+          tone="plain"
+          grow
+          icon={(color) => <Pin width={16} height={16} color={color} />}
+          disabled={!reachable}
+          busy={keep.isPending}
+          onPress={() => keep.mutate(taskId, { onSuccess: tapDone })}
+        />
+      )}
+      <Button
+        label="Done"
+        tone="ink"
+        grow
+        disabled={!reachable}
+        busy={done.isPending}
+        onPress={() => done.mutate(taskId, { onSuccess: tapDone })}
+      />
     </View>
   )
 }

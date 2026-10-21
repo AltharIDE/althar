@@ -324,7 +324,7 @@ export const scenario = (now: number): Scenario => {
         }),
         say.agent(
           'claude-code',
-          'The dry run for January matches the ledger to the cent on 4,112 invoices. Batching by month keeps each transaction under a second; doing February to May next.',
+          'The dry run for **January** matches the ledger to the cent on 4,112 invoices.\n\n- Batching by month keeps each transaction under a second\n- `--dry-run` writes nothing; the report goes to `out/backfill-2024-01.csv`\n\nDoing February to May next.',
           ago(now, 4),
         ),
         say.tool('claude-code', ago(now, 1), 'Run the job dry', 'execute', {
@@ -453,7 +453,7 @@ export const scenario = (now: number): Scenario => {
       say.person('Why does the checkout test flake? Don’t fix it yet, just find out.', ago(now, 53)),
       say.agent(
         'claude-code',
-        'It’s a race: the cart cache warms in a `setImmediate`, and the first price lookup can run before it. It fails about 1 run in 40 locally. I wrote up the trace and two ways to fix it in notes/checkout-flake.md.',
+        'It’s a race: the cart cache warms in a `setImmediate`, and the first price lookup can run before it. It fails about **1 run in 40** locally.\n\n```ts\nawait cart.warm() // resolves before the cache is filled\nconst price = await prices.lookup(sku) // can read an empty cache\n```\n\nTwo ways to fix it, with the trace, are in `notes/checkout-flake.md`.',
         ago(now, 21),
       ),
     ]),

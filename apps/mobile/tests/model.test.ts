@@ -146,3 +146,14 @@ describe('files viewed', () => {
     expect(viewedFiles.of('task_a').size).toBe(0)
   })
 })
+
+describe('settling a finished task', () => {
+  it('lets a plain task be done, and a review only once answered', async () => {
+    const { isSettleable, takesDone } = await import('../src/model/calls')
+    const base = { projectId: 'p', taskId: 't', title: 'T', phase: 'ready' as const }
+    expect(isSettleable(task({ ...base, kind: 'plain' })) && takesDone(task({ ...base, kind: 'plain' }))).toBe(true)
+    expect(isSettleable(task({ ...base }))).toBe(false)
+    const drafted = task({ ...base, kind: 'review', reviewing: null })
+    expect(isSettleable(drafted) && takesDone(drafted)).toBe(false)
+  })
+})

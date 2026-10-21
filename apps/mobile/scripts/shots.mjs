@@ -28,6 +28,7 @@ const SHOTS = [
   { name: 'task-running', url: '/task/thr_task_backfill' },
   { name: 'task-running-dark', url: '/task/thr_task_backfill', theme: 'dark' },
   { name: 'task-ready', url: '/task/thr_task_stripe' },
+  { name: 'task-finished', url: '/task/thr_task_flaky' },
   { name: 'task-ready-full', url: '/task/thr_task_stripe', full: true },
   { name: 'changes', url: '/task/thr_task_stripe/changes?taskId=task_stripe' },
   { name: 'diff', url: '/task/thr_task_stripe/diff?taskId=task_stripe&path=src%2Fwebhooks%2Fhandle.ts' },

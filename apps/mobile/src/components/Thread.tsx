@@ -9,6 +9,7 @@ import { blocksOf, type Block } from '../model/thread'
 import { since, whoWorks } from '../model/words'
 import { useTheme } from '../theme/Theme'
 import { radius, space } from '../theme/tokens'
+import { Markdown } from './Markdown'
 import { Button, Chip, LiveDot, Text, Well } from './ui'
 
 /*
@@ -88,7 +89,7 @@ export function ReportCard({ report, threadId = null }: { readonly report: Repor
           {whoWorks(content.agentId, null)}
         </Text>
       </View>
-      <Text kind="body">{content.summary}</Text>
+      <Markdown source={content.summary} />
       {content.findings.map((finding, index) => (
         <Finding key={index} finding={finding} threadId={threadId} />
       ))}
@@ -212,9 +213,7 @@ function Item({
           <Text kind="caption" ink="t3">
             {whoWorks(item.agentId, null)}
           </Text>
-          <Text kind="body" selectable>
-            {item.content.text}
-          </Text>
+          <Markdown source={item.content.text} />
         </View>
       )
     case 'notice':
