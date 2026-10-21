@@ -83,7 +83,11 @@
   overflow-wrap: anywhere;
 }
 .url {
-  flex: none;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
   font-size: 11.5px;
 }
 span.url {
