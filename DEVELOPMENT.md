@@ -58,6 +58,7 @@ merge.
 | [`packages/contracts`](packages/contracts) | `@althar/contracts`: the API between the runtime and its clients, and the transport it runs over |
 | [`apps/desktop`](apps/desktop) | `@althar/desktop`: the desktop app, Electron with the runtime in a utility process |
 | [`apps/cli`](apps/cli) | `@althar/cli`: a command-line client for the runtime, which runs a task with a real agent in a terminal |
+| [`apps/mobile`](apps/mobile) | `@althar/mobile`: the phone app, Expo, on demo data until the relay exists. Outside the Bun workspace, with its own lockfile |
 | [`brand`](brand) | `@althar/brand`: the mark, lockups, avatars, banners and screenshots, ready to use, and the code that draws them |
 | [`docs/architecture`](docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud |
 | [`docs/decisions`](docs/decisions) | Architecture decisions, one per file |
