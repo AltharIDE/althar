@@ -97,6 +97,16 @@ the client seam the relay will implement. Screens, as shot in
 | Diagnostics (`diagnostics`) | The relay client's whole path, run in the app against a runtime of the contract's own: on a phone, a one-tap check on Hermes |
 | The Mac out of date (`home-outdated`) | Which side needs updating when the two speak different API versions |
 
+<table>
+<tr><td valign="top" width="33%"><img src="shots/home.png" width="240" alt="Home: what needs you, answered in place"><br><sub>Home: what needs you, answered in place</sub></td><td valign="top" width="33%"><img src="shots/home-away.png" width="240" alt="The Mac away: answers wait"><br><sub>The Mac away: answers wait</sub></td><td valign="top" width="33%"><img src="shots/home-dark.png" width="240" alt="Dark"><br><sub>Dark</sub></td></tr>
+<tr><td valign="top" width="33%"><img src="shots/call-permission.png" width="240" alt="A permission, whole"><br><sub>A permission, whole</sub></td><td valign="top" width="33%"><img src="shots/call-stuck.png" width="240" alt="A stuck step"><br><sub>A stuck step</sub></td><td valign="top" width="33%"><img src="shots/task-running.png" width="240" alt="A task at work, live"><br><sub>A task at work, live</sub></td></tr>
+<tr><td valign="top" width="33%"><img src="shots/task-ready-full.png" width="240" alt="Ready: checks, merge, reports"><br><sub>Ready: checks, merge, reports</sub></td><td valign="top" width="33%"><img src="shots/changes.png" width="240" alt="What it changed"><br><sub>What it changed</sub></td><td valign="top" width="33%"><img src="shots/diff.png" width="240" alt="A diff, wrapped"><br><sub>A diff, wrapped</sub></td></tr>
+<tr><td valign="top" width="33%"><img src="shots/task-finished.png" width="240" alt="A finished question, in markdown"><br><sub>A finished question, in markdown</sub></td><td valign="top" width="33%"><img src="shots/project.png" width="240" alt="A project’s lanes"><br><sub>A project’s lanes</sub></td><td valign="top" width="33%"><img src="shots/new-task.png" width="240" alt="A new task"><br><sub>A new task</sub></td></tr>
+<tr><td valign="top" width="33%"><img src="shots/pair-verify.png" width="240" alt="Pairing: four words to check"><br><sub>Pairing: four words to check</sub></td><td valign="top" width="33%"><img src="shots/notifications-full.png" width="240" alt="Notifications and the Live Activity"><br><sub>Notifications and the Live Activity</sub></td><td valign="top" width="33%"><img src="shots/diagnostics.png" width="240" alt="Diagnostics: the relay path, in the app"><br><sub>Diagnostics: the relay path, in the app</sub></td></tr>
+</table>
+
+The shots are the web build at 390×844 (`bun run export:web && bun run shots`); on a phone the system draws the bars, sheets and keyboard.
+
 Behind the screens, also built and tested:
 
 - **The relay client** (`src/client/relay/RelayClient.ts`): the runtime's own
