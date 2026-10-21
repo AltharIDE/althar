@@ -72,7 +72,9 @@
       in its repository (two commits, never the person's working tree);
     - a document its agent committed;
     - its screenshots and command output, which were in the artifact
-      store already.
+      store already;
+    - what Run runs, from its repository's own folder until Run brings
+      the task's back.
 
     Its folder comes back, at the same path, before anything needs it:
     - before an agent starts on the task, as a session loads its thread;

@@ -50,12 +50,13 @@ const LONG = `node -e "setTimeout(() => {}, 60000)"`
 
 const person = Effect.map(Instance, (instance) => instance.personId)
 
-/** A task in a new repository, with a file committed on its branch, settled `days` ago as `state`. */
-const finished = (state: 'done' | 'abandoned', days: number, title = 'Add a retry') =>
+/** A task in a new repository, with a file committed on its branch, settled `days` ago as `state`; `before` changes the repository first. */
+const finished = (state: 'done' | 'abandoned', days: number, title = 'Add a retry', before?: (root: string) => void) =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const sql = yield* SqlClient.SqlClient
     const root = repository()
+    before?.(root)
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
     const task = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId: project.projectId, title })
     const [workspace] = yield* sql<{ id: string; path: string; branch: string }>`
@@ -492,6 +493,25 @@ describe('a removed folder set up again', () => {
       const [launched] = yield* sql<{ launchedAt: string }>`SELECT launched_at FROM processes WHERE id = ${started.id}`
       assert.isTrue((JSON.parse(setUp?.setup ?? '{}') as { at: string }).at <= (launched?.launchedAt ?? ''))
       assert.isUndefined(yield* folderOf(task.taskId))
+      yield* launches.stop(started.id)
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
+  it.live('says how a task whose folder went runs, from its repository, and runs it in its folder brought back', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 4, 'Serve', (root) =>
+        commit(root, 'package.json', JSON.stringify({ name: 'serve', private: true, scripts: { dev: LONG } })),
+      )
+      const launches = yield* Launches
+      yield* (yield* FolderCleanup).sweep
+      assert.isFalse(existsSync(task.worktree))
+      assert.deepStrictEqual(
+        (yield* launches.runnables(task.projectId, task.taskId)).map((one) => one.command),
+        ['npm run dev'],
+      )
+      const started = yield* launches.start({ projectId: task.projectId, taskId: task.taskId, threadId: null })
+      assert.isTrue(existsSync(join(task.worktree, 'package.json')))
+      assert.strictEqual(started.command, 'npm run dev')
       yield* launches.stop(started.id)
     }).pipe(Effect.provide(withCleanup())),
   )

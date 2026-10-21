@@ -314,7 +314,10 @@ export class Launches extends Context.Service<
             const places = yield* placesOf(projectId, taskId, undefined)
             return (yield* keptOf(projectId)).flatMap((kept): ReadonlyArray<ShownRunnable> => {
               const place = places.find(({ binding }) => binding.id === kept.bindingId)
-              const run = place === undefined ? null : runOfKept(kept, place.binding, place.root)
+              // A finished task's folder that was removed says how it runs from its repository's own folder, until running
+              // brings it back (ADR-055).
+              const root = place === undefined ? null : existsSync(place.root) ? place.root : place.binding.repository
+              const run = place === undefined || root === null ? null : runOfKept(kept, place.binding, root)
               return place === undefined || run === null
                 ? []
                 : [
