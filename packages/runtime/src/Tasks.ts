@@ -35,9 +35,9 @@ import { Setups } from './Setups'
  * carries that step on (`Runs.resume`). Abandoning settles the task as it
  * stands: its plan is declined, its calls withdrawn, its run suspended rather
  * than ended, and its agents stop. Its worktree and branch stay where they
- * are, since Althar never removes the person's worktrees for them (01).
+ * are, until its folder's wait is up (FolderCleanup.ts, ADR-055).
  * Reopening opens it on them again, putting back a worktree whose folder
- * went, which Althar sets up again (a plain task's that never had a branch
+ * went, removed or by hand, which Althar sets up again (a plain task's that never had a branch
  * with none still, where it started; a review's copy at the head its lead
  * read, set up with nothing): a run that was cut short resumes like a
  * stopped one, a run that passed is ready again, and a plan that never

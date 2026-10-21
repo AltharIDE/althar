@@ -245,9 +245,9 @@ project again.
   declined, its calls withdrawn and its runs cancelled, so no step reacts to
   its agents stopping; then every agent on it stops. Nothing starts in it
   after: no plan, no agent, and nothing said to one. Its folders, its tasks'
-  worktrees and their branches stay where they are (ADR-006 never removes
-  the person's worktrees for them), and opening its folder again makes a
-  new project.
+  worktrees and their branches stay where they are (ADR-006; finished
+  tasks' folders in a removed project are never cleaned up, ADR-055), and
+  opening its folder again makes a new project.
 
 ### Existing working copies
 
@@ -261,7 +261,9 @@ It never:
 - changes the user's current branch;
 - hides or stashes their changes;
 - resets their working tree;
-- removes their worktree;
+- removes their worktree, but for a finished task's folder once its wait
+  is up, its branch kept, and only where nothing in it exists nowhere
+  else ([ADR-055](../decisions/055-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md));
 - rewrites remotes;
 - initializes Git without a separate explicit action.
 
