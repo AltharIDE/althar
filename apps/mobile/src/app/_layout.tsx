@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { DemoClient } from '../client/demo/DemoClient'
 import { demoOptionsFromUrl } from '../client/demo/fromUrl'
 import { ClientProvider } from '../client/react'
+import { NotificationsBridge } from '../notify/Notifications'
 import { ThemeProvider, useTheme } from '../theme/Theme'
 import { fonts } from '../theme/tokens'
 
@@ -68,6 +69,7 @@ export default function Root() {
       <SafeAreaProvider>
         <ThemeProvider>
           <ClientProvider client={client}>
+            <NotificationsBridge demo />
             <Screens />
           </ClientProvider>
         </ThemeProvider>

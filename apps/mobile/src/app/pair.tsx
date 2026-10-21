@@ -10,6 +10,7 @@ import { DEMO_MAC } from '../client/demo/DemoClient'
 import { useClient } from '../client/react'
 import { Button, Card, Text } from '../components/ui'
 import { tapDone } from '../lib/device'
+import { askToNotify } from '../notify/Notifications'
 import { useTheme } from '../theme/Theme'
 import { radius, space } from '../theme/tokens'
 
@@ -185,7 +186,13 @@ export default function Pair() {
             Althar taps you here when an agent asks or work is ready, while your Mac is awake. Allowing asks for Face ID first; denying
             never does.
           </Text>
-          <Button label="Done" tone="ink" onPress={() => router.replace('/')} />
+          <Button
+            label="Let Althar tap you"
+            tone="ink"
+            onPress={() => void askToNotify().finally(() => router.replace('/'))}
+            accessibilityHint="Asks to send notifications when an agent asks or work is ready"
+          />
+          <Button label="Not now" tone="quiet" onPress={() => router.replace('/')} />
         </View>
       )}
     </View>

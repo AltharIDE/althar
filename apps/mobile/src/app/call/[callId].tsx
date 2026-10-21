@@ -1,7 +1,7 @@
 import type { AlwaysScope, HomeCall } from '@althar/contracts'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Lock } from 'iconoir-react-native'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ScrollView, TextInput, View } from 'react-native'
 
 import { useCommand, useConnection, useHome, useNow } from '../../client/react'
@@ -31,7 +31,7 @@ const scopeWords = (scope: AlwaysScope, call: HomeCall): string => {
   }
 }
 
-function Permission({ call }: { readonly call: HomeCall }) {
+function Permission({ call, allowNow }: { readonly call: HomeCall; readonly allowNow: boolean }) {
   const router = useRouter()
   const theme = useTheme()
   const reachable = useConnection().state === 'online'
@@ -48,6 +48,13 @@ function Permission({ call }: { readonly call: HomeCall }) {
     if (!proof.ok) return setError(proof.why)
     answer.mutate({ decision: 'allow', ...(always === undefined ? {} : { always }) }, done)
   }
+  // From a notification's Allow: Face ID asks as the call opens, the call in view behind it.
+  const asked = useRef(false)
+  useEffect(() => {
+    if (!allowNow || asked.current || !reachable) return
+    asked.current = true
+    void allow()
+  })
   return (
     <View style={{ gap: space.lg }}>
       {call.command === null ? null : (
@@ -211,7 +218,7 @@ function Stuck({ call }: { readonly call: HomeCall }) {
 }
 
 export default function CallSheet() {
-  const { callId } = useLocalSearchParams<{ callId: string }>()
+  const { callId, allow } = useLocalSearchParams<{ callId: string; allow?: string }>()
   const router = useRouter()
   const now = useNow()
   const home = useHome()
@@ -242,7 +249,7 @@ export default function CallSheet() {
               {[project?.name, call.taskTitle ?? 'Coordinator', since(call.createdAt, now)].filter(Boolean).join(' · ')}
             </Text>
           </View>
-          {call.kind === 'permission' ? <Permission call={call} /> : <Stuck call={call} />}
+          {call.kind === 'permission' ? <Permission call={call} allowNow={allow === '1'} /> : <Stuck call={call} />}
         </>
       )}
     </ScrollView>
