@@ -298,7 +298,7 @@ export class Automations extends Context.Service<
 
       /* ---- Cards in the coordinator's thread ---- */
 
-      /** An automation's cards, rewritten with where it stands now; each keeps what it showed and what it asked. */
+      /** An automation's cards, rewritten with where it stands now; one showing a change keeps it, and each what it asked. */
       const refreshCards = (automationId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -317,6 +317,8 @@ export class Automations extends Context.Service<
             const content = JSON.parse(item.content) as AutomationCard & Record<string, unknown>
             yield* updateItem(item.projectId, item.id, {
               ...content,
+              // A card showing what the coordinator changed keeps it; any other shows the automation as it is now.
+              ...(content.was === null && definition !== null ? { definition } : {}),
               state: row.state,
               nextAt: definition === null ? null : nextAtOf(row, definition, paused),
             })

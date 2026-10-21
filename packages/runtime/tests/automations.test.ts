@@ -299,12 +299,15 @@ describe('automations', () => {
           /“Release notes” \(auto_[0-9a-f]+\): every Friday at 16:00, a task from its prompt; waiting for the person to turn it on/,
         )
 
+        // Changed by the person on its card before it is on, the card shows it as changed.
+        yield* automations.change(automationId, { ...(card?.definition ?? NOTES), minutes: 30 }, instance.personId)
+        assert.strictEqual((yield* cards)[0]?.definition.minutes, 30)
         yield* automations.turnOn(automationId, instance.personId)
         assert.deepInclude((yield* cards)[0], { state: 'on', nextAt: '2026-10-23T15:00:00.000Z' })
 
         // A shorter time holds as it is; another day reaches further, so it waits for the person, its card saying what it was.
         assert.match(
-          yield* callTool(coordinator, 'change_automation', { automation: 'release notes', minutes: 30 }),
+          yield* callTool(coordinator, 'change_automation', { automation: 'release notes', minutes: 20 }),
           /holds from its next run/,
         )
         assert.strictEqual((yield* automationRow(automationId))?.state, 'on')
