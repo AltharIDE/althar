@@ -431,11 +431,52 @@ export const Container = Schema.Struct({
 })
 export type Container = typeof Container.Type
 
-/** An issue to file: its title, its body in Markdown, and the labels to put on it. */
+/**
+ * An issue to file: its title, its body in Markdown, the labels to put on it,
+ * and its priority, where the tracker has priorities (`changes` holds
+ * `priority`); left out, or on a tracker without them, it has none.
+ */
 export interface NewIssue {
   readonly title: string
   readonly body: string
   readonly labels: ReadonlyArray<string>
+  readonly priority?: Priority
+}
+
+/**
+ * What of an issue Althar can change, where the tracker can: its status (any
+ * of the tracker's own), closing it, its priority, who it is assigned to, its
+ * labels, the project it is in (Linear's project, a GitHub or GitLab
+ * milestone), and its title.
+ */
+export const IssueField = Schema.Literals(['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title'])
+export type IssueField = typeof IssueField.Type
+
+/** The fields set to one of the tracker's own, which `Tracker.choices` lists. */
+export type ChosenField = 'status' | 'labels' | 'assignee' | 'project'
+
+/** Something a field can be set to, as the tracker lists it: its own id, its name, and other words it answers to (a login, an email). */
+export interface Choice {
+  readonly id: string
+  readonly name: string
+  readonly also?: ReadonlyArray<string>
+}
+
+/**
+ * A change to an issue, by the tracker's own ids as `Tracker.choices` gave
+ * them: each field left out stays as it is. `close` closes it as done, by
+ * the tracker's own way (Linear's and Jira's done status, GitHub's and
+ * GitLab's closed, Trello's archive). Null takes an assignee or a project
+ * off. Labels are added and taken off; others stay.
+ */
+export interface IssueChange {
+  readonly status?: Choice
+  readonly close?: true
+  readonly priority?: Priority
+  readonly assignee?: Choice | null
+  readonly labels?: { readonly add: ReadonlyArray<Choice>; readonly remove: ReadonlyArray<Choice> }
+  readonly project?: Choice | null
+  readonly title?: string
 }
 
 /** What a tracker can do beyond the model's floor. */
@@ -444,7 +485,13 @@ export interface TrackerCapabilities {
   readonly links: boolean
   /** An issue can be moved to the tracker's own "in progress": a Linear team's started state, a Jira transition into In Progress. */
   readonly starts: boolean
+  /** What of an issue `update` can change here; what isn't listed, the tracker has no field for, or Althar can't reach it yet. */
+  readonly changes: ReadonlyArray<IssueField>
 }
+
+/** A tracker's refusal of a change it can't make: said for the field, in words an agent can pass on. */
+export const cantChange = (product: Product, field: IssueField, why: string): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t change an issue’s ${field} here: ${why}` })
 
 /** What `Tracker.start` did: moved the issue, or left it as it was; and the status it is in now. */
 export interface Started {
@@ -488,4 +535,30 @@ export interface Tracker {
    * was filed.
    */
   create(container: string, issue: NewIssue): Effect.Effect<Issue, ConnectorFailed>
+  /**
+   * What an issue's field can be set to, as the tracker lists them for it:
+   * its team's or board's statuses, its labels, the people it can be
+   * assigned to, its projects or milestones. `wanted` narrows people to
+   * those a name finds, where the tracker searches rather than lists them
+   * (Jira); a tracker that makes any label it is given (Jira) offers the
+   * one wanted, and the issue's own. Refused, as `rejected`, for a field
+   * not in `capabilities.changes`.
+   */
+  choices(issue: Issue, field: ChosenField, wanted?: string): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed>
+  /**
+   * Changes an issue as the person approved, or their own setting lets
+   * through: never on an agent's word alone. The issue as the tracker has it
+   * after. Doing it again changes nothing more, so a change whose answer was
+   * lost can be made again. A field not in `capabilities.changes` is refused
+   * before anything changes, as `rejected`.
+   */
+  update(issue: Issue, change: IssueChange): Effect.Effect<Issue, ConnectorFailed>
 }
+
+/** The fields a change touches, in the model's order. */
+export const fieldsOf = (change: IssueChange): ReadonlyArray<IssueField> =>
+  IssueField.literals.filter((field) => change[field] !== undefined)
+
+/** A change's first field the tracker can't change, if any. */
+export const unchangeable = (capabilities: TrackerCapabilities, change: IssueChange): IssueField | undefined =>
+  fieldsOf(change).find((field) => !capabilities.changes.includes(field))

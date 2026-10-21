@@ -9,10 +9,13 @@ import type {
   ChangeState,
   ChangeToReview,
   Check,
+  Choice,
   CodeHost,
   Comment,
   Container,
   Issue,
+  IssueChange,
+  IssueField,
   ListedChange,
   NewReview,
   Person,
@@ -22,7 +25,7 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
-import { leftAsItIs, noListing, noReviews, stillOpen, unstarted } from '../model'
+import { cantChange, leftAsItIs, noListing, noReviews, stillOpen, unchangeable, unstarted } from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -62,7 +65,40 @@ export interface FakeServiceOptions {
   readonly reviews?: boolean
   /** Whether reading a change says the repository its branch is on: it does, unless a test says, as a host that can't. */
   readonly saysHead?: boolean
+  /** What of an issue it updates: as its product's adapter does, unless a test says. */
+  readonly changes?: ReadonlyArray<IssueField>
 }
+
+/** What each product's adapter changes of an issue, as the fake takes them. */
+const CHANGES_OF = (product: Product): ReadonlyArray<IssueField> =>
+  product === 'linear'
+    ? ['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title']
+    : product === 'jira_cloud' || product === 'jira_dc'
+      ? ['status', 'close', 'priority', 'assignee', 'labels', 'title']
+      : product === 'trello'
+        ? ['status', 'close', 'assignee', 'labels', 'title']
+        : ['status', 'close', 'assignee', 'labels', 'project', 'title']
+
+/** A team's statuses, on the fake, as Linear's are: each with its category, in their order on the board. */
+const STATUSES: ReadonlyArray<Issue['status']> = [
+  { name: 'Backlog', category: 'backlog' },
+  { name: 'Todo', category: 'todo' },
+  { name: 'In Progress', category: 'started' },
+  { name: 'In Review', category: 'started' },
+  { name: 'Done', category: 'done' },
+  { name: 'Canceled', category: 'cancelled' },
+]
+
+/** A repository's, on the fake, as GitHub's are. */
+const OPEN_CLOSED: ReadonlyArray<Issue['status']> = [
+  { name: 'Open', category: 'todo' },
+  { name: 'Closed', category: 'done' },
+]
+
+/** The labels, people besides the account, and projects the fake's issues can be set to. */
+const LABELS = ['bug', 'docs', 'payments']
+const PEOPLE = [{ id: 'user-sam', login: 'sam', name: 'Sam Rivera' }]
+const PROJECTS = ['Q4 launch', 'Payments v2']
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
 export interface FakeControls {
@@ -111,6 +147,8 @@ export interface FakeControls {
   readonly reruns: ReadonlyArray<string>
   /** Every issue `create` filed, in order, as it was filed: labels and all, since the fake takes any label. */
   readonly created: ReadonlyArray<Issue>
+  /** Every change `update` made, in order, with the issue's ref. */
+  readonly issueChanges: ReadonlyArray<{ readonly ref: string; readonly change: IssueChange }>
   commentsOn(number: number): ReadonlyArray<Comment>
   issueComments(ref: string): ReadonlyArray<string>
   linksOn(ref: string): ReadonlyArray<{ readonly url: string; readonly title: string }>
@@ -189,6 +227,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const links = new Map<string, Array<{ readonly url: string; readonly title: string }>>()
   const containers = new Map<string, Container>()
   const created: Array<Issue> = []
+  const issueChanges: Array<{ readonly ref: string; readonly change: IssueChange }> = []
+  const changesHere = options.changes ?? CHANGES_OF(product)
+  /** Its statuses: a repository's issue is open or closed; any other has a team's. */
+  const statusesOf = (issue: Issue) => (issue.ref.includes('#') ? OPEN_CLOSED : STATUSES)
   const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
   const calls: Array<string> = []
   const deleted: Array<number> = []
@@ -244,6 +286,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       reviews: options.reviews ?? product === 'github',
       links: true,
       starts: true,
+      changes: changesHere,
     },
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
@@ -527,6 +570,66 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         return Effect.succeed({ moved: true, status })
       }),
     containers: () => Effect.andThen(called('containers'), () => Effect.succeed(filable())),
+    choices: (issue, field) =>
+      Effect.andThen(called('choices'), (): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed> => {
+        const allowed: IssueField = field
+        if (!changesHere.includes(allowed)) return Effect.fail(cantChange(product, allowed, 'the fake has no such field'))
+        switch (field) {
+          case 'status':
+            return Effect.succeed(statusesOf(issue).map((status) => ({ id: status.name.toLowerCase(), name: status.name })))
+          case 'labels':
+            return Effect.succeed(LABELS.map((label) => ({ id: `label-${label}`, name: label })))
+          case 'assignee':
+            return Effect.succeed(
+              [me, ...PEOPLE].map((person) => ({ id: person.id, name: person.name ?? person.login, also: [person.login] })),
+            )
+          case 'project':
+            return Effect.succeed(PROJECTS.map((project) => ({ id: `project-${project.toLowerCase()}`, name: project })))
+        }
+      }),
+    update: (issue, wanted) =>
+      Effect.andThen(called('update'), () => {
+        const refused = unchangeable({ links: true, starts: true, changes: changesHere }, wanted)
+        if (refused !== undefined) return Effect.fail(cantChange(product, refused, 'the fake has no such field'))
+        const found = issues.get(issue.ref)
+        if (found === undefined) return Effect.fail(missing(`issue ${issue.ref}`))
+        const statuses = statusesOf(found)
+        const closed = statuses.find((status) => status.category === 'done')
+        const status =
+          wanted.status !== undefined
+            ? statuses.find((one) => one.name.toLowerCase() === wanted.status?.name.toLowerCase())
+            : wanted.close === true
+              ? closed
+              : found.status
+        if (status === undefined) return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'No such status' }))
+        const people = [me, ...PEOPLE.map((person) => ({ ...person, bot: false }))]
+        const removed = new Set((wanted.labels?.remove ?? []).map((label) => label.name.toLowerCase()))
+        const after: Issue = {
+          ...found,
+          status,
+          ...(wanted.title === undefined ? {} : { title: wanted.title }),
+          ...(wanted.priority === undefined
+            ? {}
+            : { priority: { level: wanted.priority, name: wanted.priority === 'none' ? 'No priority' : wanted.priority } }),
+          ...(wanted.assignee === undefined
+            ? {}
+            : { assignees: wanted.assignee === null ? [] : people.filter((person) => person.id === wanted.assignee?.id) }),
+          ...(wanted.labels === undefined
+            ? {}
+            : {
+                labels: [
+                  ...new Set([
+                    ...found.labels.filter((label) => !removed.has(label.toLowerCase())),
+                    ...wanted.labels.add.map((label) => label.name),
+                  ]),
+                ],
+              }),
+          updatedAt: now(),
+        }
+        issues.set(found.ref, after)
+        issueChanges.push({ ref: found.ref, change: wanted })
+        return Effect.succeed(after)
+      }),
     create: (id, draft) =>
       Effect.andThen(called('create'), () => {
         const container = filable().find((candidate) => candidate.id === id)
@@ -541,6 +644,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...service.addIssue({ ref, title: draft.title, body: draft.body, assigned: false }),
           labels: [...draft.labels],
           container: container.name,
+          // A priority where it takes them, as the adapters do; none without.
+          priority:
+            draft.priority === undefined || !changesHere.includes('priority')
+              ? null
+              : { level: draft.priority, name: draft.priority === 'none' ? 'No priority' : draft.priority },
         }
         issues.set(ref, filed)
         created.push(filed)
@@ -677,6 +785,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     },
     get created() {
       return [...created]
+    },
+    get issueChanges() {
+      return [...issueChanges]
     },
     commentsOn: (number) => comments.get(number) ?? [],
     issueComments: (ref) => issueComments.get(ref) ?? [],

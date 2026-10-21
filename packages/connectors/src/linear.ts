@@ -4,7 +4,18 @@ import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
-import { type Account, type Container, type Issue, leftAsItIs, type Priority, type StatusCategory, type Tracker, unstarted } from './model'
+import {
+  type Account,
+  type Choice,
+  type Container,
+  type Issue,
+  type IssueChange,
+  leftAsItIs,
+  type Priority,
+  type StatusCategory,
+  type Tracker,
+  unstarted,
+} from './model'
 import { type Answer, answered, probe, readAs, refusalOf, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
@@ -60,6 +71,9 @@ export const categoryOf = (type: string): StatusCategory => {
 
 const PRIORITIES: ReadonlyArray<Priority> = ['none', 'urgent', 'high', 'medium', 'low']
 
+/** A level as Linear numbers it: 0 for none, 1 for urgent, down to 4 for low. */
+const priorityNumber = (level: Priority) => Math.max(0, PRIORITIES.indexOf(level))
+
 const issueOf = (issue: LinearIssue): Issue => {
   const level = PRIORITIES[issue.priority ?? 0] ?? 'none'
   return {
@@ -114,8 +128,49 @@ const labelIdsOf = (labels: ReadonlyArray<typeof Label.Type>, names: ReadonlyArr
   return [...new Set(names.flatMap((name) => byName.get(name.trim().toLowerCase()) ?? []))]
 }
 
+/** Someone on a team, who an issue can be assigned to. */
+const Member = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  displayName: Schema.optional(Schema.String),
+  email: Schema.optional(Schema.NullOr(Schema.String)),
+  active: Schema.optional(Schema.Boolean),
+})
+
+const Project = Schema.Struct({ id: Schema.String, name: Schema.String })
+
+/** An issue's team, with its id and one of its lists, as `items`: each asked for only when a change needs it. */
+const TeamOf = <A>(node: Schema.Codec<A, unknown>) =>
+  Schema.Struct({
+    issue: Schema.Struct({ team: Schema.Struct({ id: Schema.String, items: Schema.Struct({ nodes: Schema.Array(node) }) }) }),
+  })
+
+/** What is read of each of a team's lists. */
+const FIELDS_OF: Readonly<Record<string, string>> = {
+  'states(first: 100)': 'id name type position',
+  'members(first: 250)': 'id name displayName email active',
+  'projects(first: 100)': 'id name',
+  'projects(first: 1)': 'id name',
+}
+
 /** A key as Linear writes it, however it was typed: mer-231 is MER-231. Anything else goes as it is. */
 const keyOf = (ref: string) => (/^[A-Z][A-Z0-9]*-\d+$/i.test(ref) ? ref.toUpperCase() : ref)
+
+/** What Linear changes of an issue: every field the model has. */
+const CHANGES = ['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title'] as const
+
+/** A change as Linear's `IssueUpdateInput` takes it, closed into `closedInto` where it closes without a status of its own. */
+export const changeInput = (change: IssueChange, closedInto?: string): Readonly<Record<string, unknown>> => ({
+  ...(change.title === undefined ? {} : { title: change.title }),
+  ...(change.status !== undefined ? { stateId: change.status.id } : closedInto === undefined ? {} : { stateId: closedInto }),
+  ...(change.priority === undefined ? {} : { priority: priorityNumber(change.priority) }),
+  ...(change.assignee === undefined ? {} : { assigneeId: change.assignee?.id ?? null }),
+  ...(change.project === undefined ? {} : { projectId: change.project?.id ?? null }),
+  ...(change.labels === undefined || change.labels.add.length === 0 ? {} : { addedLabelIds: change.labels.add.map((label) => label.id) }),
+  ...(change.labels === undefined || change.labels.remove.length === 0
+    ? {}
+    : { removedLabelIds: change.labels.remove.map((label) => label.id) }),
+})
 
 export const makeLinear = (options: AdapterOptions): Tracker => {
   const product = 'linear' as const
@@ -131,20 +186,100 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
     ({ viewer }) => ({ id: viewer.id, login: viewer.displayName ?? viewer.name, name: viewer.name }),
   )
 
-  return {
-    product,
-    capabilities: { links: true, starts: true },
-    account,
-    issue: (ref) =>
+  /** A team's labels and the workspace's, which any of its issues may take: page after page. */
+  const teamLabels = (teamId: string) =>
+    paged<typeof Label.Type, string | null>(null, (after) =>
       Effect.map(
         http.graphql(
-          Schema.Struct({ issue: LinearIssue }),
+          Schema.Struct({ issueLabels: Connection(Label) }),
           url,
-          `query($id: String!) { issue(id: $id) { ...IssueFields } } ${IssueFields}`,
-          { id: keyOf(ref) },
+          'query($teamId: ID!, $after: String) { issueLabels(first: 250, after: $after, filter: { or: [{ team: { id: { eq: $teamId } } }, { team: { null: true } }] }) { nodes { id name isGroup } pageInfo { hasNextPage endCursor } } }',
+          { teamId, after },
         ),
-        ({ issue }) => issueOf(issue),
+        ({ issueLabels }) => pageOf(issueLabels),
       ),
+    )
+
+  /** An issue by its key or id, as Linear has it now. */
+  const read = (ref: string) =>
+    Effect.map(
+      http.graphql(Schema.Struct({ issue: LinearIssue }), url, `query($id: String!) { issue(id: $id) { ...IssueFields } } ${IssueFields}`, {
+        id: keyOf(ref),
+      }),
+      ({ issue }) => issueOf(issue),
+    )
+
+  /** An issue's team: its id, and one of its lists (its states, its people, its projects). */
+  const ofTeam = <A>(issue: Issue, node: Schema.Codec<A, unknown>, list: string) =>
+    Effect.map(
+      http.graphql(
+        TeamOf(node),
+        url,
+        `query($id: String!) { issue(id: $id) { team { id items: ${list} { nodes { ${FIELDS_OF[list]} } } } } }`,
+        {
+          id: issue.id,
+        },
+      ),
+      ({ issue: found }) => ({ teamId: found.team.id, items: found.team.items.nodes }),
+    )
+
+  /** An issue's team's states, in their order on its board. */
+  const states = (issue: Issue) =>
+    Effect.map(ofTeam(issue, State, 'states(first: 100)'), ({ items }) => items.toSorted((a, b) => a.position - b.position))
+
+  const choices: Tracker['choices'] = (issue, field) => {
+    switch (field) {
+      case 'status':
+        return Effect.map(states(issue), (all) => all.map((state): Choice => ({ id: state.id, name: state.name })))
+      // Its team's and the workspace's; a group only holds labels.
+      case 'labels':
+        return Effect.gen(function* () {
+          const { teamId } = yield* ofTeam(issue, Project, 'projects(first: 1)')
+          return (yield* teamLabels(teamId))
+            .filter((label) => label.isGroup !== true)
+            .map((label): Choice => ({ id: label.id, name: label.name }))
+        })
+      // Its team's people, still active: who Linear lets it be assigned to.
+      case 'assignee':
+        return Effect.map(ofTeam(issue, Member, 'members(first: 250)'), ({ items }) =>
+          items
+            .filter((member) => member.active !== false)
+            .map((member): Choice => ({
+              id: member.id,
+              name: member.name,
+              also: [member.displayName, member.email].filter((word): word is string => typeof word === 'string' && word !== ''),
+            })),
+        )
+      case 'project':
+        return Effect.map(ofTeam(issue, Project, 'projects(first: 100)'), ({ items }) =>
+          items.map((project): Choice => ({ id: project.id, name: project.name })),
+        )
+    }
+  }
+
+  const changeIssue: Tracker['update'] = (issue, wanted) =>
+    Effect.gen(function* () {
+      // Closed is done: its team's first completed state, by its place on the board.
+      const closing = wanted.close === true && wanted.status === undefined
+      const closedInto = closing ? (yield* states(issue)).find((state) => state.type === 'completed') : undefined
+      if (closing && closedInto === undefined)
+        return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Its team has no completed state' })
+      const { issueUpdate } = yield* http.graphql(
+        Schema.Struct({ issueUpdate: Schema.Struct({ success: Schema.Boolean, issue: Schema.optional(Schema.NullOr(LinearIssue)) }) }),
+        url,
+        `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { ...IssueFields } } } ${IssueFields}`,
+        { id: issue.id, input: changeInput(wanted, closedInto?.id) },
+      )
+      if (!issueUpdate.success) return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not change it' })
+      // Changed, by Linear's word: read again where it didn't say how it stands now.
+      return issueUpdate.issue == null ? yield* read(issue.ref) : issueOf(issueUpdate.issue)
+    })
+
+  return {
+    product,
+    capabilities: { links: true, starts: true, changes: CHANGES },
+    account,
+    issue: read,
     // Into the team's first started state, by its position on the board: In Progress, before In Review.
     start: (issue) =>
       Effect.gen(function* () {
@@ -218,28 +353,20 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
     create: (team, issue) =>
       Effect.gen(function* () {
         // Linear takes labels by id, and makes none from a name: the team's and the workspace's are read only when some are asked for.
-        const labelIds =
-          issue.labels.length === 0
-            ? []
-            : labelIdsOf(
-                yield* paged<typeof Label.Type, string | null>(null, (after) =>
-                  Effect.map(
-                    http.graphql(
-                      Schema.Struct({ issueLabels: Connection(Label) }),
-                      url,
-                      'query($teamId: ID!, $after: String) { issueLabels(first: 250, after: $after, filter: { or: [{ team: { id: { eq: $teamId } } }, { team: { null: true } }] }) { nodes { id name isGroup } pageInfo { hasNextPage endCursor } } }',
-                      { teamId: team, after },
-                    ),
-                    ({ issueLabels }) => pageOf(issueLabels),
-                  ),
-                ),
-                issue.labels,
-              )
+        const labelIds = issue.labels.length === 0 ? [] : labelIdsOf(yield* teamLabels(team), issue.labels)
         const { issueCreate } = yield* http.graphql(
           Schema.Struct({ issueCreate: Schema.Struct({ success: Schema.Boolean, issue: Schema.optional(Schema.NullOr(LinearIssue)) }) }),
           url,
           `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { ...IssueFields } } } ${IssueFields}`,
-          { input: { teamId: team, title: issue.title, description: issue.body, ...(labelIds.length === 0 ? {} : { labelIds }) } },
+          {
+            input: {
+              teamId: team,
+              title: issue.title,
+              description: issue.body,
+              ...(labelIds.length === 0 ? {} : { labelIds }),
+              ...(issue.priority === undefined || issue.priority === 'none' ? {} : { priority: priorityNumber(issue.priority) }),
+            },
+          },
         )
         if (!issueCreate.success)
           return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not file the issue' })
@@ -248,6 +375,8 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
           return yield* new ConnectorFailed({ product, reason: 'invalid_response', message: 'Linear filed the issue without saying which' })
         return issueOf(issueCreate.issue)
       }),
+    choices,
+    update: changeIssue,
   }
 }
 
