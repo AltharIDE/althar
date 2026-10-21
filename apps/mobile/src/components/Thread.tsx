@@ -3,13 +3,17 @@ import { CheckCircle, NavArrowDown, NavArrowRight, WarningTriangle, XmarkCircle 
 import { useState } from 'react'
 import { Pressable, View } from 'react-native'
 
-import { useCommand, useConnection } from '../client/react'
+import { useRouter } from 'expo-router'
+
+import { useCommand, useConnection, useNow } from '../client/react'
 import { tapDone } from '../lib/device'
+import { stepWords } from '../model/home'
 import { blocksOf, type Block } from '../model/thread'
 import { since, whoWorks } from '../model/words'
 import { useTheme } from '../theme/Theme'
 import { radius, space } from '../theme/tokens'
 import { Markdown } from './Markdown'
+import { PlanActions } from './PlanActions'
 import { Button, Chip, LiveDot, Text, Well } from './ui'
 
 /*
@@ -174,6 +178,46 @@ function Work({ block }: { readonly block: Extract<Block, { readonly kind: 'work
   )
 }
 
+type Posted = Extract<ThreadItem, { readonly kind: 'task' }>
+
+/** A task the coordinator made, as its card in the conversation: its plan, who does what, and Hold or Start now while it counts down. */
+function TaskPosted({ item }: { readonly item: Posted }) {
+  const theme = useTheme()
+  const router = useRouter()
+  const now = useNow(1_000)
+  const card = item.content
+  const steps = card.plan?.steps.filter((step) => !step.skipped) ?? []
+  const running = card.phase === 'running'
+  return (
+    <View style={{ borderRadius: radius.lg, borderWidth: 1, borderColor: theme.line2, backgroundColor: theme.raised, overflow: 'hidden' }}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => router.push(`/task/${card.threadId}`)}
+        style={({ pressed }) => ({ padding: space.md, gap: 4, backgroundColor: pressed ? theme.pressed : 'transparent' })}
+      >
+        <Text kind="label" ink="t3">
+          Task
+        </Text>
+        <Text kind="headline">{card.title}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {running ? <LiveDot size={5} /> : null}
+          <Text kind="sub" ink={running ? 'live' : card.phase === 'planned' ? 't2' : 'signal'}>
+            {stepWords(card, now)}
+          </Text>
+        </View>
+        {steps.length === 0 ? null : (
+          <Text kind="sub" ink="t3">
+            {steps
+              .map((step) => `${whoWorks(step.agentId, step.model)} ${step.key === 'implement' ? 'implements' : 'reviews'}`)
+              .join(' · ')}
+          </Text>
+        )}
+      </Pressable>
+      <PlanActions task={card} inset={space.md} />
+    </View>
+  )
+}
+
 function Item({
   item,
   now,
@@ -227,6 +271,8 @@ function Item({
           <View style={{ flex: 1, height: 1, backgroundColor: theme.line2 }} />
         </View>
       )
+    case 'task':
+      return <TaskPosted item={item} />
     case 'step_result':
       return <ReportCard report={item} threadId={latest ? threadId : null} />
     case 'question':

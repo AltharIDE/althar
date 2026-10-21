@@ -15,7 +15,15 @@ import { Text } from './ui'
  * connection. The microphone is the keyboard's dictation for now: a
  * transcript on the phone is a later step.
  */
-export function Composer({ threadId, leadWorking }: { readonly threadId: string; readonly leadWorking: boolean }) {
+export function Composer({
+  threadId,
+  leadWorking,
+  placeholder = 'Tell the lead…',
+}: {
+  readonly threadId: string
+  readonly leadWorking: boolean
+  readonly placeholder?: string
+}) {
   const theme = useTheme()
   const reachable = useConnection().state === 'online'
   const [body, setBody] = useState('')
@@ -75,10 +83,10 @@ export function Composer({ threadId, leadWorking }: { readonly threadId: string;
       ) : null}
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: space.sm }}>
         <TextInput
-          accessibilityLabel="Message to the lead"
+          accessibilityLabel={placeholder === 'Tell the lead…' ? 'Message to the lead' : placeholder.replace('…', '')}
           value={body}
           onChangeText={setBody}
-          placeholder={reachable ? 'Tell the lead…' : 'Your Mac is away'}
+          placeholder={reachable ? placeholder : 'Your Mac is away'}
           placeholderTextColor={theme.t4}
           editable={reachable}
           multiline

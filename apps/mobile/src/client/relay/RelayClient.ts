@@ -74,6 +74,7 @@ export const connectRelay = async (port: PortLike, link: RelayLink): Promise<Alt
     unpair: () => link.unpair(),
     home: () => settle(api.GetHome({})),
     board: (projectId) => settle(api.GetBoard({ projectId })),
+    coordinator: (projectId) => settle(api.GetCoordinator({ projectId, limit: 100 })),
     thread: (threadId) => settle(api.GetThread({ threadId, limit: 100 })),
     fileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
     searchTasks: (input) => settle(api.SearchTasks({ ...input, limit: 30 })),

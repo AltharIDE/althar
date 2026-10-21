@@ -116,6 +116,17 @@ const FLOWS = {
     await page.getByText('Add an RSS feed for the shifts').first().waitFor()
   },
 
+  'ask the coordinator for work': async (page) => {
+    await open(page, '/project/proj_site')
+    await page.getByRole('button', { name: 'Talk to the coordinator' }).click()
+    await page.getByText('Ask for what should be done').waitFor()
+    await page.getByLabel('Ask the coordinator').fill('Add an RSS feed for the shifts. Keep it under 50 items.')
+    await page.getByRole('button', { name: 'Queue', exact: true }).click()
+    await page.getByText('Starts in 2m').waitFor()
+    await page.getByRole('button', { name: 'Start now' }).click()
+    await page.getByText('Implementing').first().waitFor()
+  },
+
   'find a task and open it': async (page) => {
     await open(page, '/projects')
     await page.getByLabel('Find a task').fill('stripe')

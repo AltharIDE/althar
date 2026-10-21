@@ -7,6 +7,7 @@ import type {
   HomeTask,
   ProjectSummary,
   SessionSummary,
+  TaskCard,
   ThreadItem,
   ThreadSnapshot,
 } from '@althar/contracts'
@@ -196,6 +197,8 @@ export const say = {
       exit: over.exit ?? (over.command === undefined ? null : 0),
     },
   }),
+  /** A task's card in the coordinator's conversation: its plan before it starts, then where it stands. */
+  task: (card: TaskCard, at: string): ThreadItem => ({ ...item(null, at), kind: 'task', content: card }),
   notice: (title: string, at: string, severity: 'info' | 'warning' | 'error' = 'info', description: string | null = null): ThreadItem => ({
     ...item(null, at),
     kind: 'notice',

@@ -5,6 +5,7 @@ import type { Connection } from '../client/AltharClient'
  */
 
 const AGENTS: Readonly<Record<string, string>> = {
+  coordinator: 'Coordinator',
   'claude-code': 'Claude Code',
   codex: 'Codex',
   copilot: 'GitHub Copilot',

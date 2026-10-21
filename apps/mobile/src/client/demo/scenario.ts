@@ -1,4 +1,4 @@
-import type { DiffLine, FileDiff, HomeCall, HomeEvent, HomeTask, ProjectSummary, ThreadSnapshot } from '@althar/contracts'
+import type { DiffLine, FileDiff, HomeCall, HomeEvent, HomeTask, ProjectSummary, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 
 import { ago, ahead, attentionOf, call, checks, file, project, pullRequest, say, session, task, thread } from './builders'
 
@@ -14,6 +14,8 @@ export type Scenario = {
   calls: Array<HomeCall>
   events: Array<HomeEvent>
   threads: Map<string, ThreadSnapshot>
+  /** Each project's conversation with its coordinator, by its thread. */
+  coordinators: Map<string, Array<ThreadItem>>
   diffs: Map<string, FileDiff>
   /** When the person last left the home. */
   looked: string
@@ -519,7 +521,25 @@ export const scenario = (now: number): Scenario => {
     truncated: false,
   })
 
+  const coordinators = new Map<string, Array<ThreadItem>>([
+    [
+      meridian.coordinatorThreadId ?? '',
+      [
+        say.person('The webhook signing secret is two years old. Rotate it, without dropping deliveries.', ago(now, 2)),
+        say.agent(
+          'coordinator',
+          'One task: **Rotate the webhook signing secret**. Opus 5 implements, with both secrets accepted for a day so nothing in flight fails; Codex reviews, as it does security changes here. It opens a draft pull request.',
+          ago(now, 1),
+        ),
+        say.task(secret, ago(now, 1)),
+      ],
+    ],
+    [billing.coordinatorThreadId ?? '', []],
+    [site.coordinatorThreadId ?? '', []],
+  ])
+
   return {
+    coordinators,
     projects: [meridian, billing, site],
     tasks,
     calls,

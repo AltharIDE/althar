@@ -1,6 +1,7 @@
 import type {
   AlwaysScope,
   BoardSnapshot,
+  CoordinatorSnapshot,
   Disposition,
   FieldAnswer,
   FileDiff,
@@ -59,6 +60,8 @@ export interface AltharClient {
   home(): Promise<HomeSnapshot>
   /** GetBoard: a project's tasks, by card, and its calls. */
   board(projectId: string): Promise<BoardSnapshot>
+  /** GetCoordinator: a project's conversation with its coordinator, which plans the tasks it's asked for. */
+  coordinator(projectId: string): Promise<CoordinatorSnapshot>
   /** GetThread: a task's thread, newest items. */
   thread(threadId: string): Promise<ThreadSnapshot>
   /** GetFileDiff: one file a task changed. */

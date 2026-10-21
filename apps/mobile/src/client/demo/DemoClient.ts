@@ -1,5 +1,6 @@
 import type {
   BoardSnapshot,
+  CoordinatorSnapshot,
   FileDiff,
   FoundTasks,
   HomeSnapshot,
@@ -10,7 +11,7 @@ import type {
 } from '@althar/contracts'
 
 import type { AltharClient, Connection, PairedMac, Unsubscribe } from '../AltharClient'
-import { ago, call, file, say, slugOf, task, thread } from './builders'
+import { ago, ahead, call, file, say, slugOf, task, thread } from './builders'
 import { scenario, type Scenario } from './scenario'
 
 /*
@@ -133,6 +134,31 @@ export class DemoClient implements AltharClient {
     }
   }
 
+  async coordinator(projectId: string): Promise<CoordinatorSnapshot> {
+    await this.wait()
+    const project = this.state.projects.find((one) => one.id === projectId)
+    if (project === undefined) throw new Error(`No project ${projectId}`)
+    const threadId = project.coordinatorThreadId ?? `thr_coord_${projectId}`
+    // A task's card is posted once and kept current: shown as it stands now.
+    const items = (this.state.coordinators.get(threadId) ?? []).map((one) => {
+      if (one.kind !== 'task') return one
+      const now = this.state.tasks.find((card) => card.taskId === one.content.taskId)
+      return now === undefined ? one : { ...one, content: now }
+    })
+    return {
+      threadId,
+      cursor: this.cursor,
+      project: { id: project.id, name: project.name },
+      session: null,
+      suggested: { agentId: 'claude-code', agentName: 'Claude Code', model: 'claude-opus-5', effort: null, available: true },
+      items,
+      earlier: false,
+      host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true },
+      runnables: [],
+      launches: [],
+    }
+  }
+
   async thread(threadId: string): Promise<ThreadSnapshot> {
     await this.wait()
     const found = this.state.threads.get(threadId)
@@ -252,7 +278,46 @@ export class DemoClient implements AltharClient {
 
   async send(input: { readonly threadId: string; readonly body: string; readonly dictated?: boolean }): Promise<void> {
     await this.wait()
-    this.append(input.threadId, say.person(input.body, new Date(this.now()).toISOString()))
+    const conversation = this.state.coordinators.get(input.threadId)
+    if (conversation === undefined) return this.append(input.threadId, say.person(input.body, new Date(this.now()).toISOString()))
+    conversation.push(say.person(input.body, new Date(this.now()).toISOString()))
+    const project = this.state.projects.find((one) => one.coordinatorThreadId === input.threadId)
+    this.changed('thread', input.threadId, project?.id ?? null, input.threadId)
+    // The coordinator plans what it was told, a moment later: one task, counting down to its start.
+    this.timers.push(setTimeout(() => this.plan(input.threadId, input.body, project?.id ?? ''), this.latency <= 0 ? 0 : 1_200))
+  }
+
+  private plan(threadId: string, body: string, projectId: string): void {
+    const conversation = this.state.coordinators.get(threadId)
+    if (conversation === undefined) return
+    const at = new Date(this.now()).toISOString()
+    const [first = body] = body.split(/[.\n]/)
+    const title = first.trim().slice(0, 70)
+    const made = task({
+      taskId: `task_${slugOf(title)}_${this.cursor}`,
+      projectId,
+      title,
+      phase: 'planned',
+      createdAt: at,
+      plan: {
+        id: `plan_${slugOf(title)}_${this.cursor}`,
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: 'claude-opus-5', skipped: false },
+          { key: 'review', agentId: 'codex', model: 'gpt-5.5-codex', skipped: false },
+        ],
+        startsAt: ahead(this.now(), 2),
+        reason: 'Opus 5 knows this code from its last tasks; Codex reviews.',
+        end: 'draft',
+      },
+    })
+    this.state.tasks.push(made)
+    const name = this.state.projects.find((one) => one.id === projectId)?.name ?? ''
+    this.state.threads.set(made.threadId, thread(made, name, [say.person(body, at)]))
+    conversation.push(
+      say.agent('coordinator', `One task: **${title}**. Opus 5 implements and Codex reviews; it opens a draft pull request.`, at),
+    )
+    conversation.push(say.task(made, at))
+    this.changed('task', made.taskId, projectId, threadId)
   }
 
   async createTask(input: { readonly projectId: string; readonly title: string; readonly description?: string }): Promise<TaskSummary> {

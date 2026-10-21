@@ -72,8 +72,9 @@ Notifications.**
 
 **C. Talk first.** A conversation with the coordinator, or a realtime voice
 agent (Happy, Omnara). Realtime voice is niche and paid where it exists, and
-Superset found native dictation into the composer beats it. **Built as the
-New task sheet and a composer with dictation; realtime voice left out.**
+Superset found native dictation into the composer beats it. **Built as Talk
+(a project's coordinator, which plans what it's told), the New task sheet,
+and a composer with dictation; realtime voice left out.**
 
 **D. A terminal mirror (Orca).** Rejected: it reads badly on a phone, and
 Althar's thread already folds the lead's work into rounds.
@@ -92,6 +93,7 @@ the client seam the relay will implement. Screens, as shot in
 | Changes, Diff (`changes`, `diff`) | Files with status and lines, and how many viewed; a unified diff that wraps by default, the changed stretch marked, Mark viewed |
 | Projects, a project (`projects`, `find`, `project`) | Each project's counts; Find a task, by what it was about, what matched marked; a project's lanes as segments, Needs you first |
 | New task (`new-task`) | Project, what should be done, Plan it |
+| Talk (`talk`) | A project's coordinator, as the desktop's Talk room: say what should be done; it posts the task it planned, counting down, to hold or start now |
 | Pair (`pair`, `pair-verify`) | Scan the Mac's code; check four words on both screens; done |
 | Settings, Notifications (`settings`, `notifications-full`) | The paired Mac, Face ID, unpair; notification groups, with previews of the lock screen, the island and the Live Activity |
 | Diagnostics (`diagnostics`) | The relay client's whole path, run in the app against a runtime of the contract's own: on a phone, a one-tap check on Hermes |
@@ -104,7 +106,7 @@ the client seam the relay will implement. Screens, as shot in
 <tr><td valign="top" width="33%"><img src="shots/task-finished.png" width="240" alt="A finished question, in markdown"><br><sub>A finished question, in markdown</sub></td><td valign="top" width="33%"><img src="shots/home-upnext.png" width="240" alt="Up next: a plan to hold or start"><br><sub>Up next: a plan to hold or start</sub></td><td valign="top" width="33%"><img src="shots/project.png" width="240" alt="A project’s lanes"><br><sub>A project’s lanes</sub></td></tr>
 <tr><td valign="top" width="33%"><img src="shots/find.png" width="240" alt="Finding a task"><br><sub>Finding a task</sub></td><td valign="top" width="33%"><img src="shots/new-task.png" width="240" alt="A new task"><br><sub>A new task</sub></td><td valign="top" width="33%"><img src="shots/pair-verify.png" width="240" alt="Pairing: four words to check"><br><sub>Pairing: four words to check</sub></td></tr>
 <tr><td valign="top" width="33%"><img src="shots/notifications-full.png" width="240" alt="Notifications and the Live Activity"><br><sub>Notifications and the Live Activity</sub></td><td valign="top" width="33%"><img src="shots/diagnostics.png" width="240" alt="Diagnostics: the relay path, in the app"><br><sub>Diagnostics: the relay path, in the app</sub></td><td valign="top" width="33%"><img src="shots/home-outdated.png" width="240" alt="The phone and the Mac out of step"><br><sub>The phone and the Mac out of step</sub></td></tr>
-<tr><td valign="top" width="33%"><img src="shots/home-unpaired.png" width="240" alt="Before pairing"><br><sub>Before pairing</sub></td><td></td><td></td></tr>
+<tr><td valign="top" width="33%"><img src="shots/talk.png" width="240" alt="Talk: the coordinator plans what you ask"><br><sub>Talk: the coordinator plans what you ask</sub></td><td valign="top" width="33%"><img src="shots/home-unpaired.png" width="240" alt="Before pairing"><br><sub>Before pairing</sub></td><td></td></tr>
 </table>
 
 The shots are the web build at 390×844 (`bun run export:web && bun run shots`); on a phone the system draws the bars, sheets and keyboard.

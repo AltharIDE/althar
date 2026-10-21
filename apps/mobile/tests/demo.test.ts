@@ -83,6 +83,28 @@ describe('the demo client', () => {
     await expect(demo.startPlan('plan_secret')).rejects.toThrow('already started')
   })
 
+  it('has the coordinator plan what it is told, as a task counting down', async () => {
+    vi.useFakeTimers()
+    const demo = new DemoClient({ latency: 0, now: () => Date.parse('2026-10-21T15:00:00.000Z') })
+    const before = await demo.coordinator('proj_site')
+    expect(before.items).toEqual([])
+    await demo.send({ threadId: before.threadId, body: 'Add an RSS feed for the shifts. Keep it under 50 items.' })
+    vi.advanceTimersByTime(10)
+    const after = await demo.coordinator('proj_site')
+    expect(after.items.map((item) => item.kind)).toEqual(['user_message', 'agent_message', 'task'])
+    const posted = after.items[2]
+    expect(posted?.kind === 'task' ? posted.content : null).toMatchObject({ title: 'Add an RSS feed for the shifts', phase: 'planned' })
+    expect((await demo.home()).tasks.some((one) => one.title === 'Add an RSS feed for the shifts')).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it('shows a task the coordinator posted as it stands now', async () => {
+    const demo = client()
+    await demo.startPlan('plan_secret')
+    const posted = (await demo.coordinator('proj_meridian')).items.find((item) => item.kind === 'task')
+    expect(posted?.kind === 'task' ? posted.content.phase : null).toBe('running')
+  })
+
   it('streams the lead’s words and brings a new call in, live', async () => {
     vi.useFakeTimers()
     const demo = new DemoClient({ latency: 0, live: true })

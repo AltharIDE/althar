@@ -1,15 +1,16 @@
-import { Stack, useLocalSearchParams } from 'expo-router'
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router'
 import { useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
-import { useBoard, useHome, useNow } from '../../client/react'
-import { NeedCard } from '../../components/NeedCard'
-import { TaskRow } from '../../components/TaskRow'
-import { Card, Divider, ProjectMark, Text } from '../../components/ui'
-import { callKindOf, readyKindOf, standingCalls } from '../../model/calls'
-import { lanesOf } from '../../model/home'
-import { useTheme } from '../../theme/Theme'
-import { radius, space } from '../../theme/tokens'
+import { useBoard, useHome, useNow } from '../../../client/react'
+import { NeedCard } from '../../../components/NeedCard'
+import { TaskRow } from '../../../components/TaskRow'
+import { Button, Card, Divider, ProjectMark, Text } from '../../../components/ui'
+import { ChatLines } from 'iconoir-react-native'
+import { callKindOf, readyKindOf, standingCalls } from '../../../model/calls'
+import { lanesOf } from '../../../model/home'
+import { useTheme } from '../../../theme/Theme'
+import { radius, space } from '../../../theme/tokens'
 
 /*
  * A project's board, as a phone holds it: the desktop's lanes as one
@@ -31,6 +32,7 @@ export default function Board() {
   const now = useNow()
   const home = useHome()
   const board = useBoard(projectId)
+  const router = useRouter()
   const [lane, setLane] = useState<Lane>('needsYou')
   const project = home.data?.projects.find((one) => one.id === projectId) ?? null
   const lanes = board.data === undefined ? null : lanesOf(board.data)
@@ -50,6 +52,13 @@ export default function Board() {
           </View>
         </View>
       )}
+      <Button
+        label="Talk to the coordinator"
+        tone="plain"
+        icon={(color) => <ChatLines width={16} height={16} color={color} />}
+        accessibilityHint="Ask for work in words; the coordinator plans it"
+        onPress={() => router.push({ pathname: '/project/[projectId]/talk', params: { projectId } })}
+      />
       <View
         accessibilityRole="tablist"
         style={{ flexDirection: 'row', backgroundColor: theme.pressed, borderRadius: radius.md, padding: 3, gap: 2 }}

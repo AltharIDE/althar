@@ -86,6 +86,11 @@ export const useBoard = (projectId: string) => {
   return useQuery({ queryKey: ['board', projectId], queryFn: () => client.board(projectId) })
 }
 
+export const useCoordinator = (projectId: string) => {
+  const client = useClient()
+  return useQuery({ queryKey: ['coordinator', projectId], queryFn: () => client.coordinator(projectId) })
+}
+
 export const useThread = (threadId: string) => {
   const client = useClient()
   return useQuery({ queryKey: ['thread', threadId], queryFn: () => client.thread(threadId) })

@@ -36,6 +36,7 @@ const SHOTS = [
   { name: 'projects', url: '/projects' },
   { name: 'find', url: '/projects', type: { label: 'Find a task', text: 'webhook' } },
   { name: 'project', url: '/project/proj_meridian' },
+  { name: 'talk', url: '/project/proj_meridian/talk' },
   { name: 'new-task', url: '/new' },
   { name: 'pair', url: '/pair' },
   { name: 'pair-verify', url: '/pair?step=verify' },

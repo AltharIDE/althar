@@ -1,4 +1,4 @@
-import type { HomeTask } from '@althar/contracts'
+import type { TaskCard } from '@althar/contracts'
 import { View } from 'react-native'
 
 import { useCommand, useConnection } from '../client/react'
@@ -11,14 +11,14 @@ import { Button, Text } from './ui'
  * lead, and Hold or Start now. A plan starts on its own when its countdown
  * ends; holding stops the countdown, and it starts when the person says.
  */
-export function PlanActions({ task }: { readonly task: HomeTask }) {
+export function PlanActions({ task, inset = 52 }: { readonly task: Pick<TaskCard, 'plan' | 'inLine' | 'phase'>; readonly inset?: number }) {
   const reachable = useConnection().state === 'online'
   const start = useCommand((client, planId: string) => client.startPlan(planId))
   const hold = useCommand((client, planId: string) => client.holdPlan(planId))
   const plan = task.plan
   if (plan === null || task.inLine === true || task.phase !== 'planned') return null
   return (
-    <View style={{ gap: space.sm, paddingLeft: 52, paddingRight: space.lg, paddingBottom: space.md }}>
+    <View style={{ gap: space.sm, paddingLeft: inset, paddingRight: space.lg, paddingBottom: space.md }}>
       {plan.reason === null ? null : (
         <Text kind="sub" ink="t3">
           {plan.reason}
