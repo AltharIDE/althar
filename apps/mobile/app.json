@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Althar",
+    "slug": "althar",
+    "scheme": "althar",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "dev.althar.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Althar uses the camera to scan the pairing code on your Mac.",
+        "NSFaceIDUsageDescription": "Althar asks for Face ID before it answers an agent for you."
+      }
+    },
+    "android": {
+      "package": "dev.althar.mobile",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "output": "single",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      ["expo-camera", { "cameraPermission": "Althar uses the camera to scan the pairing code on your Mac." }],
+      ["expo-local-authentication", { "faceIDPermission": "Althar asks for Face ID before it answers an agent for you." }],
+      "expo-notifications"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
