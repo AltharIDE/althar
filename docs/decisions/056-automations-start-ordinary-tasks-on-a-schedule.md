@@ -32,7 +32,7 @@
     automation starts a fixed few minutes after its time, from its id.
   - **The clock is the runtime's,** while Althar runs, windows or not: it
     looks every 30 seconds and whenever an automation changes. A slot the
-    Mac slept through, or Althar was closed for, runs once when it is back,
+    computer slept through, or Althar was closed for, runs once when it is back,
     if it is still within half the time to the next slot (at most 12 hours),
     after a moment to settle; one past that is missed, and says so; never
     every slot it missed. Its lead is told when it was due and when it is.

@@ -25,7 +25,7 @@ import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } fr
 /*
  * Automations (docs/plans/automations.md): work that starts by itself on a
  * schedule, on this computer. Each slot runs once, as an ordinary task; one the
- * Mac slept through runs once on waking, within its window, or is missed;
+ * computer slept through runs once on waking, within its window, or is missed;
  * one that can't start now is skipped and says why; three failures in a row
  * pause it. The clock here is the test's, in London.
  */

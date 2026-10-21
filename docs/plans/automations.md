@@ -26,7 +26,7 @@
 - **It runs on this computer, in the runtime, while Althar runs.** On a Mac,
   Althar already keeps running with every window closed. Add one opt-in,
   "Open Althar at login, in the background". No daemon, and no waking the
-  Mac, which needs root. A run missed while the Mac slept runs once when it
+  Mac, which needs root. A run missed while the computer slept runs once when it
   wakes, inside a window; never a backlog. The cloud comes later, in two
   steps: a relay for GitHub's webhooks, then runs in the cloud, a product of
   their own, paid per use.
@@ -106,7 +106,7 @@ Three records, three lifetimes:
 - **The occurrence** is the fact that it was time, or that something
   happened. It exists even when nothing starts: skipped (paused, busy, out of
   its window, overlapping, no longer needed), nothing to do, missed while the
-  Mac slept. It is the history the page shows, and the unit of dedupe:
+  computer slept. It is the history the page shows, and the unit of dedupe:
   `(automation, slot)` for a schedule, `(automation, slot, subject)` for a
   schedule with a subject query, `(automation, subject, version)` for an
   event, unique in SQLite and written before anything starts. A slot is the
@@ -245,7 +245,7 @@ If the computer is asleep at 2:00, it runs when it wakes, until 14:00."
   routines hold an hour, and an agent-made automation every ten minutes is
   how Codex users spent a month's allowance in a day.
 - **9:00 where the person is.** Keep the zone, but read the time in the
-  Mac's zone of the moment, as Calendar's floating times do, so travelling
+  computer's zone of the moment, as Calendar's floating times do, so travelling
   doesn't move the morning review to 3:00. The zone is still kept, for a
   server that has none. So the next time, kept as an instant, is worked out
   again when the computer's zone changes; and since a slot is its local date and
@@ -772,7 +772,7 @@ other tools says Run now and runs.
 - **GitHub's budget.** Projects × repositories × pollers, against 5,000 an
   hour shared with the agents' `gh`, measured on the person's account.
 - **Timers at wake.** Does an overdue timer fire at wake or late, on a real
-  Mac? The design looks again on wake either way. And does `resume` fire
+  computer, on each system? The design looks again on wake either way. And does `resume` fire
   for a dark wake?
 - **Review fatigue.** In dotnet/runtime, 44% of the agent's closed pull
   requests were drafts nobody reviewed. How many open automation pull
