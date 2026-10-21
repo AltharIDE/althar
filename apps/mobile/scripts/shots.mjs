@@ -39,6 +39,7 @@ const SHOTS = [
   { name: 'settings', url: '/settings' },
   { name: 'notifications', url: '/notifications' },
   { name: 'notifications-full', url: '/notifications', full: true },
+  { name: 'diagnostics', url: '/diagnostics', press: 'Run the checks' },
 ]
 
 const types = {
@@ -73,6 +74,10 @@ try {
     await page.goto(`http://localhost:${port}${shot.url}${separator}live=0${shot.theme ? `&theme=${shot.theme}` : ''}`)
     await page.waitForLoadState('networkidle')
     await page.waitForTimeout(700)
+    if (shot.press) {
+      await page.getByRole('button', { name: shot.press }).click()
+      await page.waitForTimeout(2500)
+    }
     if (shot.full) {
       /* A phone scrolls; to show a whole screen, the page grows to its content. */
       const height = await page.evaluate(() => Math.max(...[...document.querySelectorAll('div')].map((element) => element.scrollHeight)))

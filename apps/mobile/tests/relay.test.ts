@@ -1,13 +1,10 @@
-import { Api, ApiError, serverProtocol, type HomeSnapshot, type WatchEvent } from '@althar/contracts'
-import { Effect, Layer, Scope, Stream } from 'effect'
-import { RpcServer } from 'effect/rpc'
+import type { WatchEvent } from '@althar/contracts'
+import { Effect, Exit, Scope } from 'effect'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { Connection } from '../src/client/AltharClient'
-import { DEMO_MAC } from '../src/client/demo/DemoClient'
-import { scenario } from '../src/client/demo/scenario'
-import { connectRelay, newCommandId, type RelayLink } from '../src/client/relay/RelayClient'
-import { decode, encode, jsonPort, type TextChannel } from '../src/client/relay/jsonPort'
+import { connectRelay, newCommandId } from '../src/client/relay/RelayClient'
+import { decode, encode, jsonPort } from '../src/client/relay/jsonPort'
+import { onlineLink, selfTest, serveDemo, textChannels, type Received } from '../src/client/relay/selfTest'
 
 /*
  * The relay client against the runtime's own contract: a server answering
@@ -18,100 +15,17 @@ import { decode, encode, jsonPort, type TextChannel } from '../src/client/relay/
 
 const NOW = Date.parse('2026-10-21T15:00:00.000Z')
 
-/** Two ends of a channel carrying text, delivered a moment later, as a network would. */
-const channels = (): readonly [TextChannel & { readonly sent: Array<string> }, TextChannel] => {
-  const listeners: [Set<(text: string) => void>, Set<(text: string) => void>] = [new Set(), new Set()]
-  const sent: Array<string> = []
-  const end = (mine: 0 | 1) => ({
-    send: (text: string) => {
-      sent.push(text)
-      setTimeout(() => listeners[mine === 0 ? 1 : 0].forEach((listener) => listener(text)), 0)
-    },
-    onText: (handler: (text: string) => void) => {
-      listeners[mine].add(handler)
-      return () => listeners[mine].delete(handler)
-    },
-  })
-  return [{ ...end(0), sent }, end(1)]
-}
-
-const link: RelayLink = {
-  connection: (): Connection => ({ state: 'online', mac: DEMO_MAC }),
-  onConnection: () => () => {},
-  pair: () => Promise.resolve(DEMO_MAC),
-  unpair: () => Promise.resolve(),
-}
-
-type Received = { readonly tag: string; readonly payload: unknown }
-
-/** A runtime answering the calls the phone makes, recording each. */
-const serve = (channel: TextChannel, received: Array<Received>) => {
-  const state = scenario(NOW)
-  const home: HomeSnapshot = {
-    cursor: 7,
-    looked: state.looked,
-    since: state.looked,
-    tasks: state.tasks,
-    calls: state.calls,
-    events: state.events,
-    projects: state.projects,
-  }
-  const record = (tag: string) => (payload: unknown) => Effect.sync(() => void received.push({ tag, payload }))
-  const handlers: Record<string, (payload: never) => unknown> = {
-    GetHome: (payload) => Effect.as(record('GetHome')(payload), home),
-    GetThread: ({ threadId }: { readonly threadId: string }) => {
-      const thread = state.threads.get(threadId)
-      return thread === undefined ? Effect.fail(new ApiError({ reason: 'NotFound', message: 'No such thread' })) : Effect.succeed(thread)
-    },
-    GetFileDiff: ({ taskId, path }: { readonly taskId: string; readonly path: string }) => {
-      const diff = state.diffs.get(`${taskId}:${path}`)
-      return diff === undefined ? Effect.fail(new ApiError({ reason: 'NotFound', message: 'No such file' })) : Effect.succeed(diff)
-    },
-    Answer: record('Answer'),
-    Merge: (payload: { readonly head: string }) =>
-      payload.head === '9f3c2ab'
-        ? record('Merge')(payload)
-        : Effect.fail(new ApiError({ reason: 'Moved', message: 'It changed since you looked' })),
-    Watch: () =>
-      Stream.fromIterable<WatchEvent>([
-        {
-          _tag: 'Changed',
-          cursor: 8,
-          aggregateType: 'task',
-          aggregateId: 'task_webhooks',
-          projectId: 'proj_meridian',
-          threadId: 'thr_task_webhooks',
-        },
-        {
-          _tag: 'Streaming',
-          threadId: 'thr_task_backfill',
-          itemId: 'item_9',
-          kind: 'agent_message',
-          agentId: 'claude-code',
-          text: 'March matches.',
-        },
-      ]),
-  }
-  const all = new Proxy(handlers, {
-    get: (target, tag: string) =>
-      target[tag] ?? (() => Effect.fail(new ApiError({ reason: 'NotServed', message: `${tag} isn't served here` }))),
-  })
-  return Effect.forkScoped(
-    Layer.launch(RpcServer.layer(Api).pipe(Layer.provide(Api.toLayer(all as never)), Layer.provide(serverProtocol(jsonPort(channel))))),
-  )
-}
-
 let scope: Scope.Closeable | undefined
 afterEach(async () => {
-  if (scope !== undefined) await Effect.runPromise(Scope.close(scope, Effect.void as never))
+  if (scope !== undefined) await Effect.runPromise(Scope.close(scope, Exit.void))
 })
 
 const connected = async () => {
-  const [phone, mac] = channels()
+  const [phone, mac] = textChannels()
   const received: Array<Received> = []
   scope = await Effect.runPromise(Scope.make())
-  await Effect.runPromise(Scope.provide(serve(mac, received), scope))
-  const client = await connectRelay(jsonPort(phone), link)
+  await Effect.runPromise(Scope.provide(serveDemo(mac, received, NOW), scope))
+  const client = await connectRelay(jsonPort(phone), onlineLink)
   return { client, received, sent: phone.sent }
 }
 
@@ -174,6 +88,14 @@ describe('the relay client', () => {
     })
     expect(heard.map((event) => event._tag)).toEqual(['Changed', 'Streaming'])
     await client.close()
+  })
+})
+
+describe('the self-test the app runs', () => {
+  it('passes every check', async () => {
+    const checks = await selfTest()
+    expect(checks.filter((check) => !check.ok)).toEqual([])
+    expect(checks.map((check) => check.name)).toContain('Watch, as a stream')
   })
 })
 

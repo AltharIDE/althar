@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router'
-import { Bell, FaceId, Laptop, NavArrowRight, ShieldCheck } from 'iconoir-react-native'
+import { Bell, Cpu, FaceId, Laptop, NavArrowRight, ShieldCheck } from 'iconoir-react-native'
 import type { ReactNode } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -105,6 +105,13 @@ export default function Settings() {
           title="Notifications"
           detail="What taps you, and what waits for you to look"
           onPress={() => router.push('/notifications')}
+        />
+        <Divider inset={50} />
+        <Row
+          icon={<Cpu width={22} height={22} color={theme.t2} />}
+          title="Diagnostics"
+          detail="Check the way the phone talks to Althar"
+          onPress={() => router.push('/diagnostics')}
         />
       </Card>
 

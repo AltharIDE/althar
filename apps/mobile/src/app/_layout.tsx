@@ -41,6 +41,7 @@ function Screens() {
         <Stack.Screen name="new" options={{ presentation: 'modal', title: 'New task' }} />
         <Stack.Screen name="pair" options={{ presentation: 'fullScreenModal', headerShown: false }} />
         <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
+        <Stack.Screen name="diagnostics" options={{ title: 'Diagnostics' }} />
         <Stack.Screen name="project/[projectId]" options={{ title: '' }} />
         <Stack.Screen name="task/[threadId]/index" options={{ title: '' }} />
         <Stack.Screen name="task/[threadId]/changes" options={{ title: 'Changes' }} />
