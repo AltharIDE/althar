@@ -45,6 +45,7 @@ Hermes, the way it will talk to Althar once the relay exists.
 | `bun run lint` | The repository's lint and format checks, on this app |
 | `bun run export:web` | Builds the web version into `dist` |
 | `bun run shots [name…]` | Screenshots of each screen from `dist`, at 390×844, into `test-results/shots` |
+| `bun run flows [name…]` | The app's flows end to end on `dist` and the demo: answering, merging, starting, finding, pairing; a failing flow's screenshot goes to `test-results/flows` |
 
 The demo reads the page's address on the web: `?connection=away`,
 `?connection=unpaired` or `?connection=outdated` for those states,

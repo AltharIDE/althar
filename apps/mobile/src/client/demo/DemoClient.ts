@@ -142,7 +142,18 @@ export class DemoClient implements AltharClient {
       ? found
       : {
           ...found,
-          task: { ...found.task, phase: card.phase, step: card.step, changes: card.change === null ? [] : [card.change] },
+          task: {
+            ...found.task,
+            phase: card.phase,
+            step: card.step,
+            changes: card.change === null ? [] : [card.change],
+            actions:
+              card.phase === 'running' || card.phase === 'waiting'
+                ? ['stop', 'abandon']
+                : card.phase === 'stopped'
+                  ? ['resume', 'abandon']
+                  : ['abandon'],
+          },
           attention: found.attention.filter((one) => this.state.calls.some((open) => open.id === one.id)),
         }
   }

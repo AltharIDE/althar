@@ -26,11 +26,11 @@ A thin client of the runtime on the paired Mac, reached through the relay. The r
 - **The person's word is the phone's to give.** A paired phone may answer, where a client on the Mac's socket can't (ADR-048). Answers that let an agent do more (allow, always allow, merge) ask for Face ID first; refusing never does.
 - **The desktop's words and colours.** Every word on screen is the glossary's; violet means a person's call, cobalt what runs.
 - **One Effect, on the phone's scheduler.** Metro resolves `effect` from the app for every file, the contract's included; the relay client runs everything on a scheduler that yields with `setTimeout`, as React Native's `setImmediate` doesn't let anything else run ([docs/hermes-spike.md](docs/hermes-spike.md)).
-- **Pure modules, tested.** `model/`, `notify/notices.ts`, the pairing code, the demo client and the relay client are tested. Screens are shown with screenshots of the web build.
+- **Pure modules, tested.** `model/`, `notify/notices.ts`, the pairing code, the demo client and the relay client are tested. Screens are shown with screenshots of the web build, and their flows checked end to end on it (`scripts/flows.mjs`).
 
 ## Gaps
 
 - No relay yet: the app runs the demo. The relay client is built and tested; it needs the relay's channel (a WebSocket, and an encrypted session over it).
 - Pairing reads the code and draws the words, but makes no key yet: the Secure Enclave key is still to do.
 - Notifications are local: the service extension that opens encrypted pushes, and Deny from a killed app, are still to do. No dictation of its own or Live Activity yet; [docs/design.md](docs/design.md) says how each is meant to work.
-- Screens have no component tests; they're checked by the shots.
+- Screens have no component tests: the flows check them on the web build, not on a phone's own engine and views.

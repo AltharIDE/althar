@@ -152,6 +152,8 @@ export default function Pair() {
   const [step, setStep] = useState<Step>(asked === 'verify' ? 'verify' : asked === 'done' ? 'done' : 'scan')
   const [mac, setMac] = useState<PairedMac>(DEMO_MAC)
   const [refused, setRefused] = useState(false)
+  // Pairing opens over where the person was, the home most often: go back there, now paired.
+  const leave = () => (router.canGoBack() ? router.back() : router.replace('/'))
   return (
     <View style={{ flex: 1, backgroundColor: theme.page, paddingTop: insets.top + space.lg, paddingHorizontal: space.lg, gap: space.xl }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
@@ -202,10 +204,10 @@ export default function Pair() {
           <Button
             label="Let Althar tap you"
             tone="ink"
-            onPress={() => void askToNotify().finally(() => router.replace('/'))}
+            onPress={() => void askToNotify().finally(() => leave())}
             accessibilityHint="Asks to send notifications when an agent asks or work is ready"
           />
-          <Button label="Not now" tone="quiet" onPress={() => router.replace('/')} />
+          <Button label="Not now" tone="quiet" onPress={() => leave()} />
         </View>
       )}
     </View>

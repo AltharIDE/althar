@@ -15,7 +15,8 @@
     "test": "vitest run",
     "shots": "node scripts/shots.mjs",
     "lint": "cd ../.. && vp lint apps/mobile/src apps/mobile/tests && vp fmt --check apps/mobile/src apps/mobile/tests apps/mobile/scripts",
-    "fix": "cd ../.. && vp lint --fix apps/mobile/src apps/mobile/tests && vp fmt apps/mobile/src apps/mobile/tests apps/mobile/scripts"
+    "fix": "cd ../.. && vp lint --fix apps/mobile/src apps/mobile/tests && vp fmt apps/mobile/src apps/mobile/tests apps/mobile/scripts",
+    "flows": "node scripts/flows.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
