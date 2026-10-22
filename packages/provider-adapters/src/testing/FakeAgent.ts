@@ -34,6 +34,8 @@ export const scenarios = {
   bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
   updates: 'updates',
+  /** Usage updates that carry Claude Code's rate-limit event in `_meta`: the five-hour window at 82 percent, then the weekly at 40. */
+  planUsage: 'plan-usage',
   /** One chunk, then waits until cancelled. */
   slow: 'slow',
   /** Fails with Claude Code's usage-limit message. */
@@ -70,6 +72,8 @@ export const scenarios = {
   choice: 'choice',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
+  /** Copilot's usage limit, said as a message, `Error: …`, and the turn ending as if done. */
+  limitInText: 'limit-in-text',
   /** Claude's structured report of a full context. */
   contextFull: 'context-full',
   /** Claude's structured warning of a short rate limit, then a normal reply. */
@@ -498,6 +502,7 @@ const playStall = async (
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
+ * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
@@ -720,6 +725,7 @@ const playRole = async (
         for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         return 'Stopped reviewing.'
       }
+      if (session.markers.has('[review:slowly]')) for (let waited = 0; !session.cancelled && waited < 3_000; waited += 10) await pause(10)
       if (session.markers.has('[review:always]'))
         return await call('report_review', {
           verdict: 'changes_requested',
@@ -1623,6 +1629,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
+        case scenarios.limitInText:
+          await say(
+            "Error: You've hit your rate limit. Please wait for your limit to reset in 3 hours 20 minutes or switch to auto model to continue. Learn More (https://docs.github.com/copilot/concepts/rate-limits).",
+          )
+          return ended()
         case scenarios.quota:
           await update({
             sessionUpdate: 'session_info_update',
@@ -1766,6 +1777,32 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'tool_call', ...described, status: 'pending' })
           const chosen = await ask({ toolCallId: 'call-4' }, permissionOptions(false))
           await say(`chosen=${chosen}`)
+          return ended()
+        }
+        case scenarios.planUsage: {
+          // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
+          const inSeconds = (seconds: number) => Math.floor(Date.now() / 1000) + seconds
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 10,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': {
+                status: 'allowed_warning',
+                rateLimitType: 'five_hour',
+                utilization: 0.82,
+                resetsAt: inSeconds(3 * 3600),
+              },
+            },
+          })
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 20,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: inSeconds(5 * 86_400) },
+            },
+          })
           return ended()
         }
         case scenarios.updates:

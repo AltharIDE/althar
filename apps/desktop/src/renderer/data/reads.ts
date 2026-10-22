@@ -31,6 +31,8 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
+  /** Every account's plan usage and the warnings not yet seen: kept whole as the runtime sends it. */
+  planUsage: ['planUsage'] as const,
   /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
@@ -119,6 +121,8 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  // The runtime sends it whole on the feed whenever it changes, so it is read once a window, and again only by asking.
+  planUsage: () => queryOptions({ queryKey: keys.planUsage, queryFn: () => client.getPlanUsage() }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.
   folders: () =>
     queryOptions({

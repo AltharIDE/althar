@@ -415,11 +415,17 @@ release (Tier D), and provider-signed reasoning is lost either way.
 A usage limit belongs to an account (`ProviderPrincipal`), so it pauses every
 session on that account at once ([05](05-workflow-engine.md)). The agent's
 other accounts are not out, and moving on tries them first (Several
-accounts, below). ACP does not report limits. Althar detects them in two
-layers:
+accounts, below). ACP does not report plan windows yet. Althar detects limits
+in two layers:
 
 1. **From errors, on every agent.** Each adapter classifies a failed turn as
-   `usage_limit`, with the reset time when the error carries one. Claude's
+   `usage_limit`, with the reset time when the error carries one, from each
+   agent's own words (`failures.ts`): a length ("reset after 19h14m47s"), a
+   time on a clock in a named zone or this computer's ("resets 3pm
+   (Europe/Budapest)", "try again at 3:05 PM"), or a date. Some agents give
+   it as a code (Junie's -32010, Mistral Vibe's -31001) or in the error's
+   data (OpenCode's `provider.quota`), and Copilot says it as a message and
+   ends its turn as if done (the registry's `failsInText`). Claude's
    adapter also reports failures in structured form when the client asks (the
    JetBrains AIR `sessionFailure` extension, in `_meta`): its category and the
    actions it suggests tell an exhausted quota from a short rate limit and a
@@ -427,31 +433,60 @@ layers:
    `usage_limit`, `context_full` (start a new session from a brief),
    `transient` (a short rate limit or an overloaded service: retry after a
    pause), `auth_required`, `invalid_request` or `unknown`.
-2. **From account status, where the agent exposes it.** A native side channel
-   reports use per window and reset times before the limit is reached:
-   - Claude Code: the Agent SDK's `rate_limit_event` gives status, use per
-     window (five-hour, seven-day, per model) and reset times.
-     `claude-agent-acp` doesn't forward it, so Althar ships the adapter
-     with a patch that forwards it as an ACP extension notification, and
-     offers the patch upstream.
+2. **From account status, before the limit is reached.** Plan usage is
+   required for every agent and every subscription account
+   ([plan](../plans/plan-usage.md)). An account's windows (five hours, a
+   week, a month, told apart by length) come from the first of these that
+   works for its (agent, provider) pair:
+   1. ACP's quota feature, once an adapter advertises it (an RFD is open:
+      [#2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316);
+      v1's `usage_update` carries context and cost only, and ACP v2, a Draft,
+      leaves it unchanged);
+   2. an extension the adapter ships in ACP;
+   3. the agent's own control channel, started with the account's home;
+   4. the provider's usage endpoint, read with the account's own sign-in:
+      the usage read, rule 3's one exception
+      ([ADR-058](../decisions/058-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
+
+   Today (`usageSources.ts` declares each pair's sources, or why it has none):
+   - Claude Code: live, `claude-agent-acp` forwards one window per event in
+     `usage_update` `_meta["_claude/rateLimit"]` (the Agent SDK's
+     `rate_limit_event`), and drops it if it arrives before a turn's first
+     usage figure ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
+     so Althar carries a patch for that (`patches/`, on the pinned version).
+     Any account, idle ones too: Anthropic's `/api/oauth/usage`, at most
+     every five minutes, and not while a session has just said.
    - Codex: app-server's `account/rateLimits/read` and
-     `account/rateLimits/updated`, through a small app-server connection used
-     only for this.
-   - OpenCode: the provider's rate-limit errors and retry hints. API keys have
-     no plan windows.
+     `account/rateLimits/updated` (`usage.ts`), started in the account's
+     home; ChatGPT's `wham/usage` where it can't answer.
+   - Kimi Code and Grok Build: their providers' usage URLs.
+   - OpenCode: plan or key is told per provider from its own
+     `opencode auth list --standalone --format json` (2.x; 1.x can't say);
+     its plan sign-ins are kept in its own database, and not read.
+   - Copilot, Junie, Mistral Vibe, Qwen Code and Antigravity give their usage
+     to no other app; each says why, calmly, rather than as a fault.
+
+   Errors (layer 1) stay under all of it: they say a limit was reached, not
+   how much is left.
 
 ```ts
 type AccountStatus = {
   principalId: string
-  state: "ok" | "warning" | "limited"
-  windows: Array<{ kind: string; usedFraction?: number; resetsAt?: string }>
-  source: "error" | "side_channel"
+  state: "ok" | "warning" | "limited" | "fault"
+  windows: Array<{ kind: "five_hour" | "weekly" | "monthly" | "other"; label?: string; usedPercent: number; resetsAt?: string }>
+  source: "acp" | "acp_extension" | "agent" | "endpoint" | "error"
+  fault?: "sign_in_again" | "expired" | "source_changed" | "unreachable" | "no_source" | "no_data_yet" | "cannot_classify"
+  noReading?: string // why the agent's usage can't be read, said calmly
   observedAt: string
 }
 ```
 
-With account status, the scheduler can hold or move work before the limit is
-reached rather than after.
+With the windows, the scheduler moves or holds new work before the limit is
+reached rather than after ([05](05-workflow-engine.md), Usage limits): an
+account's room is its tightest window left, as last read (a window past its
+reset has started again; a model's own window counts for that model; money
+spent past the plan doesn't), and under 5% it is nearly out. Warnings fire at
+50, 25, 10 and 5% remaining (once per account, window and reset).
 
 ## Provider session lifecycle
 
@@ -572,7 +607,10 @@ Rules:
 2. Althar may invoke documented status/login commands or react to a
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
-   synchronizes the CLI's credential cache.
+   synchronizes the CLI's credential cache, but for one exception: the
+   usage read ([ADR-058](../decisions/058-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+   an account's access token read into memory for one allowlisted `GET` to
+   its provider's usage URL, and dropped.
 4. It never asks for a provider password or browser session cookie.
 5. Subscription-backed execution runs on the user's device and only where the
    provider's current documentation and terms permit that use.
