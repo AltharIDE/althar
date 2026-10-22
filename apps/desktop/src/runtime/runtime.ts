@@ -14,6 +14,7 @@ import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { profileInUse } from './profileInUse'
+import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
 
@@ -87,6 +88,9 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
   open: (sealed) => askMain('open', sealed),
 })
 
+/* Screenshots agents ask for, which the main process draws, with Chromium (screenshots.ts). */
+const screenshots = screenshotsWith((message) => parent.postMessage(message))
+
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const appFetch: Fetch = appFetchOf(net)
 
@@ -118,6 +122,7 @@ const options = {
   agentsRoot: join(profile, 'agents'),
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
+  screenshot: screenshots.ask,
   editors: {
     list: () =>
       device === undefined
@@ -174,6 +179,14 @@ const program = Effect.gen(function* () {
   // The Codex its adapter drives, out on the device, where Codex's own sandbox works (flatpak/codex-host.sh says why, and what to do without one).
   if (process.env.FLATPAK_ID !== undefined) process.env.CODEX_PATH = '/app/bin/althar-host-codex'
   // The end-to-end tests drive the app against a scripted agent and a fake code host, keeping tokens in memory. Packaged builds leave this out.
+  // A real agent against the fake GitHub, for a test of what a real lead does on a pull request (e2e/real-tools.spec.ts).
+  const fakeHost =
+    __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS !== '1' && process.env.ALTHAR_FAKE_CONNECTORS === 'github'
+      ? {
+          connectors: (yield* Effect.promise(() => import('./fakeConnectors'))).fakeConnectors,
+          secrets: Secrets.memory(),
+        }
+      : undefined
   const fake =
     __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
       ? {
@@ -205,6 +218,7 @@ const program = Effect.gen(function* () {
             fetch: appFetch,
             // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
             modelFacts: { url: MODEL_LIST, cache: join(profile, 'model-facts.json'), fetch: appFetch },
+            ...fakeHost,
           }
         : { ...options, ...fake },
     ),
@@ -298,11 +312,13 @@ parent.on('message', (message) => {
     readonly error?: string
     readonly keyring?: boolean
     readonly threadId?: string
+    readonly shot?: unknown
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
     answerSealed(data.requestId, data)
   }
+  if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)

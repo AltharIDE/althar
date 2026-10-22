@@ -1252,6 +1252,8 @@ export type PlanStep = typeof PlanStep.Type
 export const BackgroundCommand = Schema.Struct({
   id: Schema.String,
   command: Schema.String,
+  /** What the agent says it does, where it named it apart from the command: "Site dev server". Absent where it only gave the command. */
+  name: Schema.optional(Schema.String),
   /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
   label: Schema.optional(Schema.String),
   /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
@@ -2641,6 +2643,8 @@ export const Api = RpcGroup.make(
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
+  /** What a command a thread's session left running has printed so far, while its session lives. */
+  call('ReadBackgroundOutput', { threadId: Schema.String, id: Schema.String }, OutputText),
   /**
    * A markdown document an agent in a thread wrote, as it is now in the
    * task's worktree: by the path the thread names it by. Only a markdown

@@ -257,6 +257,8 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
+    /** How a screenshot is taken, where a test takes one; without, none can be. */
+    readonly screenshot?: RuntimeOptions['screenshot']
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
   } = {},
@@ -288,6 +290,7 @@ export const runtime = (
     usage: { readEndpoint: () => Promise.resolve({ kind: 'none' as const }), ...more.usage },
     ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
+    ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     busy: { machine: ROOMY, ...more.busy },
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
   })
@@ -405,6 +408,28 @@ export const listTools = (access: ToolAccess) =>
 /** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
   Effect.map(callToolAtOnce(access, name, [args]), (said) => said[0] ?? '')
+
+/** Calls one of Althar's tools, and gives back all it answered: its words, and any picture, as the agent gets them. */
+export const callToolWhole = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
+  Effect.gen(function* () {
+    const granted = yield* (yield* ToolServer).grant(access)
+    const server = granted.server
+    if (server.type !== 'http') return { isError: true, content: [] as ReadonlyArray<Record<string, unknown>> }
+    return yield* Effect.promise(async () => {
+      const client = new Client({ name: 'test', version: '1.0.0' })
+      const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
+      await client.connect(transport as Parameters<typeof client.connect>[0])
+      try {
+        const result = await client.callTool(args === undefined ? { name } : { name, arguments: args })
+        return {
+          isError: result.isError === true,
+          content: (Array.isArray(result.content) ? result.content : []) as ReadonlyArray<Record<string, unknown>>,
+        }
+      } finally {
+        await client.close()
+      }
+    })
+  })
 
 /** Calls one of Althar's tools several times at once over one connection, as an agent's parallel calls reach it: what each said. */
 export const callToolAtOnce = (access: ToolAccess, name: string, calls: ReadonlyArray<Record<string, unknown> | undefined>) =>

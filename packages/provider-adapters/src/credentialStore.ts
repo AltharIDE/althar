@@ -6,7 +6,7 @@ import { isAbsolute, join, normalize, sep } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
 /*
- * The one place that opens an agent's credential store (ADR-057, the usage
+ * The one place that opens an agent's credential store (ADR-058, the usage
  * read). It is not exported from the package, and only `usageRead.ts` imports
  * it: a test fails if another file does. It reads one named file inside one
  * account's home, or, on a Mac, the one keychain item Claude Code keeps for

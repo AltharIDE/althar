@@ -1,4 +1,4 @@
-# ADR-057: A usage read may use an account's own sign-in, once, for one call to its provider's usage URL
+# ADR-058: A usage read may use an account's own sign-in, once, for one call to its provider's usage URL
 
 - **Status:** Accepted (the person decided it on 21 October 2026)
 - **Date:** 2026-10-21

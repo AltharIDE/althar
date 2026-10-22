@@ -11,6 +11,7 @@ import {
   ConnectorFailed,
   type Person,
   type Product,
+  products,
   type Repository,
 } from '@althar/connectors'
 import { PushRequestItem } from '@althar/contracts'
@@ -2730,19 +2731,37 @@ export class Changes extends Context.Service<
           return row !== undefined
         })
 
-      /** Whether Althar ran the checks on this commit again after they failed (ADR-041). */
+      /**
+       * Whether the checks on this commit ran again after they failed (ADR-041),
+       * the latest time: Althar's own once, `rerun:<sha>`, and each the lead
+       * asked for after, `rerun:<sha>:<n>`.
+       */
       const ranAgain = (link: LinkRow, sha: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [row] = yield* sql<{ at: string }>`
-            SELECT observed_at AS at FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
-              AND kind = 'checks_rerun' AND json_extract(payload, '$.id') = ${`rerun:${sha}`} LIMIT 1`
+          const [row] = yield* sql<{ at: string; id: string }>`
+            SELECT observed_at AS at, json_extract(payload, '$.id') AS id FROM observations
+            WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+              AND kind = 'checks_rerun' AND json_extract(payload, '$.sha') = ${sha}
+            ORDER BY observed_at DESC, rowid DESC LIMIT 1`
           if (row === undefined) return null
           // Its run again is under way once the host has shown it running; a failure before that is the old one, still showing.
+          const startedId = row.id.replace(/^rerun:/, 'rerun-started:')
           const [started] = yield* sql<{ one: number }>`
             SELECT 1 AS one FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
-              AND kind = 'checks_rerun_started' AND json_extract(payload, '$.id') = ${`rerun-started:${sha}`} LIMIT 1`
-          return { at: row.at, started: started !== undefined }
+              AND kind = 'checks_rerun_started' AND json_extract(payload, '$.id') = ${startedId} LIMIT 1`
+          // How its outcome is heard: Althar's own as it always was, each of the lead's apart.
+          return { at: row.at, started: started !== undefined, startedId, again: row.id === `rerun:${sha}` ? ':again' : `:${row.id}` }
+        })
+
+      /** Keeps that the lead ran checks on this commit again: its outcome is heard afresh, as Althar's own rerun's is. */
+      const leadRanAgain = (link: LinkRow, sha: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [count] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+              AND kind = 'checks_rerun' AND json_extract(payload, '$.sha') = ${sha}`
+          yield* heard(link, 'checks_rerun', `rerun:${sha}:${(count?.n ?? 0) + 1}`, { sha, by: 'lead' })
         })
 
       /**
@@ -2890,7 +2909,7 @@ export class Changes extends Context.Service<
             if (sum.outcome === 'running') {
               happened = true
               yield* heard(link, 'checks_running', `running:${sum.sha}`, { sha: sum.sha })
-              if (reran !== null && !reran.started) yield* heard(link, 'checks_rerun_started', `rerun-started:${sum.sha}`, { sha: sum.sha })
+              if (reran !== null && !reran.started) yield* heard(link, 'checks_rerun_started', reran.startedId, { sha: sum.sha })
               yield* stuckOn(link, name, sum.sha)
             }
             const settled =
@@ -2899,7 +2918,7 @@ export class Changes extends Context.Service<
               finished &&
               settled &&
               (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome) &&
-              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}${reran !== null ? ':again' : ''}`, { ...sum }))
+              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}${reran?.again ?? ''}`, { ...sum }))
             ) {
               happened = true
               // The failed checks' logs, read once: the card shows their ends, or why there are none, and the lead is told the same.
@@ -4432,6 +4451,85 @@ export class Changes extends Context.Service<
           ].join('\n')
         })
 
+      const RerunAsked = Schema.Struct({
+        check: Schema.optional(Schema.NullOr(Schema.String)),
+        pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
+      })
+
+      /**
+       * Runs checks on the task's pull request again, as one that may have
+       * failed by chance: the one named, or each that failed. Its new outcome
+       * is heard as a rerun's is (ADR-041), and the lead told. A check the
+       * host can't run again from here, as one another CI service reported, is
+       * said so, with its page, where the person can.
+       */
+      const rerunCheck = (taskId: string, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* Schema.decodeUnknownEffect(RerunAsked)(input).pipe(
+            Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
+          )
+          const named = asked.pull_request == null ? null : String(asked.pull_request).trim().toLowerCase()
+          const seen = yield* urlsOf(taskId)
+          const chosen = named === null ? undefined : seen.find((candidate) => isNamed(candidate, named))
+          if (named !== null && chosen === undefined)
+            return yield* new ToolRefused({
+              message: `This task's pull requests are ${seen.map(shortNameOf).join(', ')}. Name one of those.`,
+            })
+          const { link, snapshot, host, repository } = yield* current(taskId, chosen?.url)
+          const now = yield* host.change(repository, snapshot.number)
+          const name = nameOf(snapshot)
+          if (now.state !== 'open') return yield* new ToolRefused({ message: `${name} is ${now.state}, so its checks don't run again.` })
+          if (now.headSha === null) return `${name} has no commits, so no checks.`
+          const sha = now.headSha
+          const all = yield* host.checks(repository, sha)
+          const wanted = asked.check?.trim().toLowerCase()
+          const one = wanted === undefined || wanted === '' ? undefined : all.find((candidate) => candidate.name.toLowerCase() === wanted)
+          if (wanted !== undefined && wanted !== '' && one === undefined)
+            return yield* new ToolRefused({
+              message: `${name} has no check called "${asked.check}". Its checks: ${all.length === 0 ? 'none' : all.map((check) => check.name).join(', ')}.`,
+            })
+          if (one !== undefined && (one.state === 'queued' || one.state === 'running'))
+            return `${one.name} on ${name} is still ${one.state === 'queued' ? 'waiting to run' : 'running'}, so there's nothing to run again yet.`
+          const failed = all.filter((check) => check.state === 'failed')
+          const targets = one === undefined ? failed : [one]
+          if (targets.length === 0)
+            return `None of ${name}'s checks failed${all.some((check) => check.state === 'queued' || check.state === 'running') ? ', and some still run' : ''}, so there's nothing to run again. Name one with check to run it again all the same.`
+          const tried = yield* Effect.forEach(targets, (check) =>
+            host.rerun(repository, check).pipe(
+              Effect.map((again) => ({ check, again, refused: null as string | null })),
+              Effect.catch((error: ConnectorFailed) => Effect.succeed({ check, again: false, refused: error.message })),
+            ),
+          )
+          const again = tried.filter((one) => one.again).map((one) => one.check.name)
+          const elsewhere = tried.filter((one) => !one.again && one.refused === null)
+          const refused = tried.filter((one) => one.refused !== null)
+          // Heard as a rerun's, so its new outcome is the lead's once it ends, and Althar doesn't run it again by itself.
+          if (again.length > 0) {
+            yield* leadRanAgain(link, sha)
+            yield* sayOn(link, `Running ${again.join(', ')} on ${name} again, as its lead asked.`)
+            wakeNow(taskId)
+          }
+          const hostName = products[link.product].name
+          const why =
+            link.product === 'github'
+              ? 'only a GitHub Actions job runs again from Althar, and it comes from another service'
+              : link.product === 'gitlab'
+                ? "only a pipeline's job runs again from Althar, and it isn't one"
+                : `${hostName}'s checks don't run again from Althar`
+          return [
+            ...(again.length === 0
+              ? []
+              : [
+                  `Running ${again.join(', ')} on ${name} again. If ${again.length === 1 ? 'it fails' : 'they fail'} again, you'll be told, as for any checks; read_pull_request shows how ${again.length === 1 ? 'it goes' : 'they go'} meanwhile.`,
+                ]),
+            ...elsewhere.map(
+              ({ check }) =>
+                `${check.name} can't be run again here: ${why}. ${check.url === null ? 'Ask the person to run it again where it ran.' : `The person can run it again from its page: ${check.url}`}`,
+            ),
+            ...refused.map(({ check, refused: said }) => `${hostName} refused to run ${check.name} again: ${said}`),
+          ].join('\n\n')
+        })
+
       /** Whether the lead names this pull request: by its repository and number, as read_pull_request does (web#3), its whole path, or its number. */
       const isNamed = (candidate: Snapshot, asked: string) =>
         asked === `${candidate.repository.at(-1) ?? ''}${candidate.words.prefix}${candidate.number}`.toLowerCase() ||
@@ -4547,6 +4645,15 @@ export class Changes extends Context.Service<
             required: ['check'],
           },
           (taskId, input) => readCheckLog(taskId, input),
+        ),
+        leadTool(
+          'rerun_check',
+          "Runs checks on the task's pull request again, as for one that may have failed by chance (a flaky test, a runner that went away): with check, the one by that name, as read_pull_request gives it; without, each that failed. Should they fail again, you'll be told, as for any checks. A check its host can't run again from Althar, such as one another CI service reports to GitHub (Cloudflare's builds, Vercel, CircleCI's app), or any on Bitbucket, is said so, with its page, where the person can. Fix a failure that is the change's rather than running it again. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3.",
+          {
+            type: 'object',
+            properties: { check: { type: 'string' }, pull_request: { type: 'string' } },
+          },
+          (taskId, input) => rerunCheck(taskId, input),
         ),
         leadTool(
           'reply_on_pull_request',

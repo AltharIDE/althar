@@ -239,6 +239,7 @@ describe('the client', () => {
           GetThread: () => Effect.die('unused'),
           GetThreadItem: () => Effect.die('unused'),
           ReadOutput: () => Effect.die('unused'),
+          ReadBackgroundOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
           FindCode: () => Effect.die('unused'),
           ReadCode: () => Effect.die('unused'),

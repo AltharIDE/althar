@@ -2,6 +2,7 @@ import { open } from 'node:fs/promises'
 
 import { Duration, Effect } from 'effect'
 
+import { localAddress } from './ports'
 import { commandIn, shortCommand } from './rules'
 
 /*
@@ -15,6 +16,8 @@ import { commandIn, shortCommand } from './rules'
 export interface LeftRunning {
   readonly id: string
   readonly command: string
+  /** What the agent says it does, as it named the command: "Site dev server". Empty where it only gave the command. */
+  readonly name: string
   /** The tool call that started it, whose output may say where it answers. */
   readonly toolCallId: string | null
   /** The file its output goes to, where the agent says (Claude Code). */
@@ -23,9 +26,27 @@ export interface LeftRunning {
   printed: string
   /** Where it answers, as its output said: http://localhost:5173/. */
   url: string | null
+  /** `url` was worked out from a port, not said by its output: its output, once it says, replaces it. */
+  inferred: boolean
   readonly startedAt: string
   /** It ended by itself: when, and its exit code where its output says. */
   ended: { readonly at: string; readonly code: number | null } | null
+}
+
+/**
+ * Where one answers, given what it printed and the port found for it, if any:
+ * what it printed is authoritative and replaces an address worked out from a
+ * port; a port only gives one where it has none. Null where nothing changes.
+ */
+export const addressOf = (
+  left: Pick<LeftRunning, 'url' | 'inferred'>,
+  printed: string,
+  port: number | null,
+): { readonly url: string; readonly inferred: boolean } | null => {
+  const said = servingAt(printed)
+  if (said !== null) return left.url === said && !left.inferred ? null : { url: said, inferred: false }
+  if (left.url === null && port !== null) return { url: localAddress(port), inferred: true }
+  return null
 }
 
 /**
@@ -144,12 +165,15 @@ export const commandOfCall = (call: Readonly<Record<string, unknown>> | undefine
 
 /** What a client shows of one. */
 export type ShownLeftRunning = Pick<LeftRunning, 'id' | 'command' | 'url' | 'startedAt' | 'ended'> & {
+  /** What the agent calls it, where that says more than the command does. */
+  readonly name?: string
   /** The command as it reads at a glance: without its `cd`, environment and output plumbing. */
   readonly label?: string
 }
 export const shownOf = (left: LeftRunning): ShownLeftRunning => ({
   id: left.id,
   command: left.command,
+  ...(left.name === '' || left.name === left.command ? {} : { name: left.name }),
   label: shortCommand(left.command),
   url: left.url,
   startedAt: left.startedAt,

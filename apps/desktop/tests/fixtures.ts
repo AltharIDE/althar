@@ -842,6 +842,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
+    readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readDocument: vi.fn(async (_threadId: string, path: string) => ({
       path,
       body: '# Notes\n\nRefunds share the partner budget.\n',
