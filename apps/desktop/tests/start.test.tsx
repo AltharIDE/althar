@@ -631,6 +631,24 @@ describe('the start', () => {
     await waitFor(() => expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false))
     view.unmount()
 
+    // With some on and some off, it reads as off, and turns the rest on.
+    const mixed = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      listSkills: vi.fn(async () => ({
+        enabled: true,
+        catalogRevision: 'fixture-1',
+        skills: [installedSkill, { ...installedSkill, id: 'systematic-debugging', active: false }],
+      })),
+    }).client
+    const some = withServices(<Start onProject={vi.fn()} />, mixed, fakeHost())
+    const partly = await screen.findByRole('switch', { name: 'Agent skills' })
+    expect(partly.getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(partly)
+    await waitFor(() => expect(partly.getAttribute('aria-checked')).toBe('true'))
+    expect(mixed.setSkillActive).toHaveBeenCalledTimes(1)
+    expect(mixed.setSkillActive).toHaveBeenCalledWith('systematic-debugging', true)
+    some.unmount()
+
     // Where this Althar has no skills to give, it isn't asked.
     withServices(
       <Start onProject={vi.fn()} />,

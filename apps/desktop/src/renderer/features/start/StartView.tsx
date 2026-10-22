@@ -228,7 +228,8 @@ function First({
         foot={
           <>
             {/* Only where Althar has skills to give, once the store is read: off until turned on, as each one is. */}
-            {skills.enabled && sound.length > 0 && <SkillsLine on={sound.some((skill) => skill.on)} onChange={skills.toggleAll} />}
+            {/* On only when every one is, so with some on it turns the rest on, as Settings' Turn all on does. */}
+            {skills.enabled && sound.length > 0 && <SkillsLine on={sound.every((skill) => skill.on)} onChange={skills.toggleAll} />}
             <CrashReportsLine
               on={preferences.crashReports}
               onChange={(on) => set('crashReports', on)}
