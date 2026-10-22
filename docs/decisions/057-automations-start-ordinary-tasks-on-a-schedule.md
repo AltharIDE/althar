@@ -40,15 +40,24 @@
     coordinator: a task from its prompt, its plan held then started (a report
     on this computer, or a draft or ready pull request), or a review of each pull
     request opened by anyone but the person that no task reviews yet, a few
-    a run, one review task each.
+    a run, oldest first, one review task each. A listing that has more is
+    read on from its last, a few listings deep; a run that couldn't read a
+    repository to its end says so. A review is over once drafted, or once
+    its lead has gone without drafting one, stopped or ended.
   - **It waits its turn and keeps small.** A run's work waits after
     everything else for a place among the agents at work, every step of it,
     and only one automation's task is at work at once (`Busy.ts`). It is
     skipped, and says why, while its last run still goes, while every
     automation is paused, with five of its pull requests open, past 24 runs
-    a day, or where its agent pays per use (plans only, until cost is
-    counted). It works at most its minutes, counted over its turns, and is
-    stopped past them. Three failures in a row pause it, saying why.
+    a day, or where none of its agent's accounts is on a plan, as the
+    agent's own status says: per use, or where it can't tell (plans only,
+    until cost is counted). Every session of a run is held to the same
+    wherever it starts (`Limits.pick`), so a usage limit moves it to another
+    agent on a plan, never to an account paid per use. A run starts one at
+    a time, its limits checked and its occurrence kept together, so a slot
+    and Run now never both pass. It works at most its minutes, counted over
+    its turns, and is stopped past them. Three failures in a row pause it,
+    saying why.
   - **With nobody there, it goes ahead.** Its task allows everything where
     its automation says (on by default), and pushing to the default branch
     is never allowed, which allowing everything doesn't go past

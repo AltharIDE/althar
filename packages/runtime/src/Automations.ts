@@ -10,7 +10,7 @@ import {
 import { ConnectorFailed, type ListedChange } from '@althar/connectors'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
+import { Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { definitionOf, partsOf } from './automated'
@@ -27,7 +27,6 @@ import { failureWords } from './pullRequestList'
 import { change, fact, timestamp } from './records'
 import { ReviewRefused, Reviews } from './Reviews'
 import type { PlanStep } from './Runs'
-import { SignIns } from './SignIns'
 import { instantOf, lastCome, localOf, localZone, nextToCome, type Slot, staggerOf, windowOf } from './slots'
 import { Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
@@ -59,6 +58,9 @@ export const OPEN_AT_ONCE = 5
 /** Pull requests one run reviews at most: the rest wait for its next run. */
 export const REVIEWS_A_RUN = 5
 
+/** Listings of a repository's open pull requests one run reads back through, at most: past them, the oldest aren't looked at, and its run says so. */
+const PAGES = 5
+
 /** Failures in a row that pause an automation. */
 export const FAILURES = 3
 
@@ -87,7 +89,6 @@ type Store =
   | Tasks
   | Connections
   | Limits
-  | SignIns
 
 /** An automation as its row and its current definition hold it. */
 interface Row {
@@ -250,13 +251,21 @@ export class Automations extends Context.Service<
       const tasks = yield* Tasks
       const connections = yield* Connections
       const limits = yield* Limits
-      const signIns = yield* SignIns
       const options = (yield* RuntimeConfig).automations ?? {}
       const nowOf = options.now ?? (() => Date.now())
       const zoneOf = options.zone ?? localZone
       const tick = Duration.toMillis(options.tick ?? Duration.seconds(30))
       const settle = Duration.toMillis(options.settle ?? Duration.minutes(2))
       const staggered = options.stagger ?? true
+      const listedAtOnce = options.listed ?? 100
+      /**
+       * Starting a run, from its limits checked to its task under way, one at
+       * a time: a slot that came, Run now pressed in two windows, and a run
+       * picked up after a restart never both pass the limits before either
+       * is kept. One runtime holds the store.
+       */
+      const admitting = Semaphore.makeUnsafe(1)
+      const admitted = <A, E, R>(effect: Effect.Effect<A, E, R>) => admitting.withPermits(1)(effect)
       /** Wakes the clock when an automation changes. */
       const wake = yield* Queue.sliding<void>(1)
       /** Now, for an automation's rows: the clock its schedule is read by, so what was turned on and what came compare. */
@@ -499,13 +508,18 @@ export class Automations extends Context.Service<
 
       /* ---- Running ---- */
 
-      /** What a run's lead and reviewer pay with: a plan, or per use, which automations don't run on yet. */
-      const paysPerUse = (agentId: string, projectId: string) =>
-        Effect.gen(function* () {
-          const account = yield* limits.pick({ agentId, projectId }).pipe(Effect.option)
-          if (Option.isNone(account)) return false
-          return (yield* signIns.account(account.value)).paidBy === 'key'
-        })
+      /**
+       * Why a run's lead or reviewer can't run unwatched: none of its accounts
+       * is on a plan, as its agent's status says; null where one is. Each
+       * session of the run is held to the same (`Limits.pick`).
+       */
+      const offPlan = (agentId: string, projectId: string) =>
+        limits.pick({ agentId, projectId, planOnly: true }).pipe(
+          Effect.as(null),
+          Effect.catchTag('PlanOnly', (error) => Effect.succeed(error.message)),
+          // An agent with no account at all is the run's to fail on, where its thread says why.
+          Effect.catchTag('NotFound', () => Effect.succeed(null)),
+        )
 
       /** Why a run can't start now, in a sentence; null where it can. */
       const blocked = (row: Row, definition: AutomationDefinition, cause: 'schedule' | 'now') =>
@@ -530,8 +544,10 @@ export class Automations extends Context.Service<
           for (const step of [
             definition.lead,
             ...(definition.work.kind === 'task' && definition.work.review !== null ? [definition.work.review] : []),
-          ])
-            if (yield* paysPerUse(step.agentId, row.projectId)) return 'Its agent pays per use, and automations run on a plan only for now.'
+          ]) {
+            const why = yield* offPlan(step.agentId, row.projectId)
+            if (why !== null) return why
+          }
           return null
         })
 
@@ -674,14 +690,24 @@ export class Automations extends Context.Service<
           yield* planned(row.projectId, created.taskId, definition)
         })
 
-      /** A run's task, planned and started: once, however often it is asked. */
+      /**
+       * A run's task, planned and started: once, however often it is asked.
+       * One whose plan was kept, held, but Althar stopped before it started,
+       * or before its run was made, starts that plan.
+       */
       const planned = (projectId: ProjectId, taskId: string, definition: AutomationDefinition) =>
         Effect.gen(function* () {
           if (definition.work.kind !== 'task') return
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ state: string; planned: number }>`
-            SELECT k.state, EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id) AS planned FROM tasks k WHERE k.id = ${taskId}`
-          if (task === undefined || task.state !== 'draft' || task.planned === 1) return
+          const [task] = yield* sql<{ state: string; planId: string | null; planState: string | null }>`
+            SELECT k.state, p.id AS plan_id, p.state AS plan_state FROM tasks k
+            LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id ORDER BY proposed_at DESC, rowid DESC LIMIT 1)
+            WHERE k.id = ${taskId}`
+          if (task === undefined || task.state !== 'draft') return
+          if (task.planId !== null) {
+            if (task.planState === 'proposed' || task.planState === 'accepted') yield* plans.start(task.planId, instance.systemId)
+            return
+          }
           const planId = yield* plans.propose({
             projectId,
             taskId,
@@ -699,14 +725,22 @@ export class Automations extends Context.Service<
        * The pull requests a review automation's run reviews: each open one
        * ready for review in the project's repositories, by anyone but the
        * person, that no task of Althar's reviews or reviewed, and this
-       * automation hasn't had before; the oldest first, a few a run. What
-       * stopped a repository being listed, said.
+       * automation hasn't had before; the oldest first, a few a run. A
+       * listing that has more reads on from the last it gave, a few times;
+       * a repository it couldn't read to its end is said, as is what stopped
+       * one being listed.
        */
       const subjectsOf = (
         row: Row,
       ): Effect.Effect<
         | { readonly failed: string }
-        | { readonly subjects: ReadonlyArray<Subject>; readonly left: number; readonly failed: ReadonlyArray<string> },
+        | {
+            readonly subjects: ReadonlyArray<Subject>
+            readonly left: number
+            readonly failed: ReadonlyArray<string>
+            /** The repositories whose oldest open pull requests weren't looked at, with how many were. */
+            readonly short: ReadonlyArray<{ readonly name: string; readonly read: number }>
+          },
         unknown,
         Store
       > =>
@@ -729,6 +763,7 @@ export class Automations extends Context.Service<
           )
           const found: Array<Omit<Subject, 'named'> & { readonly number: number; readonly updatedAt: string }> = []
           const failed: Array<string> = []
+          const short: Array<{ readonly name: string; readonly read: number }> = []
           let reviewable = 0
           for (const binding of bindings) {
             const remotes = Option.getOrElse(
@@ -741,8 +776,26 @@ export class Automations extends Context.Service<
             const listed = yield* Effect.gen(function* () {
               const me = (yield* connections.adapters(place.connectionId)).info.account.login.toLowerCase()
               const repository = yield* place.host.repository(place.path)
-              const list = yield* place.host.listChanges(repository, { state: 'open', draft: false, limit: 30 })
-              return list.changes.filter((one: ListedChange) => one.author !== null && one.author.login.toLowerCase() !== me)
+              // Newest first: each listing after the first goes on from the last the one before gave.
+              const read = new Map<string, ListedChange>()
+              let whole = false
+              let until: string | undefined
+              for (let page = 0; page < PAGES && !whole; page += 1) {
+                const list = yield* place.host.listChanges(repository, {
+                  state: 'open',
+                  draft: false,
+                  limit: listedAtOnce,
+                  ...(until === undefined ? {} : { updatedUntil: until }),
+                })
+                const before = read.size
+                for (const one of list.changes) read.set(one.id, one)
+                // All of them, or a listing that brought nothing new, as from a host that can't read on.
+                if (!list.more) whole = true
+                else if (read.size === before) break
+                until = list.changes.at(-1)?.updatedAt
+              }
+              if (!whole) short.push({ name: binding.name, read: read.size })
+              return [...read.values()].filter((one) => one.author !== null && one.author.login.toLowerCase() !== me)
             }).pipe(
               Effect.catch((error) =>
                 Effect.succeed(
@@ -771,8 +824,12 @@ export class Automations extends Context.Service<
           const oldest = found
             .toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt))
             .map(({ number, updatedAt: _updatedAt, ...one }) => ({ ...one, named: reviewable === 1 ? `#${number}` : one.url }))
-          return { subjects: oldest.slice(0, REVIEWS_A_RUN), left: Math.max(0, oldest.length - REVIEWS_A_RUN), failed }
+          return { subjects: oldest.slice(0, REVIEWS_A_RUN), left: Math.max(0, oldest.length - REVIEWS_A_RUN), failed, short }
         })
+
+      /** What a run says of the repositories it couldn't read to their end: their oldest open pull requests weren't looked at. */
+      const shortWords = (short: ReadonlyArray<{ readonly name: string; readonly read: number }>) =>
+        short.map((one) => ` Only the ${one.read} latest open pull requests of ${one.name} were looked at; older ones weren’t.`).join('')
 
       /** Starts a review of each new pull request for an occurrence, an occurrence each; the slot's says what it found. */
       const startReviews = (
@@ -786,12 +843,19 @@ export class Automations extends Context.Service<
         Effect.gen(function* () {
           const listed = yield* subjectsOf(row)
           if (!('subjects' in listed)) return yield* end(occurrenceId, 'failed', listed.failed)
-          if (listed.subjects.length === 0) return yield* end(occurrenceId, 'nothing', 'No new pull requests to review.')
+          if (listed.subjects.length === 0)
+            return yield* end(
+              occurrenceId,
+              'nothing',
+              listed.short.length === 0
+                ? 'No new pull requests to review.'
+                : `No new pull requests among those looked at.${shortWords(listed.short)}`,
+            )
           const count = listed.subjects.length
           yield* end(
             occurrenceId,
             'made',
-            `Found ${count} new pull request${count === 1 ? '' : 's'}${listed.left > 0 ? `; ${listed.left} more wait for its next run` : ''}.`,
+            `Found ${count} new pull request${count === 1 ? '' : 's'}${listed.left > 0 ? `; ${listed.left} more wait for its next run` : ''}.${shortWords(listed.short)}`,
           )
           for (const subject of listed.subjects) {
             const id = yield* record({ row, cause, slot, subject, dueAt: due, state: 'starting' })
@@ -829,25 +893,27 @@ export class Automations extends Context.Service<
        * person who asked, rather than recording a skip.
        */
       const fire = (row: Row, definition: AutomationDefinition, cause: 'schedule' | 'now', slot: string | null, due: number) =>
-        Effect.gen(function* () {
-          const why = yield* blocked(row, definition, cause)
-          if (why !== null && cause === 'now') return yield* refused(why)
-          const id = yield* newId(Ids.automationOccurrence)
-          const at = slot ?? `now:${id}`
-          const recorded = yield* record({
-            row,
-            cause,
-            slot: at,
-            dueAt: due,
-            state: why === null ? 'starting' : 'skipped',
-            reason: why,
-            id,
-          })
-          if (recorded === null || why !== null) return
-          yield* work(row, definition, id, cause, at, due)
-          // Its cards' next time has moved on.
-          yield* refreshCards(row.id)
-        })
+        admitted(
+          Effect.gen(function* () {
+            const why = yield* blocked(row, definition, cause)
+            if (why !== null && cause === 'now') return yield* refused(why)
+            const id = yield* newId(Ids.automationOccurrence)
+            const at = slot ?? `now:${id}`
+            const recorded = yield* record({
+              row,
+              cause,
+              slot: at,
+              dueAt: due,
+              state: why === null ? 'starting' : 'skipped',
+              reason: why,
+              id,
+            })
+            if (recorded === null || why !== null) return
+            yield* work(row, definition, id, cause, at, due)
+            // Its cards' next time has moved on.
+            yield* refreshCards(row.id)
+          }),
+        )
 
       /** An occurrence's work, started; where it fails, the occurrence says why. */
       const work = (
@@ -940,7 +1006,10 @@ export class Automations extends Context.Service<
       /**
        * Looks at every run under way: one whose task ended says how it went;
        * one that has worked its minutes is stopped. A run of the review kind
-       * made something once its review is drafted.
+       * made something once its review is drafted, and failed where its lead
+       * went before drafting one: stopped, gone, or its last turn failed
+       * with nothing since for as long as the run may work. Nothing else
+       * would finish it, since a review has no run of steps.
        */
       const watch = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -954,6 +1023,9 @@ export class Automations extends Context.Service<
           runState: string | null
           drafts: number
           reviewing: number
+          leadState: string | null
+          turnState: string | null
+          turnEnded: number | null
           worked: number | null
           parts: string
           name: string
@@ -963,6 +1035,12 @@ export class Automations extends Context.Service<
             (SELECT r.state FROM runs r WHERE r.task_id = k.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1) AS run_state,
             (SELECT count(*) FROM review_drafts d WHERE d.task_id = k.id) AS drafts,
             (SELECT count(*) FROM external_links x WHERE x.task_id = k.id AND x.kind = 'review') AS reviewing,
+            (SELECT s.state FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
+              WHERE h.task_id = k.id AND h.kind = 'task' ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1) AS lead_state,
+            (SELECT t.state FROM turn_deliveries t JOIN threads h ON h.id = t.thread_id
+              WHERE h.task_id = k.id AND h.kind = 'task' ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1) AS turn_state,
+            (SELECT (julianday(${at}) - julianday(t.ended_at)) * 86400000 FROM turn_deliveries t JOIN threads h ON h.id = t.thread_id
+              WHERE h.task_id = k.id AND h.kind = 'task' ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1) AS turn_ended,
             (SELECT sum((julianday(coalesce(t.ended_at, ${at})) - julianday(t.delivered_at)) * 86400000)
               FROM turn_deliveries t JOIN threads h ON h.id = t.thread_id WHERE h.task_id = k.id AND t.delivered_at IS NOT NULL) AS worked,
             d.parts, d.name, d.prompt
@@ -975,6 +1053,15 @@ export class Automations extends Context.Service<
             if (one.reviewing > 0) {
               if (one.drafts > 0) return yield* end(one.id, 'made', null)
               if (one.taskState === 'done') return yield* end(one.id, 'nothing', 'Its lead drafted no review.')
+              // Its lead went before drafting one: stopped (by the person, or Althar closing), or its agent ended.
+              if (one.leadState === 'completed' || one.leadState === 'cancelled')
+                return yield* end(one.id, 'failed', 'Its review was stopped before its lead drafted one.')
+              if (one.leadState === 'lost' || one.leadState === 'failed')
+                return yield* end(one.id, 'failed', 'Its lead stopped before it drafted a review; its task’s thread says why.')
+              // A turn that failed may be taken over, as after a usage limit: only one left so for as long as the run may work ends it.
+              const allowed = (Option.getOrUndefined(definitionOf(one))?.minutes ?? 45) * 60_000
+              if (one.turnState === 'failed' && (one.turnEnded ?? 0) > allowed)
+                return yield* end(one.id, 'failed', 'Its lead’s last turn failed before it drafted a review; its task’s thread says why.')
             } else {
               if (one.runState === 'succeeded') return yield* end(one.id, 'made', null)
               if (one.runState === 'failed') return yield* end(one.id, 'failed', 'Its task failed; its thread says why.')
@@ -983,7 +1070,7 @@ export class Automations extends Context.Service<
                 // Made, but stopped before its plan started: it starts now.
                 const definition = Option.getOrUndefined(definitionOf(one))
                 const [task] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM tasks WHERE id = ${one.taskId}`
-                if (definition !== undefined && task !== undefined) yield* planned(task.projectId, one.taskId, definition)
+                if (definition !== undefined && task !== undefined) yield* admitted(planned(task.projectId, one.taskId, definition))
                 return
               }
             }
@@ -1018,7 +1105,7 @@ export class Automations extends Context.Service<
             if (Option.isNone(row) || row.value.state !== 'on' || one.subject !== '')
               return yield* end(one.id, 'failed', 'Althar stopped before its task started.')
             const definition = yield* definitionIn(row.value)
-            yield* work(row.value, definition, one.id, one.cause, one.slot, Date.parse(one.dueAt))
+            yield* admitted(work(row.value, definition, one.id, one.cause, one.slot, Date.parse(one.dueAt)))
           }).pipe(contained('Automations.recover', () => undefined))
       })
 

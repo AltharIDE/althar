@@ -336,7 +336,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
             (query.author === undefined || change.author?.login.toLowerCase() === query.author.toLowerCase()) &&
             words.every((word) => change.title.toLowerCase().includes(word)) &&
             (query.reviewRequested !== true || (asked.get(change.number) ?? []).includes(me.login)) &&
-            (query.draft === undefined || change.draft === query.draft),
+            (query.draft === undefined || change.draft === query.draft) &&
+            (query.updatedUntil === undefined || change.updatedAt <= query.updatedUntil),
         )
         const listed = found.slice(0, query.limit).map((change): ListedChange => {
           // Each reviewer's latest verdict: a request for changes holds over an approval.

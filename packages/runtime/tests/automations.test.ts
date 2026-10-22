@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,15 +10,20 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Accounts } from '../src/Accounts'
 import { AutomationRefused, Automations } from '../src/Automations'
 import type { AutomationOptions } from '../src/Config'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { Limits } from '../src/Limits'
+import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Reviews } from '../src/Reviews'
 import * as Runtime from '../src/Runtime'
+import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
 
@@ -58,6 +63,44 @@ const NOTES: AutomationDefinition = {
   late: 'once',
 }
 
+/** Every morning at 9:00, a review of each new pull request, on an agent held to reading. */
+const REVIEW: AutomationDefinition = {
+  ...NOTES,
+  name: 'Morning review',
+  prompt: 'Review the new pull requests.',
+  lead: { agentId: 'claude-code', model: null },
+  work: { kind: 'review' },
+}
+
+/** A repository on the fake GitHub, with one pull request by a teammate, #1, whose head is there to review. */
+const withOneToReview = () => {
+  const at = hosted()
+  const github = makeFakeService({ pushUrl: () => at.bare })
+  github.addRepository(['meridian', 'api'])
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Nine', '-c', 'user.email=nine@althar.test', ...args], { cwd: at.working })
+      .toString()
+      .trim()
+  git('checkout', '-q', '--detach', 'main')
+  writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
+  git('add', '.')
+  git('commit', '-q', '-m', 'Send back')
+  const head = git('rev-parse', 'HEAD')
+  git('checkout', '-q', 'main')
+  git('push', '-q', at.bare, `${head}:refs/pull/1/head`)
+  github.addPullRequest({ path: ['meridian', 'api'], title: 'Send back', author: 'ninemate', body: '', headSha: head })
+  return { at, github }
+}
+
+/** The project on that repository, with GitHub connected. */
+const openedOn = (working: string) =>
+  Effect.gen(function* () {
+    const instance = yield* Instance
+    yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+    const projects = yield* Projects
+    return (yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })).projectId as ProjectId
+  })
+
 const opened = Effect.gen(function* () {
   const projects = yield* Projects
   const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -79,6 +122,18 @@ const occurrencesOf = (automationId: string) =>
       SELECT cause, slot, subject, subject_title, state, reason, task_id FROM automation_occurrences
       WHERE automation_id = ${automationId} ORDER BY fired_at, rowid`
   })
+
+/** Once a run's task has its lead at work: a session on its thread. */
+const leadStarted = (taskId: string) =>
+  until(
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) => sql<{ state: string }>`
+        SELECT s.state FROM provider_sessions s JOIN threads h ON h.id = s.thread_id WHERE h.task_id = ${taskId} AND h.kind = 'task'`,
+    ),
+    (sessions) => sessions.length > 0,
+    Duration.seconds(20),
+  )
 
 const automationRow = (automationId: string) =>
   Effect.gen(function* () {
@@ -456,38 +511,14 @@ describe('automations', () => {
     'review each new pull request not by the person, one task each; the first waits, and once let post, they are signed with its name',
     () => {
       const clock = clockAt('2026-10-21T07:59:00Z')
-      const at = hosted()
-      const github = makeFakeService({ pushUrl: () => at.bare })
-      github.addRepository(['meridian', 'api'])
-      const git = (...args: Array<string>) =>
-        execFileSync('git', ['-c', 'user.name=Nine', '-c', 'user.email=nine@althar.test', ...args], { cwd: at.working })
-          .toString()
-          .trim()
-      git('checkout', '-q', '--detach', 'main')
-      writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
-      git('add', '.')
-      git('commit', '-q', '-m', 'Send back')
-      const head = git('rev-parse', 'HEAD')
-      git('checkout', '-q', 'main')
-      git('push', '-q', at.bare, `${head}:refs/pull/1/head`)
-      github.addPullRequest({ path: ['meridian', 'api'], title: 'Send back', author: 'ninemate', body: '', headSha: head })
-      const review: AutomationDefinition = {
-        ...NOTES,
-        name: 'Morning review',
-        prompt: 'Review the new pull requests.',
-        lead: { agentId: 'claude-code', model: null },
-        work: { kind: 'review' },
-      }
+      const { at, github } = withOneToReview()
       return Effect.gen(function* () {
         const automations = yield* Automations
         const instance = yield* Instance
         const reviews = yield* Reviews
         const sql = yield* SqlClient.SqlClient
-        const connections = yield* Connections
-        yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
-        const projects = yield* Projects
-        const projectId = (yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: at.working })).projectId
-        const automationId = yield* automations.make({ projectId, definition: review, on: true, actorId: instance.personId })
+        const projectId = yield* openedOn(at.working)
+        const automationId = yield* automations.make({ projectId, definition: REVIEW, on: true, actorId: instance.personId })
         clock.set('2026-10-21T08:00:05Z')
         const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2 && all[1]?.taskId !== null, Duration.seconds(20))
         assert.deepInclude(rows[0], { subject: '', state: 'made', reason: 'Found 1 new pull request.' })
@@ -523,4 +554,206 @@ describe('automations', () => {
       }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })))
     },
   )
+
+  it.live('run on a plan only where the agent’s status says so: one that can’t tell is refused, and skipped on its schedule', () => {
+    const clock = clockAt('2026-10-21T07:59:00Z')
+    const unsure = 'Althar can’t tell that its agent is on a plan, and automations run on a plan only for now.'
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const projectId = yield* opened
+      const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
+      const refused = yield* Effect.flip(automations.runNow(automationId, instance.personId))
+      assert.strictEqual((refused as AutomationRefused).message, unsure)
+      clock.set('2026-10-21T08:00:05Z')
+      const [skipped] = yield* until(occurrencesOf(automationId), (rows) => rows.length === 1)
+      assert.deepInclude(skipped, { state: 'skipped', reason: unsure })
+    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, unsure: ['codex'] })))
+  })
+
+  it.live('keep a run on a plan when its account runs out: another agent on a plan takes it over, never the account paid per use', () => {
+    const clock = clockAt('2026-10-21T07:59:00Z')
+    const back = Date.now() + 60 * 60 * 1000
+    const work = join(mkdtempSync(join(tmpdir(), 'althar-home-')), 'work')
+    mkdirSync(work)
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const accounts = yield* Accounts
+      const limits = yield* Limits
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* opened
+      const [usual] = yield* accounts.of('codex')
+      const key = yield* accounts.add({ agentId: 'codex', name: 'work', folder: work })
+      // The project moves work on to an agent's next account, which here pays per use.
+      yield* (yield* Policies).setAccounts(projectId, { rotate: true }, instance.personId)
+      const automationId = yield* automations.make({ projectId, definition: NOTES, on: true, actorId: instance.personId })
+      clock.set('2026-10-21T08:00:05Z')
+      const [ran] = yield* until(occurrencesOf(automationId), (rows) => rows[0]?.state === 'made', Duration.seconds(30))
+      const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${ran?.taskId ?? ''} AND kind = 'task'`
+      const sessions = yield* sql<{ agentId: string; accountId: string }>`
+        SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${thread?.id ?? ''} ORDER BY started_at`
+      assert.deepStrictEqual(
+        sessions.map((one) => one.agentId),
+        ['codex', 'claude-code'],
+      )
+      assert.strictEqual(sessions[0]?.accountId, usual?.id)
+      assert.notInclude(
+        sessions.map((one) => one.accountId),
+        key.id,
+      )
+      // Nor does a session of its run start on that account when it is named.
+      const refused = yield* Effect.flip(limits.pick({ agentId: 'codex', projectId, threadId: thread?.id ?? '', accountId: key.id }))
+      assert.deepInclude(refused, { _tag: 'PlanOnly', message: 'Its agent pays per use, and automations run on a plan only for now.' })
+      // Outside an automation's run, the project's work still moves to it.
+      assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId })).id, key.id)
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {}, { automations: clock.options, each: { 'codex@usual': { outOfUsage: { until: back } } }, perUse: [work] }),
+      ),
+    )
+  })
+
+  it.live('start one run of Run now pressed twice at once: the other is refused, its run still going', () => {
+    const clock = clockAt('2026-10-21T10:00:00Z')
+    // A lead that never reports: its run goes on.
+    const going: AutomationDefinition = { ...NOTES, prompt: 'Write release notes.' }
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const projectId = yield* opened
+      const automationId = yield* automations.make({ projectId, definition: going, on: true, actorId: instance.personId })
+      const press = automations.runNow(automationId, instance.personId).pipe(
+        Effect.as('ran'),
+        Effect.catch((error) => Effect.succeed(error instanceof AutomationRefused ? error.message : 'failed')),
+      )
+      const pressed = yield* Effect.all([press, press], { concurrency: 'unbounded' })
+      assert.deepStrictEqual(pressed.toSorted(), ['Its last run was still going.', 'ran'])
+      const rows = yield* occurrencesOf(automationId)
+      assert.strictEqual(rows.length, 1)
+      assert.strictEqual(rows[0]?.cause, 'now')
+    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options })))
+  })
+
+  it.live('start a run’s plan Althar kept, held, but stopped before starting, once it is back: once', () => {
+    const clock = clockAt('2026-10-21T10:00:00Z')
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-automations-')), 'althar.sqlite')
+    const occurrenceId = `occ_${'0'.repeat(31)}3`
+    return Effect.gen(function* () {
+      const taskId = yield* Effect.gen(function* () {
+        const automations = yield* Automations
+        const instance = yield* Instance
+        const sql = yield* SqlClient.SqlClient
+        const projectId = yield* opened
+        const automationId = yield* automations.make({ projectId, definition: NOTES, actorId: instance.personId })
+        // The clock has looked since it was made, and won't again before Althar stops.
+        yield* Effect.sleep('300 millis')
+        yield* sql`INSERT INTO automation_occurrences ${sql.insert({
+          id: occurrenceId,
+          projectId,
+          automationId,
+          definition: 1,
+          cause: 'now',
+          slot: `now:${occurrenceId}`,
+          state: 'starting',
+          dueAt: '2026-10-21T09:00:00.000Z',
+          firedAt: '2026-10-21T09:00:01.000Z',
+        })}`
+        // Its task made, and its plan kept, held, as a run does before starting it; then Althar stops.
+        const created = yield* (yield* Projects).createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: 'Release notes, 21 Oct',
+          description: NOTES.prompt,
+          draft: true,
+          request: NOTES.prompt,
+          plain: true,
+          occurrence: occurrenceId,
+        })
+        yield* (yield* Plans).propose({
+          projectId,
+          taskId: created.taskId,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          reason: null,
+          actorId: instance.systemId,
+          end: null,
+          held: true,
+          here: true,
+        })
+        return created.taskId
+      }).pipe(Effect.provide(runtime(database, {}, { automations: { ...clock.options, tick: Duration.hours(1) } })))
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const [made] = yield* until(
+          sql<{ state: string; taskId: string | null }>`SELECT state, task_id FROM automation_occurrences WHERE id = ${occurrenceId}`,
+          (rows) => rows[0]?.state === 'made',
+          Duration.seconds(20),
+        )
+        assert.strictEqual(made?.taskId, taskId)
+        const kept = yield* sql<{ state: string }>`SELECT state FROM task_plans WHERE task_id = ${taskId}`
+        assert.deepStrictEqual(
+          kept.map((plan) => plan.state),
+          ['accepted'],
+        )
+      }).pipe(Effect.provide(runtime(database, {}, { automations: clock.options })))
+    })
+  })
+
+  it.live('end a review stopped before its lead drafted one, as failed, so the next run isn’t held up by it', () => {
+    const clock = clockAt('2026-10-21T07:59:00Z')
+    const { at, github } = withOneToReview()
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const projectId = yield* openedOn(at.working)
+      const automationId = yield* automations.make({ projectId, definition: REVIEW, on: true, actorId: instance.personId })
+      clock.set('2026-10-21T08:00:05Z')
+      const rows = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'running', Duration.seconds(20))
+      const taskId = rows[1]?.taskId ?? ''
+      // Its lead is at it, and the person stops it before it drafts anything.
+      yield* leadStarted(taskId)
+      yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', { taskId }), taskId })
+      const stopped = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed', Duration.seconds(20))
+      assert.strictEqual(stopped[1]?.reason, 'Its review was stopped before its lead drafted one.')
+      // Run now isn't refused as if it still went: it finds nothing new, since a task has had that pull request.
+      yield* automations.runNow(automationId, instance.personId)
+      const now = yield* until(occurrencesOf(automationId), (all) => all.length === 3 && all[2]?.state !== 'starting')
+      assert.deepInclude(now[2], { cause: 'now', state: 'nothing', reason: 'No new pull requests to review.' })
+    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })))
+  })
+
+  it.live('read on past a listing that had more, to find the oldest a teammate opened; and say when it couldn’t read to the end', () => {
+    const clock = clockAt('2026-10-21T07:59:00Z')
+    const { at, github } = withOneToReview()
+    // Newer than the teammate's #1, three of the person's own: a listing of two at a time doesn't reach #1 at first.
+    for (const title of ['Mine two', 'Mine three', 'Mine four'])
+      github.addPullRequest({ path: ['meridian', 'api'], title, author: 'you', body: '' })
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const projectId = yield* openedOn(at.working)
+      const automationId = yield* automations.make({ projectId, definition: REVIEW, on: true, actorId: instance.personId })
+      clock.set('2026-10-21T08:00:05Z')
+      const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2 && all[1]?.taskId !== null, Duration.seconds(20))
+      assert.deepInclude(rows[0], { subject: '', state: 'made', reason: 'Found 1 new pull request.' })
+      assert.strictEqual(rows[1]?.subjectTitle, '#1 Send back')
+      // That review stopped, its run is over.
+      const taskId = rows[1]?.taskId ?? ''
+      yield* leadStarted(taskId)
+      yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', { taskId }), taskId })
+      yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed', Duration.seconds(20))
+      // Four more of the person's: five listings of two read back only so far, and the run says so.
+      for (const title of ['Mine five', 'Mine six', 'Mine seven', 'Mine eight'])
+        github.addPullRequest({ path: ['meridian', 'api'], title, author: 'you', body: '' })
+      clock.set('2026-10-22T08:00:05Z')
+      const next = yield* until(occurrencesOf(automationId), (all) => all.length === 3)
+      assert.strictEqual(next[2]?.state, 'nothing')
+      assert.match(
+        next[2]?.reason ?? '',
+        /^No new pull requests among those looked at\. Only the 6 latest open pull requests of \S+ were looked at; older ones weren’t\.$/,
+      )
+    }).pipe(
+      Effect.provide(runtime(':memory:', {}, { automations: { ...clock.options, listed: 2 }, connectors: fakeConnectors({ github }) })),
+    )
+  })
 })

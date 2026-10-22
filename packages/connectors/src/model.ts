@@ -119,6 +119,12 @@ export interface ChangeQuery {
   readonly reviewRequested?: boolean
   /** Only drafts, or only those ready for review. */
   readonly draft?: boolean
+  /**
+   * Only those last updated at or before this time, to read on past the
+   * last of a listing that had more: where the host can (GitHub). A host
+   * that can't lists from the newest again.
+   */
+  readonly updatedUntil?: string
   /** How many at most, newest change first. */
   readonly limit: number
 }

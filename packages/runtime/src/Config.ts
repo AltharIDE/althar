@@ -113,6 +113,8 @@ export interface AutomationOptions {
   readonly settle?: Duration.Duration
   /** Whether each automation starts its few minutes after its time: yes. */
   readonly stagger?: boolean
+  /** Pull requests a review automation lists at a time, reading back from the latest: 100, as many as GitHub gives at once. */
+  readonly listed?: number
 }
 
 /** Each is the default unless a test says otherwise. */
