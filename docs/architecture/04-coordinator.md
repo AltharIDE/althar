@@ -92,8 +92,10 @@ coordinator may run in copies of its own
   Code, where its sandbox can start, runs its commands in it without asking,
   held to its folder: writes only there, no network, no socket, reads none
   of the home folder, the person's checkouts or the task folders but its
-  folder, the mirrors, the objects its copies borrow and the toolchains,
-  and never outside it; it loads no settings file and runs no hook. Claude
+  folder, the mirrors, the objects its copies borrow, the toolchains and
+  git's config files (never its credential store), and never outside it;
+  it loads no settings file and runs no hook. The reader rules hold its own
+  read and search tools to the same places. Claude
   Code's plan mode
   and OpenCode's plan agent would be simpler, but both refuse MCP tools.
   OpenCode has no sandbox yet, so for it the copy is the boundary.

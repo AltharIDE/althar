@@ -56,9 +56,15 @@
     no socket, and never run outside it. They read none of the home folder,
     the person's checkouts or the project's task folders, but what Althar
     gives back: the coordinator's folder, the mirrors, the objects folders
-    the copies borrow, and the toolchains kept in the home folder (bun,
-    Node's version managers, Rust's, Python's, git's config; never a folder
-    that holds a key), and nothing where the person keeps keys and sign-ins.
+    the copies borrow, the toolchains kept in the home folder (bun, Node's
+    version managers, Rust's, Python's; never a folder that holds a key),
+    and git's config files one by one (`~/.gitconfig`, and `config`,
+    `ignore` and `attributes` in its config folder, never the folder, where
+    its credential store keeps passwords in `credentials`); and nothing
+    where the person keeps keys and sign-ins. Its own tools for reading and
+    searching files aren't in the sandbox, so the reader rules hold them to
+    the same places: a read outside its folder that reaches into one held
+    from it, not given back, is refused.
     It loads no settings file, the person's or the repository's, and runs no
     hook, as a review's lead: no allow rule or sandbox exemption of theirs
     lets a command out, and no hook of a repository it reads runs beside it.
@@ -120,7 +126,9 @@
   `node --test` file and `bun --version` ran without asking; a write
   outside the folder, a write or tag in the person's checkout, reading
   its `.env` or a folder of the person's, a socket, `curl`, and reading
-  `~/.ssh` were refused, and the hook didn't run. Linux isn't tried yet.
+  `~/.ssh` were refused, and the hook didn't run; its Read tool was
+  refused the folder of the person's and the checkout's `.env`. Linux
+  isn't tried yet.
 - **Revisit when:** Codex's sandbox can be held to a folder with writes
   in its git folder; Althar can tell before a session starts that an
   agent's sandbox will start on Windows; the coordinator needs the
