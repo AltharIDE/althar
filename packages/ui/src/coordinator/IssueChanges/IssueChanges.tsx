@@ -19,7 +19,11 @@ import s from './IssueChanges.module.css'
  * it; you can discard it instead. Several issues share one card. Where not
  * all of it applied, each issue says why and applying it again tries what
  * didn't. Applied, by you or at once (a comment, a link, or a project that
- * lets changes through), or discarded, it folds to a line.
+ * lets changes through), or discarded, it folds to a line; a comment's line
+ * keeps the start of what it said beneath.
+ *
+ * Each issue leads with its title; what changes on it sits beneath, each
+ * change a quiet name and the value it takes.
  */
 
 /** One thing changed on an issue: its status, closing it, its priority, assignee, project or title; labels added and taken off; a comment; a link. */
@@ -48,10 +52,10 @@ export interface IssueChangesIssue {
 export interface IssueChangesText {
   /** What it is and where: Issue changes · Linear. */
   kicker: (sources: readonly string[]) => string
+  /** A change, as what it changes and what to: [Status, Done], [Labels, +perf −bug], [Close, null]. */
+  parts: (change: IssueChange) => readonly [string, string | null]
   /** A change, in a few words: Status → Done, Labels +perf −bug. */
   change: (change: IssueChange) => string
-  /** Beside the buttons, until it is applied. */
-  note: string
   applying: string
   /** Beside the buttons, where not all of it applied. */
   failed: string
@@ -69,24 +73,29 @@ export interface IssueChangesText {
   newTab: string
 }
 
-const CHANGE_WORDS = {
-  status: (to: string | null) => `Status → ${to ?? 'none'}`,
-  close: () => 'Close',
-  priority: (to: string | null) => `Priority → ${to ?? 'none'}`,
-  assignee: (to: string | null) => (to === null ? 'Unassign' : `Assignee → ${to}`),
-  project: (to: string | null) => (to === null ? 'Out of its project' : `Project → ${to}`),
-  title: (to: string | null) => `Title → “${to ?? ''}”`,
-  comment: () => 'Comment',
-  link: () => 'Link the pull request',
-}
+const CHANGE_PARTS = {
+  status: (to: string | null) => ['Status', to ?? 'none'],
+  close: () => ['Close', null],
+  priority: (to: string | null) => ['Priority', to ?? 'none'],
+  assignee: (to: string | null) => (to === null ? ['Unassign', null] : ['Assignee', to]),
+  project: (to: string | null) => (to === null ? ['Out of its project', null] : ['Project', to]),
+  title: (to: string | null) => ['Title', `“${to ?? ''}”`],
+  comment: () => ['Comment', null],
+  link: () => ['Link the pull request', null],
+} satisfies Record<string, (to: string | null) => readonly [string, string | null]>
+
+const partsOf = (change: IssueChange): readonly [string, string | null] =>
+  change.field === 'labels'
+    ? ['Labels', [...change.add.map((label) => `+${label}`), ...change.remove.map((label) => `−${label}`)].join(' ')]
+    : CHANGE_PARTS[change.field](change.to)
 
 export const issueChangesText: IssueChangesText = {
   kicker: (sources) => (sources.length === 0 ? 'Issue changes' : `Issue changes · ${sources.join(', ')}`),
-  change: (change) =>
-    change.field === 'labels'
-      ? `Labels ${[...change.add.map((label) => `+${label}`), ...change.remove.map((label) => `−${label}`)].join(' ')}`
-      : CHANGE_WORDS[change.field](change.to),
-  note: 'Nothing changes until you apply it.',
+  parts: partsOf,
+  change: (change) => {
+    const [what, to] = partsOf(change)
+    return to === null ? what : `${what}${change.field === 'labels' ? ' ' : ' → '}${to}`
+  },
   applying: 'Applying…',
   failed: 'Not all of it applied.',
   appliedOne: 'Applied',
@@ -136,23 +145,30 @@ export function IssueChanges({ issues, note, state, onApply, onDiscard, text, re
             : only?.field === 'link'
               ? t.linked
               : t.changed
+      const comment = state === IssueChangesState.Applied && only?.field === 'comment' ? only.to : null
       return (
-        <article ref={setLine} tabIndex={-1} className={cx(s.line, className)} data-rhythm={Rhythm.Fold} {...rest}>
-          {first && <BrandMark brand={first.mark} size={12} className={s.lineMark} />}
-          <span className={s.said}>{said}</span>
-          <span className={cx(s.lineWhat, state === IssueChangesState.Discarded && s.struck)}>
-            {issues.map((issue, index) => (
-              <span key={`${issue.source}:${issue.key}`} className={s.lineIssue}>
-                {index > 0 && <span className={s.sep}> · </span>}
-                <Key issue={issue} t={t} />{' '}
-                {only?.field === 'comment' ? (
-                  <span className={s.quote}>{only.to}</span>
-                ) : only?.field === 'link' ? null : (
-                  issue.changes.map(t.change).join(', ')
-                )}
-              </span>
-            ))}
+        <article
+          ref={setLine}
+          tabIndex={-1}
+          className={cx(s.line, comment !== null && s.lineComment, className)}
+          data-rhythm={Rhythm.Fold}
+          {...rest}
+        >
+          <span className={s.lineHead}>
+            {first && <BrandMark brand={first.mark} size={12} className={s.lineMark} />}
+            <span className={s.said}>{said}</span>
+            <span className={cx(s.lineWhat, state === IssueChangesState.Discarded && s.struck)}>
+              {issues.map((issue, index) => (
+                <span key={`${issue.source}:${issue.key}`} className={s.lineIssue}>
+                  {index > 0 && <span className={s.sep}> · </span>}
+                  <Key issue={issue} t={t} />
+                  {only?.field === 'comment' || only?.field === 'link' ? null : ` ${issue.changes.map(t.change).join(', ')}`}
+                </span>
+              ))}
+            </span>
           </span>
+          {/* what it said, in its own words, a couple of lines of it */}
+          {comment !== null && <span className={s.lineQuote}>{comment}</span>}
         </article>
       )
     }
@@ -199,24 +215,39 @@ function Card({ root, issues, note, state, onApply, onDiscard, t }: CardProps) {
   const sources = [...new Set(issues.map((issue) => issue.source))]
   return (
     <article aria-labelledby={kickerId} className={cx(s.card, className)} data-rhythm={Rhythm.Card} {...rest}>
-      <div className={s.head}>
-        <span className={s.kicker} id={kickerId}>
-          {issues[0] && <BrandMark brand={issues[0].mark} size={11} className={s.mark} />}
-          {t.kicker(sources)}
-        </span>
-        {note && <p className={s.why}>{note}</p>}
-      </div>
+      <p className={s.head}>
+        {issues[0] && <BrandMark brand={issues[0].mark} size={11} className={s.mark} />}
+        <span id={kickerId}>{t.kicker(sources)}</span>
+        {note && <span className={s.why}>{note}</span>}
+      </p>
       <ul className={s.issues}>
         {issues.map((issue) => {
           const comment = issue.changes.find((change) => change.field === 'comment')
           const rest = issue.changes.filter((change) => change.field !== 'comment')
           return (
             <li key={`${issue.source}:${issue.key}`} className={s.issue}>
-              <div className={s.which}>
-                <Key issue={issue} t={t} />
+              <p className={s.which}>
                 <span className={s.issueTitle}>{issue.title}</span>
-              </div>
-              {rest.length > 0 && <p className={s.changes}>{rest.map(t.change).join(' · ')}</p>}
+                <Key issue={issue} t={t} />
+              </p>
+              {rest.length > 0 && (
+                <p className={s.changes}>
+                  {rest.map((change, index) => {
+                    const [what, to] = t.parts(change)
+                    return (
+                      <span key={index} className={s.change}>
+                        {to === null ? (
+                          <span className={s.to}>{what}</span>
+                        ) : (
+                          <>
+                            <span className={s.what}>{what}</span> <span className={s.to}>{to}</span>
+                          </>
+                        )}
+                      </span>
+                    )
+                  })}
+                </p>
+              )}
               {comment?.field === 'comment' && <p className={s.comment}>{comment.to}</p>}
               {failed && issue.applied === true && <p className={s.done}>{t.appliedOne}</p>}
               {failed && issue.applied === false && issue.error && <p className={s.error}>{issue.error}</p>}
@@ -226,7 +257,7 @@ function Card({ root, issues, note, state, onApply, onDiscard, t }: CardProps) {
       </ul>
       <div className={s.foot}>
         <span className={cx(s.note, failed && s.noteFailed)} aria-live="polite">
-          {applying ? t.applying : failed ? t.failed : t.note}
+          {applying ? t.applying : failed ? t.failed : null}
         </span>
         {onDiscard && !applying && (
           <Button variant="quiet" onClick={onDiscard}>

@@ -443,7 +443,9 @@ describe('a task', () => {
     withServices(<Task />, client)
     const card = within(await screen.findByRole('article', { name: 'Issue changes · Linear' }))
     expect(card.getByText('PR #1 opened.')).toBeTruthy()
-    expect(card.getByText('Status → In Review')).toBeTruthy()
+    expect(
+      card.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === 'Status In Review' && node.childElementCount > 0),
+    ).toBeTruthy()
     await userEvent.click(card.getByRole('button', { name: 'Apply' }))
     expect(client.applyIssueChanges).toHaveBeenCalledWith('ich_1')
     await userEvent.click(card.getByRole('button', { name: 'Discard' }))

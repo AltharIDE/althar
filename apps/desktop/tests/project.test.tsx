@@ -326,8 +326,12 @@ describe('the Talk room', () => {
     })
     withServices(<Project />, client)
     const card = within(await screen.findByRole('article', { name: 'Issue changes · Linear' }))
-    expect(card.getByText('Status → Done')).toBeTruthy()
-    expect(card.getByText('Priority → Low')).toBeTruthy()
+    expect(
+      card.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === 'Status Done' && node.childElementCount > 0),
+    ).toBeTruthy()
+    expect(
+      card.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === 'Priority Low' && node.childElementCount > 0),
+    ).toBeTruthy()
     await userEvent.click(card.getByRole('button', { name: 'Apply' }))
     expect(client.applyIssueChanges).toHaveBeenCalledWith('ich_1')
     await userEvent.click(card.getByRole('button', { name: 'Discard' }))

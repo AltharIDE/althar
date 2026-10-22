@@ -23,8 +23,13 @@ export const Pending: Story = {
   play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('article', { name: 'Issue changes · Linear' })).toBeInTheDocument()
-    await expect(c.getByText('Status → Done')).toBeInTheDocument()
-    await expect(c.getByText('Priority → Low · Labels +perf −bug · Assignee → Ana Ruiz')).toBeInTheDocument()
+    // Each change, a name and the value it takes.
+    const change = (text: string) =>
+      c.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === text && node.childElementCount > 0)
+    await expect(change('Status Done')).toBeInTheDocument()
+    await expect(change('Priority Low')).toBeInTheDocument()
+    await expect(change('Labels +perf −bug')).toBeInTheDocument()
+    await expect(change('Assignee Ana Ruiz')).toBeInTheDocument()
     await expect(c.getByRole('link', { name: /DEV-67/ })).toHaveAttribute('target', '_blank')
     await userEvent.click(c.getByRole('button', { name: 'Apply' }))
     await expect(args.onApply).toHaveBeenCalled()
@@ -37,7 +42,7 @@ export const ToReview: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByText('PR #212 opened.')).toBeInTheDocument()
-    await expect(c.getByText('Status → In Review')).toBeInTheDocument()
+    await expect(c.getByText('In Review')).toBeInTheDocument()
   },
 }
 
@@ -80,7 +85,7 @@ export const Applied: Story = {
   },
 }
 
-/** A lead's comment on its task's issue, posted at once: a line with its first words. */
+/** A lead’s comment on its task’s issue, posted at once: a line, with the first couple of lines of what it said beneath. */
 export const Commented: Story = {
   args: { ...COMMENTED_LINEAR, state: IssueChangesState.Applied },
   play: async ({ canvasElement }) => {
