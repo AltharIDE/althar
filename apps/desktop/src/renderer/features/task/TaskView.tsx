@@ -11,14 +11,13 @@ import {
   Delivery,
   DiffLineKind,
   type FileView,
+  Behind,
   Composer,
   DictationTray,
   Issue,
   TaskActivity,
   LinkButton,
-  Listening,
   type ModelInfo,
-  Running,
   TaskFace,
   TaskHeader,
   type TaskHeaderStep,
@@ -39,10 +38,9 @@ import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
 import { device, platform } from '../../shared/device'
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { queuedWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
-import { Holders } from '../../shared/Holders'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
@@ -65,7 +63,7 @@ import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
-import { behindText, listeningOf, useHeard } from './behind'
+import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
@@ -485,6 +483,7 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
+  const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
   const running = [...(session?.background ?? []), ...snapshot.task.launches]
   const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
@@ -728,12 +727,6 @@ export function TaskView({
       {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
         <p className={s.handover}>{text.needsAgent}</p>
       )}
-      <Holders
-        holders={snapshot.task.queued?.holders}
-        onStop={(holder, id) => void model.stopHolding(holder, id)}
-        // 2nd or later in its project's line, it can go first from here.
-        {...((snapshot.task.place ?? 0) > 1 ? { onFront: () => void model.moveToFront() } : {})}
-      />
       {waiting !== null && (
         <p className={s.handover}>
           {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
@@ -751,26 +744,31 @@ export function TaskView({
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={kept} />}
         text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
-        // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
+        // What goes on outside the conversation, as one chip over its end: why it waits, what its lead left running, the pull requests it listens to.
         above={
-          (listening.length > 0 || leftRunning.length > 0) && (
-            <>
-              {listening.length > 0 && (
-                <Listening sources={listening} heard={heard} onStop={(url) => void model.stopListening(url)} note={behindText.note} />
-              )}
-              <Running
-                processes={leftRunning}
-                onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
-                onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
-                onOutput={setOutputOf}
-                // Where it answers opens in the person's browser.
-                onOpenUrl={(id) => {
-                  const url = running.find((command) => command.id === id)?.url
-                  if (url != null) window.open(url, '_blank')
-                }}
-              />
-            </>
-          )
+          <Behind
+            wait={wait}
+            onStopHeld={(taskId) => {
+              // Stopping what a task left running frees its place.
+              const holder = snapshot.task.queued?.holders?.find((one) => one.taskId === taskId)
+              if (holder?.threadId != null) for (const command of holder.running) void model.stopHolding(holder.threadId, command.id)
+            }}
+            // 2nd or later in its project's line, it can go first from here.
+            {...((snapshot.task.place ?? 0) > 1 ? { onFront: () => void model.moveToFront() } : {})}
+            processes={leftRunning}
+            onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
+            onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
+            onOutput={setOutputOf}
+            // Where it answers opens in the person's browser.
+            onOpenUrl={(id) => {
+              const url = running.find((command) => command.id === id)?.url
+              if (url != null) window.open(url, '_blank')
+            }}
+            sources={listening}
+            heard={heard}
+            onStopListening={(url) => void model.stopListening(url)}
+            text={listeningText}
+          />
         }
         onSubmit={(body) => submit(body, false)}
         onSendNow={(body) => submit(body, true)}
