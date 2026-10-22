@@ -32,6 +32,8 @@ import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
+import { bringBackThen } from './bringBack'
+import { FolderCleanup } from './FolderCleanup'
 import { Folders } from './Folders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
@@ -63,6 +65,7 @@ import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { Busy } from './Busy'
 import { timestamp } from './records'
+import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
 import { Coordinator } from './Coordinator'
@@ -164,6 +167,21 @@ export const handlers = Api.toLayer(
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
     const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands>()
+    // What bringing a task's removed folder back needs (ADR-056).
+    const folderStore = yield* Effect.context<SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto>()
+    const cleanup = yield* FolderCleanup
+    const setups = yield* Setups
+    /**
+     * A task's folder about to open: brought back first, where it was removed
+     * to free the disk, and set up again; and kept as opened before anything
+     * can remove it again, which holds it back from removal for a day and
+     * restarts its wait (ADR-056).
+     */
+    const openingFolder = (taskId: string) =>
+      Effect.gen(function* () {
+        const opened = Effect.flatMap(timestamp, (at) => sql`UPDATE tasks SET opened_at = ${at} WHERE id = ${taskId}`)
+        if (yield* Effect.provideContext(bringBackThen(taskId, instance.personId, opened), folderStore)) yield* setups.begin(taskId)
+      })
     const agents = yield* Agents
     const config = yield* RuntimeConfig
     const connections = yield* Connections
@@ -725,6 +743,7 @@ export const handlers = Api.toLayer(
             return {
               coAuthor: { on, line: coAuthorLine },
               postTeamReviews: yield* postTeamReviews,
+              folderWait: yield* cleanup.wait,
               agentsAtOnce: {
                 count: atOnce.count,
                 own: atOnce.own,
@@ -735,6 +754,10 @@ export const handlers = Api.toLayer(
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
+      SetFolderWait: ({ commandId, wait }) => once(commandId, api(cleanup.setWait(wait))),
+      GetTaskFolders: () => api(cleanup.list),
+      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(instance.personId))),
+      RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, instance.personId))),
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
@@ -1239,6 +1262,7 @@ export const handlers = Api.toLayer(
           Effect.gen(function* () {
             const open = config.editors?.open
             if (open === undefined) return false
+            yield* openingFolder(taskId)
             // The task's folder: its worktree, or with several the folder that holds them, which its changes' paths start from.
             const worktrees = yield* sql<{ path: string }>`
               SELECT path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} ORDER BY created_at, rowid`
@@ -1257,6 +1281,8 @@ export const handlers = Api.toLayer(
           Effect.gen(function* () {
             const open = config.editors?.open
             if (open === undefined) return false
+            const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
+            if (thread?.taskId != null) yield* openingFolder(thread.taskId)
             const place = yield* queries.codeRoots(threadId)
             const found = codeRootOf(place, path)
             if (found === null) return false

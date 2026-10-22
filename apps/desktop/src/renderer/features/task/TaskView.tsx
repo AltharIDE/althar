@@ -138,6 +138,8 @@ export const text = {
   /** A task that isn't a change, its lead done: the person settles it, or keeps it for later. */
   finished: 'Finished',
   kept: 'Kept for later',
+  /** Its folder coming back from its branch, and set up again, before its lead goes on (ADR-056). */
+  returning: 'Bringing its folder back',
   /** What the composer suggests to a task that finished and isn't a change, in grey: Tab takes it, Enter sends it to its lead. */
   suggest: 'Mark this as done',
   /** Issues its lead drafted wait for the person to file. */
@@ -174,6 +176,8 @@ export const statusOf = (
   const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
+  // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
+  if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]

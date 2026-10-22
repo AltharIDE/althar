@@ -256,6 +256,8 @@ export const runtime = (
     readonly busy?: BusyOptions
     /** How a screenshot is taken, where a test takes one; without, none can be. */
     readonly screenshot?: RuntimeOptions['screenshot']
+    /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
+    readonly disk?: RuntimeOptions['disk']
   } = {},
 ) =>
   Runtime.layer({
@@ -285,7 +287,11 @@ export const runtime = (
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     busy: { machine: ROOMY, ...more.busy },
+    disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
   })
+
+/** A disk with half of its 1 TB free: room enough that no finished task's folder goes for want of space. */
+export const ROOMY_DISK = { total: 1024 ** 4, free: 1024 ** 4 / 2, used: 1024 ** 4 / 2 }
 
 /** A machine with room for as many agents at once as Althar runs: 64 cores and 256 GB. */
 export const ROOMY = { cores: 64, memory: 256 * 1024 ** 3 }
