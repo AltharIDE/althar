@@ -1583,29 +1583,34 @@ export class Queries extends Context.Service<
             : { id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content },
         )
 
-      /** Why work waits for a place: how many are busy, and who holds them. What a holder left running is listed where it alone keeps the place, to stop it from here. */
-      const queuedNow = Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const sessions = yield* Sessions
-        const { busy, atOnce, holders } = yield* (yield* Busy).now
-        return {
-          busy,
-          atOnce,
-          holders: yield* Effect.forEach(holders, (holder) =>
-            Effect.gen(function* () {
-              const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`
-              const live = holder.kept && holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
-              return {
-                taskId: holder.taskId,
-                title: task?.title ?? '',
-                threadId: holder.threadId,
-                kept: holder.kept,
-                running: Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
-              }
-            }),
-          ),
-        }
-      })
+      /**
+       * Why a task's work waits for a place: how many are busy, and who holds them, the task itself left out: it never
+       * waits behind itself. What a holder left running is listed where it alone keeps the place, to stop it from here.
+       */
+      const queuedNow = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const sessions = yield* Sessions
+          const now = yield* (yield* Busy).now
+          const holders = now.holders.filter((holder) => holder.taskId !== taskId)
+          return {
+            busy: now.busy - (now.holders.length - holders.length),
+            atOnce: now.atOnce,
+            holders: yield* Effect.forEach(holders, (holder) =>
+              Effect.gen(function* () {
+                const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`
+                const live = holder.kept && holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
+                return {
+                  taskId: holder.taskId,
+                  title: task?.title ?? '',
+                  threadId: holder.threadId,
+                  kept: holder.kept,
+                  running: Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
+                }
+              }),
+            ),
+          }
+        })
 
       /**
        * A waiting task's place in its project's line, the tasks that wait for a place before any agent has worked on them, in
@@ -1894,7 +1899,7 @@ export class Queries extends Context.Service<
             startedAt: task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
-            queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
+            queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
             ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),

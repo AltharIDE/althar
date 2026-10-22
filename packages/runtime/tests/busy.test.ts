@@ -8,7 +8,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Busy } from '../src/Busy'
+import { Busy, type Waiter } from '../src/Busy'
 import type { BusyOptions } from '../src/Config'
 import { touchTask } from '../src/cards'
 import { Coordinator } from '../src/Coordinator'
@@ -541,25 +541,50 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('hold a review until what its lead left running stops: the two would be two agents at work', () =>
+  it.live('start a review at once in its task’s place, though what its lead left running still runs', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const sessions = yield* Sessions
       const task = yield* reviewed(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:pass]')
       assert.strictEqual(task.outcome, 'running')
-      // The lead's step is done, and the server it left running still runs: the review waits for a place, and says so.
-      const running = yield* until(
-        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-        (left) => left.length === 1,
-      )
-      yield* until(
-        attempts(task.taskId),
-        (rows) => rows.map((row) => [row.step, row.state, row.holdReason]).join() === 'implement,succeeded,,review,held,machine_busy',
-      )
-      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, task.taskId))?.queued), { busy: 1, atOnce: 1 })
-      // The server stops: the reviewer takes the place, and the review passes.
-      yield* sessions.stopBackground(task.threadId, running[0]?.id ?? '')
+      // The lead's step is done, and the server it left running still runs: the review goes on in the task's place.
       yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.state === 'succeeded')
+      assert.isFalse((yield* facts(task.taskId)).includes('node_attempt.held'), 'the review never waited for a place')
+      const left = yield* sessions.running(task.threadId)
+      assert.strictEqual(Option.isSome(left) ? left.value.background.filter((one) => one.ended === null).length : 0, 1)
+      // The server still counts, once, for its task.
+      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('start a task’s waiting work in the place it keeps only by what its lead left running, ahead of what waited longer', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const busy = yield* Busy
+      const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
+      yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* busyAt(1)
+      // Work of another task under way waited first; then the task's own, as a review that waited from before a restart.
+      const begun: Array<string> = []
+      const waiters = [
+        { taskId: 'other', order: 'underway', since: '2026-01-01T00:00:00.000Z' },
+        { taskId: task.taskId, review: true, order: 'underway', since: '2026-01-02T00:00:00.000Z' },
+      ].map((waiter): Waiter => ({
+        ...(waiter as Omit<Waiter, 'start'>),
+        // Holds its place from here on, as work under way does.
+        start: Effect.andThen(
+          Effect.sync(() => begun.push(waiter.taskId)),
+          Effect.never,
+        ),
+      }))
+      yield* busy.queue(Effect.sync(() => waiters.filter((waiter) => !begun.includes(waiter.taskId))))
+      yield* until(
+        Effect.sync(() => begun),
+        (rows) => rows.length === 1,
+      )
+      yield* Effect.sleep('300 millis')
+      assert.deepStrictEqual(begun, [task.taskId])
+      assert.strictEqual((yield* busy.now).busy, 1)
     }).pipe(Effect.provide(machine(1))),
   )
 
@@ -579,28 +604,119 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('start a task’s work under way before new work that waited longer', () =>
+  it.live('give a task’s work that waited its task’s place first once it frees, ahead of work under way that waited longer', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const busy = yield* Busy
+      const task = yield* started(projectId, 'Task', 'Work on it. [lead:wait]')
+      yield* working(task.taskId)
+      // Another task's work under way waits, then the task's own, while its lead holds the place.
+      const begun: Array<string> = []
+      const waiters = [
+        { taskId: 'other', order: 'underway', since: '2026-01-01T00:00:00.000Z' },
+        { taskId: task.taskId, review: true, order: 'underway', since: '2026-01-02T00:00:00.000Z' },
+      ].map((waiter): Waiter => ({
+        ...(waiter as Omit<Waiter, 'start'>),
+        // Holds its place from here on, as work under way does.
+        start: Effect.andThen(
+          Effect.sync(() => begun.push(waiter.taskId)),
+          Effect.never,
+        ),
+      }))
+      yield* busy.queue(Effect.sync(() => waiters.filter((waiter) => !begun.includes(waiter.taskId))))
+      yield* Effect.sleep('300 millis')
+      assert.deepStrictEqual(begun, [])
+      // The lead's step ends and its place frees: the task's work has it, and the other waits on.
+      yield* say(task.threadId, '[lead:finish]')
+      yield* until(
+        Effect.sync(() => begun),
+        (rows) => rows.length === 1,
+      )
+      yield* Effect.sleep('300 millis')
+      assert.deepStrictEqual(begun, [task.taskId])
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('give a task’s work that waited its task’s place once it frees, though the person’s work takes every other one', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const busy = yield* Busy
+      const sessions = yield* Sessions
+      const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(first.threadId)
+      const task = yield* started(projectId, 'Task', 'Work on it. [lead:wait]')
+      yield* working(task.taskId)
+      // The task's own work waits while its lead holds the place.
+      const begun: Array<string> = []
+      const waiter: Waiter = {
+        taskId: task.taskId,
+        review: true,
+        order: 'underway',
+        since: '2026-01-02T00:00:00.000Z',
+        start: Effect.andThen(
+          Effect.sync(() => begun.push(task.taskId)),
+          Effect.never,
+        ),
+      }
+      yield* busy.queue(Effect.sync(() => (begun.length === 0 ? [waiter] : [])))
+      yield* Effect.sleep('300 millis')
+      assert.deepStrictEqual(begun, [])
+      // The person says something to the first's lead: it goes on, one over.
+      yield* say(first.threadId, scenarios.slow, 'after_current')
+      yield* until(
+        Effect.map(sessions.running(first.threadId), (live) => (Option.isSome(live) && live.value.turnRunning ? [true] : [])),
+        (rows) => rows.length === 1,
+      )
+      yield* busyAt(2)
+      // The lead's step ends: its place is its task's work's, though the person's turn still takes the only other.
+      yield* say(task.threadId, '[lead:finish]')
+      yield* until(
+        Effect.sync(() => begun),
+        (rows) => rows.length === 1,
+      )
+      const live = yield* sessions.running(first.threadId)
+      assert.isTrue(Option.isSome(live) && live.value.turnRunning, 'the person’s turn still ran')
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('leave a waiting task out of the count and the holders it is shown', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const task = yield* reviewed(projectId, 'Reviewed', 'Work on it. [lead:finish] [review:wait]')
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.state === 'running')
+      yield* idle(task.threadId)
+      // Althar tells the lead something while the task's reviewer holds the place: the lead's turn waits.
+      yield* tell(task.threadId, 'The checks failed.')
+      const [queued] = yield* queuedOn(projectId, task.taskId)
+      assert.deepStrictEqual(countsOf(queued), { busy: 0, atOnce: 1 })
+      assert.deepStrictEqual(queued?.holders, [])
+      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('start a task’s review in its own place though the person’s work has taken every place and one more', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const sessions = yield* Sessions
+      const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(first.threadId)
       const task = yield* reviewed(projectId, 'Served', 'Work on it. [lead:wait] [review:pass]')
       yield* working(task.taskId)
-      const other = yield* started(projectId, 'Other', 'Work on it. [lead:wait]')
-      yield* waiting(other.taskId)
-      // The lead serves and finishes: what it left running still runs, so its review waits for a place of its own.
-      yield* say(task.threadId, '[lead:serve] [lead:finish]')
-      const running = yield* until(
-        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-        (left) => left.length === 1,
-      )
+      // The person says something to the first's lead: it goes on, one over.
+      yield* say(first.threadId, scenarios.slow, 'after_current')
       yield* until(
-        attempts(task.taskId),
-        (rows) => rows.map((row) => [row.step, row.state, row.holdReason]).join() === 'implement,succeeded,,review,held,machine_busy',
+        Effect.map(sessions.running(first.threadId), (live) => (Option.isSome(live) && live.value.turnRunning ? [true] : [])),
+        (rows) => rows.length === 1,
       )
-      // The server stops: the review is the task's work under way, and goes before the other, new, that waited longer.
-      yield* sessions.stopBackground(task.threadId, running[0]?.id ?? '')
+      yield* busyAt(2)
+      // The lead serves and finishes: its review goes on in the task's place, its server running on.
+      yield* say(task.threadId, '[lead:serve] [lead:finish]')
       yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.state === 'succeeded')
-      yield* working(other.taskId)
+      assert.isFalse((yield* facts(task.taskId)).includes('node_attempt.held'), 'the review never waited for a place')
+      const left = yield* sessions.running(task.threadId)
+      assert.strictEqual(Option.isSome(left) ? left.value.background.filter((one) => one.ended === null).length : 0, 1)
     }).pipe(Effect.provide(machine(1))),
   )
 
