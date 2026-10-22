@@ -1,10 +1,10 @@
 import { readdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 
 import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
 import { claudeWho, type SignInFlowEvent, type SignInFlowOptions, startSignInFlow } from '../src/signInFlow'
+import { ownTemp } from './ownTemp'
 
 /*
  * Each agent's sign-in, run against a stand-in for its login: a script that
@@ -228,11 +228,15 @@ describe('signing in inside Althar', () => {
   })
 
   it('says, in the person’s words, that Antigravity turned the account down, and leaves no temporary folder', async () => {
-    const before = readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length
-    const said = await run(antigravity('subscription'), { way: 'browser' })
-    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length).toBeLessThanOrEqual(before)
+    const { folder, restore } = ownTemp()
+    try {
+      const said = await run(antigravity('subscription'), { way: 'browser' })
+      expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(readdirSync(folder)).toEqual([])
+    } finally {
+      restore()
+    }
   })
 
   it('says each other way Antigravity turns a sign-in down in the person’s words, and its own where it has none for it', async () => {
