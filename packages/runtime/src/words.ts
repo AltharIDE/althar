@@ -243,6 +243,8 @@ export const words = (
         return draftClosed[text(error, 'state')] ?? 'That issue draft can’t change now.'
       case 'DraftUntitled':
         return 'An issue needs a title.'
+      case 'ChangesClosed':
+        return changesClosed[text(error, 'state')] ?? 'Those issue changes can’t change now.'
       case 'ReviewDraftClosed':
         return reviewClosed[text(error, 'state')] ?? 'That review draft can’t change now.'
       case 'ReviewDraftIncomplete':
@@ -362,6 +364,13 @@ const reviewClosed: Readonly<Record<string, string>> = {
   posting: 'That review is being posted now.',
 }
 
+/** Why changes to issues can't be applied or discarded now, by where they stand. */
+const changesClosed: Readonly<Record<string, string>> = {
+  applied: 'Those changes are applied already.',
+  discarded: 'Those changes were discarded.',
+  applying: 'Those changes are being applied.',
+}
+
 /** What a review draft lacks to be kept or posted. */
 const reviewIncomplete = {
   verdict: 'Choose a verdict before you post the review.',
@@ -375,6 +384,7 @@ export const expected = new Set([
   'AttachRefused',
   'DraftClosed',
   'DraftUntitled',
+  'ChangesClosed',
   'ReviewDraftClosed',
   'ReviewDraftIncomplete',
   'ChangedSinceSeen',

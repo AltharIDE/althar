@@ -12,6 +12,7 @@ import {
   type CoordinatorSnapshot,
   type HomeEvent,
   type HomeSnapshot,
+  IssueChangesCard,
   IssueDraftCard,
   ReviewDraftCard,
   type IssueSummary,
@@ -51,7 +52,7 @@ import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type 
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
-import { answeredIn, handedOf, issueDraftsWaiting, kindOf } from './kinds'
+import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
@@ -378,6 +379,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
+const decodeIssueChanges = Schema.decodeUnknownOption(IssueChangesCard)
 const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
@@ -590,6 +592,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         onNone: () => undefined,
         onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
       })
+    // Changes to issues, written whole with each change, as an issue draft's card is.
+    case 'issue_changes':
+      return Option.match(decodeIssueChanges(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'issue_changes', content: card }),
+      })
     // A review draft's card, written whole with each change to the draft, as an issue draft's is.
     case 'review_draft':
       return Option.match(decodeReviewDraft(content), {
@@ -735,7 +743,7 @@ export class Queries extends Context.Service<
             (SELECT count(*) FROM tasks t WHERE t.project_id = p.id) AS tasks,
             (SELECT count(*) FROM provider_sessions s WHERE s.project_id = p.id AND s.state IN (${sql.unsafe(live)})) AS running,
             (SELECT count(*) FROM attention_requests a WHERE a.project_id = p.id AND a.state = 'open')
-              + (SELECT coalesce(sum(${sql.unsafe(issueDraftsWaiting('wk'))}), 0) FROM tasks wk WHERE wk.project_id = p.id AND wk.state = 'open') AS waiting,
+              + (SELECT coalesce(sum(${sql.unsafe(issueCardsWaiting('wk'))}), 0) FROM tasks wk WHERE wk.project_id = p.id AND wk.state = 'open') AS waiting,
             -- Its tasks under way and ready, as their cards would say, worked out from the store alone (Nudges reads ready the same way).
             (SELECT count(*) FROM tasks k JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
               WHERE k.project_id = p.id AND k.state NOT IN ('done', 'abandoned') AND r.state = 'running'
@@ -746,19 +754,19 @@ export class Queries extends Context.Service<
                 AND coalesce((SELECT state FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
                   ORDER BY proposed_at DESC LIMIT 1), '') <> 'proposed'
                 AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-                AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0
+                AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
                 AND NOT EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                   WHERE e.run_id = r.id AND a.state = 'admitted')) AS ready,
             -- A review has no run: drafted, it is the person's to post, as its card says, unless a call on it waits on them first.
             (SELECT json_group_array(k.id) FROM tasks k WHERE k.project_id = p.id AND k.state = 'open'
                 AND EXISTS (SELECT 1 FROM review_drafts d WHERE d.task_id = k.id AND d.state IN ('pending', 'failed', 'uncertain'))
                 AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-                AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0) AS drafted,
+                AND ${sql.unsafe(issueCardsWaiting('k'))} = 0) AS drafted,
             -- Or posted, written to again and answered: finished, the person's to settle, once its lead's turn is over (read below).
             (SELECT json_group_array(json_object('task', k.id, 'thread', t.id)) FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
               WHERE k.project_id = p.id AND k.state = 'open' AND ${sql.unsafe(answeredIn('k'))}
                 AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-                AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0) AS answered,
+                AND ${sql.unsafe(issueCardsWaiting('k'))} = 0) AS answered,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
             coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
             (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
@@ -804,7 +812,7 @@ export class Queries extends Context.Service<
             SELECT k.id, k.project_id, k.title, k.slug, t.id AS thread_id, k.state, ${sql.unsafe(SHOWN_BRANCH)},
               (SELECT s.agent_id FROM provider_sessions s WHERE s.thread_id = t.id AND s.state IN (${sql.unsafe(live)})
                 ORDER BY s.started_at DESC LIMIT 1) AS agent_id,
-              (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open') + ${sql.unsafe(issueDraftsWaiting('k'))} AS waiting,
+              (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
               k.created_at
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
@@ -1575,29 +1583,34 @@ export class Queries extends Context.Service<
             : { id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content },
         )
 
-      /** Why work waits for a place: how many are busy, and who holds them. What a holder left running is listed where it alone keeps the place, to stop it from here. */
-      const queuedNow = Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const sessions = yield* Sessions
-        const { busy, atOnce, holders } = yield* (yield* Busy).now
-        return {
-          busy,
-          atOnce,
-          holders: yield* Effect.forEach(holders, (holder) =>
-            Effect.gen(function* () {
-              const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`
-              const live = holder.kept && holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
-              return {
-                taskId: holder.taskId,
-                title: task?.title ?? '',
-                threadId: holder.threadId,
-                kept: holder.kept,
-                running: Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
-              }
-            }),
-          ),
-        }
-      })
+      /**
+       * Why a task's work waits for a place: how many are busy, and who holds them, the task itself left out: it never
+       * waits behind itself. What a holder left running is listed where it alone keeps the place, to stop it from here.
+       */
+      const queuedNow = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const sessions = yield* Sessions
+          const now = yield* (yield* Busy).now
+          const holders = now.holders.filter((holder) => holder.taskId !== taskId)
+          return {
+            busy: now.busy - (now.holders.length - holders.length),
+            atOnce: now.atOnce,
+            holders: yield* Effect.forEach(holders, (holder) =>
+              Effect.gen(function* () {
+                const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`
+                const live = holder.kept && holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
+                return {
+                  taskId: holder.taskId,
+                  title: task?.title ?? '',
+                  threadId: holder.threadId,
+                  kept: holder.kept,
+                  running: Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
+                }
+              }),
+            ),
+          }
+        })
 
       /**
        * A waiting task's place in its project's line, the tasks that wait for a place before any agent has worked on them, in
@@ -1723,7 +1736,7 @@ export class Queries extends Context.Service<
                 AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL) AS answers_wait,
               -- A turn of its lead or reviewer that waits for a place.
               (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL) AS turn_waits,
-              (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueDraftsWaiting('k'))} AS waiting,
+              (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
@@ -1886,7 +1899,7 @@ export class Queries extends Context.Service<
             startedAt: task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
-            queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
+            queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
             ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
@@ -2564,6 +2577,7 @@ export class Queries extends Context.Service<
                 WHEN 'external_link' THEN (SELECT t.id FROM external_links x
                   JOIN threads t ON t.task_id = x.task_id AND t.kind = 'task' WHERE x.id = c.aggregate_id)
                 WHEN 'issue_draft' THEN (SELECT thread_id FROM issue_drafts WHERE id = c.aggregate_id)
+                WHEN 'issue_change' THEN (SELECT thread_id FROM issue_changes WHERE id = c.aggregate_id)
                 WHEN 'review_draft' THEN (SELECT thread_id FROM review_drafts WHERE id = c.aggregate_id)
                 -- A run and a try at one of its steps belong to their task's thread, whose graph they change.
                 WHEN 'run' THEN (SELECT t.id FROM runs r

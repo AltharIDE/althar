@@ -318,6 +318,27 @@ describe('the Talk room', () => {
     expect(screen.getByText('Issue draft discarded')).toBeTruthy()
   })
 
+  it('applies or discards the coordinator’s changes to issues, several on one card, and folds applied ones to a line', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ items: [items.changes(), items.changes({ changesId: 'ich_2', state: 'applied' })] }),
+      ),
+    })
+    withServices(<Project />, client)
+    const card = within(await screen.findByRole('article', { name: 'Issue changes · Linear' }))
+    expect(
+      card.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === 'Status Done' && node.childElementCount > 0),
+    ).toBeTruthy()
+    expect(
+      card.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === 'Priority Low' && node.childElementCount > 0),
+    ).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Apply' }))
+    expect(client.applyIssueChanges).toHaveBeenCalledWith('ich_1')
+    await userEvent.click(card.getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueChanges).toHaveBeenCalledWith('ich_1')
+    expect(screen.getByText('Changed')).toBeTruthy()
+  })
+
   it('holds, changes and starts a plan before it starts on its own', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card())] })) })
     withServices(<Project />, client)

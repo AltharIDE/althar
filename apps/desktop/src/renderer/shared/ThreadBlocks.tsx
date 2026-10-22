@@ -37,6 +37,7 @@ import { answersOf, partsOf, pickedOf, questionText } from './questions'
 import type {
   ArrivalContent,
   Block,
+  IssueChangesContent,
   IssueDraftContent,
   ReviewDraftContent,
   Part,
@@ -390,6 +391,7 @@ export function ThreadBlocks({
   card,
   run,
   draft,
+  changes,
   push,
   review,
   queued,
@@ -421,6 +423,8 @@ export function ThreadBlocks({
   run?: (run: RunContent) => ReactNode
   /** Draws an issue the coordinator drafted, in its thread. */
   draft?: (draft: IssueDraftContent) => ReactNode
+  /** Draws changes to issues, in the thread of whoever proposed them. */
+  changes?: (changes: IssueChangesContent) => ReactNode
   /** Draws a push the lead asked for, in a task's thread, with when it was asked or settled. */
   push?: (request: PushRequestContent, at: string) => ReactNode
   /** Draws a review the lead drafted of someone else's pull request, in a review task's thread. */
@@ -481,6 +485,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
       case 'draft':
         return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
+      case 'changes':
+        return <Fragment key={block.id}>{changes?.(block.changes)}</Fragment>
       case 'setup':
         return <SetupView key={block.id} setup={block.setup} />
       case 'push':

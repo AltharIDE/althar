@@ -20,8 +20,12 @@ export const text = {
     line: 'When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.',
   },
   moveIssues: {
-    title: 'Move issues to In Progress',
-    line: 'When a task starts from a Linear, Jira or Trello issue.',
+    title: 'Move issues along with their tasks',
+    line: 'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
+  },
+  changeIssues: {
+    title: 'Change issues without asking',
+    line: 'Status, priority, assignee, labels and closing apply at once, instead of waiting for you on a card.',
   },
 }
 
@@ -60,6 +64,7 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
       : [
           { rule: 'resolveConflicts', words: text.conflicts, on: rules.resolveConflicts, set: model.setResolveConflicts },
           { rule: 'moveIssues', words: text.moveIssues, on: rules.moveIssues, set: model.setMoveIssues },
+          { rule: 'changeIssues', words: text.changeIssues, on: rules.changeIssues, set: model.setChangeIssues },
         ]
   return (
     <>

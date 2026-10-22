@@ -31,6 +31,14 @@ export const Pending: Story = {
   },
 }
 
+/** With the priority it is filed with, beside its labels. */
+export const WithPriority: Story = {
+  args: { priority: 'Low' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Priority: Low · Labels: refunds, webhooks, bug')).toBeInTheDocument()
+  },
+}
+
 /** Any other tracker, with no labels. */
 export const PendingOnJira: Story = { args: DRAFT_JIRA }
 

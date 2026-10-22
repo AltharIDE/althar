@@ -12,10 +12,10 @@ import { Sessions } from '../src/Sessions'
 import { repository, runtime, until } from './support'
 
 /*
- * A later round of review that waits for a place of its own (Busy.ts), its
- * lead's server still running, where placesKept.test.ts and busy.test.ts
- * don't go: it starts with what the lead settled before it, whether the
- * person resumed it or its place freed.
+ * A later round of review whose lead's server still runs (Busy.ts), where
+ * placesKept.test.ts and busy.test.ts don't go: it starts at once in its
+ * task's place, the server running on in it (ADR-032's follow-up of 21
+ * October), with what the lead settled before it.
  */
 
 const GB = 1024 ** 3
@@ -31,30 +31,6 @@ const attempts = (taskId: string) =>
       SELECT a.id, n.node_key AS step, n.iteration, a.state, a.hold_reason, a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id
       JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
       WHERE r.task_id = ${taskId} ORDER BY a.admitted_at, a.rowid`
-  })
-
-/** The round of review, once it waits for a place. */
-const waitingRound = (taskId: string, iteration: number) =>
-  Effect.map(
-    until(
-      attempts(taskId),
-      (rows) => rows.some((row) => row.step === 'review' && row.iteration === iteration && row.holdReason === 'machine_busy'),
-      Duration.seconds(20),
-    ),
-    (rows) => rows.find((row) => row.step === 'review' && row.iteration === iteration) ?? assert.fail('no round'),
-  )
-
-/** What a step waiting for a place keeps, as an earlier Althar kept it as the person resumed it: on its reviewer, at once. */
-const resumed = (attempt: { readonly id: string; readonly output: string | null }) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const { since } = JSON.parse(attempt.output ?? '{}') as { since?: string }
-    const place = {
-      how: 'resume',
-      lead: { agentId: 'claude-code', model: null, effort: null },
-      reviewer: { key: 'review', agentId: 'codex', model: null, skipped: false },
-    }
-    yield* sql`UPDATE node_attempts SET output = ${JSON.stringify({ place, since })} WHERE id = ${attempt.id}`
   })
 
 /** A task whose lead serves what it built, then finishes, and whose review finds something in its first round; started now. */
@@ -83,8 +59,6 @@ const served = Effect.gen(function* () {
     held: true,
   })
   yield* plans.start(planId, instance.personId)
-  // Its server keeps a place, so its first round waits for one of its own: an earlier Althar kept it as resumed, so it goes now.
-  yield* resumed(yield* waitingRound(task.taskId, 0))
   return task
 })
 
@@ -110,25 +84,28 @@ const passed = (taskId: string) =>
     Duration.seconds(20),
   )
 
-describe('a later round of review waiting for a place of its own', () => {
-  it.live('starts, as the person resumed it, with what the lead settled', () =>
+describe('a later round of review, its lead’s server still running', () => {
+  it.live('starts at once in its task’s place, with what the lead settled', () =>
     Effect.gen(function* () {
-      const task = yield* served
-      yield* resumed(yield* waitingRound(task.taskId, 1))
-      assert.include(yield* toldLater(task.taskId), 'The lead settled your findings:\n\nFixed the heading.')
-      yield* passed(task.taskId)
-    }).pipe(Effect.provide(oneAtOnce())),
-  )
-
-  it.live('starts once its lead’s server stops, with what the lead settled', () =>
-    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const task = yield* served
-      yield* waitingRound(task.taskId, 1)
-      const [left] = Option.getOrUndefined(yield* sessions.running(task.threadId))?.background ?? []
-      yield* sessions.stopBackground(task.threadId, left?.id ?? '')
       assert.include(yield* toldLater(task.taskId), 'The lead settled your findings:\n\nFixed the heading.')
       yield* passed(task.taskId)
+      // No round waited for a place, and the server ran on all the while.
+      assert.deepStrictEqual(
+        (yield* attempts(task.taskId)).flatMap((row) => (row.holdReason === null ? [] : [row.holdReason])),
+        [],
+      )
+      assert.lengthOf(
+        yield* sql`SELECT sequence FROM record_events WHERE aggregate_type = 'node_attempt' AND type = 'node_attempt.held'`,
+        0,
+      )
+      const left = Option.getOrUndefined(yield* sessions.running(task.threadId))?.background ?? []
+      assert.lengthOf(
+        left.filter((one) => one.ended === null),
+        1,
+      )
     }).pipe(Effect.provide(oneAtOnce())),
   )
 })

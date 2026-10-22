@@ -39,7 +39,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
 import { touchCard } from './cards'
-import { logForLead, readLog } from './checkLogs'
+import { logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import {
@@ -103,6 +103,7 @@ import {
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
+import { IssueChanges } from './IssueChanges'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { Sessions } from './Sessions'
 import { spanOf } from './stallWatch'
@@ -352,9 +353,6 @@ const RERUN_SHOWS = Duration.minutes(3)
 /** How long `push_tag` waits for the person before it returns, and the lead is told later: well within what agents wait for a tool. */
 export const TAG_ANSWERED_WITHIN = Duration.seconds(30)
 
-/** How many lines of a check's log `read_check_log` gives at a time. */
-const LOG_PAGE = 300
-
 /** A change in Althar's hands: how often its checks failed since its work came back, whether they run now, and whether it gave up. */
 export interface Hands {
   readonly failed: number
@@ -413,6 +411,7 @@ type Store =
   | Policies
   | Live
   | Busy
+  | IssueChanges
 
 /** Where a task's conflict round stands, as its card says it (`Changes.conflictStanding`). */
 export type ConflictStanding =
@@ -677,6 +676,10 @@ export class Changes extends Context.Service<
       const agents = yield* Agents
       const live = yield* Live
       const scope = yield* Scope.Scope
+      const issueChanges = yield* IssueChanges
+      /** Offers to move a task's issue along with its pull request, in the background: nothing it meets holds the pull request up. */
+      const follow = (taskId: string, event: 'opened' | 'merged', change: Parameters<typeof nameOf>[0]) =>
+        Effect.asVoid(Effect.forkIn(issueChanges.followPullRequest(taskId, event, { key: nameOf(change) }), scope))
       const every = (yield* RuntimeConfig).listenEvery ?? Duration.seconds(30)
       const checksAppear = Duration.toMillis((yield* RuntimeConfig).checksAppear ?? Duration.minutes(1))
       const stuckAfter = (yield* RuntimeConfig).checksStuck ?? STUCK_AFTER
@@ -1237,11 +1240,14 @@ export class Changes extends Context.Service<
                 key: `link_issue:${issueLink.id}:${opened.url}`,
                 request: { url: opened.url },
                 retryable: true,
-                perform: tracker.link(issue, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` }),
+                perform: Effect.as(tracker.link(issue, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` }), true),
                 encode: () => true,
-                decode: () => undefined,
+                // Linked once, by this or its lead's link_pull_request, which shares its key: its receipt answers.
+                decode: () => true,
               })
             }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause)))
+          // Its issue, moved on to review, where the person applies it.
+          if (issueLink !== undefined) yield* follow(input.taskId, 'opened', snapshot)
           yield* touchCard(input.taskId)
           yield* news(input.taskId)
           wakeNow(input.taskId)
@@ -2093,6 +2099,7 @@ export class Changes extends Context.Service<
           if (after.state !== before.state && settled)
             yield* arrive(link, { kind: after.state, from: null, where: nameOf(before), url: before.url })
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
+          if (after.state === 'merged' && before.state !== 'merged') yield* follow(link.taskId, 'merged', before)
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           return after
         })
@@ -3027,6 +3034,7 @@ export class Changes extends Context.Service<
           })
           // Merged or closed, it takes no more pushes: what the lead asked to push to it is closed.
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
+          if (after.state === 'merged' && before.state !== 'merged') yield* follow(link.taskId, 'merged', before)
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           // Checks on what Althar pushed to resolve a conflict are the round's; what fails there isn't told the lead twice.
           const theRounds = yield* checked(link, before.url, now, host, repository).pipe(
@@ -4436,19 +4444,7 @@ export class Changes extends Context.Service<
           // A log its host keeps but wouldn't give is refused, with why; a check it keeps none of is said, with what it reported.
           if (read.log === null)
             return read.kept ? yield* new ToolRefused({ message: logForLead(read) }) : `${nameOf(snapshot)}: ${logForLead(read)}`
-          const lines = read.log.trimEnd().split('\n')
-          const from = Math.min(Math.max(1, Math.floor(asked.from_line ?? lines.length - LOG_PAGE + 1)), lines.length)
-          const to = Math.min(lines.length, from + LOG_PAGE - 1)
-          const around = [
-            ...(from > 1 ? [`from_line ${Math.max(1, from - LOG_PAGE)} reads the page before`] : []),
-            ...(to < lines.length ? [`from_line ${to + 1} reads on`] : []),
-          ]
-          return [
-            `Lines ${from} to ${to} of ${lines.length} of ${check.name}'s log on ${nameOf(snapshot)}${around.length === 0 ? '' : `; ${around.join(', ')}`}:`,
-            '```',
-            lines.slice(from - 1, to).join('\n'),
-            '```',
-          ].join('\n')
+          return logPage(read.log, asked.from_line, check.name, nameOf(snapshot))
         })
 
       const RerunAsked = Schema.Struct({

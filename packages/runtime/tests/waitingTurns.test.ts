@@ -12,6 +12,7 @@ import { Busy } from '../src/Busy'
 import type { BusyOptions } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Questions } from '../src/Questions'
@@ -33,8 +34,8 @@ import { items, repository, runtime, until } from './support'
 const GB = 1024 ** 3
 
 /** The runtime on a machine that runs one agent at once, with the queries the screens read. */
-const oneAtOnce = (busy: BusyOptions = {}, file = ':memory:') =>
-  Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { busy: { machine: { cores: 3, memory: 7 * GB }, ...busy } })))
+const oneAtOnce = (busy: BusyOptions = {}, file = ':memory:', more: Parameters<typeof runtime>[2] = {}) =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { ...more, busy: { machine: { cores: 3, memory: 7 * GB }, ...busy } })))
 
 /** A task whose plan, its lead Codex with no review unless said, the person starts now. */
 const started = (
@@ -308,21 +309,30 @@ describe('an answer kept for a place, as answers once were', () => {
 })
 
 describe('a review that waits for a place of its own', () => {
-  it.live('is gone on without when the person skips it, and its reviewer never starts', () =>
-    Effect.gen(function* () {
+  it.live('is gone on without when the person skips it, and its reviewer never starts again', () => {
+    const back = Date.now() + 5_000
+    return Effect.gen(function* () {
       const runs = yield* Runs
       const sql = yield* SqlClient.SqlClient
+      const policies = yield* Policies
+      const instance = yield* Instance
       const projectId = yield* opened
-      // The lead leaves its server running, so its review waits for a place of its own.
-      const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:pass]', [
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
+      // Its reviewer is out of usage until its reset; meanwhile another task's lead takes the one place.
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+      yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+      // At the reset there is none: the review waits for a place of its own.
       yield* until(
         attempts(task.taskId),
         (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.holdReason === 'machine_busy',
         Duration.seconds(15),
       )
+      const reviewers = sql`SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
+      const before = (yield* reviewers).length
       yield* runs.skipReview({ envelope: yield* Runtime.envelope('run.skip_review', {}), taskId: task.taskId })
       const [run] = yield* sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`
       assert.strictEqual(run?.state, 'succeeded')
@@ -333,7 +343,8 @@ describe('a review that waits for a place of its own', () => {
           ['review', 'cancelled'],
         ],
       )
-      assert.lengthOf(yield* sql`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`, 0)
-    }).pipe(Effect.provide(oneAtOnce())),
-  )
+      yield* Effect.sleep('300 millis')
+      assert.lengthOf(yield* reviewers, before)
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: { until: back } } } })))
+  })
 })

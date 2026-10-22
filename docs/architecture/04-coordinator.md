@@ -43,11 +43,11 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
   fresh read-only session using its agent and model, without delaying the
   conversation ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
 
-It never edits a repository, runs builds or tests, or merges, even for a
+It never edits a repository, installs or builds, or merges, even for a
 one-line change. A change is always a task with a lead, and so is trying
-something out. Althar refuses the coordinator's commands that change anything,
-for its role, and its brief says so, so it doesn't take that for the person
-saying no. What a task has built is in that task's worktree, so the coordinator
+something out that needs the project set up. Althar refuses the coordinator's
+commands that change anything beyond its own copies, for its role, and its
+brief says so, so it doesn't take that for the person saying no. What a task has built is in that task's worktree, so the coordinator
 asks its lead to try it.
 
 ## Shape
@@ -59,7 +59,7 @@ flowchart LR
     Brief --> Session["Coordinator session<br/>any agent, over ACP"]
     Session <-->|"MCP"| Tools["Althar tools"]
     Tools --> Runtime["Runtime commands and queries"]
-    Session -.->|"reads"| Repos["Read-only worktrees"]
+    Session -.->|"reads"| Repos["Copies of its own"]
     Runtime --> Tasks["Tasks, leads, and steps"]
 ```
 
@@ -71,25 +71,39 @@ role: its brief, its tools, and its read-only rule.
 
 Read-only is enforced by what the coordinator can reach, not by its prompt,
 in three layers ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)).
-A reviewer, the other role that only reads, gets the same.
+A reviewer, the other role that only reads, gets the same, but for what the
+coordinator may run in copies of its own
+([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)).
 
 - It reads throwaway copies. Its working directory is an Althar-owned
-  folder holding one worktree per bound repository, detached at the default
-  branch. They are refreshed from the remote's default branch when you start
-  a turn, so nothing written there survives or reaches a task. A project with
-  no repositories gets an empty folder. A reviewer reads a copy of the lead's
+  folder holding one copy per bound repository, detached at the default
+  branch. Each is a repository of its own, whose git folder is made again
+  for every turn: it borrows the person's repository's objects, and fetches
+  only from a mirror of that repository's refs Althar keeps beside the
+  folder, after Althar fetched the remote there. So its `git fetch`
+  and `git tag` write only the copy, and nothing written there survives or
+  reaches a task, nor is read by Althar's own git. A project with no
+  repositories gets an empty folder. A reviewer reads a copy of the lead's
   worktree, snapshotted when its round begins, so it reads what the round is
   about even if the lead moves on, and the record keeps which code it was.
 - The agent's own sandbox is read-only where it has one that still lets it
   call Althar's tools: Codex's `read-only` sandbox, and Claude Code with its
-  edit tools denied (which also denies its sandbox's writes) and every shell
-  command asking. Claude Code's plan mode and OpenCode's plan agent would be
-  simpler, but both refuse MCP tools. OpenCode has no sandbox yet, so for it
-  the copy is the boundary.
+  edit tools denied and every shell command asking. The coordinator's Claude
+  Code, where its sandbox can start, runs its commands in it without asking,
+  held to its folder: writes only there, no network, no socket, reads none
+  of the home folder, the person's checkouts or the task folders but its
+  folder, the mirrors, the objects its copies borrow, the toolchains and
+  git's config files (never its credential store), and never outside it;
+  it loads no settings file and runs no hook. The reader rules hold its own
+  read and search tools to the same places. Claude
+  Code's plan mode
+  and OpenCode's plan agent would be simpler, but both refuse MCP tools.
+  OpenCode has no sandbox yet, so for it the copy is the boundary.
 - Althar's reader rules are the backstop. They allow reads, searches and
   fetches, and commands that only look, each with the flags it may take (no
-  `rg --pre`, `git -c`, `sort -o`). They refuse everything else with a reason,
-  and never ask you.
+  `rg --pre`, `git -c`, `sort -o`). For the coordinator they also take
+  `$(…)` whose commands only look, `uptime` and the like, and `git tag`
+  listing. They refuse everything else with a reason, and never ask you.
 - Its only way to change anything is its tools. They issue the same commands
   the interface does: validated, recorded, idempotent, and never beyond your
   own authority.
@@ -106,6 +120,8 @@ provisional.
 | `find_tasks` | The project's tasks found by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number, an issue's key, a branch or a file; best first, a line each with where it stands, its pull request, its id and what matched ([02](02-desktop-runtime.md#queries)) | Read |
 | `read_thread` | A task's thread, or, without a task, its own conversation: the latest part, then further back a part at a time | Read |
 | `read_change` | A task's diff and checks | Read |
+| `read_pull_request` | Any of the project's pull requests, whoever opened it, by its number or link, as its host has it now: state, where it goes and whether it conflicts there, size, description, checks with the end of a failed one's log, and what everyone said on it, as data ([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)) | Read |
+| `read_check_log` | A check's whole log on one of the project's pull requests, a page at a time ([ADR-041](../decisions/041-what-failed-said-in-full.md)) | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
 | `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
 | `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |

@@ -4,7 +4,7 @@ import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } 
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
-import { answeredIn, issueDraftsWaiting } from './kinds'
+import { answeredIn, issueCardsWaiting } from './kinds'
 import { outStep } from './Limits'
 import { field, parse, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
@@ -152,7 +152,7 @@ export class Nudges extends Context.Service<
             AND coalesce((SELECT state FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
               ORDER BY proposed_at DESC LIMIT 1), '') <> 'proposed'
             AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-            AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0
+            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
             AND NOT EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
               WHERE e.run_id = r.id AND a.state = 'admitted')
             AND NOT EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
@@ -188,7 +188,7 @@ export class Nudges extends Context.Service<
           JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
           WHERE d.state = 'pending' AND k.state = 'open'
             AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-            AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0
+            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
           ORDER BY d.created_at, d.rowid`
         for (const review of drafted) {
           const turning = yield* Effect.map(
@@ -213,7 +213,7 @@ export class Nudges extends Context.Service<
           JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
           WHERE k.state = 'open' AND k.kept_at IS NULL AND ${sql.unsafe(answeredIn('k'))}
             AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-            AND ${sql.unsafe(issueDraftsWaiting('k'))} = 0
+            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
           ORDER BY k.created_at, k.id`
         for (const review of answered) {
           if (Option.exists(yield* sessions.running(review.threadId), (session) => session.turnRunning)) continue
@@ -229,7 +229,7 @@ export class Nudges extends Context.Service<
         // Issues a lead drafted, for the person to file: one nudge for a task, whatever the number.
         const issues = yield* sql<{ threadId: string; title: string; drafts: number }>`
           SELECT thread_id, title, drafts FROM (
-            SELECT t.id AS thread_id, k.title, ${sql.unsafe(issueDraftsWaiting('k'))} AS drafts, k.created_at, k.id AS task_id
+            SELECT t.id AS thread_id, k.title, ${sql.unsafe(issueCardsWaiting('k'))} AS drafts, k.created_at, k.id AS task_id
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
