@@ -1,5 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "include": [".", "../../src/renderer/global.d.ts"],
-  "exclude": ["shots"]
-}
