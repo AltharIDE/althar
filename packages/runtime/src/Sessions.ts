@@ -78,6 +78,7 @@ import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
 import { addItem, betweenTurns, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
+  addressOf,
   commandOfCall,
   exitCodeIn,
   type LeftRunning,
@@ -88,8 +89,10 @@ import {
   shownOf,
   stillBusy,
   tailOf,
+  uncoloured,
   WAKE_FOR,
 } from './leftRunning'
+import { holding, portFor, portsBelow } from './ports'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -296,6 +299,12 @@ interface Running {
   settleBetween: Effect.Effect<void, never, Store>
   /** What records its events now: its turn's, or the one between turns. */
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
+  /**
+   * The ports its process tree listened on as its latest turn began, once
+   * read: what a command it leaves running in that turn is told apart from
+   * where only the agent's whole tree is known (`portFor`).
+   */
+  listeningBefore: Deferred.Deferred<ReadonlySet<number>>
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
   readonly background: Map<string, LeftRunning>
   /** Tool calls it began outside a turn Althar sent, as Claude Code does when something it left running ends, and hasn't finished. */
@@ -322,9 +331,17 @@ interface Running {
 /** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
 const IDLE_EVERY = Duration.millis(250)
 
-/** How often, and for how long, what one left running is read for where it answers. */
+/**
+ * How often, and for how long, what one left running is read for where it
+ * answers: as long as Althar's own runs are (Launches.ts). Its output is read
+ * each time; the ports its processes listen on, every few.
+ */
 const SERVING_EVERY = Duration.millis(500)
-const SERVING_TRIES = 240
+const SERVING_TRIES = 1_200
+const PORTS_EVERY = 4
+
+/** The longest a turn waits to read what the agent's tree listens on before it begins. */
+const BASELINE_WITHIN = Duration.seconds(5)
 
 /** Keeps what the agent last said of its context, from an event it streamed. */
 const heardContext = (running: Running, event: SessionEvent) => {
@@ -592,6 +609,8 @@ export class Sessions extends Context.Service<
     stopBackground(threadId: string, id: string): Effect.Effect<void, AgentRequestFailed | AgentExited>
     /** Clears one that ended by itself from the list. */
     clearBackground(threadId: string, id: string): Effect.Effect<void>
+    /** What one left running has printed, as far as it is read: the end of it. */
+    backgroundOutput(threadId: string, id: string): Effect.Effect<{ readonly text: string; readonly dropped: number }, NotFound>
     /**
      * Runs `effect` while no agent is on the thread, and none can start on it
      * meanwhile: a finished task's folders go so (ADR-056). Null, and nothing
@@ -760,16 +779,69 @@ export class Sessions extends Context.Service<
                 ),
             })
 
-      /** Reads what one prints, now and then, until it says where it answers, ends, or a couple of minutes go by. */
-      const watchServing = (running: Running, id: string) =>
+      /**
+       * The port one listens on, found from the processes it started: those
+       * holding the file its output goes to (Claude Code), whose tree is its
+       * own; else the agent's whole tree, where only one new port with no
+       * other command left without an address is taken as it (`portFor`).
+       * `known` is what the agent's tree listened on before the turn the
+       * command began in, not when it was reported: Codex reports one after
+       * the turn, by when a quiet server is already listening.
+       */
+      const listeningPort = (running: Running, left: LeftRunning, known: ReadonlySet<number>) =>
         Effect.gen(function* () {
+          const held = left.outputPath === null ? [] : yield* holding(left.outputPath)
+          const agent = running.connection.process?.pid
+          const roots = held.length > 0 ? held : agent === undefined ? [] : [agent]
+          const found = yield* portsBelow(roots)
+          // Taken after the lookup, which others ran at the same time: a port is claimed by one only.
+          const others = [...running.background.values()].filter((other) => other !== left)
+          const claimed = new Set(others.flatMap((other) => (other.url === null ? [] : [Number(new URL(other.url).port)])))
+          const rivals = others.filter((other) => other.ended === null && other.url === null).length
+          return portFor({ found, claimed, own: held.length > 0, known, rivals })
+        })
+
+      /**
+       * Reads where the agent's tree listens as its turn begins. The turn waits
+       * for it, a moment, before the prompt goes: a server it starts must not
+       * be in what listened before. Bounded, for a lookup that hangs.
+       */
+      const notingListening = (running: Running) =>
+        Effect.gen(function* () {
+          const agent = running.connection.process?.pid
+          const ports =
+            agent === undefined
+              ? []
+              : yield* portsBelow([agent]).pipe(Effect.timeoutOption(BASELINE_WITHIN), Effect.map(Option.getOrElse(() => [])))
+          const before = yield* Deferred.make<ReadonlySet<number>>()
+          yield* Deferred.succeed(before, new Set(ports))
+          running.listeningBefore = before
+        })
+
+      /**
+       * Reads what one prints, now and then, and where its processes listen,
+       * until what it prints says where it answers, it ends, or ten minutes
+       * go by. An address from a port stands until its output says another.
+       */
+      const watchServing = (running: Running, id: string, before: Deferred.Deferred<ReadonlySet<number>>) =>
+        Effect.gen(function* () {
+          const known = yield* Deferred.await(before)
           for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
             const left = running.background.get(id)
             if (left === undefined || left.ended !== null) return
-            const url = servingAt(yield* printedBy(left))
-            if (url !== null) {
-              left.url = url
-              return yield* toldBackground(running)
+            const printed = yield* printedBy(left)
+            const port =
+              left.url === null && servingAt(printed) === null && tries % PORTS_EVERY === PORTS_EVERY - 1
+                ? yield* listeningPort(running, left, known)
+                : null
+            const now = running.background.get(id)
+            if (now === undefined || now.ended !== null) return
+            const found = addressOf(now, printed, port)
+            if (found !== null) {
+              now.url = found.url
+              now.inferred = found.inferred
+              yield* toldBackground(running)
+              if (!found.inferred) return
             }
             yield* Effect.sleep(SERVING_EVERY)
           }
@@ -786,17 +858,19 @@ export class Sessions extends Context.Service<
                 running.background.set(event.id, {
                   id: event.id,
                   command: commandOfCall(item?.content, event.name),
+                  name: event.name,
                   toolCallId: event.toolCallId ?? null,
                   outputPath: event.outputPath ?? null,
                   printed: yield* printedBefore(running, item?.id),
                   url: null,
+                  inferred: false,
                   startedAt: yield* timestamp,
                   ended: null,
                 })
                 // Left running, its call is no longer one the agent has open.
                 if (event.toolCallId !== undefined) running.callsOpen.delete(event.toolCallId)
                 yield* toldBackground(running)
-                yield* Effect.forkIn(watchServing(running, event.id), running.scope)
+                yield* Effect.forkIn(watchServing(running, event.id, running.listeningBefore), running.scope)
                 return
               }
               case 'ToolCallUpdate': {
@@ -1347,6 +1421,7 @@ export class Sessions extends Context.Service<
             )
           })
           const images = inputs.flatMap((input) => sent.images.get(input.id) ?? [])
+          yield* notingListening(running)
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, images, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
@@ -1929,6 +2004,9 @@ export class Sessions extends Context.Service<
             context: null,
             recording: undefined,
             settleBetween: Effect.void,
+            listeningBefore: yield* Deferred.make<ReadonlySet<number>>().pipe(
+              Effect.tap((before) => Deferred.succeed(before, new Set<number>())),
+            ),
             background: new Map(),
             callsOpen: new Set(),
             workedAt: null,
@@ -2844,6 +2922,12 @@ export class Sessions extends Context.Service<
             if (running === undefined || running.background.get(id)?.ended == null) return
             running.background.delete(id)
             yield* toldBackground(running)
+          }),
+        backgroundOutput: (threadId, id) =>
+          Effect.gen(function* () {
+            const left = threads.get(threadId)?.background.get(id)
+            if (left === undefined) return yield* Effect.fail(new NotFound({ kind: 'background command', id }))
+            return { text: uncoloured(yield* printedBy(left)), dropped: 0 }
           }),
         outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
         busy: (threadId) => busyNow(threadId),

@@ -153,6 +153,13 @@ describe('what a lead left running, from the window', () => {
         const serving = yield* eventually(client.GetThread({ threadId }), (thread) => thread.session?.background[0]?.url != null)
         const left = serving.session?.background[0]
         assert.deepInclude(left, { command: 'bun dev', url: 'http://localhost:5173/', ended: null })
+        // What it printed is read while it runs: its address, as it said it.
+        const printed = yield* client.ReadBackgroundOutput({ threadId, id: left?.id ?? '' })
+        assert.include(printed.text, 'Local:   http://localhost:5173/')
+        assert.notInclude(printed.text, '\u001b')
+        const missing = yield* Effect.flip(client.ReadBackgroundOutput({ threadId, id: 'nothing' }))
+        assert.instanceOf(missing, ApiError)
+        assert.strictEqual(missing instanceof ApiError ? missing.reason : '', 'NotFound')
         yield* client.StopBackground({ commandId: commandId(), threadId, id: left?.id ?? '' })
         assert.deepStrictEqual((yield* client.GetThread({ threadId })).session?.background, [])
 

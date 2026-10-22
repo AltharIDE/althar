@@ -124,6 +124,8 @@ export interface Client {
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
   /** What a command in a thread printed, as kept once it ended. */
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
+  /** What a command a thread's session left running has printed so far. */
+  readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** One file a task changed, as a diff from its base to its worktree. */
@@ -527,6 +529,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
+    readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),

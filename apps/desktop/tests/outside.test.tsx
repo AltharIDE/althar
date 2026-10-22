@@ -953,6 +953,39 @@ describe('what a task’s lead left running', () => {
   })
 })
 
+describe('a server a task’s lead left running, as it named it', () => {
+  it('leads with its name and address, quietly says the command at a glance, and shows what it prints', async () => {
+    const server = {
+      id: 'bg-1',
+      name: 'Site dev server',
+      command: 'cd /w/site && node_modules/.bin/vp dev --config ../../a/vite.config.ts 2>&1 | tail -20',
+      label: 'vp dev',
+      url: 'http://localhost:5173/',
+      startedAt: '2026-10-10T09:00:00.000Z',
+      ended: null,
+    }
+    const thread = snapshot()
+    const readBackgroundOutput = vi.fn(async () => ({ text: 'VITE ready in 312 ms\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 }))
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...thread, session: thread.session === null ? null : { ...thread.session, background: [server] } })),
+      readBackgroundOutput,
+    })
+    withServices(<Task />, client)
+    const pill = await screen.findByRole('button', { name: /^Running/ })
+    expect(pill.textContent).toBe('RunningSite dev server· localhost:5173')
+    await userEvent.click(pill)
+    const list = within(await screen.findByRole('dialog', { name: 'Running' }))
+    expect(list.getByText('Site dev server')).toBeTruthy()
+    expect(list.getByText('vp dev').getAttribute('title')).toBe(server.command)
+    await userEvent.click(list.getByRole('button', { name: 'Show the output of Site dev server' }))
+    const output = within(await screen.findByRole('dialog', { name: 'Output of Site dev server' }))
+    expect(await output.findByText(/VITE ready in 312 ms/)).toBeTruthy()
+    expect(readBackgroundOutput).toHaveBeenCalledWith('th1', 'bg-1')
+    await userEvent.click(output.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Output of Site dev server' })).toBeNull())
+  })
+})
+
 describe('a task’s pull request', () => {
   it('says over the composer that it listens to it, says for a moment what it hears, and stops when asked', async () => {
     let thread = snapshot({ task: { ...snapshot().task, changes: [change()] }, items: [items.arrival()] })

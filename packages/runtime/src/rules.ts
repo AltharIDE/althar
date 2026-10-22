@@ -1260,10 +1260,53 @@ const withoutRedirects = (words: ReadonlyArray<string>, operators: ReadonlySet<n
     return operators.has(index - 1) && OUTPUT_REDIRECTS.includes(words[index - 1] ?? '') ? [] : [word]
   })
 
+/** Flags whose value is a place, such as a config file, that a reader has no use for at a glance: `--config ../../a/vite.config.ts`. */
+const PLACE_FLAGS = /^--?(config|config-?file|cwd|root|project|tsconfig|env-?file|prefix|dir|workspace)$/i
+/** A runner's own words before the program it runs: `npx -y`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x`. */
+const FETCHERS = [['npx'], ['bunx'], ['pnpx'], ['pnpm', 'dlx'], ['yarn', 'dlx'], ['bun', 'x']]
+const FETCHER_FLAGS = ['-y', '--yes', '-q', '--quiet', '--no-install', '--no', '--bun']
+const BIN_FOLDER = /(?:^|[/\\])node_modules[/\\]\.bin[/\\]([^/\\]+)$/
+const looksLikePlace = (value: string) => /[/\\]/.test(value) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+
+/**
+ * A command's last meaningful part (ADR-044): its program without the folder
+ * a package manager keeps it in or the runner that fetches it, and without
+ * the flags that only say where a file is: `node_modules/.bin/vp dev
+ * --config ../../a/vite.config.ts` reads `vp dev`.
+ */
+const plainer = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
+  let rest = words
+  const runner = FETCHERS.find((one) => one.every((word, at) => rest[at] === word))
+  if (runner !== undefined && rest.length > runner.length) {
+    rest = rest.slice(runner.length)
+    while (FETCHER_FLAGS.includes(rest[0] ?? '') && rest.length > 1) rest = rest.slice(1)
+  }
+  const bin = BIN_FOLDER.exec(rest[0] ?? '')?.[1]
+  if (bin !== undefined) rest = [bin, ...rest.slice(1)]
+  const kept: Array<string> = []
+  for (let at = 0; at < rest.length; at += 1) {
+    const word = rest[at] ?? ''
+    if (at > 0 && word.startsWith('-')) {
+      const [flag = '', ...joined] = word.split('=')
+      if (PLACE_FLAGS.test(flag)) {
+        if (joined.length > 0 && looksLikePlace(joined.join('='))) continue
+        if (joined.length === 0 && looksLikePlace(rest[at + 1] ?? '')) {
+          at += 1
+          continue
+        }
+      }
+    }
+    kept.push(word)
+  }
+  return kept
+}
+
 /**
  * A command line as the person reads it at a glance: what it runs, without
  * the `cd <dir> &&` an agent puts first, variable assignments, `timeout N`
- * and the like, or the plumbing after it (`2>&1`, `| tail -20`). The line
+ * and the like, or the plumbing after it (`2>&1`, `| tail -20`); a program
+ * without its `node_modules/.bin/` or the `npx` that fetches it, and without
+ * flags that only name a file (`plainer`). The line
  * itself is never changed; this is only what to show of it. A line that only
  * changes folder, or that has parts the shell works out when it runs, is
  * shown as written.
@@ -1289,7 +1332,7 @@ export const shortCommand = (text: string): string => {
       // Words dropped from the front by unwrap shift where the operators are.
       const unwrapped = unwrap(words)
       const dropped = words.length - unwrapped.length
-      const shown = withoutRedirects(unwrapped, new Set([...operators].map((at) => at - dropped)))
+      const shown = plainer(withoutRedirects(unwrapped, new Set([...operators].map((at) => at - dropped))))
       return shown.length === 0 ? '' : `${shown.map(sayWord).join(' ')}${index === kept.length - 1 ? '' : (KEPT_BETWEEN[end] ?? '; ')}`
     })
     .join('')
