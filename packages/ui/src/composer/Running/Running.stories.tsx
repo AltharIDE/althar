@@ -122,7 +122,7 @@ export const Named: Story = {
 export const NamedNoAddress: Story = { args: { processes: [API], defaultOpen: true } }
 /** Several named servers, each with its address or without, and one exited. */
 export const NamedSeveral: Story = { args: { processes: [SITE, API, { ...CRASHED, name: 'Queue worker' }], defaultOpen: true } }
-/** A name or an address too long for the popover wraps, and the long command under it wraps too: nothing is cut off. */
+/** A name too long for the popover keeps to two lines; the address and the command under it to one each, the whole on hover. */
 export const NamedLong: Story = {
   args: {
     defaultOpen: true,

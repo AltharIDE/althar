@@ -17,7 +17,9 @@ import s from './Running.module.css'
  * person would say it: "Site dev server · localhost:5173". The command, at a
  * glance, is its quiet second line with how long it has run, and the whole of
  * it is on hover. Without a name, the command at a glance leads. Nothing is
- * cut off: a long line wraps.
+ * cut off at the popover's width without a way to read it: a long
+ * name wraps to two lines, the address and the command each keep to one, and
+ * the whole is on hover.
  */
 
 export interface RunningProcess {
@@ -157,11 +159,13 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
                 )}
                 {p.url &&
                   (onOpenUrl ? (
-                    <LinkButton className={s.url} aria-label={t.openLabel(p.url)} onClick={() => onOpenUrl(p.id)}>
+                    <LinkButton className={s.url} title={p.url} aria-label={t.openLabel(p.url)} onClick={() => onOpenUrl(p.id)}>
                       {p.url}
                     </LinkButton>
                   ) : (
-                    <span className={s.url}>{p.url}</span>
+                    <span className={s.url} title={p.url}>
+                      {p.url}
+                    </span>
                   ))}
               </span>
               <span className={s.rowMeta}>
