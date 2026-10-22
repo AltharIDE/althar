@@ -41,8 +41,12 @@ export interface Outward<A, E, R> {
   readonly decode: (kept: unknown) => A | undefined
 }
 
-/** Whether a failure leaves it unknown if the service did it: the answer, not the request, was lost. */
-const lost = (error: unknown) => error instanceof ConnectorFailed && error.reason === 'unreachable'
+/**
+ * Whether a failure leaves it unknown if the service did it: the answer, not
+ * the request, was lost, or came back in a shape Althar couldn't read, which
+ * a service that did it may send as well as one that didn't.
+ */
+const lost = (error: unknown) => error instanceof ConnectorFailed && (error.reason === 'unreachable' || error.reason === 'invalid_response')
 
 export const outward = <A, E, R>(action: Outward<A, E, R>) =>
   Effect.gen(function* () {

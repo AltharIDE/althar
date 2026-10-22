@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
 import { Instance } from './Instance'
+import { changeWords, type Said } from './issueChangeWords'
 import { Models } from './Models'
 import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
 
@@ -97,7 +98,8 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       SELECT aggregate_id AS plan_id, type, actor_id FROM record_events
       WHERE project_id = ${projectId} AND aggregate_type = 'task_plan' AND sequence > ${last.sequence} AND type IN ${sql.in(HEARD)}
       ORDER BY sequence`
-    const drafts = yield* draftNews(projectId, last.sequence)
+    // What became of its issue drafts, and of changes to issues in its thread, are told together.
+    const drafts = [...(yield* draftNews(projectId, last.sequence)), ...(yield* changeNews(projectId, last.sequence))]
     const started = yield* startedNews(projectId, last.sequence)
     const made = yield* madeNews(projectId, last.sequence, modelOf)
     if (events.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0) return null
@@ -229,6 +231,47 @@ const draftNews = (projectId: string, since: number) =>
         )
       else if (changed)
         lines.push(`- The person changed the issue you drafted${was}: it now reads “${draft.title}”, and waits on them to file it.`)
+    }
+    return lines
+  })
+
+/** The events on changes to issues the coordinator hears of: Althar offered some in its thread; the person applied or discarded them; or they didn't all apply. */
+const CHANGED = ['issue_change.proposed', 'issue_change.applied', 'issue_change.failed', 'issue_change.discarded'] as const
+
+/**
+ * What became of the changes to issues in the coordinator's thread, since a
+ * place in the ledger: a line for each card, as it now stands. Its own it
+ * heard as it proposed them, and what applied at once then; Althar's are
+ * said as they are offered. A lead's are its own.
+ */
+const changeNews = (projectId: string, since: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    const events = yield* sql<{ changesId: string; type: (typeof CHANGED)[number]; actorId: string }>`
+      SELECT aggregate_id AS changes_id, type, actor_id FROM record_events
+      WHERE project_id = ${projectId} AND aggregate_type = 'issue_change' AND sequence > ${since} AND type IN ${sql.in(CHANGED)}
+      ORDER BY sequence`
+    const lines: Array<string> = []
+    for (const changesId of new Set(events.map((event) => event.changesId))) {
+      const mine = events.filter((event) => event.changesId === changesId)
+      const [card] = yield* sql<{ changes: string; note: string | null; state: string; error: string | null; proposedBy: string }>`
+        SELECT c.changes, c.note, c.state, c.error, c.proposed_by FROM issue_changes c
+        WHERE c.id = ${changesId} AND c.thread_id IN (SELECT id FROM threads WHERE kind = 'coordinator')`
+      if (card === undefined) continue
+      // What it did itself, it heard from its tool.
+      if (mine.every((event) => event.actorId === instance.coordinatorId)) continue
+      const said = changeWords(JSON.parse(card.changes) as ReadonlyArray<Said>)
+      const whose = card.proposedBy === 'althar' ? `Althar's change${card.note === null ? '' : ` (${card.note})`}` : 'your change'
+      const Whose = `${whose.charAt(0).toUpperCase()}${whose.slice(1)}`
+      if (card.state === 'applied') lines.push(`- ${Whose} to issues is applied: ${said}.`)
+      else if (card.state === 'discarded') lines.push(`- The person discarded ${whose} to issues: ${said}. Nothing changed.`)
+      else if (card.state === 'failed')
+        lines.push(`- ${Whose} to issues didn't all apply: ${card.error ?? ''} The person can apply it again from its card.`)
+      else if (card.proposedBy === 'althar')
+        lines.push(
+          `- Althar offers, on a card in your thread: ${said}${card.note === null ? '' : ` (${card.note})`}. It waits on the person; don't propose it again.`,
+        )
     }
     return lines
   })

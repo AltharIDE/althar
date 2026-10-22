@@ -103,6 +103,7 @@ import {
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
+import { IssueChanges } from './IssueChanges'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { Sessions } from './Sessions'
 import { spanOf } from './stallWatch'
@@ -410,6 +411,7 @@ type Store =
   | Policies
   | Live
   | Busy
+  | IssueChanges
 
 /** Where a task's conflict round stands, as its card says it (`Changes.conflictStanding`). */
 export type ConflictStanding =
@@ -674,6 +676,10 @@ export class Changes extends Context.Service<
       const agents = yield* Agents
       const live = yield* Live
       const scope = yield* Scope.Scope
+      const issueChanges = yield* IssueChanges
+      /** Offers to move a task's issue along with its pull request, in the background: nothing it meets holds the pull request up. */
+      const follow = (taskId: string, event: 'opened' | 'merged', change: Parameters<typeof nameOf>[0]) =>
+        Effect.asVoid(Effect.forkIn(issueChanges.followPullRequest(taskId, event, { key: nameOf(change) }), scope))
       const every = (yield* RuntimeConfig).listenEvery ?? Duration.seconds(30)
       const checksAppear = Duration.toMillis((yield* RuntimeConfig).checksAppear ?? Duration.minutes(1))
       const stuckAfter = (yield* RuntimeConfig).checksStuck ?? STUCK_AFTER
@@ -1234,11 +1240,14 @@ export class Changes extends Context.Service<
                 key: `link_issue:${issueLink.id}:${opened.url}`,
                 request: { url: opened.url },
                 retryable: true,
-                perform: tracker.link(issue, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` }),
+                perform: Effect.as(tracker.link(issue, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` }), true),
                 encode: () => true,
-                decode: () => undefined,
+                // Linked once, by this or its lead's link_pull_request, which shares its key: its receipt answers.
+                decode: () => true,
               })
             }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause)))
+          // Its issue, moved on to review, where the person applies it.
+          if (issueLink !== undefined) yield* follow(input.taskId, 'opened', snapshot)
           yield* touchCard(input.taskId)
           yield* news(input.taskId)
           wakeNow(input.taskId)
@@ -2090,6 +2099,7 @@ export class Changes extends Context.Service<
           if (after.state !== before.state && settled)
             yield* arrive(link, { kind: after.state, from: null, where: nameOf(before), url: before.url })
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
+          if (after.state === 'merged' && before.state !== 'merged') yield* follow(link.taskId, 'merged', before)
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           return after
         })
@@ -3024,6 +3034,7 @@ export class Changes extends Context.Service<
           })
           // Merged or closed, it takes no more pushes: what the lead asked to push to it is closed.
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
+          if (after.state === 'merged' && before.state !== 'merged') yield* follow(link.taskId, 'merged', before)
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           // Checks on what Althar pushed to resolve a conflict are the round's; what fails there isn't told the lead twice.
           const theRounds = yield* checked(link, before.url, now, host, repository).pipe(

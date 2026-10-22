@@ -40,6 +40,7 @@ export const revisionedTables = [
   'connections',
   'external_links',
   'issue_drafts',
+  'issue_changes',
   'conflict_resolutions',
   'review_drafts',
 ] as const

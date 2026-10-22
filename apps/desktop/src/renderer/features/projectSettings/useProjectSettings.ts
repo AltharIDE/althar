@@ -21,7 +21,7 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'moveIssues'
+export type RuleSwitch = 'resolveConflicts' | 'moveIssues' | 'changeIssues'
 
 export interface ProjectSettingsModel {
   readonly project: ProjectSummary | null
@@ -46,6 +46,7 @@ export interface ProjectSettingsModel {
   readonly setResolveConflicts: (on: boolean) => void
   /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
   readonly setMoveIssues: (on: boolean) => void
+  readonly setChangeIssues: (on: boolean) => void
   /** Which switch didn't hold, and why. */
   readonly ruleFailed: { readonly rule: RuleSwitch; readonly message: string } | null
   /** Asking whether to remove it from Althar. */
@@ -133,6 +134,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   )
   const setResolveConflicts = useCallback((on: boolean) => setRule('resolveConflicts', on), [setRule])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
+  const setChangeIssues = useCallback((on: boolean) => setRule('changeIssues', on), [setRule])
 
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
@@ -210,6 +212,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     noteFailed,
     setResolveConflicts,
     setMoveIssues,
+    setChangeIssues,
     ruleFailed,
     removing,
     askRemove,

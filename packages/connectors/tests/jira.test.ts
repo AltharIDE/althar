@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import type { Credential } from '../src/credential'
-import { categoryOf, jiraLabelOf, levelOf, makeJiraCloud, makeJiraDataCenter, siteOf } from '../src/jira'
+import { categoryOf, jiraLabelOf, levelOf, makeJiraCloud, makeJiraDataCenter, priorityFor, siteOf } from '../src/jira'
 import type { Issue } from '../src/model'
 import { products } from '../src/products'
 import { type Route, stubFetch } from './stub'
@@ -210,6 +210,18 @@ describe('Jira, either edition', () => {
       assert.strictEqual(categoryOf('done', 'Closed', resolution), 'cancelled', resolution)
     for (const resolution of ['Fixed', 'Done', 'Implemented', 'Resolved', 'Delivered'])
       assert.strictEqual(categoryOf('done', 'Resolved', resolution), 'done')
+  })
+
+  it('finds a site’s priority for a level by Jira’s own name first, then by any of that level', () => {
+    const site = [
+      { id: '1', name: 'Blocker' },
+      { id: '2', name: 'Highest' },
+      { id: '3', name: 'Minor' },
+    ]
+    assert.deepStrictEqual(
+      (['urgent', 'low', 'medium'] as const).map((level) => priorityFor(site, level)?.id),
+      ['2', '3', undefined],
+    )
   })
 
   it('reads a priority’s level by its name, and a site’s own name as medium', () => {
@@ -732,6 +744,187 @@ describe('Jira Cloud', () => {
       const failed = yield* Effect.flip(tracker.create('HHH', { title: 'A summary', body: '', labels: [] }))
       assert.strictEqual(failed.reason, 'rate_limited')
       assert.isFalse(sent.some((request) => request.method === 'POST'))
+    }),
+  )
+
+  describe('changing an issue', () => {
+    const transition = (id: string, name: string, category: string, more: Record<string, unknown> = {}) => ({
+      id,
+      name: `To ${name}`,
+      to: { name, id, statusCategory: { key: category } },
+      ...more,
+    })
+    const transitions = [
+      transition('11', 'Backlog', 'new'),
+      transition('41', 'In Review', 'indeterminate'),
+      transition('61', 'Won’t Do', 'done', { isAvailable: false }),
+      transition('71', 'Closed', 'done'),
+      transition('51', 'Done', 'done'),
+    ]
+    const priorities = [
+      { id: '1', name: 'Highest' },
+      { id: '2', name: 'High' },
+      { id: '3', name: 'Medium' },
+      { id: '4', name: 'Low' },
+      { id: '5', name: 'Lowest' },
+    ]
+
+    it('changes all but a project, which only Jira’s own Move changes', () => {
+      assert.deepStrictEqual(cloud([]).tracker.capabilities.changes, ['status', 'close', 'priority', 'assignee', 'labels', 'title'])
+    })
+
+    it.effect('offers the statuses its workflow lets it go to now, and where it is; the label wanted, and its own', () =>
+      Effect.gen(function* () {
+        const { tracker } = cloud([['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { transitions } }]])
+        const here = issue({ labels: ['needs-test'] })
+        assert.deepStrictEqual(
+          (yield* tracker.choices(here, 'status')).map((one) => one.name),
+          ['Waiting for review', 'Backlog', 'In Review', 'Closed', 'Done'],
+        )
+        assert.deepStrictEqual(
+          (yield* tracker.choices(here, 'labels', 'good first issue')).map((one) => one.id),
+          ['needs-test', 'good-first-issue'],
+        )
+        const project = yield* Effect.flip(tracker.choices(here, 'project'))
+        assert.strictEqual(project.reason, 'rejected')
+      }),
+    )
+
+    it.effect('finds who it can be assigned to by a name: on Cloud by query and account id, on Data Center by user name', () =>
+      Effect.gen(function* () {
+        const atCloud = cloud([
+          [
+            'GET',
+            `${CLOUD}/user/assignable/search?issueKey=HHH-20844&maxResults=50&query=gavin`,
+            { json: [{ accountId: '557058:f1', displayName: 'Gavin King', emailAddress: 'gavin@hibernate.org' }] },
+          ],
+        ])
+        assert.deepStrictEqual(yield* atCloud.tracker.choices(issue(), 'assignee', ' gavin '), [
+          { id: '557058:f1', name: 'Gavin King', also: ['Gavin King', 'gavin@hibernate.org'] },
+        ])
+        const atServer = dataCenter([
+          [
+            'GET',
+            `${DC}/user/assignable/search?issueKey=KAFKA-1&maxResults=50&username=chia`,
+            { json: [{ name: 'chia7712', key: 'JIRAUSER1', displayName: 'Chia-Ping Tsai' }] },
+          ],
+        ])
+        assert.deepStrictEqual(yield* atServer.tracker.choices(issue({ ref: 'KAFKA-1', key: 'KAFKA-1' }), 'assignee', 'chia'), [
+          { id: 'chia7712', name: 'Chia-Ping Tsai', also: ['chia7712'] },
+        ])
+      }),
+    )
+
+    it.effect('edits its title, priority and labels at once, then its assignee, then moves it by a transition, and reads it back', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([
+          ['GET', `${CLOUD}/priority`, { json: priorities }],
+          ['PUT', `${CLOUD}/issue/HHH-20844`, { status: 204 }],
+          ['PUT', `${CLOUD}/issue/HHH-20844/assignee`, { status: 204 }],
+          ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { transitions } }],
+          ['POST', `${CLOUD}/issue/HHH-20844/transitions`, { status: 204 }],
+          ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+        ])
+        const changed = yield* tracker.update(issue(), {
+          title: 'A new summary',
+          priority: 'urgent',
+          labels: { add: [{ id: 'needs-test', name: 'needs-test' }], remove: [{ id: 'triage', name: 'triage' }] },
+          assignee: { id: '557058:f1', name: 'Gavin King' },
+          status: { id: 'In Review', name: 'in review' },
+        })
+        assert.strictEqual(changed.key, 'HHH-20844')
+        assert.deepStrictEqual(
+          sent.map((request) => request.method),
+          ['GET', 'PUT', 'PUT', 'GET', 'POST', 'GET'],
+        )
+        assert.deepStrictEqual(sent[1]?.body, {
+          fields: { summary: 'A new summary', priority: { id: '1' } },
+          update: { labels: [{ add: 'needs-test' }, { remove: 'triage' }] },
+        })
+        assert.deepStrictEqual(sent[2]?.body, { accountId: '557058:f1' })
+        assert.deepStrictEqual(sent[4]?.body, { transition: { id: '41' } })
+      }),
+    )
+
+    it.effect(
+      'closes it into Done before any other of Done’s category, takes the assignee off by name on Data Center, and leaves it where it is already',
+      () =>
+        Effect.gen(function* () {
+          const closing = cloud([
+            ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { transitions } }],
+            ['POST', `${CLOUD}/issue/HHH-20844/transitions`, { status: 204 }],
+            ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+          ])
+          yield* closing.tracker.update(issue(), { close: true })
+          assert.deepStrictEqual(closing.sent[1]?.body, { transition: { id: '51' } })
+          const server = dataCenter([
+            ['PUT', `${DC}/issue/KAFKA-1/assignee`, { status: 204 }],
+            ['GET', `${DC}/issue/KAFKA-1?${FIELDS}`, { json: { ...cloudIssue(), key: 'KAFKA-1' } }],
+          ])
+          // Done already, and asked to close: no transition is asked for.
+          yield* server.tracker.update(issue({ ref: 'KAFKA-1', key: 'KAFKA-1', status: { name: 'Resolved', category: 'done' } }), {
+            assignee: null,
+            close: true,
+          })
+          assert.deepStrictEqual(server.sent[0]?.body, { name: null })
+          assert.lengthOf(server.sent, 2)
+        }),
+    )
+
+    it.effect(
+      'refuses no priority, a level the site hasn’t, a status its workflow can’t reach, and a project, before changing anything',
+      () =>
+        Effect.gen(function* () {
+          const { tracker, sent } = cloud([
+            ['GET', `${CLOUD}/priority`, { json: [{ id: '3', name: 'Normal' }] }],
+            ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { transitions } }],
+          ])
+          const none = yield* Effect.flip(tracker.update(issue(), { priority: 'none' }))
+          assert.strictEqual(none.message, 'A Jira issue always has a priority: name one')
+          const low = yield* Effect.flip(tracker.update(issue(), { priority: 'low' }))
+          assert.strictEqual(low.message, 'This site has no low priority')
+          const nowhere = yield* Effect.flip(tracker.update(issue(), { status: { id: 'Won’t Do', name: 'Won’t Do' } }))
+          assert.strictEqual(nowhere.message, 'Its workflow has no way from Waiting for review into Won’t Do')
+          const project = yield* Effect.flip(tracker.update(issue(), { project: null }))
+          assert.strictEqual(project.reason, 'rejected')
+          assert.isFalse(sent.some((request) => request.method !== 'GET'))
+        }),
+    )
+  })
+
+  it.effect('files an issue at the site’s priority of its level, and without it where the project’s screen takes none', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { json: { issueTypes: [{ id: '10001', name: 'Bug' }] } }],
+        [
+          'GET',
+          `${CLOUD}/priority`,
+          {
+            json: [
+              { id: '2', name: 'Major' },
+              { id: '4', name: 'Low' },
+              { id: '5', name: 'Trivial' },
+            ],
+          },
+        ],
+        [
+          'POST',
+          `${CLOUD}/issue`,
+          (request) =>
+            (request.body as { fields: Record<string, unknown> }).fields.priority === undefined
+              ? { status: 201, json: { id: '115161', key: 'HHH-20844' } }
+              : { status: 400, json: { errorMessages: [], errors: { priority: "Field 'priority' cannot be set." } } },
+        ],
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+      ])
+      yield* tracker.create('HHH', { title: 'A summary', body: '', labels: ['triage'], priority: 'low' })
+      assert.deepStrictEqual(sent[2]?.body, {
+        fields: { project: { key: 'HHH' }, issuetype: { id: '10001' }, summary: 'A summary', labels: ['triage'], priority: { id: '4' } },
+      })
+      // Its labels kept, its priority left to the project's default.
+      assert.deepStrictEqual(sent[3]?.body, {
+        fields: { project: { key: 'HHH' }, issuetype: { id: '10001' }, summary: 'A summary', labels: ['triage'] },
+      })
     }),
   )
 

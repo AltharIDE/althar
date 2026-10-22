@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import type { Priority } from '@althar/connectors'
 import { type CommandEnvelope, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { knownModelName } from '@althar/contracts'
@@ -119,7 +120,11 @@ const DraftedIssue = Schema.Struct({
   tracker: Schema.optional(Schema.String),
   container: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
+  priority: Schema.optional(Schema.String),
 })
+
+/** A priority as an agent may write it: Low, low, none. */
+const PRIORITY = /^(urgent|high|medium|low|none)$/
 /*
  * A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. And how hard it
  * thinks, where named: one of the model's efforts as list_models writes them.
@@ -1083,6 +1088,15 @@ export class Coordinator extends Context.Service<
       const draftIssue = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(DraftedIssue, input)
+          const priority = asked.priority
+            ?.trim()
+            .toLowerCase()
+            .replace(/\s+priority$/, '')
+            .replace(/^no$/, 'none')
+          if (priority !== undefined && !PRIORITY.test(priority))
+            return yield* new ToolRefused({
+              message: `A priority is one of urgent, high, medium, low or none, not “${asked.priority ?? ''}”.`,
+            })
           const card = yield* issueDrafts
             .draft({
               projectId: access.projectId as ProjectId,
@@ -1092,6 +1106,7 @@ export class Coordinator extends Context.Service<
               title: asked.title,
               body: asked.description ?? '',
               labels: asked.labels ?? [],
+              ...(priority === undefined ? {} : { priority: priority as Priority }),
               ...(access.taskId === null ? {} : { taskId: access.taskId }),
               actorId: access.role === 'coordinator' ? instance.coordinatorId : instance.systemId,
             })
@@ -1105,7 +1120,12 @@ export class Coordinator extends Context.Service<
               ? `Drafted the issue “${filed.title}”, but it wasn't filed: ${filed.error ?? 'the tracker did not take it'}. The person can file it again from its card.`
               : `Filed the issue “${filed.title}” on ${filed.tracker}, in ${filed.container}, as ${filed.issue.key}: ${filed.issue.url}`
           }
-          return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}. Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
+          // A tracker without priorities files it at its own default: the agent hears so, rather than writing it in the description.
+          const unprioritised =
+            priority !== undefined && priority !== 'none' && card.priority === null
+              ? ` ${card.tracker}'s issues have no priority, so it has none.`
+              : ''
+          return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}.${unprioritised} Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
         })
 
       const tool = (
@@ -1168,6 +1188,11 @@ export class Coordinator extends Context.Service<
                 "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a repository as owner/name.",
             },
             labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; others are left off.' },
+            priority: {
+              type: 'string',
+              enum: ['urgent', 'high', 'medium', 'low', 'none'],
+              description: 'Its priority, where the tracker has priorities: set it here, not in the description.',
+            },
           },
           required: ['title'],
         },

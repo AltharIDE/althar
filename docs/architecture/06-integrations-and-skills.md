@@ -476,8 +476,11 @@ for the person, as above.
   board's first open list named Doing or In progress), once, and leaves one
   already started, done or cancelled as it is. GitHub's and GitLab's issues
   have no standard In Progress and are left alone. A
-  project's rules can turn it off. Who moves an issue to in review or done,
-  and when, is an open question.
+  project's rules can turn it off. As the task's pull request opens, Althar
+  offers to move the issue to its tracker's review status, on a card in the
+  task's thread; as it merges, to close it as done, on a card in the
+  coordinator's thread (the task settles). Both follow the same rule, and
+  are cards like any change to an issue ("Changing issues", below).
 - **The key goes in the branch and the PR's title,** so the trackers' own
   Git integrations link them. Field ownership (above) decides whether
   Althar also moves a status those integrations move.
@@ -546,6 +549,59 @@ Creating an issue needs a sign-in that may write: Linear's sign-in asks to
 read and write, GitLab's for `api`, Trello's token for `read,write`; a Jira
 token files where the account has Create Issues, and Althar's GitHub App
 needs Issues: Read and write, which is set on the app itself.
+
+### Changing issues
+
+Leads and the coordinator change issues that already exist
+(`IssueChanges.ts`), through each tracker's `update`, `comment` and `link`:
+
+- **A lead** changes only the issue its task came from: `comment_on_issue`
+  and `link_pull_request` apply at once, and show in its thread as a line;
+  `change_issue` proposes its status (any of its tracker's), closing it, its
+  priority, assignee, labels or title. For any other issue it tells the
+  person, and the coordinator changes it.
+- **The coordinator** changes any issue on the person's trackers, by key or
+  link: `change_issues` proposes the same fields and a project or milestone,
+  several issues on one card ("move DEV-67 to Done, set DEV-142 to Low");
+  `comment_on_issue` comments at once.
+- **Status, priority, assignee, labels, project, title and closing wait on a
+  card** the person applies with one press, or discards, in the thread of
+  whoever proposed them. Each name is read against the tracker before the
+  card is made (its statuses, members, labels, projects), and one it lacks
+  is refused with what it has, so a card never holds what can't apply. A
+  project's rule, Change issues without asking (`changeIssues`, off by
+  default), applies them at once instead, as a line. Whether a change
+  waits is that one rule (`waitsOnThePerson`).
+- **Applying is per issue,** each a receipt in the outbound ledger: what
+  applied stays applied, and a card where not all of it did says why for
+  each and applies again only the rest. A card being applied as Althar
+  closed is failed on its next start, to apply again. A comment whose
+  answer was lost or couldn't be read is never posted again: its card says
+  to look on the tracker. A tracker that answers it didn't take a comment or
+  a link (Linear's `success: false`) has its refusal shown, never a line
+  saying it was done. The lead hears what
+  the person decided in its thread; the coordinator hears it as news, as it
+  hears of its drafts.
+- **A lead's waiting card** holds its task in Needs you, as its drafts do.
+  Althar's own offer as a pull request opens doesn't: the task is Ready
+  for the person then, and the card waits in the thread they open.
+- **Drafts take a priority** (`draft_issue`'s `priority`), set at creation
+  where the tracker has priorities, never written into the description.
+
+What each tracker changes:
+
+| | Linear | Jira | Trello | GitHub issues | GitLab issues |
+|---|---|---|---|---|---|
+| Status | The team's states | A transition offered now; one that needs fields fails in Jira's words | The board's lists | Open, closed as done or not planned | Open or closed |
+| Priority | Yes | Yes | No priorities | No priorities | No priorities |
+| Assignee, labels, title | Yes | Yes | Members, labels, name | Yes | Yes |
+| Project | Its project | No | No | Its milestone | Its milestone |
+| Comment | Yes | Yes | Yes | Yes | Yes |
+| Link a pull request | An attachment | A remote link | An attachment | No: a PR that names the issue links it | No: as GitHub |
+
+Not covered yet: Jira's epic, sprint and transition screens with fields,
+Linear's cycles and estimates, GitHub Projects' fields, and GitLab's
+work-item statuses beyond open and closed.
 
 ### Reviewing someone else's pull request
 

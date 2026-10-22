@@ -66,6 +66,7 @@ import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
+import { ChangesCard } from '../../shared/ChangesCard'
 import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
@@ -145,6 +146,8 @@ export const text = {
   suggest: 'Mark this as done',
   /** Issues its lead drafted wait for the person to file. */
   issues: 'Issues to file',
+  /** Changes its lead proposed to its issue wait for the person to apply. */
+  issueChanges: 'Issue changes to apply',
   fileAll: (count: number) => `File all ${count}`,
   done: 'Done',
   abandoned: 'Abandoned',
@@ -172,8 +175,16 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
-  // No call waits, yet the task does: issues its lead drafted wait to be filed.
-  if (snapshot.task.phase === 'waiting') return { status: TaskStatus.Yours, state: text.issues }
+  // No call waits, yet the task does: issues its lead drafted wait to be filed, or changes it proposed to its issue to be applied.
+  if (snapshot.task.phase === 'waiting')
+    return {
+      status: TaskStatus.Yours,
+      state: snapshot.items.some(
+        (item) => item.kind === 'issue_draft' && item.content.state !== 'filed' && item.content.state !== 'discarded',
+      )
+        ? text.issues
+        : text.issueChanges,
+    }
   const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
@@ -1017,6 +1028,16 @@ export function TaskView({
                       onFile: (draftId) => void model.fileIssueDraft(draftId),
                       onChange: model.changeIssueDraft,
                       onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                    }}
+                  />
+                )}
+                // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
+                changes={(changes) => (
+                  <ChangesCard
+                    changes={changes}
+                    actions={{
+                      onApply: (changesId) => void model.applyIssueChanges(changesId),
+                      onDiscard: (changesId) => void model.discardIssueChanges(changesId),
                     }}
                   />
                 )}
