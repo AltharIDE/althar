@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 22 October with Anthropic's SDK major versions; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -55,6 +55,15 @@ export interface Upcoming extends Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'anthropic-sdks-2026-10-21',
+    date: '2026-10-21',
+    kind: ShiftKind.Tools,
+    who: 'Anthropic',
+    title: 'Anthropic’s SDKs jump a major version, with breaking changes',
+    what: 'Python 2.0.0, TypeScript 1.0.0 and the rest default to API version 2026-10-21, where a lowered temperature has no effect. Code staying on 2023-06-01 is unaffected.',
+    source: { name: 'Claude Platform release notes', url: 'https://platform.claude.com/docs/en/release-notes/overview' },
+  },
   {
     id: 'cursor-new-plans',
     date: '2026-10-18',
