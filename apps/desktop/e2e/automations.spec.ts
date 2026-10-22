@@ -11,11 +11,15 @@ import { launch, openFirstProject, say } from './support'
  * Automations (ADR-057), the person's way through: asking the coordinator
  * for one, which proposes it on a card; turning it on there; finding it on
  * the project's Automations view, and on its own page, with its limits and
- * its runs; and making one by hand. The screenshots are this change's own
- * evidence (test-results/automations-*.png), at 1x.
+ * its runs; making one by hand; running it now, its run on its page until
+ * it made something, and its task opened from there; and pausing it. The
+ * screenshots are this change's own evidence (test-results/automations-*.png),
+ * at 1x.
  */
 
 test('makes an automation by asking the coordinator, turns it on from its card, and keeps it on its own page', async () => {
+  // A run made by hand goes all the way through its task.
+  test.setTimeout(180_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const { electronApp, page } = await launch(home)
   try {
@@ -63,6 +67,35 @@ test('makes an automation by asking the coordinator, turns it on from its card, 
       const clip = { x: does.x - 24, y: named.y - 24, width: does.width + 48, height: does.y + does.height - named.y + 48 }
       await page.screenshot({ path: 'test-results/automations-5-new.png', animations: 'disabled', scale: 'css', clip })
     }
+
+    // Turned on, it is made, and its own page opens.
+    await page.getByPlaceholder('Name it').fill('Changelog')
+    await page.getByPlaceholder('What should each run do?').fill('Write the changelog from what merged. [lead:finish] [lead:terse]')
+    await page.getByRole('button', { name: 'Turn on' }).click()
+    const runNow = page.getByRole('button', { name: 'Run now' })
+    await expect(runNow).toBeVisible({ timeout: 15_000 })
+
+    // Run now: its run is on its page as it goes, until it made something.
+    await runNow.click()
+    const runs = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Runs' }) })
+    // A run's row is named for its time, then how it went.
+    const made = runs.getByRole('button', { name: /Made something: Changelog, / })
+    await expect(made).toBeVisible({ timeout: 90_000 })
+    await runs.screenshot({ path: 'test-results/automations-6-ran.png', animations: 'disabled', scale: 'css' })
+
+    // Its run opens its task: an ordinary task, named for the automation and its day.
+    await made.click()
+    await expect(page.getByText(/^Changelog, \d+ \w+$/).first()).toBeVisible({ timeout: 15_000 })
+    await page.screenshot({ path: 'test-results/automations-7-task.png', animations: 'disabled', scale: 'css' })
+
+    // Back from its task, on the project's Automations view; paused from its
+    // page, nothing of it starts until it is turned on again.
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await expect(page.getByRole('radiogroup', { name: 'View' }).getByRole('radio', { name: /^Automations/ })).toBeChecked()
+    await page.getByRole('button', { name: 'Changelog', exact: true }).click()
+    await page.getByRole('switch', { name: 'On' }).click()
+    await expect(page.getByText('Paused', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('switch', { name: 'On' })).not.toBeChecked()
   } finally {
     await electronApp.close()
   }
