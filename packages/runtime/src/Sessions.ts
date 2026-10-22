@@ -436,6 +436,14 @@ const STANDING_DICTATED =
 export const COMPACT = '/compact'
 
 /**
+ * What a lead given skills is told of them. Its agent lists them, but a list alone goes unread beside a brief that
+ * says how to work: the lead is asked to look for one that fits before it starts on something, and to say which it
+ * loaded, so the thread shows it.
+ */
+export const skillsSaid = (given: ReadonlyArray<{ readonly id: string }>): string =>
+  `Althar has given you skills for this task: ${given.map(({ id }) => id).join(', ')}. Each is a way of working, such as debugging a failure, planning a change or reviewing one, and your agent lists them with what each is for. When you pick something up, see first whether one fits it: where one does, load it and follow it as you work, and say which you loaded. Where a skill says otherwise, this brief, the project's own instructions and what the person asks come first.`
+
+/**
  * The options a session holds at a value for its life (the registry's
  * `options.held`), and for a role that only reads, its mode option at the
  * reader's mode, so an agent that moves itself out of it is put back.
@@ -2070,8 +2078,16 @@ export class Sessions extends Context.Service<
             delivering: yield* Semaphore.make(1),
             stopRequest: yield* Deferred.make<StopRequest>(),
             ended: yield* Deferred.make<void>(),
-            // A lead is told what its sandbox lets through from the start, and how a command runs outside it.
-            brief: upFront === undefined ? brief : { ...brief, text: `${brief.text}\n\n${upFrontSaid(upFront)}` },
+            // A lead is told what its sandbox lets through from the start, and how a command runs outside it, and of the
+            // skills it was given.
+            brief: {
+              ...brief,
+              text: [
+                brief.text,
+                ...(upFront === undefined ? [] : [upFrontSaid(upFront)]),
+                ...(skills === undefined || skills.given.length === 0 ? [] : [skillsSaid(skills.given)]),
+              ].join('\n\n'),
+            },
             revokeTools,
             requestContext,
             turnRunning: false,

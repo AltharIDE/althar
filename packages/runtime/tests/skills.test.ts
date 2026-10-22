@@ -12,7 +12,7 @@ import { SqlClient } from 'effect/sql'
 import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { onlyReads, Sessions } from '../src/Sessions'
 import { runSkills } from '../src/Skills'
-import { launches, notices, runtime, sessionMetas, task } from './support'
+import { items, launches, notices, runtime, sessionMetas, task, until } from './support'
 
 /*
  * Althar-selected skills reach a task's lead on every agent the registry says how to give them to, from Althar's own
@@ -63,6 +63,16 @@ const givenTo = (threadId: string) =>
     return (JSON.parse(row?.payload ?? '{}') as { skills?: Array<{ id: string; treeHash: string }> }).skills ?? []
   })
 
+/** The brief a lead's session started from, as the fake agent echoes it back. */
+const briefOf = (threadId: string) => {
+  const echoed = (text: unknown): text is string => typeof text === 'string' && text.startsWith('echo: You are working')
+  const brief = (rows: ReadonlyArray<{ readonly content: Record<string, unknown> }>) => rows.map((item) => item.content.text).find(echoed)
+  return Effect.map(
+    until(items(threadId), (rows) => brief(rows) !== undefined),
+    (rows) => brief(rows) ?? '',
+  )
+}
+
 const worktreeOf = (threadId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -106,6 +116,10 @@ describe('skills for a task’s lead', () => {
         assert.isFalse(plugin.startsWith(worktree))
         // The session's record says which skills it was given, each at the version it got.
         const given = yield* givenTo(created.threadId)
+        // Its brief names them and asks it to load one that fits.
+        const brief = yield* briefOf(created.threadId)
+        assert.include(brief, 'Althar has given you skills for this task: alpha, beta.')
+        assert.include(brief, 'load it and follow it')
         assert.deepStrictEqual(
           given.map(({ id }) => id),
           ['alpha', 'beta'],
@@ -137,6 +151,8 @@ describe('skills for a task’s lead', () => {
           ),
           JSON.stringify(said),
         )
+        // Its brief names only what it got.
+        assert.include(yield* briefOf(created.threadId), 'Althar has given you skills for this task: alpha.')
         // Recorded as given: what it got, not what it couldn't use.
         assert.deepStrictEqual(
           (yield* givenTo(created.threadId)).map(({ id }) => id),
@@ -275,6 +291,7 @@ describe('skills for a task’s lead', () => {
       const { task: created } = yield* task()
       yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
       assert.isUndefined(sessionMetas.at(-1)?.options?.skills)
+      assert.notInclude(yield* briefOf(created.threadId), 'given you skills')
       yield* sessions.stop(created.threadId)
     }).pipe(Effect.provide(runtime())),
   )
