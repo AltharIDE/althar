@@ -261,12 +261,19 @@ export interface SessionOptions {
   readonly offline?: boolean
   readonly untrusted?: boolean
   /**
-   * The folder a trusted reader, the coordinator, may write in (ADR-056):
-   * where the agent has a sandbox Althar can hold to it, its commands run
-   * there without asking, writing only there and reaching no network; else
-   * it is started as any reader, and Althar's rules hold it.
+   * Where a trusted reader, the coordinator, may reach (ADR-056): where the
+   * agent has a sandbox Althar can hold to it, its commands run there without
+   * asking, writing only in `folder`, reading none of `denied` but what
+   * `allowed` gives back, and reaching no network; else it is started as any
+   * reader, and Althar's rules hold it.
    */
-  readonly contained?: string
+  readonly contained?: Contained
+}
+
+/** The coordinator's folder, and what its sandboxed commands may read: real paths. */
+export interface Contained {
+  readonly folder: string
+  readonly reads: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
 }
 
 export interface AgentCli {
@@ -588,24 +595,29 @@ const claudeSandboxStarts = (): boolean => {
  * Claude Code for the coordinator, a trusted reader in its own copies of the
  * project's repositories (ADR-056): its shell commands run in its sandbox
  * without asking, held to the coordinator's folder. They write only there
- * (and in the sandbox's own temporary folder), reach no network
+ * (and in the sandbox's own temporary folder); read none of the home
+ * folder, the person's checkouts or the project's task folders but what
+ * Althar gives back (the folder, the mirrors its copies fetch from, the
+ * objects they borrow, the toolchains in the home folder), and nothing
+ * where the person keeps keys and sign-ins; reach no network
  * (`strictAllowlist` with no domain refuses every host without asking) and
- * no socket, read nothing where the person keeps keys and sign-ins, and
- * never run outside it (`allowUnsandboxedCommands: false`, which also drops
- * the project's own sandbox settings). One that would run outside anyway, as
- * one the person's own settings exempt does, asks, and meets Althar's reader
- * rules, unless the person's own allow rules let it through, as they would
- * in their own Claude Code. Its edit tools stay denied: a change is a task.
- * Where the sandbox can't start, the session doesn't either
- * (`failIfUnavailable`), so it is asked for only where it can
- * (`claudeSandboxStarts`); elsewhere the coordinator is started as any reader.
+ * no socket; and never run outside it (`allowUnsandboxedCommands: false`).
+ * It loads no settings file (`settingSources: []`) and runs no hook, as a
+ * review's lead: no allow rule or sandbox exemption of the person's or the
+ * repository's lets a command out, and no hook of theirs runs beside it. Its
+ * edit tools stay denied: a change is a task. Where the sandbox can't start,
+ * the session doesn't either (`failIfUnavailable`), so it is asked for only
+ * where it can (`claudeSandboxStarts`); elsewhere the coordinator is started
+ * as any reader.
  */
-const claudeContains = (folder: string) => ({
+const claudeContains = ({ folder, reads }: Contained) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      settingSources: [],
       settings: {
+        disableAllHooks: true,
         permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['WebFetch'] },
         sandbox: {
           enabled: true,
@@ -613,7 +625,7 @@ const claudeContains = (folder: string) => ({
           allowUnsandboxedCommands: false,
           failIfUnavailable: true,
           network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
-          filesystem: { allowWrite: [folder] },
+          filesystem: { allowWrite: [folder], denyRead: [...reads.denied], allowRead: [...reads.allowed] },
         },
       },
     },

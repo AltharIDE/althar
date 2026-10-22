@@ -1,4 +1,5 @@
-import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { Effect, Option } from 'effect'
@@ -18,12 +19,14 @@ import { Instance } from './Instance'
  * no repositories gets an empty folder.
  *
  * A copy is a repository of its own (ADR-056): its git folder, made again
- * for every turn, borrows the person's repository's objects to read and has
- * that repository for its only remote, so the coordinator's `git fetch` and
- * `git tag` write only the copy, and reach no network. Althar fetches the
- * project's remote into the person's repository first; the copy's fetch
- * brings what that has. Nothing the coordinator left in the git folder, its
- * config, hooks or refs, is ever read by Althar's own git.
+ * for every turn, borrows the person's repository's objects to read, and its
+ * only remote is a bare mirror of that repository's refs Althar keeps beside
+ * the folder, out of the coordinator's reach. So the coordinator's `git
+ * fetch` and `git tag` write only the copy, and reach no network, nor the
+ * person's checkout. Althar fetches the project's remote into the person's
+ * repository first, and its refs into the mirror; the copy's fetch brings
+ * what that has. Nothing the coordinator left in the git folder, its config,
+ * hooks or refs, is ever read by Althar's own git.
  */
 
 export interface CoordinatorFolder {
@@ -40,6 +43,46 @@ export interface CoordinatorFolder {
     readonly within: string | null
     readonly base: string
   }>
+  /**
+   * What the coordinator's commands may read, where a sandbox holds them
+   * (ADR-056): none of `denied` (the home folder, the person's checkouts,
+   * Althar's folders for the project's tasks) but what `allowed` gives back
+   * (its folder, the mirrors, the objects its copies borrow, and the
+   * toolchains a command runs on). Real paths, as a sandbox matches them.
+   */
+  readonly reads: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
+}
+
+/**
+ * Where programs a command runs on are kept in the home folder, which a
+ * sandboxed command may read: bun, Node's version managers, Deno, Rust's,
+ * Python's, and git's own config. Never a folder that holds a key: only
+ * `~/.cargo/bin` of `~/.cargo`, whose credentials are beside it.
+ */
+export const TOOLCHAINS = [
+  '.bun',
+  '.nvm',
+  '.volta',
+  '.fnm',
+  '.local/share/fnm',
+  '.local/share/mise',
+  '.asdf',
+  '.deno',
+  '.cargo/bin',
+  '.rustup',
+  '.pyenv',
+  '.local/bin',
+  '.gitconfig',
+  '.config/git',
+]
+
+/** A path as the filesystem has it, links followed, where it is there; as it is, where it isn't. */
+const real = (path: string) => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
 }
 
 /** What a copy's fetch brings from the person's repository: its branches, each remote's as last fetched, and its tags. */
@@ -89,13 +132,45 @@ const clearedFor = (repository: string, path: string) =>
     if (former !== undefined) rmSync(former, { recursive: true, force: true })
   }).pipe(Effect.catchDefect((error) => Effect.fail(new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }))))
 
+/** The folder of the person's repository's objects, which a copy and its mirror borrow. */
+const objectsOf = (repository: string) =>
+  Effect.map(git(repository, 'rev-parse', '--git-path', 'objects'), (objects) => resolve(repository, objects))
+
+/** Has a repository borrow `objects`, to read, rather than holding them. */
+const borrow = (gitFolder: string, objects: string) =>
+  Effect.try({
+    try: () => {
+      mkdirSync(join(gitFolder, 'objects', 'info'), { recursive: true })
+      writeFileSync(join(gitFolder, 'objects', 'info', 'alternates'), `${objects}\n`)
+    },
+    catch: (error) => new GitFailed({ args: ['init'], cwd: gitFolder, stderr: String(error) }),
+  })
+
+/**
+ * A bare mirror of `repository`'s refs at `path`, which a copy fetches from
+ * rather than the person's checkout: made if it isn't there, borrowing the
+ * repository's objects, and brought up to date with its branches, each
+ * remote's and its tags. Only Althar writes it, out of the coordinator's
+ * folder.
+ */
+export const freshMirror = (repository: string, path: string) =>
+  Effect.gen(function* () {
+    if (!existsSync(join(path, 'HEAD'))) {
+      mkdirSync(path, { recursive: true })
+      yield* git(path, 'init', '--quiet', '--bare', '--template=')
+    }
+    yield* borrow(path, yield* objectsOf(repository))
+    yield* git(path, 'fetch', '--quiet', '--prune', repository, ...MIRRORED)
+  })
+
 /**
  * A copy of `repository` at `path`, detached at its default branch as the
  * remote has it, or offline as this computer has it: made if it isn't there, its
  * git folder made again, and anything written in it since thrown away, but
- * what git ignores, such as installed packages.
+ * what git ignores, such as installed packages. Its fetch comes from `from`,
+ * a mirror of the repository's (`freshMirror`), or the repository itself.
  */
-export const freshCopy = (repository: string, path: string, base: string) =>
+export const freshCopy = (repository: string, path: string, base: string, from = repository) =>
   Effect.gen(function* () {
     // Every branch of the remote, so the copy's `git fetch` has them all as of this turn; offline, the repository as it is.
     const fetched = yield* gitWithin(60_000, repository, 'fetch', '--quiet', 'origin').pipe(
@@ -104,18 +179,13 @@ export const freshCopy = (repository: string, path: string, base: string) =>
     )
     const remote = fetched ? yield* commitOf(repository, `origin/${base}`).pipe(Effect.option) : Option.none()
     const commit = Option.isSome(remote) ? remote.value : yield* commitOf(repository, base)
-    const objects = resolve(repository, yield* git(repository, 'rev-parse', '--git-path', 'objects'))
+    const objects = yield* objectsOf(repository)
+    if (from !== repository) yield* freshMirror(repository, from)
     yield* clearedFor(repository, path)
     // No template: no sample hooks, nothing but what git needs.
     yield* git(path, 'init', '--quiet', '--template=', ...(commit.length === 64 ? ['--object-format=sha256'] : []))
-    yield* Effect.try({
-      try: () => {
-        mkdirSync(join(path, '.git', 'objects', 'info'), { recursive: true })
-        writeFileSync(join(path, '.git', 'objects', 'info', 'alternates'), `${objects}\n`)
-      },
-      catch: (error) => new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }),
-    })
-    yield* git(path, 'config', 'remote.origin.url', repository)
+    yield* borrow(join(path, '.git'), objects)
+    yield* git(path, 'config', 'remote.origin.url', from)
     for (const refspec of MIRRORED) yield* git(path, 'config', '--add', 'remote.origin.fetch', refspec)
     // A tag made in the copy isn't signed with the person's key, whatever their own config says.
     yield* git(path, 'config', 'tag.gpgSign', 'false')
@@ -140,13 +210,17 @@ export const coordinatorFolder = (projectId: string) =>
       JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
       ORDER BY b.created_at, b.rowid`
-    const folder = join(config.worktreeRoot, project.slug, '.coordinator')
+    const projectFolder = join(config.worktreeRoot, project.slug)
+    const folder = join(projectFolder, '.coordinator')
+    // Beside the coordinator's folder, never in it: what its commands may write is only that folder.
+    const mirrors = join(projectFolder, '.coordinator-mirrors')
     mkdirSync(folder, { recursive: true })
+    mkdirSync(mirrors, { recursive: true })
     const repositories = yield* Effect.forEach(bindings, (binding) =>
       Effect.gen(function* () {
         const base = binding.base ?? 'main'
         const path = join(folder, binding.slug)
-        yield* freshCopy(binding.repository, path, base)
+        yield* freshCopy(binding.repository, path, base, join(mirrors, `${binding.slug}.git`))
         return {
           name: binding.name,
           path: binding.within === null ? path : join(path, binding.within),
@@ -156,5 +230,15 @@ export const coordinatorFolder = (projectId: string) =>
         }
       }),
     )
-    return { folder, repositories } satisfies CoordinatorFolder
+    const objects = yield* Effect.forEach(bindings, (binding) => objectsOf(binding.repository))
+    const home = homedir()
+    const allowed = [folder, mirrors, ...objects, ...TOOLCHAINS.map((place) => join(home, place)).filter((place) => existsSync(place))].map(
+      real,
+    )
+    const denied = [home, projectFolder, ...bindings.map((binding) => binding.repository)].map(real)
+    return {
+      folder,
+      repositories,
+      reads: { allowed: [...new Set(allowed)], denied: [...new Set(denied)] },
+    } satisfies CoordinatorFolder
   })

@@ -141,4 +141,22 @@ describe("the coordinator's copies", () => {
       assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), join(copy, '.git'))
     }),
   )
+
+  it.effect('fetch from a mirror Althar keeps beside the folder, so their fetch never reads the person’s checkout', () =>
+    Effect.gen(function* () {
+      const { home, person, copy } = place()
+      const mirror = join(home, 'worktrees', 'meridian', '.coordinator-mirrors', 'meridian.git')
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.strictEqual(git(copy, 'remote', 'get-url', 'origin'), mirror)
+      assert.strictEqual(git(mirror, 'rev-parse', '--is-bare-repository'), 'true')
+      git(copy, 'fetch', '-q')
+      assert.strictEqual(git(copy, 'log', '-1', '--format=%s', 'origin/feature/retry'), 'Retry')
+      assert.deepStrictEqual(git(copy, 'tag', '-l').split('\n'), ['v0.1.0', 'v0.2.0'])
+      // A branch the person makes after shows at the next turn.
+      git(person, 'branch', 'later')
+      yield* freshCopy(person, copy, 'main', mirror)
+      git(copy, 'fetch', '-q')
+      assert.include(git(copy, 'branch', '--list', 'later'), 'later')
+    }),
+  )
 })

@@ -1789,7 +1789,7 @@ export class Sessions extends Context.Service<
                         untrusted
                           ? { untrusted, ...(offline ? { offline } : {}) }
                           : thread.role === 'coordinator'
-                            ? { contained: thread.folder.folder }
+                            ? { contained: { folder: thread.folder.folder, reads: thread.folder.reads } }
                             : undefined,
                       ),
                     }),

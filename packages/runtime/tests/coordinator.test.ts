@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
+import { SECRET_PLACES } from '@althar/provider-adapters'
 import { BUILT, BUILT_SETTLED, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -1438,10 +1439,22 @@ describe('the coordinator, a trusted reader in its own copies (ADR-056)', () => 
       assert.strictEqual(fetched?.outcome, 'reject')
       assert.include(fetched?.reason ?? '', 'this role only reads')
       // Its session's, not the one Althar lists models with.
-      assert.deepInclude(sessionMetas, {
-        role: 'reader',
-        options: { contained: join(config.worktreeRoot, project?.slug ?? '', '.coordinator') },
-      })
+      const contained = sessionMetas.findLast((meta) => meta.options?.contained !== undefined)?.options?.contained
+      const folder = join(config.worktreeRoot, project?.slug ?? '', '.coordinator')
+      assert.strictEqual(contained?.folder, folder)
+      const real = (path: string) => realpathSync(path)
+      const { allowed = [], denied = [] } = contained?.reads ?? {}
+      // None of the home folder, the person's checkout or the project's task folders, but its own folder and what it fetches from.
+      assert.includeMembers([...denied], [real(homedir()), real(join(config.worktreeRoot, project?.slug ?? ''))])
+      const [checkout] = yield* sql<{ path: string }>`SELECT path FROM repository_locations`
+      assert.include(denied, real(checkout?.path ?? ''))
+      assert.includeMembers([...allowed], [real(folder), real(join(config.worktreeRoot, project?.slug ?? '', '.coordinator-mirrors'))])
+      assert.notInclude(allowed, real(checkout?.path ?? ''))
+      // Nothing it is given back holds a key: no place of the person's keys is in one, nor one in a place of keys.
+      for (const place of SECRET_PLACES) {
+        const secret = join(homedir(), place)
+        for (const given of allowed) assert.isFalse(secret.startsWith(`${given}/`) || given.startsWith(secret), `${given} and ${secret}`)
+      }
     }).pipe(Effect.provide(runtime())),
   )
 })

@@ -109,4 +109,22 @@ describe('the coordinator, a trusted reader in its own copies', () => {
     ])
       assert.notStrictEqual(coordinator(command), 'allowed', command)
   })
+
+  it('reads no .env file outside its folder, as the person’s checkout’s is, by its path, from home, or after a cd', () => {
+    for (const command of [
+      'cat /Users/dana/Projects/meridian/.env',
+      'cat ~/Projects/meridian/.env.local',
+      'grep KEY ../../meridian/.env',
+      'cd /Users/dana/Projects/meridian && cat .env',
+      'echo $(cat /Users/dana/Projects/meridian/.env)',
+    ])
+      assert.include(coordinator(command), '.env file outside your working folder', command)
+    // Its own copies' are its to read, and an example of what goes in one anywhere.
+    assert.strictEqual(coordinator('cat meridian/.env'), 'allowed')
+    assert.strictEqual(coordinator('cat /Users/dana/Projects/meridian/.env.example'), 'allowed')
+    const read = (path: string) =>
+      decideReader({ ...request(''), kind: 'read', title: `Read ${path}`, paths: [path] }, { cwd, trusted: true })
+    assert.strictEqual(read('/Users/dana/Projects/meridian/.env').verdict, 'deny')
+    assert.strictEqual(read(`${cwd}/meridian/.env`).verdict, 'allow')
+  })
 })

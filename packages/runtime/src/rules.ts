@@ -3338,6 +3338,33 @@ export interface ReaderOptions {
   readonly trusted?: boolean
 }
 
+/** Why a trusted reader may not read a `.env` file outside its folder. */
+const ENV_REFUSED =
+  "A .env file outside your working folder holds the person's secrets, such as their checkout's; this role reads only its own copies'."
+
+/** A `.env` file outside a trusted reader's folder, as the person's checkout's is: from `~`, or from the folder. */
+const envOutside = (path: string, cwd: string, system: System = systemOf()) => {
+  const { paths, home } = system
+  const target = paths.resolve(cwd, path.replace(HOME_WORD, home))
+  const inside = paths.relative(cwd, target)
+  return envFile(target) && (inside.startsWith('..') || paths.isAbsolute(inside))
+}
+
+/**
+ * Whether a trusted reader's line names a `.env` file outside its folder:
+ * by its path, or by any name at all where a `cd` takes it elsewhere first.
+ */
+const envOutsideIn = (command: string, cwd: string) => {
+  const { commands } = parseCommandLine(command)
+  const moves = commands.some((words) => ['cd', 'pushd'].includes(words[0] ?? ''))
+  return commands.some((words) =>
+    words
+      .slice(1)
+      .flatMap(pathsInWord)
+      .some((path) => (moves ? envFile(path) : envOutside(path, cwd))),
+  )
+}
+
 /**
  * Why a command line a reader wants to run would do more than look, or
  * nothing when it only looks. A trusted reader's substitutions, `$(…)` and
@@ -3346,6 +3373,7 @@ export interface ReaderOptions {
  */
 const readerLineReason = (command: string, options: ReaderOptions): string | undefined => {
   if (options.trusted === true) {
+    if (options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
     const found = substitutionsIn(command)
     if (typeof found === 'string') return found
     if (found.scripts.length > 0)
@@ -3377,9 +3405,13 @@ export const decideReader = (request: PermissionRequest, options: ReaderOptions 
   switch (request.kind) {
     case 'read':
     case 'search': {
-      // A reader may read anything but where the person keeps keys and sign-ins.
+      // A reader may read anything but where the person keeps keys and sign-ins; a trusted one, no `.env` outside its folder either.
       const secret = secretReason(request, options.cwd)
-      return secret === undefined ? ALLOW : deny(secret)
+      if (secret !== undefined) return deny(secret)
+      const { cwd } = options
+      return options.trusted === true && cwd !== undefined && pathsOf(request).some((path) => envOutside(path, cwd))
+        ? deny(ENV_REFUSED)
+        : ALLOW
     }
     case 'think':
       return ALLOW
