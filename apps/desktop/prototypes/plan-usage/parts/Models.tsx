@@ -27,8 +27,20 @@ export const routeWords = (usage: PlanUsage | null, info: Pick<ModelInfo, 'id'>,
 }
 
 /** A picker's row, beside a model. */
-export function ModelNote({ usage, info, d }: { readonly usage: PlanUsage | null; readonly info: ModelInfo; readonly d: Direction }) {
-  const words = routeWords(usage, info, d)
+export function ModelNote({
+  usage,
+  info,
+  d,
+  compact,
+}: {
+  readonly usage: PlanUsage | null
+  readonly info: ModelInfo
+  readonly d: Direction
+  /** In All models, where the name needs the room: the figure alone, until when on hover. */
+  readonly compact?: boolean
+}) {
+  const full = routeWords(usage, info, d)
+  const words = compact === true ? (full?.split(' · until ')[0] ?? null) : full
   if (words === null) return null
   const { route } = routeFor(usage, info)
   if (route === null)
@@ -38,7 +50,7 @@ export function ModelNote({ usage, info, d }: { readonly usage: PlanUsage | null
       </span>
     )
   return (
-    <span className={s.note} data-usage data-tone={usageTone(route.room.left)}>
+    <span className={s.note} data-usage data-tone={usageTone(route.room.left)} title={compact === true ? (full ?? undefined) : undefined}>
       {d === 'B' && <Gauge left={route.room.left} small />}
       {words}
     </span>

@@ -261,6 +261,19 @@
   grid-template-columns: auto 1fr;
   align-items: center;
   column-gap: 12px;
+  width: calc(100% + 12px);
+  margin: -6px -6px 0;
+  padding: 6px;
+  border-radius: var(--r);
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.lead:hover {
+  background: var(--line);
+}
+.lead[aria-expanded='true'] .chev,
+.line[aria-expanded='true'] .chev {
+  transform: rotate(90deg);
 }
 .leadFigure {
   font-size: 26px;

@@ -8,7 +8,8 @@ import {
 } from '@althar/ui'
 
 import { usePlanUsage } from '../../../src/renderer/features/usage/useUsage'
-import { ChipSays, ModelNote, routeWords } from '../parts/Models'
+import { setBrowserNote } from '../browserNote'
+import { ChipSays, ModelNote } from '../parts/Models'
 import s from '../parts/plan.module.css'
 import { useProto } from '../store'
 
@@ -39,12 +40,7 @@ export function ModelPick(props: ModelPickProps) {
 export function ModelBrowser(props: ModelBrowserProps) {
   const { d } = useProto()
   const usage = usePlanUsage()
-  if (d === 'N') return <KitModelBrowser {...props} />
-  // A runtime's reading goes beside how it is signed in, on each of its models' rows.
-  const runtimes = props.runtimes.map((runtime) => {
-    const model = props.models.find((one) => one.runtime === runtime.id)
-    const words = model === undefined ? null : routeWords(usage, { id: `${runtime.id}:` }, d)
-    return words === null ? runtime : { ...runtime, how: `${runtime.how} · ${words}` }
-  })
-  return <KitModelBrowser {...props} runtimes={runtimes} />
+  // Each row's reading, by its own model's route: Opus counts its own week.
+  setBrowserNote(d === 'N' ? null : (info) => <ModelNote usage={usage} info={info} d={d} compact />)
+  return <KitModelBrowser {...props} />
 }

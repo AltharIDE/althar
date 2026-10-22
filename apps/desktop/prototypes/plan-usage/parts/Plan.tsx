@@ -200,22 +200,27 @@ export function PlanSection({ usage }: { readonly usage: PlanUsage | null }) {
   )
 }
 
-/** C: the one limit closest to running out, big, and then the rest, a line each. */
+/** C: the one limit closest to running out, big, and then the rest, a line each; the lead opens in place as they do. */
 export function PeekTightest({ usage }: { readonly usage: PlanUsage | null }) {
   const [first, ...rest] = agentRooms(usage)
+  const [open, setOpen] = useState(false)
   const brand = first === undefined ? undefined : brandOf(first.agentId)
   return (
     <div className={s.peek}>
       {first !== undefined && (
-        <div className={s.lead}>
-          <span className={s.leadFigure}>{pctWords(first.route.room.left)}</span>
-          <span className={s.leadWords}>
-            <span className={s.leadWho}>
-              {brand !== undefined && <BrandMark brand={brand} size={13} />}
-              {first.route.several ? `${first.name} ${first.route.account.accountName}` : first.name}
+        <div>
+          <button type="button" className={s.lead} aria-expanded={open} onClick={() => setOpen(!open)}>
+            <span className={s.leadFigure}>{pctWords(first.route.room.left)}</span>
+            <span className={s.leadWords}>
+              <span className={s.leadWho}>
+                {brand !== undefined && <BrandMark brand={brand} size={13} />}
+                {first.route.several ? `${first.name} ${first.route.account.accountName}` : first.name}
+                <Icon name="chevron" size={9} className={s.chev} />
+              </span>
+              <span className={s.leadUntil}>{ofWords({ ...first, route: { ...first.route, several: false } })}</span>
             </span>
-            <span className={s.leadUntil}>{ofWords({ ...first, route: { ...first.route, several: false } })}</span>
-          </span>
+          </button>
+          {open && <Detail agent={first} />}
         </div>
       )}
       {rest.length > 0 && (

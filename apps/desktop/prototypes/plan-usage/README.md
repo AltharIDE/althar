@@ -44,7 +44,7 @@ Every direction ranks the same way. **The figure that counts** is the agent clos
 **A · A third gauge.**
 - **The bar**: PLAN, a gauge of its own right after CPU and MEM, in their exact manner: five steps lit as the tightest route is used, full ink once under a tenth.
 - **Its peek** (click or ⌘U): "Plan usage" and its level ("Plenty left", "Codex is nearly out"); a row per agent, least room first: name, "% left", a bar, and what the figure is of ("Side · Weekly limit · until Tue 20:00"). A press opens the agent in place.
-- **The pickers**: every row ends in its route's figure, "65%", or "Side · 79%" where the agent has several accounts; from a quarter down, "until 14:00" too. "no reading" in faint ink. The composer's chip says "3% left until 14:00" beside itself once under a tenth.
+- **The pickers**: every row ends in its route's figure, "65%", or "Side · 79%" where the agent has several accounts; from a quarter down, "until 14:00" too. Opus counts its own week (19% here, where Sonnet has 56%). In All models, each row has the figure alone, so the name keeps its room, and the reset time is in its tooltip. "no reading" in faint ink. The composer's chip says "3% left until 14:00" beside itself once under a tenth.
 
 **B · In the load meter.**
 - **The bar**: one meter, CPU · MEM · PLAN, one button.
@@ -53,7 +53,7 @@ Every direction ranks the same way. **The figure that counts** is the agent clos
 
 **C · Tightest first.**
 - **The bar**: a figure, not steps: "PLAN 65%" in the meter's own type. Once under a tenth it names who: "CODEX 3% · 14:00".
-- **Its peek**: the tightest limit leads, big ("3%", Codex, Five-hour limit · until 14:00); then the other agents a line each (name, figure, reset), each opening in place.
+- **Its peek**: the tightest limit leads, big ("3%", Codex, Five-hour limit · until 14:00); then the other agents a line each (name, figure, reset). The lead and each line open in place to every account and window.
 - **The pickers**: quiet unless it matters. A row says nothing above half, "40% left" from half down, and adds "until 14:00" from a quarter. The chip speaks only under a tenth.
 
 ## What each costs to build
@@ -71,6 +71,7 @@ With the server up, outside the agent sandbox (Chromium can't start in it):
 node shoot.mjs        # every shot in shots.json, 1280×800 at 1x, into shots/ (with a captioned list)
 sh sheets.sh          # one sheet per direction: shots/sheet-ninemate.png, sheet-a.png, sheet-b.png, sheet-c.png
 node peek.mjs '?d=B&v=picker' shots/peek.png   # one look, with what the page logged
+node check.mjs       # A to C as used: All models' readings per model (shots/a-browser.png…), C's lead opening, peeks closing on Escape and a click outside, switching direction with a peek open
 ```
 
 `shots/` is ignored by git.
@@ -82,7 +83,7 @@ node peek.mjs '?d=B&v=picker' shots/peek.png   # one look, with what the page lo
   - the Talk room's notices (`ProjectView`);
   - every model picker and All models (`ModelChoice`).
 
-  One patch, to `shared/agents.ts` `waitsWords`: it leaves the file alone, saying so, if the text changed.
+  Two patches, each leaving its file alone, saying so, if the text changed: `shared/agents.ts` `waitsWords`, and the kit's `ModelBrowser`, which has no slot for a row's note, so each row calls `browserNote(model)` (`browserNote.ts`) after its model's name.
 - `data.ts`: the scenario: agents and accounts, models, plan usage and ninemate's warnings, and what steering did (`steerOf`). `runtime.ts`: the snapshots the fake client answers with. `usage.ts`: tightest window, route, agents ranked, words. `clock.ts`: the page's 11:20.
 - `parts/`: `Plan.tsx` (the gauge, an agent's row, the three peeks), `Bar.tsx` (A's gauge, B's meter, C's figure), `Models.tsx` (the pickers' notes and the chip).
 - **Another agent works in this worktree.** The page runs the files as they are on disk, so a change to the app or the kit shows here at once, and one half made can break it for a moment.

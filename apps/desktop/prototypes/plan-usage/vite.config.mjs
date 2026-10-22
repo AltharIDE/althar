@@ -56,6 +56,12 @@ const patches = [
       ],
     ],
   },
+  {
+    // All models has no slot for a row's note: each row gets one after its model's name, per model.
+    file: 'packages/ui/src/composer/ModelBrowser/ModelBrowser.tsx',
+    first: "import { browserNote as __browserNote } from '@proto/browserNote'",
+    edits: [['{off && <span className={s.inUse}>{t.off}</span>}', '{off && <span className={s.inUse}>{t.off}</span>}\n{__browserNote(m)}']],
+  },
 ]
 
 /** @type {import('vite-plus').Plugin} */

@@ -194,7 +194,8 @@ export const usageOf = (s: State): PlanUsage => {
       windows: [
         win('five_hour', 31, today(15, 40)),
         win('weekly', s.level === 'out' ? 100 : 44, nextMonday(9)),
-        win('weekly', 38, nextMonday(9), 'Opus'),
+        // Opus's own week runs lower than the rest, so a model's own window shows where it counts.
+        win('weekly', 81, nextMonday(9), 'Opus'),
       ],
       fault: null,
       noReading: null,
