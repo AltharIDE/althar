@@ -15,10 +15,11 @@ import {
   ProjectFront,
   type ProjectFrontProps,
   Running,
+  keys,
+  modKey,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
-import { platform } from '../../shared/device'
 import { useModels } from '../../data/models'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
@@ -369,7 +370,7 @@ export function ProjectView({
         onEditQueued={(id) => void edit(id)}
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        text={{ queued: text.queue, sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
+        text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
         meter={contextMeter(session, named, model.compact)}
         picker={

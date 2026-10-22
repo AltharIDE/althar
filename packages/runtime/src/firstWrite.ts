@@ -5,6 +5,7 @@ import type { ProjectId } from '@althar/domain'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { touchCard } from './cards'
 import { evidencePaths } from './evidence'
 import { branchExists, commitsAhead, git, uncommittedFiles } from './git'
@@ -160,8 +161,8 @@ export const branchOnFirstWrite = (
     const distinct = [...new Set(branched.map((worktree) => worktree.name))]
     const own =
       distinct.length === 1
-        ? `on a branch of its own now, ${distinct[0] ?? ''}, which stays on this computer`
-        : `on branches of its own now, ${distinct.join(', ')}, which stay on this computer`
+        ? `on a branch of its own now, ${distinct[0] ?? ''}, which stays on ${thisDevice()}`
+        : `on branches of its own now, ${distinct.join(', ')}, which stay on ${thisDevice()}`
     const title = made
       ? null
       : already

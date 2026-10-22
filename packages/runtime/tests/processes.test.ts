@@ -7,6 +7,7 @@ import { scenarios } from '@althar/provider-adapters/testing'
 import { Effect, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from '../src/device'
 import { SessionFailed } from '../src/errors'
 import { type Failure, failureOf, Failures } from '../src/Failures'
 import * as Runtime from '../src/Runtime'
@@ -111,7 +112,7 @@ describe('agents as processes', () => {
       const [row] = yield* sql<{ session: string; process: string; pid: number | null }>`
         SELECT s.state AS session, p.state AS process, p.pid FROM provider_sessions s JOIN processes p ON p.provider_session_id = s.id`
       assert.deepStrictEqual(row, { session: 'failed', process: 'unknown', pid: null })
-      assert.strictEqual(error.summary, "althar-no-such-agent isn't installed, or isn't on this computer's PATH.")
+      assert.strictEqual(error.summary, `althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`)
       assert.deepStrictEqual(yield* notices(created.threadId), [
         { source: 'runtime', severity: 'error', title: "Fake missing couldn't start.", description: error.summary },
       ])

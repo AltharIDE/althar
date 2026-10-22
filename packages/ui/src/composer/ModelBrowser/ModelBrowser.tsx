@@ -1,6 +1,7 @@
 import { Dialog, RadioGroup, Toggle } from 'radix-ui'
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
+import { modKey, commandDown } from '../../foundations/keys'
 import { unreachable } from '../../foundations/vocabulary'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import type { Brand } from '../../foundations/brands/brands'
@@ -76,7 +77,7 @@ export const modelBrowserText: ModelBrowserText = {
   context: (k) => (k >= 1000 ? `${k / 1000}M` : `${k}k`),
   noContext: '—',
   empty: (q) => `No model matches “${q}”.`,
-  keys: { escape: 'esc', up: '↑', down: '↓', enter: '↵', pin: '⌘P' },
+  keys: { escape: 'esc', up: '↑', down: '↓', enter: '↵', pin: modKey('P') },
   move: 'move',
   choose: 'use',
   pinVerb: 'pin',
@@ -197,7 +198,7 @@ export function ModelBrowser({
         break
       }
       case 'p': {
-        if (!(e.metaKey || e.ctrlKey) || !(focused instanceof HTMLElement)) break
+        if (!commandDown(e) || !(focused instanceof HTMLElement)) break
         const id = focused.closest<HTMLElement>('[data-id]')?.dataset.id
         if (id) {
           e.preventDefault()
