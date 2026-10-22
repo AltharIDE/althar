@@ -252,8 +252,9 @@ const askedFor = (thread: { readonly title: string; readonly description: string
  * Whether a thread's agent only reads: the coordinator, a reviewer, and a review's lead. It loads nothing of the
  * repository's own settings, and is given none of the skills Althar selected, which are a task's lead's alone.
  */
-export const onlyReads = (thread: { readonly role: ThreadContext['role']; readonly review?: object | null }) =>
-  thread.role !== 'task' || thread.review !== null
+export const onlyReads = (
+  thread: { readonly role: 'task'; readonly review: object | null } | { readonly role: Exclude<ThreadContext['role'], 'task'> },
+) => thread.role !== 'task' || thread.review !== null
 
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)

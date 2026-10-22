@@ -198,10 +198,12 @@ function First({
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  const error = project.error ?? model.error
+  const skills = useSkills()
+  const error = project.error ?? model.error ?? skills.error
   const { preferences, set } = usePreferences()
   const { host } = useServices()
-  const skills = useSkills()
+  // The skills that can be given: one Althar can't read is left as it is, on or off.
+  const sound = skills.rows?.filter((skill) => skill.problem === undefined) ?? []
   return (
     <div className={`${s.window} ${s.bare}`}>
       <BareBar className={s.over} />
@@ -226,9 +228,7 @@ function First({
         foot={
           <>
             {/* Only where Althar has skills to give, once the store is read: off until turned on, as each one is. */}
-            {skills.enabled && skills.rows !== undefined && skills.rows.length > 0 && (
-              <SkillsLine on={skills.rows.some((skill) => skill.on)} onChange={skills.toggleAll} />
-            )}
+            {skills.enabled && sound.length > 0 && <SkillsLine on={sound.some((skill) => skill.on)} onChange={skills.toggleAll} />}
             <CrashReportsLine
               on={preferences.crashReports}
               onChange={(on) => set('crashReports', on)}

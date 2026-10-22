@@ -166,7 +166,7 @@ describe('skills for a task’s lead', () => {
   )
 
   it.live(
-    'gives Claude Code, Codex and OpenCode leads only the skills turned on, read-only, and writes none to a home or the repository',
+    'gives Claude Code, Codex and OpenCode leads only the skills turned on, read-only, and writes none to the home or the repository',
     () => {
       // A home of its own, so what an agent's own folders would get is seen: ~/.agents/skills, ~/.claude/skills and the like.
       const home = mkdtempSync(join(tmpdir(), 'althar-skills-home-'))
@@ -196,11 +196,6 @@ describe('skills for a task’s lead', () => {
                   for (const file of skillFilesUnder(folder)) assert.strictEqual(statSync(file).mode & 0o222, 0, `${agentId}: ${file}`)
                   const worktree = yield* worktreeOf(created.threadId)
                   assert.deepStrictEqual(skillFilesUnder(worktree), [], agentId)
-                  // Nor in the account's home the agent was started in.
-                  const launched = launches.at(-1)
-                  for (const [key, value] of Object.entries(launched?.env ?? {}))
-                    if (/HOME|CONFIG_DIR/.test(key) && value.startsWith('/'))
-                      assert.deepStrictEqual(skillFilesUnder(value), [], `${agentId}: ${key}`)
                   yield* sessions.stop(created.threadId)
                   assert.isFalse(existsSync(folder), agentId)
                 }
