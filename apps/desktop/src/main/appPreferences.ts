@@ -35,7 +35,7 @@ const editor: Kind<string | null> = {
 export type Appearance = 'light' | 'dark' | 'system'
 
 const appearance: Kind<Appearance> = {
-  starts: 'system',
+  starts: 'light',
   holds: (value): value is Appearance => value === 'light' || value === 'dark' || value === 'system',
 }
 
