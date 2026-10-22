@@ -70,11 +70,19 @@ export interface RequestContext {
    * A task's lead works under the project rules; a role that only reads,
    * under the reader's rules, which never ask: `offline`, as the lead of a
    * review of a pull request from outside is, with no fetch allowed either;
-   * `cwd`, the folder a reader works in, which the paths it names are read from.
+   * `cwd`, the folder a reader works in, which the paths it names are read from;
+   * `trusted`, the coordinator in its own copies (ADR-058), never a review's lead;
+   * `reads`, where a trusted reader's own tools for reading may reach.
    */
   readonly rules:
     | { readonly role: 'task'; readonly context: RuleContext }
-    | { readonly role: 'reader'; readonly offline?: boolean; readonly cwd?: string }
+    | {
+        readonly role: 'reader'
+        readonly offline?: boolean
+        readonly cwd?: string
+        readonly trusted?: boolean
+        readonly reads?: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
+      }
 }
 
 interface Waiting {
@@ -515,8 +523,13 @@ export class Permissions extends Context.Service<
             )
             // A role that only reads is answered at once: allowed, or refused with a reason it reads.
             if (requestContext.rules.role === 'reader') {
-              const { offline, cwd } = requestContext.rules
-              const read = decideReader(request, { offline: offline === true, ...(cwd === undefined ? {} : { cwd }) })
+              const { offline, cwd, trusted, reads } = requestContext.rules
+              const read = decideReader(request, {
+                offline: offline === true,
+                ...(cwd === undefined ? {} : { cwd }),
+                ...(trusted === true ? { trusted } : {}),
+                ...(reads === undefined ? {} : { reads }),
+              })
               const decision: PermissionDecision =
                 read.verdict === 'allow'
                   ? { decision: 'allow', reason: 'This role may do this.' }

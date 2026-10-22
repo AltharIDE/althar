@@ -90,6 +90,30 @@ export const readLog = (host: CodeHost, repository: Repository, check: Check, wh
   )
 }
 
+/** How many lines of a check's log `read_check_log` gives at a time. */
+const LOG_PAGE = 300
+
+/**
+ * A page of a check's whole log, as `read_check_log` gives it (ADR-041):
+ * from the line asked for, or its last page without one, with where the
+ * pages before and after start. Never more than a page at once.
+ */
+export const logPage = (log: string, fromLine: number | null | undefined, name: string, on: string): string => {
+  const lines = log.trimEnd().split('\n')
+  const from = Math.min(Math.max(1, Math.floor(fromLine ?? lines.length - LOG_PAGE + 1)), lines.length)
+  const to = Math.min(lines.length, from + LOG_PAGE - 1)
+  const around = [
+    ...(from > 1 ? [`from_line ${Math.max(1, from - LOG_PAGE)} reads the page before`] : []),
+    ...(to < lines.length ? [`from_line ${to + 1} reads on`] : []),
+  ]
+  return [
+    `Lines ${from} to ${to} of ${lines.length} of ${name}'s log on ${on}${around.length === 0 ? '' : `; ${around.join(', ')}`}:`,
+    '```',
+    lines.slice(from - 1, to).join('\n'),
+    '```',
+  ].join('\n')
+}
+
 /** What the lead is told of a log it was given, or of one it couldn't be: why, and where to look instead. */
 export const logForLead = (read: LogRead): string => {
   if (read.log !== null) return `The end of ${read.name}'s log:\n\`\`\`\n${read.log}\n\`\`\``
