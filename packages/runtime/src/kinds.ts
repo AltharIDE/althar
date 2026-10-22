@@ -68,14 +68,20 @@ export const quickIn = (task: string) =>
     AND NOT EXISTS (SELECT 1 FROM external_links ql WHERE ql.task_id = ${task}.id AND ql.kind = 'change'))`
 
 /**
- * How many issues its lead drafted wait on the person for the task `task` (a
- * table alias), as SQL: drafted and not filed or discarded, or not filed the
- * last time. Each is a call on the person, as an open one is
- * (`attention_requests`), though no row of that table stands for it.
+ * How many issue cards wait on the person in the task `task`'s thread (a
+ * table alias), as SQL: issues its lead drafted and not filed or discarded,
+ * or not filed the last time; and changes to issues its lead proposed, not
+ * applied or discarded, or not all applied the last time. Each is a call on
+ * the person, as an open one is (`attention_requests`), though no row of that
+ * table stands for it. Althar's own offer to move the issue to review, as the
+ * task's pull request opens, isn't: the task is ready for the person then, and
+ * its card waits in the thread they open.
  */
-export const issueDraftsWaiting = (task: string) =>
-  `(SELECT count(*) FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
-    WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain'))`
+export const issueCardsWaiting = (task: string) =>
+  `((SELECT count(*) FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
+    WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain'))
+  + (SELECT count(*) FROM issue_changes wc JOIN threads wct ON wct.id = wc.thread_id
+    WHERE wct.task_id = ${task}.id AND wc.proposed_by = 'lead' AND wc.state IN ('pending', 'failed')))`
 
 /**
  * What a plain task handed back, for its card: the pictures its lead showed

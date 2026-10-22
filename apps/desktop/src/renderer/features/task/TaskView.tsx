@@ -66,6 +66,7 @@ import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
+import { ChangesCard } from '../../shared/ChangesCard'
 import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
@@ -77,6 +78,7 @@ import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
 import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
+import { BackgroundOutput } from './BackgroundOutput'
 import { NoOutputsView } from './NoOutputsView'
 import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
@@ -144,6 +146,8 @@ export const text = {
   suggest: 'Mark this as done',
   /** Issues its lead drafted wait for the person to file. */
   issues: 'Issues to file',
+  /** Changes its lead proposed to its issue wait for the person to apply. */
+  issueChanges: 'Issue changes to apply',
   fileAll: (count: number) => `File all ${count}`,
   done: 'Done',
   abandoned: 'Abandoned',
@@ -171,8 +175,16 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
-  // No call waits, yet the task does: issues its lead drafted wait to be filed.
-  if (snapshot.task.phase === 'waiting') return { status: TaskStatus.Yours, state: text.issues }
+  // No call waits, yet the task does: issues its lead drafted wait to be filed, or changes it proposed to its issue to be applied.
+  if (snapshot.task.phase === 'waiting')
+    return {
+      status: TaskStatus.Yours,
+      state: snapshot.items.some(
+        (item) => item.kind === 'issue_draft' && item.content.state !== 'filed' && item.content.state !== 'discarded',
+      )
+        ? text.issues
+        : text.issueChanges,
+    }
   const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
@@ -326,6 +338,8 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
+  // The command its lead left running whose output is shown.
+  const [outputOf, setOutputOf] = useState<string | null>(null)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
   // Attaching it to a pull request asks which; then, where its branch isn't based on that one's head, whether to start it there.
@@ -485,7 +499,9 @@ export function TaskView({
   // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
   const running = [...(session?.background ?? []), ...snapshot.task.launches]
   const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
-  const leftRunning = runningOf(running, now)
+  // Althar's own runs keep their output in their cards, not here.
+  const leftRunning = runningOf(running, now).map((one) => (launched.has(one.id) ? { ...one, output: false } : one))
+  const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
     ...(snapshot.task.request === null || snapshot.earlier
@@ -757,6 +773,7 @@ export function TaskView({
                 processes={leftRunning}
                 onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
                 onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
+                onOutput={setOutputOf}
                 // Where it answers opens in the person's browser.
                 onOpenUrl={(id) => {
                   const url = running.find((command) => command.id === id)?.url
@@ -1014,6 +1031,16 @@ export function TaskView({
                     }}
                   />
                 )}
+                // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
+                changes={(changes) => (
+                  <ChangesCard
+                    changes={changes}
+                    actions={{
+                      onApply: (changesId) => void model.applyIssueChanges(changesId),
+                      onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+                    }}
+                  />
+                )}
                 // A review the lead drafted is posted from its card, only when the person says.
                 review={(draft) => (
                   <ReviewCard
@@ -1134,6 +1161,15 @@ export function TaskView({
             })
           }
           onClose={() => setAttaching(null)}
+        />
+      )}
+      {outputShown !== undefined && threadId !== null && (
+        <BackgroundOutput
+          threadId={threadId}
+          id={outputShown.id}
+          name={outputShown.name ?? outputShown.label ?? outputShown.command}
+          command={outputShown.command}
+          onClose={() => setOutputOf(null)}
         />
       )}
       {changes.open && (

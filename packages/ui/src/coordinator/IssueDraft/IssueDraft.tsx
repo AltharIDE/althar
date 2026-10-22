@@ -28,6 +28,8 @@ export interface IssueDraftText {
   kicker: (source: string, container: string) => string
   /** The labels, as quiet text. */
   labelled: (labels: readonly string[]) => string
+  /** Its priority, as quiet text beside them. */
+  prioritised: (priority: string) => string
   showAll: string
   showLess: string
   /** Beside the buttons, until it is filed. */
@@ -63,6 +65,7 @@ export interface IssueDraftText {
 export const issueDraftText: IssueDraftText = {
   kicker: (source, container) => `Issue draft · ${source} · ${container}`,
   labelled: (labels) => `Labels: ${labels.join(', ')}`,
+  prioritised: (priority) => `Priority: ${priority}`,
   showAll: 'Show all',
   showLess: 'Show less',
   note: 'Nothing is filed until you file it.',
@@ -106,6 +109,8 @@ export type IssueDraftProps = RootProps<
     /** The body drawn, where the consumer draws Markdown; the plain text otherwise. */
     bodyView?: ReactNode
     labels: readonly string[]
+    /** The priority it is filed with, in the tracker's word: Low. */
+    priority?: string
     state: IssueDraftState
     /** Why it wasn't filed, while it stands failed; or why it may have been, while uncertain. */
     error?: string
@@ -142,6 +147,7 @@ export function IssueDraft({
   body,
   bodyView,
   labels,
+  priority,
   state,
   error,
   issue,
@@ -200,7 +206,7 @@ export function IssueDraft({
       return (
         <DraftCard
           root={{ ...rest, ref, className }}
-          draft={{ mark, source, container, title, body, bodyView, labels, error }}
+          draft={{ mark, source, container, title, body, bodyView, labels, priority, error }}
           state={state}
           onFile={onFile}
           onChange={onChange}
@@ -232,7 +238,7 @@ function folds(state: IssueDraftState) {
 
 interface CardProps {
   root: ComponentPropsWithRef<'article'>
-  draft: Pick<IssueDraftProps, 'mark' | 'source' | 'container' | 'title' | 'body' | 'bodyView' | 'labels' | 'error'>
+  draft: Pick<IssueDraftProps, 'mark' | 'source' | 'container' | 'title' | 'body' | 'bodyView' | 'labels' | 'priority' | 'error'>
   state: IssueDraftState
   onFile?: () => void
   onChange?: (edit: IssueDraftEdit) => void
@@ -244,7 +250,8 @@ interface CardProps {
 
 /** The draft before it is filed: what it says, and the buttons that file it, change it, or throw it away. */
 function DraftCard({ root, draft, state, onFile, onChange, onDiscard, saving, headingLevel, t }: CardProps) {
-  const { mark, source, container, title, body, bodyView, labels, error } = draft
+  const { mark, source, container, title, body, bodyView, labels, priority, error } = draft
+  const quiet = [...(priority ? [t.prioritised(priority)] : []), ...(labels.length > 0 ? [t.labelled(labels)] : [])]
   const { className, ...rest } = root
   const kickerId = useId()
   const titleId = useId()
@@ -309,7 +316,7 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, saving, he
               )}
             </div>
           )}
-          {labels.length > 0 && <p className={s.labels}>{t.labelled(labels)}</p>}
+          {quiet.length > 0 && <p className={s.labels}>{quiet.join(' · ')}</p>}
           <div aria-live="polite">
             {failed && (
               <p className={s.error}>

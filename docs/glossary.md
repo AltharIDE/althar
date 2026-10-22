@@ -138,10 +138,10 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | The rest | the mode, `permissions` | What happens to what no rule keeps: allowed, the coordinator decides, ask me, or allow everything. A kind of request on no list is with the rest. |
 | Allow always, Never allow | an answer that keeps a rule, by its scope | An answer that is also kept in the project's rules: for this exact command, commands starting the same way, or the kind of request. Offered only where the rule would hold. |
 | Allowed by the project's rules | a decision a rule made | The quiet line under a turn for what an allow rule let through, opening to each command and its rule. |
-| Skills | Agent Skills, `@althar/skills`'s store (ADR-057) | Folders of instructions, each with a `SKILL.md`, that a task's lead is given for its session, the same for every agent. Kept on this device, outside every repository. Set up in Settings, under Skills. |
+| Skills | Agent Skills, `@althar/skills`'s store (ADR-059) | Folders of instructions, each with a `SKILL.md`, that a task's lead is given for its session, the same for every agent. Kept on this device, outside every repository. Set up in Settings, under Skills. |
 | Althar's catalog | the default catalog, `packages/skills/catalog` | The skills Althar ships, chosen and adjusted from two open-source sets; each says where it came from and its licence. All are on unless the person turns one off. |
 | Review, Install | a review card, an approved install | What a skill from GitHub shows before it is added: where it came from, at which commit, its licence, what stands out in it and its files. Only Install adds it. |
-| Repository files | `ProjectRules.repositoryFiles` (ADR-058) | Whether skill and OpenSpec files may be in the project's repository and be pushed: Write Althar-managed skills, Write OpenSpec artifacts, Push skill/OpenSpec files, each off until turned on. With them off, a push holding such files is held back. |
+| Repository files | `ProjectRules.repositoryFiles` (ADR-060) | Whether skill and OpenSpec files may be in the project's repository and be pushed: Write Althar-managed skills, Write OpenSpec artifacts, Push skill/OpenSpec files, each off until turned on. With them off, a push holding such files is held back. |
 | Settled | terminal states | Calls answered, changes accepted, tasks abandoned, Finished tasks marked Done. |
 
 ## Althar itself
@@ -153,7 +153,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Althar 0.1.1 is ready, Restart | an update Squirrel has in place (`main/updates.ts`) | A newer Althar, downloaded in the background, said in one quiet line in the window's bar and in Settings' About Althar. Restart is there only while no work runs; otherwise the line says it installs when you quit. Checking and downloading never show. |
 | Check for Updates… | `checkNow` | In the app menu: looks now, and says in a dialog what it found. |
 | What's new | a release's notes | In the quick settings' foot and Settings' About Althar, beside the version: that version's GitHub Release, in the browser. |
-| Light or dark: Light, Dark, Match the system | the `appearance` preference, `light`, `dark` or `system` (ADR-055) | In Settings › Appearance: Althar light, dark, or turning with the system, said in each system's words: Match the Mac, Match the PC (Windows), Match the computer (Linux). It starts matching the system. |
+| Light or dark: Light, Dark, Match the system | the `appearance` preference, `light`, `dark` or `system` (ADR-055) | In Settings › Appearance: Althar light, dark, or turning with the system, said in each system's words: Match the Mac, Match the PC (Windows), Match the computer (Linux). It starts light; Match the system is for whoever picks it. |
 | CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
 
 ## Words the interface doesn't use

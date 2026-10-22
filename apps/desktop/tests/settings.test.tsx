@@ -838,7 +838,7 @@ describe('how Althar looks, on the Settings tab', () => {
     ])
   })
 
-  it('offers light, dark or as the Mac is, as the Mac is to begin with, and keeps a choice', async () => {
+  it('offers light, dark or as the Mac is, light to begin with, and keeps a choice', async () => {
     const host = fakeHost()
     withServices(<Settings at="appearance" />, fakeClient().client, host)
     const choice = await screen.findByRole('radiogroup', { name: 'Light or dark' })
@@ -852,8 +852,10 @@ describe('how Althar looks, on the Settings tab', () => {
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
     ).toEqual(['Light', 'Dark', 'Match the Mac'])
-    expect(checked()).toEqual(['Match the Mac'])
-    expect(screen.getByText('Match the Mac turns dark when the Mac does.')).toBeTruthy()
+    expect(checked()).toEqual(['Light'])
+    await userEvent.click(within(choice).getByRole('radio', { name: 'Match the Mac' }))
+    await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'system'))
+    expect(await screen.findByText('Match the Mac turns dark when the Mac does.')).toBeTruthy()
     await userEvent.click(within(choice).getByRole('radio', { name: 'Dark' }))
     await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'dark'))
     await waitFor(() => expect(checked()).toEqual(['Dark']))

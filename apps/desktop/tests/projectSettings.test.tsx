@@ -230,15 +230,30 @@ describe('a project’s settings', () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
     const move = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
-      name: 'Move issues to In Progress',
+      name: 'Move issues along with their tasks',
     })
     expect(move.getAttribute('aria-checked')).toBe('true')
-    expect(descriptionOf(move)).toBe('When a task starts from a Linear, Jira or Trello issue.')
+    expect(descriptionOf(move)).toBe(
+      'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
+    )
     await userEvent.click(move)
     // Off at once, before the runtime has said so.
     expect(move.getAttribute('aria-checked')).toBe('false')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', moveIssues: false }))
     expect(move.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('lets changes to issues apply without a card once switched on, off until then', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const change = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', { name: 'Change issues without asking' })
+    expect(change.getAttribute('aria-checked')).toBe('false')
+    expect(descriptionOf(change)).toBe(
+      'Status, priority, assignee, labels and closing apply at once, instead of waiting for you on a card.',
+    )
+    await userEvent.click(change)
+    expect(change.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', changeIssues: true }))
   })
 
   it('switches back, saying why under the one that didn’t hold, and the other says nothing of it', async () => {
@@ -249,7 +264,7 @@ describe('a project’s settings', () => {
     })
     await openSettings()
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
-    const move = tasks.getByRole('switch', { name: 'Move issues to In Progress' })
+    const move = tasks.getByRole('switch', { name: 'Move issues along with their tasks' })
     await userEvent.click(move)
     expect(await tasks.findByRole('alert')).toHaveProperty('textContent', 'The rules changed meanwhile.')
     await waitFor(() => expect(move.getAttribute('aria-checked')).toBe('true'))

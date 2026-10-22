@@ -1066,4 +1066,94 @@ describe('GitLab listing merge requests', () => {
       assert.deepInclude(refused, { reason: 'forbidden', scope: 'read_api' })
     }),
   )
+
+  describe('changing an issue', () => {
+    const AT = `${API}/projects/meridian%2Fpayments%2Fapi`
+    const open: Issue = {
+      id: '205729782',
+      ref: 'meridian/payments/api#231',
+      key: '#231',
+      title: 'Rate-limit refunds like charges',
+      body: '',
+      url: 'https://gitlab.com/meridian/payments/api/-/work_items/231',
+      status: { name: 'Open', category: 'todo' },
+      priority: null,
+      assignees: [],
+      labels: ['payments'],
+      container: 'meridian/payments/api',
+      updatedAt: '2026-10-07T16:25:33.584Z',
+    }
+
+    it('changes all but a priority, which GitLab’s issues haven’t', () => {
+      assert.deepStrictEqual(gitlab([]).host.capabilities.changes, ['status', 'close', 'assignee', 'labels', 'project', 'title'])
+    })
+
+    it.effect('offers open and closed, the project’s labels, its people found by a name, and its active milestones', () =>
+      Effect.gen(function* () {
+        const { host } = gitlab([
+          [
+            'GET',
+            `${AT}/labels?per_page=100&page=1`,
+            {
+              json: [
+                { id: 1, name: 'payments' },
+                { id: 2, name: 'type::bug' },
+              ],
+            },
+          ],
+          ['GET', `${AT}/members/all?query=sam&per_page=100&page=1`, { json: [user(6, 'sam', { name: 'Sam Rivera' })] }],
+          ['GET', `${AT}/milestones?state=active&per_page=100&page=1`, { json: [{ id: 41, iid: 3, title: 'Q4 launch' }] }],
+        ])
+        assert.deepStrictEqual(
+          (yield* host.choices(open, 'status')).map((one) => one.id),
+          ['reopen', 'close'],
+        )
+        assert.deepStrictEqual(
+          (yield* host.choices(open, 'labels')).map((one) => one.name),
+          ['payments', 'type::bug'],
+        )
+        assert.deepStrictEqual(yield* host.choices(open, 'assignee', 'sam'), [{ id: '6', name: 'Sam Rivera', also: ['sam'] }])
+        assert.deepStrictEqual(yield* host.choices(open, 'project'), [{ id: '41', name: 'Q4 launch' }])
+      }),
+    )
+
+    it.effect('changes it in one edit, labels by name, and reads it as GitLab answers', () =>
+      Effect.gen(function* () {
+        const { host, sent } = gitlab([['PUT', `${AT}/issues/231`, { json: issue({ state: 'closed', title: 'Refunds, rate-limited' }) }]])
+        const changed = yield* host.update(open, {
+          title: 'Refunds, rate-limited',
+          close: true,
+          assignee: { id: '6', name: 'Sam Rivera' },
+          project: { id: '41', name: 'Q4 launch' },
+          labels: {
+            add: [
+              { id: 'type::bug', name: 'type::bug' },
+              { id: 'docs', name: 'docs' },
+            ],
+            remove: [{ id: 'payments', name: 'payments' }],
+          },
+        })
+        assert.deepStrictEqual([changed.status, changed.title], [{ name: 'Closed', category: 'done' }, 'Refunds, rate-limited'])
+        assert.deepStrictEqual(sent[0]?.body, {
+          title: 'Refunds, rate-limited',
+          state_event: 'close',
+          assignee_ids: [6],
+          milestone_id: 41,
+          add_labels: 'type::bug,docs',
+          remove_labels: 'payments',
+        })
+      }),
+    )
+
+    it.effect('takes its assignees and milestone off with 0, reopens it, and refuses a priority before asking anything', () =>
+      Effect.gen(function* () {
+        const { host, sent } = gitlab([['PUT', `${AT}/issues/231`, { json: issue() }]])
+        yield* host.update(open, { status: { id: 'reopen', name: 'Open' }, assignee: null, project: null })
+        assert.deepStrictEqual(sent[0]?.body, { state_event: 'reopen', assignee_ids: [0], milestone_id: 0 })
+        const refusing = gitlab([])
+        assert.strictEqual((yield* Effect.flip(refusing.host.update(open, { priority: 'urgent' }))).reason, 'rejected')
+        assert.lengthOf(refusing.sent, 0)
+      }),
+    )
+  })
 })

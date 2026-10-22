@@ -924,6 +924,105 @@ describe('GitHub as a tracker', () => {
     ...overrides,
   })
 
+  describe('changing an issue', () => {
+    const open: Issue = {
+      id: '900',
+      ref: 'meridian/api#12',
+      key: '#12',
+      title: 'Refunds ignore the rate limit',
+      body: '',
+      url: 'https://github.com/meridian/api/issues/12',
+      status: { name: 'Open', category: 'todo' },
+      priority: null,
+      assignees: [],
+      labels: ['bug'],
+      container: 'meridian/api',
+      updatedAt: '2026-10-01T08:00:00Z',
+    }
+
+    it('changes all but a priority, which GitHub’s issues haven’t', () => {
+      assert.deepStrictEqual(github([]).host.capabilities.changes, ['status', 'close', 'assignee', 'labels', 'project', 'title'])
+    })
+
+    it.effect('offers open and closed, the repository’s labels, its people and its open milestones, page after page', () =>
+      Effect.gen(function* () {
+        const labels = Array.from({ length: 100 }, (_, index) => ({ name: `label-${index}` }))
+        const { host } = github([
+          ['GET', `${REPO}/labels?per_page=100&page=1`, { json: labels }],
+          ['GET', `${REPO}/labels?per_page=100&page=2`, { json: [{ name: 'payments' }] }],
+          [
+            'GET',
+            `${REPO}/assignees?per_page=100&page=1`,
+            {
+              json: [
+                { id: 5, login: 'you', name: 'You Person' },
+                { id: 6, login: 'sam' },
+              ],
+            },
+          ],
+          ['GET', `${REPO}/milestones?state=open&per_page=100&page=1`, { json: [{ number: 3, title: 'Q4 launch' }] }],
+        ])
+        assert.deepStrictEqual(
+          (yield* host.choices(open, 'status')).map((one) => one.name),
+          ['Open', 'Closed', 'Closed as not planned'],
+        )
+        assert.lengthOf(yield* host.choices(open, 'labels'), 101)
+        assert.deepStrictEqual(yield* host.choices(open, 'assignee'), [
+          { id: 'you', name: 'You Person', also: ['you'] },
+          { id: 'sam', name: 'sam', also: ['sam'] },
+        ])
+        assert.deepStrictEqual(yield* host.choices(open, 'project'), [{ id: '3', name: 'Q4 launch' }])
+      }),
+    )
+
+    it.effect('edits its title, state, assignee and milestone at once, adds and takes off labels, and reads it back', () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          ['PATCH', `${REPO}/issues/12`, { json: issue() }],
+          ['POST', `${REPO}/issues/12/labels`, { json: [] }],
+          ['DELETE', `${REPO}/issues/12/labels/needs%20triage`, { status: 404, json: { message: 'Label does not exist' } }],
+          ['GET', `${REPO}/issues/12`, { json: issue({ state: 'closed', state_reason: 'not_planned' }) }],
+        ])
+        const changed = yield* host.update(open, {
+          title: 'Refunds, rate-limited',
+          status: { id: 'not_planned', name: 'Closed as not planned' },
+          assignee: { id: 'sam', name: 'sam' },
+          project: { id: '3', name: 'Q4 launch' },
+          labels: { add: [{ id: 'payments', name: 'payments' }], remove: [{ id: 'needs triage', name: 'needs triage' }] },
+        })
+        assert.strictEqual(changed.status.category, 'cancelled')
+        assert.deepStrictEqual(sent[0]?.body, {
+          title: 'Refunds, rate-limited',
+          state: 'closed',
+          state_reason: 'not_planned',
+          assignees: ['sam'],
+          milestone: 3,
+        })
+        assert.deepStrictEqual(sent[1]?.body, { labels: ['payments'] })
+      }),
+    )
+
+    it.effect('closes it as done, takes its assignees and milestone off, and refuses a priority before asking anything', () =>
+      Effect.gen(function* () {
+        const { host, sent } = github([
+          ['PATCH', `${REPO}/issues/12`, { json: issue() }],
+          ['GET', `${REPO}/issues/12`, { json: issue({ state: 'closed', state_reason: 'completed' }) }],
+        ])
+        yield* host.update(open, { close: true, assignee: null, project: null })
+        assert.deepStrictEqual(sent[0]?.body, { state: 'closed', state_reason: 'completed', assignees: [], milestone: null })
+        const reopening = github([
+          ['PATCH', `${REPO}/issues/12`, { json: issue() }],
+          ['GET', `${REPO}/issues/12`, { json: issue() }],
+        ])
+        yield* reopening.host.update(open, { status: { id: 'open', name: 'Open' } })
+        assert.deepStrictEqual(reopening.sent[0]?.body, { state: 'open' })
+        const refusing = github([])
+        assert.strictEqual((yield* Effect.flip(refusing.host.update(open, { priority: 'low' }))).reason, 'rejected')
+        assert.lengthOf(refusing.sent, 0)
+      }),
+    )
+  })
+
   it.effect('reads an issue by owner/repo#number', () =>
     Effect.gen(function* () {
       const { host } = github([

@@ -1154,6 +1154,7 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          changeIssues: false,
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
           repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
           // A repository with no packages, on no host: only what every lead runs outside its sandbox.

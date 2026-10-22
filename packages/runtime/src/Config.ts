@@ -14,6 +14,27 @@ import type { LoadOptions } from './MachineLoad'
 import type { ModelFactsOptions } from './ModelFacts'
 import type { SkillsConfig } from './Skills'
 
+/** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
+export interface Shot {
+  readonly url: string
+  readonly width: number
+  readonly height: number
+  /** The whole page, as tall as it is, not only what the viewport shows. */
+  readonly fullPage: boolean
+  /** A CSS selector: only the first element it finds. */
+  readonly selector: string | null
+  /** The origins of Althar's runs it may be of beside this computer's: a page it goes on to, by a redirect or itself, must be at one of them too (screenshots.ts, mayDraw). */
+  readonly origins: ReadonlyArray<string>
+}
+
+/** A screenshot taken: a PNG at 1×, as base64, its size, and the page's title. */
+export interface Screenshot {
+  readonly png: string
+  readonly width: number
+  readonly height: number
+  readonly title: string
+}
+
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
@@ -48,6 +69,12 @@ export interface RuntimeOptions {
   readonly probeRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
+  /**
+   * Takes a screenshot, headless, where something can draw a page: the
+   * desktop app's main process, with Chromium. It fails with why, in words
+   * for the agent. Without it, the screenshot tool says this Althar can't.
+   */
+  readonly screenshot?: (shot: Shot) => Effect.Effect<Screenshot, string>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */

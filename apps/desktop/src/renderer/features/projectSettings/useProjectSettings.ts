@@ -22,7 +22,7 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'moveIssues' | 'repositoryFiles'
+export type RuleSwitch = 'resolveConflicts' | 'moveIssues' | 'changeIssues' | 'repositoryFiles'
 
 /** One of the three permissions for skill and OpenSpec files in its repositories. */
 export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
@@ -50,6 +50,7 @@ export interface ProjectSettingsModel {
   readonly setResolveConflicts: (on: boolean) => void
   /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
   readonly setMoveIssues: (on: boolean) => void
+  readonly setChangeIssues: (on: boolean) => void
   /** Allows or holds back skill or OpenSpec files in a task's commits, or pushing them: each a new revision of its rules. */
   readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Which switch didn't hold, and why. */
@@ -139,6 +140,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   )
   const setResolveConflicts = useCallback((on: boolean) => setRule('resolveConflicts', on), [setRule])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
+  const setChangeIssues = useCallback((on: boolean) => setRule('changeIssues', on), [setRule])
   // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
   const setRepositoryFile = useCallback(
     (file: RepositoryFile, on: boolean) => {
@@ -224,6 +226,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     noteFailed,
     setResolveConflicts,
     setMoveIssues,
+    setChangeIssues,
     setRepositoryFile,
     ruleFailed,
     removing,

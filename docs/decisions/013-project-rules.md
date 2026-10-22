@@ -18,7 +18,7 @@
   with everything allowed ([ADR-043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md)),
   and is never the coordinator's to judge.
   2026-10-18: the rules keep the project's Repository files switches
-  ([ADR-058](058-skill-and-openspec-files-stay-off-the-repository.md)):
+  ([ADR-060](060-skill-and-openspec-files-stay-off-the-repository.md)):
   whether skill and OpenSpec files may be in its repository and be pushed.
   Each off unless the person turns it on.
 - **Owner:** Repository maintainers

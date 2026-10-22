@@ -77,6 +77,13 @@ export const ProjectRules = Schema.Struct({
   /** Whether a task's issue is moved to its tracker's In Progress as the task starts: on without it. */
   moveIssues: Schema.optional(Schema.Boolean),
   /**
+   * Whether changes to issues on the person's trackers (status, priority,
+   * assignee, labels, closing), proposed by the coordinator, a lead or
+   * Althar, apply at once rather than as a card the person applies. Off
+   * without it. Comments and links apply at once either way.
+   */
+  changeIssues: Schema.optional(Schema.Boolean),
+  /**
    * Whether skill and OpenSpec files may be written into, committed to, or pushed from this project's repositories
    * (docs/plans/skills-across-harnesses.md, section 4). Each is off without it, and the person turns each on alone.
    */
@@ -177,6 +184,9 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
+
+/** Whether a revision's rules let changes to issues apply without the person's card: not unless the person turned it on. */
+export const changesIssues = (rules: ProjectRules): boolean => rules.changeIssues === true
 
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true

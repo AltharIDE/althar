@@ -1,6 +1,6 @@
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
@@ -86,6 +86,18 @@ const waitingStep = (taskId: string) =>
     (rows) => rows.at(-1) ?? { id: '', step: '', state: '', holdReason: null, output: null },
   )
 
+/**
+ * The task's review, once it waits for a place behind another task: its reviewer is out of usage until its reset, another
+ * task's lead takes the one place meanwhile, and at the reset there is none. The other task, and the review waiting.
+ */
+const reviewBehind = (projectId: ProjectId, taskId: string) =>
+  Effect.gen(function* () {
+    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+    const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+    return { other, review: yield* waitingStep(taskId) }
+  })
+
 /** What a step waiting for a place keeps, as an earlier Althar kept it: how it starts, since when it waited. */
 const keptAs = (attemptId: string, output: string | null, place: unknown) =>
   Effect.gen(function* () {
@@ -109,16 +121,18 @@ const readyIs = (projectId: string, taskId: string) =>
   )
 
 describe('a step an earlier Althar kept waiting for a place as the person resumed it', () => {
-  it.live('starts a review at once on the reviewer it was resumed on, though every place is taken', () =>
-    Effect.gen(function* () {
-      const sessions = yield* Sessions
+  it.live('starts a review at once on the reviewer it was resumed on, though every place is taken', () => {
+    const back = Date.now() + 5_000
+    return Effect.gen(function* () {
+      const policies = yield* Policies
+      const instance = yield* Instance
       const projectId = yield* opened
-      const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:pass]', [
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      // The lead left its server running, so its review waits for a place of its own.
-      const review = yield* waitingStep(task.taskId)
+      const { other, review } = yield* reviewBehind(projectId, task.taskId)
       assert.strictEqual(review.step, 'review')
       yield* keptAs(review.id, review.output, {
         how: 'resume',
@@ -126,12 +140,12 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
         reviewer: { key: 'review', agentId: 'codex', model: null, skipped: false },
       })
       yield* readyIs(projectId, task.taskId)
-      // Its server still runs: the review went on all the same, as the person's.
-      assert.lengthOf(Option.getOrUndefined(yield* sessions.running(task.threadId))?.background ?? [], 1)
+      // The other never finished: the review went on all the same, as the person's.
+      assert.notStrictEqual((yield* attempts(other.taskId)).at(-1)?.state, 'succeeded')
       const [reviewed] = (yield* attempts(task.taskId)).filter((row) => row.step === 'review')
       assert.strictEqual(reviewed?.state, 'succeeded')
-    }).pipe(Effect.provide(oneAtOnce())),
-  )
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
+  })
 
   it.live("carries a lead's step on at once on the lead it was resumed on, or as answered", () =>
     Effect.gen(function* () {
