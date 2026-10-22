@@ -6,8 +6,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { keyringUnavailable } from '../src/main/keyring'
-import { sealingWith } from '../src/runtime/sealing'
+import { keyringUnavailable, sealFailure } from '../src/main/keyring'
+import { resultOf, sealedOf, sealingWith } from '../src/runtime/sealing'
 
 /*
  * A seal the main process refuses for want of a keyring (main.ts): the
@@ -40,5 +40,28 @@ describe('a seal refused for want of a keyring', () => {
     const error = await Effect.runPromise(Effect.flip(sealing.ask('seal', 'x')))
     expect(error.keyring).toBeUndefined()
     expect(words(error, () => 'agent').message).not.toContain('disk full')
+  })
+})
+
+describe('what the runtime makes of main’s answer to a secret', () => {
+  it('keeps a lost key as unreadable all the way from what safeStorage threw, so it is not read as a keychain that is away', async () => {
+    // What main posts when decryptString throws, as the runtime receives it.
+    const posted = { type: 'sealed', requestId: 'r', ...sealFailure('open', new Error('Error while decrypting the ciphertext.')) }
+    const failure = await Effect.runPromise(Effect.flip(resultOf(sealedOf(posted))))
+    expect(failure).toMatchObject({ _tag: 'SecretsUnavailable', reason: 'Error while decrypting the ciphertext.', unreadable: true })
+    expect(failure.keyring).toBeUndefined()
+  })
+
+  it('keeps an unreadable mark through the request and its answer', async () => {
+    const sealing = sealingWith((message) => queueMicrotask(() => sealing.answer(message.requestId, { error: 'lost', unreadable: true })))
+    const failure = await Effect.runPromise(Effect.flip(sealing.ask('open', 'x')))
+    expect(failure).toMatchObject({ reason: 'lost', unreadable: true })
+  })
+
+  it('gives the value of a secret sealed or opened, and a plain failure no mark', async () => {
+    expect(await Effect.runPromise(resultOf(sealedOf({ value: 'abc' })))).toBe('abc')
+    const failure = await Effect.runPromise(Effect.flip(resultOf(sealedOf({ error: 'Busy.' }))))
+    expect(failure.unreadable).toBeUndefined()
+    expect(failure.keyring).toBeUndefined()
   })
 })

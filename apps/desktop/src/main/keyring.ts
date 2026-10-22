@@ -155,3 +155,14 @@ export const keyringUnavailable = (platform: NodeJS.Platform): string =>
   platform === 'linux'
     ? 'Althar has nowhere safe to keep sign-ins: install and start a keyring (gnome-keyring or KWallet), then try again.'
     : 'The keychain Althar seals sign-ins with isn’t available.'
+
+/**
+ * What main answers the runtime when safeStorage throws. A failed open is not the keychain being away (that is answered before,
+ * as `keyring`): the keychain answered, and the key it holds doesn't open what Althar sealed. In a Flatpak whose libsecret keeps
+ * its keyring in a file of the sandbox's own, Chromium finds no key there and makes a new one at every start, so what an earlier
+ * run sealed can't be opened by the next. The runtime has the sign-in made again, rather than ask again.
+ */
+export const sealFailure = (type: 'seal' | 'open', error: unknown): { readonly error: string; readonly unreadable?: true } => ({
+  error: error instanceof Error ? error.message : String(error),
+  ...(type === 'open' ? { unreadable: true } : {}),
+})
