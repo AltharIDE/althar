@@ -3336,6 +3336,39 @@ export interface ReaderOptions {
   readonly offline?: boolean
   readonly cwd?: string
   readonly trusted?: boolean
+  /**
+   * Where a trusted reader's own tools may read (ADR-056): none of `denied`
+   * but what `allowed` gives back, real paths, as its sandbox holds its
+   * commands. Its agent's tools for reading and searching aren't in the
+   * sandbox, so the rules hold them.
+   */
+  readonly reads?: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
+}
+
+/** Why a trusted reader may not read a place outside what it is given. */
+const HELD_REFUSED =
+  "That is outside what this role reads: the person's home folder, their checkouts and the task folders, but for your working folder and its copies."
+
+/** A path as the filesystem has it, links followed, as far as it is there. */
+const realOf = (path: string, paths: typeof posix): string => {
+  try {
+    return realpathSync(path)
+  } catch {
+    const parent = paths.dirname(path)
+    return parent === path ? path : paths.join(realOf(parent, paths), paths.basename(path))
+  }
+}
+
+/** Whether a trusted reader's tool reading `path` reaches into a place it is held from, and not one given back. */
+const heldFrom = (path: string, cwd: string, reads: NonNullable<ReaderOptions['reads']>, system: System = systemOf()) => {
+  const { paths, home, caseless } = system
+  const fold = (value: string) => (caseless ? value.toLowerCase() : value)
+  const target = fold(realOf(paths.resolve(cwd, path.replace(HOME_WORD, home)), paths))
+  const within = (place: string) => {
+    const inside = paths.relative(fold(place), target)
+    return !inside.startsWith('..') && !paths.isAbsolute(inside)
+  }
+  return reads.denied.some(within) && !reads.allowed.some(within)
 }
 
 /** Why a trusted reader may not read a `.env` file outside its folder. */
@@ -3408,10 +3441,11 @@ export const decideReader = (request: PermissionRequest, options: ReaderOptions 
       // A reader may read anything but where the person keeps keys and sign-ins; a trusted one, no `.env` outside its folder either.
       const secret = secretReason(request, options.cwd)
       if (secret !== undefined) return deny(secret)
-      const { cwd } = options
-      return options.trusted === true && cwd !== undefined && pathsOf(request).some((path) => envOutside(path, cwd))
-        ? deny(ENV_REFUSED)
-        : ALLOW
+      const { cwd, reads } = options
+      if (options.trusted !== true || cwd === undefined) return ALLOW
+      const read = pathsOf(request)
+      if (read.some((path) => envOutside(path, cwd))) return deny(ENV_REFUSED)
+      return reads !== undefined && read.some((path) => heldFrom(path, cwd, reads)) ? deny(HELD_REFUSED) : ALLOW
     }
     case 'think':
       return ALLOW

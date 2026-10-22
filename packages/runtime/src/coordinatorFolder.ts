@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -56,7 +56,7 @@ export interface CoordinatorFolder {
 /**
  * Where programs a command runs on are kept in the home folder, which a
  * sandboxed command may read: bun, Node's version managers, Deno, Rust's,
- * Python's, and git's own config. Never a folder that holds a key: only
+ * Python's, and git's config file. Never a folder that holds a key: only
  * `~/.cargo/bin` of `~/.cargo`, whose credentials are beside it.
  */
 export const TOOLCHAINS = [
@@ -73,16 +73,52 @@ export const TOOLCHAINS = [
   '.pyenv',
   '.local/bin',
   '.gitconfig',
-  '.config/git',
 ]
 
-/** A path as the filesystem has it, links followed, where it is there; as it is, where it isn't. */
-const real = (path: string) => {
+/**
+ * Git's files in its config folder a command may read, named one by one:
+ * never the folder, where git's credential store keeps passwords in plain
+ * text (`credentials`).
+ */
+export const GIT_CONFIG_FILES = ['config', 'ignore', 'attributes']
+
+/** A path as the filesystem has it, links followed, as far as it is there. */
+const real = (path: string): string => {
   try {
     return realpathSync(path)
   } catch {
-    return path
+    const parent = dirname(path)
+    return parent === path ? path : join(real(parent), basename(path))
   }
+}
+
+/**
+ * What the coordinator's sandboxed commands may read (ADR-056): none of the
+ * home folder, the project's task folders or the person's checkouts, but its
+ * folder, the mirrors, the objects its copies borrow, the toolchains there
+ * are and git's config files. Git's config folder is `$XDG_CONFIG_HOME/git`
+ * where that is set, and its credential store there is denied wherever it is.
+ */
+export const readsOf = (place: {
+  readonly home: string
+  readonly xdgConfig?: string | undefined
+  readonly projectFolder: string
+  readonly folder: string
+  readonly mirrors: string
+  readonly objects: ReadonlyArray<string>
+  readonly repositories: ReadonlyArray<string>
+}) => {
+  const gitConfig = join(place.xdgConfig === undefined || place.xdgConfig === '' ? join(place.home, '.config') : place.xdgConfig, 'git')
+  const allowed = [
+    place.folder,
+    place.mirrors,
+    ...place.objects,
+    ...TOOLCHAINS.map((toolchain) => join(place.home, toolchain)).filter((toolchain) => existsSync(toolchain)),
+    // Whether or not they are there: git reading one held from it fails rather than going without.
+    ...GIT_CONFIG_FILES.map((file) => join(gitConfig, file)),
+  ].map(real)
+  const denied = [place.home, place.projectFolder, ...place.repositories, join(gitConfig, 'credentials')].map(real)
+  return { allowed: [...new Set(allowed)], denied: [...new Set(denied)] }
 }
 
 /** What a copy's fetch brings from the person's repository: its branches, each remote's as last fetched, and its tags. */
@@ -230,15 +266,14 @@ export const coordinatorFolder = (projectId: string) =>
         }
       }),
     )
-    const objects = yield* Effect.forEach(bindings, (binding) => objectsOf(binding.repository))
-    const home = homedir()
-    const allowed = [folder, mirrors, ...objects, ...TOOLCHAINS.map((place) => join(home, place)).filter((place) => existsSync(place))].map(
-      real,
-    )
-    const denied = [home, projectFolder, ...bindings.map((binding) => binding.repository)].map(real)
-    return {
+    const reads = readsOf({
+      home: homedir(),
+      xdgConfig: process.env.XDG_CONFIG_HOME,
+      projectFolder,
       folder,
-      repositories,
-      reads: { allowed: [...new Set(allowed)], denied: [...new Set(denied)] },
-    } satisfies CoordinatorFolder
+      mirrors,
+      objects: yield* Effect.forEach(bindings, (binding) => objectsOf(binding.repository)),
+      repositories: bindings.map((binding) => binding.repository),
+    })
+    return { folder, repositories, reads } satisfies CoordinatorFolder
   })

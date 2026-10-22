@@ -1743,7 +1743,7 @@ export class Sessions extends Context.Service<
                     cwd: cwdOf(thread),
                     ...(offline ? { offline } : {}),
                     // The coordinator reads its own copies of the project's repositories (ADR-056): never a review's lead.
-                    ...(thread.role === 'coordinator' ? { trusted: true } : {}),
+                    ...(thread.role === 'coordinator' ? { trusted: true, reads: thread.folder.reads } : {}),
                   },
           }
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.

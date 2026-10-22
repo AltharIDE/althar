@@ -1,4 +1,8 @@
 import type { PermissionRequest } from '@althar/provider-adapters'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 
 import { decideReader } from '../src/rules'
@@ -126,5 +130,59 @@ describe('the coordinator, a trusted reader in its own copies', () => {
       decideReader({ ...request(''), kind: 'read', title: `Read ${path}`, paths: [path] }, { cwd, trusted: true })
     assert.strictEqual(read('/Users/dana/Projects/meridian/.env').verdict, 'deny')
     assert.strictEqual(read(`${cwd}/meridian/.env`).verdict, 'allow')
+  })
+
+  it('reads with its own tools none of the home folder or the person’s checkout but its folder and what it is given back', () => {
+    const home = mkdtempSync(join(tmpdir(), 'althar-home-'))
+    const folder = join(home, 'worktrees', 'meridian', '.coordinator')
+    const checkout = join(home, 'Projects', 'meridian')
+    for (const place of [folder, checkout, join(home, 'other'), join(home, '.bun')]) mkdirSync(place, { recursive: true })
+    const reads = {
+      allowed: [folder, join(home, '.bun')].map((place) => realpathSync(place)),
+      denied: [home, checkout].map((place) => realpathSync(place)),
+    }
+    const read = (kind: 'read' | 'search', path: string, trusted = true) =>
+      decideReader(
+        {
+          ...request(''),
+          kind,
+          title: `${kind} ${path}`,
+          paths: [],
+          rawInput: kind === 'read' ? { file_path: path } : { pattern: 'x', path },
+        },
+        trusted ? { cwd: folder, trusted, reads } : { cwd: folder },
+      ).verdict
+    // A folder of the person's, their checkout, the home folder, by its path, from the folder, or with a link followed.
+    symlinkSync(checkout, join(folder, 'linked'))
+    for (const path of [
+      join(home, 'other', 'sentinel.txt'),
+      join(checkout, 'src', 'index.ts'),
+      home,
+      '../../../other/notes.md',
+      'linked/README.md',
+    ]) {
+      assert.strictEqual(read('read', path), 'deny', path)
+      assert.strictEqual(read('search', path), 'deny', path)
+    }
+    // Its own copies, and a toolchain it is given back.
+    for (const path of [join(folder, 'meridian', 'README.md'), 'meridian/src', join(home, '.bun', 'bin', 'bun')]) {
+      assert.strictEqual(read('read', path), 'allow', path)
+      assert.strictEqual(read('search', path), 'allow', path)
+    }
+    // A review's lead is as it was: it reads anything but the person's keys.
+    assert.strictEqual(read('read', join(home, 'other', 'sentinel.txt'), false), 'allow')
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('reads git’s credential store in no role, by any tool', () => {
+    for (const command of ['cat ~/.config/git/credentials', 'grep github ~/.config/git/credentials']) {
+      assert.notStrictEqual(coordinator(command), 'allowed', command)
+      assert.notStrictEqual(reviewLead(command), 'allowed', command)
+    }
+    const read = decideReader(
+      { ...request(''), kind: 'read', title: 'Read', paths: [], rawInput: { file_path: '~/.config/git/credentials' } },
+      { cwd },
+    )
+    assert.strictEqual(read.verdict, 'deny')
   })
 })

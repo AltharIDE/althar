@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { freshCopy } from '../src/coordinatorFolder'
+import { freshCopy, readsOf } from '../src/coordinatorFolder'
 
 /*
  * The coordinator's copies of the project's repositories (ADR-056): each a
@@ -159,4 +159,26 @@ describe("the coordinator's copies", () => {
       assert.include(git(copy, 'branch', '--list', 'later'), 'later')
     }),
   )
+
+  it('may read git’s config files but never its credential store, which is in the same folder', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
+    const projectFolder = join(home, 'worktrees', 'meridian')
+    const place = { home, projectFolder, folder: join(projectFolder, '.coordinator'), mirrors: join(projectFolder, '.coordinator-mirrors') }
+    const within = (path: string, places: ReadonlyArray<string>) => places.some((given) => path === given || path.startsWith(`${given}/`))
+    const holds = (gitConfig: string, xdgConfig?: string) => {
+      mkdirSync(gitConfig, { recursive: true })
+      writeFileSync(join(gitConfig, 'config'), '[core]\n')
+      writeFileSync(join(gitConfig, 'credentials'), 'https://dana:sentinel-token@github.com\n')
+      const { allowed, denied } = readsOf({ ...place, xdgConfig, objects: [], repositories: [join(home, 'Projects', 'meridian')] })
+      assert.isFalse(within(join(gitConfig, 'credentials'), allowed), 'the credential store is given back')
+      assert.isTrue(within(join(gitConfig, 'credentials'), denied), 'the credential store isn’t held from it')
+      assert.isTrue(within(join(gitConfig, 'config'), allowed), 'git’s config isn’t given back')
+    }
+    holds(join(home, '.config', 'git'))
+    // Where XDG_CONFIG_HOME is set, outside the home folder, as git reads it.
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'althar-xdg-')))
+    holds(join(elsewhere, 'git'), elsewhere)
+    rmSync(home, { recursive: true, force: true })
+    rmSync(elsewhere, { recursive: true, force: true })
+  })
 })
