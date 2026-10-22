@@ -105,6 +105,7 @@ import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
+import { guardPush } from './repositoryGuard'
 import { Sessions } from './Sessions'
 import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
@@ -1089,6 +1090,15 @@ export class Changes extends Context.Service<
             sent?.head ?? null,
             yield* remoteTip(task.path, pushTarget, task.branch),
           ])
+          yield* guardPush({
+            projectId: input.projectId,
+            taskId: input.taskId,
+            remote: task.branch,
+            cwd: task.path,
+            base: task.baseCommit,
+            ref: task.baseRef ?? own.defaultBranch,
+            head,
+          })
           yield* pushTo(task.path, pushTarget, task.branch, head)
           yield* settle
           if (input.end === 'none') return { kind: 'pushed', branch: task.branch, left } as const
@@ -1698,8 +1708,8 @@ export class Changes extends Context.Service<
       const worktreeOf = (taskId: string, url: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [workspace] = yield* sql<{ path: string; branch: string; base: string; threadId: string }>`
-            SELECT w.path, w.branch, coalesce(b.default_base_ref, w.base_ref) AS base,
+          const [workspace] = yield* sql<{ path: string; branch: string; base: string; baseCommit: string | null; threadId: string }>`
+            SELECT w.path, w.branch, coalesce(b.default_base_ref, w.base_ref) AS base, w.base_commit,
               (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
@@ -1924,6 +1934,15 @@ export class Changes extends Context.Service<
           const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
           // What Althar last pushed before what it last saw: a pull request read before that push is behind it.
           yield* stillOnHead(taskId, snapshot.url, workspace.path, seen, head, tip, [sent, snapshot.headSha])
+          yield* guardPush({
+            projectId: link.projectId,
+            taskId,
+            remote: nameOf(snapshot),
+            cwd: workspace.path,
+            base: workspace.baseCommit,
+            ref: workspace.base,
+            head,
+          })
           // Refused, it says why in a sentence, not git's hint: the pull request has commits the branch doesn't.
           yield* pushTo(workspace.path, pushTarget, workspace.branch, head, undefined, onto).pipe(
             Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)),
@@ -1952,6 +1971,15 @@ export class Changes extends Context.Service<
           if (ruleSetOf(rules).never.includes('force-push')) return yield* new PushRefused({ taskId, why: 'never', remote: where })
           const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [replaces, sent])
           yield* stillOnHead(taskId, snapshot.url, workspace.path, seen, head, null, [replaces, sent])
+          yield* guardPush({
+            projectId: link.projectId,
+            taskId,
+            remote: where,
+            cwd: workspace.path,
+            base: workspace.baseCommit,
+            ref: workspace.base,
+            head,
+          })
           yield* pushTo(workspace.path, pushTarget, workspace.branch, head, replaces, sourceOf(snapshot, workspace.branch)).pipe(
             Effect.catchTag('GitFailed', (failed) =>
               /\(stale info\)/i.test(failed.stderr)
@@ -2329,6 +2357,15 @@ export class Changes extends Context.Service<
             // What the person saw, or what crediting made of it, still on the branch: a commit the lead made since isn't theirs to have seen.
             if (!(yield* onHead(repository.worktree, head)) && !(yield* onHead(repository.worktree, sent)))
               return yield* new CantMerge({ taskId, why: 'changed', detail: '' })
+            yield* guardPush({
+              projectId: task.projectId,
+              taskId,
+              remote: `${remote}/${repository.branch}`,
+              cwd: repository.worktree,
+              base: repository.baseCommit,
+              ref: repository.base,
+              head: sent,
+            })
             yield* gitWithin(60_000, repository.worktree, 'push', '--', remote, `${sent}:refs/heads/${repository.branch}`).pipe(
               Effect.catchTag('GitFailed', (failed) => refusal(taskId, `${remote}/${repository.branch}`, failed)),
             )
@@ -2375,15 +2412,24 @@ export class Changes extends Context.Service<
             if (followed.code !== 0 || followed.stdout === '') continue
             const remote = followed.stdout
             const at = remote.indexOf('/')
+            // What is sent is the branch's tip, which may be ahead of the task's head: guard that, not the head.
+            // One it can't read is not pushed at all: the task's head in its place would send what the branch never held.
+            const [tip] = yield* commitsOf(repository.root, [`refs/heads/${repository.base}`])
+            if (tip === undefined || tip === null)
+              return yield* Effect.die(new Error(`${repository.base} could not be read once the task merged into it`))
+            yield* guardPush({
+              projectId: task.projectId,
+              taskId,
+              remote,
+              cwd: repository.worktree,
+              base: repository.baseCommit,
+              ref: repository.base,
+              head: tip,
+            })
             // As the person would push it: their remote, their branch there, their sign-in. A prompt for a password fails rather than waits.
-            yield* gitWithin(
-              60_000,
-              repository.root,
-              'push',
-              '--',
-              remote.slice(0, at),
-              `refs/heads/${repository.base}:refs/heads/${remote.slice(at + 1)}`,
-            ).pipe(Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)))
+            yield* gitWithin(60_000, repository.root, 'push', '--', remote.slice(0, at), `${tip}:refs/heads/${remote.slice(at + 1)}`).pipe(
+              Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)),
+            )
             pushed.push({ branch: repository.base, remote })
           }
           if (pushed.length > 0)

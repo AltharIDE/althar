@@ -42,6 +42,7 @@ import { statements as attachedChangeSets } from './0037_attached_change_sets'
 import { statements as roundOpeners } from './0038_round_openers'
 import { statements as taskOpened } from './0039_task_opened'
 import { statements as issueChanges } from './0040_issue_changes'
+import { statements as skills } from './0041_skills'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -101,6 +102,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0038_round_openers', statements: roundOpeners },
   { key: '0039_task_opened', statements: taskOpened },
   { key: '0040_issue_changes', statements: issueChanges },
+  { key: '0041_skills', statements: skills },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

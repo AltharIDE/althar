@@ -10,11 +10,23 @@ import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
 import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
-import { isSection, type Section, SECTIONS } from '../src/renderer/features/settings/sections'
+import { isSection, type Section, sectionText, SECTIONS } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
+import { reviewOf, rowOf } from '../src/renderer/features/settings/useSkills'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
-import { agents, connectionList, fakeClient, fakeHost, githubConnection, models, withoutOpenCode } from './fixtures'
+import {
+  agents,
+  changed,
+  connectionList,
+  fakeClient,
+  fakeHost,
+  githubConnection,
+  installedSkill,
+  models,
+  skillCard,
+  withoutOpenCode,
+} from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -256,6 +268,7 @@ describe('the Settings tab', () => {
           .map((one) => one.textContent),
       ).toEqual([
         'Agents, needs you',
+        'Skills',
         'Code hosts and trackers',
         'Work on this Mac',
         'Reviews and pull requests',
@@ -289,10 +302,123 @@ describe('the Settings tab', () => {
   })
 
   it('names its sections as the address does, and takes nothing else for one', () => {
-    expect(SECTIONS).toEqual(['agents', 'code-hosts', 'this-mac', 'reviews', 'notifications', 'appearance', 'editor', 'about'])
+    expect(SECTIONS).toEqual(['agents', 'skills', 'code-hosts', 'this-mac', 'reviews', 'notifications', 'appearance', 'editor', 'about'])
     expect(isSection('this-mac')).toBe(true)
     expect(isSection('mac')).toBe(false)
     expect(isSection(undefined)).toBe(false)
+  })
+
+  it('lists the skills each lead is given, turns one off, and installs one from GitHub only once its card is read', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings at="skills" />, client)
+    expect(await screen.findByRole('switch', { name: 'brainstorming' })).toBeTruthy()
+    expect(screen.getByText(/agent-skills \(Addy Osmani\) and superpowers \(Jesse Vincent\), both MIT/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('switch', { name: 'brainstorming' }))
+    expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false)
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Install a skill from GitHub' }), 'acme/agent-skills')
+    await userEvent.click(screen.getByRole('button', { name: 'Find skills' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    expect(client.stageSkill).toHaveBeenCalledWith({ repo: 'acme/agent-skills', ref: 'HEAD', subpath: 'skills/release-notes' })
+    // The card: where it is from, its licence and what the agent is told; nothing installed until Install.
+    const card = await screen.findByRole('region', { name: 'release-notes' })
+    expect(within(card).getByText('Write the notes.', { exact: false })).toBeTruthy()
+    expect(client.approveSkill).not.toHaveBeenCalled()
+    await userEvent.click(within(card).getByRole('button', { name: 'Install' }))
+    await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-notes' }), false))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'release-notes' })).toBeNull())
+  })
+
+  it('offers to replace a skill of the same name from another folder of the same repository, not to update it', async () => {
+    const { client } = fakeClient()
+    const installed = { source: 'github' as const, treeHash: 'b'.repeat(64), review: 'reviewed' as const, active: true }
+    vi.mocked(client.stageSkill).mockResolvedValue({
+      ...skillCard,
+      installed: { ...installed, repo: 'acme/agent-skills', subpath: 'old/release-notes' },
+    })
+    withServices(<Settings at="skills" />, client)
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Install a skill from GitHub' }), 'acme/agent-skills')
+    await userEvent.click(screen.getByRole('button', { name: 'Find skills' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    const card = await screen.findByRole('region', { name: 'release-notes' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Install in place of the one from acme/agent-skills' }))
+    await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-notes' }), true))
+  })
+
+  it('turns every skill on at once, then every one off, and reads the store again where one isn’t kept', async () => {
+    const { client } = fakeClient({
+      listSkills: vi.fn(async () => ({
+        enabled: true,
+        catalogRevision: 'fixture-1',
+        skills: [installedSkill, { ...installedSkill, id: 'systematic-debugging', active: false }],
+      })),
+    })
+    withServices(<Settings at="skills" />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Turn all on' }))
+    expect(client.setSkillActive).toHaveBeenCalledTimes(1)
+    expect(client.setSkillActive).toHaveBeenCalledWith('systematic-debugging', true)
+    expect(screen.getByText('all 2 on')).toBeTruthy()
+    vi.mocked(client.setSkillActive).mockRejectedValueOnce(new Error('brainstorming couldn’t be turned off'))
+    await userEvent.click(screen.getByRole('button', { name: 'Turn all off' }))
+    expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false)
+    expect(client.setSkillActive).toHaveBeenCalledWith('systematic-debugging', false)
+    await waitFor(() => expect(vi.mocked(client.listSkills).mock.calls.length).toBeGreaterThan(1))
+  })
+
+  it('shows a skill switched in another window, as the feed says it changed', async () => {
+    const { client, emit } = fakeClient()
+    withServices(<Settings at="skills" />, client)
+    const brainstorming = await screen.findByRole('switch', { name: 'brainstorming' })
+    expect(brainstorming.getAttribute('aria-checked')).toBe('true')
+    vi.mocked(client.listSkills).mockResolvedValue({
+      enabled: true,
+      catalogRevision: 'fixture-1',
+      skills: [{ ...installedSkill, active: false }],
+    })
+    emit(changed('skill', 'brainstorming', null, null))
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'brainstorming' }).getAttribute('aria-checked')).toBe('false'))
+  })
+
+  it('opens an update the check found, as an update of the one installed', async () => {
+    const { client } = fakeClient()
+    const card = {
+      ...skillCard,
+      installed: {
+        source: 'github' as const,
+        repo: skillCard.source.repo,
+        subpath: skillCard.source.subpath,
+        treeHash: 'b'.repeat(64),
+        review: 'reviewed' as const,
+        active: true,
+      },
+    }
+    vi.mocked(client.checkSkillUpdates).mockResolvedValue([
+      { id: 'release-notes', state: 'available', card },
+      { id: 'changelog', state: 'failed', error: 'GitHub didn’t answer' },
+    ])
+    withServices(<Settings at="skills" />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Check for updates' }))
+    expect(await screen.findByText('changelog couldn’t be checked: GitHub didn’t answer')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Review the update to release-notes' }))
+    const review = await screen.findByRole('region', { name: 'release-notes' })
+    await userEvent.click(within(review).getByRole('button', { name: 'Update' }))
+    await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(card, false))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Review the update to release-notes' })).toBeNull())
+  })
+
+  it('says a change to the skills reaches each lead the next time it starts, and never speaks of the runtime', async () => {
+    withServices(<Settings at="skills" />, fakeClient().client)
+    expect(await screen.findByText(/A change reaches each lead the next time it starts, in a task under way too\./)).toBeTruthy()
+    expect(screen.queryByText(/keeps what it started with|runtime/)).toBeNull()
+    expect(sectionText.skills.lede).toBe(
+      'What each task’s lead is given as it starts, whichever agent leads it: the skills Althar ships and any you install from GitHub.',
+    )
+  })
+
+  it('says when this Althar has no skills to give, without speaking of the runtime', async () => {
+    const { client } = fakeClient({ listSkills: vi.fn(async () => ({ enabled: false, catalogRevision: null, skills: [] })) })
+    withServices(<Settings at="skills" />, client)
+    expect(await screen.findByText('Skills aren’t set up in this copy of Althar, so each lead starts without them.')).toBeTruthy()
   })
 
   it('opens the agents on the one that needs the person, each with its accounts and who makes it', async () => {
@@ -857,6 +983,11 @@ describe('how Althar looks, on the Settings tab', () => {
     const host = fakeHost({
       setAppIcon: vi.fn(() => new Promise<void>((resolve, reject) => void answers.push({ resolve, reject }))),
     })
+    const answer = (at: number) => {
+      const one = answers[at]
+      if (one === undefined) throw new Error(`No icon choice ${at} was asked for`)
+      return one
+    }
     withServices(<Settings at="appearance" />, fakeClient().client, host)
     const icons = await screen.findByRole('radiogroup', { name: 'App icon' })
     const checked = () =>
@@ -867,14 +998,14 @@ describe('how Althar looks, on the Settings tab', () => {
     // Ink, then Paper before Ink is kept: Paper is kept, and Ink failing after says nothing.
     await userEvent.click(within(icons).getByRole('radio', { name: 'Ink' }))
     await userEvent.click(within(icons).getByRole('radio', { name: 'Paper' }))
-    await act(async () => answers[1]!.resolve())
-    await act(async () => answers[0]!.reject(new Error('late')))
+    await act(async () => answer(1).resolve())
+    await act(async () => answer(0).reject(new Error('late')))
     expect(checked()).toBe('Paper')
     expect(screen.queryByRole('alert')).toBeNull()
 
     // Keystone, which can't be kept: Paper, the last kept, comes back.
     await userEvent.click(within(icons).getByRole('radio', { name: 'Keystone' }))
-    await act(async () => answers[2]!.reject(new Error('no picture')))
+    await act(async () => answer(2).reject(new Error('no picture')))
     expect(checked()).toBe('Paper')
     expect(await alert()).toBe('That icon couldn’t be kept. Try again.')
   })
@@ -883,5 +1014,44 @@ describe('how Althar looks, on the Settings tab', () => {
     withServices(<Settings at="appearance" />, fakeClient().client, fakeHost({ appIcon: vi.fn(async () => null) }))
     expect(await screen.findByRole('radiogroup', { name: 'In other apps' })).toBeTruthy()
     expect(screen.queryByRole('radiogroup', { name: 'App icon' })).toBeNull()
+  })
+})
+
+describe('the skills’ view model', () => {
+  const installed = { treeHash: 'b'.repeat(64), review: 'reviewed' as const, active: true }
+
+  it('takes a card from the folder installed as an update, and one from anywhere else as replacing it, saying from where', () => {
+    expect(reviewOf(skillCard)).toMatchObject({ id: 'release-notes', repo: 'acme/agent-skills', update: false, replaces: null })
+    const same = { ...installed, source: 'github' as const, repo: 'acme/agent-skills', subpath: 'skills/release-notes' }
+    expect(reviewOf({ ...skillCard, installed: same })).toMatchObject({ update: true, replaces: null })
+    expect(reviewOf({ ...skillCard, installed: { ...same, subpath: 'old/release-notes' } })).toMatchObject({
+      update: false,
+      replaces: 'acme/agent-skills',
+    })
+    expect(reviewOf({ ...skillCard, installed: { ...same, repo: 'other/skills' } })).toMatchObject({
+      update: false,
+      replaces: 'other/skills',
+    })
+    expect(reviewOf({ ...skillCard, installed: { ...installed, source: 'althar-default' as const } })).toMatchObject({
+      update: false,
+      replaces: 'Althar',
+    })
+  })
+
+  it('shows each skill with where it is from, and lets only the ones the person installed go', () => {
+    expect(rowOf(installedSkill)).toEqual({
+      id: 'brainstorming',
+      description: installedSkill.description,
+      from: 'Althar',
+      on: true,
+      needsSubagents: false,
+      canRollBack: false,
+      removable: false,
+    })
+    expect(rowOf({ ...installedSkill, source: 'github', repo: 'acme/agent-skills', needs: ['subagents'] })).toMatchObject({
+      from: 'acme/agent-skills',
+      needsSubagents: true,
+      removable: true,
+    })
   })
 })

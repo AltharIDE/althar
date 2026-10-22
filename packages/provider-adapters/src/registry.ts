@@ -218,6 +218,23 @@ export interface AgentDefinition {
    */
   readonly upFront?: true
   /**
+   * How a lead's session is given the skills Althar chose for its run (docs/plans/skills-across-harnesses.md), each
+   * from a folder of Althar's own laid out as `layout` (`@althar/skills`' projection), for that session alone: never
+   * the account's home, the person's own folders or a repository. `capabilities`, what it can do that a skill may
+   * need: one needing more is left out and reported. `via`, how the session finds the folder: `meta`, its
+   * `sessionMeta` (given `skills` in its options); `directory`, as a directory added to the session; `env`, what its
+   * environment adds over its own. `null`, its sessions get none: each agent says which, so one added is never given
+   * none by leaving it out.
+   */
+  readonly skills: {
+    readonly layout: 'claude-plugin' | 'agents' | 'plain'
+    readonly capabilities: ReadonlyArray<string>
+    readonly via:
+      | { readonly kind: 'meta' }
+      | { readonly kind: 'directory' }
+      | { readonly kind: 'env'; readonly env: (folder: string, own: Readonly<Record<string, string>>) => Readonly<Record<string, string>> }
+  } | null
+  /**
    * How it is held as the lead of a review of someone else's pull request
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
    * `env`, what its environment adds over `withoutOwnTools`' (which it is
@@ -277,6 +294,12 @@ export interface SessionOptions {
    */
   readonly contained?: Contained
   readonly sandbox?: UpFront
+  /**
+   * The folder of skills Althar chose for this run, laid out as the agent's `skills.layout` says and loaded for
+   * the session alone. Only a lead's session is given one; the person's own folders and the repository are never
+   * written to.
+   */
+  readonly skills?: string
 }
 
 /** The coordinator's folder, and what its sandboxed commands may read: real paths. */
@@ -498,6 +521,13 @@ const openCodeReviewing = (own: Readonly<Record<string, string>>): Readonly<Reco
   }
 }
 
+/** OpenCode's config as its environment carries it, with the run's skills folder among its `skills.paths`. */
+const openCodeSkills = (folder: string, own: Readonly<Record<string, string>>): Readonly<Record<string, string>> => {
+  const config = JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig) as Readonly<Record<string, unknown>>
+  const skills = (config.skills ?? {}) as { readonly paths?: ReadonlyArray<string> }
+  return { OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...config, skills: { ...skills, paths: [...(skills.paths ?? []), folder] } }) }
+}
+
 /**
  * Codex as the lead of a review of someone else's pull request, through the
  * config codex-acp merges into every session it starts (`CODEX_CONFIG`, read
@@ -560,11 +590,12 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * rules would let them through anyway. Both are settings Claude Code takes
  * only from trusted sources, which these, given as the session's own, are.
  */
-const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }) => ({
+const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }, skills?: string) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      ...(skills === undefined ? {} : { plugins: [{ type: 'local', path: skills }] }),
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
         permissions: { deny: secretReadRules(), ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
@@ -731,11 +762,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      */
     sessionMeta: (role = 'lead', options = {}) =>
       role !== 'reader'
-        ? claudeAsks(options.sandbox)
+        ? claudeAsks(options.sandbox, options.skills)
         : options.contained !== undefined && options.untrusted !== true && options.offline !== true && claudeSandboxStarts()
           ? claudeContains(options.contained)
           : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true),
     upFront: true,
+    /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
+    skills: { layout: 'claude-plugin', capabilities: ['subagents'], via: { kind: 'meta' } },
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
@@ -808,6 +841,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { outside: false, env: codexReviewing },
     /*
+     * codex-acp 2.2.2 sets Codex's extra skill roots to `<dir>/.agents/skills` of each of a session's added directories
+     * (`skills/extraRoots/set`, Codex 0.160). That also makes the folder writable in its sandbox: only the run's own
+     * read-only copies are there. Whether it dispatches subagents isn't settled, so a skill that needs them is left out.
+     */
+    skills: { layout: 'agents', capabilities: [], via: { kind: 'directory' } },
+    /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
      * edit. Allowing a permission profile reaches the rest of the turn.
@@ -830,6 +869,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "A project's known commands and hosts aren't passed to it: its sandbox has no list of commands to run outside it, and no list of hosts in the mode Althar starts it in, so each asks first.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
+      "Beside Althar's skills it loads the person's own from the shared `skills` folder and `~/.agents/skills`, as it always does.",
     ],
     cli: {
       name: 'codex',
@@ -892,6 +932,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'opencode', args: ['--version'] }),
     withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
     reviewing: { outside: true, env: openCodeReviewing },
+    /* Its config's `skills.paths`, each searched for every `SKILL.md` below it (OpenCode 1.19.0), beside its own config; its task tool runs subagents. */
+    skills: {
+      layout: 'plain',
+      capabilities: ['subagents'],
+      via: { kind: 'env', env: (folder, own) => openCodeSkills(folder, own) },
+    },
     /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
     cli: {
       name: 'opencode',
@@ -915,6 +961,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     knownGaps: [
       'Provider rate limits come back as errors; API keys have no plan windows.',
       'Carrying on after a rejection relies on an experimental setting, continue_loop_on_deny.',
+      "Beside Althar's skills it loads the person's own from `~/.claude/skills` and `~/.agents/skills`, as it always does.",
     ],
   },
   /*
@@ -926,6 +973,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   copilot: {
     id: 'copilot',
+    skills: null,
     name: 'GitHub Copilot',
     source: 'user_installed',
     /*
@@ -1012,6 +1060,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   junie: {
     id: 'junie',
+    skills: null,
     name: 'Junie',
     source: 'user_installed',
     /* No config of its own or the repository's (`.junie/config.json` can turn brave mode on), and no MCP servers but Althar's. */
@@ -1064,6 +1113,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   grok: {
     id: 'grok',
+    skills: null,
     name: 'Grok Build',
     source: 'user_installed',
     /*
@@ -1127,6 +1177,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   kimi: {
     id: 'kimi',
+    skills: null,
     name: 'Kimi Code',
     source: 'user_installed',
     launch: () => ({ command: 'kimi', args: ['acp'], env: { KIMI_CODE_NO_AUTO_UPDATE: '1' }, inheritEnv: ['KIMI_CODE_HOME'] }),
@@ -1173,6 +1224,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   'mistral-vibe': {
     id: 'mistral-vibe',
+    skills: null,
     name: 'Mistral Vibe',
     source: 'user_installed',
     /* Its settings from the environment win over the person's and the repository's: asking, with no model judging what is safe. */
@@ -1226,6 +1278,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   'qwen-code': {
     id: 'qwen-code',
+    skills: null,
     name: 'Qwen Code',
     source: 'user_installed',
     launch: () => ({ command: 'qwen', args: ['--acp', '--approval-mode', 'default'], inheritEnv: ['QWEN_HOME'] }),
@@ -1268,6 +1321,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   antigravity: {
     id: 'antigravity',
+    skills: null,
     name: 'Google Antigravity',
     source: 'user_installed',
     /*

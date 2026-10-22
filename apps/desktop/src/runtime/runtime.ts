@@ -120,6 +120,10 @@ const options = {
   artifactsRoot: join(profile, 'artifacts'),
   // Agents the person asked Althar to download, kept in the profile, never on their PATH.
   agentsRoot: join(profile, 'agents'),
+  // Skills a task's lead is given: the store in the profile, never in a project, seeded from the catalog the app ships.
+  ...(process.env.ALTHAR_SKILLS_CATALOG === undefined
+    ? {}
+    : { skills: { root: join(profile, 'skills'), catalog: process.env.ALTHAR_SKILLS_CATALOG } }),
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
   screenshot: screenshots.ask,

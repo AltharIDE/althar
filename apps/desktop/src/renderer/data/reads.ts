@@ -31,6 +31,8 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
+  /** The skills store: read before the skills show, and again as a skill changes, in this window or another (feed.ts). */
+  skills: ['skills'] as const,
   /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
@@ -119,6 +121,7 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.
   folders: () =>
     queryOptions({

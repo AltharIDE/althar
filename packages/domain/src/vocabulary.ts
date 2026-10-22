@@ -318,5 +318,6 @@ export const AggregateType = Schema.Literals([
   'project_note',
   'review_draft',
   'issue_change',
+  'skill',
 ])
 export type AggregateType = typeof AggregateType.Type
