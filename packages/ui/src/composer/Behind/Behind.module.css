@@ -17,6 +17,7 @@
   box-shadow:
     inset 0 0 0 1px var(--line-2),
     var(--lift-card);
+  overflow: hidden;
   font-size: 11.5px;
   color: var(--t-2);
   white-space: nowrap;
@@ -57,12 +58,14 @@
 .part > * {
   flex: none;
 }
-/* what runs gives way first: a long name and address shorten, the wait and the sources keep theirs */
-.part.ran {
+/* what runs gives way first: a long name and address shorten, the wait and the sources keep theirs; what just arrived shortens too */
+.part.ran,
+.part.said {
   flex: 0 1 auto;
 }
 .ran > .name,
-.ran > .aside {
+.ran > .aside,
+.said > .name {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 260px;
@@ -129,7 +132,7 @@
   }
 }
 @container composer-edge (max-width: 380px) {
-  .part:not(:first-child) > .name {
+  .part:not(:first-child, .said) > .name {
     display: none;
   }
 }

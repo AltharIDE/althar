@@ -134,11 +134,28 @@ export const OnlyFailed: Story = {
     await expect(within(canvasElement).getByRole('button', { name: 'Site tests exited 1' })).toHaveTextContent('Site tests exited 1')
   },
 }
-/** Everything finished well, and nothing else to say: no chip. */
+/** Everything finished well, and nothing else to say: a quiet count, which opens what finished, to read or clear. */
 export const AllFinished: Story = {
   args: { processes: FINISHED },
+  play: async ({ canvasElement, args }) => {
+    const chip = within(canvasElement).getByRole('button', { name: '3 finished' })
+    await userEvent.click(chip)
+    const page = within(document.body)
+    // Nothing else to show, so nothing is folded.
+    await expect(await page.findByText('Build the site')).toBeVisible()
+    await expect(page.queryByRole('button', { name: /· Show$/ })).toBeNull()
+    await userEvent.click(page.getByRole('button', { name: 'Show the output of Build the site' }))
+    await expect(args.onOutput).toHaveBeenCalledWith('done-0')
+    await userEvent.click(page.getByRole('button', { name: 'Clear them' }))
+    await expect(args.onDismiss).toHaveBeenCalledTimes(3)
+  },
+}
+/** What finished well, beside a pull request: not counted on the chip. */
+export const FinishedBesideAPullRequest: Story = {
+  args: { processes: FINISHED, sources: [PR] },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).queryByRole('button', { name: /finished|Ran/ })).toBeNull()
+    const chip = within(canvasElement).getByRole('button', { name: 'Listening to PR #317' })
+    await expect(chip).not.toHaveTextContent('finished')
   },
 }
 /** A long name and address give way; the pull request keeps its label. */
@@ -163,6 +180,30 @@ export const Narrow: Story = {
 export const Narrowest: Story = {
   args: { wait: WAIT, processes: [SITE, STORYBOOK, TESTS], sources: [PR, PR2] },
   render: (args) => <Edge {...args} width={320} />,
+}
+const LONG_ARRIVAL = 'margaret-hamilton-at-charrette-studio commented on PR #317: the chip overlaps the composer at narrow widths'
+/** A long arrival, alone, in a narrow window: it shortens inside the chip. */
+export const HeardLongNarrow: Story = {
+  args: { sources: [PR], heard: { key: 1, text: LONG_ARRIVAL }, arrivalFor: Number.POSITIVE_INFINITY },
+  render: (args) => <Edge {...args} width={320} />,
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByRole('button', { name: 'Listening to PR #317' })
+    await waitFor(() => expect(chip).toHaveTextContent('margaret-hamilton'))
+    // It never runs past the chip, nor the chip past the composer.
+    await expect(chip.scrollWidth).toBeLessThanOrEqual(chip.clientWidth)
+    await expect(chip.getBoundingClientRect().right).toBeLessThanOrEqual(canvasElement.querySelector('form')!.getBoundingClientRect().right)
+  },
+}
+/** A long arrival beside the wait, at 440: the wait keeps its words, the arrival shortens. */
+export const HeardLongBesideWait: Story = {
+  args: { wait: WAIT, sources: [PR], heard: { key: 1, text: LONG_ARRIVAL }, arrivalFor: Number.POSITIVE_INFINITY },
+  render: (args) => <Edge {...args} width={440} />,
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByRole('button', { name: /^Waiting for a place/ })
+    await waitFor(() => expect(chip).toHaveTextContent('margaret-hamilton'))
+    await expect(chip).toHaveTextContent('Waiting for a place')
+    await expect(chip.scrollWidth).toBeLessThanOrEqual(chip.clientWidth)
+  },
 }
 /** Something arrives: the source's part says it for a moment, and so does a screen reader. */
 export const Heard: Story = {

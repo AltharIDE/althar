@@ -954,11 +954,20 @@ describe('what a task’s lead left running', () => {
     expect(client.clearBackground).toHaveBeenCalledWith('th1', 'bg-2')
     act(() => emit({ _tag: 'Background', threadId: 'th1', background: [] }))
     await waitFor(() => expect(screen.queryByRole('button', { name: /bun run seed/ })).toBeNull())
-    // What finished well isn't counted on the chip: with nothing else behind the task, there is none.
+    // What finished well isn't named on the chip: with nothing else behind the task, it is a quiet count, and its output still opens.
     act(() =>
       emit({ _tag: 'Background', threadId: 'th1', background: [{ ...serving, ended: { at: '2026-10-10T09:10:00.000Z', code: 0 } }] }),
     )
-    await waitFor(() => expect(screen.queryByRole('button', { name: /bun dev/ })).toBeNull())
+    const finished = await screen.findByRole('button', { name: '1 finished' })
+    expect(finished.textContent).not.toContain('bun dev')
+    await userEvent.click(finished)
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Behind this task' })).getByRole('button', { name: 'Show the output of bun dev' }),
+    )
+    expect(client.readBackgroundOutput).toHaveBeenCalledWith('th1', 'bg-1')
+    await userEvent.keyboard('{Escape}')
+    act(() => emit({ _tag: 'Background', threadId: 'th1', background: [] }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '1 finished' })).toBeNull())
     // Another thread's says nothing here.
     act(() => emit({ _tag: 'Background', threadId: 'th9', background: [serving] }))
     expect(screen.queryByRole('button', { name: /bun dev/ })).toBeNull()

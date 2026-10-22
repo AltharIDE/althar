@@ -21,7 +21,8 @@ import s from './Behind.module.css'
  * source with when it last heard from it.
  *
  * What finished well isn't counted on the chip, and folds away in the list;
- * a failure is named. As the composer narrows, the parts drop what they add
+ * a failure is named. Where nothing else is left to say, the chip stays as a
+ * quiet count of what finished, so its output can still be read and cleared. As the composer narrows, the parts drop what they add
  * (where it stands, where it answers), then their names, down to glyphs; what
  * runs gives way first, so the wait and the sources keep theirs. When
  * something arrives, the source's part says it for a few seconds, and it is
@@ -190,13 +191,17 @@ export function Behind({
   const failed = processes.filter(bad)
   const fine = processes.filter((p) => p.exited !== undefined && !bad(p))
   const ran = live.length > 0 || failed.length > 0
+  // Only what finished well, and nothing else to say: a quiet count, the way to its output.
+  const quiet = !ran && fine.length > 0 && wait === null && sources.length === 0
+  const folded = !unfolded && (live.length > 0 || failed.length > 0)
   const heardNow = sources.length > 0 ? showing : null
-  if (wait === null && !ran && sources.length === 0) return null
+  if (wait === null && !ran && !quiet && sources.length === 0) return null
 
   const one = live.length === 1 ? live[0] : undefined
   const marks = [...new Set(sources.map((x) => x.mark))]
-  const ranWords =
-    live.length > 0
+  const ranWords = quiet
+    ? t.finished(fine.length)
+    : live.length > 0
       ? one
         ? calledOf(one)
         : t.running(live.length)
@@ -208,6 +213,7 @@ export function Behind({
   const said = [
     wait !== null && [t.waiting, wait.place].filter(Boolean).join(', '),
     ran && [ranWords, one?.url, live.length > 0 && failed.length > 0 && t.failed(failed.length)].filter(Boolean).join(', '),
+    quiet && ranWords,
     sources.length > 0 && `${t.listening} ${sourceWords}`,
   ]
     .filter(Boolean)
@@ -246,8 +252,14 @@ export function Behind({
                 {live.length > 0 && failed.length > 0 && <span className={s.badDot} />}
               </span>
             )}
-            {sources.length > 0 && (
+            {quiet && (
               <span className={s.part}>
+                <Icon name="terminal" size={11} className={s.glyph} />
+                <span className={s.aside}>{ranWords}</span>
+              </span>
+            )}
+            {sources.length > 0 && (
+              <span className={cx(s.part, heardNow && s.said)}>
                 {heardNow ? (
                   <>
                     <LiveDot ping urgent />
@@ -315,7 +327,7 @@ export function Behind({
               {live.length > 0 ? r.title : r.ran}
             </div>
             <RunningList
-              processes={unfolded ? [...live, ...failed, ...fine] : [...live, ...failed]}
+              processes={folded ? [...live, ...failed] : [...live, ...failed, ...fine]}
               onStop={onStop}
               onDismiss={onDismiss}
               onOutput={onOutput}
@@ -324,9 +336,11 @@ export function Behind({
             />
             {fine.length > 0 && (
               <div className={s.foot}>
-                <LinkButton onClick={() => setUnfolded(!unfolded)}>
-                  {unfolded ? t.hide : `${t.finished(fine.length)} · ${t.show}`}
-                </LinkButton>
+                {(live.length > 0 || failed.length > 0) && (
+                  <LinkButton onClick={() => setUnfolded(!unfolded)}>
+                    {unfolded ? t.hide : `${t.finished(fine.length)} · ${t.show}`}
+                  </LinkButton>
+                )}
                 {onDismiss && <LinkButton onClick={() => fine.forEach((p) => onDismiss(p.id))}>{t.clearFinished}</LinkButton>}
               </div>
             )}
