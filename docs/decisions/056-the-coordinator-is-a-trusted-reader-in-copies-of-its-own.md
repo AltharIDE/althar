@@ -64,7 +64,9 @@
     where the person keeps keys and sign-ins. Its own tools for reading and
     searching files aren't in the sandbox, so the reader rules hold them to
     the same places: a read outside its folder that reaches into one held
-    from it, not given back, is refused.
+    from it, not given back, is refused, and so is a search that starts at
+    or above one (its folder, or one a pattern of paths names), since it
+    goes down into it.
     It loads no settings file, the person's or the repository's, and runs no
     hook, as a review's lead: no allow rule or sandbox exemption of theirs
     lets a command out, and no hook of a repository it reads runs beside it.

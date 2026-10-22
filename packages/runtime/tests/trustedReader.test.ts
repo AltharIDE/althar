@@ -1,7 +1,7 @@
 import type { PermissionRequest } from '@althar/provider-adapters'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 
@@ -169,6 +169,25 @@ describe('the coordinator, a trusted reader in its own copies', () => {
       assert.strictEqual(read('read', path), 'allow', path)
       assert.strictEqual(read('search', path), 'allow', path)
     }
+    // A search from above a place held from it goes into it: from the home folder's parent, the root, up from its folder, or by a pattern of paths.
+    const search = (rawInput: Record<string, unknown>) =>
+      decideReader({ ...request(''), kind: 'search', title: 'Search', paths: [], rawInput }, { cwd: folder, trusted: true, reads }).verdict
+    for (const rawInput of [
+      { pattern: '.', path: dirname(home) },
+      { pattern: '.', path: '/' },
+      { pattern: '.', path: '../../../..' },
+      { pattern: `${dirname(home)}/**/*.txt` },
+      { pattern: '../../../**/*.md' },
+      { pattern: '.', glob: `${home}/**` },
+    ])
+      assert.strictEqual(search(rawInput), 'deny', JSON.stringify(rawInput))
+    // A search in its folder or a copy, by a pattern or a regex that only looks like a path, is as it was.
+    for (const rawInput of [
+      { pattern: 'TODO' },
+      { pattern: '**/*.ts', path: 'meridian' },
+      { pattern: '/api/v1', path: join(folder, 'meridian') },
+    ])
+      assert.strictEqual(search(rawInput), 'allow', JSON.stringify(rawInput))
     // A review's lead is as it was: it reads anything but the person's keys.
     assert.strictEqual(read('read', join(home, 'other', 'sentinel.txt'), false), 'allow')
     rmSync(home, { recursive: true, force: true })

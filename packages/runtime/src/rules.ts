@@ -3349,6 +3349,9 @@ export interface ReaderOptions {
 const HELD_REFUSED =
   "That is outside what this role reads: the person's home folder, their checkouts and the task folders, but for your working folder and its copies."
 
+/** Why a trusted reader may not search from a place that is, or holds, one outside what it is given. */
+const SEARCH_REFUSED = `${HELD_REFUSED} A search from a folder above one of those goes into it: search from your working folder or a copy in it.`
+
 /** A path as the filesystem has it, links followed, as far as it is there. */
 const realOf = (path: string, paths: typeof posix): string => {
   try {
@@ -3359,16 +3362,48 @@ const realOf = (path: string, paths: typeof posix): string => {
   }
 }
 
-/** Whether a trusted reader's tool reading `path` reaches into a place it is held from, and not one given back. */
-const heldFrom = (path: string, cwd: string, reads: NonNullable<ReaderOptions['reads']>, system: System = systemOf()) => {
+/**
+ * Whether a trusted reader's tool reading `path` reaches into a place it is
+ * held from, and not one given back. A search goes down from where it starts,
+ * so one that starts above a place held from it reaches into it too.
+ */
+const heldFrom = (path: string, cwd: string, reads: NonNullable<ReaderOptions['reads']>, searches = false, system: System = systemOf()) => {
   const { paths, home, caseless } = system
   const fold = (value: string) => (caseless ? value.toLowerCase() : value)
   const target = fold(realOf(paths.resolve(cwd, path.replace(HOME_WORD, home)), paths))
-  const within = (place: string) => {
-    const inside = paths.relative(fold(place), target)
-    return !inside.startsWith('..') && !paths.isAbsolute(inside)
+  const inside = (outer: string, inner: string) => {
+    const between = paths.relative(outer, inner)
+    return !between.startsWith('..') && !paths.isAbsolute(between)
   }
-  return reads.denied.some(within) && !reads.allowed.some(within)
+  const within = (place: string) => inside(fold(place), target)
+  if (reads.denied.some(within) && !reads.allowed.some(within)) return true
+  return searches && reads.denied.some((place) => inside(target, fold(place)))
+}
+
+/** Glob's characters: a pattern's folder is what comes before the first. */
+const GLOB_CHARACTER = /[*?[{]/
+
+/**
+ * Where a search starts: the folder it names, or the working folder, and the
+ * folder a pattern of paths names before its first glob character where it
+ * leaves that folder (absolute, from home, or up with `..`), as Glob's
+ * `pattern` or Grep's `glob` may.
+ */
+const searchRootsOf = (request: PermissionRequest, cwd: string): ReadonlyArray<string> => {
+  const named = pathsOf(request)
+  const from = named[0] ?? cwd
+  const patterns = ['pattern', 'glob']
+    .map((key) => field(request.rawInput, key))
+    .filter((value): value is string => typeof value === 'string')
+    .filter((value) => value.startsWith('/') || HOME_WORD.test(value) || /(^|[/\\])\.\.($|[/\\])/.test(value))
+    .map((value) => {
+      const glob = value.search(GLOB_CHARACTER)
+      const fixed = glob === -1 ? value : value.slice(0, glob)
+      const folder = fixed.slice(0, Math.max(fixed.lastIndexOf('/'), fixed.lastIndexOf('\\')) + 1)
+      return folder === '' ? fixed : folder
+    })
+    .map((folder) => (folder.startsWith('/') || HOME_WORD.test(folder) ? folder : `${from}/${folder}`))
+  return [...(named.length === 0 ? [cwd] : named), ...patterns]
 }
 
 /** Why a trusted reader may not read a `.env` file outside its folder. */
@@ -3445,7 +3480,10 @@ export const decideReader = (request: PermissionRequest, options: ReaderOptions 
       if (options.trusted !== true || cwd === undefined) return ALLOW
       const read = pathsOf(request)
       if (read.some((path) => envOutside(path, cwd))) return deny(ENV_REFUSED)
-      return reads !== undefined && read.some((path) => heldFrom(path, cwd, reads)) ? deny(HELD_REFUSED) : ALLOW
+      if (reads === undefined) return ALLOW
+      if (request.kind === 'search')
+        return searchRootsOf(request, cwd).some((path) => heldFrom(path, cwd, reads, true)) ? deny(SEARCH_REFUSED) : ALLOW
+      return read.some((path) => heldFrom(path, cwd, reads)) ? deny(HELD_REFUSED) : ALLOW
     }
     case 'think':
       return ALLOW
