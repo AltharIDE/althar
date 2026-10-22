@@ -305,118 +305,33 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
   )
 })
 
-describe('warnings as a plan runs down', () => {
-  const heard = (usedPercent: number) =>
-    Effect.gen(function* () {
-      const usage = yield* PlanUsage
-      const [account] = yield* (yield* Accounts).of('claude-code')
-      yield* usage.heard(account!.id, 'claude-code', used(usedPercent))
-      return { usage, account: account! }
-    })
-
-  it.effect('tells 50, 25, 10 and 5 percent left, each once, and the lowest a reading skips to', () =>
-    Effect.gen(function* () {
-      const told: number[] = []
-      for (const percent of [30, 55, 60, 76, 77, 93, 99]) {
-        const { usage } = yield* heard(percent)
-        const view = yield* usage.now(true)
-        const latest = view.warnings.at(-1)
-        if (latest !== undefined && !told.includes(latest.remainingPercent)) told.push(latest.remainingPercent)
-      }
-      assert.deepStrictEqual(told, [50, 25, 10, 5])
-    }).pipe(Effect.provide(withUsage({}))),
-  )
-
-  it.effect('holds one warning per window until the person has seen it, and no more for the same one', () =>
-    Effect.gen(function* () {
-      const { usage, account } = yield* heard(80)
-      const first = (yield* usage.now(true)).warnings
-      assert.deepStrictEqual(
-        first.map((warning) => [warning.accountId, warning.windowKey, warning.remainingPercent, warning.agentId]),
-        [[account.id, 'five_hour', 25, 'claude-code']],
-      )
-      yield* usage.acknowledge([{ accountId: account.id, windowKey: 'five_hour' }])
-      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
-      yield* heard(82)
-      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
-      yield* heard(91)
-      assert.deepStrictEqual(
-        (yield* usage.now(true)).warnings.map((warning) => warning.remainingPercent),
-        [10],
-      )
-    }).pipe(Effect.provide(withUsage({}))),
-  )
-
-  it.effect('arms again when the window resets, and not because use dipped', () =>
-    Effect.gen(function* () {
-      const { usage, account } = yield* heard(80)
-      yield* usage.acknowledge([{ accountId: account.id, windowKey: 'five_hour' }])
-      yield* heard(40)
-      yield* heard(80)
-      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
-      yield* usage.heard(account.id, 'claude-code', used(80, { resetsAt: '2026-10-15T22:00:00.000Z' }))
-      assert.deepStrictEqual(
-        (yield* usage.now(true)).warnings.map((warning) => warning.remainingPercent),
-        [25],
-      )
-    }).pipe(Effect.provide(withUsage({}))),
-  )
-
-  it.effect('does not arm again when a reading leaves the reset out', () =>
-    Effect.gen(function* () {
-      const { usage, account } = yield* heard(96)
-      yield* usage.acknowledge([{ accountId: account.id, windowKey: 'five_hour' }])
-      yield* usage.heard(account.id, 'claude-code', { kind: 'five_hour', usedPercent: 96 })
-      yield* heard(96)
-      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
-    }).pipe(Effect.provide(withUsage({}))),
-  )
-
-  it.effect('shows a window whose reset has passed with all of its plan left, and drops its warning', () =>
+describe('a window as it resets, and what a restart reads back', () => {
+  it.effect('shows a window whose reset has passed with all of its plan left', () =>
     Effect.gen(function* () {
       const usage = yield* PlanUsage
       const [account] = yield* (yield* Accounts).of('claude-code')
       // The test clock starts at 0: this window resets a second in.
       yield* usage.heard(account!.id, 'claude-code', used(95, { resetsAt: new Date(1000).toISOString() }))
-      assert.strictEqual((yield* usage.now(true)).warnings.length, 1)
+      assert.strictEqual(accountOf(yield* usage.now(true), 'claude-code').windows[0]?.usedPercent, 95)
       yield* TestClock.adjust(Duration.seconds(2))
-      const view = yield* usage.now(true)
-      assert.deepStrictEqual(accountOf(view, 'claude-code').windows, [{ kind: 'five_hour', label: null, usedPercent: 0, resetsAt: null }])
-      assert.deepStrictEqual(view.warnings, [])
+      assert.deepStrictEqual(accountOf(yield* usage.now(true), 'claude-code').windows, [
+        { kind: 'five_hour', label: null, usedPercent: 0, resetsAt: null },
+      ])
     }).pipe(Effect.provide(withUsage({}))),
   )
 
-  it.effect('tells Codex’s windows too, with the agent’s name', () =>
-    Effect.gen(function* () {
-      const view = yield* (yield* PlanUsage).now(true)
-      assert.deepStrictEqual(
-        view.warnings.map((warning) => [warning.agentId, warning.kind, warning.remainingPercent]),
-        [['codex', 'weekly', 5]],
-      )
-    }).pipe(Effect.provide(withUsage({ readAgent: async () => read(used(10), { kind: 'weekly', usedPercent: 96 }) }))),
-  )
-
-  it.effect('keeps what it told and what it last read in the store, which is all a restart reads back', () =>
+  it.effect('keeps what it last read in the store, which is all a restart reads back', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { usage, account } = yield* heard(80)
-      const [told] = yield* sql<{ threshold: number; resetsAt: string | null; acknowledgedAt: string | null }>`
-        SELECT threshold, resets_at, acknowledged_at FROM plan_usage_warnings WHERE account_id = ${account.id}`
-      assert.deepStrictEqual([told?.threshold, told?.resetsAt, told?.acknowledgedAt], [25, RESET, null])
+      const usage = yield* PlanUsage
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      yield* usage.heard(account!.id, 'claude-code', used(80))
       const [kept] = yield* sql<{
         source: string
         windows: string
-      }>`SELECT source, windows FROM plan_usage_readings WHERE account_id = ${account.id}`
+      }>`SELECT source, windows FROM plan_usage_readings WHERE account_id = ${account!.id}`
       assert.strictEqual(kept?.source, 'acp_extension')
       assert.deepStrictEqual(JSON.parse(kept?.windows ?? '[]'), [used(80)])
-      yield* usage.acknowledge([{ accountId: account.id, windowKey: 'five_hour' }])
-      const [seen] = yield* sql<{
-        acknowledgedAt: string | null
-      }>`SELECT acknowledged_at FROM plan_usage_warnings WHERE account_id = ${account.id}`
-      assert.isString(seen?.acknowledgedAt)
-      // What was told is read back from the store each time, so a reading that follows a restart tells nothing twice.
-      yield* heard(82)
-      assert.deepStrictEqual((yield* usage.now(true)).warnings, [])
     }).pipe(Effect.provide(withUsage({}))),
   )
 })
@@ -627,7 +542,7 @@ describe('telling the window', () => {
       Effect.map((told) => (told as unknown as ReadonlyArray<{ _tag: 'PlanUsage'; usage: PlanUsageView }>)[0]!.usage),
     )
 
-  it.effect('publishes the usage whole a moment after windows are heard, once for them all, and when a warning is seen', () =>
+  it.effect('publishes the usage whole a moment after windows are heard, once for them all', () =>
     Effect.gen(function* () {
       const usage = yield* PlanUsage
       const [account] = yield* (yield* Accounts).of('claude-code')
@@ -638,9 +553,6 @@ describe('telling the window', () => {
       yield* TestClock.adjust(Duration.millis(250))
       const heard = yield* plans(events)
       assert.strictEqual(accountOf(heard, 'claude-code').windows.length, 2)
-      assert.strictEqual(heard.warnings.length, 1)
-      yield* usage.acknowledge([{ accountId: account!.id, windowKey: 'five_hour' }])
-      assert.strictEqual((yield* plans(events)).warnings.length, 0)
     }).pipe(Effect.provide(Layer.fresh(withUsage({})))),
   )
 })

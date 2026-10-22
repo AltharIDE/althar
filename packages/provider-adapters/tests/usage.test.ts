@@ -6,16 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
 import { normalize } from '../src/events'
-import {
-  claudeRateLimitWindow,
-  codexUsage,
-  leftOf,
-  nextWarning,
-  readAgentUsage,
-  tightestWindow,
-  type WarningState,
-  windowKind,
-} from '../src/usage'
+import { claudeRateLimitWindow, codexUsage, leftOf, readAgentUsage, tightestWindow, windowKind } from '../src/usage'
 
 const NOW = new Date('2026-10-15T12:00:00.000Z')
 
@@ -127,81 +118,6 @@ describe('Codex’s rate limits as an account’s usage', () => {
     const read = codexUsage({ rateLimits: { primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 1e20 } } }, NOW)
     expect(read).toEqual({ kind: 'failed', message: expect.stringContaining('a reset time that is no date') })
     expect(codexUsage({ rateLimits: { primary: { usedPercent: 10, resetsAt: 'soon' } } }, NOW).kind).toBe('failed')
-  })
-})
-
-describe('warning as a plan runs out', () => {
-  const RESET = '2026-10-15T17:00:00.000Z'
-  const step = (used: number, before?: WarningState, resetsAt: string | undefined = RESET) => nextWarning(used, resetsAt, before)
-
-  it('says nothing while more than half is left', () => {
-    expect(step(49).warn).toBeUndefined()
-  })
-
-  it('warns at 50, 25, 10 and 5 percent left, each once', () => {
-    let state: WarningState | undefined
-    const warned: number[] = []
-    for (const used of [30, 50, 55, 75, 76, 90, 91, 95, 99]) {
-      const next = step(used, state)
-      state = next.state
-      if (next.warn !== undefined) warned.push(next.warn)
-    }
-    expect(warned).toEqual([50, 25, 10, 5])
-  })
-
-  it('tells only the lowest threshold a reading skips to', () => {
-    expect(step(92).warn).toBe(10)
-    expect(step(100).warn).toBe(5)
-  })
-
-  it('does not tell a threshold again when use dips and rises in the same period', () => {
-    const first = step(80)
-    expect(first.warn).toBe(25)
-    const dipped = step(60, first.state)
-    expect(dipped.warn).toBeUndefined()
-    expect(step(80, dipped.state).warn).toBeUndefined()
-  })
-
-  it('tells the next threshold after a dip', () => {
-    const first = step(80)
-    const dipped = step(60, first.state)
-    expect(step(91, dipped.state).warn).toBe(10)
-  })
-
-  it('arms again when the window resets', () => {
-    const first = step(96)
-    expect(first.warn).toBe(5)
-    const later = step(96, first.state, '2026-10-15T22:00:00.000Z')
-    expect(later.warn).toBe(5)
-  })
-
-  it('does not arm again when a reading leaves the reset out, nor when it gives an earlier one', () => {
-    const first = step(96)
-    expect(first.warn).toBe(5)
-    const missing = step(96, first.state, undefined)
-    expect(missing.warn).toBeUndefined()
-    expect(missing.state.resetsAt).toBe(RESET)
-    expect(step(96, missing.state).warn).toBeUndefined()
-    expect(step(96, first.state, '2026-10-15T16:59:00.000Z').warn).toBeUndefined()
-  })
-
-  it('takes the reset a later reading gives, once it knows none', () => {
-    const first = nextWarning(80, undefined, undefined)
-    const known = step(80, first.state)
-    expect(known.warn).toBeUndefined()
-    expect(known.state.resetsAt).toBe(RESET)
-    expect(step(80, known.state, '2026-10-15T22:00:00.000Z').warn).toBe(25)
-  })
-
-  it('warns once for a window that gives no reset time', () => {
-    const first = nextWarning(80, undefined, undefined)
-    expect(first.warn).toBe(25)
-    expect(nextWarning(80, undefined, first.state).warn).toBeUndefined()
-  })
-
-  it('keeps a state that survives being stored as JSON', () => {
-    const state = step(10).state
-    expect(JSON.parse(JSON.stringify(state))).toEqual(state)
   })
 })
 

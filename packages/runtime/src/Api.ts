@@ -40,6 +40,7 @@ import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
 import { MachineLoad } from './MachineLoad'
+import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
@@ -1252,7 +1253,17 @@ export const handlers = Api.toLayer(
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
-      AcknowledgeUsageWarnings: ({ warnings }) => api(planUsage.acknowledge(warnings)),
+      GetModelRooms: ({ projectId }) =>
+        api(
+          modelRooms(projectId).pipe(
+            Effect.provideService(Agents, agents),
+            Effect.provideService(Models, models),
+            Effect.provideService(SignIns, signIns),
+            Effect.provideService(Installs, installs),
+            Effect.provideService(Limits, limits),
+            Effect.provideService(Accounts, accounts),
+          ),
+        ),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(

@@ -117,26 +117,32 @@ export const AccountUsage = Schema.Struct({
 })
 export type AccountUsage = typeof AccountUsage.Type
 
-/** A plan window ran down to a threshold: 50, 25, 10 or 5 percent left. Told once per account and window for each reset. */
-export const UsageWarning = Schema.Struct({
+/** Every account's plan usage. */
+export const PlanUsage = Schema.Struct({ accounts: Schema.Array(AccountUsage) })
+export type PlanUsage = typeof PlanUsage.Type
+
+/**
+ * How much room a model has where work on it would start: on the account
+ * the runtime picks for it (the most room first, as the project moves work
+ * through an agent's accounts), that account's tightest window as last read,
+ * a model's own window (Opus's week) counted. Only a model on a plan whose
+ * usage is read has one.
+ */
+export const ModelRoom = Schema.Struct({
+  agentId: Schema.String,
+  /** The model's id at the agent. */
+  model: Schema.String,
   accountId: Schema.String,
   accountName: Schema.String,
-  agentId: Schema.String,
-  agentName: Schema.String,
-  /** Which window: its kind, and its label where it has one. */
-  windowKey: Schema.String,
+  /** The agent has more than one account here, so the account is worth naming. */
+  several: Schema.Boolean,
+  /** 0 to 100. */
+  leftPercent: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.String),
   kind: UsageWindowKind,
   label: Schema.NullOr(Schema.String),
-  /** The threshold crossed: the percent of the window left, at most. */
-  remainingPercent: Schema.Int,
-  resetsAt: Schema.NullOr(Schema.String),
-  raisedAt: Schema.String,
 })
-export type UsageWarning = typeof UsageWarning.Type
-
-/** Every account's plan usage, and the warnings the person has not yet seen. */
-export const PlanUsage = Schema.Struct({ accounts: Schema.Array(AccountUsage), warnings: Schema.Array(UsageWarning) })
-export type PlanUsage = typeof PlanUsage.Type
+export type ModelRoom = typeof ModelRoom.Type
 
 /** The percent of a plan left at which a warning is told. */
 export const USAGE_WARN_AT = [50, 25, 10, 5] as const
@@ -2317,7 +2323,7 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
   /** What Althar runs of a project itself, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
-  /** Every account's plan usage and the warnings not yet seen, whole each time either changes. */
+  /** Every account's plan usage, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('PlanUsage'), usage: PlanUsage }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
@@ -3087,14 +3093,10 @@ export const Api = RpcGroup.make(
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
   /** How hard this computer works now, and Althar's work's part, for the window's bar while it shows it. */
   call('GetLoad', {}, Load),
-  /** Every account's plan usage and the warnings not yet seen: read again first where `refresh`, else as kept (at most a minute old). */
+  /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
-  /** The person has seen these warnings: they are not told again for their reset. */
-  command(
-    'AcknowledgeUsageWarnings',
-    { warnings: Schema.Array(Schema.Struct({ accountId: Schema.String, windowKey: Schema.String })) },
-    Schema.Void,
-  ),
+  /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
+  call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */

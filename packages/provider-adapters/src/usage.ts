@@ -74,46 +74,6 @@ export const tightestWindow = (windows: ReadonlyArray<UsageWindow>, now: number,
     )
 }
 
-/* Warnings. Percent of the plan left when each fires, highest first. */
-export const WARN_AT_REMAINING: ReadonlyArray<number> = [50, 25, 10, 5]
-
-/** What was warned of for one window: kept per account and window, by the caller. */
-export interface WarningState {
-  /** The reset the warning belongs to; a different one is a new period. */
-  readonly resetsAt: string | undefined
-  /** The lowest threshold fired in this period. */
-  readonly firedAt: number
-}
-
-export interface WarningStep {
-  /** The threshold to tell the person of now, if any. */
-  readonly warn?: number
-  readonly state: WarningState
-}
-
-/**
- * The warning a reading calls for. Each threshold is told at most once per
- * reset period; a reading that skips several (50 to 8 percent left) tells
- * only the lowest it crossed; and a window is armed again only when it has
- * reset (`resetsLater`), not because use dipped and rose again.
- */
-export const nextWarning = (usedPercent: number, resetsAt: string | undefined, before: WarningState | undefined): WarningStep => {
-  const remaining = 100 - usedPercent
-  const crossed = WARN_AT_REMAINING.filter((threshold) => remaining <= threshold)
-  const lowest = crossed.length === 0 ? undefined : Math.min(...crossed)
-  if (before === undefined || resetsLater(before.resetsAt, resetsAt))
-    return lowest === undefined ? { state: { resetsAt, firedAt: 100 } } : { warn: lowest, state: { resetsAt, firedAt: lowest } }
-  // The same period: a reset left out of this reading is the one known before.
-  const known = resetsAt ?? before.resetsAt
-  const state = known === before.resetsAt ? before : { ...before, resetsAt: known }
-  if (lowest === undefined || before.firedAt <= lowest) return { state }
-  return { warn: lowest, state: { ...state, firedAt: lowest } }
-}
-
-/** A new reset period: both resets known, and the new one later. One left out, or earlier, is the same period. */
-export const resetsLater = (before: string | undefined, next: string | undefined): boolean =>
-  before !== undefined && next !== undefined && Date.parse(next) > Date.parse(before)
-
 /* Codex: `account/rateLimits/read` of its app-server (codex-rs/app-server-protocol, v2/account.rs). */
 
 export type UsageRead =
