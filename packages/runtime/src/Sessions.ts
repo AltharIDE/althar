@@ -64,11 +64,13 @@ import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
 import { change, fact, timestamp } from './records'
+import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
+import { bringBackFor } from './bringBack'
 import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
@@ -247,6 +249,22 @@ const askedFor = (thread: { readonly title: string; readonly description: string
 
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
+
+/**
+ * What a lead is told of what its sandbox lets through from the start: as
+ * Claude Code 2.1 runs it, a line runs outside the sandbox only where every
+ * command in it is one of these, never one that changes folder, and never
+ * one that starts with `bun`, so a Bun script is listed by what it runs.
+ */
+export const upFrontSaid = (upFront: Reach): string =>
+  [
+    upFront.commands.length === 0
+      ? ''
+      : `These commands run outside your sandbox from the start, so they don't fail inside it first: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, \`cd\` included, stays in the sandbox, so change folder in a call of its own first. A line that starts with \`bun\` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here.`,
+    upFront.hosts.length === 0 ? '' : `Your sandbox reaches these hosts without asking: ${upFront.hosts.join(', ')}.`,
+  ]
+    .filter((said) => said !== '')
+    .join(' ')
 
 interface Running {
   readonly sessionId: string
@@ -574,6 +592,12 @@ export class Sessions extends Context.Service<
     stopBackground(threadId: string, id: string): Effect.Effect<void, AgentRequestFailed | AgentExited>
     /** Clears one that ended by itself from the list. */
     clearBackground(threadId: string, id: string): Effect.Effect<void>
+    /**
+     * Runs `effect` while no agent is on the thread, and none can start on it
+     * meanwhile: a finished task's folders go so (ADR-056). Null, and nothing
+     * run, where one is on it.
+     */
+    quiet<A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A | null, E, R>
     /** The session running on a thread, if there is one. */
     running(threadId: string): Effect.Effect<
       Option.Option<{
@@ -861,6 +885,11 @@ export class Sessions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [kind] = yield* sql<{ kind: string; projectId: ProjectId; projectName: string }>`
             SELECT t.kind, t.project_id, p.name AS project_name FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ${threadId}`
+          // A finished task's folder that was removed comes back before an agent starts in it, and is set up again (ADR-056).
+          if (kind !== undefined && kind.kind !== 'coordinator') {
+            const back = yield* bringBackFor(threadId, instance.systemId)
+            if (back !== null) yield* setups.begin(back)
+          }
           if (kind?.kind === 'coordinator')
             return {
               role: 'coordinator',
@@ -1740,6 +1769,13 @@ export class Sessions extends Context.Service<
                   }
                 : { role: 'reader', cwd: cwdOf(thread), ...(offline ? { offline } : {}) },
           }
+          // What a lead's sandbox lets through from the start, as the rules stand now; nothing for a role that only reads.
+          const upFront =
+            requestContext.rules.role === 'task' && definition.upFront === true && definition.sessionMeta !== undefined
+              ? yield* permissions
+                  .upFront(thread.projectId, thread.role === 'coordinator' ? null : thread.taskId, requestContext.rules.context)
+                  .pipe(Effect.orElseSucceed(() => undefined))
+              : undefined
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
             role: toolRoleOf(thread),
@@ -1780,7 +1816,11 @@ export class Sessions extends Context.Service<
                   : {
                       meta: definition.sessionMeta(
                         reads ? 'reader' : 'lead',
-                        untrusted ? { untrusted, ...(offline ? { offline } : {}) } : undefined,
+                        untrusted
+                          ? { untrusted, ...(offline ? { offline } : {}) }
+                          : upFront === undefined
+                            ? undefined
+                            : { sandbox: upFront },
                       ),
                     }),
               })
@@ -1844,14 +1884,14 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
-          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext }
+          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, upFront }
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
       const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext } = connected
+          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, upFront } = connected
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -1880,7 +1920,8 @@ export class Sessions extends Context.Service<
             delivering: yield* Semaphore.make(1),
             stopRequest: yield* Deferred.make<StopRequest>(),
             ended: yield* Deferred.make<void>(),
-            brief,
+            // A lead is told what its sandbox lets through from the start, and how a command runs outside it.
+            brief: upFront === undefined ? brief : { ...brief, text: `${brief.text}\n\n${upFrontSaid(upFront)}` },
             revokeTools,
             requestContext,
             turnRunning: false,
@@ -2755,6 +2796,11 @@ export class Sessions extends Context.Service<
               const running = threads.get(threadId)
               return running === undefined ? Effect.fail(new NoSession({ threadId })) : stopRunning(running, { state: 'completed' })
             }),
+          ),
+        quiet: (threadId, effect) =>
+          exclusive(
+            threadId,
+            Effect.suspend(() => (threads.has(threadId) ? Effect.succeed(null) : effect)),
           ),
         running: (threadId) =>
           Effect.sync(() => {

@@ -10,10 +10,11 @@ import {
   type ProviderSessionState,
   transition,
 } from '@althar/domain'
+import { hostOf } from '@althar/contracts'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { answerFor, type PermissionDecision, type PermissionMeanings, type PermissionRequest } from '@althar/provider-adapters'
 import { Cause, Context, Crypto, Deferred, Effect, Fiber, Layer, Schema } from 'effect'
-import { SqlClient } from 'effect/sql'
+import { SqlClient, type SqlError } from 'effect/sql'
 
 import { AlwaysNotOffered, AttentionClosed, NotFound } from './errors'
 import { currentBranch } from './git'
@@ -41,6 +42,7 @@ import {
   sayAllowRule,
   type Verdict,
 } from './rules'
+import { type Reach, withEdits, workedOutReach } from './sandboxReach'
 import { addItem } from './threads'
 
 /*
@@ -165,6 +167,14 @@ export class Permissions extends Context.Service<
       readonly reason?: string
       readonly always?: AlwaysScope
     }): Effect.Effect<void, AttentionClosed | NotFound | AlwaysNotOffered>
+    /**
+     * What a lead's sandbox lets through from the start (`sandboxReach.ts`),
+     * as its session starts: the commands it runs outside it, which still
+     * ask and meet the rules, and the hosts it reaches without asking, only
+     * those the rules would let a network request reach without anyone. A
+     * change to the rules applies from the lead's next session.
+     */
+    upFront(projectId: ProjectId, taskId: string | null, rules: RuleContext): Effect.Effect<Reach, SqlError.SqlError | Schema.SchemaError>
     /** Withdraws every request a session is still waiting on, as when its agent has gone. */
     withdrawAll(sessionId: string): Effect.Effect<void>
     /** Decides again every request of a project still waiting on the person, by its rules as they now are: what they no longer keep for the person is answered. */
@@ -334,7 +344,7 @@ export class Permissions extends Context.Service<
         readonly decision: PermissionDecision
         readonly cited?: { readonly rules: ReadonlyArray<AllowRule>; readonly policyId: string }
       } => {
-        if (verdict.verdict === 'deny') return { decision: { decision: 'reject', reason: verdict.reason } }
+        if (verdict.verdict === 'deny') return { decision: { decision: 'reject', reason: verdict.reason, decidedBy: 'rules' } }
         const [first] = verdict.rules ?? []
         return first === undefined || verdict.rules === undefined
           ? { decision: { decision: 'allow', reason: 'Allowed by the project rules.' } }
@@ -523,7 +533,7 @@ export class Permissions extends Context.Service<
               const decision: PermissionDecision =
                 read.verdict === 'allow'
                   ? { decision: 'allow', reason: 'This role may do this.' }
-                  : { decision: 'reject', reason: read.reason }
+                  : { decision: 'reject', reason: read.reason, decidedBy: 'rules' }
               yield* sql.withTransaction(
                 recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
               )
@@ -649,7 +659,27 @@ export class Permissions extends Context.Service<
           )
         })
 
+      const upFront = (projectId: ProjectId, taskId: string | null, rules: RuleContext) =>
+        Effect.gen(function* () {
+          const { policy, project } = yield* rulesNow(projectId, taskId)
+          const reach = yield* workedOutReach(projectId, taskId)
+          const edits = policy.rules.sandbox
+          // A host goes in only where the rules let a request for it through without the person or the coordinator;
+          // never a wildcard, which would let through hosts under it the rules ask about or refuse.
+          const reached = (host: string) =>
+            hostOf(host) === host &&
+            decide(
+              { sessionId: '', toolCallId: '', title: host, kind: 'other', rawInput: { host }, paths: [], options: [] },
+              { ...rules, project },
+            ).verdict === 'allow'
+          return {
+            commands: withEdits(reach.commands, edits?.commands),
+            hosts: withEdits(reach.hosts, edits?.hosts).filter(reached),
+          } satisfies Reach
+        })
+
       return Permissions.of({
+        upFront: (projectId, taskId, rules) => run(upFront(projectId, taskId, rules)),
         decide: (requestContext, request) =>
           Effect.gen(function* () {
             // Track the whole callback, including its commit, until the adapter gets the answer.

@@ -105,7 +105,10 @@ const run = (command: string, args: ReadonlyArray<string>) =>
     // Windows finds bun and playwright as .cmd files, which only a shell runs.
     child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32' })
     child.once('exit', (code, signal) => resolve(code ?? (signal === null ? 1 : 128)))
-    child.once('error', () => resolve(1))
+    child.once('error', (error) => {
+      console.error(`Could not start ${command}: ${error.message}`)
+      resolve(1)
+    })
   })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
@@ -118,7 +121,8 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const)
 if (process.env.CI === undefined) slot = await take()
 try {
   const built = await run('bun', ['run', 'build'])
-  process.exitCode = built === 0 ? await run('playwright', ['test', ...process.argv.slice(2)]) : built
+  // Through bunx, so it runs as `node scripts/e2e.ts` too, without a package runner's PATH: a lead's sandbox lets that through.
+  process.exitCode = built === 0 ? await run('bunx', ['playwright', 'test', ...process.argv.slice(2)]) : built
 } finally {
   release(slot)
 }

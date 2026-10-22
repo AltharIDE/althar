@@ -119,6 +119,8 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
   ...(event.projectId !== null && AUTOMATIONS.has(event.aggregateType)
     ? [{ key: keys.automations(event.projectId), offScreen: false }, ...automationReads(cache, event)]
     : []),
+  // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).
+  ...(event.aggregateType === 'workspace' || event.aggregateType === 'task' ? [{ key: keys.folders, offScreen: false }] : []),
 ]
 
 /** The automations' pages a change moves: the one it is, or, for a run, every one of its project's, as a run names its occurrence. */

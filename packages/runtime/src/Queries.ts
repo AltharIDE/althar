@@ -1,6 +1,6 @@
 import { HOSTED, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, sep } from 'node:path'
 
 import {
   AllowedBy,
@@ -48,15 +48,16 @@ import { questionTitle } from './Questions'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
-import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
+import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueDraftsWaiting, kindOf } from './kinds'
-import { documentText, outputText } from './reading'
+import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
+import { folderOf, KEPT } from './bringBack'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
 import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
@@ -130,12 +131,12 @@ const ROUND_REACH = 2_000
  * What starts a round of a task's thread, as SQL over its item `i` and that
  * item's input `u`: an ask the lead's work answers. What the person said,
  * once the lead has it; what Althar says that isn't its own housekeeping
- * (`aside`), such as what the coordinator passed on, a conflict or failed
+ * (`aside`, or its folder going or coming back), such as what the coordinator passed on, a conflict or failed
  * checks; a review's verdict or what publishing found; and what arrived on
  * a pull request.
  */
 const ROUND_ASK = `(i.kind = 'user_message' AND coalesce(u.state, 'delivered') = 'delivered')
-  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') <> 'aside')
+  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder'))
   OR (i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('review', 'publish'))
   OR i.kind = 'arrival'`
 
@@ -475,7 +476,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           severity: severity === 'error' || severity === 'warning' ? severity : 'info',
           title: text(content, 'title'),
           description: description === '' ? null : description,
-          ...(role === 'aside' || role === 'relayed' ? { role } : {}),
+          ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
         },
       }
     }
@@ -974,9 +975,11 @@ export class Queries extends Context.Service<
             opened: number
             taskId: string
             projectId: string
+            workspaceId: string
+            state: string
           }>`
             SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.branch, w.base_ref, w.base_commit,
-              w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id,
+              w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id, w.id AS workspace_id, w.state,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -1117,6 +1120,9 @@ export class Queries extends Context.Service<
               Effect.gen(function* () {
                 const owner = { path: worktree.path, taskId: worktree.taskId, projectId: worktree.projectId }
                 const there = existsSync(worktree.path)
+                // Its folder removed once it finished, what it changed is read in its repository, from the commit kept as it went (ADR-056).
+                if (!there && worktree.state === 'cleaned')
+                  return { worktree, changed: wants.changed ? yield* removedChanges(worktree) : nothingChanged, here: [], merged: [] }
                 const branch = `refs/heads/${worktree.defaultBranch}`
                 const [[head = null, base = null, tip = null], index] = there
                   ? yield* Effect.all([commitsOf(worktree.path, ['HEAD', worktree.baseRef ?? '', branch]), indexStamp(worktree.path)], {
@@ -1183,6 +1189,58 @@ export class Queries extends Context.Service<
             here: each.flatMap(({ here }) => here),
             merged: each.flatMap(({ merged }) => merged),
           }
+        })
+
+      /**
+       * What a task whose folder was removed changed, read in its repository:
+       * from where it met its default branch to the commit kept as its folder
+       * went, or its branch; nothing where git can't tell.
+       */
+      const removedChanges = (worktree: {
+        readonly root: string | null
+        readonly workspaceId: string
+        readonly branch: string
+        readonly baseRef: string | null
+        readonly baseCommit: string | null
+      }) =>
+        Effect.gen(function* () {
+          if (worktree.root === null || worktree.baseCommit === null) return nothingChanged
+          const root = worktree.root
+          const [kept = null, branch = null, base = null] = yield* commitsOf(root, [
+            `${KEPT}${worktree.workspaceId}`,
+            `refs/heads/${worktree.branch}`,
+            worktree.baseRef ?? '',
+          ])
+          const head = kept ?? branch
+          if (head === null) return nothingChanged
+          const fork = yield* forkOf(root, head, base, worktree.baseCommit)
+          return { files: yield* changedBetween(root, fork, head), commits: yield* commitsAhead(root, fork, head) }
+        }).pipe(Effect.orElseSucceed(() => nothingChanged))
+
+      /** One file's diff for a task whose folder was removed, read in its repository as `removedChanges` reads its files (ADR-056). */
+      const removedDiff = (
+        worktree: {
+          readonly root: string | null
+          readonly workspaceId: string
+          readonly branch: string
+          readonly baseRef: string | null
+          readonly baseCommit: string | null
+          readonly state: string
+        },
+        path: string,
+      ) =>
+        Effect.gen(function* () {
+          if (worktree.state !== 'cleaned' || worktree.root === null || worktree.baseCommit === null)
+            return yield* new NotFound({ kind: 'task’s worktree', id: worktree.workspaceId })
+          const root = worktree.root
+          const [kept = null, branch = null, base = null] = yield* commitsOf(root, [
+            `${KEPT}${worktree.workspaceId}`,
+            `refs/heads/${worktree.branch}`,
+            worktree.baseRef ?? '',
+          ])
+          const head = kept ?? branch
+          if (head === null) return yield* new NotFound({ kind: 'task’s worktree', id: worktree.workspaceId })
+          return yield* fileDiff(root, yield* forkOf(root, head, base, worktree.baseCommit), path, head)
         })
 
       /** How many commits `from` has that none of `not` has; failing, so it isn't kept, where git can't tell. */
@@ -1253,9 +1311,10 @@ export class Queries extends Context.Service<
           const slash = path.indexOf('/')
           const named = worktrees.length > 1 ? worktrees.find((worktree) => worktree.slug === path.slice(0, slash)) : worktrees[0]
           const inside = worktrees.length > 1 ? path.slice(slash + 1) : path
-          if (named === undefined || named.baseCommit === null || !existsSync(named.path))
-            return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
-          const diff = yield* fileDiff(named.path, yield* baseOf(named.path, named.baseRef, named.baseCommit), inside)
+          if (named === undefined || named.baseCommit === null) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
+          const diff = existsSync(named.path)
+            ? yield* fileDiff(named.path, yield* baseOf(named.path, named.baseRef, named.baseCommit), inside)
+            : yield* removedDiff(named, inside)
           return worktrees.length > 1
             ? {
                 ...diff,
@@ -2373,6 +2432,8 @@ export class Queries extends Context.Service<
           const planned = card?.plan?.steps.find((step) => step.key === 'implement')
           // What the person can do to it as a whole, from where it stands.
           const standing = yield* standingOf(head.taskId)
+          // Its folder, removed once it finished or on its way back (ADR-056).
+          const folder = yield* folderOf(head.taskId)
           // Whether its run under way still has a review to come or under way, which the person can skip (ADR-034).
           const [reviewing] = yield* sql<{ left: number }>`
             SELECT count(*) AS left FROM runs r, json_each(r.parameters, '$.steps') s
@@ -2400,6 +2461,7 @@ export class Queries extends Context.Service<
               state: head.state,
               branch: head.branch,
               worktree: head.worktree,
+              ...(folder === undefined ? {} : { folder }),
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
               kind: card?.kind,
@@ -2584,6 +2646,20 @@ export class Queries extends Context.Service<
               const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
               if (thread?.taskId == null) return yield* new NotFound({ kind: 'document', id: path })
               const worktrees = yield* worktreesOf(thread.taskId)
+              // Whose it is: the worktree an absolute path is in, else the first.
+              const owner = isAbsolute(path)
+                ? worktrees.find((worktree) => path === worktree.path || path.startsWith(`${worktree.path}${sep}`))
+                : worktrees[0]
+              // Its folder removed once it finished, a document it committed reads from the commit kept as it went (ADR-056).
+              if (owner !== undefined && owner.state === 'cleaned' && owner.root !== null && !existsSync(owner.path)) {
+                const [kept = null, branch = null] = yield* commitsOf(owner.root, [
+                  `${KEPT}${owner.workspaceId}`,
+                  `refs/heads/${owner.branch}`,
+                ])
+                const head = kept ?? branch
+                if (head === null) return yield* new NotFound({ kind: 'document', id: path })
+                return yield* documentKept(path, { root: owner.root, head, worktree: owner.path })
+              }
               return yield* documentText(
                 path,
                 worktrees.map((worktree) => worktree.path),

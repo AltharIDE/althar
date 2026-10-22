@@ -63,4 +63,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [053](053-the-code-an-agent-names-opens-beside-the-conversation.md) | The code an agent names opens beside the conversation, read where the agent works, and never edited |
 | [054](054-a-task-s-steps-are-a-graph-in-a-lane-for-each-agent.md) | A task's steps are a graph of its own face, in a lane for each agent, read from the runtime's runs |
 | [055](055-light-dark-or-as-the-system-is.md) | Althar is light, dark, or as the system is: one warm dark set of tokens, followed from nativeTheme |
-| [056](056-automations-start-ordinary-tasks-on-a-schedule.md) | Automations start ordinary tasks on a schedule: a kept request, and an occurrence for each time it was due, on this computer while Althar runs |
+| [056](056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md) | A finished task's folder goes after a wait that suits how it ended, and comes back when the task needs it |
+| [057](057-automations-start-ordinary-tasks-on-a-schedule.md) | Automations start ordinary tasks on a schedule: a kept request, and an occurrence for each time it was due, on this computer while Althar runs |

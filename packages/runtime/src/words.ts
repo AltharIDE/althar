@@ -235,7 +235,9 @@ export const words = (
       case 'ChangedSinceSeen':
         return text(error, 'what') === 'branch'
           ? 'The branch changed since you looked at it, so nothing was pushed. Have another look at what would go up, then push.'
-          : 'The pull request changed since you looked at it. Have another look before you accept it.'
+          : text(error, 'what') === 'folder'
+            ? 'What is in the task’s folder changed since you looked at it, so it stays. Have another look before you remove it.'
+            : 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'NotAnIssue':
@@ -344,6 +346,9 @@ const taskRefused = {
   title_too_long: 'Keep the title short: what should change, in a few words.',
   left_running:
     'Althar couldn’t stop what the task left running, such as a page, so it isn’t done yet. Try Done again, or keep it for later.',
+  folder_in_use: 'Something runs from the task’s folder, or an agent works in it, so it stays. Stop it first, then remove the folder.',
+  folder_in_way:
+    'Something that isn’t the task’s worktree is where its folder goes, so the folder can’t come back there. Move it away, then try again.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Why an issue draft can't change, by where it stands. */

@@ -31,6 +31,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/StepGraph/StepGraph.tsx': 'a step’s card, the whole of which opens its report; a round’s marker, a pill over the lanes',
   'screens/Automations/Automations.tsx': 'an automation’s name, stretched over its card, which opens its page',
   'screens/Automations/AutomationPage.tsx': 'a run’s row, which opens its task',
+  'setup/TaskFolders/TaskFolders.tsx':
+    'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',

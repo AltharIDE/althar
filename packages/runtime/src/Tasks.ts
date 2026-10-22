@@ -11,6 +11,7 @@ import { TITLE_LENGTH } from './Coordinator'
 import { NotFound, TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
+import { bringBack as bringFoldersBack } from './bringBack'
 import { Instance } from './Instance'
 import { answeredIn, issueDraftsWaiting, quickIn } from './kinds'
 import { Plans } from './Plans'
@@ -34,9 +35,9 @@ import { Setups } from './Setups'
  * carries that step on (`Runs.resume`). Abandoning settles the task as it
  * stands: its plan is declined, its calls withdrawn, its run suspended rather
  * than ended, and its agents stop. Its worktree and branch stay where they
- * are, since Althar never removes the person's worktrees for them (01).
+ * are, until its folder's wait is up (FolderCleanup.ts, ADR-056).
  * Reopening opens it on them again, putting back a worktree whose folder
- * went, which Althar sets up again (a plain task's that never had a branch
+ * went, removed or by hand, which Althar sets up again (a plain task's that never had a branch
  * with none still, where it started; a review's copy at the head its lead
  * read, set up with nothing): a run that was cut short resumes like a
  * stopped one, a run that passed is ready again, and a plan that never
@@ -417,6 +418,8 @@ export class Tasks extends Context.Service<
           const [project] = yield* sql<{ id: string }>`
             SELECT id FROM projects WHERE id = ${standing.projectId} AND archived_at IS NULL`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: standing.projectId })
+          // Its folders, where they were removed to free the disk, come back first (ADR-056).
+          const back = yield* bringFoldersBack(input.taskId, input.envelope.actorId)
           // Its worktrees, each put back on its branch where its folder went: git runs before the task is written. A plain task's
           // that never had one is put back with none, where it started, as it was made (DEV-96); a review's copy, at the head its
           // lead read, never where the pull request's change starts, which it only compares with.
@@ -508,7 +511,7 @@ export class Tasks extends Context.Service<
               ...(plan.here === true ? { here: true } : {}),
             })
           }
-          if (restored) yield* setups.begin(input.taskId)
+          if (restored || back) yield* setups.begin(input.taskId)
           yield* touchCard(input.taskId)
         })
 

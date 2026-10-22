@@ -41,7 +41,7 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   },
   'this-mac': {
     title: `Work on ${device.this}`,
-    lede: `How much work ${device.this} takes on at once, keeping it awake for it, showing how hard it works, and when automations run.`,
+    lede: `How much work ${device.this} takes on at once, keeping it awake for it, showing how hard it works, when finished tasks’ folders go, and when automations run.`,
     icon: 'load',
   },
   reviews: {
