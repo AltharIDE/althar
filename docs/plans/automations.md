@@ -26,8 +26,8 @@
 - **It runs on this computer, in the runtime, while Althar runs.** On a Mac,
   Althar already keeps running with every window closed. Add one opt-in,
   "Open Althar at login, in the background". No daemon, and no waking the
-  Mac, which needs root. A run missed while the computer slept runs once when it
-  wakes, inside a window; never a backlog. The cloud comes later, in two
+  computer, which on a Mac needs root. A run missed while the computer slept
+  runs once when it wakes, inside a window; never a backlog. The cloud comes later, in two
   steps: a relay for GitHub's webhooks, then runs in the cloud, a product of
   their own, paid per use.
 - **Events come from three places, cheapest first:** Althar's own record (a
@@ -535,8 +535,8 @@ and signs what it does. So:
   file in the repository would fire on every teammate's computer, and every pull
   request would get two reviews. Automations for a team need one runner,
   which means the cloud.
-- **On the computer they were made on.** Each names its device, so two Macs never
-  both run it: cheap now, and what a lease needs later. Device-only data
+- **On the computer they were made on.** Each names its device, so two computers
+  never both run it: cheap now, and what a lease needs later. Device-only data
   stays in device-keyed tables, as the schema rules ask.
 - **Later, perhaps, as a file to share:** `.althar/automations/<name>.md`, a
   template a teammate imports and turns on for themselves, like gh-aw's
@@ -602,7 +602,7 @@ Then three steps, each a decision of its own:
    and a service to run: operations, security, and payloads passing through
    Althar's server.
 2. **A clock in the cloud, and leases to devices.** It fires on time and
-   offers the run to whichever of the person's Macs is up; with two Macs,
+   offers the run to whichever of the person's computers is up; with two,
    one runs it. It still needs a computer awake.
 3. **Runs in the cloud.** Agents in cloud machines: a clone every run, setup
    baked into an image, secrets through a proxy, a network allowlist. Plans
@@ -772,12 +772,12 @@ other tools says Run now and runs.
 - **GitHub's budget.** Projects × repositories × pollers, against 5,000 an
   hour shared with the agents' `gh`, measured on the person's account.
 - **Timers at wake.** Does an overdue timer fire at wake or late, on a real
-  computer, on each system? The design looks again on wake either way. And does `resume` fire
-  for a dark wake?
+  computer, on each system? The design looks again on wake either way. And
+  does `resume` fire for a Mac's dark wake?
 - **Review fatigue.** In dotnet/runtime, 44% of the agent's closed pull
   requests were drafts nobody reviewed. How many open automation pull
   requests are too many? Five for each automation, to begin with.
-- **Two Macs, travel, holidays.** Does the person use more than one computer?
+- **Two computers, travel, holidays.** Does the person use more than one?
   Should there be "Pause all until Monday"?
 
 ## Sources
