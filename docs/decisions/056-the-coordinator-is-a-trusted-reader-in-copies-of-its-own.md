@@ -31,12 +31,15 @@
     `gh` is never signed in for an agent.
   - **Its copies are repositories of their own.** Each copy's git folder
     is made again before every turn: it borrows the person's repository's
-    objects to read (`objects/info/alternates`), and its only remote is the
-    person's repository, from which it fetches the branches, the remote's
-    branches and the tags. Before the turn Althar fetches the project's
-    remote, all its branches, into the person's repository, as any fetch
-    there would. So the coordinator's `git fetch` brings the remote as of
-    the turn and reaches no network itself, and its `git tag`, its fetches
+    objects to read (`objects/info/alternates`), and its only remote is a
+    bare mirror of the person's repository's refs, its branches, its
+    remotes' branches and its tags, which Althar keeps beside the
+    coordinator's folder (`.coordinator-mirrors`) and alone writes. Before
+    the turn Althar fetches the project's remote, all its branches, into the
+    person's repository, as any fetch there would, and the person's refs
+    into the mirror. So the coordinator's `git fetch` brings the remote as of
+    the turn, reaches no network itself and never reads the person's
+    checkout, and its `git tag`, its fetches
     and anything else it writes stay in the copy, thrown away with it.
     Nothing the coordinator leaves there is read by Althar's own git: the
     git folder, its config, hooks and refs, goes before Althar's next
@@ -50,8 +53,16 @@
     its shell commands in its sandbox, held to the coordinator's folder:
     they write only there and in the sandbox's own temporary folder, reach
     no network (no domain allowed, every other refused without asking) and
-    no socket, read nothing where the person keeps keys and sign-ins, and
-    never run outside it. A session whose sandbox can't start doesn't start
+    no socket, and never run outside it. They read none of the home folder,
+    the person's checkouts or the project's task folders, but what Althar
+    gives back: the coordinator's folder, the mirrors, the objects folders
+    the copies borrow, and the toolchains kept in the home folder (bun,
+    Node's version managers, Rust's, Python's, git's config; never a folder
+    that holds a key), and nothing where the person keeps keys and sign-ins.
+    It loads no settings file, the person's or the repository's, and runs no
+    hook, as a review's lead: no allow rule or sandbox exemption of theirs
+    lets a command out, and no hook of a repository it reads runs beside it.
+    A session whose sandbox can't start doesn't start
     at all, so Althar asks for this only where it can start (macOS; Linux
     with bubblewrap and socat, outside a Flatpak); elsewhere the coordinator
     starts as any reader, every command asking. Its edit tools stay denied:
@@ -65,7 +76,9 @@
     say how the computer stands (`uptime`, `uname`, `df`; not `ps`, whose
     lines carry other programs' arguments); and `git tag` listing with
     patterns and sorting. Nothing that writes, installs, reaches the
-    network or changes the code host. A review's lead keeps the strict
+    network or changes the code host. On every agent, the coordinator reads
+    no `.env` file outside its folder, as the person's checkout's, whose
+    secrets DEV-69 keeps from leads as well. A review's lead keeps the strict
     list: it reads a repository it doesn't trust.
   - **A test runs only with what its copy has.** The copies have no
     packages installed, and Althar installs none: a test file the sandbox
@@ -89,9 +102,9 @@
     every flag a program may take.
 - **Trade-off:** the coordinator runs the project's own code on Claude
   Code where a test asks it to, inside a sandbox, as leads already do
-  inside theirs; the risk is that of the sandbox. A command the person's
-  own Claude Code settings both exempt from the sandbox and allow runs
-  outside it unasked, as it would in their own Claude Code. The copies'
+  inside theirs; the risk is that of the sandbox. The person's own Claude
+  Code settings don't reach the coordinator: their allow rules and
+  sandbox exemptions, and their hooks, aren't loaded for it. The copies'
   `git fetch` is as fresh as the turn, not the moment. Codex keeps its
   read-only sandbox, whose commands can't write the copy, so its `git
   fetch` and `git tag` are refused when they ask to go beyond it; OpenCode
@@ -100,11 +113,14 @@
   instead of running in the sandbox, and then meets the reader rules: the
   brief says to write such commands plainly. What Claude Code's sandbox
   does with these settings was read from its documentation and settings'
-  schema, and tried on a real session on macOS on 21 October 2026
-  (tests/agents/reader.test.ts): `git fetch`, `git tag`, `$(…)` with
-  `uptime`, and a `node --test` file ran without asking; a write outside
-  the folder, `curl`, and reading `~/.ssh` were refused by the sandbox.
-  Linux isn't tried yet.
+  schema, and tried on a real session on macOS on 22 October 2026
+  (tests/agents/reader.test.ts), in a repository whose own settings
+  carried a hook writing outside and allow rules and exemptions for
+  `touch` and `cat`: `git fetch`, `git tag`, `$(…)` with `uptime`, a
+  `node --test` file and `bun --version` ran without asking; a write
+  outside the folder, a write or tag in the person's checkout, reading
+  its `.env` or a folder of the person's, a socket, `curl`, and reading
+  `~/.ssh` were refused, and the hook didn't run. Linux isn't tried yet.
 - **Revisit when:** Codex's sandbox can be held to a folder with writes
   in its git folder; Althar can tell before a session starts that an
   agent's sandbox will start on Windows; the coordinator needs the

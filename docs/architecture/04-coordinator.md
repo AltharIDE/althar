@@ -79,7 +79,8 @@ coordinator may run in copies of its own
   folder holding one copy per bound repository, detached at the default
   branch. Each is a repository of its own, whose git folder is made again
   for every turn: it borrows the person's repository's objects, and fetches
-  only from it, after Althar fetched the remote there. So its `git fetch`
+  only from a mirror of that repository's refs Althar keeps beside the
+  folder, after Althar fetched the remote there. So its `git fetch`
   and `git tag` write only the copy, and nothing written there survives or
   reaches a task, nor is read by Althar's own git. A project with no
   repositories gets an empty folder. A reviewer reads a copy of the lead's
@@ -89,8 +90,11 @@ coordinator may run in copies of its own
   call Althar's tools: Codex's `read-only` sandbox, and Claude Code with its
   edit tools denied and every shell command asking. The coordinator's Claude
   Code, where its sandbox can start, runs its commands in it without asking,
-  held to its folder: writes only there, no network, no socket, none of
-  where the person keeps keys, and never outside it. Claude Code's plan mode
+  held to its folder: writes only there, no network, no socket, reads none
+  of the home folder, the person's checkouts or the task folders but its
+  folder, the mirrors, the objects its copies borrow and the toolchains,
+  and never outside it; it loads no settings file and runs no hook. Claude
+  Code's plan mode
   and OpenCode's plan agent would be simpler, but both refuse MCP tools.
   OpenCode has no sandbox yet, so for it the copy is the boundary.
 - Althar's reader rules are the backstop. They allow reads, searches and
