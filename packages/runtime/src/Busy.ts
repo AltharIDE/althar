@@ -55,7 +55,8 @@ import { Sessions } from './Sessions'
  * whatever waits, what that agent left running going on in it; so does any
  * work of a task that holds its place only by what its agents left running.
  * Work of a task that has to wait while another of its agents is at work
- * (`owed`) has the task's place first once that agent's frees.
+ * (`owed`) has the task's place first once that agent's frees, though the
+ * person's work has taken every other place and more.
  * Without a place, work waits: written in the store where it waits, so a
  * restart doesn't lose it, or, a turn, in what the thread has queued. When a
  * place frees, what stands first starts (`queue`): looked at whenever an
@@ -259,7 +260,7 @@ export class Busy extends Context.Service<
       const turns = new Map<string, Waiter & { readonly sessionId: string }>()
       /*
        * Tasks with work waiting while another of their agents held a place: once it frees, that work has it before
-       * anything else that waits, as the task's own (ADR-037).
+       * anything else that waits, as the task's own (ADR-037), over the number too, as it was the task's.
        */
       const owed = new Set<string>()
       /* What the cards of waiting tasks last said, so they are read again when it changes. */
@@ -484,7 +485,9 @@ export class Busy extends Context.Service<
             // On its way already: it is counted, and not started twice.
             if (starting.has(key)) continue
             const kept = taken.has(waiter.taskId) ? undefined : keptPlace(waiter.taskId, holders)
-            if (waiter.order !== 'person' && !busy.has(key) && kept === undefined && busy.size >= most) {
+            // Owed its task's place, which its agent has freed since: it takes that place, though others hold every one.
+            const back = owed.has(waiter.taskId) && !holders.some((holder) => holder.taskId === waiter.taskId)
+            if (waiter.order !== 'person' && !busy.has(key) && kept === undefined && !back && busy.size >= most) {
               left.push(waiter.taskId)
               continue
             }

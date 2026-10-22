@@ -637,6 +637,49 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
+  it.live('give a task’s work that waited its task’s place once it frees, though the person’s work takes every other one', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const busy = yield* Busy
+      const sessions = yield* Sessions
+      const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(first.threadId)
+      const task = yield* started(projectId, 'Task', 'Work on it. [lead:wait]')
+      yield* working(task.taskId)
+      // The task's own work waits while its lead holds the place.
+      const begun: Array<string> = []
+      const waiter: Waiter = {
+        taskId: task.taskId,
+        review: true,
+        order: 'underway',
+        since: '2026-01-02T00:00:00.000Z',
+        start: Effect.andThen(
+          Effect.sync(() => begun.push(task.taskId)),
+          Effect.never,
+        ),
+      }
+      yield* busy.queue(Effect.sync(() => (begun.length === 0 ? [waiter] : [])))
+      yield* Effect.sleep('300 millis')
+      assert.deepStrictEqual(begun, [])
+      // The person says something to the first's lead: it goes on, one over.
+      yield* say(first.threadId, scenarios.slow, 'after_current')
+      yield* until(
+        Effect.map(sessions.running(first.threadId), (live) => (Option.isSome(live) && live.value.turnRunning ? [true] : [])),
+        (rows) => rows.length === 1,
+      )
+      yield* busyAt(2)
+      // The lead's step ends: its place is its task's work's, though the person's turn still takes the only other.
+      yield* say(task.threadId, '[lead:finish]')
+      yield* until(
+        Effect.sync(() => begun),
+        (rows) => rows.length === 1,
+      )
+      const live = yield* sessions.running(first.threadId)
+      assert.isTrue(Option.isSome(live) && live.value.turnRunning, 'the person’s turn still ran')
+    }).pipe(Effect.provide(machine(1))),
+  )
+
   it.live('leave a waiting task out of the count and the holders it is shown', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
