@@ -87,6 +87,18 @@ const heldFor = (taskId: string, reason: 'machine_busy' | 'usage_limit') =>
     (rows) => rows.at(-1) ?? { id: '', step: '', state: '', holdReason: null, output: null },
   )
 
+/**
+ * The task's review, once it waits for a place behind another task: its reviewer is out of usage until its reset, another
+ * task's lead takes the one place meanwhile, and at the reset there is none. The other task, and the review waiting.
+ */
+const reviewBehind = (projectId: ProjectId, taskId: string) =>
+  Effect.gen(function* () {
+    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+    const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+    return { other, review: yield* heldFor(taskId, 'machine_busy') }
+  })
+
 const readyIs = (projectId: string, taskId: string) =>
   until(
     Effect.gen(function* () {
@@ -108,44 +120,53 @@ const ranOn = (threadId: string) =>
   })
 
 describe('a step waiting for a place, as an earlier Althar kept it', () => {
-  it.live('starts a review kept with no reviewer named on the plan’s reviewer, once there is a place', () =>
-    Effect.gen(function* () {
+  it.live('starts a review kept with no reviewer named on the plan’s reviewer, once there is a place', () => {
+    const back = Date.now() + 5_000
+    return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
+      const policies = yield* Policies
+      const instance = yield* Instance
       const projectId = yield* opened
-      const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:pass]', [
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      const review = yield* heldFor(task.taskId, 'machine_busy')
-      yield* sql`UPDATE node_attempts SET output = json_remove(output, '$.place.reviewer') WHERE id = ${review.id}`
-      // The server stops: the review takes the place, on the plan's reviewer.
-      const [left] = Option.getOrUndefined(yield* sessions.running(task.threadId))?.background ?? []
-      yield* sessions.stopBackground(task.threadId, left?.id ?? '')
+      const { other, review } = yield* reviewBehind(projectId, task.taskId)
+      // Kept as the step after its lead's, with no reviewer named.
+      const { since } = JSON.parse(review.output ?? '{}') as { since?: string }
+      yield* sql`UPDATE node_attempts SET output = ${JSON.stringify({ place: { how: 'next' }, since })} WHERE id = ${review.id}`
+      // The other's lead finishes: the review takes the place, on the plan's reviewer.
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: '[lead:finish]' })
       yield* readyIs(projectId, task.taskId)
       const [reviewer] = yield* sql<{ agentId: string }>`
         SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       assert.strictEqual(reviewer?.agentId, 'codex')
-    }).pipe(Effect.provide(oneAtOnce())),
-  )
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
+  })
 
-  it.live('starts a review kept as resumed with no reviewer named at once, on the plan’s reviewer', () =>
-    Effect.gen(function* () {
+  it.live('starts a review kept as resumed with no reviewer named at once, on the plan’s reviewer', () => {
+    const back = Date.now() + 5_000
+    return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      const policies = yield* Policies
+      const instance = yield* Instance
       const projectId = yield* opened
-      const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:pass]', [
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      const review = yield* heldFor(task.taskId, 'machine_busy')
+      const { review } = yield* reviewBehind(projectId, task.taskId)
       const { since } = JSON.parse(review.output ?? '{}') as { since?: string }
       yield* sql`UPDATE node_attempts SET output = ${JSON.stringify({
         place: { how: 'resume', lead: { agentId: 'claude-code', model: null, effort: null } },
         since,
       })} WHERE id = ${review.id}`
       yield* readyIs(projectId, task.taskId)
-    }).pipe(Effect.provide(oneAtOnce())),
-  )
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
+  })
 
   it.live('carries on one whose record can’t be read as after a restart, once there is a place, and its plan can’t be changed', () =>
     Effect.gen(function* () {

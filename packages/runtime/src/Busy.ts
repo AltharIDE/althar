@@ -97,7 +97,7 @@ export interface Agent {
   readonly review?: boolean | undefined
 }
 
-/** How a step after another on the same task enters: the agent it follows, whose place frees unless what it left running still runs. */
+/** How a step after another on the same task enters: the agent it follows, whose place it takes, with what that agent left running. */
 export interface Entering<A> {
   /** Its reviewer's place, not its lead's. */
   readonly review?: boolean | undefined
