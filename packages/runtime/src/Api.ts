@@ -48,6 +48,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  changesIssues,
   Policies,
   type ProjectRules,
   resolvesConflicts,
@@ -69,6 +70,7 @@ import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
 import { Coordinator } from './Coordinator'
+import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
 import { Plans } from './Plans'
@@ -158,6 +160,7 @@ export const handlers = Api.toLayer(
     const policies = yield* Policies
     const plans = yield* Plans
     const issueDrafts = yield* IssueDrafts
+    const issueChanges = yield* IssueChanges
     const reviews = yield* Reviews
     const runs = yield* Runs
     const tasks = yield* Tasks
@@ -339,6 +342,7 @@ export const handlers = Api.toLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        changeIssues: changesIssues(rules),
       }
     }
 
@@ -929,10 +933,22 @@ export const handlers = Api.toLayer(
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
-      ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
-        once(commandId, api(issueDrafts.change(draftId, { title, body, labels }, instance.personId))),
+      ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
+        once(
+          commandId,
+          api(
+            issueDrafts.change(
+              draftId,
+              { title, body, labels, ...(priority === undefined ? {} : { priority: priority ?? 'none' }) },
+              instance.personId,
+            ),
+          ),
+        ),
       FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, instance.personId)))),
       DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, instance.personId))),
+      ApplyIssueChanges: ({ commandId, changesId }) =>
+        once(commandId, api(Effect.asVoid(issueChanges.apply(changesId, instance.personId)))),
+      DiscardIssueChanges: ({ commandId, changesId }) => once(commandId, api(issueChanges.discard(changesId, instance.personId))),
       ChangeReviewDraft: ({ commandId, draftId, verdict, summary, comments }) =>
         once(
           commandId,
@@ -1318,6 +1334,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
+      ReadBackgroundOutput: ({ threadId, id }) => api(sessions.backgroundOutput(threadId, id)),
       ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
       RunProject: ({ commandId, projectId, taskId, threadId, runnableId }) =>
         once(commandId, api(launches.start({ projectId, taskId, threadId, ...(runnableId === undefined ? {} : { runnableId }) }))),

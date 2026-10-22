@@ -34,13 +34,19 @@ export type ToolRole = 'coordinator' | 'lead' | 'reviewer'
 /** A tool's answer when it can't do what was asked: told to the agent, which can try again. */
 export class ToolRefused extends Schema.TaggedError<ToolRefused>()('ToolRefused', { message: Schema.String }) {}
 
+/** A tool's answer with a picture beside its words, as a screenshot's: the picture as base64, and its type. */
+export interface ToolPicture {
+  readonly text: string
+  readonly image: { readonly data: string; readonly mimeType: string }
+}
+
 export interface Tool {
   readonly name: string
   readonly description: string
   /** The input, as JSON Schema. */
   readonly input: Readonly<Record<string, unknown>>
-  /** Runs the tool; the text the agent reads back. */
-  readonly call: (input: unknown, access: ToolAccess) => Effect.Effect<string, ToolRefused>
+  /** Runs the tool; the text the agent reads back, or that with a picture. */
+  readonly call: (input: unknown, access: ToolAccess) => Effect.Effect<string | ToolPicture, ToolRefused>
   /**
    * Given to the lead of a review of someone else's pull request too: it only
    * reads, or drafts that review. A review's lead is refused every other tool
@@ -112,7 +118,15 @@ export class ToolServer extends Context.Service<
           const guarded = await refusal(tool)
           if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: guarded }] }
           const exit = await Effect.runPromiseExit(tool.call(request.params.arguments ?? {}, access))
-          if (Exit.isSuccess(exit)) return { content: [{ type: 'text' as const, text: exit.value }] }
+          if (Exit.isSuccess(exit))
+            return typeof exit.value === 'string'
+              ? { content: [{ type: 'text' as const, text: exit.value }] }
+              : {
+                  content: [
+                    { type: 'text' as const, text: exit.value.text },
+                    { type: 'image' as const, data: exit.value.image.data, mimeType: exit.value.image.mimeType },
+                  ],
+                }
           const refused = exit.cause.reasons.find((reason) => reason._tag === 'Fail')
           const text =
             refused !== undefined && refused._tag === 'Fail' && refused.error instanceof ToolRefused

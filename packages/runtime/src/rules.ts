@@ -416,7 +416,8 @@ const hostReason = (words: ReadonlyArray<string>): string | undefined => {
     return "Answer on the task's pull request with Althar's reply_on_pull_request tool."
   if (command === 'pr' || command === 'mr')
     return "Althar opens the task's pull request itself, and the person pushes what you commit to it once they've looked; only a merge Althar asked you to make to resolve a conflict, Althar pushes itself. Commit, then ask them to push it with push_to_pull_request; read it with read_pull_request."
-  if (command === 'issue') return "Althar doesn't change issues from a task. Read one with read_issue, and tell the person what it needs."
+  if (command === 'issue')
+    return 'Althar changes issues through its own tools, not gh or glab. Read one with read_issue; on the issue this task came from, comment with comment_on_issue and propose a change with change_issue; for any other, tell the person what it needs.'
   if (command === 'auth') return "Agents run without the person's sign-in to the code host; Althar's tools reach it for the task."
   return "Agents don't change things on the code host themselves; Althar does that for the task. Tell the person what's needed."
 }
@@ -1260,10 +1261,53 @@ const withoutRedirects = (words: ReadonlyArray<string>, operators: ReadonlySet<n
     return operators.has(index - 1) && OUTPUT_REDIRECTS.includes(words[index - 1] ?? '') ? [] : [word]
   })
 
+/** Flags whose value is a place, such as a config file, that a reader has no use for at a glance: `--config ../../a/vite.config.ts`. */
+const PLACE_FLAGS = /^--?(config|config-?file|cwd|root|project|tsconfig|env-?file|prefix|dir|workspace)$/i
+/** A runner's own words before the program it runs: `npx -y`, `bunx`, `pnpm dlx`, `yarn dlx`, `bun x`. */
+const FETCHERS = [['npx'], ['bunx'], ['pnpx'], ['pnpm', 'dlx'], ['yarn', 'dlx'], ['bun', 'x']]
+const FETCHER_FLAGS = ['-y', '--yes', '-q', '--quiet', '--no-install', '--no', '--bun']
+const BIN_FOLDER = /(?:^|[/\\])node_modules[/\\]\.bin[/\\]([^/\\]+)$/
+const looksLikePlace = (value: string) => /[/\\]/.test(value) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+
+/**
+ * A command's last meaningful part (ADR-044): its program without the folder
+ * a package manager keeps it in or the runner that fetches it, and without
+ * the flags that only say where a file is: `node_modules/.bin/vp dev
+ * --config ../../a/vite.config.ts` reads `vp dev`.
+ */
+const plainer = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
+  let rest = words
+  const runner = FETCHERS.find((one) => one.every((word, at) => rest[at] === word))
+  if (runner !== undefined && rest.length > runner.length) {
+    rest = rest.slice(runner.length)
+    while (FETCHER_FLAGS.includes(rest[0] ?? '') && rest.length > 1) rest = rest.slice(1)
+  }
+  const bin = BIN_FOLDER.exec(rest[0] ?? '')?.[1]
+  if (bin !== undefined) rest = [bin, ...rest.slice(1)]
+  const kept: Array<string> = []
+  for (let at = 0; at < rest.length; at += 1) {
+    const word = rest[at] ?? ''
+    if (at > 0 && word.startsWith('-')) {
+      const [flag = '', ...joined] = word.split('=')
+      if (PLACE_FLAGS.test(flag)) {
+        if (joined.length > 0 && looksLikePlace(joined.join('='))) continue
+        if (joined.length === 0 && looksLikePlace(rest[at + 1] ?? '')) {
+          at += 1
+          continue
+        }
+      }
+    }
+    kept.push(word)
+  }
+  return kept
+}
+
 /**
  * A command line as the person reads it at a glance: what it runs, without
  * the `cd <dir> &&` an agent puts first, variable assignments, `timeout N`
- * and the like, or the plumbing after it (`2>&1`, `| tail -20`). The line
+ * and the like, or the plumbing after it (`2>&1`, `| tail -20`); a program
+ * without its `node_modules/.bin/` or the `npx` that fetches it, and without
+ * flags that only name a file (`plainer`). The line
  * itself is never changed; this is only what to show of it. A line that only
  * changes folder, or that has parts the shell works out when it runs, is
  * shown as written.
@@ -1289,7 +1333,7 @@ export const shortCommand = (text: string): string => {
       // Words dropped from the front by unwrap shift where the operators are.
       const unwrapped = unwrap(words)
       const dropped = words.length - unwrapped.length
-      const shown = withoutRedirects(unwrapped, new Set([...operators].map((at) => at - dropped)))
+      const shown = plainer(withoutRedirects(unwrapped, new Set([...operators].map((at) => at - dropped))))
       return shown.length === 0 ? '' : `${shown.map(sayWord).join(' ')}${index === kept.length - 1 ? '' : (KEPT_BETWEEN[end] ?? '; ')}`
     })
     .join('')
@@ -3045,6 +3089,59 @@ const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'e
   env: 'env',
 }
 
+/**
+ * What a trusted reader, the coordinator in its own copies (ADR-058), may
+ * run beside: programs that only say how the computer stands. Not `ps` or
+ * `lsof`, whose lines carry other programs' arguments, keys among them.
+ */
+const TRUSTED_READS: Readonly<Record<string, Flags | 'any'>> = {
+  uptime: 'any',
+  uname: 'any',
+  whoami: 'any',
+  id: 'any',
+  groups: 'any',
+  nproc: 'any',
+  arch: { operands: 0 },
+  sw_vers: 'any',
+  vm_stat: 'any',
+  df: 'any',
+  free: 'any',
+  // `hostname NAME` sets it.
+  hostname: { short: 'sfidaAIsy', long: ['--short', '--fqdn', '--ip-address', '--all-ip-addresses', '--domain'], operands: 0 },
+}
+
+/**
+ * `git tag`'s flags that only list, for a trusted reader: with `-l`, or one
+ * that implies it, its other words are patterns. Not `-v`, which runs gpg,
+ * nor any that makes a tag.
+ */
+const GIT_TAG_LISTS =
+  /^(-l|--list|-n\d*|--sort(=.*)?|--format(=.*)?|--points-at(=.*)?|--contains(=.*)?|--no-contains(=.*)?|--merged(=.*)?|--no-merged(=.*)?|--column(=.*)?|--no-column|-i|--ignore-case|--omit-empty|--color(=.*)?)$/
+const GIT_TAG_IMPLIES_LIST = /^(-l|--list|-n\d*|--points-at(=.*)?|--contains(=.*)?|--no-contains(=.*)?|--merged(=.*)?|--no-merged(=.*)?)$/
+/** The flags whose value is the next word, where it isn't joined with `=`. */
+const GIT_TAG_WITH_VALUE = /^(--sort|--format|--points-at)$/
+
+/** Why a trusted reader's `git tag` would make or remove a tag, or verify one, or nothing when it only lists. */
+const gitTagReason = (args: ReadonlyArray<string>): string | undefined => {
+  let operands = 0
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? ''
+    if (arg === '--') {
+      operands += args.length - index - 1
+      break
+    }
+    if (arg.startsWith('-')) {
+      if (!GIT_TAG_LISTS.test(arg)) return `\`git tag ${arg}\` makes, removes or verifies a tag, and this role only reads.`
+      if (GIT_TAG_WITH_VALUE.test(arg)) index += 1
+      continue
+    }
+    operands += 1
+  }
+  return operands === 0 || args.some((arg) => GIT_TAG_IMPLIES_LIST.test(arg))
+    ? undefined
+    : '`git tag` with a name makes a tag; list them with `git tag -l` and a pattern, as this role only reads.'
+}
+
 /** Why a command's flags go beyond what a reader may use, or nothing when they don't. */
 const flagsReason = (program: string, flags: Flags, args: ReadonlyArray<string>): string | undefined => {
   let operands = 0
@@ -3256,7 +3353,7 @@ const GIT_LIST_FLAGS = new Set([
 ])
 
 /** Why a git command a reader wants to run would change something or run a program, or nothing when it only looks. */
-const gitReason = (words: ReadonlyArray<string>): string | undefined => {
+const gitReason = (words: ReadonlyArray<string>, trusted: boolean): string | undefined => {
   const call = gitCall(words, '.')
   if (call === undefined) return undefined
   const before = words.slice(1, words.indexOf(call.subcommand, 1))
@@ -3269,6 +3366,7 @@ const gitReason = (words: ReadonlyArray<string>): string | undefined => {
   if (flag !== undefined) return `\`git ${call.subcommand} ${flag}\` writes a file or runs a program, and this role only reads.`
   if (GIT_LOOKS.has(call.subcommand)) return undefined
   if (GIT_LISTS.has(call.subcommand) && call.args.every((arg) => GIT_LIST_FLAGS.has(arg))) return undefined
+  if (trusted && call.subcommand === 'tag') return gitTagReason(call.args)
   // A stash or the reflog only looks when listed or shown: `git stash` alone stashes the lead's work.
   if ((call.subcommand === 'stash' || call.subcommand === 'reflog') && ['list', 'show'].includes(call.args[0] ?? '')) return undefined
   return `\`git ${call.subcommand}\` can change the repository, and this role only reads.`
@@ -3283,19 +3381,138 @@ const gitReason = (words: ReadonlyArray<string>): string | undefined => {
 const SYSTEM_PROGRAMS =
   /^\/(s?bin|usr\/s?bin|usr\/local\/s?bin|opt\/homebrew\/s?bin|home\/linuxbrew\/\.linuxbrew\/s?bin|snap\/bin|run\/current-system\/sw\/bin|nix\/var\/nix\/profiles\/default\/bin)\/[^/]+$/
 
+/**
+ * What stands for a command substitution's output once its command is read
+ * (`substitutionsIn`): a variable, which the shell expands into words that
+ * may be anything, a flag among them.
+ */
+const OUTPUT = '$ALTHAR_OUTPUT'
+/** What stands for the output of a substitution that prints only commits' and refs' names, which never start with a dash. */
+const NAMES = '$ALTHAR_NAMES'
+/** Where a word holds a substitution's output. */
+const SUBSTITUTED = /\$ALTHAR_(OUTPUT|NAMES)/
+
+/** `git rev-parse`'s and `git rev-list`'s flags that keep them printing names: `rev-parse` prints any other flag back. */
+const NAMES_FLAGS =
+  /^(--short(=\d+)?|--abbrev-ref|--verify|--quiet|-q|--symbolic-full-name|--count|--first-parent|--reverse|--merges|--no-merges|--all|--branches|--tags|--max-count=\d+|-\d+)$/
+
+/**
+ * Whether a substitution's command prints only commits' and refs' names,
+ * or a count: one git command of those that do, as `git describe --tags`.
+ * A name never starts with a dash, so what it prints is never a flag.
+ */
+const namesOnly = (script: string): boolean => {
+  const { commands, opaque } = parseCommandLine(script)
+  const [only] = commands
+  if (opaque || commands.length !== 1 || only === undefined || only[0] !== 'git') return false
+  const [subcommand, ...args] = only.slice(1)
+  if (subcommand === 'describe' || subcommand === 'merge-base') return true
+  if (subcommand === 'branch') return args.length === 1 && args[0] === '--show-current'
+  if (subcommand !== 'rev-parse' && subcommand !== 'rev-list') return false
+  return args.every((arg) => (arg.startsWith('-') ? NAMES_FLAGS.test(arg) : !/[$`*?[{]/.test(arg)))
+}
+
+/** The index of the `)` that closes what opens just before `from`, past quotes and parentheses of its own; -1 where none does. */
+const closingOf = (text: string, from: number): number => {
+  let depth = 1
+  for (let index = from; index < text.length; index += 1) {
+    const char = text[index] ?? ''
+    if (char === '\\') index += 1
+    else if (char === "'") {
+      const close = text.indexOf("'", index + 1)
+      if (close === -1) return -1
+      index = close
+    } else if (char === '"') {
+      for (index += 1; index < text.length && text[index] !== '"'; index += 1) if (text[index] === '\\') index += 1
+    } else if (char === '(') depth += 1
+    else if (char === ')') {
+      depth -= 1
+      if (depth === 0) return index
+    }
+  }
+  return -1
+}
+
+/**
+ * The commands a line's substitutions run, `$(…)` and backticks, and the
+ * line with each one's output standing as `OUTPUT`, outside quotes, so it
+ * is read as words the shell expands; or why it can't be read so. For a
+ * trusted reader: each command is read as a line of its own.
+ */
+const substitutionsIn = (text: string): { readonly scripts: ReadonlyArray<string>; readonly text: string } | string => {
+  const scripts: Array<string> = []
+  let out = ''
+  let quoted = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] ?? ''
+    if (char === '\\') {
+      out += text.slice(index, index + 2)
+      index += 1
+      continue
+    }
+    if (char === "'" && !quoted) {
+      const close = text.indexOf("'", index + 1)
+      const end = close === -1 ? text.length : close
+      out += text.slice(index, end + 1)
+      index = end
+      continue
+    }
+    if (char === '"') {
+      quoted = !quoted
+      out += char
+      continue
+    }
+    const standIn = (script: string) => {
+      const stands = namesOnly(script) ? NAMES : OUTPUT
+      return quoted ? `"${stands}"` : stands
+    }
+    if (char === '$' && text[index + 1] === '(') {
+      if (text[index + 2] === '(')
+        return 'An arithmetic expansion, `$((…))`, can set a variable, which changes what runs; work the number out yourself, as this role only reads.'
+      const end = closingOf(text, index + 2)
+      if (end === -1) return "Althar can't tell where this `$(…)` ends, and this role only reads."
+      const script = text.slice(index + 2, end)
+      scripts.push(script)
+      out += standIn(script)
+      index = end
+      continue
+    }
+    if (char === '`') {
+      let end = index + 1
+      while (end < text.length && text[end] !== '`') end += text[end] === '\\' ? 2 : 1
+      if (end >= text.length) return "Althar can't tell where this backtick ends, and this role only reads."
+      const script = text.slice(index + 1, end).replace(/\\([`$\\])/g, '$1')
+      scripts.push(script)
+      out += standIn(script)
+      index = end
+      continue
+    }
+    out += char
+  }
+  return { scripts, text: out }
+}
+
+/** Whether all a word's shell expands is the output of substitutions that print only names (`NAMES`): it can't become a flag. */
+const onlyNames = (word: string) => {
+  if (!word.includes(NAMES)) return false
+  const rest = word.replaceAll(NAMES, 'x')
+  return !/[*?[$]/.test(rest) && !/\{[^{}]*(,|\.\.)[^{}]*\}/.test(rest)
+}
+
 /** Why one command would change something or run another program, or nothing when it only looks. */
-const readerWordsReason = (words: ReadonlyArray<string>): string | undefined => {
+const readerWordsReason = (words: ReadonlyArray<string>, trusted = false): string | undefined => {
   const named = words[0] ?? ''
   const program = named.split('/').at(-1) ?? ''
   const written = writes(words).filter((target) => target !== '/dev/null')
   if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
   // Where a shell's output goes, thrown away.
   if (onlyRedirects(words)) return undefined
+  if (SUBSTITUTED.test(named)) return "What `$(…)` prints can't be the command to run: name the program, as this role only reads."
   if (named.includes('/') && !SYSTEM_PROGRAMS.test(named))
     return `\`${named}\` runs what that folder holds, not the system's \`${program}\`, and this role only reads.`
   if (SHELL_STATE.has(program))
     return `\`${program}\` can set a variable, a function or an alias, or how the shell finds a command, and this role only reads.`
-  const reads = READS[program]
+  const reads = READS[program] ?? (trusted ? TRUSTED_READS[program] : undefined)
   if (reads === undefined) return `\`${program}\` isn't on the list of commands that only look, and this role only reads.`
   const args = words.slice(1)
   const reason = ((): string | undefined => {
@@ -3303,7 +3520,7 @@ const readerWordsReason = (words: ReadonlyArray<string>): string | undefined => 
       case 'any':
         return undefined
       case 'git':
-        return gitReason(words)
+        return gitReason(words, trusted)
       case 'env':
         return args.length > 0 ? '`env` runs another command, and this role only reads.' : undefined
       case 'printf':
@@ -3370,7 +3587,7 @@ const readerLaunchReason = (words: ReadonlyArray<string>): string | undefined =>
  * expansion (`${PATH:=.}`, `$[PATH=1]`), and no file name the shell expands
  * into a flag (`rg x *` where a file is named `--pre=./run.sh`).
  */
-const readerCommandReason = (text: string): string | undefined => {
+const readerCommandReason = (text: string, trusted = false): string | undefined => {
   if (/[<>]\(/.test(text)) return 'A process substitution, `<(…)`, runs a command of its own, and this role only reads.'
   const { commands, operators, expanded, opaque, grouped, evaluated } = splitCommandLine(text)
   if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
@@ -3397,21 +3614,26 @@ const readerCommandReason = (text: string): string | undefined => {
       if (option !== undefined) return `\`${program} ${option}\` has the shell read or run more than its script, and this role only reads.`
       const written = writes(inner).filter((target) => target !== '/dev/null')
       if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
-      const reason = readerCommandReason(args[script + 1] ?? '')
+      const reason = readerCommandReason(args[script + 1] ?? '', trusted)
       if (reason !== undefined) return reason
       continue
     }
     // A program whose flags are read closely can't take one the shell made from a file's name; after `--` none is a flag.
-    const reads = READS[program]
+    const reads = READS[program] ?? (trusted ? TRUSTED_READS[program] : undefined)
     if (reads !== undefined && reads !== 'any') {
       const ends = inner.indexOf('--')
       const at = [...(expanded[index] ?? [])]
         .map((each) => (movedTo.get(each) ?? each) - dropped)
-        .find((each) => each >= 1 && (ends === -1 || each < ends) && !REDIRECTS.includes(inner[each - 1] ?? ''))
+        .find(
+          (each) =>
+            each >= 1 && (ends === -1 || each < ends) && !REDIRECTS.includes(inner[each - 1] ?? '') && !onlyNames(inner[each] ?? ''),
+        )
+      if (at !== undefined && SUBSTITUTED.test(inner[at] ?? ''))
+        return `What \`$(…)\` prints could start with a dash, which \`${program}\` would take for a flag: run it on its own and name what it prints, or put it after \`--\`, as this role only reads.`
       if (at !== undefined)
         return `The shell would expand \`${inner[at]}\`, which \`${program}\` could take for a flag where a file's name starts with a dash; quote it or name the files, as this role only reads.`
     }
-    const reason = readerWordsReason(inner)
+    const reason = readerWordsReason(inner, trusted)
     if (reason !== undefined) return reason
   }
   return undefined
@@ -3421,6 +3643,131 @@ const readerCommandReason = (text: string): string | undefined => {
 export const OFFLINE =
   'This review has no network: the pull request is from outside the project, and its words could send you to a page of their choosing. Read the pull request with read_pull_request, and its code in your copy.'
 
+/** How a reader is held: see `decideReader`. */
+export interface ReaderOptions {
+  readonly offline?: boolean
+  readonly cwd?: string
+  readonly trusted?: boolean
+  /**
+   * Where a trusted reader's own tools may read (ADR-058): none of `denied`
+   * but what `allowed` gives back, real paths, as its sandbox holds its
+   * commands. Its agent's tools for reading and searching aren't in the
+   * sandbox, so the rules hold them.
+   */
+  readonly reads?: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
+}
+
+/** Why a trusted reader may not read a place outside what it is given. */
+const HELD_REFUSED =
+  "That is outside what this role reads: the person's home folder, their checkouts and the task folders, but for your working folder and its copies."
+
+/** Why a trusted reader may not search from a place that is, or holds, one outside what it is given. */
+const SEARCH_REFUSED = `${HELD_REFUSED} A search from a folder above one of those goes into it: search from your working folder or a copy in it.`
+
+/** A path as the filesystem has it, links followed, as far as it is there. */
+const realOf = (path: string, paths: typeof posix): string => {
+  try {
+    return realpathSync(path)
+  } catch {
+    const parent = paths.dirname(path)
+    return parent === path ? path : paths.join(realOf(parent, paths), paths.basename(path))
+  }
+}
+
+/**
+ * Whether a trusted reader's tool reading `path` reaches into a place it is
+ * held from, and not one given back. A search goes down from where it starts,
+ * so one that starts above a place held from it reaches into it too.
+ */
+const heldFrom = (path: string, cwd: string, reads: NonNullable<ReaderOptions['reads']>, searches = false, system: System = systemOf()) => {
+  const { paths, home, caseless } = system
+  const fold = (value: string) => (caseless ? value.toLowerCase() : value)
+  const target = fold(realOf(paths.resolve(cwd, path.replace(HOME_WORD, home)), paths))
+  const inside = (outer: string, inner: string) => {
+    const between = paths.relative(outer, inner)
+    return !between.startsWith('..') && !paths.isAbsolute(between)
+  }
+  const within = (place: string) => inside(fold(place), target)
+  if (reads.denied.some(within) && !reads.allowed.some(within)) return true
+  return searches && reads.denied.some((place) => inside(target, fold(place)))
+}
+
+/** Glob's characters: a pattern's folder is what comes before the first. */
+const GLOB_CHARACTER = /[*?[{]/
+
+/**
+ * Where a search starts: the folder it names, or the working folder, and the
+ * folder a pattern of paths names before its first glob character where it
+ * leaves that folder (absolute, from home, or up with `..`), as Glob's
+ * `pattern` or Grep's `glob` may.
+ */
+const searchRootsOf = (request: PermissionRequest, cwd: string): ReadonlyArray<string> => {
+  const named = pathsOf(request)
+  const from = named[0] ?? cwd
+  const patterns = ['pattern', 'glob']
+    .map((key) => field(request.rawInput, key))
+    .filter((value): value is string => typeof value === 'string')
+    .filter((value) => value.startsWith('/') || HOME_WORD.test(value) || /(^|[/\\])\.\.($|[/\\])/.test(value))
+    .map((value) => {
+      const glob = value.search(GLOB_CHARACTER)
+      const fixed = glob === -1 ? value : value.slice(0, glob)
+      const folder = fixed.slice(0, Math.max(fixed.lastIndexOf('/'), fixed.lastIndexOf('\\')) + 1)
+      return folder === '' ? fixed : folder
+    })
+    .map((folder) => (folder.startsWith('/') || HOME_WORD.test(folder) ? folder : `${from}/${folder}`))
+  return [...(named.length === 0 ? [cwd] : named), ...patterns]
+}
+
+/** Why a trusted reader may not read a `.env` file outside its folder. */
+const ENV_REFUSED =
+  "A .env file outside your working folder holds the person's secrets, such as their checkout's; this role reads only its own copies'."
+
+/** A `.env` file outside a trusted reader's folder, as the person's checkout's is: from `~`, or from the folder. */
+const envOutside = (path: string, cwd: string, system: System = systemOf()) => {
+  const { paths, home } = system
+  const target = paths.resolve(cwd, path.replace(HOME_WORD, home))
+  const inside = paths.relative(cwd, target)
+  return envFile(target) && (inside.startsWith('..') || paths.isAbsolute(inside))
+}
+
+/**
+ * Whether a trusted reader's line names a `.env` file outside its folder:
+ * by its path, or by any name at all where a `cd` takes it elsewhere first.
+ */
+const envOutsideIn = (command: string, cwd: string) => {
+  const { commands } = parseCommandLine(command)
+  const moves = commands.some((words) => ['cd', 'pushd'].includes(words[0] ?? ''))
+  return commands.some((words) =>
+    words
+      .slice(1)
+      .flatMap(pathsInWord)
+      .some((path) => (moves ? envFile(path) : envOutside(path, cwd))),
+  )
+}
+
+/**
+ * Why a command line a reader wants to run would do more than look, or
+ * nothing when it only looks. A trusted reader's substitutions, `$(…)` and
+ * backticks, are each read as a line of their own, and what they print as
+ * words the shell expands.
+ */
+const readerLineReason = (command: string, options: ReaderOptions): string | undefined => {
+  if (options.trusted === true) {
+    if (options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
+    const found = substitutionsIn(command)
+    if (typeof found === 'string') return found
+    if (found.scripts.length > 0)
+      return [...found.scripts, found.text].map((line) => readerLineReason(line, options)).find((reason) => reason !== undefined)
+  }
+  return (
+    parseCommandLine(command)
+      .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
+      .find((found) => found !== undefined) ??
+    secretCommandReason(command, options.cwd) ??
+    readerCommandReason(command, options.trusted === true)
+  )
+}
+
 /**
  * Decides a request from a role that only reads. Nothing here asks a person:
  * a reader's request is allowed or refused. `offline`, as the lead of a
@@ -3428,18 +3775,27 @@ export const OFFLINE =
  * on the network: a fetch is refused, as anything the agent's sandbox asks
  * to reach is, and no command it may run reaches the network anyway. `cwd`
  * is the folder the agent works in, which the paths it names are read from.
+ * `trusted`, as the coordinator is in its own copies of the project's
+ * repositories (ADR-058), it may also run `$(…)` and backticks whose
+ * commands only look, a few programs that say how the computer stands
+ * (`uptime`), and list tags with patterns: never the lead of a review.
  */
-export const decideReader = (
-  request: PermissionRequest,
-  options: { readonly offline?: boolean; readonly cwd?: string } = {},
-): ReaderVerdict => {
+export const decideReader = (request: PermissionRequest, options: ReaderOptions = {}): ReaderVerdict => {
   if (ALTHAR_TOOL.test(request.title)) return ALLOW
   switch (request.kind) {
     case 'read':
     case 'search': {
-      // A reader may read anything but where the person keeps keys and sign-ins.
+      // A reader may read anything but where the person keeps keys and sign-ins; a trusted one, no `.env` outside its folder either.
       const secret = secretReason(request, options.cwd)
-      return secret === undefined ? ALLOW : deny(secret)
+      if (secret !== undefined) return deny(secret)
+      const { cwd, reads } = options
+      if (options.trusted !== true || cwd === undefined) return ALLOW
+      const read = pathsOf(request)
+      if (read.some((path) => envOutside(path, cwd))) return deny(ENV_REFUSED)
+      if (reads === undefined) return ALLOW
+      if (request.kind === 'search')
+        return searchRootsOf(request, cwd).some((path) => heldFrom(path, cwd, reads, true)) ? deny(SEARCH_REFUSED) : ALLOW
+      return read.some((path) => heldFrom(path, cwd, reads)) ? deny(HELD_REFUSED) : ALLOW
     }
     case 'think':
       return ALLOW
@@ -3452,12 +3808,7 @@ export const decideReader = (
     default: {
       const command = commandIn(request.rawInput) ?? (request.kind === 'execute' ? request.title : undefined)
       if (command === undefined || command === '') return deny("Althar can't tell what this does, and this role only reads.")
-      const reason =
-        parseCommandLine(command)
-          .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
-          .find((found) => found !== undefined) ??
-        secretCommandReason(command, options.cwd) ??
-        readerCommandReason(command)
+      const reason = readerLineReason(command, options)
       return reason === undefined ? ALLOW : deny(reason)
     }
   }

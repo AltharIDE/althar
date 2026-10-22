@@ -1,4 +1,4 @@
-import { type Container, ConnectorFailed, type Issue, type Product, products, type Tracker } from '@althar/connectors'
+import { type Container, ConnectorFailed, type Issue, type Priority, type Product, products, type Tracker } from '@althar/connectors'
 import { type ActorId, Ids, type IssueDraftState, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -46,6 +46,8 @@ export interface DraftCard {
   readonly title: string
   readonly body: string
   readonly labels: ReadonlyArray<string>
+  /** Its priority, where the tracker has priorities; null for the tracker's default. */
+  readonly priority: Priority | null
   readonly state: IssueDraftState
   /** Why it wasn't filed, in the tracker's words, while it stands failed. */
   readonly error: string | null
@@ -134,6 +136,7 @@ interface Row {
   readonly title: string
   readonly body: string
   readonly labels: string
+  readonly priority: Priority | null
   readonly state: IssueDraftState
   readonly error: string | null
   readonly issueKey: string | null
@@ -151,6 +154,7 @@ export const cardOf = (row: Row): DraftCard => ({
   title: row.title,
   body: row.body,
   labels: Schema.decodeUnknownSync(Labels)(row.labels),
+  priority: row.priority,
   state: row.state,
   error: row.error,
   issue: row.issueKey === null || row.issueUrl === null ? null : { key: row.issueKey, url: row.issueUrl },
@@ -228,14 +232,21 @@ export class IssueDrafts extends Context.Service<
       readonly title: string
       readonly body: string
       readonly labels: ReadonlyArray<string>
+      /** Its priority; left out, or on a tracker without priorities, it has none, and is filed at the tracker's default. */
+      readonly priority?: Priority
       /** The task whose lead drafts it: where its own issue came from is where an unnamed draft goes. */
       readonly taskId?: string
       readonly actorId: ActorId
     }): Effect.Effect<DraftCard, unknown>
-    /** Changes what a draft says, before it is filed: `DraftClosed` after, `DraftUntitled` without a title. */
+    /** Changes what a draft says, before it is filed: `DraftClosed` after, `DraftUntitled` without a title. A priority left out stays; null takes it off. */
     change(
       draftId: string,
-      draft: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+      draft: {
+        readonly title: string
+        readonly body: string
+        readonly labels: ReadonlyArray<string>
+        readonly priority?: Priority | null
+      },
       actorId: ActorId,
     ): Effect.Effect<void, unknown>
     /** Files a draft on its tracker, because the person said to; one that failed, again. The card says how it went; `DraftClosed` once filed or discarded. */
@@ -257,8 +268,8 @@ export class IssueDrafts extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<Row>`
-            SELECT id, project_id, thread_id, connection_id, product, tracker_name, container, container_name, title, body, labels, state, error,
-              issue_key, issue_url
+            SELECT id, project_id, thread_id, connection_id, product, tracker_name, container, container_name, title, body, labels, priority,
+              state, error, issue_key, issue_url
             FROM issue_drafts WHERE id = ${draftId} AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
           return row === undefined ? yield* new NotFound({ kind: 'issue draft', id: draftId }) : row
         })
@@ -480,6 +491,11 @@ export class IssueDrafts extends Context.Service<
             if (waiting !== undefined) return cardOf(yield* load(waiting.id))
             const draftId = yield* newId(Ids.issueDraft)
             const labels = labelsOf(input.labels)
+            // A tracker without priorities files it at its own default: none is kept to show.
+            const priority =
+              input.priority === undefined || input.priority === 'none' || !where.tracker.capabilities.changes.includes('priority')
+                ? null
+                : input.priority
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const at = yield* timestamp
@@ -495,6 +511,7 @@ export class IssueDrafts extends Context.Service<
                   title,
                   body: input.body.trim(),
                   labels: JSON.stringify(labels),
+                  priority,
                   state: 'pending',
                   draftedByActorId: input.actorId,
                   createdAt: at,
@@ -506,7 +523,7 @@ export class IssueDrafts extends Context.Service<
                   aggregateId: draftId,
                   revision: 1,
                   type: 'issue_draft.drafted',
-                  payload: { product: where.product, tracker: where.label, container: where.container.name, title, labels },
+                  payload: { product: where.product, tracker: where.label, container: where.container.name, title, labels, priority },
                   actorId: input.actorId,
                 })
                 yield* addItem({ projectId: input.projectId, threadId: input.threadId }, 'issue_draft', cardOf(yield* load(draftId)))
@@ -528,7 +545,12 @@ export class IssueDrafts extends Context.Service<
             const result = yield* transition(
               draftId,
               open,
-              () => ({ title, body: next.body.trim(), labels: JSON.stringify(labelsOf(next.labels)) }),
+              () => ({
+                title,
+                body: next.body.trim(),
+                labels: JSON.stringify(labelsOf(next.labels)),
+                ...(next.priority === undefined ? {} : { priority: next.priority === 'none' ? null : next.priority }),
+              }),
               'issue_draft.changed',
               actorId,
               (row) => ({ title: row.title }),
@@ -610,6 +632,7 @@ export class IssueDrafts extends Context.Service<
                         title: row.title,
                         body: row.body,
                         labels: Schema.decodeUnknownSync(Labels)(row.labels),
+                        ...(row.priority === null ? {} : { priority: row.priority }),
                       }),
               ),
               Effect.result,

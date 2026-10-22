@@ -1130,6 +1130,7 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          changeIssues: false,
           // A repository with no packages, on no host: only what every lead runs outside its sandbox.
           sandbox: {
             commands: ['ps', 'env -i'],

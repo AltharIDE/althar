@@ -6,14 +6,18 @@ import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
 import { AdfNode, adfOf, markdownOfAdf, markdownOfWiki, wikiOf } from './jiraText'
 import {
+  cantChange,
   type Account,
+  type Choice,
   type Container,
   type Issue,
+  type IssueField,
   leftAsItIs,
   type Person,
   type Priority,
   type StatusCategory,
   type Tracker,
+  unchangeable,
   unstarted,
 } from './model'
 import { type Answer, answered, failedOf, probe, readAs, refusalOf, serverLine, stopped, UNREADABLE } from './probe'
@@ -163,11 +167,27 @@ const issueTypeOf = (types: typeof IssueTypes.Type) => {
   return all.find((type) => type.subtask !== true && /^task$/i.test(type.name)) ?? all.find((type) => type.subtask !== true)
 }
 
+/** What Jira changes of an issue: all but a project, which an issue is filed in and moved between only by Jira's own move. */
+const CHANGES: ReadonlyArray<IssueField> = ['status', 'close', 'priority', 'assignee', 'labels', 'title']
+
+/** One of a site's priorities. */
+const PriorityAnswer = Schema.Struct({ id: Schema.String, name: Schema.String })
+
+/** The names a level goes by first, before any other a site's own priority of that level has: Jira's own five. */
+const NAMED: Readonly<Record<Priority, string>> = { urgent: 'highest', high: 'high', medium: 'medium', low: 'low', none: 'none' }
+
+/** A site's priority for a level: the one named as Jira names it, or else its first of that level. */
+export const priorityFor = (priorities: ReadonlyArray<typeof PriorityAnswer.Type>, level: Priority) =>
+  priorities.find((one) => one.name.trim().toLowerCase() === NAMED[level]) ?? priorities.find((one) => levelOf(one.name) === level)
+
 /** A label as Jira can hold it: one word, so its spaces become hyphens. */
 export const jiraLabelOf = (label: string): string => label.trim().replace(/\s+/g, '-')
 
 /** How many projects a page of Cloud's project search holds: its most. */
 const PROJECTS_PAGE = 100
+
+/** Two names alike, in any case. */
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
 
 /** A JQL string, quoted. */
 const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
@@ -253,17 +273,131 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
   )
 
   // A key as typed (proj-123) is the key: Jira's keys are upper case.
-  const issue = (ref: string) =>
+  const read = (ref: string) =>
     Effect.map(
       call((root) => http.json(IssueAnswer, 'GET', `${root}${issuePath(ref.trim().toUpperCase())}?fields=${FIELDS}`)),
       issueOf,
     )
 
+  /** The site's priorities, as it lists them. */
+  const priorities = call((root) => http.json(Schema.Array(PriorityAnswer), 'GET', `${root}/priority`))
+
+  /** The transitions its workflow offers an issue now, those it marks unavailable left out. */
+  const transitionsOf = (issue: Issue) =>
+    Effect.map(
+      call((root) => http.json(Transitions, 'GET', `${root}${issuePath(issue.ref)}/transitions`)),
+      ({ transitions }) => transitions.filter((each) => each.isAvailable !== false),
+    )
+
+  const choices: Tracker['choices'] = (issue, field, wanted) => {
+    switch (field) {
+      // Where its workflow lets it go from where it is, by the status each transition goes into; and where it is.
+      case 'status':
+        return Effect.map(transitionsOf(issue), (transitions) => {
+          const names = [issue.status.name, ...transitions.map((each) => each.to.name)]
+          return [...new Map(names.map((name) => [name.toLowerCase(), name])).values()].map((name): Choice => ({ id: name, name }))
+        })
+      // Jira makes any label it is given: the one wanted, as Jira can hold it, and those the issue has.
+      case 'labels': {
+        const asked = wanted === undefined ? '' : jiraLabelOf(wanted)
+        return Effect.succeed(
+          [...new Set([...issue.labels, ...(asked === '' ? [] : [asked])])].map((label): Choice => ({ id: label, name: label })),
+        )
+      }
+      // Jira finds people by a name rather than listing them: those the issue can be assigned to.
+      case 'assignee': {
+        const query =
+          wanted === undefined || wanted.trim() === '' ? '' : `&${cloud ? 'query' : 'username'}=${encodeURIComponent(wanted.trim())}`
+        return Effect.map(
+          call((root) =>
+            http.json(
+              Schema.Array(User),
+              'GET',
+              `${root}/user/assignable/search?issueKey=${encodeURIComponent(issue.ref)}&maxResults=50${query}`,
+            ),
+          ),
+          (users) =>
+            users.map((user): Choice => {
+              const person = personOf(user)
+              const email = 'accountId' in user ? user.emailAddress : undefined
+              return {
+                id: 'accountId' in user ? user.accountId : user.name,
+                name: person.name ?? person.login,
+                also: [person.login, ...(email === undefined ? [] : [email])],
+              }
+            }),
+        )
+      }
+      case 'project':
+        return Effect.fail(cantChange(product, 'project', 'Jira moves an issue to another project only by its own Move'))
+    }
+  }
+
+  const changeIssue: Tracker['update'] = (issue, wanted) =>
+    Effect.gen(function* () {
+      const refused = unchangeable({ links: true, starts: true, changes: CHANGES }, wanted)
+      if (refused !== undefined) return yield* cantChange(product, refused, 'Jira moves an issue to another project only by its own Move')
+      const path = issuePath(issue.ref)
+      if (wanted.priority === 'none')
+        return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'A Jira issue always has a priority: name one' })
+      const priority = wanted.priority === undefined ? undefined : priorityFor(yield* priorities, wanted.priority)
+      if (wanted.priority !== undefined && priority === undefined)
+        return yield* new ConnectorFailed({ product, reason: 'rejected', message: `This site has no ${wanted.priority} priority` })
+      // Its title and priority are set, and its labels added and taken off, in one edit.
+      const fields = {
+        ...(wanted.title === undefined ? {} : { summary: wanted.title }),
+        ...(priority === undefined ? {} : { priority: { id: priority.id } }),
+      }
+      const labels = [
+        ...(wanted.labels?.add ?? []).map((label) => ({ add: label.id })),
+        ...(wanted.labels?.remove ?? []).map((label) => ({ remove: label.id })),
+      ]
+      if (Object.keys(fields).length > 0 || labels.length > 0)
+        yield* call((root) =>
+          http.json(Schema.Unknown, 'PUT', `${root}${path}`, {
+            ...(Object.keys(fields).length === 0 ? {} : { fields }),
+            ...(labels.length === 0 ? {} : { update: { labels } }),
+          }),
+        )
+      // Someone, by Cloud's account id or Data Center's user name; none takes the assignee off.
+      if (wanted.assignee !== undefined)
+        yield* call((root) =>
+          http.json(
+            Schema.Unknown,
+            'PUT',
+            `${root}${path}/assignee`,
+            cloud ? { accountId: wanted.assignee?.id ?? null } : { name: wanted.assignee?.id ?? null },
+          ),
+        )
+      // A status, by the transition its workflow offers into it now; closed, by one into Done's category, Done itself first.
+      if (wanted.status !== undefined || wanted.close === true) {
+        const target = wanted.status?.name
+        const there =
+          target === undefined ? issue.status.category === 'done' || issue.status.category === 'cancelled' : same(issue.status.name, target)
+        if (!there) {
+          const transitions = yield* transitionsOf(issue)
+          const into =
+            target !== undefined
+              ? transitions.find((each) => same(each.to.name, target))
+              : (transitions.find((each) => each.to.statusCategory?.key === 'done' && /^done$/i.test(each.to.name)) ??
+                transitions.find((each) => each.to.statusCategory?.key === 'done'))
+          if (into === undefined)
+            return yield* new ConnectorFailed({
+              product,
+              reason: 'rejected',
+              message: `Its workflow has no way from ${issue.status.name} into ${target ?? 'Done'}`,
+            })
+          yield* call((root) => http.json(Schema.Unknown, 'POST', `${root}${path}/transitions`, { transition: { id: into.id } }))
+        }
+      }
+      return yield* read(issue.ref)
+    })
+
   return {
     product,
-    capabilities: { links: true, starts: true },
+    capabilities: { links: true, starts: true, changes: CHANGES },
     account,
-    issue,
+    issue: read,
     mine: (options = {}) => {
       const jql = [
         'assignee = currentUser() AND statusCategory != Done',
@@ -340,32 +474,44 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
             message: `The project ${project} has no type of issue Althar can file: sub-tasks need a parent`,
           })
         const labels = [...new Set(draft.labels.map(jiraLabelOf).filter((label) => label !== ''))]
+        // A priority by the site's own name for it; a site with none of that level files it at its default.
+        const priority =
+          draft.priority === undefined || draft.priority === 'none'
+            ? undefined
+            : priorityFor(yield* priorities.pipe(Effect.orElseSucceed(() => [])), draft.priority)
         const fields = {
           project: { key: project },
           issuetype: { id: type.id },
           summary: draft.title,
           ...(draft.body === '' ? {} : { description: cloud ? adfOf(draft.body) : wikiOf(draft.body) }),
         }
-        // What was filed, with the labels it was filed with.
-        const file = (sent: ReadonlyArray<string>) =>
+        // What was filed, with the labels it was filed with, and its priority where it was given one.
+        const file = (sent: ReadonlyArray<string>, prioritised: boolean) =>
           Effect.map(
             call((root) =>
               http.json(Schema.Struct({ id: Schema.String, key: Schema.String }), 'POST', `${root}/issue`, {
-                fields: sent.length > 0 ? { ...fields, labels: sent } : fields,
+                fields: {
+                  ...fields,
+                  ...(sent.length > 0 ? { labels: sent } : {}),
+                  ...(prioritised && priority !== undefined ? { priority: { id: priority.id } } : {}),
+                },
               }),
             ),
             (filed) => ({ ...filed, labels: sent }),
           )
-        // Jira makes any label it is given, but a project whose screen has no labels refuses them: the issue is filed without.
-        const filed = yield* file(labels).pipe(
+        // Jira makes any label it is given, but a project whose screen has no labels refuses them, as one without priorities refuses
+        // a priority: the issue is filed without what its screen refused.
+        const filed = yield* file(labels, true).pipe(
           Effect.catchIf(
-            (error) => labels.length > 0 && error.reason === 'rejected' && /\blabels\b/i.test(error.message),
-            () => file([]),
+            (error) =>
+              error.reason === 'rejected' &&
+              ((labels.length > 0 && /\blabels\b/i.test(error.message)) || (priority !== undefined && /\bpriority\b/i.test(error.message))),
+            (error) => file(/\blabels\b/i.test(error.message) ? [] : labels, !/\bpriority\b/i.test(error.message)),
           ),
         )
         // Filed: a failed read of it now is no reason to file it again, so it is what was sent.
         const now = yield* Clock.currentTimeMillis
-        return yield* issue(filed.key).pipe(
+        return yield* read(filed.key).pipe(
           Effect.orElseSucceed((): Issue => ({
             id: filed.id,
             ref: filed.key,
@@ -382,6 +528,8 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
           })),
         )
       }),
+    choices,
+    update: changeIssue,
   }
 }
 

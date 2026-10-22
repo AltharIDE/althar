@@ -480,6 +480,8 @@ describe('the API', () => {
               ChangeIssueDraft: () => Effect.void,
               FileIssueDraft: () => Effect.void,
               DiscardIssueDraft: () => Effect.void,
+              ApplyIssueChanges: () => Effect.void,
+              DiscardIssueChanges: () => Effect.void,
               ChangeReviewDraft: () => Effect.void,
               PostReviewDraft: () => Effect.void,
               DiscardReviewDraft: () => Effect.void,
@@ -558,6 +560,7 @@ describe('the API', () => {
               StopListening: () => Effect.void,
               AttachPullRequest: () =>
                 Effect.succeed({ kind: 'attached' as const, name: 'PR #1', source: 'main', started: false, kept: 0, own: 0 }),
+              ReadBackgroundOutput: () => Effect.succeed({ text: '', dropped: 0 }),
               StopBackground: () => Effect.void,
               ClearBackground: () => Effect.void,
               RunProject: () => Effect.die('unused'),

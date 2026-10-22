@@ -468,6 +468,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved to its tracker's In Progress as the task starts. */
   moveIssues: Schema.Boolean,
+  /** Whether changes to issues (status, priority, assignee, labels, closing) apply without waiting on the person's card. */
+  changeIssues: Schema.Boolean,
   /** What each of the project's repositories says, in the project's order. */
   conventions: Schema.Array(RepositoryConventions),
   /** What its leads' sandboxes let through from the start. */
@@ -1173,6 +1175,8 @@ export type PlanStep = typeof PlanStep.Type
 export const BackgroundCommand = Schema.Struct({
   id: Schema.String,
   command: Schema.String,
+  /** What the agent says it does, where it named it apart from the command: "Site dev server". Absent where it only gave the command. */
+  name: Schema.optional(Schema.String),
   /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
   label: Schema.optional(Schema.String),
   /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
@@ -1491,6 +1495,10 @@ export const PushRequestItem = Schema.Struct({
   }),
 })
 
+/** An issue's priority, as every tracker's fall into. */
+export const IssuePriority = Schema.Literals(['urgent', 'high', 'medium', 'low', 'none'])
+export type IssuePriority = typeof IssuePriority.Type
+
 /** Where an issue the coordinator drafted stands: waiting on you, being filed, filed, not filed and why, perhaps filed (its answer was lost), or discarded. */
 export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
@@ -1512,6 +1520,8 @@ export const IssueDraftCard = Schema.Struct({
   /** Markdown. */
   body: Schema.String,
   labels: Schema.Array(Schema.String),
+  /** The priority it is filed with, where the tracker has priorities; null for none, or the tracker's default. */
+  priority: Schema.NullOr(IssuePriority),
   state: IssueDraftState,
   /** Why it wasn't filed, while it stands failed, or why it may have been, while uncertain: in the tracker's words, or Althar's. */
   error: Schema.NullOr(Schema.String),
@@ -1524,6 +1534,64 @@ export const IssueDraftItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('issue_draft'),
   content: IssueDraftCard,
+})
+
+/** Where changes to issues stand: waiting on you, being applied, applied, not all applied (each issue says why), or discarded. */
+export const IssueChangeState = Schema.Literals(['pending', 'applying', 'applied', 'failed', 'discarded'])
+export type IssueChangeState = typeof IssueChangeState.Type
+
+/**
+ * One thing changed on an issue, in the tracker's words: its status, closed,
+ * its priority, who it is assigned to (null for nobody), its project or
+ * milestone (null for none), its title; labels added and taken off; or,
+ * applied at once, a comment and a link.
+ */
+export const IssueChangeLine = Schema.Union([
+  Schema.Struct({
+    field: Schema.Literals(['status', 'close', 'priority', 'assignee', 'project', 'title', 'comment', 'link']),
+    to: Schema.NullOr(Schema.String),
+  }),
+  Schema.Struct({ field: Schema.Literal('labels'), add: Schema.Array(Schema.String), remove: Schema.Array(Schema.String) }),
+])
+export type IssueChangeLine = typeof IssueChangeLine.Type
+
+/**
+ * Changes to one or more issues on the person's trackers, in the thread of
+ * whoever proposed them (docs/architecture/06, "Changing issues"): each
+ * issue, what changes on it, and how applying it went. Status, priority,
+ * assignee, labels and closing wait on the person to apply them here, unless
+ * the project lets them through; a comment and a link are applied already.
+ * Althar posts it and keeps it current.
+ */
+export const IssueChangesCard = Schema.Struct({
+  changesId: Schema.String,
+  /** Why, in a sentence, where whoever proposed it said: its pull request merged. */
+  note: Schema.NullOr(Schema.String),
+  state: IssueChangeState,
+  /** Why not all of it applied, while it stands failed. */
+  error: Schema.NullOr(Schema.String),
+  /** Whether the project's rules applied it without asking. */
+  direct: Schema.Boolean,
+  issues: Schema.Array(
+    Schema.Struct({
+      product: Product,
+      tracker: Schema.String,
+      key: Schema.String,
+      url: Schema.String,
+      title: Schema.String,
+      changes: Schema.Array(IssueChangeLine),
+      /** Applied, or not and why; null until it was tried. */
+      applied: Schema.NullOr(Schema.Boolean),
+      error: Schema.NullOr(Schema.String),
+    }),
+  ),
+})
+export type IssueChangesCard = typeof IssueChangesCard.Type
+
+export const IssueChangesItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('issue_changes'),
+  content: IssueChangesCard,
 })
 
 /** How much a comment in a review matters, as its lead says: blocking it, a major or minor point, or a nit. */
@@ -1641,6 +1709,7 @@ export const ThreadItem = Schema.Union([
   SetupItem,
   PushRequestItem,
   ReviewDraftItem,
+  IssueChangesItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -2556,6 +2625,8 @@ export const Api = RpcGroup.make(
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
+  /** What a command a thread's session left running has printed so far, while its session lives. */
+  call('ReadBackgroundOutput', { threadId: Schema.String, id: Schema.String }, OutputText),
   /**
    * A markdown document an agent in a thread wrote, as it is now in the
    * task's worktree: by the path the thread names it by. Only a markdown
@@ -2622,13 +2693,24 @@ export const Api = RpcGroup.make(
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   command(
     'ChangeIssueDraft',
-    { draftId: Schema.String, title: Schema.String, body: Schema.String, labels: Schema.Array(Schema.String) },
+    {
+      draftId: Schema.String,
+      title: Schema.String,
+      body: Schema.String,
+      labels: Schema.Array(Schema.String),
+      /** Left out, it stays as it is; null files it at the tracker's default. */
+      priority: Schema.optional(Schema.NullOr(IssuePriority)),
+    },
     Schema.Void,
   ),
   /** Files an issue the coordinator drafted, on its tracker; or one that wasn't filed, again. Its card says how it went. */
   command('FileIssueDraft', { draftId: Schema.String }, Schema.Void),
   /** Discards an issue the coordinator drafted: nothing is filed. */
   command('DiscardIssueDraft', { draftId: Schema.String }, Schema.Void),
+  /** Applies changes to issues on their trackers; or what didn't apply, again. Its card says how it went. */
+  command('ApplyIssueChanges', { changesId: Schema.String }, Schema.Void),
+  /** Discards changes to issues: nothing changes on the tracker. */
+  command('DiscardIssueChanges', { changesId: Schema.String }, Schema.Void),
   /**
    * Changes a review the lead drafted, before it is posted: the verdict it
    * posts with, its summary, and which of its comments are kept, or what
@@ -2939,6 +3021,7 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      changeIssues: Schema.optional(Schema.Boolean),
       /** What the person changed of what leads' sandboxes let through, each list whole. */
       sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
       /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */

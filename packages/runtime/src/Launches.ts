@@ -18,6 +18,7 @@ import { Live } from './Live'
 import { change, fact, timestamp } from './records'
 import { shortCommand } from './rules'
 import { lineOf, type RunCommand, runOf, type Script, scriptsIn, setupIn } from './runCommand'
+import { shotOf, shotWords, VIEWPORT } from './screenshots'
 import { Setups } from './Setups'
 import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
@@ -100,9 +101,9 @@ export class LaunchRefused extends Schema.TaggedError<LaunchRefused>()('LaunchRe
 /** How often, and for how long, a run is read for where it answers. */
 const SERVING_EVERY = Duration.millis(500)
 const SERVING_TRIES = 1_200
-/** How long the coordinator waits for a run it started to say where it answers, so it can give the person a link. */
+/** How long an agent waits for a run it started to say where it answers, so it can give the person a link, or read it. */
 const ANSWERING_WITHIN = Duration.seconds(30)
-/** How many of the last lines a run printed the coordinator reads, when it ended at once. */
+/** How many of the last lines a run printed an agent reads, when it ended at once. */
 const LAST_LINES = 15
 
 interface Binding {
@@ -966,6 +967,45 @@ export class Launches extends Context.Service<
         })
       const lastLines = (printed: string) => uncoloured(printed).trimEnd().split('\n').slice(-LAST_LINES).join('\n') || '(nothing)'
 
+      /** The project's runnable an agent names, by its name or its command; its default without one. */
+      const namedRun = (projectId: string, run: string | undefined) =>
+        Effect.gen(function* () {
+          const wanted = run?.trim().toLowerCase()
+          if (wanted === undefined || wanted === '') return undefined
+          const named = (yield* runnables(projectId, null)).find(
+            (one) => one.name?.toLowerCase() === wanted || one.command.toLowerCase() === wanted,
+          )
+          if (named === undefined)
+            return yield* new ToolRefused({ message: `The project runs nothing called ${run}. ${yield* listed(projectId)}` })
+          return named
+        })
+
+      /** Starts a run an agent asked for, and says how it is once it says where it answers, or ends, or a while goes by. */
+      const runFor = (
+        access: ToolAccess,
+        task: { readonly id: string; readonly slug: string } | undefined,
+        asked: typeof Asked.Type,
+        place: string,
+        after: { readonly answering: string; readonly quiet: string },
+      ) =>
+        Effect.gen(function* () {
+          const named = yield* namedRun(access.projectId, asked.run)
+          const started = yield* start({
+            projectId: access.projectId,
+            taskId: task?.id ?? null,
+            threadId: access.threadId,
+            ...(named === undefined ? {} : { runnableId: named.id }),
+            ...(asked.repository === undefined ? {} : { repository: asked.repository }),
+          })
+          // It mostly says where it answers within seconds: waiting for that gives the person a link at once.
+          const launch = yield* settled(started.id, ANSWERING_WITHIN)
+          const running = `Running \`${started.command}\` in ${place}`
+          if (launch?.ended != null)
+            return `\`${started.command}\` in ${place} ended at once${launch.ended.code === null ? '' : `, with exit code ${launch.ended.code}`}. Its last lines:\n\n${lastLines(launch.printed)}\n\n${after.quiet}`
+          if (launch?.url != null) return `${running}, at ${launch.url}. ${after.answering}`
+          return `${running}. It hasn't said where it answers yet; the person sees it in the Running pill, with its address once it says, and stops it there.`
+        })
+
       const runTool: Tool = {
         name: 'run_project',
         description:
@@ -994,40 +1034,142 @@ export class Launches extends Context.Service<
                         SELECT id, slug FROM tasks WHERE project_id = ${access.projectId} AND (id = ${asked.task} OR slug = ${asked.task})`
                 if (asked.task !== undefined && task === undefined)
                   return yield* new ToolRefused({ message: `This project has no task ${asked.task}. list_tasks shows them.` })
-                const wanted = asked.run?.trim().toLowerCase()
-                const named =
-                  wanted === undefined
-                    ? undefined
-                    : (yield* runnables(access.projectId, null)).find(
-                        (one) => one.name?.toLowerCase() === wanted || one.command.toLowerCase() === wanted,
-                      )
-                if (wanted !== undefined && named === undefined)
-                  return yield* new ToolRefused({
-                    message: `The project runs nothing called ${asked.run}. ${yield* listed(access.projectId)}`,
-                  })
-                const started = yield* start({
-                  projectId: access.projectId,
-                  taskId: task?.id ?? null,
-                  threadId: access.threadId,
-                  ...(named === undefined ? {} : { runnableId: named.id }),
-                  ...(asked.repository === undefined ? {} : { repository: asked.repository }),
-                })
-                // It mostly says where it answers within seconds: waiting for that gives the person a link at once.
-                const launch = yield* settled(started.id, ANSWERING_WITHIN)
-                const place = task === undefined ? 'a fresh copy of the default branch' : `${task.slug}'s worktree`
-                const running = `Running \`${started.command}\` in ${place}`
-                if (launch?.ended != null)
-                  return `\`${started.command}\` in ${place} ended at once${launch.ended.code === null ? '' : `, with exit code ${launch.ended.code}`}. Its last lines:\n\n${lastLines(launch.printed)}\n\nTell the person why, in a sentence; if how it runs is wrong, keep how with set_run_command or keep_run and run it again.`
-                if (launch?.url != null)
-                  return `${running}, at ${launch.url}. Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from the Running pill too.`
-                return `${running}. It hasn't said where it answers yet; the person sees it in the Running pill, with its address once it says, and stops it there.`
+                return yield* runFor(
+                  access,
+                  task,
+                  asked,
+                  task === undefined ? 'a fresh copy of the default branch' : `${task.slug}'s worktree`,
+                  {
+                    answering:
+                      "Give the person that address as a link, with the page on it they'd want, if one; they can open and stop it from the Running pill too.",
+                    quiet:
+                      'Tell the person why, in a sentence; if how it runs is wrong, keep how with set_run_command or keep_run and run it again.',
+                  },
+                )
               }),
             ),
           ),
       }
 
-      yield* toolServer.serve('coordinator', [runTool, keepTool(() => instance.coordinatorId), keepRunTool(() => instance.coordinatorId)])
-      yield* toolServer.serve('lead', [keepTool(() => instance.systemId), keepRunTool(() => instance.systemId)])
+      /*
+       * A lead runs the project in its own worktree, as the coordinator runs a
+       * task's: the same run, with its card in the task's thread and in the
+       * Running pill, which the person opens and stops as any other. It stops
+       * only its task's runs.
+       */
+      const LeadAsked = Schema.Struct({ run: Schema.optional(Schema.String), repository: Schema.optional(Schema.String) })
+      const leadRunTool: Tool = {
+        name: 'run_project',
+        description:
+          'Runs the project in your worktree, outside your sandbox, as Althar runs it for the person: its default run command, or with run the one of the things it runs by that name (Storybook), after its setup. Use it rather than starting a dev server yourself: it answers on localhost as it would, and the person sees it in the Running pill over the composer, with where it answers, and can open or stop it there. It returns once it says where it answers, or ends, with its last lines if it did; a run of it already going is the one returned. It stays running until you stop it with stop_project, or the person stops it: stop it once you no longer need it. In a task of several repositories, say which, as repository.',
+        input: {
+          type: 'object',
+          properties: {
+            run: {
+              type: 'string',
+              description: 'The name of one of the things the project runs, as keep_run kept it; its default without.',
+            },
+            repository: { type: 'string' },
+          },
+        },
+        call: (input, access) =>
+          said(
+            provide(
+              Effect.gen(function* () {
+                if (access.taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
+                const asked = yield* read(LeadAsked, input)
+                const sql = yield* SqlClient.SqlClient
+                const [task] = yield* sql<{ id: string; slug: string }>`SELECT id, slug FROM tasks WHERE id = ${access.taskId}`
+                if (task === undefined) return yield* new ToolRefused({ message: 'Althar can’t find this task. Tell the person.' })
+                return yield* runFor(access, task, asked, 'your worktree', {
+                  answering:
+                    'Read it there, or take a screenshot of it with screenshot; stop it with stop_project once you no longer need it.',
+                  quiet: 'Fix what stopped it, or, if how it runs is wrong, keep how with set_run_command or keep_run, and run it again.',
+                })
+              }),
+            ),
+          ),
+      }
+
+      const StopAsked = Schema.Struct({ run: Schema.optional(Schema.String) })
+      const stopTool: Tool = {
+        name: 'stop_project',
+        description:
+          "Stops what you ran with run_project in your worktree, or the person ran there: with run, the one by that name or command; without, each of the task's runs. It goes from the Running pill. What runs from the default branch, or another task's worktree, isn't yours to stop.",
+        input: { type: 'object', properties: { run: { type: 'string' } } },
+        call: (input, access) =>
+          said(
+            Effect.gen(function* () {
+              if (access.taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
+              const asked = yield* read(StopAsked, input)
+              const ours = [...launches.values()].filter(
+                (launch) => launch.projectId === access.projectId && launch.taskId === access.taskId,
+              )
+              const wanted = asked.run?.trim().toLowerCase()
+              const chosen =
+                wanted === undefined || wanted === ''
+                  ? ours
+                  : ours.filter((launch) => launch.name?.toLowerCase() === wanted || launch.command.toLowerCase() === wanted)
+              if (chosen.length === 0)
+                return ours.length === 0
+                  ? 'Nothing runs in your worktree, so there was nothing to stop.'
+                  : yield* new ToolRefused({
+                      message: `Nothing called ${asked.run} runs in your worktree. What runs there: ${ours.map((launch) => launch.name ?? launch.command).join(', ')}.`,
+                    })
+              for (const launch of chosen) yield* stop(launch.id)
+              return `Stopped ${chosen.map((launch) => `\`${launch.command}\``).join(', ')} in your worktree.`
+            }),
+          ),
+      }
+
+      /*
+       * A screenshot Althar takes itself, headless, outside the agent's
+       * sandbox, where Chromium in the agent's would fail: of a page served on
+       * this computer, a run's or a dev server's, given back as a picture.
+       */
+      const screenshotTool: Tool = {
+        name: 'screenshot',
+        description: `Takes a screenshot of a web page served on this computer, such as what run_project runs or a dev server or Storybook on localhost, and gives it back to you as a picture, at 1×. Althar draws it itself, headless, outside your sandbox, so use it rather than starting a browser yourself. The viewport is ${VIEWPORT.width}×${VIEWPORT.height} without width and height; full_page takes the whole page, as tall as it is; selector takes only the first element a CSS selector finds. It waits for the page to load, not for what it fetches after: for a page that fills in later, take it again. Pages on the internet aren't taken. Each picture stays in your context, so take only what you need to see.`,
+        input: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'The page, such as http://localhost:5173/settings.' },
+            width: { type: 'integer', minimum: 240, maximum: 3840 },
+            height: { type: 'integer', minimum: 160, maximum: 2160 },
+            full_page: { type: 'boolean' },
+            selector: { type: 'string', description: 'A CSS selector, for one element of the page.' },
+          },
+          required: ['url'],
+        },
+        call: (input, access) =>
+          Effect.gen(function* () {
+            const take = config.screenshot
+            if (take === undefined)
+              return yield* new ToolRefused({ message: 'This Althar can’t take screenshots: only the desktop app draws pages.' })
+            // What Althar runs for the project answers where it says, which may be by this computer's name rather than localhost.
+            const running = [...launches.values()].flatMap((launch) =>
+              launch.projectId === access.projectId && launch.ended === null && launch.url !== null ? [launch.url] : [],
+            )
+            const shot = shotOf(input, running)
+            if (typeof shot === 'string') return yield* new ToolRefused({ message: shot })
+            const taken = yield* take(shot).pipe(Effect.mapError((why) => new ToolRefused({ message: `Althar couldn’t take it: ${why}` })))
+            return { text: shotWords(shot, taken), image: { data: taken.png, mimeType: 'image/png' } }
+          }),
+      }
+
+      yield* toolServer.serve('coordinator', [
+        screenshotTool,
+        runTool,
+        keepTool(() => instance.coordinatorId),
+        keepRunTool(() => instance.coordinatorId),
+      ])
+      yield* toolServer.serve('lead', [
+        keepTool(() => instance.systemId),
+        keepRunTool(() => instance.systemId),
+        leadRunTool,
+        stopTool,
+        screenshotTool,
+      ])
 
       return Launches.of({
         start,

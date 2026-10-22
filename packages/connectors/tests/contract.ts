@@ -110,6 +110,7 @@ export const trackerContract = (subject: TrackerSubject) =>
         assert.isArray(yield* tracker.mine({ limit: 5 }))
         yield* tracker.comment(issue, 'A comment from the Althar connectors contract.')
         if (tracker.capabilities.links) yield* tracker.link(issue, { url: 'https://example.com/althar-contract', title: 'Althar contract' })
+        if (tracker.capabilities.changes.includes('status')) assert.isNotEmpty(yield* tracker.choices(issue, 'status'))
       }),
     )
   })

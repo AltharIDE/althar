@@ -11,6 +11,7 @@ import { adapterNode, asNode, type CapturedFrame, childEnvironment, environmentD
 import { agents } from '../src/registry'
 import { fakeAgentMain, scenarios } from '../src/testing'
 import { text } from './contract'
+import { ownTemp } from './ownTemp'
 
 /** Where the processes run: the system's temporary folder, which every system has, as `/tmp` isn't on Windows. */
 const here = tmpdir()
@@ -163,11 +164,15 @@ describe('the process transport', () => {
   )
 
   it.live('removes the temporary folder of a command that never started', () =>
-    Effect.gen(function* () {
-      const before = readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length
-      yield* Effect.flip(Effect.scoped(spawnOwned({ command: 'althar-no-such-agent', args: [], privateTemp: true }, here)))
-      assert.isAtMost(readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length, before)
-    }),
+    Effect.acquireUseRelease(
+      Effect.sync(ownTemp),
+      ({ folder }) =>
+        Effect.gen(function* () {
+          yield* Effect.flip(Effect.scoped(spawnOwned({ command: 'althar-no-such-agent', args: [], privateTemp: true }, here)))
+          assert.deepStrictEqual(readdirSync(folder), [])
+        }),
+      ({ restore }) => Effect.sync(restore),
+    ),
   )
 
   it.live('fails to start a command that does not exist', () =>
