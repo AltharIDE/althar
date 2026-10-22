@@ -29,7 +29,7 @@ describe('the app’s preferences kept in the profile', () => {
       showLoad: true,
       usageData: true,
       crashReports: true,
-      appearance: 'system',
+      appearance: 'light',
     })
   })
 
