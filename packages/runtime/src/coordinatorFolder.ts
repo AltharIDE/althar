@@ -18,7 +18,7 @@ import { Instance } from './Instance'
  * nothing the coordinator writes survives or reaches a task. A project with
  * no repositories gets an empty folder.
  *
- * A copy is a repository of its own (ADR-056): its git folder, made again
+ * A copy is a repository of its own (ADR-058): its git folder, made again
  * for every turn, borrows the person's repository's objects to read, and its
  * only remote is a bare mirror of that repository's refs Althar keeps beside
  * the folder, out of the coordinator's reach. So the coordinator's `git
@@ -45,7 +45,7 @@ export interface CoordinatorFolder {
   }>
   /**
    * What the coordinator's commands may read, where a sandbox holds them
-   * (ADR-056): none of `denied` (the home folder, the person's checkouts,
+   * (ADR-058): none of `denied` (the home folder, the person's checkouts,
    * Althar's folders for the project's tasks) but what `allowed` gives back
    * (its folder, the mirrors, the objects its copies borrow, and the
    * toolchains a command runs on). Real paths, as a sandbox matches them.
@@ -93,7 +93,7 @@ const real = (path: string): string => {
 }
 
 /**
- * What the coordinator's sandboxed commands may read (ADR-056): none of the
+ * What the coordinator's sandboxed commands may read (ADR-058): none of the
  * home folder, the project's task folders or the person's checkouts, but its
  * folder, the mirrors, the objects its copies borrow, the toolchains there
  * are and git's config files. Git's config folder is `$XDG_CONFIG_HOME/git`

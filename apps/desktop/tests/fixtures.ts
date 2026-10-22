@@ -28,6 +28,7 @@ import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
+import { withChange } from '../src/renderer/features/rules/useRules'
 import type { Host } from '../src/renderer/data/services'
 
 /* What the runtime would say, as plain values, and a client that says it. */
@@ -64,6 +65,11 @@ export const projectRules: ProjectRulesView = {
   titlePattern: null,
   moveIssues: true,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
+  sandbox: {
+    commands: ['bunx playwright', 'node scripts/e2e.ts', 'ps', 'env -i'],
+    hosts: ['github.com', 'registry.npmjs.org'],
+    edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
+  },
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [
@@ -834,6 +840,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
+    readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readDocument: vi.fn(async (_threadId: string, path: string) => ({
       path,
       body: '# Notes\n\nRefunds share the partner budget.\n',
@@ -886,10 +893,15 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
       postTeamReviews: false,
+      folderWait: 'smart' as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
+    setFolderWait: vi.fn(async () => {}),
+    getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
+    cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 0 })),
+    removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
     moveInLine: vi.fn(async () => {}),
     lineOldestFirst: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
@@ -949,7 +961,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     dropProjectNote: vi.fn(async () => {}),
     editProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
-    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
+    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({
+      ...withChange(projectRules, change),
+      projectId,
+    })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
       ...usual('acc_added', 'signed_out'),
       name: input.name,

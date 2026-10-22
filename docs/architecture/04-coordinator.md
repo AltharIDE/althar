@@ -73,7 +73,7 @@ Read-only is enforced by what the coordinator can reach, not by its prompt,
 in three layers ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)).
 A reviewer, the other role that only reads, gets the same, but for what the
 coordinator may run in copies of its own
-([ADR-056](../decisions/056-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)).
+([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)).
 
 - It reads throwaway copies. Its working directory is an Althar-owned
   folder holding one copy per bound repository, detached at the default
@@ -120,7 +120,7 @@ provisional.
 | `find_tasks` | The project's tasks found by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number, an issue's key, a branch or a file; best first, a line each with where it stands, its pull request, its id and what matched ([02](02-desktop-runtime.md#queries)) | Read |
 | `read_thread` | A task's thread, or, without a task, its own conversation: the latest part, then further back a part at a time | Read |
 | `read_change` | A task's diff and checks | Read |
-| `read_pull_request` | Any of the project's pull requests, whoever opened it, by its number or link, as its host has it now: state, where it goes and whether it conflicts there, size, description, checks with the end of a failed one's log, and what everyone said on it, as data ([ADR-056](../decisions/056-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)) | Read |
+| `read_pull_request` | Any of the project's pull requests, whoever opened it, by its number or link, as its host has it now: state, where it goes and whether it conflicts there, size, description, checks with the end of a failed one's log, and what everyone said on it, as data ([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)) | Read |
 | `read_check_log` | A check's whole log on one of the project's pull requests, a page at a time ([ADR-041](../decisions/041-what-failed-said-in-full.md)) | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
 | `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
@@ -133,12 +133,19 @@ provisional.
 | `rename_task` | Gives a task another title, as the person can, where its title no longer says what it does; its slug and branch stay, and what the person asked stays in its thread | Command |
 | `make_it_a_change` | A lead's, not the coordinator's: offered only on a quick task not made a change yet, and refused, with why, on any other. Called when the person asks to turn what the lead made into a real thing: a title for what it does now, a reviewer named as `propose_plan` names one (none only where the person said so), and a pull request, a draft or ready for review. Makes its branch where it has none; renames the task and gives its plan, and the run under way, the review and the ending, or opens a round with them where its last run had ended; its thread and the coordinator's news say so. The lead's next `finish_step` goes through the review, then the pull request opens ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)) | Command |
 | `run_project` | Runs the project with no agent, its default or one of what it runs by name: the default branch in a copy of its own, or a task's worktree (ADR-023, ADR-044) | Command |
+| `screenshot` | A picture of a page served on this computer, a run's or a dev server's, drawn offscreen by the desktop app at a viewport, whole or one element; leads have it too (ADR-057) | Read |
 | `set_run_command` | Keeps how a repository runs, its own way to run, for Althar to run it; leads have it too (ADR-023) | Command |
 | `keep_run` | Keeps something more for the project to run by a name and a command, or drops it; leads have it too (ADR-044) | Command |
 | `order_tasks` | Orders a batch | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |
 | `keep_note`, `list_notes`, `drop_note` | The project's notes: a decision the person made, in a sentence; at most 40 (ADR-031) | Command |
 | `recommend_lead` | Records a lead recommendation and its reasons | Command |
+
+A lead's own tools, beside `finish_step` and its pull request's, do what its
+sandbox would refuse, outside it (ADR-057): `install_dependencies` runs its
+worktree's setup again; `run_project` and `stop_project` run the project in
+its worktree, as the run the person sees; `screenshot`, as above; and
+`rerun_check` runs checks on its pull request again.
 
 The same server serves every session. The read tools are how a lead, a step,
 or an agent that took over a task reads the record its brief left out. Command

@@ -1,4 +1,4 @@
-# ADR-056: The coordinator is a trusted reader, in copies of its own, held by a sandbox where it has one
+# ADR-058: The coordinator is a trusted reader, in copies of its own, held by a sandbox where it has one
 
 - **Status:** Accepted
 - **Date:** 2026-10-21

@@ -74,6 +74,8 @@ export type RoundBlock =
   | { readonly kind: 'relayed'; readonly id: string; readonly title: string | null; readonly body: string }
   /** Althar, saying something the person should know: a conflict, checks. */
   | { readonly kind: 'althar'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' }
+  /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
+  | { readonly kind: 'folder'; readonly id: string; readonly text: string }
   /** A reviewer's verdict and findings, in its own voice. */
   | { readonly kind: 'verdict'; readonly id: string; readonly at: string; readonly result: StepResult }
   /** The pull request the task opened or pushed to. */
@@ -90,12 +92,14 @@ const ASIDES = [
   /showed no sign of work/,
 ]
 
-const roleOf = (content: NoticeContent): 'relayed' | 'aside' | 'news' =>
-  relayed(content)
-    ? 'relayed'
-    : content.role === 'aside' || (content.role === undefined && ASIDES.some((pattern) => pattern.test(content.title)))
-      ? 'aside'
-      : 'news'
+const roleOf = (content: NoticeContent): 'relayed' | 'aside' | 'folder' | 'news' =>
+  content.role === 'folder'
+    ? 'folder'
+    : relayed(content)
+      ? 'relayed'
+      : content.role === 'aside' || (content.role === undefined && ASIDES.some((pattern) => pattern.test(content.title)))
+        ? 'aside'
+        : 'news'
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`)
 
@@ -298,6 +302,10 @@ export const roundsOf = (
           return
         }
         close(false)
+        if (role === 'folder') {
+          out.push({ kind: 'folder', id: block.id, text: block.text })
+          return
+        }
         out.push({ kind: 'althar', id: block.id, text: shorter(block.text), tone: content.severity === 'info' ? 'info' : 'warning' })
         return
       }

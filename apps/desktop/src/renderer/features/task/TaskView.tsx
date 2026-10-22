@@ -60,7 +60,7 @@ import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { roundsOf } from '../../shared/rounds'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
-import { type Outgoing, takesImages, useImages } from '../../shared/useImages'
+import { type Outgoing, outgoingOf, takesImages, useImages } from '../../shared/useImages'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
@@ -77,6 +77,7 @@ import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
 import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
+import { BackgroundOutput } from './BackgroundOutput'
 import { NoOutputsView } from './NoOutputsView'
 import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
@@ -138,6 +139,8 @@ export const text = {
   /** A task that isn't a change, its lead done: the person settles it, or keeps it for later. */
   finished: 'Finished',
   kept: 'Kept for later',
+  /** Its folder coming back from its branch, and set up again, before its lead goes on (ADR-056). */
+  returning: 'Bringing its folder back',
   /** What the composer suggests to a task that finished and isn't a change, in grey: Tab takes it, Enter sends it to its lead. */
   suggest: 'Mark this as done',
   /** Issues its lead drafted wait for the person to file. */
@@ -174,6 +177,8 @@ export const statusOf = (
   const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
+  // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
+  if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
@@ -322,6 +327,8 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
+  // The command its lead left running whose output is shown.
+  const [outputOf, setOutputOf] = useState<string | null>(null)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
   // Attaching it to a pull request asks which; then, where its branch isn't based on that one's head, whether to start it there.
@@ -481,7 +488,9 @@ export function TaskView({
   // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
   const running = [...(session?.background ?? []), ...snapshot.task.launches]
   const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
-  const leftRunning = runningOf(running, now)
+  // Althar's own runs keep their output in their cards, not here.
+  const leftRunning = runningOf(running, now).map((one) => (launched.has(one.id) ? { ...one, output: false } : one))
+  const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
     ...(snapshot.task.request === null || snapshot.earlier
@@ -589,6 +598,17 @@ export function TaskView({
       if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said.pictures)
     }
+  }
+
+  // A queued message goes to the lead now, interrupting it, rather than when the lead is done: out of the queue, and said again. One the lead has already read stays as it was.
+  const sendQueuedNow = async (id: string) => {
+    const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
+    if (said === undefined || !(await model.takeBack(id))) return
+    if (await model.sendNow(said.text, outgoingOf(said))) return
+    // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
+    setDraft((current) => withQueued(current, said.text))
+    if (said.dictated === true) setDraftDictated(kept, true)
+    images.restore(said.pictures)
   }
 
   const issue = snapshot.task.issue
@@ -742,6 +762,7 @@ export function TaskView({
                 processes={leftRunning}
                 onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
                 onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
+                onOutput={setOutputOf}
                 // Where it answers opens in the person's browser.
                 onOpenUrl={(id) => {
                   const url = running.find((command) => command.id === id)?.url
@@ -758,6 +779,7 @@ export function TaskView({
         busy={busy}
         queued={queuedOf(snapshot.items, queue)}
         onEditQueued={(id) => void edit(id)}
+        onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(receiver.name)}
         meter={contextMeter(session, named, model.compact)}
@@ -1118,6 +1140,15 @@ export function TaskView({
             })
           }
           onClose={() => setAttaching(null)}
+        />
+      )}
+      {outputShown !== undefined && threadId !== null && (
+        <BackgroundOutput
+          threadId={threadId}
+          id={outputShown.id}
+          name={outputShown.name ?? outputShown.label ?? outputShown.command}
+          command={outputShown.command}
+          onClose={() => setOutputOf(null)}
         />
       )}
       {changes.open && (

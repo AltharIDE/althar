@@ -7,6 +7,7 @@ import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
+import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { keepingAwake } from './awake'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
@@ -19,6 +20,9 @@ import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
+import type { Shot } from '@althar/runtime'
+import { pageWindow } from './screenshotWindow'
+import { takeScreenshot } from './screenshots'
 import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
@@ -43,6 +47,7 @@ import {
   Menu,
   MessageChannelMain,
   nativeImage,
+  nativeTheme,
   net,
   Notification,
   powerMonitor,
@@ -54,7 +59,7 @@ import {
   utilityProcess,
 } from 'electron'
 
-import { appMenu, windowOptions } from './windowOptions'
+import { appMenu, PAGE, windowOptions } from './windowOptions'
 import { keyringIsSafe, keyringUnavailable, passwordStore, sealWithPortal, sealsWithPortal, withPortalFeature } from './keyring'
 
 /*
@@ -214,6 +219,8 @@ interface RuntimeMessage {
   readonly usage?: unknown
   /** What the runtime couldn't handle (runtime/crashes.ts); crashReports.ts reads it. */
   readonly crash?: unknown
+  /** A screenshot an agent asked for (screenshots.ts). */
+  readonly shot?: Shot
   readonly event?: {
     readonly _tag?: string
     readonly kind?: unknown
@@ -246,9 +253,29 @@ let waiting = 0
  * as kept. A change waits for that read, so the read can't undo it.
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
+
+/*
+ * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
+ * follows the scheme that gives, and its paper with it (paintPaper). On Linux, where Electron has no word of the
+ * desktop's own setting, the Settings portal's is followed while Appearance is as the system is (themeSourceFor).
+ */
+let linuxScheme: Scheme | undefined
+const applyAppearance = () => {
+  nativeTheme.themeSource = themeSourceFor(preferences.appearance, process.platform, linuxScheme)
+}
+if (process.platform === 'linux') {
+  const stop = followDesktopScheme((scheme) => {
+    linuxScheme = scheme
+    applyAppearance()
+  })
+  // On the process's exit, as the tray's watch: quitting ends in app.exit, which skips will-quit.
+  process.once('exit', stop)
+}
+
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
   awake.wants(kept)
+  applyAppearance()
   // A count the runtime gave before the file was read is shown again as the person has it.
   if (waiting > 0) app.setBadgeCount(dockCount(waiting, kept))
 })
@@ -443,6 +470,21 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   }
 }
 
+/** Takes a screenshot an agent asked for, offscreen, and answers with it or why not (screenshots.ts). */
+const screenshot = (child: UtilityProcess, message: RuntimeMessage) => {
+  const { requestId, shot } = message
+  if (requestId === undefined || shot === undefined) return
+  void takeScreenshot(shot, pageWindow).then(
+    (value) => child.postMessage({ type: 'screenshot-taken', requestId, value }),
+    (error: unknown) =>
+      child.postMessage({ type: 'screenshot-taken', requestId, error: error instanceof Error ? error.message : String(error) }),
+  )
+}
+/* The end-to-end tests take one as an agent would, straight from the main process (e2e/screenshots.spec.ts). Packaged builds leave this out. */
+if (__ALTHAR_TEST_HOOKS__)
+  (globalThis as unknown as { takeScreenshot: (shot: Shot) => Promise<unknown> }).takeScreenshot = (shot) =>
+    takeScreenshot(shot, pageWindow)
+
 const startRuntime = () => {
   const { profile, worktrees } = locations()
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
@@ -465,6 +507,7 @@ const startRuntime = () => {
   child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
+    if (message.type === 'screenshot') return screenshot(child, message)
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
@@ -572,6 +615,13 @@ const openOutside = (url: string) => {
 /** Althar's picture for the window's icon on Linux, at the size X11 takes: the full-size file would silently overflow the property and leave the window iconless. */
 const windowIcon = () => nativeImage.createFromPath(join(here, '../../resources/icons/cobalt.png')).resize({ width: 128, height: 128 })
 
+/** The paper under every window's page, in the scheme's shade: what shows as it resizes, or before the page draws. */
+const paintPaper = () => {
+  const paper = nativeTheme.shouldUseDarkColors ? PAGE.dark : PAGE.light
+  for (const window of windows) if (!window.isDestroyed()) window.setBackgroundColor(paper)
+}
+nativeTheme.on('updated', paintPaper)
+
 const openWindow = () => {
   const window = new BrowserWindow({
     width: 1280,
@@ -580,7 +630,7 @@ const openWindow = () => {
     minHeight: 600,
     show: false,
     // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), and on Linux it carries Althar's icon.
-    ...windowOptions(process.platform, windowIcon()),
+    ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
       sandbox: true,
@@ -717,6 +767,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
   awake.wants(preferences)
+  if (key === 'appearance') applyAppearance()
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })
@@ -808,7 +859,16 @@ void ready.then(() => {
     const menu = appMenu(process.platform, !app.isPackaged)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
-  openWindow()
+  // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
+  // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
+  void preferencesRead
+    .catch(() => undefined)
+    .then(() =>
+      process.platform === 'linux' && preferences.appearance === 'system' ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT) : undefined,
+    )
+    .then(() => {
+      if (windows.size === 0) openWindow()
+    })
   startReports({
     profile: () => locations().profile,
     // The install's one id, the one usage data keeps (usageData.ts), whether or not its switch is on.

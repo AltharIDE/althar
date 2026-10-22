@@ -9,7 +9,7 @@ import { Effect } from 'effect'
 import { freshCopy, readsOf } from '../src/coordinatorFolder'
 
 /*
- * The coordinator's copies of the project's repositories (ADR-056): each a
+ * The coordinator's copies of the project's repositories (ADR-058): each a
  * repository of its own, so what the coordinator's `git fetch` and `git tag`
  * write stays in the copy; and nothing it leaves there, in the git folder or
  * as a link, ever has Althar's own git reach the person's checkout.

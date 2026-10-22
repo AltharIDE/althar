@@ -9,7 +9,7 @@ import {
   type ProductInfo,
   products,
 } from '@althar/connectors'
-import { makeFakeService } from '@althar/connectors/testing'
+import { type FakeCheck, makeFakeService } from '@althar/connectors/testing'
 import { Connectors } from '@althar/runtime'
 import { Effect, Layer } from 'effect'
 
@@ -20,16 +20,22 @@ import { Effect, Layer } from 'effect'
  * meridian/api, with one issue, and meridian/web where
  * ALTHAR_FAKE_REMOTE_WEB is set, with the pull requests ALTHAR_FAKE_PULLS
  * lists for a test to review; what is pushed to one goes to the bare
- * repository ALTHAR_FAKE_REMOTE_API or _WEB names, else ALTHAR_FAKE_REMOTE. A pasted token connects it, and so
+ * repository ALTHAR_FAKE_REMOTE_API or _WEB names, else ALTHAR_FAKE_REMOTE, and its commits have the checks
+ * ALTHAR_FAKE_CHECKS names, where it does. A pasted token connects it, and so
  * does gh's sign-in, which is signed in to it. Loaded only when
- * ALTHAR_FAKE_AGENTS is set.
+ * ALTHAR_FAKE_AGENTS is set, or, with real agents, ALTHAR_FAKE_CONNECTORS=github.
  */
 
 export const HOST = 'https://github.test'
 
+/** The checks every pull request's commits have, where a test names them (ALTHAR_FAKE_CHECKS, as JSON); else those a test sets. */
+const namedChecks =
+  process.env.ALTHAR_FAKE_CHECKS === undefined ? undefined : (JSON.parse(process.env.ALTHAR_FAKE_CHECKS) as ReadonlyArray<FakeCheck>)
+
 // A repository's pushes go to ALTHAR_FAKE_REMOTE_<NAME> where that is set, as a test of several repositories gives each its own.
 const github = makeFakeService({
   pushUrl: (path) => process.env[`ALTHAR_FAKE_REMOTE_${(path.at(-1) ?? '').toUpperCase()}`] ?? process.env.ALTHAR_FAKE_REMOTE ?? '',
+  ...(namedChecks === undefined ? {} : { checksFor: () => namedChecks }),
 })
 github.addRepository(['meridian', 'api'])
 // Only for a test that gives it somewhere to push: every other sees the one repository it always did.

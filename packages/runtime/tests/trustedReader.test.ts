@@ -8,7 +8,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { decideReader } from '../src/rules'
 
 /*
- * The coordinator as a trusted reader (ADR-056): in its own copies of the
+ * The coordinator as a trusted reader (ADR-058): in its own copies of the
  * project's repositories it may run more than a review's lead, which reads
  * a repository it doesn't trust. Where its agent has no sandbox Althar can
  * hold it in, these rules are what holds it.

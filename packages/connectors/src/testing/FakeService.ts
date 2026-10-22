@@ -37,7 +37,12 @@ import { leftAsItIs, noListing, noReviews, stillOpen, unstarted } from '../model
  */
 
 /** A check as a fake host runs it: its log, or the refusal reading it meets, and its page. */
-export type FakeCheck = Pick<Check, 'name' | 'state'> & { readonly log?: string | ConnectorFailed; readonly url?: string }
+export type FakeCheck = Pick<Check, 'name' | 'state'> & {
+  readonly log?: string | ConnectorFailed
+  readonly url?: string
+  /** Whether it runs again when asked: it does, unless the service says none do; false for one another CI service reported, or why the host refuses. */
+  readonly rerun?: false | ConnectorFailed
+}
 
 export interface FakeServiceOptions {
   readonly product?: Product
@@ -183,6 +188,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const logs = new Map<string, string | ConnectorFailed | null>()
   const reran: Array<string> = []
   const starting = new Set<string>()
+  /** Checks that don't run again when asked, by id: false, or the host's refusal. */
+  const fixed = new Map<string, false | ConnectorFailed>()
   const issues = new Map<string, Issue>()
   const assigned = new Set<string>()
   const issueComments = new Map<string, Array<string>>()
@@ -417,6 +424,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ran.map((check, index): Check => {
             const id = `check-${change.number}-${sha}-${index}`
             logs.set(id, check.log ?? null)
+            if (check.rerun === undefined) fixed.delete(id)
+            else fixed.set(id, check.rerun)
             // Run again, a check shows as running for a reading, as a host's does once it has started it again.
             const again = starting.delete(id)
             return { id, name: check.name, state: again ? 'running' : check.state, url: check.url ?? null, summary: null }
@@ -430,7 +439,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       }),
     rerun: (_repository, check) =>
       Effect.andThen(called('rerun'), () => {
-        if (options.reruns === false) return Effect.succeed(false)
+        const again = fixed.get(check.id)
+        if (again instanceof ConnectorFailed) return Effect.fail(again)
+        if (options.reruns === false || again === false) return Effect.succeed(false)
         reran.push(check.id)
         starting.add(check.id)
         return Effect.succeed(true)

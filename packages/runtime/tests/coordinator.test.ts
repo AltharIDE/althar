@@ -1412,7 +1412,7 @@ describe('a step whose agent stalls or goes round in circles', () => {
   )
 })
 
-describe('the coordinator, a trusted reader in its own copies (ADR-056)', () => {
+describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => {
   it.live('is started with its folder as its sandbox’s, and its commands meet the trusted reader’s rules', () =>
     Effect.gen(function* () {
       const config = yield* RuntimeConfig

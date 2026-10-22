@@ -175,6 +175,15 @@ export const AgentsAtOnce = Schema.Struct({
 })
 export type AgentsAtOnce = typeof AgentsAtOnce.Type
 
+/**
+ * When finished tasks' folders go (ADR-056): by how each task ended
+ * (`smart`: a review's at once, a merged change's after 3 days, a done
+ * task's after a week, an abandoned one's after 2 weeks, sooner when space
+ * runs low), one wait for all, or only when the person cleans up.
+ */
+export const FolderWait = Schema.Literals(['smart', 'day', 'week', 'month', 'never'])
+export type FolderWait = typeof FolderWait.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
@@ -182,8 +191,63 @@ export const AppSettings = Schema.Struct({
   agentsAtOnce: AgentsAtOnce,
   /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
   postTeamReviews: Schema.Boolean,
+  /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
+  folderWait: FolderWait,
 })
 export type AppSettings = typeof AppSettings.Type
+
+/** How a finished task ended, which its folder's wait goes by. */
+export const FolderKind = Schema.Literals(['merged', 'done', 'abandoned', 'review'])
+export type FolderKind = typeof FolderKind.Type
+
+/**
+ * Why a finished task's folder stays though Clean up runs or its wait is
+ * up: changes in it not committed, a change's commits pushed nowhere,
+ * something running from it, opened in an editor from Althar within the
+ * day, or git couldn't say what is in it. The person can still remove it by
+ * hand, but while something runs from it.
+ */
+export const FolderHold = Schema.Literals(['uncommitted', 'unpushed', 'running', 'opened', 'unreadable'])
+export type FolderHold = typeof FolderHold.Type
+
+/**
+ * What holds a finished task's folder, the gravest where several do:
+ * something running from it, then what would be lost with it, then its
+ * being opened lately; and how many of what (files not committed, commits
+ * pushed nowhere).
+ */
+export const FolderHeld = Schema.Struct({ why: FolderHold, count: Schema.NullOr(Schema.Int) })
+export type FolderHeld = typeof FolderHeld.Type
+
+/** A finished task's folder still on this computer: its task, how and when it ended, its size, and what holds it, if anything. */
+export const FinishedFolder = Schema.Struct({
+  taskId: Schema.String,
+  threadId: Schema.String,
+  title: Schema.String,
+  project: Schema.String,
+  kind: FolderKind,
+  settledAt: Schema.String,
+  /** On disk, in bytes, as `du` counts it, its repositories' folders together; null until measured. */
+  bytes: Schema.NullOr(Schema.Number),
+  /** Why it stays; null where nothing holds it. */
+  held: Schema.NullOr(FolderHeld),
+})
+export type FinishedFolder = typeof FinishedFolder.Type
+
+/** Finished tasks' folders on this computer, and the disk they are on. */
+export const TaskFolders = Schema.Struct({
+  /** The disk the folders are on, in bytes: its size and what is used; null where it couldn't be read. */
+  disk: Schema.NullOr(Schema.Struct({ total: Schema.Number, used: Schema.Number })),
+  /** Every finished task's folder still here, the latest settled first. */
+  folders: Schema.Array(FinishedFolder),
+  /** Some sizes are still being measured; the feed says once they are (`folders`). */
+  measuring: Schema.Boolean,
+})
+export type TaskFolders = typeof TaskFolders.Type
+
+/** What removing finished tasks' folders freed, measured on the disk after, in bytes; and how many it couldn't remove. */
+export const FoldersFreed = Schema.Struct({ freed: Schema.Number, failed: Schema.Int })
+export type FoldersFreed = typeof FoldersFreed.Type
 
 export const Status = Schema.Struct({
   apiVersion: Schema.Number,
@@ -354,6 +418,27 @@ export const RepositoryConventions = Schema.Struct({
 })
 export type RepositoryConventions = typeof RepositoryConventions.Type
 
+/** What the person added to a list Althar works out for a project, and took from it. */
+export const SandboxEdits = Schema.Struct({ added: Schema.Array(Schema.String), removed: Schema.Array(Schema.String) })
+export type SandboxEdits = typeof SandboxEdits.Type
+
+/**
+ * What a project's leads' sandboxes let through from the start: commands
+ * they run outside it rather than failing inside it first, and hosts they
+ * reach without asking. Each list is what Althar works out from the project,
+ * with the person's edits; a command still meets the rules, and the hosts
+ * apply only while the rules let the rest through.
+ */
+export const SandboxReachView = Schema.Struct({
+  /** Commands by how they start: `bunx playwright`, `bun run test:e2e`. */
+  commands: Schema.Array(Schema.String),
+  /** Hosts by name: `github.com`, `registry.npmjs.org`. */
+  hosts: Schema.Array(Schema.String),
+  /** What the person changed of each, kept over what is worked out later. */
+  edits: Schema.Struct({ commands: SandboxEdits, hosts: SandboxEdits }),
+})
+export type SandboxReachView = typeof SandboxReachView.Type
+
 /** A project's rules, as its rules screen shows them. */
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
@@ -385,6 +470,8 @@ export const ProjectRulesView = Schema.Struct({
   moveIssues: Schema.Boolean,
   /** What each of the project's repositories says, in the project's order. */
   conventions: Schema.Array(RepositoryConventions),
+  /** What its leads' sandboxes let through from the start. */
+  sandbox: SandboxReachView,
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
 
@@ -959,7 +1046,12 @@ export const NoticeItem = Schema.Struct({
     severity: Schema.Literals(['info', 'warning', 'error']),
     title: Schema.String,
     description: Schema.NullOr(Schema.String),
-    role: Schema.optional(Schema.Literals(['aside', 'relayed'])),
+    /**
+     * How the thread draws it, where not as Althar's own line: an aside in the
+     * work, what the coordinator relayed, or its task's folder going or coming
+     * back, a line across the thread (ADR-056).
+     */
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
   }),
 })
 
@@ -1081,6 +1173,8 @@ export type PlanStep = typeof PlanStep.Type
 export const BackgroundCommand = Schema.Struct({
   id: Schema.String,
   command: Schema.String,
+  /** What the agent says it does, where it named it apart from the command: "Site dev server". Absent where it only gave the command. */
+  name: Schema.optional(Schema.String),
   /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
   label: Schema.optional(Schema.String),
   /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
@@ -1883,6 +1977,12 @@ export const ThreadSnapshot = Schema.Struct({
     state: Schema.String,
     branch: Schema.NullOr(Schema.String),
     worktree: Schema.NullOr(Schema.String),
+    /**
+     * Its folder, where it isn't on this computer as it should be: removed once
+     * the task finished (ADR-056), or coming back, from its branch, and
+     * setting up again. Absent while it is here.
+     */
+    folder: Schema.optional(Schema.Literals(['removed', 'returning'])),
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
@@ -2458,6 +2558,8 @@ export const Api = RpcGroup.make(
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
+  /** What a command a thread's session left running has printed so far, while its session lives. */
+  call('ReadBackgroundOutput', { threadId: Schema.String, id: Schema.String }, OutputText),
   /**
    * A markdown document an agent in a thread wrote, as it is now in the
    * task's worktree: by the path the thread names it by. Only a markdown
@@ -2593,6 +2695,19 @@ export const Api = RpcGroup.make(
    * there is room now.
    */
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
+  /** When finished tasks' folders go from now on; a sweep runs at once by it. */
+  command('SetFolderWait', { wait: FolderWait }, Schema.Void),
+  /** Finished tasks' folders on this computer, with the disk they are on: sizes not yet measured start being measured. */
+  call('GetTaskFolders', {}, TaskFolders),
+  /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */
+  command('CleanUpFolders', {}, FoldersFreed),
+  /**
+   * Removes one finished task's folder by hand, though something holds it,
+   * but while something runs from it. `seen` is what the person was told
+   * holds it as they chose to: where more would be lost with it now, it
+   * stays, refused (`ChangedSinceSeen`).
+   */
+  command('RemoveTaskFolder', { taskId: Schema.String, seen: Schema.NullOr(FolderHeld) }, FoldersFreed),
   /**
    * Puts a task waiting for a free agent before any has worked on it at a
    * place in its project's line, from 0 the front, the rest keeping their
@@ -2828,6 +2943,8 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      /** What the person changed of what leads' sandboxes let through, each list whole. */
+      sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
       /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */
       expectedRevision: Schema.optional(Schema.Number),
     },

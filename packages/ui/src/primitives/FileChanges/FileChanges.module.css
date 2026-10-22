@@ -14,7 +14,7 @@
   transition: background var(--fast) var(--ease);
 }
 button.file:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .path {
   display: flex;

@@ -6,7 +6,7 @@
   width: max-content;
   max-width: min(280px, calc(100vw - 16px));
   padding: 10px 12px;
-  background: var(--paper);
+  background: var(--float);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow: var(--lift-pop);

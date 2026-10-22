@@ -1,0 +1,208 @@
+/* Dark — the same paper and ink at night: warm browns rather than a grey,
+   so it is still Althar. The root's `data-theme="dark"` switches to it;
+   the desktop app sets that from the window's scheme, which Electron's
+   nativeTheme follows from Settings › Appearance.
+
+   Every colour token in tokens.css is set again here, in the same order,
+   except the few that are the same in every theme (tests/tokens.test.ts
+   names them): what is dark anyway (the island, the lightbox, a dark
+   terminal's words), and a project's mark, which is its picture.
+
+   Raised still means lighter: the page is a dark shade, what sits on it a
+   step lighter. A shadow barely shows on dark, so edges are drawn with
+   light instead, and a hover lightens where on paper it darkens. Cobalt and
+   violet lighten to read as words; violet that carries words keeps a deeper
+   fill so they stay white. The ink that fills (a primary button, a switch
+   that is on) turns a soft light with dark words on it. */
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* ---- Surfaces: darkest first, the desk, the window's bars, the page, raised ---- */
+  --n-0: #100f0d;
+  --chrome: #161513;
+  --n-2: #1c1a17;
+  --n-1: #25231f;
+  --n-3: #282622;
+  --paper: #2d2a26;
+  --n-4: #33302b;
+  --n-5: #443f38;
+
+  /* ---- Ink ---- */
+  --t-1: #efeae1;
+  --t-2: #bcb5a9;
+  --t-3: #aca699;
+  --t-4: #6e695f;
+
+  /* ---- Lines: the paper's warm white at low alpha ---- */
+  --line: rgba(255, 240, 215, 0.075);
+  --line-2: rgba(255, 240, 215, 0.115);
+  --line-3: rgba(255, 240, 215, 0.19);
+
+  /* ---- Signal: lighter, to read as words; its fill deeper, so its words stay white ---- */
+  --signal: #a68aff;
+  --signal-bright: #b9a1ff;
+  --signal-dim: rgba(166, 138, 255, 0.13);
+  --selection: rgba(166, 138, 255, 0.34);
+  --signal-line: rgba(166, 138, 255, 0.42);
+  --signal-hover: rgba(166, 138, 255, 0.22);
+  /* an asking sheet over brown carries little violet, so it reads warm with a violet edge, not dusty */
+  --signal-paper: color-mix(in oklab, #a68aff 7%, var(--n-1));
+  --signal-raised: color-mix(in oklab, #a68aff 5%, var(--paper));
+  --signal-pressed: #9474f5;
+  --on-signal: #ffffff;
+  --signal-fill: #7350ec;
+  --signal-fill-hover: #7c5cf0;
+  --signal-fill-pressed: #6844e0;
+
+  /* ---- Cobalt, and the states beside it ---- */
+  --live: #8a95ff;
+  --live-dim: rgba(138, 149, 255, 0.15);
+  --warm: #e2a457;
+  --danger: #f2816f;
+  --danger-dim: rgba(242, 129, 111, 0.11);
+  --danger-hover: rgba(242, 129, 111, 0.18);
+  --ok: #5fc47e;
+
+  /* ---- Roles on paper: on dark each is a lighter wash, as a hover lightens here ---- */
+  --hover-paper: color-mix(in oklab, var(--paper), var(--t-1) 6%);
+  --hover-faint: color-mix(in oklab, var(--paper), var(--t-1) 3%);
+  --chosen: color-mix(in oklab, var(--paper), var(--t-1) 10%);
+  --inset: rgba(255, 240, 215, 0.05);
+  --pressed-paper: color-mix(in oklab, var(--paper), var(--t-1) 11%);
+  --chip: rgba(255, 240, 215, 0.07);
+  --well: rgba(0, 0, 0, 0.2); /* a recess darkens whatever it is in, card or paper */
+  --segment-track: rgba(255, 240, 215, 0.055);
+  --segment-on: color-mix(in oklab, var(--paper), var(--t-1) 10%);
+  --knob: color-mix(in oklab, var(--paper), var(--t-1) 18%);
+  --knob-off: color-mix(in oklab, var(--t-1) 80%, var(--n-2));
+  --tile: rgba(255, 240, 215, 0.06);
+  --tile-hover: rgba(255, 240, 215, 0.11);
+  --ring-track: rgba(255, 240, 215, 0.16);
+  --scroll-thumb: rgba(255, 240, 215, 0.2);
+  --float: color-mix(in oklab, var(--paper), var(--t-1) 7%); /* its shadow is lost on dark: a step lighter instead */
+  --live-step: color-mix(in srgb, var(--live) 92%, var(--n-1));
+  --you-lane: color-mix(in oklab, var(--signal) 4%, var(--n-2));
+
+  /* ---- Derived materials ---- */
+  --n-1-clear: color-mix(in srgb, var(--n-1) 0%, transparent);
+  --n-2-clear: color-mix(in srgb, var(--n-2) 0%, transparent);
+  --n-5-hover: color-mix(in oklab, var(--n-5), var(--t-1) 10%);
+  --track: rgba(255, 240, 215, 0.1);
+  --track-done: rgba(255, 240, 215, 0.42);
+  --sunk: rgba(255, 240, 215, 0.055);
+  --wire: color-mix(in oklab, var(--t-1) 20%, var(--n-2));
+  --wire-live: color-mix(in oklab, var(--t-1) 42%, var(--n-2));
+  --add: rgba(95, 196, 126, 0.14);
+  --del: rgba(242, 129, 111, 0.12);
+  --shadow: rgba(0, 0, 0, 0.55);
+  --lift: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --lift-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --lift-dialog: 0 0 0 0.5px rgba(255, 240, 215, 0.09), 0 1px 2px rgba(0, 0, 0, 0.4), 0 24px 48px -20px rgba(0, 0, 0, 0.75);
+  --scrim: rgba(0, 0, 0, 0.48);
+  --scrim-dark: rgba(0, 0, 0, 0.8);
+  --lift-2: 0 1px 2px rgba(0, 0, 0, 0.36), 0 4px 10px -6px rgba(0, 0, 0, 0.5);
+  --lift-pop: 0 0 0 0.5px rgba(255, 240, 215, 0.1), 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 24px -12px var(--shadow);
+  --traffic: #4c4841;
+
+  /* ---- Frost: dark glass, ringed with light, sheets on it a touch lighter ---- */
+  --frost: color-mix(in srgb, var(--paper) 84%, transparent);
+  --frost-faint: rgba(255, 240, 215, 0.035);
+  --frost-sheet: rgba(255, 240, 215, 0.06);
+  --frost-raised: rgba(255, 240, 215, 0.09);
+  --frost-hover: rgba(255, 240, 215, 0.13);
+  --frost-well: rgba(255, 240, 215, 0.13);
+  --frost-well-hover: rgba(255, 240, 215, 0.18);
+  --frost-ring: 0 0 0 0.5px rgba(255, 240, 215, 0.09);
+  --lift-frost:
+    0 0 0 0.5px rgba(255, 240, 215, 0.16), inset 0 0.5px 0 rgba(255, 240, 215, 0.1), 0 18px 48px -14px rgba(0, 0, 0, 0.7),
+    0 4px 12px -6px rgba(0, 0, 0, 0.5);
+
+  /* ---- Ink as a fill: a soft light, a shade under the brightest words ---- */
+  --ink-fill: #ddd7cc;
+
+  /* ---- On ink: the fill is light now, so what sits on it is dark ---- */
+  --on-ink: var(--n-0);
+  --on-ink-2: color-mix(in oklab, var(--n-0) 70%, var(--t-1));
+  --on-ink-focus: #6b3fe0;
+  --ink-hover: color-mix(in oklab, var(--ink-fill) 90%, var(--n-2));
+  --ink-pressed: color-mix(in oklab, var(--ink-fill) 78%, var(--n-2));
+
+  /* ---- Terminal: darker than the page, so it still reads as its own sheet ---- */
+  --term: #12110f;
+  --term-raised: #1c1a17;
+  --term-paper-ink: #e2ddd2;
+
+  /* ---- Syntax and diff inks ---- */
+  --syn-keyword: #e58ad2;
+  --syn-string: #eca66c;
+  --syn-fn: #85b5ff;
+  --syn-type: #62cfc5;
+  --syn-comment: #9f998d;
+  --syn-punct: #aaa398;
+  --named-line: color-mix(in oklab, #d6a72a 15%, var(--n-1));
+  --named-gutter: color-mix(in oklab, #d6a72a 26%, var(--n-1));
+  --named-edge: #d6a72a;
+  --named-ink: #f0d78f;
+  --note-paper: color-mix(in oklab, #d6a72a 9%, var(--n-1));
+  --note-line: color-mix(in oklab, #d6a72a 24%, var(--n-1));
+  --add-ink: #c5f1d1;
+  --add-ink-2: #8ad5a0;
+  --del-ink: #ffd2ca;
+  --del-ink-2: #f39d90;
+  --add-line: color-mix(in oklab, #3fb95f 13%, var(--n-1));
+  --add-gutter: color-mix(in oklab, #3fb95f 21%, var(--n-1));
+  --add-word: color-mix(in oklab, #3fb95f 34%, var(--n-1));
+  --add-sign: #5fc47e;
+  --del-line: color-mix(in oklab, #f0604c 12%, var(--n-1));
+  --del-gutter: color-mix(in oklab, #f0604c 20%, var(--n-1));
+  --del-word: color-mix(in oklab, #f0604c 33%, var(--n-1));
+  --del-sign: #f2816f;
+  --signal-peek: color-mix(in oklab, #a68aff 13%, var(--n-1));
+
+  /* ---- The thread ---- */
+  --you-bubble: rgba(255, 240, 215, 0.07);
+
+  /* ---- Sources ---- */
+  --linear: #8790ec;
+  --linear-ink: #a2a9f2;
+
+  /* ---- Parts that look different at night --------------------------------
+     Not tokens of their own on paper: each part keeps its light look as its
+     fallback, `var(--part, …)`, and takes these only here.                  */
+  --logo-tile: var(--pressed-paper); /* a source's logo on an issue: its own dark tile, light mark */
+  --logo-ink: var(--t-1);
+  --logo-edge: var(--line-2);
+  --linear-tile: #5e6ad2; /* Linear keeps its brand indigo, with white */
+  --linear-tile-ink: #ffffff;
+  --icon-edge: drop-shadow(0 0 0.6px rgba(255, 240, 215, 0.5)); /* a dark app's icon keeps its edge */
+  --face-edge: rgba(255, 240, 215, 0.16); /* Althar's face, a dark tile, on a dark row */
+  --page-sheet: var(--paper); /* a panel's sheet set on a page: paper, not a white wash over it */
+  --tab-hover: color-mix(in oklab, var(--n-1), var(--paper) 50%); /* under the chosen tab, not over it */
+  --field-hover: var(--tile-hover);
+  --dot-cutout: var(--chrome); /* a dot cut out of the window's bar */
+  --kbd-ink: color-mix(in oklab, var(--t-3) 65%, var(--t-2)); /* a key's word, on a wash over a wash */
+  --kbd-ink-chosen: var(--t-2);
+  --kbd-fill-wash: 0%; /* a key on a filled button: a ring, not a wash, so its glyph sits on the fill */
+  --kbd-fill-ring: 35%;
+  --desk: linear-gradient(165deg, var(--n-2), var(--n-0)); /* behind a picture of the Dock: darker toward its foot */
+  --taskbar: rgba(36, 36, 40, 0.92); /* a picture of Windows' taskbar, dark as its own is */
+  --taskbar-edge: rgba(255, 255, 255, 0.1);
+  --taskbar-ink: 255, 255, 255;
+  --glow-lift: 30%; /* a project's wash: its ink lifted toward the words, and fainter, so it reads as light */
+  --glow-strength: 0.75;
+  --grain-scale: 0.4; /* the light's grain: its light specks read as static on dark */
+  --gather: 0.22; /* the light gathered under an agent on first run: a hint, so the names under it read */
+  --gather-off: 0.08;
+  --wash-blend: screen; /* a hover wash on the welcome's pictures lightens */
+
+  /* ---- Projects: a step lighter, for a swatch and the wash of a project's page ---- */
+  --project-clay: #d4774f;
+  --project-ochre: #c3a259;
+  --project-olive: #a3ab5a;
+  --project-moss: #82b07c;
+  --project-teal: #5fa8b4;
+  --project-slate: #95a0ae;
+  --project-rose: #d27d8e;
+  --project-umber: #b48b77;
+}

@@ -257,8 +257,8 @@
   z-index: 4;
   opacity: 0;
   pointer-events: none;
-  background: rgba(20, 20, 28, 0.05);
-  mix-blend-mode: multiply;
+  background: color-mix(in srgb, var(--t-1) 5%, transparent);
+  mix-blend-mode: var(--wash-blend, multiply); /* on dark it lightens, as a hover there does (dark.css) */
   transition:
     opacity 200ms var(--ease),
     background 120ms var(--ease);
@@ -267,7 +267,7 @@
   opacity: 1;
 }
 .washDown {
-  background: rgba(20, 20, 28, 0.1);
+  background: color-mix(in srgb, var(--t-1) 10%, transparent);
 }
 
 /* the pointer: a hand on the table showing what a person would do */

@@ -17,7 +17,7 @@ import { Sessions } from '../../src/Sessions'
  * A role that only reads, on the real agents (docs/architecture/04): asked to
  * write a file, it can't. The coordinator stands in for every reader on
  * Codex, since a reviewer gets the same settings. On Claude Code the
- * coordinator is a trusted reader (ADR-056): its commands run in its sandbox,
+ * coordinator is a trusted reader (ADR-058): its commands run in its sandbox,
  * held to its own copies, so it is tried at each of that sandbox's edges.
  * It costs a turn of usage on each agent.
  */
