@@ -192,6 +192,12 @@ export interface AgentDefinition {
   /** What prints its own version, for Settings; without it, none is shown. */
   readonly version?: (node: string) => LaunchSpec
   /**
+   * The one major version Althar runs it at, where another isn't safe yet:
+   * no session starts on a copy whose `version` says another, and Settings
+   * says `why`; Althar's download takes only releases of this one.
+   */
+  readonly supported?: { readonly major: number; readonly why: string }
+  /**
    * The command its launch, sign-in and version run by name, and the copies
    * of it Althar has where the person has none of their own: one that
    * ships with Althar, and one Althar can download at the person's asking
@@ -326,7 +332,7 @@ export type AgentDownload = GitHubDownload | PinnedDownload
 
 /** An agent's latest release on GitHub, each file with the sha256 GitHub gives it; the command alone is kept. */
 export interface GitHubDownload {
-  /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
+  /** Its GitHub repository, owner/name: its latest release is what is downloaded, of the agent's `supported` major where it has one. */
   readonly repository: string
   /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
   readonly assets: Readonly<Record<string, string>>
@@ -890,6 +896,16 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     version: () => ({ command: 'opencode', args: ['--version'] }),
+    /*
+     * OpenCode 2 ignores how Althar keeps the person's MCP servers out (its
+     * enabled-only `mcp` entries) and `continue_loop_on_deny`, and its
+     * `auth list` reads another account's sign-ins through its background
+     * service; seen with 2.0.29 on 15 October 2026 (docs/plans/opencode-2.md).
+     */
+    supported: {
+      major: 1,
+      why: 'OpenCode 2 isn’t supported yet: Althar can’t yet keep your own MCP servers out of its sessions, and a rejected command would end the whole turn. Use OpenCode 1 with Althar for now, or another agent.',
+    },
     withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
     reviewing: { outside: true, env: openCodeReviewing },
     /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */

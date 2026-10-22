@@ -77,6 +77,17 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
       ...(pinnedOf(agent) === undefined ? {} : { pinned: pinnedOf(agent) }),
       ...(failed === undefined ? {} : { failed }),
     }
+  // There, but at a version no session starts on: why, and the way back, before anything about its sign-in.
+  if (agent.unsupported !== null)
+    return {
+      ...base,
+      state: RuntimeState.Unsupported,
+      why: agent.unsupported,
+      ...(agent.version === null ? {} : { version: agent.version }),
+      // Althar's own copy, which the newest release it runs can replace; the person's own is theirs to change.
+      ...(agent.kept && agent.download !== null ? { download: agent.download.size } : {}),
+      ...(failed === undefined ? {} : { failed }),
+    }
   switch (agent.signIn) {
     case 'signed_in':
       return { ...base, state: RuntimeState.Ready }

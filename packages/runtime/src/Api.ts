@@ -1,4 +1,4 @@
-import { agentVersion } from '@althar/provider-adapters'
+import { unsupportedAt } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
@@ -376,32 +376,31 @@ export const handlers = Api.toLayer(
         ),
       )
 
-    /* Each agent's version, asked of its CLI once a launch. */
-    const versions = new Map<string, string | null>()
-    const versionOf = (entry: AgentEntry) =>
-      versions.has(entry.definition.id)
-        ? Effect.succeed(versions.get(entry.definition.id) ?? null)
-        : agentVersion(entry.definition).pipe(
-            Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))),
-            // Asked again next time: one that failed says no version, not a wrong one.
-            contained('Status.version', () => null, entry.definition.id),
-          )
+    /* Each agent's version, as SignIns last read it of its CLI, within the minute or now when the person checks: they may have changed it. */
+    const versionOf = (entry: AgentEntry, recheck: boolean) =>
+      signIns.version(entry.definition.id, recheck).pipe(contained('Status.version', () => null, entry.definition.id))
 
     /*
      * An agent, with its accounts: each check starts the agent's own status
-     * command, in the account's home. An agent that couldn't be looked at
-     * says so on its own, and every other agent is shown as it is.
+     * command, in the account's home, but at a version no session starts on,
+     * which says why instead. Its version and its accounts' checks share
+     * one reading of it, SignIns', so the two say the same. An agent that couldn't be looked at says so on its own, and
+     * every other agent is shown as it is.
      */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
+        const install = yield* installs.state(entry.definition)
+        const installed = entry.definition.cli === undefined || install.located !== null
+        // Read now when the person checks, first, and its accounts' checks share it; else after them, which may have just read it.
+        const fresh = recheck ? yield* versionOf(entry, true) : undefined
         const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
           concurrency: 'unbounded',
         })
-        const install = yield* installs.state(entry.definition)
+        const version = fresh === undefined ? yield* versionOf(entry, false) : fresh
         return {
           id: entry.definition.id,
           name: entry.definition.name,
-          installed: entry.definition.cli === undefined || install.located !== null,
+          installed,
           kept: install.located?.whose === 'althar',
           download:
             install.downloadable && install.size !== null
@@ -409,7 +408,9 @@ export const handlers = Api.toLayer(
               : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
-          version: yield* versionOf(entry),
+          version,
+          // One that isn't here says so instead.
+          unsupported: installed ? unsupportedAt(entry.definition, version) : null,
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
           addsAccounts: entry.definition.home.accounts !== 'one',
@@ -428,6 +429,8 @@ export const handlers = Api.toLayer(
             signIn: 'unknown',
             login: entry.definition.signIn.login,
             version: null,
+            // Its problem says why; a session asks the version on its own.
+            unsupported: null,
             ways: entry.definition.signIn.inApp?.ways ?? [],
             accounts: [],
             addsAccounts: entry.definition.home.accounts !== 'one',
@@ -1269,7 +1272,7 @@ export const handlers = Api.toLayer(
           Effect.gen(function* () {
             const entry = yield* agents.get(agentId)
             yield* installs.install(entry.definition)
-            versions.delete(agentId)
+            yield* signIns.version(agentId, true)
             yield* models.forget(agentId)
           }),
         ),

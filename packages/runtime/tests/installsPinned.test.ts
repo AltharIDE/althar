@@ -116,22 +116,25 @@ describe('where an agent’s command is', () => {
     const dir = mkdtempSync(join(tmpdir(), 'althar-release-'))
     mkdirSync(join(dir, 'release', 'bin'), { recursive: true })
     writeFileSync(join(dir, 'release', 'README'), 'OpenCode\n')
-    writeFileSync(join(dir, 'release', 'bin', 'opencode'), '#!/bin/sh\necho 9.9.9\n', { mode: 0o755 })
+    writeFileSync(join(dir, 'release', 'bin', 'opencode'), '#!/bin/sh\necho 1.9.9\n', { mode: 0o755 })
     const file = join(dir, 'opencode-linux-x64.tar.gz')
     execFileSync('tar', ['-czf', file, '-C', dir, 'release'])
     const bytes = readFileSync(file)
+    // OpenCode's release is looked for in the list, newest of the major it runs.
     const fetch = async (url: string) =>
-      url.endsWith('/releases/latest')
-        ? Response.json({
-            tag_name: 'v1.18.35',
-            assets: [
-              {
-                name: 'opencode-linux-x64.tar.gz',
-                browser_download_url: 'https://github.example/download',
-                digest: `sha256:${sum(bytes)}`,
-              },
-            ],
-          })
+      url.includes('/releases?')
+        ? Response.json([
+            {
+              tag_name: 'v1.18.35',
+              assets: [
+                {
+                  name: 'opencode-linux-x64.tar.gz',
+                  browser_download_url: 'https://github.example/download',
+                  digest: `sha256:${sum(bytes)}`,
+                },
+              ],
+            },
+          ])
         : new Response(new Uint8Array(bytes))
     const root = mkdtempSync(join(tmpdir(), 'althar-agents-'))
     const layer = Installs.layer({ root, platform: 'linux', arch: 'x64', musl: false, fetch, search: { env: { PATH: '' }, dirs: [] } })
@@ -142,7 +145,7 @@ describe('where an agent’s command is', () => {
       ),
     )
     assert.isTrue(Exit.isSuccess(done), JSON.stringify(done))
-    assert.strictEqual(execFileSync(join(root, 'opencode', 'current', 'opencode'), { encoding: 'utf8' }).trim(), '9.9.9')
+    assert.strictEqual(execFileSync(join(root, 'opencode', 'current', 'opencode'), { encoding: 'utf8' }).trim(), '1.9.9')
   })
 
   it('takes the build for this computer where there is no musl one, and keeps none with nowhere to keep it', async () => {

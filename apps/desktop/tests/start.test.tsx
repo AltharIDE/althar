@@ -16,7 +16,7 @@ import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, openCode2, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
@@ -790,6 +790,19 @@ describe('the start', () => {
       [RuntimeState.Ready, true],
       [RuntimeState.SignedOut, false],
     ])
+    // A version no session starts on says why, whoever it is signed in as.
+    expect(runtimeEntry({ ...openCode2, kept: false })).toMatchObject({
+      state: RuntimeState.Unsupported,
+      version: '2.0.29',
+      why: openCode2.unsupported,
+    })
+    expect(runtimeEntry({ ...openCode2, kept: false })).not.toHaveProperty('download')
+    // Althar's own copy can be replaced by one it runs; why the last download stopped, said.
+    const kept = { ...openCode2, kept: true, download: { size: '45 MB', installing: false, pinned: null } }
+    expect(runtimeEntry(kept, undefined, 'GitHub couldn’t be reached.')).toMatchObject({
+      download: '45 MB',
+      failed: 'GitHub couldn’t be reached.',
+    })
     // One Althar couldn't check says why on its own row, whatever else it holds.
     const problem = "Althar couldn't check Codex. Its log has the details."
     const codex = agents.find((agent) => agent.id === 'codex')

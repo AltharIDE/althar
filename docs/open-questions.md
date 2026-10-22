@@ -63,6 +63,32 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   replaces the closed #201's KDE-specific path with the app-specific portal
   path on both desktops.
 
+## OpenCode 2, 15 October
+
+Researched in [the OpenCode 2 plan](plans/opencode-2.md).
+
+- [ ] **When Althar supports OpenCode 2.** The person's own install always
+  runs, so an `opencode upgrade --major` switches Althar too. Rejecting a
+  command then ends the turn, and every 2.x account's sign-in reads as
+  "can't tell".
+  - Leaning: 1.x stays the supported line, and Althar's download is pinned
+    to it. On 2.x no OpenCode session starts, and Settings says why, until
+    the person's MCP servers are shown to stay off there. A warning alone
+    wouldn't hold that boundary. Then the adapter becomes version-aware in
+    stages. The gate and the pin are in (the registry's `supported`); what
+    is open is when to lift them.
+- [ ] **Carrying on after a rejection on 2.x.** It ignores
+  `continue_loop_on_deny`, and no replacement is documented. Ask upstream,
+  or treat a rejection as one that stops the turn and tell the lead in the
+  next prompt.
+- [ ] **One background service per user.** Without `--standalone`, OpenCode
+  2's CLI commands run through a service keyed by `XDG_STATE_HOME`, not the
+  account's `XDG_DATA_HOME`.
+  - Leaning: every command Althar runs on 2.x is `--standalone` or `acp`,
+    rather than a state folder per account.
+- [ ] **Going back to 1.x.** 1.x can't open a data folder that 2.x created.
+  Say so per account, and never fall back.
+
 ## Usage data, 12 October
 
 - [x] **Where usage data goes from, and what can.** The main process, with
