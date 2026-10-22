@@ -42,107 +42,76 @@
     "caption": "Ninemate’s · Claude Code Work’s week gone, the work moved to Codex: the notice still says 5% left; the card shows the new lead only."
   },
   {
-    "id": "a-plenty",
+    "id": "a-bar-plenty",
     "page": "?d=A&s=plenty&v=board",
-    "clip": [560, 0, 720, 44],
-    "caption": "A · plenty left everywhere: one faint glyph beside the load meter, a place to click and for ⌘U to open from; no words, no count."
+    "clip": [740, 0, 540, 40],
+    "caption": "A · plenty left: PLAN, a third gauge after CPU and MEM, two steps lit; nothing said beside it."
   },
   {
-    "id": "a-board",
+    "id": "a-bar-nearly",
     "page": "?d=A&s=nearly&v=board",
-    "caption": "A · Codex’s five hours at 3%: the chip names only the tightest limit, in ink as deep as it is low; the card says where the review went and why."
+    "clip": [740, 0, 540, 40],
+    "caption": "A · Codex’s five hours at 3%: the gauge lit in full ink, and beside it, as the meter says memory running short, “Codex 3% · 14:00”."
   },
   {
     "id": "a-peek",
     "page": "?d=A&s=nearly&several=1&silent=1&v=board&u=1",
-    "clip": [440, 0, 840, 640],
-    "caption": "A · the chip (or ⌘U) opens a popover, not a page: agents and accounts tightest first, each window a slim bar, the agents with no reading in one calm line."
+    "clip": [640, 0, 440, 440],
+    "caption": "A · ⌘U or a click: Plan usage, its level in the head, a row per agent, least room first, each by the account Althar would use; the agents with no reading in one line."
   },
   {
-    "id": "a-out",
-    "page": "?d=A&s=out&v=board",
-    "clip": [560, 0, 720, 44],
-    "caption": "A · Claude Code Work’s week gone: “Claude Code · out · until Mon 09:00”."
+    "id": "a-peek-open",
+    "page": "?d=A&s=nearly&several=1&silent=1&v=board&u=1",
+    "clip": [640, 0, 440, 440],
+    "caption": "A · an agent’s row opened in place: each account and every window.",
+    "click": "button[aria-expanded=false] >> text=Codex"
   },
   {
-    "id": "a-talk-out",
-    "page": "?d=A&s=out&v=talk",
-    "clip": [300, 172, 680, 546],
-    "caption": "A · the Talk room’s card, beside its lead: “Went to Codex · Claude Code is out until Mon 09:00”. No notices."
+    "id": "b-bar",
+    "page": "?d=B&s=nearly&v=board",
+    "clip": [740, 0, 540, 40],
+    "caption": "B · the plan joins the load meter itself: CPU, MEM, PLAN, one button."
   },
   {
-    "id": "a-board-several",
-    "page": "?d=A&s=nearly&several=1&v=board",
-    "clip": [333, 170, 316, 540],
-    "caption": "A · several accounts: another of Codex’s has room, so the review stays on Codex, on Side, whatever the rule."
+    "id": "b-peek",
+    "page": "?d=B&s=nearly&several=1&silent=1&v=board&u=1",
+    "clip": [640, 0, 440, 800],
+    "caption": "B · one peek: the machine as it was, then the plan in the machine’s manner."
+  },
+  {
+    "id": "c-bar-plenty",
+    "page": "?d=C&s=plenty&v=board",
+    "clip": [740, 0, 540, 40],
+    "caption": "C · plenty left: a figure, “PLAN 62%”, in the meter’s own type."
+  },
+  {
+    "id": "c-bar-nearly",
+    "page": "?d=C&s=nearly&v=board",
+    "clip": [740, 0, 540, 40],
+    "caption": "C · nearly out: the figure names who, “CODEX 3% · 14:00”."
+  },
+  {
+    "id": "c-peek",
+    "page": "?d=C&s=nearly&several=1&silent=1&v=board&u=1",
+    "clip": [640, 0, 440, 440],
+    "caption": "C · the peek leads with the tightest limit, big; then the rest a line each."
+  },
+  {
+    "id": "a-picker",
+    "page": "?d=A&s=nearly&several=1&silent=1&v=picker",
+    "caption": "A · the task’s model picker: what each model’s route has left.",
+    "clip": [320, 296, 350, 410]
   },
   {
     "id": "b-picker",
-    "page": "?d=B&s=nearly&silent=1&v=picker",
-    "clip": [300, 280, 680, 430],
-    "caption": "B · the task’s model picker: each model says what its route has left (Opus counts its own week), or “no reading”."
+    "page": "?d=B&s=nearly&several=1&silent=1&v=picker",
+    "caption": "B · the task’s model picker: what each model’s route has left.",
+    "clip": [320, 296, 350, 410]
   },
   {
-    "id": "b-talk",
-    "page": "?d=B&s=nearly&v=talk",
-    "scroll": "text=Show the checks",
-    "clip": [300, 172, 680, 546],
-    "caption": "B · under a tenth left, a model’s chip says so: on the plan’s Review step, and on the coordinator’s own composer (it runs on GPT-5.5). Nothing in the bar."
-  },
-  {
-    "id": "b-board",
-    "page": "?d=B&s=nearly&v=board",
-    "hover": "[class*='__moved__']",
-    "clip": [333, 170, 600, 540],
-    "caption": "B · the card shows the model the review went to, marked as moved; why, on hover, in the thread’s words."
-  },
-  {
-    "id": "b-picker-several",
-    "page": "?d=B&s=nearly&several=1&v=picker",
-    "clip": [300, 280, 680, 430],
-    "caption": "B · several accounts: a model’s route is its agent’s account with most room, named: Codex’s go on Side, 79% left (its week)."
-  },
-  {
-    "id": "b-picker-out",
-    "page": "?d=B&s=out&v=picker",
-    "clip": [300, 280, 680, 430],
-    "caption": "B · Claude Code Work’s week gone: its models say “out · until Mon 09:00”; the work runs on GPT-5.5 now."
-  },
-  {
-    "id": "c-home",
-    "page": "?d=C&s=nearly&v=home",
-    "caption": "C · the home: a quiet Plan usage section under what needs you, a line per agent. No warning anywhere while nothing is out."
-  },
-  {
-    "id": "c-home-out",
-    "page": "?d=C&s=out&rule=wait&silent=1&v=home",
-    "clip": [0, 44, 960, 674],
-    "caption": "C · an account out and work held for it (the project waits): it shows in Needs you; the agents with no reading in one line."
-  },
-  {
-    "id": "c-accounts",
-    "page": "?d=C&s=nearly&several=1&v=accounts",
-    "click": "role=tab[name=/Codex/]",
-    "clip": [322, 70, 920, 520],
-    "caption": "C · Settings › Agents › Codex: under each account, every window, where the numbers came from and how old."
-  },
-  {
-    "id": "c-accounts-silent",
-    "page": "?d=C&s=nearly&silent=1&v=accounts",
-    "click": "role=tab[name=/Copilot/]",
-    "clip": [322, 70, 920, 400],
-    "caption": "C · an agent with no reading: said calmly, in words, under its account."
-  },
-  {
-    "id": "c-board-wait",
-    "page": "?d=C&s=nearly&rule=wait&v=board",
-    "clip": [333, 170, 316, 540],
-    "caption": "C (and every direction) · the project waits for resets: the card says “Waiting for Codex until 14:00”. Codex isn’t out, so nothing needs you."
-  },
-  {
-    "id": "c-board-out-wait",
-    "page": "?d=C&s=out&rule=wait&v=board",
-    "clip": [333, 170, 632, 540],
-    "caption": "C · Claude Code Work out, the work held for it: Needs you, with a way to carry on now on another model."
+    "id": "c-picker",
+    "page": "?d=C&s=nearly&several=1&silent=1&v=picker",
+    "caption": "C · the task’s model picker: what each model’s route has left.",
+    "clip": [320, 296, 350, 410]
   }
 ]

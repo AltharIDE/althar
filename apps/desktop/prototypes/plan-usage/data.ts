@@ -172,6 +172,13 @@ const win = (kind: Win['kind'], used: number, resetsAt: string, label: string | 
   resetsAt,
 })
 
+/** Why there is no reading, as usageSources.ts says it. */
+const WHY: Readonly<Record<string, string>> = {
+  copilot: 'Copilot shows its premium requests in its own window and in your GitHub settings, not to other apps.',
+  junie: 'Junie shows its JetBrains AI credits only in its own /stats, not to other apps.',
+  'mistral-vibe': 'Mistral shows Vibe’s usage only in its own console, not to other apps.',
+}
+
 /** Every account's windows: plenty left everywhere, but for the window the level runs down. */
 export const usageOf = (s: State): PlanUsage => {
   const accounts: Array<PlanUsage['accounts'][number]> = [
@@ -256,9 +263,9 @@ export const usageOf = (s: State): PlanUsage => {
           observedAt: null,
           plan: null,
           windows: [],
-          // As ninemate's runtime words it (PlanUsage.ts, as committed): a fault. This branch is changing it to a calm `noReading`.
-          fault: { kind: 'no_source' as const, message: `${name} has no usage source Althar reads yet.` },
-          noReading: null,
+          // As the runtime says it now: no fault, a calm reason (usageSources.ts).
+          fault: null,
+          noReading: WHY[agentId] ?? null,
         }))
       : []),
   ]

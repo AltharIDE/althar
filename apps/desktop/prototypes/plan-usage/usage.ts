@@ -106,3 +106,41 @@ export const agoWords = (iso: string, now: Date = new Date()): string => {
   const hours = Math.round(minutes / 60)
   return hours === 1 ? 'an hour ago' : `${hours} hours ago`
 }
+
+/** An agent as the bar and pickers rank it: by the account Althar would start it on, whose tightest window is the agent's room. */
+export interface AgentRoom {
+  readonly agentId: string
+  readonly name: string
+  readonly route: { readonly account: AccountUsage; readonly room: Room; readonly several: boolean }
+  /** Every account read, tightest first. */
+  readonly accounts: ReadonlyArray<AccountUsage>
+}
+
+/** Every agent that can be read, least room first. */
+export const agentRooms = (usage: PlanUsage | null): ReadonlyArray<AgentRoom> => {
+  const read = (usage?.accounts ?? []).filter(readable)
+  return [...new Set(read.map((account) => account.agentId))]
+    .flatMap((agentId): AgentRoom[] => {
+      const route = routeOf(usage, agentId)
+      if (route === null) return []
+      const accounts = read
+        .filter((account) => account.agentId === agentId)
+        .toSorted((a, b) => (tightestOf(a)?.left ?? 100) - (tightestOf(b)?.left ?? 100))
+      return [{ agentId, name: route.account.agentName, route, accounts }]
+    })
+    .toSorted((a, b) => a.route.room.left - b.route.room.left)
+}
+
+/** The agents with no reading, and why, as the runtime says it. */
+export const noReadings = (usage: PlanUsage | null): ReadonlyArray<{ readonly name: string; readonly why: string }> => {
+  const seen = new Map<string, string>()
+  for (const account of usage?.accounts ?? [])
+    if (!readable(account) && account.noReading !== null && !seen.has(account.agentName)) seen.set(account.agentName, account.noReading)
+  return [...seen].map(([name, why]) => ({ name, why }))
+}
+
+/** Under this share left, a place that shows usage says it out loud, as memory running short does in the load meter. */
+export const SAY_UNDER = 10
+
+/** The share left, as a figure: 3%, or out. */
+export const pctWords = (left: number): string => (left === 0 ? 'out' : `${left}%`)

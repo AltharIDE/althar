@@ -21,9 +21,9 @@ export interface State {
 
 export const DIRECTIONS: ReadonlyArray<{ readonly key: Direction; readonly short: string; readonly name: string }> = [
   { key: 'N', short: 'Ninemate’s', name: 'as built' },
-  { key: 'A', short: 'A', name: 'Quiet chip in the bar' },
-  { key: 'B', short: 'B', name: 'Beside the models' },
-  { key: 'C', short: 'C', name: 'Home and Accounts' },
+  { key: 'A', short: 'A', name: 'A third gauge' },
+  { key: 'B', short: 'B', name: 'In the load meter' },
+  { key: 'C', short: 'C', name: 'Tightest first' },
 ]
 
 export const LEVELS: ReadonlyArray<{ readonly value: Level; readonly label: string; readonly tip: string }> = [

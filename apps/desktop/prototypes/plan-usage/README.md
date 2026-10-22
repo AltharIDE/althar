@@ -1,4 +1,4 @@
-# Prototype: plan usage and steering, ninemate's and three others
+# Prototype: plan usage and steering, ninemate's and three others (second round)
 
 Throwaway. One live page: the real desktop app (its router, tabs, home, board, Talk room, task, Settings › Agents, the model picker) on the tests' fake client. A bar at the bottom swaps the direction in place, picks the scenario and the screen. Ninemate's is the kit's and the app's own parts as built. A to C draw the real screens with a few new pieces of their own (`parts/`), put in by seams for this server alone.
 
@@ -14,7 +14,7 @@ Then open **http://localhost:5441/**. The port is fixed (`strictPort`): if it's 
 
 ## The bar
 
-- **Direction** (keys 1 to 4, ← and →): Ninemate's · as built, A · Quiet chip in the bar, B · Beside the models, C · Home and Accounts.
+- **Direction** (keys 1 to 4, ← and →): Ninemate's · as built, A · A third gauge, B · In the load meter, C · Tightest first.
 - **Screen**: Home, Board, Talk (the coordinator), Task (the task steering touched), Model picker (that task, its composer's picker open), Accounts (Settings › Agents). Going somewhere in the app moves it too.
 - **Scenario**: Plenty left (every account above half), One window nearly out (Codex's five hours at 3%, until 14:00 today), An account out (Claude Code Work at 0% of its week, until Monday 09:00; its work moved).
   - **Several accounts** layers on any of them: Claude Code Work and Personal, Codex Work and Side, each with a different amount of room.
@@ -35,45 +35,33 @@ Steering itself is the runtime's (committed on this branch, 923e0df2), so its wo
 
 ## The directions
 
-**Ninemate's, as built.** The bar's **Usage** button with a count of warnings not seen, and ⌘U opens the usage view, a modal: every account, every window as a green-to-red meter, its source and age, Read again. Warnings are red or amber notices at the foot of the open coordinator's Talk room, with Open usage and Seen. They say the threshold crossed (5%), not what's left (3%). An agent with no reading is an account with a fault, "No usage source", once per agent. (This branch is changing that to a calm line, `noReading`, not committed as this was written. The page sends the committed runtime's fault, and shows whatever the view on disk does with it.) Steering shows only as the plain runtime line in the task's thread.
+The person's brief for this round: more hierarchy, usage shown quietly only where it matters, and two places fixed: **beside CPU and memory** in the bar, and **beside each model in the pickers** (the composer's list and All models). A to C all do both; they differ in how each place ranks what it shows. Ninemate's stays as key 1, to compare.
 
-**A · A quiet chip in the bar.**
-- **While every account has more than half left**: a faint glyph. It's needed, because the click and ⌘U need a place to open from, and an empty bar can't tell plenty from not read. It's as faint as the load meter's unlit steps, with no number and no count.
-- **Otherwise**: a chip with only the tightest limit, *"Codex · 3% · until 14:00"*, its ink deeper the less is left (ink, not a new colour, as the load meter does).
-- **The popover** (chip or ⌘U): agents, then their accounts, tightest first. Each window is a slim bar with % left and until when. The agents with no reading share one calm line at the end.
-- **Warnings**: no notices anywhere. The chip is the warning.
-- **Steering**: one quiet line on the card, on the board and in the Talk room: *"Review went to Claude Code · Codex has 3% left"*.
+Every direction ranks the same way. **The figure that counts** is the agent closest to running out, judged by the account Althar would start it on, which is the one steering uses. With Codex Work at 3% and Codex Side at 79%, Codex has 79%. **Then a line per agent.** **Then, opened in place, each account and every window.** Once an agent is under a tenth, the bar says who and until when beside it ("Codex 3% · 14:00"), as the load meter says memory running short. There are no notices, no badge and no modal. The agents with no reading are one quiet line at the foot of the peek, each name giving the runtime's reason on hover.
 
-**B · Beside the models.**
-- **Usage lives where a model is chosen.** Each model in a picker (task, coordinator, each step of a plan) says what its route has left: the account Althar would start it on, its tightest window, Opus counting its own week. That reads *"3% left · until 14:00"*, *"Side · 94% left"*, *"out · until Mon 09:00"*, or *"no reading"*.
-- **Nothing in the bar.** ⌘U opens the picker of the composer on screen.
-- **Warnings**: a model chip whose route is under a tenth says so beside it, on the coordinator's composer (it runs on GPT-5.5) and on the plan's Review step.
-- **Steering**: the card shows the model the step went to, marked *moved*, with the thread's words on hover.
+**Ninemate's, as built.** The bar's Usage button with a count of warnings not seen; ⌘U opens the usage view, a modal of every account and window; warnings are notices at the foot of the Talk room.
 
-**C · Home and Settings › Accounts.**
-- **The home** ends with a quiet Plan usage section: a line per agent, each account by its tightest window, and the agents with no reading in one line.
-- **Settings › Agents** shows, under each account, every window, the source and its age, and a fault in words.
-- **Warnings**: none while nothing is out. When an account is out and work waits for it (the rule waits or asks), that work is in Needs you, on the home and the board. Nothing in the bar; ⌘U goes to Settings › Agents.
-- **Steering**: the thread's line. A held card says *"Waiting for Codex until 14:00"*.
-- **C adds no sidebar.** Settings keeps the one it has.
+**A · A third gauge.**
+- **The bar**: PLAN, a gauge of its own right after CPU and MEM, in their exact manner: five steps lit as the tightest route is used, full ink once under a tenth.
+- **Its peek** (click or ⌘U): "Plan usage" and its level ("Plenty left", "Codex is nearly out"); a row per agent, least room first: name, "% left", a bar, and what the figure is of ("Side · Weekly limit · until Tue 20:00"). A press opens the agent in place.
+- **The pickers**: every row ends in its route's figure, "65%", or "Side · 79%" where the agent has several accounts; from a quarter down, "until 14:00" too. "no reading" in faint ink. The composer's chip says "3% left until 14:00" beside itself once under a tenth.
+
+**B · In the load meter.**
+- **The bar**: one meter, CPU · MEM · PLAN, one button.
+- **Its peek** (click or ⌘U): the load peek as it is, then a Plan section in the machine's own manner. One place for what limits Althar's work. The plan sits under the running work, so it's the furthest down. The peek's "Show in the bar" switch is left out here.
+- **The pickers**: the same five steps, small, and the figure on every row; the composer's chip always has the steps beside it.
+
+**C · Tightest first.**
+- **The bar**: a figure, not steps: "PLAN 65%" in the meter's own type. Once under a tenth it names who: "CODEX 3% · 14:00".
+- **Its peek**: the tightest limit leads, big ("3%", Codex, Five-hour limit · until 14:00); then the other agents a line each (name, figure, reset), each opening in place.
+- **The pickers**: quiet unless it matters. A row says nothing above half, "40% left" from half down, and adds "until 14:00" from a quarter. The chip speaks only under a tenth.
 
 ## What each costs to build
 
-- **Ninemate's**: built (#218). To keep it, still to do:
-  - the notice should say what's left, not the threshold;
-  - no-reading should go calm (under way on this branch);
-  - the red notices should be weighed against the person's "calm" rule.
-- **A**: about a day or two.
-  - **Kit**: a `UsageChip` on `Popover` (as `LoadMeter` is), with the usage view's account and meter rows moved out of `Usage.tsx` to fill it, in ink tones.
-  - **Desktop**: swap `UsageButton` for it in `TabsFrame` (⌘U already toggles), and drop `UsageNotices`. Warnings and their acknowledgement become unused.
-  - **The card line needs steering on the card's contract.** Today it is only in the thread's notice: add `TaskCard.steered: { step, from, to, left, resetsAt }` from the runtime.
-- **B**: about two or three days.
-  - **Kit**: `ModelPick`'s `note` takes a reading, not a string, and gets a `warn` beside its chip. `ModelBrowser` (All models) has no row slot and needs a column.
-  - **Runtime**: the window must not guess a model's route. `Limits.pick` and `usableModels` know which account a model would start on, so send each route's left and reset with the models (`AgentModels`). Then the coordinator's `list_models` can say the same, so plans steer too.
-  - **The board card has no model at all**: it needs the same `steered` field, and a chip lifted above the card's own link.
-- **C**: about two days.
-  - **Kit**: `Home` needs a `usage` slot (busy and at rest), and `Accounts`' row needs one (`AccountEntry.usage`). The prototype puts both in from outside.
-  - **Held work in Needs you**: today a held task is "Paused" (`lanesOf`, `needsOf`, `homeGlanceOf`). The runtime raises a usage-limit call when the account is *out* and work waits for it, or the window derives one from `waits` and `outUntil`. Its words today ("ran out of usage while working on the task") assume it ran out mid-step.
+- **All three**: the runtime sends each model's route (account, tightest window, reset) with the models (`AgentModels`), as `usableModels` already works it out for the coordinator's `list_models`, so the window never guesses. Drop `UsageNotices`, the Usage button and the usage view.
+- **A**: about a day. Kit: a `PlanGauge` on `Popover` beside `LoadMeter` (sharing its gauge), and its peek. `ModelPick`'s `note` takes a node, so a figure can sit at the row's right edge; `ModelBrowser` shows it beside each runtime.
+- **B**: a little more. `LoadMeter` takes a third gauge and `LoadPeek` a section, and the meter's own switch ("Show in the bar") must decide whether it hides the plan too.
+- **C**: about a day, like A, with a figure in place of the gauge.
 
 ## Pictures
 
@@ -90,14 +78,11 @@ node peek.mjs '?d=B&v=picker' shots/peek.png   # one look, with what the page lo
 ## How it's built
 
 - `vite.config.mjs`: the seams, each swapping one import of a real screen for the prototype's:
-  - the bar's Usage button and what ⌘U opens (`TabsFrame`);
+  - the bar's load meter, Usage button and what ⌘U opens (`TabsFrame`);
   - the Talk room's notices (`ProjectView`);
-  - the board's and the Talk room's cards (`BoardView`, `Card`);
-  - every model picker (`ModelChoice`);
-  - the home (`HomeView`);
-  - an agent's accounts (`AgentAccounts`).
+  - every model picker and All models (`ModelChoice`).
 
   One patch, to `shared/agents.ts` `waitsWords`: it leaves the file alone, saying so, if the text changed.
-- `data.ts`: the scenario: agents and accounts, models, plan usage and ninemate's warnings, and what steering did (`steerOf`). `runtime.ts`: the snapshots the fake client answers with. `usage.ts`: tightest window, route, words. `clock.ts`: the page's 11:20.
-- `parts/`: A's chip and popover, B's notes and chip warning, C's home section and account readings, the card lines.
+- `data.ts`: the scenario: agents and accounts, models, plan usage and ninemate's warnings, and what steering did (`steerOf`). `runtime.ts`: the snapshots the fake client answers with. `usage.ts`: tightest window, route, agents ranked, words. `clock.ts`: the page's 11:20.
+- `parts/`: `Plan.tsx` (the gauge, an agent's row, the three peeks), `Bar.tsx` (A's gauge, B's meter, C's figure), `Models.tsx` (the pickers' notes and the chip).
 - **Another agent works in this worktree.** The page runs the files as they are on disk, so a change to the app or the kit shows here at once, and one half made can break it for a moment.

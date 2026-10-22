@@ -10,11 +10,9 @@ import { defineConfig } from 'vite-plus'
  * Nothing in the app or the kit changes on disk. Seams swap one import of a
  * real screen for the prototype's, for this server alone:
  *
- * - the window's bar (TabsFrame): its Usage button, and what ⌘U opens;
+ * - the window's bar (TabsFrame): the load meter, its Usage button, and what ⌘U opens;
  * - the Talk room's usage notices (ProjectView);
- * - the board's cards (BoardView) and the Talk room's task cards (Card);
- * - every model picker (ModelChoice);
- * - the home's screen (HomeView) and an agent's accounts (AgentAccounts).
+ * - every model picker and the All models browser (ModelChoice).
  *
  * Each seam draws the real part, and in a direction that changes it, the
  * direction's part around it. Plain JavaScript, so no type check takes it in.
@@ -27,11 +25,7 @@ const seams = [
   { importer: 'features/tabs/TabsFrame.tsx', id: '@althar/ui', to: 'seams/tabsUi.tsx' },
   { importer: 'features/tabs/TabsFrame.tsx', id: '../usage/UsageView', to: 'seams/UsageView.tsx' },
   { importer: 'features/project/ProjectView.tsx', id: '../usage/UsageNotices', to: 'seams/UsageNotices.tsx' },
-  { importer: 'features/board/BoardView.tsx', id: '@althar/ui', to: 'seams/boardUi.tsx' },
-  { importer: 'features/project/Card.tsx', id: '@althar/ui', to: 'seams/cardUi.tsx' },
   { importer: 'shared/ModelChoice.tsx', id: '@althar/ui', to: 'seams/modelUi.tsx' },
-  { importer: 'features/home/HomeView.tsx', id: '@althar/ui/screens', to: 'seams/homeScreens.tsx' },
-  { importer: 'features/accounts/AgentAccounts.tsx', id: '@althar/ui', to: 'seams/accountsUi.tsx' },
 ]
 
 /** @type {import('vite-plus').Plugin} */
