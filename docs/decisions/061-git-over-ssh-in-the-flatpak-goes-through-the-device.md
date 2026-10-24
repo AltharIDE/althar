@@ -118,7 +118,10 @@
     it, a search or a commit message, even beside those settings' names,
     isn't refused for it, nor a substitution quoted in a `git commit` or
     `git tag` message in single quotes, which the shell leaves as text
-    (unless the line hands it to `sh -c` or `eval`). Other single-quoted
+    (unless the line hands it to `sh -c` or `eval`). Such a message stays
+    on one line, and its start is read past comments and `$'…'` as the
+    shell reads them, so a comment or a heredoc can't fake one to hide the
+    lines after it. Other single-quoted
     text counts as source something may run (`python3 -c '…'`,
     `echo '…' | sh`): the programs that run it have no end. A git config
     edited with the file tools sits outside the task's worktree, in the

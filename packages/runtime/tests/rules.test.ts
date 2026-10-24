@@ -825,6 +825,10 @@ describe('a role that only reads', () => {
       `python3 -c 'import os; os.system("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
       `node -e 'require("child_process").execSync("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
       `echo 'git -c core.sshCommand=$(command -v althar-host-ssh) fetch' | sh`,
+      // A message's start faked where the shell quotes nothing: a comment, `$'…'`, a heredoc.
+      `#; git commit -m '\ngit -c core.sshCommand="$(command -v althar-host-ssh)" fetch #'`,
+      `echo $'\\' ; git commit -m ' ; git -c core.sshCommand="$(command -v althar-host-ssh)" fetch #'`,
+      `cat <<EOF\n; git commit -m '\nEOF\ngit -c core.sshCommand="$(command -v althar-host-ssh)" fetch #'`,
       // A single-quoted setting before a commit is git's to run, not a message.
       `git -c core.sshCommand='$(command -v althar-host-ssh)' commit -m 'x'`,
       `git commit -m 'x' && perl -e 'system("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,

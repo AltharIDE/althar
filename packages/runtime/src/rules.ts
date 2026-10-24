@@ -410,7 +410,9 @@ const MESSAGE_FOLLOWS =
  * `git commit` or `git tag` message in single quotes, such as one quoting
  * the command, substitutes nothing, unless the line hands it to a shell to
  * run. Other single-quoted text is kept, as source something may run. A
- * shell or `eval` named only in a message runs nothing.
+ * shell or `eval` named only in a message runs nothing. A comment is left
+ * out as the shell leaves it, and a message never runs across a line, so
+ * neither a comment, a heredoc's text nor a `$'…'` can fake its start.
  */
 const substitutedIn = (command: string): string => {
   let kept = ''
@@ -423,11 +425,22 @@ const substitutedIn = (command: string): string => {
     } else if (char === '"') {
       doubled = !doubled
       kept += char
+    } else if (char === '#' && !doubled && /(?:^|[\s;&|()])$/.test(command.slice(0, at))) {
+      // A comment, to the line's end.
+      const end = command.indexOf('\n', at)
+      at = (end === -1 ? command.length : end) - 1
+    } else if (char === '$' && command[at + 1] === "'" && !doubled) {
+      // `$'…'`, where `\'` doesn't end it: kept as written.
+      let end = at + 2
+      while (end < command.length && command[end] !== "'") end += command[end] === '\\' ? 2 : 1
+      kept += command.slice(at, end + 1)
+      at = end
     } else if (char === "'" && !doubled) {
       // Single-quoted text, as far as its closing quote, or the line's end.
       const closing = command.indexOf("'", at + 1)
       const end = closing === -1 ? command.length : closing
-      kept += MESSAGE_FOLLOWS.test(kept) ? "''" : command.slice(at, end + 1)
+      const quoted = command.slice(at, end + 1)
+      kept += MESSAGE_FOLLOWS.test(kept) && !quoted.includes('\n') ? "''" : quoted
       at = end
     } else kept += char
   }
