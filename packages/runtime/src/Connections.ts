@@ -29,7 +29,7 @@ import {
   type Tracker,
   type Workspace,
 } from '@althar/connectors'
-import { type ActorId, Ids, newId } from '@althar/domain'
+import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { Cause, Clock, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Semaphore } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import type { Ledger } from '@althar/persistence-sqlite'
@@ -877,6 +877,7 @@ export class Connections extends Context.Service<
                       payload: { product: input.product, webUrl, account: account.login, auth: input.auth, ...where, ...from },
                       actorId: input.actorId,
                     })
+                    yield* adopt({ id, product: input.product, webUrl, accountId: account.id, workspaceKey: workspace?.key ?? null })
                   } else {
                     const revision = yield* change('connections', id, {
                       state: 'ready',
@@ -1429,6 +1430,51 @@ export class Connections extends Context.Service<
           )
         })
 
+      /**
+       * What a connection's predecessors held: the issues, drafts and reviews
+       * of one removed on this computer, of the same product on the same
+       * server, as the same account, or in the same workspace where both
+       * know theirs. Removed and made again, as signing in anew does, a
+       * connection is a new one, and they go on through it rather than
+       * through one that is gone. Another account or workspace takes none.
+       */
+      const adopt = (row: Pick<Row, 'id' | 'product' | 'webUrl' | 'accountId' | 'workspaceKey'>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const before = sql`
+            SELECT was.id FROM connections was
+            WHERE was.device_id = ${instance.deviceId} AND was.product = ${row.product} AND was.web_url = ${row.webUrl}
+              AND was.state = 'removed' AND was.id <> ${row.id}
+              AND CASE WHEN was.workspace_key IS NULL OR ${row.workspaceKey} IS NULL THEN was.account_id = ${row.accountId}
+                ELSE was.workspace_key = ${row.workspaceKey} END`
+          for (const [table, aggregateType] of [
+            ['external_links', 'external_link'],
+            ['issue_drafts', 'issue_draft'],
+            ['review_drafts', 'review_draft'],
+          ] as const) {
+            const held = yield* sql<{ id: string; projectId: ProjectId; was: string }>`
+              SELECT id, project_id, connection_id AS was FROM ${sql(table)} WHERE connection_id IN (${before})`
+            for (const one of held) {
+              const revision = yield* change(table, one.id, { connectionId: row.id })
+              yield* fact({
+                projectId: one.projectId,
+                aggregateType,
+                aggregateId: one.id,
+                revision,
+                type: `${aggregateType}.connection_moved`,
+                payload: { from: one.was, to: row.id },
+                actorId: instance.systemId,
+              })
+            }
+          }
+        })
+
+      /** Each connection takes what its predecessors left, as one made again by an Althar before this one didn't: once a launch. */
+      const adoptAll = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        for (const row of (yield* rows).toReversed()) yield* sql.withTransaction(adopt(row))
+      })
+
       /** Each ready connection whose product reaches one workspace a sign-in, and that doesn't know its own yet, asks it: once a launch. */
       const learnWorkspaces = Effect.gen(function* () {
         for (const row of yield* rows) {
@@ -1620,6 +1666,9 @@ export class Connections extends Context.Service<
           return row === undefined ? null : { connectionId: row.id, ref, ...adaptersOf(row) }
         })
 
+      yield* provide(adoptAll).pipe(
+        Effect.catchCause((cause) => Effect.logWarning('Connections made again didn’t take over what they held', cause)),
+      )
       yield* Effect.forkIn(provide(learnWorkspaces), scope)
 
       return Connections.of({

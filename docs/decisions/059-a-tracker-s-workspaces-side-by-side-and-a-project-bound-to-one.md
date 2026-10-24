@@ -51,6 +51,14 @@
     leaves the project bound to nothing until the same workspace (or, for
     a product without workspaces, the same account) is connected again,
     and then to that one.
+  - **A connection made again takes over what the removed one held.**
+    Removing a connection and connecting the same workspace (or account)
+    again, as re-adding a personal key does, makes a new connection. The
+    issues linked to tasks, issue drafts and review drafts that went
+    through the removed one move to it, each with a fact, so they don't
+    stay "Not connected" behind a connection that is gone. One made by an
+    Althar before this takes over at the next launch. Another account or
+    workspace takes none of them.
     - Bound, its drafts go to that tracker and team unless the agent
       names another.
     - The coordinator's `find_issues` and the person's issue list read

@@ -451,6 +451,23 @@ describe('a project’s trackers, in its settings', () => {
     expect(within(screen.getByRole('region', { name: 'Trackers' })).getByText('Connected as balazs')).toBeTruthy()
   })
 
+  it('says one key that reaches several teams of a workspace is connected for each team its issues are on', async () => {
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({
+        cursor: 1,
+        tasks: [taskFrom('DEV-74', 'conn_key'), taskFrom('OPS-3', 'conn_key')],
+        calls: [],
+        settledTotal: 2,
+      })),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, linear('ready', 'conn_key', 'mate')] })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings' })).toBeTruthy()
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getAllByText('Connected as mate')).toHaveLength(2)
+    expect(trackers.queryByText('Not connected')).toBeNull()
+  })
+
   it('says a tracker isn’t connected once the account its issues go through is removed, though another is signed in there', async () => {
     // Work's account was removed, so listing connections leaves it out; a personal one is signed in on the same Linear.
     windowAt('/projects/p1', {

@@ -1,6 +1,10 @@
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -27,11 +31,13 @@ import { callTool, fakeConnectors, repository, runtime } from './support'
 const ME = { id: 'u-1', login: 'mate.kokai99', name: 'Mate' }
 const ALTHAR = { id: 'team-a', key: 'ALT', name: 'Althar' }
 const FNT = { id: 'team-f', key: 'FNT', name: 'FNT' }
+const DEV = { id: 'team-d', key: 'DEV', name: 'Dev' }
 
 /** Two workspaces the same person is in, each with a team and an issue of theirs, and a key both have. */
 const workspaces = () => {
   const althar = makeFakeService({ product: 'linear', account: { ...ME, workspace: { key: 'althar', name: 'althar' } } })
   althar.addContainer(ALTHAR)
+  althar.addContainer(DEV)
   althar.addIssue({ ref: 'ALT-7', title: 'Bind a project to a workspace' })
   althar.addIssue({ ref: 'ENG-1', title: 'Althar’s ENG-1' })
   const fnt = makeFakeService({ product: 'linear', account: { ...ME, workspace: { key: 'fnt', name: 'FNT' } } })
@@ -41,9 +47,9 @@ const workspaces = () => {
   return { althar, fnt }
 }
 
-const withWorkspaces = (services: ReturnType<typeof workspaces>) =>
+const withWorkspaces = (services: ReturnType<typeof workspaces>, database = ':memory:') =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: { althar: services.althar, fnt: services.fnt } }) })),
+    Layer.provideMerge(runtime(database, {}, { connectors: fakeConnectors({ linear: { althar: services.althar, fnt: services.fnt } }) })),
   )
 
 const connect = (token: string) =>
@@ -65,6 +71,33 @@ const project = () =>
 
 const bind = (projectId: string, connectionId: string, container: { readonly id: string; readonly name: string } | null = null) =>
   Effect.flatMap(Projects, (projects) => projects.setTracker(projectId, { connectionId, container }))
+
+/** A task in a project, with an issue of its tracker's attached. */
+const withIssue = (projectId: ProjectId, issue: string) =>
+  Effect.gen(function* () {
+    const task = yield* (yield* Projects).createTask({
+      envelope: yield* Runtime.envelope('task.create', {}),
+      projectId,
+      title: issue,
+    })
+    yield* (yield* Issues).attach({ projectId, taskId: task.taskId, issue })
+    return task.taskId
+  })
+
+/** The connection a task's issue is read and moved through, as its board says. */
+const issueConnection = (projectId: string, taskId: string) =>
+  Effect.map(
+    Effect.flatMap(Queries, (queries) => queries.board(projectId)),
+    (board) => board.tasks.find((task) => task.taskId === taskId)?.issue?.connectionId,
+  )
+
+/** The connections a project's drafts go through. */
+const draftConnections = (projectId: string) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    Effect.map(sql<{ connectionId: string }>`SELECT connection_id FROM issue_drafts WHERE project_id = ${projectId}`, (rows) =>
+      rows.map((row) => row.connectionId),
+    ),
+  )
 
 const titles = (projectId: string) =>
   Effect.map(
@@ -157,6 +190,73 @@ describe('several Linear workspaces', () => {
         /Linear \(FNT\), Linear \(althar\)|Linear \(althar\), Linear \(FNT\)/,
       )
     }).pipe(Effect.provide(withWorkspaces(services)))
+  })
+
+  it.live('serve several projects from one connection, each bound to its own team there', () => {
+    const services = workspaces()
+    return Effect.gen(function* () {
+      const althar = yield* connect('althar')
+      const app = yield* project()
+      const site = yield* project()
+      yield* bind(app.projectId, althar.id, DEV)
+      yield* bind(site.projectId, althar.id, ALTHAR)
+      assert.match(
+        yield* callTool(app.access, 'draft_issue', { title: 'App’s', description: '' }),
+        /^Drafted the issue “App’s” on Linear, in Dev\./,
+      )
+      assert.match(
+        yield* callTool(site.access, 'draft_issue', { title: 'Site’s', description: '' }),
+        /^Drafted the issue “Site’s” on Linear, in Althar\./,
+      )
+      // Both list the workspace's issues, as the team is where they file, not what they read.
+      assert.deepStrictEqual(yield* titles(app.projectId), yield* titles(site.projectId))
+    }).pipe(Effect.provide(withWorkspaces(services)))
+  })
+
+  it.live('go on through a workspace removed and connected again: its issues, drafts and binding, never another’s', () => {
+    const services = workspaces()
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const althar = yield* connect('althar')
+      const fnt = yield* connect('fnt')
+      const ours = yield* project()
+      const taskId = yield* withIssue(ours.projectId, 'ALT-7')
+      const theirs = yield* withIssue(ours.projectId, 'https://linear.app/fnt/issue/FNT-12/ship')
+      yield* callTool(ours.access, 'draft_issue', { title: 'Pending', description: '', tracker: 'Linear (althar)' })
+      assert.strictEqual(yield* issueConnection(ours.projectId, taskId), althar.id)
+
+      // Removed, its issues are read through nothing: they say so.
+      yield* connections.remove(althar.id, (yield* Instance).personId)
+      // The same workspace connected again is a new connection, which they go on through; the other workspace's stay its.
+      const back = yield* connect('althar')
+      assert.notStrictEqual(back.id, althar.id)
+      assert.strictEqual(yield* issueConnection(ours.projectId, taskId), back.id)
+      assert.strictEqual(yield* issueConnection(ours.projectId, theirs), fnt.id)
+      assert.deepStrictEqual(yield* draftConnections(ours.projectId), [back.id])
+    }).pipe(Effect.provide(withWorkspaces(services)))
+  })
+
+  it.live('move what a workspace removed before left behind to the same one connected since, at launch', () => {
+    const services = workspaces()
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-workspaces-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      // As an earlier Althar left it: the issue's connection removed, its workspace unknown, the same one connected anew.
+      const { projectId, taskId, back } = yield* Effect.gen(function* () {
+        const connections = yield* Connections
+        const sql = yield* SqlClient.SqlClient
+        const althar = yield* connect('althar')
+        const { projectId } = yield* project()
+        const taskId = yield* withIssue(projectId, 'ALT-7')
+        yield* connections.remove(althar.id, (yield* Instance).personId)
+        const back = yield* connect('althar')
+        yield* sql`UPDATE external_links SET connection_id = ${althar.id} WHERE task_id = ${taskId}`
+        yield* sql`UPDATE connections SET workspace_key = NULL, workspace_name = NULL WHERE id = ${althar.id}`
+        return { projectId, taskId, back }
+      }).pipe(Effect.provide(withWorkspaces(services, file)))
+
+      const after = yield* issueConnection(projectId, taskId).pipe(Effect.provide(withWorkspaces(services, file)))
+      assert.strictEqual(after, back.id)
+    })
   })
 
   it.live('bind a project only to a connection there, and through it again once its workspace is connected anew', () => {
