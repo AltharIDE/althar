@@ -107,10 +107,16 @@
   - **Agents don't reach the device's ssh.** `GIT_SSH_COMMAND` is set only
     in the environment of Althar's own git commands, never in
     `process.env`, so no session inherits it. The rules refuse a command
-    that runs `althar-host-ssh`, as a program or as git's ssh through
-    `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand`, for leads and
-    readers alike, as they refuse `flatpak-spawn`. A line that only names
-    it, a search or a commit message, isn't refused for it. An environment variable Althar sets
+    that runs `althar-host-ssh` as a program, for leads and readers alike,
+    as they refuse `flatpak-spawn`. They also refuse a line that names
+    either one together with a way git is told what to run, now or for a
+    later plain `git fetch`: `GIT_SSH_COMMAND`, `GIT_SSH`,
+    `core.sshCommand` set in any spelling (`-c`, `git config`, a write to
+    a config file), `GIT_CONFIG_*`, or an alias. A line that only names
+    it, a search or a commit message, isn't refused for it. A git config
+    edited with the file tools sits outside the task's worktree, in the
+    repository's git folder, where the rules for outside the worktree
+    apply. An environment variable Althar sets
     outranks a repository's `core.sshCommand`, so a config an agent wrote
     in a task's repository doesn't choose the ssh Althar's fetch runs.
 - **Alternatives considered:**
@@ -137,9 +143,14 @@
 - **Trade-off:**
   - `--talk-name=org.freedesktop.Flatpak` still isn't a boundary (ADR-027).
     An agent in the sandbox that got past the rules could run
-    `flatpak-spawn --host ssh` itself, as it could before this change. This
-    adds no way in that the rules can't see. The socket would have added
-    one.
+    `flatpak-spawn --host ssh` itself, as it could before this change, for
+    example from a script it wrote and then ran. Nor can
+    `althar-host-ssh` check that Althar's own git called it: everything it
+    could check (the calling process, its parent, a token in the
+    environment) an agent running as the same user in the same sandbox can
+    imitate or read in `/proc`. So the rules are the guard, as they are for
+    `flatpak-spawn`, and this adds no way in that they can't see. The
+    socket would have added one.
   - Signing in depends on the device. Its ssh must be installed. Its agent
     must be in the session's environment or at one of the usual sockets.
     A key that needs a passphrase and isn't in an agent fails, since

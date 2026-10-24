@@ -800,6 +800,16 @@ describe('a role that only reads', () => {
       'git -c core.sshCommand=/app/bin/althar-host-ssh fetch origin',
       "git -c core.sshcommand='althar-host-ssh -v' fetch origin",
       "sh -c 'althar-host-ssh git@github.com'",
+      // Kept in a git config for a later, plain `git fetch` to use.
+      'git config core.sshCommand /app/bin/althar-host-ssh',
+      'git config set --local core.sshcommand althar-host-ssh',
+      'git config --add core.sshCommand "althar-host-ssh -v"',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.sshCommand GIT_CONFIG_VALUE_0=/app/bin/althar-host-ssh git fetch',
+      "git config alias.f '!/app/bin/althar-host-ssh'",
+      "printf '[core]\\n\\tsshCommand = althar-host-ssh\\n' >> ../.git/config",
+      // Or the bridge itself as git's ssh.
+      "git config core.sshCommand 'flatpak-spawn --host ssh'",
+      "GIT_SSH_COMMAND='flatpak-spawn --host ssh' git push origin main",
     ]) {
       for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
         assert.include(

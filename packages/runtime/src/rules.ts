@@ -376,15 +376,22 @@ const DEVICE_BRIDGE_REFUSED =
 const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
   ['flatpak-spawn', 'althar-host-ssh'].includes((words[0] ?? '').split('/').at(-1) ?? '') ? DEVICE_BRIDGE_REFUSED : undefined
 
-/** That ssh, as git would be told to run it, which the words a command is read as don't keep: an assignment's value is dropped. */
-const DEVICE_SSH_FOR_GIT = /(?:GIT_SSH(?:_COMMAND)?|sshCommand)\s*=\s*['"]?[^\s'"]*althar-host-ssh/i
+/** That ssh, or the bridge itself, named in a command line. */
+const DEVICE_BRIDGE_NAMED = /althar-host-ssh|flatpak-spawn/i
+
+/** The ways git is told what to run, at once or for a later plain `git fetch` to: its ssh settings, config from the environment, an alias. */
+const GIT_RUNS = /GIT_SSH|sshCommand|GIT_CONFIG_|\balias\./i
 
 /**
- * A command line that has git run the device's ssh: through `GIT_SSH_COMMAND`,
- * `GIT_SSH` or `core.sshCommand`. One that only names it, a search or a
+ * A command line that has git run the device's ssh, or the bridge, as it is
+ * now or once it's kept in a config: `GIT_SSH_COMMAND`, `GIT_SSH`,
+ * `core.sshCommand` however it is set, `GIT_CONFIG_*`, an alias. The words a
+ * command is read as don't keep an assignment's value, nor what a config
+ * keeps, so the whole line is read. One that only names it, a search or a
  * commit message, runs nothing.
  */
-const deviceSshReason = (command: string): string | undefined => (DEVICE_SSH_FOR_GIT.test(command) ? DEVICE_BRIDGE_REFUSED : undefined)
+const deviceSshReason = (command: string): string | undefined =>
+  DEVICE_BRIDGE_NAMED.test(command) && GIT_RUNS.test(command) ? DEVICE_BRIDGE_REFUSED : undefined
 
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
