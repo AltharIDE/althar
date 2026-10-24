@@ -46,6 +46,10 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 
 ## The Flatpak's sign-in key, 15 October
 
+- [x] **A sign-in whose key is lost asks to be made again.** When
+  `safeStorage.decryptString` throws, main marks the answer `unreadable`
+  (`sealFailure`), and the runtime puts the connection in `reauth_required`
+  ("sign in again") rather than reporting the keychain away.
 - [x] **Keep a sign-in key across restarts on GNOME and KDE.** Every Linux
   Flatpak prefers Chromium's app-specific Secret portal seal (`v12`), KDE
   included; direct KWallet access is removed from this branch so browser apps

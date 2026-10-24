@@ -2595,6 +2595,11 @@ describe('words', () => {
     )
     assert.strictEqual(summarize(Cause.fail(unstarted(''))), '')
     assert.strictEqual(summarize(Cause.empty), '')
+    // A host's refusal is said as the person reads it, not as the error is named.
+    assert.strictEqual(
+      summarize(Cause.fail(new ConnectorFailed({ product: 'github', reason: 'unauthorized', message: 'Bad credentials' }))),
+      "GitHub no longer takes Althar's sign-in. Sign in to it again.",
+    )
     // A command the sandbox could not take out to the device says what to put right, not that it is missing.
     assert.include(
       agentSaid(

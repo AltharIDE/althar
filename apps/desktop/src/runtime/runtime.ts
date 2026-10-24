@@ -313,6 +313,7 @@ parent.on('message', (message) => {
     readonly value?: string
     readonly error?: string
     readonly keyring?: boolean
+    readonly unreadable?: boolean
     readonly threadId?: string
     readonly shot?: unknown
   } | null

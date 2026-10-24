@@ -98,10 +98,10 @@ export const agentSaid = (error: unknown): string | undefined => {
   }
 }
 
-/** A cause, summed up for a person: what the agent said, or the first line of what went wrong. */
+/** A cause, summed up for a person: what the agent said, what the host said no to, or the first line of what went wrong. */
 export const summarize = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.findErrorOption(cause)
-  const said = Option.isSome(error) ? agentSaid(error.value) : undefined
+  const said = Option.isSome(error) ? (agentSaid(error.value) ?? hostFailed(error.value)) : undefined
   if (said !== undefined) return said
   const first = lastLine(Cause.pretty(cause).split('\n')[0] ?? '').replace(/^\w*Error: /, '')
   return first === '' ? '' : sentence(first)
@@ -300,6 +300,12 @@ export const words = (
   if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
   return { reason, message }
 }
+
+/** What a code host or tracker said no to, when that is what the error is: in the person's words, not the error's name. */
+const hostFailed = (error: unknown): string | undefined =>
+  tagOf(error) === 'ConnectorFailed'
+    ? hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
+    : undefined
 
 /** A product's name, by its id: GitHub, Linear. */
 const productOf = (product: string) => Object.values(products).find((info) => info.product === product)?.name ?? 'The service'
