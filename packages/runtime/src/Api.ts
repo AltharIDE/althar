@@ -589,7 +589,12 @@ export const handlers = Api.toLayer(
             const [project] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${projectId}`
             if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
             const bound = yield* projectTracker(projectId)
-            return bound === null ? null : { connectionId: bound.connectionId, container: bound.container }
+            if (bound === null) return null
+            return {
+              connectionId: bound.connectionId,
+              container: bound.container,
+              gone: bound.gone === null ? null : { product: bound.product, ...bound.gone },
+            }
           }),
         ),
       SetProjectTracker: ({ commandId, projectId, tracker }) =>

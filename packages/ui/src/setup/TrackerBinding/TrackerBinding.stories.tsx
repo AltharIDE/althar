@@ -61,6 +61,23 @@ export const Bound: Story = {
   },
 }
 
+/** Bound to a workspace disconnected since: it says so, and stays until connected again or another is chosen. */
+export const Gone: Story = {
+  args: {
+    trackers: [...TRACKERS.slice(1), { id: 'conn_4', label: 'Linear · Meridian (disconnected)', brand: Brand.Linear }],
+    value: 'conn_4',
+    container: { id: 'team-1', label: 'MER (Meridian)' },
+    containers: null,
+    gone: true,
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('combobox', { name: 'Issues go to' })).toHaveTextContent('Linear · Meridian (disconnected)')
+    await expect(c.getByText(/Disconnected\./)).toBeVisible()
+    await expect(c.queryByRole('combobox', { name: 'Team' })).toBeNull()
+  },
+}
+
 /** The binding as the person changes it: a tracker chosen clears where on it. */
 function Chosen(args: TrackerBindingProps) {
   const [value, setValue] = useState<string | null>(null)

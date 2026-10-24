@@ -25,6 +25,8 @@ export interface ProjectTrackerModel {
   readonly container: ContainerChoice | null
   /** Where on the one bound issues can be filed; null while they are read, or where it is bound to none. */
   readonly containers: ReadonlyArray<ContainerChoice> | null
+  /** Whether the one it is bound to was disconnected, and not connected again. */
+  readonly gone: boolean
   readonly choose: (connectionId: string | null) => void
   readonly chooseContainer: (container: ContainerChoice | null) => void
   /** Why the last choice didn't hold. */
@@ -37,30 +39,50 @@ const choiceOf = (container: TrackerContainer): ContainerChoice => ({
   label: container.key === null || container.key === container.name ? container.name : `${container.key} (${container.name})`,
 })
 
-/** The trackers that file issues, each one connection: Linear · FNT, Jira · acme.atlassian.net, or the service alone. */
+type Product = ConnectionList['products'][number]
+
+/** A tracker as it is told: Linear · FNT, Jira · acme.atlassian.net, or the service alone. */
+const labelOf = (product: Product, connection: { readonly webUrl: string; readonly workspace?: string | null }) => {
+  const which =
+    connection.workspace !== undefined && connection.workspace !== null
+      ? connection.workspace
+      : connection.webUrl === product.hostedUrl
+        ? null
+        : hostOf(connection.webUrl)
+  return which === null ? product.name : `${product.name} · ${which}`
+}
+
+/** The trackers that file issues, each one connection. */
 export const trackerChoices = (list: ConnectionList | null): ReadonlyArray<TrackerChoice> =>
   (list?.connections ?? []).flatMap((connection) => {
     const product = list?.products.find((option) => option.product === connection.product)
     if (product === undefined || !product.tracker || product.host) return []
-    const which =
-      connection.workspace !== undefined && connection.workspace !== null
-        ? connection.workspace.name
-        : connection.webUrl === product.hostedUrl
-          ? null
-          : hostOf(connection.webUrl)
     return [
-      { id: connection.id, label: which === null ? product.name : `${product.name} · ${which}`, brand: productBrand(connection.product) },
+      {
+        id: connection.id,
+        label: labelOf(product, { webUrl: connection.webUrl, workspace: connection.workspace?.name ?? null }),
+        brand: productBrand(connection.product),
+      },
     ]
   })
+
+/** The one a project is bound to, disconnected since: a choice still, said to be gone. */
+const goneChoice = (list: ConnectionList | null, bound: ProjectTracker | null): TrackerChoice | null => {
+  const gone = bound?.gone
+  const product = list?.products.find((option) => option.product === gone?.product)
+  if (bound === null || gone === undefined || gone === null || product === undefined) return null
+  return { id: bound.connectionId, label: `${labelOf(product, gone)} (disconnected)`, brand: productBrand(product.product) }
+}
 
 export const useProjectTracker = (projectId: string, list: ConnectionList | null): ProjectTrackerModel => {
   const { client, cache } = useServices()
   const read = reads(client)
   const key = keys.projectTracker(projectId)
   const bound = useQuery(read.projectTracker(projectId)).data ?? null
-  const trackers = trackerChoices(list)
+  const gone = goneChoice(list, bound)
+  const trackers = [...trackerChoices(list), ...(gone === null ? [] : [gone])]
   const value = bound !== null && trackers.some((tracker) => tracker.id === bound.connectionId) ? bound.connectionId : null
-  const listed = useQuery({ ...read.containers(value ?? ''), enabled: value !== null }).data
+  const listed = useQuery({ ...read.containers(value ?? ''), enabled: value !== null && gone === null }).data
   const [failed, setFailed] = useState<string | null>(null)
 
   const save = useCallback(
@@ -84,6 +106,7 @@ export const useProjectTracker = (projectId: string, list: ConnectionList | null
     value,
     container: bound?.container === undefined || bound.container === null ? null : { id: bound.container.id, label: bound.container.name },
     containers: value === null || listed === undefined ? null : listed.map(choiceOf),
+    gone: gone !== null,
     choose: (connectionId) => save(connectionId === null ? null : { connectionId, container: null }),
     chooseContainer: (container) => {
       if (value === null) return

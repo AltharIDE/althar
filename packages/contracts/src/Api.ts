@@ -312,6 +312,10 @@ export type TrackerContainer = typeof TrackerContainer.Type
 export const ProjectTracker = Schema.Struct({
   connectionId: Schema.String,
   container: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** Where it was bound to a connection removed since and not made again: its service and server, and the workspace it reached. */
+  gone: Schema.optional(
+    Schema.NullOr(Schema.Struct({ product: Schema.String, webUrl: Schema.String, workspace: Schema.NullOr(Schema.String) })),
+  ),
 })
 export type ProjectTracker = typeof ProjectTracker.Type
 

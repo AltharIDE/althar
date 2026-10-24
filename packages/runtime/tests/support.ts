@@ -266,6 +266,8 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
+    /** The keychain, kept across runtimes given the same one; else each its own. */
+    readonly keychain?: Map<string, string>
     /** How a screenshot is taken, where a test takes one; without, none can be. */
     readonly screenshot?: RuntimeOptions['screenshot']
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
@@ -283,7 +285,7 @@ export const runtime = (
     deviceName: 'Test Mac',
     agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount),
     countdown: more.countdown ?? Duration.millis(300),
-    secrets: Secrets.memory(),
+    secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
     checksAppear: more.checksAppear ?? Duration.zero,

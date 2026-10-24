@@ -592,6 +592,27 @@ describe('a project’s trackers, in its settings', () => {
     expect(client.setProjectTracker).toHaveBeenLastCalledWith('p1', null)
   })
 
+  it('says the workspace it is bound to was disconnected, rather than going back to where its issues are', async () => {
+    const althar = { ...linear('ready', 'conn_althar', 'mate'), workspace: { key: 'althar', name: 'althar' } }
+    const listContainers = vi.fn(async () => [])
+    windowAt('/projects/p1', {
+      ...onLinear(althar),
+      getProjectTracker: vi.fn(async (): Promise<ProjectTracker> => ({
+        connectionId: 'conn_fnt',
+        container: { id: 'team-f', name: 'Fintech' },
+        gone: { product: 'linear', webUrl: 'https://linear.app', workspace: 'FNT' },
+      })),
+      listContainers,
+    })
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    const goTo = await trackers.findByRole('combobox', { name: 'Issues go to' })
+    await waitFor(() => expect(goTo.textContent).toContain('Linear · FNT (disconnected)'))
+    expect(trackers.getByText(/^Disconnected\./)).toBeTruthy()
+    expect(trackers.queryByRole('combobox', { name: 'Team' })).toBeNull()
+    expect(listContainers).not.toHaveBeenCalled()
+  })
+
   it('says why a binding didn’t hold, and puts it back', async () => {
     const fnt = { ...linear('ready', 'conn_fnt', 'mate'), workspace: { key: 'fnt', name: 'FNT' } }
     windowAt('/projects/p1', {

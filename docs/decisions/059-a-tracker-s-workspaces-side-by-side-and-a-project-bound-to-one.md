@@ -40,25 +40,22 @@
     reaches. Each connection says its workspace ("Signed in as
     mate.kokai99 · FNT") and is disconnected on its own.
   - **A link to an issue goes to the connection in the workspace it
-    names**; then to one that doesn't know its workspace yet; then to any
-    of that product. A link names its workspace explicitly, so it reads
-    from whatever project it is pasted in.
+    names**, or to one that doesn't know its workspace yet; never to
+    another workspace's, where the same key is another issue: a link to a
+    workspace not connected says so. A link that names none goes to any of
+    that product. A link names its workspace explicitly, so it reads from
+    whatever project it is pasted in.
   - **A project may be bound to one tracker connection, and to a container
     there** (a Linear team), by the person in its settings (Code and
     issues → Trackers, "Issues go to"). Kept on the project
     (`projects.tracker_connection_id`, `tracker_container_id` and
-    `_name`, migration 0041), it follows the connection: one disconnected
-    leaves the project bound to nothing until the same workspace (or, for
-    a product without workspaces, the same account) is connected again,
-    and then to that one.
-  - **A connection made again takes over what the removed one held.**
-    Removing a connection and connecting the same workspace (or account)
-    again, as re-adding a personal key does, makes a new connection. The
-    issues linked to tasks, issue drafts and review drafts that went
-    through the removed one move to it, each with a fact, so they don't
-    stay "Not connected" behind a connection that is gone. One made by an
-    Althar before this takes over at the next launch. Another account or
-    workspace takes none of them.
+    `_name`, migration 0041), it follows the connection: once the same
+    workspace (or, for a product without workspaces, the same account) is
+    connected again, to that one. Disconnected and not connected again, the
+    project stays bound to it, and its settings say it is disconnected: its
+    issues aren't listed from, nor its drafts made in, another workspace in
+    its place, until it is connected again, another is chosen, or the
+    binding is unset. An agent may still name another tracker for a draft.
     - Bound, its drafts go to that tracker and team unless the agent
       names another.
     - The coordinator's `find_issues` and the person's issue list read
@@ -68,6 +65,14 @@
     - Unbound, everything goes on as before: drafts go where its issues
       already are, and issues are listed and keys found across every
       tracker.
+  - **A connection made again takes over what the removed one held.**
+    Removing a connection and connecting the same workspace (or account)
+    again, as re-adding a personal key does, makes a new connection. The
+    issues linked to tasks, issue drafts and review drafts that went
+    through the removed one move to it, each with a fact, so they don't
+    stay "Not connected" behind a connection that is gone. One made by an
+    Althar before this takes over at the next launch. Another account or
+    workspace takes none of them.
   - **Several of a product are told apart by their workspace** wherever an
     agent or the person picks one: Linear (FNT), Linear (althar); then by
     site, then by site and account, as before.

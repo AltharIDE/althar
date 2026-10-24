@@ -5,10 +5,10 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Schedule } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Connections, OtherAccount } from '../src/Connections'
+import { Connections, NotConnected, OtherAccount } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
@@ -47,9 +47,18 @@ const workspaces = () => {
   return { althar, fnt }
 }
 
-const withWorkspaces = (services: ReturnType<typeof workspaces>, database = ':memory:') =>
+const withWorkspaces = (services: ReturnType<typeof workspaces>, database = ':memory:', keychain?: Map<string, string>) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(database, {}, { connectors: fakeConnectors({ linear: { althar: services.althar, fnt: services.fnt } }) })),
+    Layer.provideMerge(
+      runtime(
+        database,
+        {},
+        {
+          connectors: fakeConnectors({ linear: { althar: services.althar, fnt: services.fnt } }),
+          ...(keychain === undefined ? {} : { keychain }),
+        },
+      ),
+    ),
   )
 
 const connect = (token: string) =>
@@ -174,6 +183,9 @@ describe('several Linear workspaces', () => {
       assert.strictEqual((yield* issues.read('FNT-12', ours.projectId)).connectionId, fnt.id)
       const linked = yield* issues.read('https://linear.app/fnt/issue/ENG-1/fnts', ours.projectId)
       assert.deepInclude(linked, { title: 'FNT’s ENG-1', connectionId: fnt.id })
+      // A link to a workspace not connected isn't read through another, where the same key is another issue.
+      const elsewhere = yield* Effect.flip(issues.read('https://linear.app/blushh/issue/ENG-1/theirs', ours.projectId))
+      assert.instanceOf(elsewhere, NotConnected)
 
       // A draft goes where the project is bound, in the team it was bound to, though two workspaces are connected.
       assert.match(
@@ -259,6 +271,68 @@ describe('several Linear workspaces', () => {
     })
   })
 
+  it.live('learn the workspace of a connection made before Althar kept it, at launch, and route its links by it', () => {
+    const services = workspaces()
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-workspaces-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      const keychain = new Map<string, string>()
+      // As an Althar before migration 0041 left it: a Linear connection not knowing its workspace, beside one connected since.
+      const { althar, fnt } = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const althar = yield* connect('althar')
+        const fnt = yield* connect('fnt')
+        yield* sql`UPDATE connections SET workspace_key = NULL, workspace_name = NULL WHERE id = ${fnt.id}`
+        // Not knowing its own, it is taken for any workspace's link no other connection is in.
+        assert.strictEqual((yield* (yield* Connections).resolve('https://linear.app/blushh/issue/ENG-1/x'))?.connectionId, fnt.id)
+        return { althar, fnt }
+      }).pipe(Effect.provide(withWorkspaces(services, file, keychain)))
+
+      yield* Effect.gen(function* () {
+        const connections = yield* Connections
+        const learned = yield* Effect.map(connections.list, (all) => all.map((one) => [one.id, one.workspace?.name ?? null])).pipe(
+          Effect.repeat({ until: (pairs) => pairs.every(([, key]) => key !== null), schedule: Schedule.spaced('20 millis') }),
+          Effect.timeout('5 seconds'),
+        )
+        assert.sameDeepMembers(learned, [
+          [althar.id, 'althar'],
+          [fnt.id, 'FNT'],
+        ])
+        // Each link goes to its own workspace's, where the same key is another issue, and another workspace's to none.
+        const issues = yield* Issues
+        assert.isNull(yield* connections.resolve('https://linear.app/blushh/issue/ENG-1/x'))
+        assert.deepInclude(yield* issues.read('https://linear.app/fnt/issue/ENG-1/x'), { title: 'FNT’s ENG-1', connectionId: fnt.id })
+        assert.deepInclude(yield* issues.read('https://linear.app/althar/issue/ENG-1/x'), {
+          title: 'Althar’s ENG-1',
+          connectionId: althar.id,
+        })
+      }).pipe(Effect.provide(withWorkspaces(services, file, keychain)))
+    })
+  })
+
+  it.live('keep a project bound to a workspace disconnected from going to another in its place', () => {
+    const services = workspaces()
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      yield* connect('althar')
+      const fnt = yield* connect('fnt')
+      const theirs = yield* project()
+      yield* bind(theirs.projectId, fnt.id, FNT)
+      yield* connections.remove(fnt.id, (yield* Instance).personId)
+
+      // Althar's workspace, the one left, is neither listed nor drafted to in FNT's place.
+      assert.deepStrictEqual(yield* titles(theirs.projectId), [])
+      assert.notMatch(yield* callTool(theirs.access, 'find_issues', {}), /ALT-7/)
+      const refused = yield* callTool(theirs.access, 'draft_issue', { title: 'Theirs', description: '' })
+      assert.match(refused, /go to Linear \(FNT\), which is no longer connected/)
+      assert.notMatch(refused, /^Drafted/)
+      // Named, another still takes it.
+      assert.match(
+        yield* callTool(theirs.access, 'draft_issue', { title: 'Named', description: '', tracker: 'Linear', container: 'ALT' }),
+        /^Drafted the issue “Named” on Linear, in Althar\./,
+      )
+    }).pipe(Effect.provide(withWorkspaces(services)))
+  })
+
   it.live('bind a project only to a connection there, and through it again once its workspace is connected anew', () => {
     const services = workspaces()
     return Effect.gen(function* () {
@@ -274,10 +348,14 @@ describe('several Linear workspaces', () => {
         connectionId: fnt.id,
         product: 'linear',
         container: { id: FNT.id, name: FNT.name },
+        gone: null,
       })
-      // Disconnected, it is bound to nothing; the same workspace connected again, to that.
+      // Disconnected, it is still bound, to one gone; the same workspace connected again, to that.
       yield* connections.remove(fnt.id, (yield* Instance).personId)
-      assert.isNull(yield* projectTracker(projectId))
+      assert.deepInclude(yield* projectTracker(projectId), {
+        connectionId: fnt.id,
+        gone: { webUrl: 'https://linear.app', workspace: 'FNT' },
+      })
       const back = yield* connect('fnt')
       assert.strictEqual((yield* projectTracker(projectId))?.connectionId, back.id)
 

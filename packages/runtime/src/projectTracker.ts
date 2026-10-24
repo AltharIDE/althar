@@ -10,18 +10,25 @@ import { SqlClient } from 'effect/sql'
  * for a bare key. Unbound, where its issues go is learned from those it has.
  */
 
-/** A project's tracker: its connection, and where issues are filed there, by the tracker's id and name; null for its default. */
+/**
+ * A project's tracker: its connection, and where issues are filed there, by
+ * the tracker's id and name; null for its default. Gone, it is the connection
+ * chosen, disconnected and not connected again, with the workspace it reached.
+ */
 export interface ProjectTracker {
   readonly connectionId: string
   readonly product: Product
   readonly container: { readonly id: string; readonly name: string } | null
+  readonly gone: { readonly webUrl: string; readonly workspace: string | null } | null
 }
 
 /**
  * The tracker a project is bound to, through a connection that is still
  * there: the one chosen, or, where it was disconnected, the same workspace
  * (or the same account, where its product has no workspaces) connected
- * again. Null for a project bound to none, or to one gone and not made again.
+ * again. Neither there, it is still bound, to one gone: its issues aren't
+ * listed, nor its drafts made, from another workspace in its place. Null for
+ * a project bound to none.
  */
 export const projectTracker = (projectId: string) =>
   Effect.gen(function* () {
@@ -38,10 +45,16 @@ export const projectTracker = (projectId: string) =>
       WHERE c.device_id = was.device_id AND c.product = was.product AND c.web_url = was.web_url AND c.state <> 'removed'
         AND (c.id = was.id OR (CASE WHEN was.workspace_key IS NULL THEN c.account_id = was.account_id ELSE c.workspace_key = was.workspace_key END))
       ORDER BY c.id = was.id DESC, c.state = 'ready' DESC, c.created_at DESC LIMIT 1`
-    if (connection === undefined) return null
+    const container = bound.containerId === null ? null : { id: bound.containerId, name: bound.containerName ?? bound.containerId }
+    if (connection !== undefined)
+      return { connectionId: connection.id, product: connection.product, container, gone: null } satisfies ProjectTracker
+    const [was] = yield* sql<{ product: Product; webUrl: string; workspaceName: string | null }>`
+      SELECT product, web_url, workspace_name FROM connections WHERE id = ${bound.connectionId}`
+    if (was === undefined) return null
     return {
-      connectionId: connection.id,
-      product: connection.product,
-      container: bound.containerId === null ? null : { id: bound.containerId, name: bound.containerName ?? bound.containerId },
+      connectionId: bound.connectionId,
+      product: was.product,
+      container,
+      gone: { webUrl: was.webUrl, workspace: was.workspaceName },
     } satisfies ProjectTracker
   })

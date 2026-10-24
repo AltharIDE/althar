@@ -129,6 +129,7 @@ export function CodeSection({
               value={bound.value}
               container={bound.container}
               containers={bound.containers}
+              gone={bound.gone}
               onChange={bound.choose}
               onContainer={bound.chooseContainer}
             />

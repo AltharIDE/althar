@@ -33,6 +33,7 @@ export interface TrackerBindingText {
   containerNote: string
   anyContainer: string
   reading: string
+  gone: string
 }
 
 export const trackerBindingText: TrackerBindingText = {
@@ -43,6 +44,7 @@ export const trackerBindingText: TrackerBindingText = {
   containerNote: 'Where its drafts are filed on it.',
   anyContainer: 'As its issues say',
   reading: 'Reading its teams',
+  gone: 'Disconnected. Its issues aren’t listed, and drafts aren’t made for another in its place, until it is connected again or another is chosen.',
 }
 
 export interface TrackerBindingProps {
@@ -54,6 +56,8 @@ export interface TrackerBindingProps {
   container: ContainerChoice | null
   /** Where on the chosen one issues can be filed; null while they are read. */
   containers: readonly ContainerChoice[] | null
+  /** Whether the one chosen was disconnected since, and not connected again. */
+  gone?: boolean
   onChange: (tracker: string | null) => void
   onContainer: (container: ContainerChoice | null) => void
   disabled?: boolean
@@ -64,7 +68,17 @@ const LEARNED = '\u0000learned'
 const ANY = '\u0000any'
 
 /** The tracker a project's issues go to, and where on it, as two rows of a setting list. */
-export function TrackerBinding({ trackers, value, container, containers, onChange, onContainer, disabled, text }: TrackerBindingProps) {
+export function TrackerBinding({
+  trackers,
+  value,
+  container,
+  containers,
+  gone,
+  onChange,
+  onContainer,
+  disabled,
+  text,
+}: TrackerBindingProps) {
   const t = { ...trackerBindingText, ...text }
   const chosen = trackers.find((tracker) => tracker.id === value)
   // The one chosen stays a choice while its tracker's teams are read, or once it no longer has it.
@@ -76,7 +90,7 @@ export function TrackerBinding({ trackers, value, container, containers, onChang
     <>
       <SettingRow
         title={t.title}
-        note={t.note}
+        note={gone === true ? t.gone : t.note}
         {...(chosen?.brand === undefined ? {} : { mark: <BrandMark brand={chosen.brand} size={18} /> })}
       >
         {() => (
@@ -89,7 +103,7 @@ export function TrackerBinding({ trackers, value, container, containers, onChang
           />
         )}
       </SettingRow>
-      {chosen !== undefined && (
+      {chosen !== undefined && gone !== true && (
         <SettingRow title={t.container} note={containers === null ? t.reading : t.containerNote} indent>
           {() => (
             <Select

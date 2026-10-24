@@ -1657,12 +1657,14 @@ export class Connections extends Context.Service<
               candidate.product === ref.product &&
               new URL(candidate.webUrl).hostname.toLowerCase() === ref.host,
           )
-          // A link that names its workspace goes to the connection in it; else to one that doesn't know its own yet, else to any.
+          // A link that names its workspace goes to the connection in it, else to one that doesn't know its own yet, never to
+          // another workspace's, where the same key is another issue; one that names none, to any.
           const workspace = ref.kind === 'issue' ? ref.workspace : undefined
           const row =
-            (workspace === undefined ? undefined : there.find((candidate) => candidate.workspaceKey?.toLowerCase() === workspace)) ??
-            (workspace === undefined ? undefined : there.find((candidate) => candidate.workspaceKey === null)) ??
-            there[0]
+            workspace === undefined
+              ? there[0]
+              : (there.find((candidate) => candidate.workspaceKey?.toLowerCase() === workspace) ??
+                there.find((candidate) => candidate.workspaceKey === null))
           return row === undefined ? null : { connectionId: row.id, ref, ...adaptersOf(row) }
         })
 
