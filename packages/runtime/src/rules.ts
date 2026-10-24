@@ -421,7 +421,7 @@ const substitutedIn = (command: string): string => {
   // one, not an escaped one such as `\ `.
   let wordStarts = true
   for (let at = 0; at < command.length; at++) {
-    const char = command[at]
+    const char = command.charAt(at)
     if (char === '\\') {
       // `\` and a newline join two lines, as if neither were there.
       if (command[at + 1] !== '\n') {
