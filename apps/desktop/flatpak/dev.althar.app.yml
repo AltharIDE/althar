@@ -63,6 +63,10 @@ modules:
       # git from the SDK: the runtime has none, and Althar and its agents run it in the sandbox.
       - install -Dm755 /usr/bin/git /app/libexec/althar/git
       - cp -a /usr/libexec/git-core /app/libexec/git-core
+      # The SDK links git-upload-pack and the other dashed commands to ../../bin/git, which here is
+      # git.sh: it runs git as plain `git`, which then can't tell it was asked for upload-pack, so a
+      # fetch from a folder on this computer fails. Link them to git itself.
+      - for l in /app/libexec/git-core/*; do if [ "$(readlink "$l")" = ../../bin/git ]; then ln -sf ../althar/git "$l"; fi; done
       - mkdir -p /app/share/git-core
       - cp -a /usr/share/git-core/templates /app/share/git-core/templates
       - install -Dm755 git.sh /app/bin/git
