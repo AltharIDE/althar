@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Connections } from '../src/Connections'
+import { Connections, OtherAccount } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
@@ -98,6 +98,13 @@ describe('several Linear workspaces', () => {
         count: number
       }>`SELECT count(*) AS count FROM connections WHERE product = 'linear' AND state <> 'removed'`
       assert.strictEqual(kept?.count, 2)
+
+      // Signed in again, a connection stays in its own workspace: another picked on Linear's page is refused, not added.
+      const refused = yield* Effect.flip(
+        connections.connectToken({ product: 'linear', token: 'althar', connectionId: second.id, actorId: (yield* Instance).personId }),
+      )
+      assert.instanceOf(refused, OtherAccount)
+      assert.deepInclude(refused, { login: 'mate.kokai99 in althar', expected: 'mate.kokai99 in FNT' })
 
       // Each disconnects on its own.
       yield* connections.remove(second.id, (yield* Instance).personId)

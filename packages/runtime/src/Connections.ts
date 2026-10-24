@@ -818,7 +818,10 @@ export class Connections extends Context.Service<
           const account: Account = yield* (
             (made.host ?? made.tracker)?.account ?? Effect.fail(new NotConnected({ product: input.product, what: 'an account' }))
           )
-          if (input.sameAs !== undefined && account.id !== input.sameAs.id)
+          // Signed in again, it is the same account, and in the same workspace where the connection knows its own.
+          const elsewhere =
+            input.sameAs?.workspace != null && account.workspace !== undefined && account.workspace.key !== input.sameAs.workspace.key
+          if (input.sameAs !== undefined && (account.id !== input.sameAs.id || elsewhere))
             return yield* new OtherAccount({
               product: input.product,
               login: whoIn(account.login, account.workspace),
