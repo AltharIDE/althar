@@ -396,9 +396,19 @@ const DEVICE_BRIDGE_SUBSTITUTED = /[\w.]=['"]?(?:\$\(|`)[^;&|]*?(?:althar-host-s
 const RUNS_A_SCRIPT = /\b(?:(?:ba|da|z|k)?sh\s+(?:-\w+\s+)*-\w*c\b|eval\b)/
 
 /**
- * The line as the shell substitutes in it: single-quoted text, such as a
- * commit message quoting the command, substitutes nothing, unless the line
- * hands it to a shell to run.
+ * A `git commit` or `git tag` message about to start: `-m `, `-am`,
+ * `--message=`, after the command's start and nothing but its own words.
+ * Any other program may run the single-quoted text it's given
+ * (`python3 -c '…'`, `echo '…' | sh`), and the list of those has no end.
+ */
+const MESSAGE_FOLLOWS =
+  /(?:^\s*|[;&|(]\s*)git(?:\s+-[cC]\s+[^\s;&|'"`$]+)*\s+(?:commit|tag)\b(?:[^;&|'"`$\\]|'')*?\s(?:-[a-zA-Z]*m\s*|--message[=\s]\s*)$/
+
+/**
+ * The line as the shell substitutes in it, as far as a message goes: a
+ * `git commit` or `git tag` message in single quotes, such as one quoting
+ * the command, substitutes nothing, unless the line hands it to a shell to
+ * run. Other single-quoted text is kept, as source something may run.
  */
 const substitutedIn = (command: string): string => {
   if (RUNS_A_SCRIPT.test(command)) return command
@@ -415,8 +425,9 @@ const substitutedIn = (command: string): string => {
     } else if (char === "'" && !doubled) {
       // Single-quoted text, as far as its closing quote, or the line's end.
       const closing = command.indexOf("'", at + 1)
-      kept += "''"
-      at = closing === -1 ? command.length : closing
+      const end = closing === -1 ? command.length : closing
+      kept += MESSAGE_FOLLOWS.test(kept) ? "''" : command.slice(at, end + 1)
+      at = end
     } else kept += char
   }
   return kept

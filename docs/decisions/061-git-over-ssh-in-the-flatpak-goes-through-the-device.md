@@ -116,9 +116,11 @@
     that sets `GIT_SSH*` or `GIT_CONFIG_*` to anything, with `git config`,
     or by writing into a git folder or config file. A line that only names
     it, a search or a commit message, even beside those settings' names,
-    isn't refused for it, nor a substitution inside single quotes, which
-    the shell leaves as text (unless the line hands it to `sh -c` or
-    `eval`). A git config
+    isn't refused for it, nor a substitution quoted in a `git commit` or
+    `git tag` message in single quotes, which the shell leaves as text
+    (unless the line hands it to `sh -c` or `eval`). Other single-quoted
+    text counts as source something may run (`python3 -c '…'`,
+    `echo '…' | sh`): the programs that run it have no end. A git config
     edited with the file tools sits outside the task's worktree, in the
     repository's git folder, where the rules for outside the worktree
     apply. An environment variable Althar sets
