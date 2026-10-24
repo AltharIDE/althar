@@ -108,12 +108,14 @@
     in the environment of Althar's own git commands, never in
     `process.env`, so no session inherits it. The rules refuse a command
     that runs `althar-host-ssh` as a program, for leads and readers alike,
-    as they refuse `flatpak-spawn`. They also refuse a line that names
-    either one together with a way git is told what to run, now or for a
-    later plain `git fetch`: `GIT_SSH_COMMAND`, `GIT_SSH`,
-    `core.sshCommand` set in any spelling (`-c`, `git config`, a write to
-    a config file), `GIT_CONFIG_*`, or an alias. A line that only names
-    it, a search or a commit message, isn't refused for it. A git config
+    as they refuse `flatpak-spawn`. They also refuse a line that sets
+    either one for git to run, now or for a later plain `git fetch`: as a
+    variable's value (`GIT_SSH_COMMAND=…`, `GIT_CONFIG_VALUE_0=…`, or `X=…`
+    for a later `$X`), with `-c` (`core.sshCommand=…`, an alias), on a line
+    that sets `GIT_SSH*` or `GIT_CONFIG_*` to anything, with `git config`,
+    or by writing into a git folder or config file. A line that only names
+    it, a search or a commit message, even beside those settings' names,
+    isn't refused for it. A git config
     edited with the file tools sits outside the task's worktree, in the
     repository's git folder, where the rules for outside the worktree
     apply. An environment variable Althar sets

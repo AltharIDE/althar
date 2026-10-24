@@ -810,6 +810,9 @@ describe('a role that only reads', () => {
       // Or the bridge itself as git's ssh.
       "git config core.sshCommand 'flatpak-spawn --host ssh'",
       "GIT_SSH_COMMAND='flatpak-spawn --host ssh' git push origin main",
+      // Through a variable, set on the line.
+      'X=/app/bin/althar-host-ssh; git -c core.sshCommand="$X" fetch',
+      'export GIT_SSH_COMMAND=$(echo althar-host-ssh) && git fetch',
     ]) {
       for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
         assert.include(
@@ -819,9 +822,17 @@ describe('a role that only reads', () => {
         )
     }
     // Naming it runs nothing: a search for it, or a commit message about it, isn't refused for it.
-    for (const command of ['grep -rn althar-host-ssh apps', "git commit -m 'Ship althar-host-ssh'"]) {
-      const decided = run(command)
-      assert.notInclude(decided.verdict === 'deny' ? decided.reason : '', 'through Flatpak', command)
+    // Nor with the settings it would be set by beside it.
+    for (const command of [
+      'grep -rn althar-host-ssh apps',
+      "git commit -m 'Ship althar-host-ssh'",
+      "rg -n 'core\\.sshCommand.*althar-host-ssh' packages",
+      "git commit -m 'Guard core.sshCommand from althar-host-ssh'",
+      "git commit -m 'Refuse GIT_SSH_COMMAND and git config core.sshCommand naming althar-host-ssh'",
+      "grep -rn 'GIT_SSH\\|sshCommand\\|flatpak-spawn' apps/desktop/flatpak",
+    ]) {
+      for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
+        assert.notInclude(decided.verdict === 'deny' ? decided.reason : '', 'through Flatpak', command)
     }
   })
 

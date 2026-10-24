@@ -379,19 +379,35 @@ const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
 /** That ssh, or the bridge itself, named in a command line. */
 const DEVICE_BRIDGE_NAMED = /althar-host-ssh|flatpak-spawn/i
 
-/** The ways git is told what to run, at once or for a later plain `git fetch` to: its ssh settings, config from the environment, an alias. */
-const GIT_RUNS = /GIT_SSH|sshCommand|GIT_CONFIG_|\balias\./i
+/**
+ * It as an assignment's value, which the words a command is read as don't
+ * keep: `GIT_SSH_COMMAND=…`, `-c core.sshCommand=…`, `GIT_CONFIG_VALUE_0=…`,
+ * or `X=…` for a later `$X`.
+ */
+const DEVICE_BRIDGE_ASSIGNED = /[\w.]=(?:['"`]|\$\()*[^\s;&|'"]*(?:althar-host-ssh|flatpak-spawn)/i
+
+/** git's ssh, or config from the environment, set on the line, whatever it is set to: `GIT_SSH_COMMAND=$(…)`. */
+const GIT_RUNS_SET = /\bGIT_(?:SSH\w*|CONFIG\w*)=/i
+
+/** A path in a git folder, or a git config file. */
+const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig$|(?:^|\/)git\/config$|config\.worktree$/
 
 /**
  * A command line that has git run the device's ssh, or the bridge, as it is
- * now or once it's kept in a config: `GIT_SSH_COMMAND`, `GIT_SSH`,
- * `core.sshCommand` however it is set, `GIT_CONFIG_*`, an alias. The words a
- * command is read as don't keep an assignment's value, nor what a config
- * keeps, so the whole line is read. One that only names it, a search or a
- * commit message, runs nothing.
+ * now or once it's kept in a config for a later plain `git fetch`: set as a
+ * variable or with `-c`, with `git config` (its ssh settings, an alias), or
+ * written into a git folder. A line that only names it, a search or a commit
+ * message, sets nothing and runs nothing.
  */
-const deviceSshReason = (command: string): string | undefined =>
-  DEVICE_BRIDGE_NAMED.test(command) && GIT_RUNS.test(command) ? DEVICE_BRIDGE_REFUSED : undefined
+const deviceSshReason = (command: string): string | undefined => {
+  if (!DEVICE_BRIDGE_NAMED.test(command)) return undefined
+  if (DEVICE_BRIDGE_ASSIGNED.test(command) || GIT_RUNS_SET.test(command)) return DEVICE_BRIDGE_REFUSED
+  const sets = parseCommandLine(command).commands.some((written) => {
+    const words = unwrap(written)
+    return gitCall(words, '/')?.subcommand === 'config' || words.some((word) => GIT_CONFIG_PATH.test(word))
+  })
+  return sets ? DEVICE_BRIDGE_REFUSED : undefined
+}
 
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
