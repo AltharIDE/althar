@@ -397,12 +397,13 @@ const RUNS_A_SCRIPT = /\b(?:(?:ba|da|z|k)?sh\s+(?:-\w+\s+)*-\w*c\b|eval\b)/
 
 /**
  * A `git commit` or `git tag` message about to start: `-m `, `-am`,
- * `--message=`, after the command's start and nothing but its own words.
- * Any other program may run the single-quoted text it's given
+ * `--message=`, after the command's start and nothing but its own words,
+ * which may be quoted (`-c user.name='A Name'`, `--author="…"`) but not
+ * substituted. Any other program may run the single-quoted text it's given
  * (`python3 -c '…'`, `echo '…' | sh`), and the list of those has no end.
  */
 const MESSAGE_FOLLOWS =
-  /(?:^\s*|[;&|(]\s*)git(?:\s+-[cC]\s+[^\s;&|'"`$]+)*\s+(?:commit|tag)\b(?:[^;&|'"`$\\]|'')*?\s(?:-[a-zA-Z]*m\s*|--message[=\s]\s*)$/
+  /(?:^\s*|[;&|(]\s*)git(?:\s+-[cC]\s+(?:[^\s;&|'"`$\\]|'[^']*'|"[^"`$\\]*")+)*\s+(?:commit|tag)\b(?:[^;&|'"`$\\]|'[^']*'|"[^"`$\\]*")*?\s(?:-[a-zA-Z]*m\s*|--message[=\s]\s*)$/
 
 /**
  * The line as the shell substitutes in it, as far as a message goes: a

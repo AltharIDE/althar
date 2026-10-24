@@ -825,6 +825,8 @@ describe('a role that only reads', () => {
       `python3 -c 'import os; os.system("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
       `node -e 'require("child_process").execSync("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
       `echo 'git -c core.sshCommand=$(command -v althar-host-ssh) fetch' | sh`,
+      // A single-quoted setting before a commit is git's to run, not a message.
+      `git -c core.sshCommand='$(command -v althar-host-ssh)' commit -m 'x'`,
       `git commit -m 'x' && perl -e 'system("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
       // An apostrophe inside double quotes quotes nothing.
       `echo "it's"; X="$(command -v althar-host-ssh)"; echo "it's"; git -c core.sshCommand="$X" fetch`,
@@ -850,6 +852,9 @@ describe('a role that only reads', () => {
       `git commit -m 'Example: git -c core.sshCommand="$(command -v althar-host-ssh)" fetch'`,
       `git -C . commit -am 'Guard' --message='Example: core.sshCommand=$(command -v althar-host-ssh)'`,
       `git tag -a v1 -m'Example: core.sshCommand=$(command -v althar-host-ssh)'`,
+      // Quoted settings before the command, or among its own words, are no script either.
+      `git -c user.name='A Name' commit -m 'Document core.sshCommand="$(command -v althar-host-ssh)"'`,
+      `git -c "user.name=A Name" commit --author='A <a@b.c>' -m 'Document core.sshCommand=$(command -v althar-host-ssh)'`,
       // Naming eval or sh -c in the message runs neither.
       `git commit -m 'Document why eval of core.sshCommand="$(command -v althar-host-ssh)" is unsafe'`,
       `git commit -m 'Say why sh -c with core.sshCommand=$(command -v althar-host-ssh) is refused'`,
