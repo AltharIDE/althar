@@ -1,16 +1,7 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import {
-  Button,
-  CrashReportsLine,
-  keys,
-  modKey,
-  primaryDown,
-  type RuntimeEntry,
-  RuntimeState,
-  SkillsLine,
-} from '@althar/ui'
+import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState, SkillsLine } from '@althar/ui'
 import { Start } from '@althar/ui/screens'
 
 import { brandOf, pinnedOf } from '../../shared/agents'
