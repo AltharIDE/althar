@@ -4,6 +4,8 @@
  * compositions and not parts. Fixtures and Storybook helpers are neither.
  */
 
+export * from './foundations/device'
+export * from './foundations/keys'
 export * from './foundations/vocabulary'
 export * from './foundations/vocabularyText'
 export * from './foundations/codeHost'

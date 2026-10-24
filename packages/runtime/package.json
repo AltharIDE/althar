@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./locations": "./src/locations.ts",
     "./artifacts": "./src/artifactFiles.ts",
+    "./device": "./src/device.ts",
     "./screenshots": "./src/screenshots.ts"
   },
   "scripts": {

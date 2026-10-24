@@ -14,6 +14,11 @@ import { withServices } from './render'
  * on sending now, and in every model's list.
  */
 
+/* The kit reads its system once, from the preload, as it loads: say Windows before it does. */
+vi.hoisted(() => {
+  ;(window as { althar?: { platform?: string } }).althar = { platform: 'win32' }
+})
+
 vi.mock('../src/renderer/shared/device', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/renderer/shared/device')>()
   return { ...actual, platform: 'win32', device: actual.deviceWords('win32') }

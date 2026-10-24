@@ -21,6 +21,13 @@ import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
 import { fakeClient, fakeHost, project } from './fixtures'
 import { withServices } from './render'
 
+/* The keys are read once from the system the window runs on (the kit's keys.ts), a Mac here; a test off a Mac says so through this. */
+const system = vi.hoisted(() => ({ offMac: false }))
+vi.mock('@althar/ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@althar/ui')>()
+  return { ...actual, primaryDown: (event: KeyboardEvent) => (system.offMac ? event.ctrlKey && !event.metaKey : actual.primaryDown(event)) }
+})
+
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', ink: 'teal' }
 
 const found = (over: Partial<FoundTask> = {}): FoundTask => ({
@@ -96,7 +103,10 @@ const windowAt = (path: string, host: Host = fakeHost(), searchTasks?: Client['s
 const where = () => screen.getByTestId('where').textContent
 const finder = () => screen.findByRole('dialog', { name: 'Find a task' })
 
-beforeEach(() => window.localStorage.clear())
+beforeEach(() => {
+  window.localStorage.clear()
+  system.offMac = false
+})
 
 describe('finding a task', () => {
   it('opens on ⌘K in a project, searching it as the words pause, and opens the task chosen', async () => {
@@ -149,6 +159,7 @@ describe('finding a task', () => {
   })
 
   it('takes Control-K off a Mac, and not ⌘ there', async () => {
+    system.offMac = true
     windowAt('/projects/p1', fakeHost({ platform: 'linux' }))
     await screen.findByRole('navigation', { name: 'Projects' })
     fireEvent.keyDown(window, { key: 'k', metaKey: true })
