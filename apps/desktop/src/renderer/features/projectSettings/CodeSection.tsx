@@ -1,5 +1,5 @@
 import type { ConnectionList } from '@althar/contracts'
-import { BrandMark, Button, ControlLine, LinkButton, SettingGroup, SettingList, SettingRow } from '@althar/ui'
+import { BrandMark, Button, ControlLine, LinkButton, SettingGroup, SettingList, SettingRow, TrackerBinding } from '@althar/ui'
 
 import { productBrand, productName } from '../../shared/products'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
@@ -10,14 +10,17 @@ import { useRepositories } from '../repositories/useRepositories'
 import s from './ProjectSettings.module.css'
 import { HEADING } from './sections'
 import { type Standing, standingOf } from './standing'
+import { useProjectTracker } from './useProjectTracker'
 
 /*
  * What a project's code and issues are: its repositories, where each is and
  * where its work goes, with the code hosts they push to; then the trackers
  * its tasks' issues are on, each by its mark as it is, saying who Althar is
  * there, or in violet that it isn't connected or is signed out, with the
- * button that connects it or signs in again. Connections are Althar's, for
- * every project: managing them is in Althar's own settings.
+ * button that connects it or signs in again. Above them, where its issues
+ * go: one tracker connected, a workspace of Linear's say, and its team, or,
+ * unset, where its issues already are (ADR-059). Connections are Althar's,
+ * for every project: managing them is in Althar's own settings.
  */
 
 export const text = {
@@ -106,6 +109,7 @@ export function CodeSection({
   onManage: () => void
 }) {
   const repositories = useRepositories(projectId)
+  const bound = useProjectTracker(projectId, list)
   return (
     <>
       <Repositories model={repositories} connections={list} onConnect={onConnect} />
@@ -119,6 +123,21 @@ export function CodeSection({
         }
       >
         <SettingList>
+          {bound.trackers.length > 0 && (
+            <TrackerBinding
+              trackers={bound.trackers}
+              value={bound.value}
+              container={bound.container}
+              containers={bound.containers}
+              onChange={bound.choose}
+              onContainer={bound.chooseContainer}
+            />
+          )}
+          {bound.failed !== null && (
+            <p role="alert" className={s.quiet}>
+              <ControlLine tone="yours">{bound.failed}</ControlLine>
+            </p>
+          )}
           {trackers.length === 0 ? (
             <SettingRow title={text.none} note={text.noneNote}>
               {() => null}

@@ -13,7 +13,12 @@ import type { FakeService } from './FakeService'
 export const byToken = (services: Readonly<Record<string, FakeService>>) => {
   const [first] = Object.values(services)
   if (first === undefined) throw new Error('byToken needs a fake')
-  const of = (token: string) => services[token] ?? first
+  return routed((token) => services[token] ?? first)
+}
+
+/** Several fakes of one product, the one a token signs in to chosen by `of`. */
+export const routed = (of: (token: string) => FakeService) => {
+  const first = of('')
   const tracker = (options: AdapterOptions): Tracker => {
     const service = Effect.map(options.credential, (credential) => of(credential.token))
     const routed = <A, E>(use: (one: FakeService) => Effect.Effect<A, E>) => Effect.flatMap(service, use)

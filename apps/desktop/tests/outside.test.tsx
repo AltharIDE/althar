@@ -580,6 +580,37 @@ describe('connections', () => {
     expect(await screen.findByLabelText('Server address')).toBeTruthy()
   })
 
+  it('lists two of Linear’s workspaces side by side, each by its name, and adds another the way the first was', async () => {
+    const workspace = (id: string, key: string, name: string) => ({
+      ...githubConnection,
+      id,
+      product: 'linear' as const,
+      name: 'Linear',
+      webUrl: 'https://linear.app',
+      account: { login: 'mate.kokai99', name: 'Mate' },
+      workspace: { key, name },
+    })
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        connections: [workspace('conn5', 'althar', 'althar'), workspace('conn6', 'fnt', 'FNT')],
+      })),
+    })
+    withServices(<Connections />, client)
+    expect(await screen.findByText('· FNT')).toBeTruthy()
+    expect(screen.getByText('· althar')).toBeTruthy()
+    expect(screen.getAllByText('Signed in as mate.kokai99', { exact: false })).toHaveLength(2)
+    // Each disconnects on its own.
+    const [, second] = screen.getAllByRole('button', { name: 'Disconnect' })
+    if (second === undefined) throw new Error('no second Disconnect')
+    await userEvent.click(second)
+    await waitFor(() => expect(client.disconnect).toHaveBeenCalledWith('conn6'))
+    // Another workspace is the first one's walk in again, not a server's.
+    expect(screen.queryByRole('button', { name: 'Add a server' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Add a workspace' }))
+    expect(await screen.findByRole('heading', { name: /Linear/ })).toBeTruthy()
+  })
+
   it('says when the list can’t be read', async () => {
     const { client } = fakeClient({
       listConnections: vi.fn(async () => Promise.reject(new ApiError({ reason: 'X', message: 'No list.' }))),
