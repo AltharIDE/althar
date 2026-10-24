@@ -417,16 +417,23 @@ const MESSAGE_FOLLOWS =
 const substitutedIn = (command: string): string => {
   let kept = ''
   let doubled = false
+  // Whether a word starts here: after a blank or operator the shell reads as
+  // one, not an escaped one such as `\ `.
+  let wordStarts = true
   for (let at = 0; at < command.length; at++) {
     const char = command[at]
     if (char === '\\') {
       // `\` and a newline join two lines, as if neither were there.
-      if (command[at + 1] !== '\n') kept += command.slice(at, at + 2)
+      if (command[at + 1] !== '\n') {
+        kept += command.slice(at, at + 2)
+        wordStarts = false
+      }
       at++
     } else if (char === '"') {
       doubled = !doubled
       kept += char
-    } else if (char === '#' && !doubled && /(?:^|[\s;&|()])$/.test(kept)) {
+      wordStarts = false
+    } else if (char === '#' && !doubled && wordStarts) {
       // A comment, to the line's end.
       const end = command.indexOf('\n', at)
       at = (end === -1 ? command.length : end) - 1
@@ -436,6 +443,7 @@ const substitutedIn = (command: string): string => {
       while (end < command.length && command[end] !== "'") end += command[end] === '\\' ? 2 : 1
       kept += command.slice(at, end + 1)
       at = end
+      wordStarts = false
     } else if (char === "'" && !doubled) {
       // Single-quoted text, as far as its closing quote, or the line's end.
       const closing = command.indexOf("'", at + 1)
@@ -443,7 +451,11 @@ const substitutedIn = (command: string): string => {
       const quoted = command.slice(at, end + 1)
       kept += MESSAGE_FOLLOWS.test(kept) && !quoted.includes('\n') ? "''" : quoted
       at = end
-    } else kept += char
+      wordStarts = false
+    } else {
+      kept += char
+      wordStarts = !doubled && /[\s;&|()]/.test(char)
+    }
   }
   return RUNS_A_SCRIPT.test(kept) ? command : kept
 }

@@ -832,6 +832,9 @@ describe('a role that only reads', () => {
       // Nor a comment the shell never sees, its line joined to the last by `\`.
       `echo x\\\n#; git -c core.sshCommand="$(command -v althar-host-ssh)" fetch`,
       `echo x\\\n#; git commit -m '\ngit -c core.sshCommand="$(command -v althar-host-ssh)" fetch #'`,
+      // Nor one after an escaped space, which is still part of the word.
+      `echo x\\ #; git -c core.sshCommand="$(command -v althar-host-ssh)" fetch`,
+      `echo x\\\t#; git -c core.sshCommand="$(command -v althar-host-ssh)" fetch`,
       // A single-quoted setting before a commit is git's to run, not a message.
       `git -c core.sshCommand='$(command -v althar-host-ssh)' commit -m 'x'`,
       `git commit -m 'x' && perl -e 'system("git -c core.sshCommand=$(command -v althar-host-ssh) fetch")'`,
