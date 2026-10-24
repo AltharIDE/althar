@@ -408,10 +408,10 @@ const MESSAGE_FOLLOWS =
  * The line as the shell substitutes in it, as far as a message goes: a
  * `git commit` or `git tag` message in single quotes, such as one quoting
  * the command, substitutes nothing, unless the line hands it to a shell to
- * run. Other single-quoted text is kept, as source something may run.
+ * run. Other single-quoted text is kept, as source something may run. A
+ * shell or `eval` named only in a message runs nothing.
  */
 const substitutedIn = (command: string): string => {
-  if (RUNS_A_SCRIPT.test(command)) return command
   let kept = ''
   let doubled = false
   for (let at = 0; at < command.length; at++) {
@@ -430,7 +430,7 @@ const substitutedIn = (command: string): string => {
       at = end
     } else kept += char
   }
-  return kept
+  return RUNS_A_SCRIPT.test(kept) ? command : kept
 }
 
 /** git's ssh, or config from the environment, set on the line, whatever it is set to: `GIT_SSH_COMMAND=$(…)`. */

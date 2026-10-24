@@ -850,6 +850,9 @@ describe('a role that only reads', () => {
       `git commit -m 'Example: git -c core.sshCommand="$(command -v althar-host-ssh)" fetch'`,
       `git -C . commit -am 'Guard' --message='Example: core.sshCommand=$(command -v althar-host-ssh)'`,
       `git tag -a v1 -m'Example: core.sshCommand=$(command -v althar-host-ssh)'`,
+      // Naming eval or sh -c in the message runs neither.
+      `git commit -m 'Document why eval of core.sshCommand="$(command -v althar-host-ssh)" is unsafe'`,
+      `git commit -m 'Say why sh -c with core.sshCommand=$(command -v althar-host-ssh) is refused'`,
     ]) {
       for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
         assert.notInclude(decided.verdict === 'deny' ? decided.reason : '', 'through Flatpak', command)
