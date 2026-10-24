@@ -386,6 +386,12 @@ const DEVICE_BRIDGE_NAMED = /althar-host-ssh|flatpak-spawn/i
  */
 const DEVICE_BRIDGE_ASSIGNED = /[\w.]=(?:['"`]|\$\()*[^\s;&|'"]*(?:althar-host-ssh|flatpak-spawn)/i
 
+/**
+ * Or a value a substitution finds, whose spaces don't end it:
+ * `core.sshCommand="$(command -v althar-host-ssh)"`, or with backticks.
+ */
+const DEVICE_BRIDGE_SUBSTITUTED = /[\w.]=['"]?(?:\$\(|`)[^;&|]*?(?:althar-host-ssh|flatpak-spawn)/i
+
 /** git's ssh, or config from the environment, set on the line, whatever it is set to: `GIT_SSH_COMMAND=$(…)`. */
 const GIT_RUNS_SET = /\bGIT_(?:SSH\w*|CONFIG\w*)=/i
 
@@ -401,7 +407,8 @@ const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig$|(?:^|\/)git\/config$
  */
 const deviceSshReason = (command: string): string | undefined => {
   if (!DEVICE_BRIDGE_NAMED.test(command)) return undefined
-  if (DEVICE_BRIDGE_ASSIGNED.test(command) || GIT_RUNS_SET.test(command)) return DEVICE_BRIDGE_REFUSED
+  if ([DEVICE_BRIDGE_ASSIGNED, DEVICE_BRIDGE_SUBSTITUTED, GIT_RUNS_SET].some((pattern) => pattern.test(command)))
+    return DEVICE_BRIDGE_REFUSED
   const sets = parseCommandLine(command).commands.some((written) => {
     const words = unwrap(written)
     return gitCall(words, '/')?.subcommand === 'config' || words.some((word) => GIT_CONFIG_PATH.test(word))

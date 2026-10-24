@@ -111,7 +111,8 @@
     as they refuse `flatpak-spawn`. They also refuse a line that sets
     either one for git to run, now or for a later plain `git fetch`: as a
     variable's value (`GIT_SSH_COMMAND=…`, `GIT_CONFIG_VALUE_0=…`, or `X=…`
-    for a later `$X`), with `-c` (`core.sshCommand=…`, an alias), on a line
+    for a later `$X`, a value a substitution finds included:
+    `"$(command -v althar-host-ssh)"`), with `-c` (`core.sshCommand=…`, an alias), on a line
     that sets `GIT_SSH*` or `GIT_CONFIG_*` to anything, with `git config`,
     or by writing into a git folder or config file. A line that only names
     it, a search or a commit message, even beside those settings' names,
@@ -146,7 +147,9 @@
   - `--talk-name=org.freedesktop.Flatpak` still isn't a boundary (ADR-027).
     An agent in the sandbox that got past the rules could run
     `flatpak-spawn --host ssh` itself, as it could before this change, for
-    example from a script it wrote and then ran. Nor can
+    example from a script it wrote and then ran, or under a name the rules
+    don't read as the bridge's, such as a glob. Reading command text, the
+    rules catch the plain ways of naming it, not every spelling. Nor can
     `althar-host-ssh` check that Althar's own git called it: everything it
     could check (the calling process, its parent, a token in the
     environment) an agent running as the same user in the same sandbox can

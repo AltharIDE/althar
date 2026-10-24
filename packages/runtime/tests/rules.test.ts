@@ -813,6 +813,11 @@ describe('a role that only reads', () => {
       // Through a variable, set on the line.
       'X=/app/bin/althar-host-ssh; git -c core.sshCommand="$X" fetch',
       'export GIT_SSH_COMMAND=$(echo althar-host-ssh) && git fetch',
+      // Or found by a substitution, whose spaces don't end the value.
+      'git -c core.sshCommand="$(command -v althar-host-ssh)" fetch',
+      'git -c core.sshCommand=`command -v althar-host-ssh` fetch',
+      'git -c "core.sshCommand=$(command -v althar-host-ssh)" fetch',
+      'X="$(command -v althar-host-ssh)"; git -c core.sshCommand="$X" fetch',
     ]) {
       for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
         assert.include(
@@ -830,6 +835,7 @@ describe('a role that only reads', () => {
       "git commit -m 'Guard core.sshCommand from althar-host-ssh'",
       "git commit -m 'Refuse GIT_SSH_COMMAND and git config core.sshCommand naming althar-host-ssh'",
       "grep -rn 'GIT_SSH\\|sshCommand\\|flatpak-spawn' apps/desktop/flatpak",
+      'git commit -m "$(printf \'Refuse core.sshCommand set to althar-host-ssh\')"',
     ]) {
       for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
         assert.notInclude(decided.verdict === 'deny' ? decided.reason : '', 'through Flatpak', command)
