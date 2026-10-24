@@ -205,11 +205,14 @@ export const freshMirror = (repository: string, path: string) =>
  * git folder made again, and anything written in it since thrown away, but
  * what git ignores, such as installed packages. Its fetch comes from `from`,
  * a mirror of the repository's (`freshMirror`), or the repository itself.
+ * The coordinator answers only once its copies are made, so the remote gets
+ * `within` milliseconds: one slow or asking for a host key costs that, and
+ * the copy is made from the last fetch.
  */
-export const freshCopy = (repository: string, path: string, base: string, from = repository) =>
+export const freshCopy = (repository: string, path: string, base: string, from = repository, within = 15_000) =>
   Effect.gen(function* () {
     // Every branch of the remote, so the copy's `git fetch` has them all as of this turn; offline, the repository as it is.
-    const fetched = yield* gitWithin(60_000, repository, 'fetch', '--quiet', 'origin').pipe(
+    const fetched = yield* gitWithin(within, repository, 'fetch', '--quiet', 'origin').pipe(
       Effect.as(true),
       Effect.orElseSucceed(() => false),
     )
