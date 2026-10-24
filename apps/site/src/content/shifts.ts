@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -70,11 +70,20 @@ export const SHIFTS: readonly Shift[] = [
     kind: ShiftKind.Access,
     who: 'GitHub',
     title: 'Six models leave Copilot, GPT-5.5 and GPT-5.4 among them',
-    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-5.6 Sol and Luna, Gemini 3.8 Flash and Grok 4.6; admins may need to enable them.',
+    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-6.1 Sol, GPT-6 Luna, Gemini 3.8 Flash and Grok 4.7; admins may need to enable them.',
     source: {
       name: 'GitHub Changelog',
-      url: 'https://github.blog/changelog/2026-09-18-upcoming-deprecation-of-selected-github-copilot-models-in-mid-october',
+      url: 'https://github.blog/changelog/2026-10-19-github-copilot-models-deprecated-on-october-19-2026',
     },
+  },
+  {
+    id: 'openai-legacy-models-left',
+    date: '2026-10-23',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'o1, o3-mini, GPT-4 and gpt-3.5-turbo leave the API',
+    what: 'Also o4-mini and the fine-tuned versions of these models, announced on 22 April. OpenAI’s replacements are GPT-5.6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
   },
   {
     id: 'gpt-5-5-retired',
@@ -381,16 +390,6 @@ export const SHIFTS: readonly Shift[] = [
  * passed; move it into SHIFTS then, with what actually happened.
  */
 export const UPCOMING: readonly Upcoming[] = [
-  {
-    id: 'openai-legacy-models-leave',
-    date: '2026-10-23',
-    announced: '2026-04-22',
-    kind: ShiftKind.Access,
-    who: 'OpenAI',
-    title: 'o1, o3-mini, GPT-4 and gpt-3.5-turbo leave the API',
-    what: 'Also o4-mini and the fine-tuned versions of these models. OpenAI’s replacements are GPT-5.6 models.',
-    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
-  },
   {
     id: 'chatgpt-pro-allowance-ends',
     date: '2026-10-29',
