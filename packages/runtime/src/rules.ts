@@ -392,6 +392,36 @@ const DEVICE_BRIDGE_ASSIGNED = /[\w.]=(?:['"`]|\$\()*[^\s;&|'"]*(?:althar-host-s
  */
 const DEVICE_BRIDGE_SUBSTITUTED = /[\w.]=['"]?(?:\$\(|`)[^;&|]*?(?:althar-host-ssh|flatpak-spawn)/i
 
+/** A shell given a script to run, or `eval`, which runs single-quoted text after all. */
+const RUNS_A_SCRIPT = /\b(?:(?:ba|da|z|k)?sh\s+(?:-\w+\s+)*-\w*c\b|eval\b)/
+
+/**
+ * The line as the shell substitutes in it: single-quoted text, such as a
+ * commit message quoting the command, substitutes nothing, unless the line
+ * hands it to a shell to run.
+ */
+const substitutedIn = (command: string): string => {
+  if (RUNS_A_SCRIPT.test(command)) return command
+  let kept = ''
+  let doubled = false
+  for (let at = 0; at < command.length; at++) {
+    const char = command[at]
+    if (char === '\\') {
+      kept += command.slice(at, at + 2)
+      at++
+    } else if (char === '"') {
+      doubled = !doubled
+      kept += char
+    } else if (char === "'" && !doubled) {
+      // Single-quoted text, as far as its closing quote, or the line's end.
+      const closing = command.indexOf("'", at + 1)
+      kept += "''"
+      at = closing === -1 ? command.length : closing
+    } else kept += char
+  }
+  return kept
+}
+
 /** git's ssh, or config from the environment, set on the line, whatever it is set to: `GIT_SSH_COMMAND=$(…)`. */
 const GIT_RUNS_SET = /\bGIT_(?:SSH\w*|CONFIG\w*)=/i
 
@@ -407,7 +437,10 @@ const GIT_CONFIG_PATH = /(?:^|\/)\.git(?:\/|$)|\.gitconfig$|(?:^|\/)git\/config$
  */
 const deviceSshReason = (command: string): string | undefined => {
   if (!DEVICE_BRIDGE_NAMED.test(command)) return undefined
-  if ([DEVICE_BRIDGE_ASSIGNED, DEVICE_BRIDGE_SUBSTITUTED, GIT_RUNS_SET].some((pattern) => pattern.test(command)))
+  if (
+    [DEVICE_BRIDGE_ASSIGNED, GIT_RUNS_SET].some((pattern) => pattern.test(command)) ||
+    DEVICE_BRIDGE_SUBSTITUTED.test(substitutedIn(command))
+  )
     return DEVICE_BRIDGE_REFUSED
   const sets = parseCommandLine(command).commands.some((written) => {
     const words = unwrap(written)
