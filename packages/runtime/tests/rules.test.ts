@@ -792,6 +792,29 @@ describe('a role that only reads', () => {
     }
   })
 
+  it('refuses Althar’s own ssh on the device to an agent, however it is named (ADR-011, ADR-061)', () => {
+    for (const command of [
+      '/app/bin/althar-host-ssh -T git@github.com',
+      'GIT_SSH_COMMAND=/app/bin/althar-host-ssh git push origin main',
+      'env GIT_SSH_COMMAND=althar-host-ssh git fetch',
+      'git -c core.sshCommand=/app/bin/althar-host-ssh fetch origin',
+      "git -c core.sshcommand='althar-host-ssh -v' fetch origin",
+      "sh -c 'althar-host-ssh git@github.com'",
+    ]) {
+      for (const decided of [decideReader(request({ kind: 'execute', title: command, rawInput: { command } })), run(command)])
+        assert.include(
+          decided.verdict === 'deny' ? decided.reason : '',
+          'Agents do not run commands on the device through Flatpak',
+          command,
+        )
+    }
+    // Naming it runs nothing: a search for it, or a commit message about it, isn't refused for it.
+    for (const command of ['grep -rn althar-host-ssh apps', "git commit -m 'Ship althar-host-ssh'"]) {
+      const decided = run(command)
+      assert.notInclude(decided.verdict === 'deny' ? decided.reason : '', 'through Flatpak', command)
+    }
+  })
+
   it('never reads credentials either, and says so', () => {
     for (const command of ['security find-generic-password -s Althar -w', 'git credential fill', 'cat x | git-credential-store get']) {
       const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))

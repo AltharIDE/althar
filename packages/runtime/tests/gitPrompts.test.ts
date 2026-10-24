@@ -23,7 +23,10 @@ import { fetchBranch, gitWithin, sshEnvironment } from '../src/git'
 const linux = process.platform === 'linux' && existsSync('/proc/self/stat')
 
 /** Field 6 of /proc/<pid>/stat: the session a process is in, which ties it to a terminal. */
-const sessionOf = (pid: number | 'self') => readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /, '').split(' ')[3]
+const sessionOf = (pid: number | 'self') =>
+  readFileSync(`/proc/${pid}/stat`, 'utf8')
+    .replace(/^.*\) /, '')
+    .split(' ')[3]
 
 /** OpenSSH meeting a host it doesn't know: it asks through askpass where it may, else on the terminal; with nobody to ask, it fails. */
 const ASKING_SSH = `#!/bin/sh

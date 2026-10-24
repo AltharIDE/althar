@@ -68,3 +68,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md) | The coordinator is a trusted reader, in copies of its own, held by a sandbox where it has one |
 | [059](059-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
 | [060](060-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
+| [061](061-git-over-ssh-in-the-flatpak-goes-through-the-device.md) | git over SSH in the Flatpak: Althar's own goes through the device's ssh, ssh in the sandbox trusts pinned code hosts, and nothing asks |

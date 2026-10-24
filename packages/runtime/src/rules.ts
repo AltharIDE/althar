@@ -365,11 +365,26 @@ const envFile = (path: string) => {
 const envKept = (path: string) =>
   kept(`Reading ${path}, outside the task's worktree, always asks: a .env file holds the person's secrets.`, 'outside', true)
 
-/** The Flatpak grants the app a broad host bridge; agents must not invoke it directly. */
+const DEVICE_BRIDGE_REFUSED =
+  'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
+
+/**
+ * The Flatpak grants the app a broad host bridge; agents must not invoke it
+ * directly, nor the ssh Althar's own git runs through it, which signs in with
+ * the person's SSH agent (ADR-061).
+ */
 const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
-  (words[0] ?? '').split('/').at(-1) === 'flatpak-spawn'
-    ? 'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
-    : undefined
+  ['flatpak-spawn', 'althar-host-ssh'].includes((words[0] ?? '').split('/').at(-1) ?? '') ? DEVICE_BRIDGE_REFUSED : undefined
+
+/** That ssh, as git would be told to run it, which the words a command is read as don't keep: an assignment's value is dropped. */
+const DEVICE_SSH_FOR_GIT = /(?:GIT_SSH(?:_COMMAND)?|sshCommand)\s*=\s*['"]?[^\s'"]*althar-host-ssh/i
+
+/**
+ * A command line that has git run the device's ssh: through `GIT_SSH_COMMAND`,
+ * `GIT_SSH` or `core.sshCommand`. One that only names it, a search or a
+ * commit message, runs nothing.
+ */
+const deviceSshReason = (command: string): string | undefined => (DEVICE_SSH_FOR_GIT.test(command) ? DEVICE_BRIDGE_REFUSED : undefined)
 
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
@@ -2659,10 +2674,12 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
     request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands, system) : undefined
   if (request.kind === 'execute' || request.kind === 'other') {
     // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
-    const refused = lineReadings(commandOf(request), system)
-      .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
-      .map((words) => credentialReason(words) ?? hostReason(words) ?? deviceBridgeReason(words))
-      .find((reason) => reason !== undefined)
+    const refused =
+      deviceSshReason(commandOf(request)) ??
+      lineReadings(commandOf(request), system)
+        .flatMap((line) => line.commands.flatMap((words) => readings(unwrap(words))))
+        .map((words) => credentialReason(words) ?? hostReason(words) ?? deviceBridgeReason(words))
+        .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
   }
   // Nor the files people keep keys and sign-ins in, whatever the request does with them.
@@ -3752,6 +3769,8 @@ const envOutsideIn = (command: string, cwd: string) => {
  * words the shell expands.
  */
 const readerLineReason = (command: string, options: ReaderOptions): string | undefined => {
+  const deviceSsh = deviceSshReason(command)
+  if (deviceSsh !== undefined) return deviceSsh
   if (options.trusted === true) {
     if (options.cwd !== undefined && envOutsideIn(command, options.cwd)) return ENV_REFUSED
     const found = substitutionsIn(command)

@@ -31,4 +31,15 @@ describe('the Flatpak manifest', () => {
     // The portal is reachable through the default portal proxy and needs no explicit bus permission.
     expect(finish).not.toMatch(/^\s*-\s+--talk-name=org\.freedesktop\.portal\.Secret/m)
   })
+
+  it('gives the sandbox neither the SSH agent’s socket nor ~/.ssh, and ships the ssh that stands for them (ADR-061)', () => {
+    const finish = manifest.slice(manifest.indexOf('finish-args:'), manifest.indexOf('modules:'))
+    expect(finish).not.toMatch(/^\s*-\s+--socket=ssh-auth/m)
+    expect(finish).not.toMatch(/^\s*-\s+--filesystem=[^\n]*\.ssh/m)
+    expect(manifest).toContain('- install -Dm644 known_hosts /app/share/althar/ssh/known_hosts\n')
+    expect(manifest).toContain('- install -Dm755 ssh.sh /app/bin/ssh\n')
+    // The path git.ts names for Althar's own git.
+    expect(manifest).toContain('- install -Dm755 host-ssh.sh /app/bin/althar-host-ssh\n')
+    for (const file of ['known_hosts', 'ssh.sh', 'host-ssh.sh']) expect(manifest).toContain(`        path: ${file}\n`)
+  })
 })

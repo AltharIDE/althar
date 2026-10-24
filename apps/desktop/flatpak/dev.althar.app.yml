@@ -36,7 +36,10 @@ finish-args:
   # permission is needed.
   - --talk-name=org.kde.StatusNotifierWatcher
   # The person's own agents and editors, found and run where they are
-  # installed (Codex among them: flatpak/codex-host.sh); nothing else.
+  # installed (Codex among them: flatpak/codex-host.sh), and the device's ssh
+  # for Althar's own fetches and pushes (flatpak/host-ssh.sh); nothing else.
+  # No --socket=ssh-auth: the agent's socket would sit at a fixed path any
+  # agent in the sandbox could use (docs/decisions/061).
   - --talk-name=org.freedesktop.Flatpak
 
 modules:
@@ -70,6 +73,12 @@ modules:
       - mkdir -p /app/share/git-core
       - cp -a /usr/share/git-core/templates /app/share/git-core/templates
       - install -Dm755 git.sh /app/bin/git
+      # ssh in the sandbox trusts the code hosts pinned here and never asks; Althar's own git runs the
+      # device's ssh, with the person's SSH agent and known hosts (docs/decisions/061). Neither the
+      # agent's socket nor ~/.ssh is given to the sandbox.
+      - install -Dm644 known_hosts /app/share/althar/ssh/known_hosts
+      - install -Dm755 ssh.sh /app/bin/ssh
+      - install -Dm755 host-ssh.sh /app/bin/althar-host-ssh
       # The Codex the adapter drives, out where its own sandbox can run (flatpak/codex-host.sh).
       - install -Dm755 codex-host.sh /app/bin/althar-host-codex
     sources:
@@ -81,6 +90,12 @@ modules:
         path: git.sh
       - type: file
         path: codex-host.sh
+      - type: file
+        path: known_hosts
+      - type: file
+        path: ssh.sh
+      - type: file
+        path: host-ssh.sh
       - type: file
         path: dev.althar.app.desktop
       - type: file
