@@ -420,12 +420,13 @@ const substitutedIn = (command: string): string => {
   for (let at = 0; at < command.length; at++) {
     const char = command[at]
     if (char === '\\') {
-      kept += command.slice(at, at + 2)
+      // `\` and a newline join two lines, as if neither were there.
+      if (command[at + 1] !== '\n') kept += command.slice(at, at + 2)
       at++
     } else if (char === '"') {
       doubled = !doubled
       kept += char
-    } else if (char === '#' && !doubled && /(?:^|[\s;&|()])$/.test(command.slice(0, at))) {
+    } else if (char === '#' && !doubled && /(?:^|[\s;&|()])$/.test(kept)) {
       // A comment, to the line's end.
       const end = command.indexOf('\n', at)
       at = (end === -1 ? command.length : end) - 1
