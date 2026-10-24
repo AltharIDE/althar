@@ -289,7 +289,12 @@ describe('issue drafts', () => {
       const said = query?.includes('teams(')
         ? { status: 200, body: { data: { teams: { nodes: [MERIDIAN], pageInfo: { hasNextPage: false, endCursor: null } } } } }
         : query?.includes('viewer')
-          ? { status: 200, body: { data: { viewer: { id: '1', name: 'You', displayName: 'you' } } } }
+          ? {
+              status: 200,
+              body: {
+                data: { viewer: { id: '1', name: 'You', displayName: 'you' }, organization: { name: 'Meridian', urlKey: 'meridian' } },
+              },
+            }
           : answer
       return Promise.resolve(
         new Response(JSON.stringify(said.body), { status: said.status, headers: { 'content-type': 'application/json' } }),

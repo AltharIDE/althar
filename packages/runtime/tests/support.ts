@@ -8,8 +8,8 @@ import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } fr
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { type Fetch, products } from '@althar/connectors'
-import type { FakeService } from '@althar/connectors/testing'
+import { type AdapterOptions, type Fetch, products } from '@althar/connectors'
+import { byToken, type FakeService } from '@althar/connectors/testing'
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -180,8 +180,24 @@ export const fakeAgents = (
  * Code hosts and trackers for tests: GitHub and Linear, each answered by a
  * fake service, and sign-in endpoints answered by `fetch`, a stand-in.
  */
+/** Linear, through one fake, or through the workspace's a connection's token signs in to. */
+const linearOf = (linear: FakeService | Readonly<Record<string, FakeService>> | undefined) => {
+  if (linear === undefined) return { ...products.linear, make: () => ({}), access: null }
+  if ('product' in linear && typeof linear.product === 'string') {
+    const one = linear as FakeService
+    return { ...products.linear, make: () => ({ tracker: one }), access: one.access }
+  }
+  const routed = byToken(linear as Readonly<Record<string, FakeService>>)
+  return { ...products.linear, make: (options: AdapterOptions) => ({ tracker: routed.tracker(options) }), access: routed.access }
+}
+
 export const fakeConnectors = (
-  services: { readonly github?: FakeService; readonly linear?: FakeService; readonly trello?: FakeService },
+  services: {
+    readonly github?: FakeService
+    /** Linear's fake, or one for each workspace, by the token that signs in to it. */
+    readonly linear?: FakeService | Readonly<Record<string, FakeService>>
+    readonly trello?: FakeService
+  },
   more: {
     readonly fetch?: Fetch
     readonly clientIds?: Readonly<Record<string, string>>
@@ -198,11 +214,7 @@ export const fakeConnectors = (
           make: () => (services.github === undefined ? {} : { host: services.github, tracker: services.github }),
           access: services.github?.access ?? null,
         },
-        {
-          ...products.linear,
-          make: () => (services.linear === undefined ? {} : { tracker: services.linear }),
-          access: services.linear?.access ?? null,
-        },
+        linearOf(services.linear),
         {
           ...products.trello,
           make: () => (services.trello === undefined ? {} : { tracker: services.trello }),

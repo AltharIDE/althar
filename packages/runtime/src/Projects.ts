@@ -332,6 +332,19 @@ export class Projects extends Context.Service<
     /** Draws a project's mark in another ink, as the person picked. Another project may have the same one. */
     setInk(projectId: string, ink: ProjectInk, commandId?: CommandId): Effect.Effect<void, NotFound | Failure>
     /**
+     * Binds a project to one of the connected trackers, and where its issues
+     * are filed there, or leaves it unbound, null, for where its issues go to
+     * be learned from those it has (ADR-059).
+     */
+    setTracker(
+      projectId: string,
+      tracker: {
+        readonly connectionId: string
+        readonly container: { readonly id: string; readonly name: string } | null
+      } | null,
+      commandId?: CommandId,
+    ): Effect.Effect<void, NotFound | Failure>
+    /**
      * Adds the repositories at a folder to a project, as opening it would find
      * them: the repository it is or is in, whole, or those directly inside it.
      * One it has already stays as it is; one left out before comes back as it
@@ -858,6 +871,41 @@ export class Projects extends Context.Service<
           )
         })
 
+      const setTracker = (
+        projectId: string,
+        tracker: { readonly connectionId: string; readonly container: { readonly id: string; readonly name: string } | null } | null,
+        commandId?: CommandId,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const project = yield* projectOf(projectId)
+              if (tracker !== null) {
+                const [connection] = yield* sql<{ id: string }>`
+                  SELECT id FROM connections WHERE id = ${tracker.connectionId} AND device_id = ${instance.deviceId} AND state <> 'removed'`
+                if (connection === undefined) return yield* new NotFound({ kind: 'connection', id: tracker.connectionId })
+              }
+              const revision = yield* change('projects', project.id, {
+                trackerConnectionId: tracker?.connectionId ?? null,
+                trackerContainerId: tracker?.container?.id ?? null,
+                trackerContainerName: tracker?.container?.name ?? null,
+              })
+              yield* fact({
+                projectId: project.id,
+                aggregateType: 'project',
+                aggregateId: project.id,
+                revision,
+                type: 'project.tracker_set',
+                payload:
+                  tracker === null ? { tracker: null } : { connectionId: tracker.connectionId, container: tracker.container?.name ?? null },
+                actorId: instance.personId,
+                ...(commandId === undefined ? {} : { commandId }),
+              })
+            }),
+          )
+        })
+
       const addRepositories = (projectId: string, path: string, commandId?: CommandId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1058,6 +1106,7 @@ export class Projects extends Context.Service<
         repositories: (projectId) => run(repositories(projectId)),
         rename: (projectId, name, commandId) => run(rename(projectId, name, commandId)),
         setInk: (projectId, ink, commandId) => run(setInk(projectId, ink, commandId)),
+        setTracker: (projectId, tracker, commandId) => run(setTracker(projectId, tracker, commandId)),
         addRepositories: (projectId, path, commandId) => run(addRepositories(projectId, real(path), commandId)),
         leaveOut: (projectId, repositoryId, commandId) => run(leaveOut(projectId, repositoryId, commandId)),
         setRepository: (input) => run(setRepository(input)),
