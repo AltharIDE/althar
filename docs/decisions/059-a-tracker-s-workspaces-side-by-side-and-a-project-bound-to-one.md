@@ -55,7 +55,9 @@
     project stays bound to it, and its settings say it is disconnected: its
     issues aren't listed from, nor its drafts made in, another workspace in
     its place, until it is connected again, another is chosen, or the
-    binding is unset. An agent may still name another tracker for a draft.
+    binding is unset. One that needs signing in again holds its drafts the
+    same way, until it is signed in again. An agent may still name another
+    tracker for a draft.
     - Bound, its drafts go to that tracker and team unless the agent
       names another.
     - The coordinator's `find_issues` and the person's issue list read

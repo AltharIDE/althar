@@ -63,7 +63,15 @@ export interface DraftCard {
  * was that it hasn't). `choices` are what can be named instead.
  */
 export class IssueTargetNeeded extends Schema.TaggedError<IssueTargetNeeded>()('IssueTargetNeeded', {
-  reason: Schema.Literals(['no_tracker', 'tracker_needed', 'unknown_tracker', 'container_needed', 'unknown_container', 'tracker_gone']),
+  reason: Schema.Literals([
+    'no_tracker',
+    'tracker_needed',
+    'unknown_tracker',
+    'container_needed',
+    'unknown_container',
+    'tracker_gone',
+    'tracker_signed_out',
+  ]),
   /** What was named and not found. */
   named: Schema.NullOr(Schema.String),
   /** The tracker the draft would go to, for a container to name. */
@@ -114,6 +122,10 @@ export const refusedDraft = (error: unknown): unknown => {
     case 'tracker_gone':
       return new ToolRefused({
         message: `This project's issues go to ${where}, which is no longer connected. The person connects it again in Settings, or binds the project to another in its settings; or name another tracker for this one${choices === '' ? '' : `, as tracker: ${choices}`}.`,
+      })
+    case 'tracker_signed_out':
+      return new ToolRefused({
+        message: `This project's issues go to ${where}, which needs signing in again. The person signs in to it again in Settings; or name another tracker for this one${choices === '' ? '' : `, as tracker: ${choices}`}.`,
       })
     case 'container_needed':
       return new ToolRefused({ message: `Say where on ${where} it goes, as container: ${choices}.` })
@@ -412,15 +424,17 @@ export class IssueDrafts extends Context.Service<
           const labels = trackers.map((one) => one.label)
           const typed = named.tracker?.trim() === '' ? undefined : named.tracker?.trim()
           const wanted = named.container?.trim() === '' ? undefined : named.container?.trim()
-          // Bound to a workspace no longer connected, it waits for that one, never going to another unasked.
-          if (bound?.gone != null && typed === undefined)
+          // Bound to a workspace no longer connected, or needing sign-in again, it waits for that one, never going to another unasked.
+          if (bound !== null && typed === undefined && !trackers.some((one) => one.connectionId === bound.connectionId)) {
+            const workspace =
+              bound.gone?.workspace ?? (yield* connections.list).find((one) => one.id === bound.connectionId)?.workspace?.name ?? null
             return yield* new IssueTargetNeeded({
-              reason: 'tracker_gone',
+              reason: bound.gone === null ? 'tracker_signed_out' : 'tracker_gone',
               named: null,
-              tracker:
-                bound.gone.workspace === null ? products[bound.product].name : `${products[bound.product].name} (${bound.gone.workspace})`,
+              tracker: workspace === null ? products[bound.product].name : `${products[bound.product].name} (${workspace})`,
               choices: labels,
             })
+          }
           const matching = typed === undefined ? trackers : trackers.filter((one) => trackerNamed(one, typed))
           if (matching.length === 0)
             return yield* new IssueTargetNeeded({

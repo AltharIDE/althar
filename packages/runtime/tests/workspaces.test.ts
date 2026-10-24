@@ -333,6 +333,29 @@ describe('several Linear workspaces', () => {
     }).pipe(Effect.provide(withWorkspaces(services)))
   })
 
+  it.live('keep a project bound to a workspace that needs signing in again from drafting to another in its place', () => {
+    const services = workspaces()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* connect('althar')
+      const fnt = yield* connect('fnt')
+      const theirs = yield* project()
+      yield* bind(theirs.projectId, fnt.id, FNT)
+      yield* sql`UPDATE connections SET state = 'reauth_required' WHERE id = ${fnt.id}`
+
+      // Althar's workspace, the only one ready, isn't drafted to in FNT's place.
+      const refused = yield* callTool(theirs.access, 'draft_issue', { title: 'Theirs', description: '' })
+      assert.match(refused, /go to Linear \(FNT\), which needs signing in again/)
+      assert.notMatch(refused, /^Drafted/)
+      assert.notMatch(yield* callTool(theirs.access, 'find_issues', {}), /ALT-7/)
+      // Named, another still takes it.
+      assert.match(
+        yield* callTool(theirs.access, 'draft_issue', { title: 'Named', description: '', tracker: 'Linear', container: 'ALT' }),
+        /^Drafted the issue “Named” on Linear, in Althar\./,
+      )
+    }).pipe(Effect.provide(withWorkspaces(services)))
+  })
+
   it.live('bind a project only to a connection there, and through it again once its workspace is connected anew', () => {
     const services = workspaces()
     return Effect.gen(function* () {
