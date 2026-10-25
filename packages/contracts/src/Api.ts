@@ -1329,6 +1329,22 @@ export const HeldForLimit = Schema.Struct({
 export type HeldForLimit = typeof HeldForLimit.Type
 
 /**
+ * A step held for the connection (ADR-059): its agent, and its service by
+ * name; `offline` while the computer is offline or its service doesn't
+ * answer, when it carries on once it does; else when its service, which
+ * failed, is tried again, and what it said.
+ */
+export const HeldForConnection = Schema.Struct({
+  agentId: Schema.String,
+  service: Schema.String,
+  offline: Schema.Boolean,
+  /** When it is tried again; null while it waits for the connection. */
+  next: Schema.NullOr(Schema.String),
+  failure: Schema.NullOr(Schema.String),
+})
+export type HeldForConnection = typeof HeldForConnection.Type
+
+/**
  * A task as its card shows it, in the coordinator's thread and on the board:
  * where it stands, its plan, the issue it came from, its pull request, the
  * step it is on, what its lead last reported, who leads it.
@@ -1389,6 +1405,8 @@ export const TaskCard = Schema.Struct({
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(HeldForLimit),
+  /** The step is held for the connection: absent or null otherwise (ADR-059). */
+  reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
   /**
    * Ready, but its lead couldn't resolve the conflict its branch has with its
    * default branch, or fix the checks that failed on the merge Althar pushed,
@@ -1833,6 +1851,8 @@ export const StuckStep = Schema.Struct({
     'looping',
     'over_budget',
     'refused',
+    // Its agent's service kept failing while the computer was online (ADR-059).
+    'transient',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -1846,6 +1866,8 @@ export const StuckStep = Schema.Struct({
   tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
   /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
   limit: Schema.optional(LimitCall),
+  /** For a service that kept failing: its name. */
+  service: Schema.optional(Schema.String),
 })
 export type StuckStep = typeof StuckStep.Type
 
@@ -2061,6 +2083,8 @@ export const ThreadSnapshot = Schema.Struct({
     madeChangeAt: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
     waits: Schema.NullOr(HeldForLimit),
+    /** Its step held for the connection: absent or null otherwise (ADR-059). */
+    reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
     /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
@@ -2797,6 +2821,11 @@ export const Api = RpcGroup.make(
   /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
   command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
+  /**
+   * Tries the thread's last turn again, where it failed, as on the
+   * connection: what the person said in it goes to its agent again (ADR-059).
+   */
+  command('TryAgain', { threadId: Schema.String }, Schema.Void),
   /**
    * Asks the thread's agent to compact its context, as a turn of its own after
    * what was said before; it never waits for a place among the agents at work.

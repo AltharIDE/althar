@@ -1308,6 +1308,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const update = (value: acp.SessionUpdate) =>
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const down = options.connection?.()
+      // The agent keeps what it was sent, though its service never answered it, as the real ones do: its role's markers too.
+      if (down !== undefined) for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
       if (down === 'offline' || down === 'server') {
         const said = down === 'offline' ? recorded.claude.offline : recorded.claude.serverError
         await update(said.retrying)
