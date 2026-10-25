@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -392,13 +392,16 @@ export const SHIFTS: readonly Shift[] = [
 export const UPCOMING: readonly Upcoming[] = [
   {
     id: 'chatgpt-pro-allowance-ends',
-    date: '2026-10-29',
+    date: '2026-10-30',
     announced: '2026-09-29',
     kind: ShiftKind.Limits,
     who: 'OpenAI',
     title: 'ChatGPT Pro $200 subscribers lose the old allowance',
-    what: 'People already on the plan keep their old allowance until this day, then get the reopened plan’s, which is roughly half.',
-    source: { name: 'Kingy AI', url: 'https://kingy.ai/news/chatgpt-pro-200-usage-cut/' },
+    what: 'People already on the plan keep 20x Plus usage through 29 October, then get the reopened plan’s 10x, roughly half, in Codex and Work.',
+    source: {
+      name: 'Engadget',
+      url: 'https://www.engadget.com/2272106/openai-adds-dollar500-pro-subscription-nerfs-its-existing-dollar200-tier/',
+    },
   },
   {
     id: 'usage-policy-takes-effect',
