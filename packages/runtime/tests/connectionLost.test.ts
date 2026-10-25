@@ -5,12 +5,14 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connectivity } from '../src/Connectivity'
+import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { items, repository, runtime, until } from './support'
 
 /*
@@ -244,6 +246,56 @@ describe('a step whose connection is lost', () => {
         assert.isTrue((yield* cardOf(task.projectId, task.taskId))?.inLine === true)
         yield* connectivity.set(true)
         yield* implementOf(task.taskId, (attempt) => attempt.state === 'succeeded')
+      }).pipe(Effect.provide(layer))
+    },
+    30_000,
+  )
+})
+
+describe('a coordinator turn whose connection is lost', () => {
+  it.live(
+    'ends in its error, keeps what the person said, and sends it again on Try again',
+    () => {
+      const { state, layer } = connection()
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const projects = yield* Projects
+        const coordinator = yield* Coordinator
+        const sessions = yield* Sessions
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        const threadId = yield* coordinator.thread(project.projectId)
+        // Offline, Claude Code ends the coordinator's turn as it did: the failure only on the prompt's response.
+        state.down = 'offline'
+        const body = 'What is left on the checkout?'
+        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+        yield* until(turnsOf(threadId), (turns) => turns[0]?.state === 'failed', Duration.seconds(10))
+        assert.deepStrictEqual(
+          (yield* turnsOf(threadId)).map((turn) => [turn.state, turn.errorClass]),
+          [['failed', 'transient']],
+        )
+        // The turn ends in its error, as the chat shows it, with Try again under it.
+        const [last] = (yield* items(threadId)).filter((item) => item.kind === 'notice').slice(-1)
+        assert.deepInclude(last?.content, {
+          severity: 'error',
+          title: "Fake claude-code couldn't answer.",
+          description: recorded.claude.offline.title,
+          failure: 'transient',
+        })
+        // What the person said waits for it, rather than lost.
+        const waiting = yield* sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued'`
+        assert.deepStrictEqual(
+          waiting.map((input) => input.body),
+          [body],
+        )
+        // Back, Try again sends it again, to the same session, and it is answered.
+        state.down = undefined
+        assert.isTrue(yield* sessions.tryAgain(threadId))
+        const turns = yield* until(turnsOf(threadId), (all) => all[1]?.state === 'completed', Duration.seconds(10))
+        assert.include(turns[1]?.prompt ?? '', body)
+        const kept = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${threadId}`
+        assert.lengthOf(kept, 1)
+        // Its last turn answered, there is nothing to try again.
+        assert.isFalse(yield* sessions.tryAgain(threadId))
       }).pipe(Effect.provide(layer))
     },
     30_000,

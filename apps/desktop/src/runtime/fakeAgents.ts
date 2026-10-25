@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -17,8 +18,31 @@ import { Layer } from 'effect'
 /** Agents whose sign-in can't be checked, as where their status command isn't there: ALTHAR_FAKE_UNCHECKED lists them. */
 const unchecked = new Set((process.env.ALTHAR_FAKE_UNCHECKED ?? '').split(',').filter((agentId) => agentId !== ''))
 
-const definition = (real: AgentDefinition): AgentDefinition => ({
+/**
+ * The fake agents' connection, where ALTHAR_FAKE_CONNECTION names a file:
+ * what it says as each prompt starts, `offline`, `server` or `waits`, ends
+ * the prompt as the real agents' did when theirs was down (ADR-059); empty
+ * or missing, it is up. Their service is at ALTHAR_FAKE_SERVICE where that
+ * is set, a test's own server, so whether it answers is the test's; else
+ * they have none, and only whether the computer is online counts.
+ */
+const connectionFile = process.env.ALTHAR_FAKE_CONNECTION
+const connection =
+  connectionFile === undefined
+    ? undefined
+    : () => {
+        try {
+          const said = readFileSync(connectionFile, 'utf8').trim()
+          return said === 'offline' || said === 'server' || said === 'waits' ? said : undefined
+        } catch {
+          return undefined
+        }
+      }
+const serviceUrl = process.env.ALTHAR_FAKE_SERVICE
+
+const definition = ({ service, ...real }: AgentDefinition): AgentDefinition => ({
   ...real,
+  ...(service === undefined || serviceUrl === undefined ? {} : { service: { name: service.name, url: serviceUrl } }),
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
   signIn: {
@@ -87,7 +111,11 @@ export const fakeAgents = Layer.succeed(
           const own = out.get(`${real.id}@${home === undefined ? 'usual' : basename(home)}`) ?? limited
           return {
             _tag: 'InProcess' as const,
-            agent: fakeAgent({ ...(own === undefined ? {} : { outOfUsage: own }), ...(slowStart === undefined ? {} : { slowStart }) }),
+            agent: fakeAgent({
+              ...(own === undefined ? {} : { outOfUsage: own }),
+              ...(slowStart === undefined ? {} : { slowStart }),
+              ...(connection === undefined ? {} : { connection }),
+            }),
           }
         },
       }

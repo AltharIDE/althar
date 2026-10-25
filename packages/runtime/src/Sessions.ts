@@ -1496,9 +1496,14 @@ export class Sessions extends Context.Service<
             // Tried again shortly, rather than straight away.
             yield* Effect.forkIn(Effect.delay(Queue.offer(running.wake, undefined), Duration.seconds(1)), running.scope)
           }
-          // A prompt the agent failed ends its turn with the agent's error, or the person waits on an answer that isn't coming.
-          // A usage limit is said by what carries the work on.
-          if (Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' && errorClass !== 'usage_limit')
+          // What the agent said went wrong, for what carries the work on to say.
+          const said = Option.isSome(failure) && 'message' in failure.value ? failure.value.message : ended?.failure?.message
+          // A prompt the agent failed ends its turn with the agent's error, or the person waits on an answer that isn't coming:
+          // thrown, or on the prompt's response, as Claude Code and Codex end a turn on a lost connection (ADR-059).
+          // A usage limit is said by what carries the work on, as a step's lost connection is; a refused prompt is tried again.
+          const failed = (Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed') || ended?.failure !== undefined
+          const saidElsewhere = errorClass === 'usage_limit' || (errorClass === 'transient' && thread.role !== 'coordinator')
+          if (failed && !saidElsewhere && !refused)
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
               'notice',
@@ -1506,7 +1511,7 @@ export class Sessions extends Context.Service<
                 source: 'agent',
                 severity: 'error',
                 title: `${running.entry.definition.name} couldn't answer.`,
-                description: failure.value.message,
+                ...(typeof said === 'string' && said !== '' ? { description: said } : {}),
                 failure: errorClass,
               },
             )
@@ -1533,8 +1538,6 @@ export class Sessions extends Context.Service<
               ...(Option.isSome(failure) ? { failure: failure.value._tag } : {}),
             }),
           )
-          // What the agent said went wrong, for what carries the work on to say.
-          const said = Option.isSome(failure) && 'message' in failure.value ? failure.value.message : ended?.failure?.message
           yield* live.publish({
             _tag: 'TurnEnded',
             threadId: thread.threadId,

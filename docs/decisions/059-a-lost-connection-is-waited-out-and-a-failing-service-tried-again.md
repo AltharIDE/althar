@@ -60,7 +60,10 @@
     connection or the session failed rather than the work. The coordinator's
     chat offers Try again under a last turn that ended in an error: a failed
     turn gives the person's words back to the queue, as a usage limit does,
-    and Try again delivers them again.
+    and Try again delivers them again. A turn that failed ends in its error
+    there however the agent said it, thrown or on the prompt's response;
+    a step's thread leaves a lost connection to the line that says it
+    waits.
 - **Consequences:** A step survives a lost connection of any length, and a
   short outage of its service, without the person; a service that keeps
   failing comes to them once, saying so, with an easy way on. Usage-limit
