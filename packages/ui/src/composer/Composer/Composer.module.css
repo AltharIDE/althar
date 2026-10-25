@@ -250,6 +250,8 @@
   gap: 8px;
   /* the thread under its empty corners stays clickable */
   pointer-events: none;
+  /* what floats there narrows as the composer does; its width is the composer's, whatever floats in it */
+  container: composer-edge / inline-size;
 }
 .above,
 .carried > * {

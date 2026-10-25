@@ -16,7 +16,7 @@ import { Sessions } from '../src/Sessions'
 import { items, repository, runtime, until } from './support'
 
 /*
- * A step whose connection fails (ADR-059), from what the agents really said
+ * A step whose connection fails (ADR-060), from what the agents really said
  * when theirs did (provider-adapters/src/testing/recorded.ts): it isn't a
  * missing report, so it is never reminded. Offline, or its service out of
  * reach, the step waits for the connection and carries on by itself once the

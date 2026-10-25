@@ -6,7 +6,7 @@ import { Predicate } from 'effect'
  * a usage limit pauses every session on the account and moves the work; a
  * lost connection, a short rate limit or a failing service is transient: its
  * step is waited out while the computer is offline, and retried after a
- * growing pause while it is online (ADR-059); a full context starts a new
+ * growing pause while it is online (ADR-060); a full context starts a new
  * session from a brief (docs/architecture/05).
  *
  * Claude Code and Codex report failures in structured form when asked (see

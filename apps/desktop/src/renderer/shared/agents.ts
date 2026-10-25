@@ -38,7 +38,7 @@ export const waitsWords = (agent: string, at: string, step?: string | null) =>
   `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
 
 /**
- * What a step held for the connection waits for (ADR-059): the connection,
+ * What a step held for the connection waits for (ADR-060): the connection,
  * while the computer is offline or its service out of reach; else the try
  * again at its service, which failed, and when. `at` says a time as the
  * window does.
@@ -64,6 +64,9 @@ const ordinal = (n: number) => {
 
 /** Where a task waiting for a free agent stands in its project's line: Next in line, 2nd in line. */
 export const inLineWords = (place: number) => `${ordinal(place)} in line`
+
+/** Where a task waiting for a free agent stands in its project's line, as the chip over its composer says it: First in Up next, 2nd in Up next. */
+export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal(place)} in Up next`
 
 /** How busy this computer's agents are, as work that waits for one says it. */
 export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>

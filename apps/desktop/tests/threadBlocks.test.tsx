@@ -169,7 +169,7 @@ describe('a turn’s work', () => {
 })
 
 describe('a turn that failed on its connection', () => {
-  // As Claude Code's ends offline: it warns it reconnects, then the turn ends in its error (ADR-059).
+  // As Claude Code's ends offline: it warns it reconnects, then the turn ends in its error (ADR-060).
   const reconnecting = items.notice({ severity: 'warning', title: 'Reconnecting to Claude, attempt 1 of 10.' })
   const failed = items.notice({
     severity: 'error',

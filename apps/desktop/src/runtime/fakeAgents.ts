@@ -21,7 +21,7 @@ const unchecked = new Set((process.env.ALTHAR_FAKE_UNCHECKED ?? '').split(',').f
 /**
  * The fake agents' connection, where ALTHAR_FAKE_CONNECTION names a file:
  * what it says as each prompt starts, `offline`, `server` or `waits`, ends
- * the prompt as the real agents' did when theirs was down (ADR-059); empty
+ * the prompt as the real agents' did when theirs was down (ADR-060); empty
  * or missing, it is up. Their service is at ALTHAR_FAKE_SERVICE where that
  * is set, a test's own server, so whether it answers is the test's; else
  * they have none, and only whether the computer is online counts.

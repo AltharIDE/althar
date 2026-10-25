@@ -301,7 +301,7 @@ const allowFolder = (requestId: string, path: string) =>
     ),
   )
 
-/** Whether the computer is online, as the main process reads it (ADR-059): the last said, once the store is open. */
+/** Whether the computer is online, as the main process reads it (ADR-060): the last said, once the store is open. */
 const tellOnline = (online: boolean) => void ready.then((context) => Effect.runPromise(Context.get(context, Connectivity).set(online)))
 
 parent.on('message', (message) => {

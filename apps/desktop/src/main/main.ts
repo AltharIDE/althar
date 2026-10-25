@@ -506,7 +506,7 @@ const startRuntime = () => {
   })
   logs.keepOutput(child)
   child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
-  // Whether the computer is online, so work waits out a lost connection rather than fail on it (ADR-059).
+  // Whether the computer is online, so work waits out a lost connection rather than fail on it (ADR-060).
   const stopWatchingOnline = watchOnline(
     () => net.isOnline(),
     (online) => {

@@ -1,4 +1,4 @@
-# ADR-059: A lost connection is waited out, and a failing service tried again, as a usage limit is held
+# ADR-060: A lost connection is waited out, and a failing service tried again, as a usage limit is held
 
 - **Status:** Accepted
 - **Date:** 2026-10-25

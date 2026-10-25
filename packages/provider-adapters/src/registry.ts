@@ -192,7 +192,7 @@ export interface AgentDefinition {
   /**
    * The service its model runs on: its name, as a step that keeps failing
    * there says it, and an address of its API that Althar asks whether it
-   * answers while that step waits for the connection (ADR-059). None where
+   * answers while that step waits for the connection (ADR-060). None where
    * it runs on whichever provider the person picks: then only whether the
    * computer is online counts.
    */

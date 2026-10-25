@@ -11,7 +11,7 @@ import { LimitCall, limitText } from './LimitCall'
  * A step of the task's plan that needs the person (docs/architecture/05):
  * what went wrong, what Althar tried, and the ways on. Every one can be
  * tried again on the agent it was on, in the session it was in: first,
- * where the connection or the session failed rather than the work (ADR-059).
+ * where the connection or the session failed rather than the work (ADR-060).
  * The lead's steps can also be told what to do, handed to another agent, or
  * abandoned; a review can be run again on another agent, or gone on without.
  */
@@ -73,7 +73,7 @@ export const text = {
     abandonedNote: 'the task is ready on its branch',
   },
   reminded: { what: 'Reminded it to say when the step is done', result: 'it stopped again without saying' },
-  /** Its service tried again after growing pauses (ADR-059). */
+  /** Its service tried again after growing pauses (ADR-060). */
   waited: ['15 seconds', 'a minute', '4 minutes'].map((pause) => ({ what: `Tried again after ${pause}`, result: 'it failed again' })),
   /** An agent out of usage: told nothing, since it would hit the same limit; handed on, or tried again once it is back. */
   out: {

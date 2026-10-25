@@ -1,5 +1,5 @@
 /*
- * Whether the computer is online, for the runtime (ADR-059): Electron's own
+ * Whether the computer is online, for the runtime (ADR-060): Electron's own
  * reading of the network, `net.isOnline()`, said once as the runtime starts
  * and whenever it changes. Electron gives the main process no event for it,
  * so it is read every couple of seconds, which costs nothing: it asks the

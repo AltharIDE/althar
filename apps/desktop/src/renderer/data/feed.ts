@@ -104,6 +104,16 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
         .findAll({ queryKey: ['repositories'] })
         .map((query) => ({ key: query.queryKey, offScreen: false }))
     : []),
+  // Its tracker (ADR-059), which follows a connection disconnected or made again, only while it shows.
+  ...(event.projectId !== null && event.aggregateType === 'project'
+    ? [{ key: keys.projectTracker(event.projectId), offScreen: false }]
+    : []),
+  ...(event.aggregateType === 'connection'
+    ? cache
+        .getQueryCache()
+        .findAll({ queryKey: ['projectTracker'] })
+        .map((query) => ({ key: query.queryKey, offScreen: false }))
+    : []),
   // Its rules, which an answer can change too (Allow always, Deny always), only while they show.
   ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
   // Its notes, which the coordinator keeps as the person decides, only while they show.

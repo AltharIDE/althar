@@ -429,7 +429,7 @@ layers:
    comes on a `session_info_update`. Every failure is one of `usage_limit`,
    `context_full` (start a new session from a brief), `transient` (a lost
    connection, a short rate limit, an overloaded or failing service: waited
-   out while offline, and retried after a pause, ADR-059), `auth_required`,
+   out while offline, and retried after a pause, ADR-060), `auth_required`,
    `invalid_request` or `unknown`.
 2. **From account status, where the agent exposes it.** A native side channel
    reports use per window and reset times before the limit is reached:
@@ -1048,7 +1048,7 @@ The adapter classifies failures without collapsing them:
 |---|---|---|
 | `auth_required` | Logged out or expired grant | Pause and request authentication |
 | `unsupported_version` | CLI schema outside support matrix | Block or degraded mode; never guess |
-| `transient` | Lost connection, short rate limit, overloaded or failing service | Never a missing report. Offline, or the service out of reach: the step is held for the connection, and its turn goes again in the same session once the computer is back and the service answers, however long that takes. The service answering with errors: retried after 15 s, 1 min, 4 min, then the step needs the person, with what it said (ADR-059) |
+| `transient` | Lost connection, short rate limit, overloaded or failing service | Never a missing report. Offline, or the service out of reach: the step is held for the connection, and its turn goes again in the same session once the computer is back and the service answers, however long that takes. The service answering with errors: retried after 15 s, 1 min, 4 min, then the step needs the person, with what it said (ADR-060) |
 | `usage_limit` | The account's allowance is used up until a reset | Pause every session on that account; move or hold work under the project rule |
 | `invalid_request` | Unsupported model/tool option | Fail node with actionable detail |
 | `provider_refusal` | Policy refusal | Record terminal provider outcome |

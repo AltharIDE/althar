@@ -67,7 +67,7 @@ import { Sessions } from './Sessions'
  * a lead at work on a step takes no other for its turns.
  *
  * While the computer is offline, nothing but what the person did takes a
- * place it hasn't already (ADR-059): work waiting in Up next, or the next
+ * place it hasn't already (ADR-060): work waiting in Up next, or the next
  * step of a task, would only start into a dead connection and fail, so it
  * waits until the computer is back, when the queue is looked at again.
  *

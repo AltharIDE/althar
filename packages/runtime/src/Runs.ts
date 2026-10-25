@@ -87,7 +87,7 @@ const CONTINUES = 3
 /** What it is told when it was cut off so. */
 const CONTINUING = "Your last turn stopped at the agent's own limit on a turn's output or steps. Carry on from where you were."
 
-/** What it is told, as quietly, when its turn is sent again once its connection, or its service, is back (ADR-059). */
+/** What it is told, as quietly, when its turn is sent again once its connection, or its service, is back (ADR-060). */
 const RECONNECTED = "Your last turn stopped because the connection to your model's service failed. It's back: carry on from where you were."
 
 /** A pause before a step tries its service again, as a thread says it. */
@@ -202,7 +202,7 @@ const Hold = Schema.Struct({
   why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
   choices: Schema.optional(Schema.Array(LimitChoice)),
   /**
-   * Held for the connection (`agent_unavailable`, ADR-059): offline, until
+   * Held for the connection (`agent_unavailable`, ADR-060): offline, until
    * the computer is back and its service answers; else until `until`, when
    * its service, which failed `tries` times in a row, is tried again. The
    * service, by name, and what it said last.
@@ -315,7 +315,7 @@ export type StuckWhy =
   | 'looping'
   | 'over_budget'
   | 'refused'
-  /** Its agent's service kept failing while the computer was online, however long Althar waited between tries (ADR-059). */
+  /** Its agent's service kept failing while the computer was online, however long Althar waited between tries (ADR-060). */
   | 'transient'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
@@ -382,7 +382,7 @@ export type Place =
   | { readonly how: 'answered'; readonly info: StuckInfo; readonly answer: Exclude<StuckAnswer, { readonly kind: 'wait' }> }
   /** A lead's step held for a usage limit that the person handed to another agent: the work of a task under way, so it waits its turn. */
   | { readonly how: 'handed'; readonly info: StuckInfo; readonly answer: Extract<StuckAnswer, { readonly kind: 'retry' }> }
-  /** Back from a usage limit, or, `connection`, from waiting for its service (ADR-059), with how often that had failed in a row. */
+  /** Back from a usage limit, or, `connection`, from waiting for its service (ADR-060), with how often that had failed in a row. */
   | {
       readonly how: 'reset'
       readonly agentId: string
@@ -1375,7 +1375,7 @@ export class Runs extends Context.Service<
               : outOfUsage(on, turn.agentId, turn.accountId)
           }
           if (on === undefined) return
-          // Its connection or its service failed (ADR-059): not a missing report, so it isn't reminded. It waits, and is tried again.
+          // Its connection or its service failed (ADR-060): not a missing report, so it isn't reminded. It waits, and is tried again.
           if (event._tag === 'TurnEnded' && event.errorClass === 'transient') {
             const [turn] = yield* sql<{ sessionId: string | null; agentId: string; accountId: string | null }>`
               SELECT t.provider_session_id AS session_id, s.agent_id, s.account_id FROM turn_deliveries t
@@ -1416,7 +1416,7 @@ export class Runs extends Context.Service<
           if (inARow > 0) return yield* blankTurn(event.threadId, event.turnId, on, inARow, info)
           // A round whose lead made nothing new, as for a question answered, ends there: the task is back where it was (ADR-034).
           if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
-          // A turn that went through after its service failed starts the count of its failures again (ADR-059).
+          // A turn that went through after its service failed starts the count of its failures again (ADR-060).
           const { tries: _tries, ...output } = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number; tries?: number }
           // Refused, it won't go on however it's reminded.
           if (event.stopReason === 'refusal') return yield* stuck(on.run, { id: on.attemptId }, info('refused', null))
@@ -2339,7 +2339,7 @@ export class Runs extends Context.Service<
         })
 
       /**
-       * Holds a step for the connection (ADR-059), as a usage limit holds one
+       * Holds a step for the connection (ADR-060), as a usage limit holds one
        * for its reset (`Hold`): it gives up its place among the agents at
        * work here, as a step held for a reset does, and asks for one again as
        * the work of a task under way when it carries on. False where the step
@@ -2402,7 +2402,7 @@ export class Runs extends Context.Service<
         })
 
       /**
-       * A step's turn failed on its connection or its service (ADR-059).
+       * A step's turn failed on its connection or its service (ADR-060).
        * Where the service doesn't answer, the computer offline or the service
        * out of reach, the step waits for the connection, however long that
        * takes, and none of it counts. Where it answers, the step is tried
@@ -3857,7 +3857,7 @@ export class Runs extends Context.Service<
        * account and model it was held for, once it has a place among the
        * agents at work on this machine; until then it waits for one.
        * `placed`, it waited for a place after its reset, and has one now.
-       * One held for the connection (`connection`, ADR-059) goes the same
+       * One held for the connection (`connection`, ADR-060) goes the same
        * way, its turn sent again in the session it was in, told quietly to
        * carry on; started again as after a reset where that session went.
        */
@@ -3965,7 +3965,7 @@ export class Runs extends Context.Service<
         })
 
       /**
-       * A step held for the connection, due (ADR-059): where its service
+       * A step held for the connection, due (ADR-060): where its service
        * answers, it carries on; where it doesn't yet, though the computer says
        * it is online, it waits for the connection, and asks again a while
        * later.

@@ -40,6 +40,7 @@ import {
   type Product,
   type ChangeTarget,
   type ProjectInk,
+  type ProjectTracker,
   type ProjectList,
   type ProjectRepository,
   type ProjectSummary,
@@ -57,6 +58,7 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
+  type TrackerContainer,
   type WatchEvent,
   type Launch,
   type RepositoryScript,
@@ -303,6 +305,12 @@ export interface Client {
   readonly renameProject: (projectId: string, name: string) => Promise<void>
   /** Draws a project's mark in another ink, wherever it shows. */
   readonly setProjectInk: (projectId: string, ink: ProjectInk) => Promise<void>
+  /** The tracker a project is bound to (ADR-059), or null where where its issues go is learned. */
+  readonly getProjectTracker: (projectId: string) => Promise<ProjectTracker | null>
+  /** Binds a project to a tracker and where its issues are filed there, or, with null, unbinds it. */
+  readonly setProjectTracker: (projectId: string, tracker: ProjectTracker | null) => Promise<void>
+  /** Where issues can be filed on a connected tracker: its teams, projects or lists. */
+  readonly listContainers: (connectionId: string) => Promise<ReadonlyArray<TrackerContainer>>
   /** Removes a project from Althar: its agents stop; its folders, worktrees and branches stay. */
   readonly removeProject: (projectId: string) => Promise<void>
   readonly getRepositories: (projectId: string) => Promise<ReadonlyArray<ProjectRepository>>
@@ -621,6 +629,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
     setProjectInk: (projectId, ink) => command((commandId) => api.SetProjectInk({ commandId, projectId, ink })),
+    getProjectTracker: (projectId) => settle(api.GetProjectTracker({ projectId })),
+    setProjectTracker: (projectId, tracker) => command((commandId) => api.SetProjectTracker({ commandId, projectId, tracker })),
+    listContainers: (connectionId) => settle(api.ListContainers({ connectionId })),
     removeProject: (projectId) => command((commandId) => api.RemoveProject({ commandId, projectId })),
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),

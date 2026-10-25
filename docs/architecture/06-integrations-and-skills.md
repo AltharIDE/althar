@@ -508,13 +508,17 @@ now. Nothing reaches the tracker on its word:
   `leadsNeedTheCard` in `IssueDrafts.ts`. A review's lead has no such tool,
   and a reviewer only reads.
 - **Where it goes** is what the coordinator names, a tracker by its name and
-  a container by its id, key or name; or, without them, where the project's
+  a container by its id, key or name; or, without them, the tracker and
+  container the project is bound to in its settings
+  ([ADR-059](../decisions/059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md));
+  or, unbound, where the project's
   issues already come from (the newest issue a task came from, or a draft
   filed), then its repository's issues, then the one tracker or container
   there is. Where none of that decides, the tool says what to name.
-- **Two connections of one tracker** (two Jira sites, two GitLab servers,
-  two accounts) are told apart by site, and by account where they share
-  one: `Jira (acme.atlassian.net)`. The coordinator names one so, or by its
+- **Two connections of one tracker** (two of Linear's workspaces, two Jira
+  sites, two GitLab servers, two accounts) are told apart by workspace, by
+  site, and by account where they share one: `Linear (FNT)`,
+  `Jira (acme.atlassian.net)`. The coordinator names one so, or by its
   site's address; a container named without a tracker, or with a name
   several share, is looked for on each, and one found on more than one is
   asked about, never guessed. The card names the tracker the same way.

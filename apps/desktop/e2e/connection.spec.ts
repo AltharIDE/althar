@@ -10,7 +10,7 @@ import { repository } from '../tests/repository'
 import { launch, openFirstProject, planTask, say } from './support'
 
 /*
- * A step that loses its connection, as the person sees it (ADR-059). The fake
+ * A step that loses its connection, as the person sees it (ADR-060). The fake
  * agents' connection is the file ALTHAR_FAKE_CONNECTION names: `offline`, and
  * a prompt ends as Claude Code's did with the network gone. Their service is
  * this test's own server, ALTHAR_FAKE_SERVICE, which stops answering. The

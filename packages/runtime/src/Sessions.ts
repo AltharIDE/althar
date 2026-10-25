@@ -549,7 +549,7 @@ export class Sessions extends Context.Service<
     ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /**
      * Tries the thread's last turn again, as the person asked, where it
-     * failed (ADR-059): what they said in it goes again, with what waits
+     * failed (ADR-060): what they said in it goes again, with what waits
      * since, to the agent on the thread, started again where it went. False,
      * and nothing done, where its last turn didn't fail.
      */
@@ -1452,7 +1452,7 @@ export class Sessions extends Context.Service<
           const errorClass = errorClassOf(failure, Exit.isFailure(streamed)) ?? ended?.failure?.failure
           // The agent refused the prompt: nothing was delivered, so the input goes back in the queue.
           const refused = errorClass === 'turn_in_progress'
-          // Out of usage, or its service out of reach (ADR-059): nothing more goes to it until what carries the work on says so.
+          // Out of usage, or its service out of reach (ADR-060): nothing more goes to it until what carries the work on says so.
           const held = errorClass === 'usage_limit' || errorClass === 'transient'
           const state = errorClass !== undefined ? 'failed' : ended?.stopReason === 'cancelled' ? 'interrupted' : 'completed'
           yield* sql.withTransaction(
@@ -1499,7 +1499,7 @@ export class Sessions extends Context.Service<
           // What the agent said went wrong, for what carries the work on to say.
           const said = Option.isSome(failure) && 'message' in failure.value ? failure.value.message : ended?.failure?.message
           // A prompt the agent failed ends its turn with the agent's error, or the person waits on an answer that isn't coming:
-          // thrown, or on the prompt's response, as Claude Code and Codex end a turn on a lost connection (ADR-059).
+          // thrown, or on the prompt's response, as Claude Code and Codex end a turn on a lost connection (ADR-060).
           // A usage limit is said by what carries the work on, as a step's lost connection is; a refused prompt is tried again.
           const failed = (Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed') || ended?.failure !== undefined
           const saidElsewhere = errorClass === 'usage_limit' || (errorClass === 'transient' && thread.role !== 'coordinator')

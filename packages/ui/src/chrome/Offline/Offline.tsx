@@ -7,7 +7,7 @@ import s from './Offline.module.css'
  * The computer is offline: one quiet line in the window's bar, for the whole
  * app, never a card per task. Work that was under way waits for the
  * connection and carries on by itself once it is back, and work waiting to
- * start stays waiting, so there is nothing to do but know (ADR-059).
+ * start stays waiting, so there is nothing to do but know (ADR-060).
  */
 
 export interface OfflineText {

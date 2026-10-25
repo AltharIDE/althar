@@ -5,7 +5,7 @@ import { Live } from './Live'
 
 /*
  * Whether the computer is online, and whether an agent's service answers
- * (ADR-059). The desktop app says the first, from Electron's own reading of
+ * (ADR-060). The desktop app says the first, from Electron's own reading of
  * the network, whenever it changes; without an app to say so, as for the
  * command-line client and tests, it is online. Each change is said on Live
  * (`Connection`), so what waits for the connection looks again. Whether a
