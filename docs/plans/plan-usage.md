@@ -11,10 +11,11 @@ Researched on 15 October 2026 against upstream `main` (`af3023a`), and again
 on 21 October for the agents #266 added. Built (see Stages): every source in
 the table below, the usage read and its exception to rule 3
 ([ADR-058](../decisions/058-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
-the warnings, the notices and the usage view, the limits recognised in each
-agent's own words, and new work steered by the windows. Which design the
-window shows them in is being chosen on a prototype
-(`apps/desktop/prototypes/plan-usage`).
+the limits recognised in each agent's own words, new work steered by the
+windows, and how the window shows them: the design the person picked on a
+prototype (direction A, 22 October 2026), a plan gauge in the bar and each
+model's room in the pickers, in place of the warnings, notices and usage tab
+first planned.
 
 ## Goal
 
@@ -112,53 +113,46 @@ Zen sign-in under the API-key row and skip its source. So:
 - The registry declares a usage source per (agent, provider) pair, and a
   contract test fails for a subscription pair with none.
 - Adding an account whose pair has no source is refused with the reason, and
-  an account whose source fails shows a fault on the usage tab and in the
-  badge, not an empty row.
+  an account whose source fails shows a fault in the plan gauge's peek, not
+  an empty row.
 
 **The 1-month window.** No source found offers one for Claude or Codex:
 Codex's snapshot has `primary`, `secondary` and `credits`. OpenCode's Go and
 Zen plans may (claim). The `windows` list carries any window a source
 returns, so it shows when a source reports it; nothing else is built for it.
 
-## Warnings
+## Where the window shows it
 
-- **Thresholds**: on the share *remaining*: 50, 25, 10 and 5%. Per account
-  and window, each fires once per reset period.
-- **Crossing several at once** (50 → 8%): fire only the lowest crossed.
-- **Re-arming**: only when the window's `resetsAt` changes. Use that dips
-  back above a threshold and falls again in the same period does not fire
-  it twice.
-- **Every source gives a percentage**, so every subscription account can
-  warn. An account whose source is failing shows a fault instead, and warns
-  from nothing until it is fixed.
+The person picked this on a prototype of four designs (direction A, 22
+October 2026). It replaces the warnings at 50, 25, 10 and 5%, the notices in
+the Talk room and the usage tab first planned here: a quiet indicator, not
+something to read.
+
+- **A plan gauge in the bar**, after CPU and memory and in their manner
+  (`PlanGauge` in the kit, `features/usage/PlanBar.tsx`): five steps lit as
+  the agent with least room uses its tightest window, there once any plan is
+  read. Under a tenth left, it turns full ink and the bar says who and until
+  when beside it ("Codex 3% · 14:00"), as the load meter says memory running
+  short. Nothing pops up and nothing has to be dismissed.
+- **Its peek**, on a click or Cmd/Ctrl+U (`PlanPeek`): a row per agent, least
+  room first, its tightest limit and reset; a row opens in place to every
+  account and window, old numbers saying how old. Agents with no reading
+  share one line at the foot that opens to why. Opening it reads every
+  account again, each at most once a minute.
+- **Each model's room in the pickers** (`ModelPick`, All models): the share
+  left of the tightest window of the account the work would start on, by the
+  project's rule (`GetModelRooms`, `modelRooms.ts`), a model's own window
+  such as Opus's week counted; from a quarter down, until when. The chip says
+  so beside itself once its model is nearly out.
+- **A card held for an agent nearly out** says it waits for the agent, not
+  that the agent is out.
+- **The coordinator agent** reads each model's room in `list_models`, and new
+  steps steer by it (below).
 - **Reached**: a classified `usage_limit` (`failures.ts`) stays the signal
-  that the limit is hit, and keeps pausing and moving work as in
-  architecture 03 and 05.
-- **Own thresholds, not the vendor's.** Claude's SDK has `status:
-  'allowed_warning'` and `surpassedThreshold`, but their cut-offs are
-  Anthropic's. Althar computes its own from the reported use.
-- **Unit unchecked**: whether Claude's `utilization` is 0 to 1 or 0 to 100
-  is not in its type (`sdk.d.ts` 0.3.296), and Codex's `usedPercent` is a
-  whole percent (`account.rs`, `i32`). The first Claude spike settles it.
-
-## Where the person is told
-
-- **One notice per account, window and threshold**, never per coordinator. A
-  limit belongs to an account, so a warning is a fact about the account.
-- **Shown in the open coordinator's Talk room**, the one for the project the
-  person is looking at, as a notice Althar posts itself. It is not a model
-  turn: it costs no usage and the coordinator did not "say" it. Which
-  project is open comes from the window; the notice records which it was
-  shown in.
-- **Nothing open** (the home, the usage tab, another screen): the warning
-  waits and shows as a badge on the usage entry, and goes into the next
-  coordinator the person opens, unless the window has reset by then.
-- **Always findable**: the usage tab shows the same state, so a missed notice
-  is not lost.
-- **The coordinator agent** reads each model's room in `list_models`, and
-  new steps steer by it (below).
-- **Left for later**: an operating-system notification when the window is
-  not focused.
+  that a limit is hit, and keeps pausing and moving work as in architecture
+  03 and 05.
+- **Left for later**: an operating-system notification, if the gauge proves
+  too quiet.
 
 ## Steering new work
 
@@ -191,26 +185,6 @@ Each agent's own words, as `failures.ts` reads them (its tests hold them):
 | Qwen Code | "Your token-plan 1-week quota has been exhausted. The quota will reset at 07-27 09:25:00 UTC."; its ended free tier asks for another sign-in | a UTC date and time |
 | Antigravity, Gemini's | RESOURCE_EXHAUSTED, "You have exhausted your capacity on this model. Your quota will reset after 19h14m47s.", "Access resets at 3:05 PM PDT" | a length, or a clock time in US zones |
 | OpenCode | `provider.quota` / `provider.free-limit` in the error's data, "… usage limit reached. It will reset in 3 hours 20 minutes." | a length |
-
-## The usage tab
-
-- **Entry**: a button in the window's bar (the app has no side menu), with the count of warnings not yet seen, and Ctrl/Cmd+U. No existing binding for it
-  was found in `apps/` or `packages/`. Check against the shortcut list when
-  building.
-- **Content**: every `AgentAccount` ([03, Several accounts](../architecture/03-agent-runtime-and-auth.md#several-accounts))
-  across Claude Code, Codex and OpenCode, with its name, the plan it is on
-  (`paidBy`), each window's use and reset time, and the source: "reported by
-  Codex", "from Claude's last turn, 10 minutes ago", "no usage data".
-- **An account with no session**: read on demand by its source: Codex by
-  starting its app-server with the account's `CODEX_HOME`, OpenCode by its
-  provider's endpoint, Claude by the SDK or a probe (see the Claude risk).
-  A row shows the age of what it shows. API-key accounts say "API key, no
-  plan window" with the credit left where the provider documents it.
-- **Where it lives**: next to the existing accounts feature
-  (`apps/desktop/src/renderer/features/accounts`). The system-load readout
-  designs in [#111](https://github.com/AltharIDE/althar/pull/111) are about
-  the Mac's CPU and memory, not plan usage; they inform the look, not the
-  content.
 
 ## What is verified and what is claimed
 
@@ -317,13 +291,11 @@ before building on it):
   classification and allowlist, OpenCode's sign-in listing (`usageSources.ts`);
   with the contract test (`tests/usageSources.test.ts`) that every
   subscription has a source and a way to be told from a key.
-- `packages/persistence-sqlite`: migration 0038, `plan_usage_readings` and
-  `plan_usage_warnings`.
+- `packages/persistence-sqlite`: migration 0040, `plan_usage_readings`.
 - `packages/runtime`: `PlanUsage.ts` keeps each account's windows (Codex read
   through its app-server, Claude heard from its sessions, OpenCode by its own
-  listing), raises the 50/25/10/5 warnings once
-  per reset, and tells the window; the API has `GetPlanUsage`,
-  `AcknowledgeUsageWarnings` and a `PlanUsage` watch event.
+  listing) and tells the window; the API has `GetPlanUsage`, `GetModelRooms`
+  and a `PlanUsage` watch event.
 - **The usage read** (ADR-058): Claude Code's idle accounts, Codex's
   fallback, Kimi Code and Grok Build, through `usageRead.ts`.
 - **No reading**, said calmly with why: OpenCode's plan sign-ins, Copilot,
@@ -340,8 +312,9 @@ before building on it):
   `events.ts` makes such a 0 a `PlanWindow` alone, so the context meter and
   the handover check keep theirs. Accounts with no session show a fault.
 
-The app side (usage overlay on Cmd/Ctrl+U, the bar badge, the Talk-room
-notice) is built in `apps/desktop` and `packages/ui`.
+The app side (the plan gauge and its peek on Cmd/Ctrl+U, each model's room
+in the pickers; see Where the window shows it) is built in `apps/desktop` and
+`packages/ui`.
 
 One pull request each. Stages 0 to 5 are Althar's; 6 to 8 are upstream and
 run in parallel.
@@ -357,11 +330,10 @@ run in parallel.
    new event beside `ContextUsage`; keep a window per `rateLimitType`;
    carry a patch for #1127 until upstream fixes it. Settle the `utilization`
    unit. Spike `usage_EXPERIMENTAL…()` for accounts with no session.
-3. **Notices.** The runtime holds `AccountStatus` per account and posts one
-   notice per account, window and threshold into the open coordinator's
-   Talk room; a badge when none is open.
-4. **The usage tab.** Ctrl/Cmd+U and the bar's button; every account, its
-   windows, its source and age.
+3. **Notices.** Replaced by the plan gauge (direction A), which says who is
+   nearly out beside itself.
+4. **The usage tab.** Replaced by the gauge's peek on Ctrl/Cmd+U and each
+   model's room in the pickers.
 5. **OpenCode sources.** First, per-provider plan-or-key detection replacing
    `paidBy: () => 'key'`, with its contract test. Then one spike, then one
    source per provider the person
@@ -392,7 +364,7 @@ run in parallel.
 - None of the endpoint reads was tried against a real account here: each
   follows Orca's working code (stablyai/orca `ef950401`), and the tests run
   them against fakes of the same shapes. Unconfirmed until someone signed in
-  opens the usage view (Cmd/Ctrl+U) on this build: Claude Code idle (its
+  opens the plan gauge's peek (Cmd/Ctrl+U) on this build: Claude Code idle (its
   token from the Keychain or `~/.claude/.credentials.json`), a second Claude
   account in its own home (its Keychain entry named for that home), Codex's
   `account/rateLimits/read`, Kimi Code and Grok Build.

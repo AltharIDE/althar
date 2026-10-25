@@ -478,13 +478,13 @@ never under running work.
 - [ ] **Claude accounts with no session.** Can the Agent SDK's
   `usage_EXPERIMENTAL…()` or a probe session read them within Anthropic's
   terms? If not, they stay uncovered until Anthropic allows a read.
-- [ ] **Usage warnings and the usage tab.** Warnings at 50, 25, 10 and 5%
-  remaining per account and window, shown once in the open coordinator's
-  Talk room (a notice Althar posts, not a model turn), and a tab for every
-  account on Ctrl/Cmd+U or in the side menu
-  ([plan](plans/plan-usage.md#warnings)). Still open: telling the
-  coordinator agent too, an operating-system notification, and the 1-month
-  window (no source yet for Claude or Codex).
+- [x] **Usage warnings and the usage tab.** Settled on a prototype (22
+  October 2026): no warnings at thresholds, no notices and no tab, but a plan
+  gauge in the bar after CPU and memory that says who is nearly out beside
+  it, its peek on Ctrl/Cmd+U, and each model's room in the pickers
+  ([plan](plans/plan-usage.md#where-the-window-shows-it)). The coordinator
+  sees each model's room in `list_models`. Still open: an operating-system
+  notification, and the 1-month window (no source yet for Claude or Codex).
 - [x] **Agent settings that approve before Althar sees.** Settled: every
   session gets settings that make the agent ask, and they win over the user's
   and the repository's own. Claude gets ask rules per session (ask beats allow
