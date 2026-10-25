@@ -6,9 +6,9 @@ import { Popover } from '../../primitives/Popover/Popover'
 import { STEPS } from '../LoadMeter/load'
 import { Gauge } from '../LoadMeter/LoadMeter'
 import meter from '../LoadMeter/LoadMeter.module.css'
-import { type PlanAgent, type PlanSilent, SAY_UNDER, stepsUsed } from './plan'
+import { firstRunning, type PlanAgent, type PlanSilent, SAY_UNDER, stepsUsed } from './plan'
 import s from './PlanGauge.module.css'
-import { PlanPeek, planPeekText, type PlanPeekText } from './PlanPeek'
+import { levelOf, PlanPeek, planPeekText, type PlanPeekText } from './PlanPeek'
 
 /*
  * How much of the plans is left, in the window's bar, after CPU and memory
@@ -37,7 +37,7 @@ export const planGaugeText: PlanGaugeText = {
 export type PlanGaugeProps = RootProps<
   'span',
   {
-    /** Least room first; the first is the figure that counts. */
+    /** Least room first; the first that can run is the figure that counts. */
     agents: readonly PlanAgent[]
     silent?: readonly PlanSilent[]
     headingLevel?: HeadingLevel
@@ -51,7 +51,7 @@ export type PlanGaugeProps = RootProps<
 export function PlanGauge({ agents, silent, headingLevel, open, defaultOpen, onOpenChange, text, className, ...rest }: PlanGaugeProps) {
   const t = { ...planGaugeText, ...text }
   const [shown, setShown] = useControlled(open, defaultOpen ?? false, onOpenChange)
-  const first = agents[0]
+  const first = firstRunning(agents)
   const left = first?.left ?? 100
   const low = first !== undefined && left <= SAY_UNDER
   return (
@@ -69,7 +69,7 @@ export function PlanGauge({ agents, silent, headingLevel, open, defaultOpen, onO
           <button
             type="button"
             className={meter.button}
-            aria-label={first === undefined ? `${t.heading}: ${t.level.nothing}` : t.label(first.name, first.left, first.until)}
+            aria-label={first === undefined ? `${t.heading}: ${levelOf(agents, t)}` : t.label(first.name, first.left, first.until)}
           >
             <Gauge name={t.short} lit={stepsUsed(left, STEPS)} ours={0} full={low} />
           </button>

@@ -9,7 +9,9 @@ import { ago, clock } from '../../shared/time'
  * Plan usage as the window shows it (docs/plans/plan-usage.md): a gauge in
  * the bar after CPU and memory, its peek a row per agent, and each model's
  * room in the pickers. An agent's figure is the tightest window of the
- * account with the most room, as work on it would start there; a model's is
+ * account with the most room, as work on it would start there, of those
+ * signed in: one signed out keeps its last numbers in the peek but runs
+ * nothing, and an agent with no other says so in place of a figure. A model's is
  * the runtime's own (`GetModelRooms`), which knows the project's rule for
  * moving work through accounts and a model's own window, such as Opus's week.
  */
@@ -22,6 +24,8 @@ export const text = {
   named: (label: string, kind: string) => `${label} ${kind.toLowerCase()}`,
   limitOf: { five_hour: 'five-hour', weekly: 'weekly', monthly: 'monthly', other: '' },
   read: (age: string) => `read ${age}`,
+  /** An agent all of whose accounts read are signed out: no work starts on it. */
+  signedOut: 'Signed out',
 }
 
 /** Numbers older than this say how old they are. */
@@ -84,11 +88,27 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       if (why !== undefined) silent.push({ name: first.agentName, why })
       continue
     }
-    // The figure is of the account new work would start on: one signed out keeps its last numbers in the peek, but runs nothing, as the runtime skips it.
-    const usable = read.filter(({ account }) => account.fault?.kind !== 'sign_in_again')
-    const route = (usable.length > 0 ? usable : read).reduce((most, one) => (leftOf(one.window) > leftOf(most.window) ? one : most))
     const several = accounts.length > 1
     const brand = brandOf(agentId)
+    const each = read.toSorted((a, b) => leftOf(a.window) - leftOf(b.window)).map(({ account }) => accountOf(account, several, now))
+    // The figure is of the account new work would start on: one signed out keeps its last numbers in the peek, but runs nothing, as the runtime skips it.
+    const usable = read.filter(({ account }) => account.fault?.kind !== 'sign_in_again')
+    if (usable.length === 0) {
+      // None signed in: no room to give it, only why, with its saved numbers in the detail.
+      agents.push({
+        id: agentId,
+        name: first.agentName,
+        ...(brand === undefined ? {} : { brand }),
+        left: 0,
+        limit: '',
+        until: null,
+        account: null,
+        accounts: each,
+        stopped: text.signedOut,
+      })
+      continue
+    }
+    const route = usable.reduce((most, one) => (leftOf(one.window) > leftOf(most.window) ? one : most))
     agents.push({
       id: agentId,
       name: first.agentName,
@@ -97,10 +117,12 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       limit: limitWords(route.window),
       until: route.window.resetsAt === null ? null : clock(route.window.resetsAt, now),
       account: several ? route.account.accountName : null,
-      accounts: read.toSorted((a, b) => leftOf(a.window) - leftOf(b.window)).map(({ account }) => accountOf(account, several, now)),
+      accounts: each,
     })
   }
-  return { agents: agents.toSorted((a, b) => a.left - b.left), silent }
+  // Least room first, an agent that can't run after every one that can.
+  const stopped = (agent: PlanAgent) => (agent.stopped === undefined ? 0 : 1)
+  return { agents: agents.toSorted((a, b) => stopped(a) - stopped(b) || a.left - b.left), silent }
 }
 
 /**
@@ -127,6 +149,8 @@ export const roomOf = (
   if (accounts.length === 0) return undefined
   if (model === null) {
     const agent = planOf({ accounts }, now).agents[0]
+    // Signed out, it has no room to give: the picker says nothing of it, as the runtime starts nothing there.
+    if (agent?.stopped !== undefined) return undefined
     if (agent !== undefined) return { left: agent.left, until: agent.until, account: agent.account }
   }
   return accounts.every((account) => account.windows.length === 0) ? null : undefined

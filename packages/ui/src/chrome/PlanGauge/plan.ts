@@ -44,7 +44,16 @@ export interface PlanAgent {
   account: string | null
   /** Every account read, tightest first. */
   accounts: readonly PlanAccount[]
+  /**
+   * Why no work can start on it, though numbers of its accounts are saved:
+   * Signed out. Its figure then counts for nothing: it is said in place of
+   * one, and the gauge and the peek's level go by the agents that can run.
+   */
+  stopped?: string
 }
+
+/** The agent with least room that work can start on: the figure that counts. */
+export const firstRunning = (agents: readonly PlanAgent[]): PlanAgent | undefined => agents.find((agent) => agent.stopped === undefined)
 
 /** An agent Althar reads no usage for, and why, in the runtime's words. */
 export interface PlanSilent {

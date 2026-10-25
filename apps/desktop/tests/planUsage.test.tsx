@@ -1,9 +1,11 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ModelRoom, PlanUsage } from '@althar/contracts'
+
+import { PlanGauge } from '@althar/ui'
 
 import type { Host } from '../src/renderer/data/services'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
@@ -106,8 +108,36 @@ describe('what the window says of a plan', () => {
     // Side's saved 80% runs nothing: new work starts on Work, at 3%.
     expect([codex?.left, codex?.account]).toEqual([3, 'work'])
     expect(codex?.accounts.map((account) => account.name)).toEqual(['work', 'side'])
-    // With every account signed out, its last numbers are all there is to say.
-    expect(planOf(planUsage([signedOut]), NOW).agents[0]?.left).toBe(80)
+    // With every account signed out, it has no room: it says why in place of a figure, after every agent that can run,
+    // its last numbers kept in the detail.
+    const claude = usageAccount({
+      agentId: 'claude-code',
+      agentName: 'Claude Code',
+      accountId: 'acc_claude',
+      windows: [{ kind: 'five_hour', label: null, usedPercent: 99, resetsAt: RESET }],
+    })
+    const {
+      agents: [first, out],
+    } = planOf(planUsage([signedOut, claude]), NOW)
+    expect([first?.name, first?.left, first?.stopped]).toEqual(['Claude Code', 1, undefined])
+    expect([out?.name, out?.stopped]).toEqual(['Codex', 'Signed out'])
+    expect(out?.accounts[0]?.windows[0]?.left).toBe(80)
+    expect(out?.accounts[0]?.fault).toBe('Sign in to Codex to see its usage.')
+    // Nor does a picker give its own default model the saved 80%.
+    expect(roomOf({ id: 'codex:' }, [], planUsage([signedOut]), NOW)).toBeUndefined()
+  })
+
+  it('shows no room in the bar for an agent whose only account is signed out', async () => {
+    const signedOut = usageAccount({
+      windows: [{ kind: 'five_hour', label: null, usedPercent: 20, resetsAt: RESET }],
+      fault: { kind: 'sign_in_again', message: 'Sign in to Codex to see its usage.' },
+    })
+    const plan = planOf(planUsage([signedOut]), NOW)
+    render(<PlanGauge agents={plan.agents} defaultOpen />)
+    expect(screen.getByRole('button', { name: 'Plan usage: Codex can’t start work' })).toBeTruthy()
+    expect(screen.getByText('Codex can’t start work')).toBeTruthy()
+    expect(screen.queryByText('Plenty left')).toBeNull()
+    expect(screen.queryByText('80% left')).toBeNull()
   })
 
   it('says how old numbers are only once they are old, and why a read failed', () => {

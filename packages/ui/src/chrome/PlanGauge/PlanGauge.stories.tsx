@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, within } from 'storybook/test'
 
-import { CLAUDE_PLENTY, CLAUDE_TWO, CODEX_NEARLY, CODEX_PLENTY, SILENT } from '../../fixtures/plan'
+import { CLAUDE_PLENTY, CLAUDE_TWO, CODEX_NEARLY, CODEX_PLENTY, CODEX_SIGNED_OUT, SILENT } from '../../fixtures/plan'
 import { LOAD_BUSY, LOAD_SLOTS } from '../../fixtures/load'
 import { LoadMeter } from '../LoadMeter/LoadMeter'
 import { PlanGauge } from './PlanGauge'
@@ -56,6 +56,34 @@ export const Open: Story = {
     // The agents with no reading, in a line that opens to why.
     await userEvent.click(page.getByRole('button', { name: 'No reading for GitHub Copilot, Junie and Mistral Vibe' }))
     await expect(page.getByText('Copilot shares no plan usage with other apps.')).toBeVisible()
+  },
+}
+
+/** Codex signed out, its last 80% saved: the figure is Claude Code's, which can run, and Codex's row says why it runs nothing. */
+export const SignedOut: Story = {
+  args: { agents: [CLAUDE_PLENTY, CODEX_SIGNED_OUT], defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    await expect(
+      within(canvasElement).getByRole('button', { name: 'Plan usage: Claude Code has 62% left, until 17:00' }),
+    ).toBeInTheDocument()
+    await expect(page.getByText('Plenty left')).toBeInTheDocument()
+    await expect(page.getByText('Signed out')).toBeInTheDocument()
+    // Its saved numbers stay in its detail, with why it runs nothing.
+    await userEvent.click(page.getByRole('button', { name: /Codex/ }))
+    await expect(page.getByText('Sign in to Codex to see its usage.')).toBeInTheDocument()
+    await expect(page.getByText('80%')).toBeInTheDocument()
+  },
+}
+
+/** Every agent read signed out: the gauge unlit, saying nothing beside it, and the peek says no work can start. */
+export const AllSignedOut: Story = {
+  args: { agents: [CODEX_SIGNED_OUT], defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const gauge = within(canvasElement).getByRole('button', { name: 'Plan usage: Codex can’t start work' })
+    await expect(said(gauge)).toBeEmptyDOMElement()
+    await expect(within(document.body).getByText('Codex can’t start work')).toBeInTheDocument()
+    await expect(within(document.body).queryByText('Plenty left')).toBeNull()
   },
 }
 

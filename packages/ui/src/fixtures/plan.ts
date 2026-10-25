@@ -68,6 +68,25 @@ export const CODEX_NEARLY: PlanAgent = {
   ],
 }
 
+/** Codex's one account signed out: its last numbers saved, but no work can start on it. */
+export const CODEX_SIGNED_OUT: PlanAgent = {
+  ...CODEX_PLENTY,
+  left: 0,
+  stopped: 'Signed out',
+  accounts: [
+    {
+      id: 'codex-work',
+      name: null,
+      age: 'read 3 hours ago',
+      fault: 'Sign in to Codex to see its usage.',
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 80, until: '11:00' },
+        { id: 'weekly', label: 'Week', left: 74, until: 'Sun 18:12' },
+      ],
+    },
+  ],
+}
+
 /** Two accounts, one out: work goes to the one with room, Personal, whose figure is the agent's. */
 export const CLAUDE_TWO: PlanAgent = {
   ...CLAUDE_PLENTY,

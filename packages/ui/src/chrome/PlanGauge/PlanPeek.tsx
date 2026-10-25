@@ -5,7 +5,7 @@ import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
-import { type PlanAccount, type PlanAgent, type PlanSilent, type PlanWindow, SAY_UNDER, usageTone } from './plan'
+import { firstRunning, type PlanAccount, type PlanAgent, type PlanSilent, type PlanWindow, SAY_UNDER, usageTone } from './plan'
 import s from './PlanPeek.module.css'
 
 /*
@@ -24,6 +24,8 @@ export interface PlanPeekText {
     down: (agent: string) => string
     nearly: (agent: string) => string
     out: (agent: string) => string
+    /** Every agent read is stopped: no work can start on any. */
+    stopped: (agent: string) => string
   }
   /** An agent's figure: 62% left, Out. */
   left: (percent: number) => string
@@ -46,6 +48,7 @@ export const planPeekText: PlanPeekText = {
     down: (agent) => `${agent} is running down`,
     nearly: (agent) => `${agent} is nearly out`,
     out: (agent) => `${agent} is out`,
+    stopped: (agent) => `${agent} can’t start work`,
   },
   left: (n) => `${n}% left`,
   out: 'Out',
@@ -56,9 +59,10 @@ export const planPeekText: PlanPeekText = {
   list: (names) => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`),
 }
 
-/** How the plans stand, by the agent with least room. */
-export const levelOf = (first: PlanAgent | undefined, t: PlanPeekText = planPeekText): string => {
-  if (first === undefined) return t.level.nothing
+/** How the plans stand, by the agent with least room that work can start on. */
+export const levelOf = (agents: readonly PlanAgent[], t: PlanPeekText = planPeekText): string => {
+  const first = firstRunning(agents)
+  if (first === undefined) return agents[0] === undefined ? t.level.nothing : t.level.stopped(agents[0].name)
   if (first.left > 50) return t.level.plenty
   if (first.left === 0) return t.level.out(first.name)
   if (first.left <= SAY_UNDER) return t.level.nearly(first.name)
@@ -120,7 +124,7 @@ function AgentRow({ agent, t }: { agent: PlanAgent; t: PlanPeekText }) {
       <button
         type="button"
         className={s.agent}
-        data-tone={usageTone(agent.left)}
+        data-tone={agent.stopped === undefined ? usageTone(agent.left) : undefined}
         aria-expanded={open}
         aria-controls={detail}
         onClick={() => setOpen(!open)}
@@ -130,9 +134,16 @@ function AgentRow({ agent, t }: { agent: PlanAgent; t: PlanPeekText }) {
           {agent.brand !== undefined && <BrandMark brand={agent.brand} size={13} />}
           {agent.name}
         </span>
-        <span className={s.agentLeft}>{agent.left === 0 ? t.out : t.left(agent.left)}</span>
-        <Bar left={agent.left} className={s.agentBar} />
-        <span className={s.agentOf}>{ofWords(agent, t)}</span>
+        {agent.stopped === undefined ? (
+          <>
+            <span className={s.agentLeft}>{agent.left === 0 ? t.out : t.left(agent.left)}</span>
+            <Bar left={agent.left} className={s.agentBar} />
+            <span className={s.agentOf}>{ofWords(agent, t)}</span>
+          </>
+        ) : (
+          // Its saved numbers are in the detail, each account saying why it runs nothing.
+          <span className={s.agentLeft}>{agent.stopped}</span>
+        )}
       </button>
       <div id={detail} className={s.detail} hidden={!open}>
         {open && agent.accounts.map((account) => <Account key={account.id} account={account} t={t} />)}
@@ -180,7 +191,7 @@ export function PlanPeek({ agents, silent = [], headingLevel = 2, text, classNam
         <Heading level={headingLevel} className={s.heading}>
           {t.heading}
         </Heading>
-        <span className={s.level}>{levelOf(agents[0], t)}</span>
+        <span className={s.level}>{levelOf(agents, t)}</span>
       </span>
       {agents.length > 0 && (
         <ul className={s.agents}>
