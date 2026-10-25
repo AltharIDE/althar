@@ -420,13 +420,17 @@ layers:
 
 1. **From errors, on every agent.** Each adapter classifies a failed turn as
    `usage_limit`, with the reset time when the error carries one. Claude's
-   adapter also reports failures in structured form when the client asks (the
-   JetBrains AIR `sessionFailure` extension, in `_meta`): its category and the
-   actions it suggests tell an exhausted quota from a short rate limit and a
-   full context, where the text alone can't. Every failure is one of
-   `usage_limit`, `context_full` (start a new session from a brief),
-   `transient` (a short rate limit or an overloaded service: retry after a
-   pause), `auth_required`, `invalid_request` or `unknown`.
+   and Codex's adapters also report failures in structured form when the
+   client asks (the JetBrains AIR `sessionFailure` extension, in `_meta`):
+   its category and the actions it suggests tell an exhausted quota from a
+   short rate limit and a full context, where the text alone can't. A
+   failure that ends a turn comes on the prompt's response, the turn
+   `end_turn` like any other; a warning while the agent retries by itself
+   comes on a `session_info_update`. Every failure is one of `usage_limit`,
+   `context_full` (start a new session from a brief), `transient` (a lost
+   connection, a short rate limit, an overloaded or failing service: waited
+   out while offline, and retried after a pause, ADR-059), `auth_required`,
+   `invalid_request` or `unknown`.
 2. **From account status, where the agent exposes it.** A native side channel
    reports use per window and reset times before the limit is reached:
    - Claude Code: the Agent SDK's `rate_limit_event` gives status, use per
@@ -1044,7 +1048,7 @@ The adapter classifies failures without collapsing them:
 |---|---|---|
 | `auth_required` | Logged out or expired grant | Pause and request authentication |
 | `unsupported_version` | CLI schema outside support matrix | Block or degraded mode; never guess |
-| `transient_provider` | Short rate limit or temporary network failure | Bounded retry with jitter and provider hint |
+| `transient` | Lost connection, short rate limit, overloaded or failing service | Never a missing report. Offline, or the service out of reach: the step is held for the connection, and its turn goes again in the same session once the computer is back and the service answers, however long that takes. The service answering with errors: retried after 15 s, 1 min, 4 min, then the step needs the person, with what it said (ADR-059) |
 | `usage_limit` | The account's allowance is used up until a reset | Pause every session on that account; move or hold work under the project rule |
 | `invalid_request` | Unsupported model/tool option | Fail node with actionable detail |
 | `provider_refusal` | Policy refusal | Record terminal provider outcome |
