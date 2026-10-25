@@ -42,8 +42,11 @@
     request opened by anyone but the person that no task reviews yet, a few
     a run, oldest first, one review task each. A listing that has more is
     read on from its last, a few listings deep; a run that couldn't read a
-    repository to its end says so. A review is over once drafted, or once
-    its lead has gone without drafting one, stopped or ended.
+    repository to its end says so, in its history beside the reviews it
+    started. A review is over once drafted, or once its lead has gone
+    without drafting one: stopped or ended, or its last turn failed or
+    stopped from the composer with nothing since for as long as the run
+    may work.
   - **It waits its turn and keeps small.** A run's work waits after
     everything else for a place among the agents at work, every step of it,
     and only one automation's task is at work at once (`Busy.ts`). It is

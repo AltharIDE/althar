@@ -851,11 +851,14 @@ export class Automations extends Context.Service<
                 ? 'No new pull requests to review.'
                 : `No new pull requests among those looked at.${shortWords(listed.short)}`,
             )
+          // Its reviews say what it found; the slot says only what they don't: those left for later, and what it couldn't read.
           const count = listed.subjects.length
           yield* end(
             occurrenceId,
             'made',
-            `Found ${count} new pull request${count === 1 ? '' : 's'}${listed.left > 0 ? `; ${listed.left} more wait for its next run` : ''}.${shortWords(listed.short)}`,
+            listed.left === 0 && listed.short.length === 0
+              ? null
+              : `Found ${count} new pull request${count === 1 ? '' : 's'}${listed.left > 0 ? `; ${listed.left} more wait for its next run` : ''}.${shortWords(listed.short)}`,
           )
           for (const subject of listed.subjects) {
             const id = yield* record({ row, cause, slot, subject, dueAt: due, state: 'starting' })
@@ -1007,9 +1010,10 @@ export class Automations extends Context.Service<
        * Looks at every run under way: one whose task ended says how it went;
        * one that has worked its minutes is stopped. A run of the review kind
        * made something once its review is drafted, and failed where its lead
-       * went before drafting one: stopped, gone, or its last turn failed
-       * with nothing since for as long as the run may work. Nothing else
-       * would finish it, since a review has no run of steps.
+       * went before drafting one: stopped, gone, or its last turn failed or
+       * was stopped from the composer, with nothing since for as long as the
+       * run may work. Nothing else would finish it, since a review has no run
+       * of steps.
        */
       const watch = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -1026,6 +1030,7 @@ export class Automations extends Context.Service<
           leadState: string | null
           turnState: string | null
           turnEnded: number | null
+          queued: number
           worked: number | null
           parts: string
           name: string
@@ -1041,6 +1046,8 @@ export class Automations extends Context.Service<
               WHERE h.task_id = k.id AND h.kind = 'task' ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1) AS turn_state,
             (SELECT (julianday(${at}) - julianday(t.ended_at)) * 86400000 FROM turn_deliveries t JOIN threads h ON h.id = t.thread_id
               WHERE h.task_id = k.id AND h.kind = 'task' ORDER BY t.requested_at DESC, t.rowid DESC LIMIT 1) AS turn_ended,
+            (SELECT count(*) FROM user_inputs i JOIN threads h ON h.id = i.thread_id
+              WHERE h.task_id = k.id AND h.kind = 'task' AND i.state = 'queued') AS queued,
             (SELECT sum((julianday(coalesce(t.ended_at, ${at})) - julianday(t.delivered_at)) * 86400000)
               FROM turn_deliveries t JOIN threads h ON h.id = t.thread_id WHERE h.task_id = k.id AND t.delivered_at IS NOT NULL) AS worked,
             d.parts, d.name, d.prompt
@@ -1058,10 +1065,14 @@ export class Automations extends Context.Service<
                 return yield* end(one.id, 'failed', 'Its review was stopped before its lead drafted one.')
               if (one.leadState === 'lost' || one.leadState === 'failed')
                 return yield* end(one.id, 'failed', 'Its lead stopped before it drafted a review; its task’s thread says why.')
-              // A turn that failed may be taken over, as after a usage limit: only one left so for as long as the run may work ends it.
+              // A turn that failed may be taken over, as after a usage limit, and one the person stopped from the composer is
+              // theirs to carry on: only one left so, with nothing waiting, for as long as the run may work ends it.
               const allowed = (Option.getOrUndefined(definitionOf(one))?.minutes ?? 45) * 60_000
-              if (one.turnState === 'failed' && (one.turnEnded ?? 0) > allowed)
+              const quiet = one.queued === 0 && (one.turnEnded ?? 0) > allowed
+              if (quiet && one.turnState === 'failed')
                 return yield* end(one.id, 'failed', 'Its lead’s last turn failed before it drafted a review; its task’s thread says why.')
+              if (quiet && one.turnState === 'interrupted')
+                return yield* end(one.id, 'failed', 'Its review was stopped before its lead drafted one.')
             } else {
               if (one.runState === 'succeeded') return yield* end(one.id, 'made', null)
               if (one.runState === 'failed') return yield* end(one.id, 'failed', 'Its task failed; its thread says why.')
@@ -1133,7 +1144,7 @@ export class Automations extends Context.Service<
         task: row.taskId === null || row.threadId === null ? null : { id: row.taskId, threadId: row.threadId, title: row.title ?? '' },
       })
 
-      /** An automation's runs, newest first: a slot that started reviews shows its reviews, else itself. */
+      /** An automation's runs, newest first: a slot that started reviews shows its reviews, and itself only where it has more to say. */
       const runsOf = (automationId: string, count: number) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1143,7 +1154,7 @@ export class Automations extends Context.Service<
             FROM automation_occurrences o
             LEFT JOIN tasks k ON k.id = o.task_id LEFT JOIN threads h ON h.task_id = o.task_id AND h.kind = 'task'
             WHERE o.automation_id = ${automationId}
-              AND NOT (o.subject = '' AND o.state = 'made'
+              AND NOT (o.subject = '' AND o.state = 'made' AND o.reason IS NULL
                 AND EXISTS (SELECT 1 FROM automation_occurrences s WHERE s.automation_id = o.automation_id AND s.slot = o.slot AND s.subject <> ''))
             ORDER BY o.fired_at DESC, o.rowid DESC LIMIT ${count}`
           return rows.map(runOf)

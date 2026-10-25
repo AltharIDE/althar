@@ -23,6 +23,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Reviews } from '../src/Reviews'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
@@ -81,15 +82,19 @@ const withOneToReview = () => {
     execFileSync('git', ['-c', 'user.name=Nine', '-c', 'user.email=nine@althar.test', ...args], { cwd: at.working })
       .toString()
       .trim()
-  git('checkout', '-q', '--detach', 'main')
-  writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
-  git('add', '.')
-  git('commit', '-q', '-m', 'Send back')
-  const head = git('rev-parse', 'HEAD')
-  git('checkout', '-q', 'main')
-  git('push', '-q', at.bare, `${head}:refs/pull/1/head`)
-  github.addPullRequest({ path: ['meridian', 'api'], title: 'Send back', author: 'ninemate', body: '', headSha: head })
-  return { at, github }
+  /** Another pull request by the teammate, its head there to review too. */
+  const byTeammate = (title: string, file: string, text: string) => {
+    git('checkout', '-q', '--detach', 'main')
+    writeFileSync(join(at.working, file), text)
+    git('add', '.')
+    git('commit', '-q', '-m', title)
+    const head = git('rev-parse', 'HEAD')
+    git('checkout', '-q', 'main')
+    const opened = github.addPullRequest({ path: ['meridian', 'api'], title, author: 'ninemate', body: '', headSha: head })
+    git('push', '-q', at.bare, `${head}:refs/pull/${opened.number}/head`)
+  }
+  byTeammate('Send back', 'send.ts', 'export const sendBack = () => 1\n')
+  return { at, github, byTeammate }
 }
 
 /** The project on that repository, with GitHub connected. */
@@ -521,7 +526,8 @@ describe('automations', () => {
         const automationId = yield* automations.make({ projectId, definition: REVIEW, on: true, actorId: instance.personId })
         clock.set('2026-10-21T08:00:05Z')
         const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2 && all[1]?.taskId !== null, Duration.seconds(20))
-        assert.deepInclude(rows[0], { subject: '', state: 'made', reason: 'Found 1 new pull request.' })
+        // Its review says what it found, so the listing says nothing of its own.
+        assert.deepInclude(rows[0], { subject: '', state: 'made', reason: null })
         assert.deepInclude(rows[1], { slot: '2026-10-21T09:00', state: 'running', subjectTitle: '#1 Send back' })
         const taskId = rows[1]?.taskId ?? ''
         const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
@@ -722,9 +728,46 @@ describe('automations', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })))
   })
 
-  it.live('read on past a listing that had more, to find the oldest a teammate opened; and say when it couldn’t read to the end', () => {
+  it.live('end a review whose lead the person stopped from the composer, once nothing has come of it for as long as it may work', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
     const { at, github } = withOneToReview()
+    // A lead that works on until it is stopped, kept to five minutes.
+    const review: AutomationDefinition = { ...REVIEW, prompt: 'Review the new pull requests. [lead:hang-once]', minutes: 5 }
+    return Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* openedOn(at.working)
+      const automationId = yield* automations.make({ projectId, definition: review, on: true, actorId: instance.personId })
+      clock.set('2026-10-21T08:00:05Z')
+      const rows = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'running', Duration.seconds(20))
+      const taskId = rows[1]?.taskId ?? ''
+      const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+      const threadId = thread?.id ?? ''
+      const lastTurn = sql<{ state: string }>`
+        SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+      yield* until(lastTurn, (turns) => turns[0]?.state === 'delivered', Duration.seconds(20))
+      // The composer's Stop: its turn ends, and its session waits for what the person says next.
+      yield* (yield* Sessions).interrupt(threadId)
+      yield* until(lastTurn, (turns) => turns[0]?.state === 'interrupted', Duration.seconds(20))
+      // Theirs to carry on for now: its run still goes.
+      yield* Effect.sleep('500 millis')
+      assert.strictEqual((yield* occurrencesOf(automationId))[1]?.state, 'running')
+      // Nothing said since, as if for ten minutes: its run is over, and failed.
+      yield* sql`
+        UPDATE turn_deliveries SET ended_at = ${new Date(Date.now() - 10 * 60_000).toISOString()} WHERE thread_id = ${threadId}`
+      const stopped = yield* until(occurrencesOf(automationId), (all) => all[1]?.state === 'failed', Duration.seconds(20))
+      assert.strictEqual(stopped[1]?.reason, 'Its review was stopped before its lead drafted one.')
+      // Run now isn't refused as if it still went.
+      yield* automations.runNow(automationId, instance.personId)
+      const now = yield* until(occurrencesOf(automationId), (all) => all.length === 3 && all[2]?.state !== 'starting')
+      assert.deepInclude(now[2], { cause: 'now', state: 'nothing', reason: 'No new pull requests to review.' })
+    }).pipe(Effect.provide(runtime(':memory:', {}, { automations: clock.options, connectors: fakeConnectors({ github }) })))
+  })
+
+  it.live('read on past a listing that had more, to find the oldest a teammate opened; and say when it couldn’t read to the end', () => {
+    const clock = clockAt('2026-10-21T07:59:00Z')
+    const { at, github, byTeammate } = withOneToReview()
     // Newer than the teammate's #1, three of the person's own: a listing of two at a time doesn't reach #1 at first.
     for (const title of ['Mine two', 'Mine three', 'Mine four'])
       github.addPullRequest({ path: ['meridian', 'api'], title, author: 'you', body: '' })
@@ -735,7 +778,8 @@ describe('automations', () => {
       const automationId = yield* automations.make({ projectId, definition: REVIEW, on: true, actorId: instance.personId })
       clock.set('2026-10-21T08:00:05Z')
       const rows = yield* until(occurrencesOf(automationId), (all) => all.length === 2 && all[1]?.taskId !== null, Duration.seconds(20))
-      assert.deepInclude(rows[0], { subject: '', state: 'made', reason: 'Found 1 new pull request.' })
+      // It read them all, and its review says what it found: the listing says nothing of its own.
+      assert.deepInclude(rows[0], { subject: '', state: 'made', reason: null })
       assert.strictEqual(rows[1]?.subjectTitle, '#1 Send back')
       // That review stopped, its run is over.
       const taskId = rows[1]?.taskId ?? ''
@@ -752,6 +796,24 @@ describe('automations', () => {
         next[2]?.reason ?? '',
         /^No new pull requests among those looked at\. Only the 6 latest open pull requests of \S+ were looked at; older ones weren’t\.$/,
       )
+      // A new one by the teammate, the newest: a run that starts its review still says what it couldn't read.
+      byTeammate('Their nine', 'nine.ts', 'export const nine = 9\n')
+      clock.set('2026-10-23T08:00:05Z')
+      const third = yield* until(occurrencesOf(automationId), (all) => all.length === 5 && all[4]?.taskId !== null, Duration.seconds(20))
+      const short = /^Found 1 new pull request\. Only the 6 latest open pull requests of \S+ were looked at; older ones weren’t\.$/
+      assert.match(third[3]?.reason ?? '', short)
+      // Its history shows that listing beside the review it started; the first morning's, which had nothing to add, it doesn't.
+      const view = yield* automations.read(automationId)
+      assert.deepStrictEqual(
+        view.runs.map((one) => [one.state, one.subject]),
+        [
+          ['running', '#9 Their nine'],
+          ['made', null],
+          ['nothing', null],
+          ['failed', '#1 Send back'],
+        ],
+      )
+      assert.match(view.runs[1]?.reason ?? '', short)
     }).pipe(
       Effect.provide(runtime(':memory:', {}, { automations: { ...clock.options, listed: 2 }, connectors: fakeConnectors({ github }) })),
     )

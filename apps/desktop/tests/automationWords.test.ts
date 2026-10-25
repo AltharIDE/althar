@@ -113,6 +113,9 @@ describe('what came of a run', () => {
     expect(runWords(automationRun())).toBe('Review #264')
     expect(runWords(automationRun({ subject: null }))).toBe('Review #264')
     expect(runWords(automationRun({ subject: null, task: null }))).toBe('Made something')
+    expect(runWords(automationRun({ subject: null, task: null, reason: 'Found 2 new pull requests; 1 more waits' }))).toBe(
+      'Found 2 new pull requests; 1 more waits',
+    )
     expect(runWords(automationRun({ state: 'nothing', reason: 'No new pull requests' }))).toBe('No new pull requests')
     expect(runWords(automationRun({ state: 'nothing' }))).toBe('Nothing to do')
     expect(runWords(automationRun({ state: 'failed', reason: 'GitHub didn’t answer' }))).toBe('GitHub didn’t answer')
