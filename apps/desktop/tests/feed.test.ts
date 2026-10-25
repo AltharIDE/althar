@@ -5,7 +5,7 @@ import type { ProjectList, ThreadSnapshot } from '@althar/contracts'
 
 import { follow, GATHER } from '../src/renderer/data/feed'
 import { continued, homeSince, keys, makeQueryClient, readFirst, reads, recheckStatus } from '../src/renderer/data/reads'
-import { changed, coordinatorSnapshot, fakeClient, items, planUsage, project, snapshot, status, streamed, usageWarning } from './fixtures'
+import { changed, coordinatorSnapshot, fakeClient, items, planUsage, project, snapshot, status, streamed, usageAccount } from './fixtures'
 
 /*
  * The window's cache and its one watch: what a change ends, read again
@@ -49,12 +49,14 @@ describe('the window’s watch', () => {
     expect(heard).toEqual(['t1', 'i1'])
   })
 
-  it('puts plan usage in the cache as it comes, whole, and tells whoever listens', () => {
-    const { client, cache, feed, emit } = opened()
+  it('puts plan usage in the cache as it comes, whole, tells whoever listens, and marks each model’s room to read again', async () => {
+    const { client, cache, feed, emit, read } = opened()
     const heard: Array<string> = []
     feed.listen((event) => heard.push(event._tag))
-    const usage = planUsage(undefined, [usageWarning()])
+    await cache.fetchQuery(read.modelRooms('p1'))
+    const usage = planUsage([usageAccount({ accountName: 'side' })])
     emit({ _tag: 'PlanUsage', usage })
+    expect(cache.getQueryState(keys.modelRooms('p1'))?.isInvalidated).toBe(true)
     expect(cache.getQueryData(keys.planUsage)).toEqual(usage)
     emit({ _tag: 'PlanUsage', usage: planUsage() })
     expect(cache.getQueryData(keys.planUsage)).toEqual(planUsage())

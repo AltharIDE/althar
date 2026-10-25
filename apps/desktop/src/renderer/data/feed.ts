@@ -197,15 +197,21 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
         void cache.invalidateQueries({ queryKey, exact: true, refetchType: renamed ? 'active' : 'none' })
       }
     }
-    // Plan usage comes whole each time, so it is the cache's as it is, not read again.
-    if (event._tag === 'PlanUsage') cache.setQueryData(keys.planUsage, event.usage)
+    // Plan usage comes whole each time, so it is the cache's as it is, not read again; each model's room follows from it.
+    if (event._tag === 'PlanUsage') {
+      cache.setQueryData(keys.planUsage, event.usage)
+      void cache.invalidateQueries({ queryKey: ['modelRooms'] })
+    }
     for (const listener of listeners) listener(event)
   }
 
   let watched = false
   const unwatch = client.watch(heard, since, () => {
     // A watch that broke may have missed a plan usage, which only the feed says changed: read again if it shows.
-    if (watched) void cache.invalidateQueries({ queryKey: keys.planUsage, exact: true })
+    if (watched) {
+      void cache.invalidateQueries({ queryKey: keys.planUsage, exact: true })
+      void cache.invalidateQueries({ queryKey: ['modelRooms'] })
+    }
     watched = true
     for (const listener of rewatching) listener()
   })

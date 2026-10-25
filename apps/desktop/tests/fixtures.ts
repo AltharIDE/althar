@@ -23,7 +23,6 @@ import type {
   ThreadItem,
   ThreadSnapshot,
   Unfurl,
-  UsageWarning,
   WatchEvent,
 } from '@althar/contracts'
 import { vi } from 'vitest'
@@ -866,8 +865,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     getLoad: vi.fn(async () => load),
-    getPlanUsage: vi.fn(async () => ({ accounts: [], warnings: [] })),
-    acknowledgeUsageWarnings: vi.fn(async () => {}),
+    getPlanUsage: vi.fn(async () => ({ accounts: [] })),
+    getModelRooms: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
     openCode: vi.fn(async () => true),
     // Names no code, unless a test says what they name.
@@ -1100,26 +1099,8 @@ export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}):
   ...over,
 })
 
-/** A warning the runtime has raised and the person has not seen: 25% of the 5-hour window left. */
-export const usageWarning = (over: Partial<UsageWarning> = {}): UsageWarning => ({
-  accountId: 'acc_codex_work',
-  accountName: 'work',
-  agentId: 'codex',
-  agentName: 'Codex',
-  windowKey: 'five_hour',
-  kind: 'five_hour',
-  label: null,
-  remainingPercent: 25,
-  resetsAt: '2026-10-15T15:00:00.000Z',
-  raisedAt: '2026-10-15T10:00:00.000Z',
-  ...over,
-})
-
 /** The usage feed carries, whole. */
-export const planUsage = (accounts: PlanUsage['accounts'] = [usageAccount()], warnings: PlanUsage['warnings'] = []): PlanUsage => ({
-  accounts,
-  warnings,
-})
+export const planUsage = (accounts: PlanUsage['accounts'] = [usageAccount()]): PlanUsage => ({ accounts })
 
 /** A change the runtime's feed reports. */
 export const changed = (

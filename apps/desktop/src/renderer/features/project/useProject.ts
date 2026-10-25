@@ -183,7 +183,7 @@ export const useProject = (projectId: string): ProjectModel => {
   }, [threadId, coordinator, readHead, readItems])
 
   useWatch((event) => {
-    // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running; plan usage is the usage view's.
+    // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running; plan usage is the plan gauge's and the pickers'.
     if (event._tag === 'Output' || event._tag === 'Background' || event._tag === 'PlanUsage') return
     // Every run in the project, the tasks' too, whole each time, which the pill over the composer shows.
     if (event._tag === 'Launches') {

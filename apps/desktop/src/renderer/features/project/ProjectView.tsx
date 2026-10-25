@@ -47,7 +47,6 @@ import { ProjectSettingsPage } from '../projectSettings/ProjectSettingsPage'
 import { FIRST_PROJECT_SECTION, type ProjectSection } from '../projectSettings/sections'
 import { connectionsNeedYou } from '../projectSettings/standing'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
-import { UsageNotices } from '../usage/UsageNotices'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
@@ -254,6 +253,7 @@ export function ProjectView({
 
   const actions: CardActions = {
     project: name,
+    ...(about === null ? {} : { projectId: about }),
     agents: model.agents,
     agentName,
     onStart: (planId) => void model.startPlan(planId),
@@ -374,6 +374,7 @@ export function ProjectView({
             <ModelChoice
               owner={text.coordinator}
               agents={model.agents}
+              {...(about === null ? {} : { projectId: about })}
               value={chosen}
               onChange={choose}
               // Another agent's model hands the conversation over, once the person says something.
@@ -521,8 +522,6 @@ export function ProjectView({
                         onAnswerQuestion={model.answerQuestion}
                       />
                     </ThreadShellProvider>
-                    {/* Plan usage warnings not yet seen: Althar's own notices, in the room the person is looking at. */}
-                    <UsageNotices />
                   </Thread>
                 </TaskFace>
               )}

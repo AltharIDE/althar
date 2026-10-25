@@ -1,6 +1,0 @@
-/* the notices at the foot of the conversation, one under another */
-.notices {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}

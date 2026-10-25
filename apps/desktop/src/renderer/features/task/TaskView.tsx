@@ -175,7 +175,8 @@ export const statusOf = (
   // No call waits, yet the task does: issues its lead drafted wait to be filed.
   if (snapshot.task.phase === 'waiting') return { status: TaskStatus.Yours, state: text.issues }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
+  if (waits !== null)
+    return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step, waits.left) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
   if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
@@ -790,6 +791,7 @@ export function TaskView({
             <ModelChoice
               owner={text.lead}
               agents={model.agents}
+              projectId={snapshot.project.id}
               value={choice}
               onChange={choose}
               // Another agent's model hands the task over, once the person says something.

@@ -31,8 +31,10 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
-  /** Every account's plan usage and the warnings not yet seen: kept whole as the runtime sends it. */
+  /** Every account's plan usage: kept whole as the runtime sends it. */
   planUsage: ['planUsage'] as const,
+  /** Each model's room where work on it would start, in a project or (null) anywhere: read again as plan usage changes. */
+  modelRooms: (projectId: string | null) => ['modelRooms', projectId] as const,
   /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
@@ -123,6 +125,13 @@ export const reads = (client: Client) => ({
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
   // The runtime sends it whole on the feed whenever it changes, so it is read once a window, and again only by asking.
   planUsage: () => queryOptions({ queryKey: keys.planUsage, queryFn: () => client.getPlanUsage() }),
+  // Shared by every picker in the window, and read again as the feed says plan usage changed.
+  modelRooms: (projectId: string | null) =>
+    queryOptions({
+      queryKey: keys.modelRooms(projectId),
+      queryFn: () => client.getModelRooms(projectId),
+      staleTime: 30_000,
+    }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.
   folders: () =>
     queryOptions({
