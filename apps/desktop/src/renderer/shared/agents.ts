@@ -1,4 +1,4 @@
-import type { AgentStatus, Queued } from '@althar/contracts'
+import type { AgentStatus, HeldForConnection, Queued } from '@althar/contracts'
 import { Brand, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
@@ -36,6 +36,15 @@ const heldWork: Readonly<Record<string, string>> = { review: 'The review waits',
  */
 export const waitsWords = (agent: string, at: string, step?: string | null) =>
   `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
+
+/**
+ * What a step held for the connection waits for (ADR-059): the connection,
+ * while the computer is offline or its service out of reach; else the try
+ * again at its service, which failed, and when. `at` says a time as the
+ * window does.
+ */
+export const reconnectsWords = (held: HeldForConnection, at: (iso: string) => string) =>
+  held.offline || held.next === null ? 'Waiting for the connection' : `${held.service} failed: trying again at ${at(held.next)}`
 
 /**
  * What work waiting for a free agent waits for (ADR-032): every agent this

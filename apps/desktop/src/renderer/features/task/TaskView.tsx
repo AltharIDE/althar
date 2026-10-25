@@ -39,7 +39,7 @@ import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
 import { device, platform } from '../../shared/device'
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
@@ -187,6 +187,8 @@ export const statusOf = (
     }
   const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
+  // Held for the connection, it carries on by itself once it is back (ADR-059).
+  if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
   if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }

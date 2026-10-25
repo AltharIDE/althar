@@ -31,6 +31,30 @@ export const NothingTried: Story = {
   },
 }
 
+/**
+ * Its agent's service kept failing, though Althar waited longer between each
+ * try: nothing was wrong with the work, so Try again is the way on, first.
+ */
+export const ServiceKeptFailing: Story = {
+  args: {
+    step: 'Implement',
+    what: "Anthropic's service kept failing: API Error: 500 Internal server error. This is a server-side issue, usually temporary — try again in a moment. Try again, or hand the step to another agent.",
+    tried: [{ id: 'waited', what: 'Tried again three times, waiting longer each time', result: 'it failed each time' }],
+    read: undefined,
+    output: undefined,
+    onAgain: fn(),
+    againFirst: true,
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const [first] = c.getAllByRole('button')
+    await expect(first).toHaveAccessibleName('Try again')
+    await userEvent.click(c.getByRole('button', { name: 'Try again' }))
+    await expect(args.onAgain).toHaveBeenCalled()
+    await expect(document.activeElement).toHaveTextContent('Trying again')
+  },
+}
+
 export const TellingTheLead: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)

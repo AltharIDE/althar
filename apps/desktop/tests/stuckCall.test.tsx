@@ -117,3 +117,42 @@ describe('the pull request Althar couldn’t open', () => {
     )
   })
 })
+
+describe('trying a step again', () => {
+  it('offers it on every card, on the agent the step was on', async () => {
+    for (const why of ['no_report', 'session_ended', 'failed_to_start', 'looping', 'refused', 'transient'] as const) {
+      const onAnswer = show(stuck({ why }))
+      await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+      expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex' })
+      document.body.innerHTML = ''
+    }
+  })
+
+  it('puts it first where the connection or the session failed, rather than the work', async () => {
+    for (const [why, first] of [
+      ['transient', 'Try again'],
+      ['session_ended', 'Try again'],
+      ['no_report', 'Tell the lead'],
+    ] as const) {
+      show(stuck({ why }))
+      const buttons = await screen.findAllByRole('button')
+      expect(buttons[0]).toHaveProperty('textContent', first)
+      document.body.innerHTML = ''
+    }
+  })
+
+  it('says whose service kept failing, and what it said', () => {
+    expect(stuckWords.what(stuck({ why: 'transient', service: 'Anthropic', detail: 'API Error: 529 Overloaded' }), 'Claude Code')).toBe(
+      "Anthropic's service kept failing: API Error: 529 Overloaded. Try again, or hand the step to another agent.",
+    )
+    expect(stuckWords.what(stuck({ why: 'transient', step: 'review' }), 'OpenCode')).toBe(
+      "OpenCode's service kept failing. Try again, or review with another agent.",
+    )
+  })
+
+  it('runs a review again on its reviewer, or hands it to another', async () => {
+    const onAnswer = show(stuck({ step: 'review', why: 'stalled' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Review again' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'retry', agentId: 'codex' })
+  })
+})
