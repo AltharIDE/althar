@@ -194,6 +194,9 @@ export interface TaskModel {
     edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
   ) => Promise<void>
   readonly discardIssueDraft: (draftId: string) => Promise<void>
+  /** Applies changes to the task's issue its lead or Althar proposed, or throws them away. */
+  readonly applyIssueChanges: (changesId: string) => Promise<void>
+  readonly discardIssueChanges: (changesId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
@@ -676,6 +679,8 @@ export const useTask = (threadId: string): TaskModel => {
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
+    applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
+    discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),

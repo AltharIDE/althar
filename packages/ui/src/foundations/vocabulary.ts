@@ -337,6 +337,16 @@ export enum IssueDraftState {
   Discarded = 'discarded',
 }
 
+/** Where changes to issues stand: waiting on you, being applied, applied, not all applied, or discarded. */
+export enum IssueChangesState {
+  Pending = 'pending',
+  Applying = 'applying',
+  Applied = 'applied',
+  /** Not all of it applied: each issue says why, and applying it again tries what didn't. */
+  Failed = 'failed',
+  Discarded = 'discarded',
+}
+
 /** Where a review a lead drafted of someone else's pull request stands. */
 export enum ReviewDraftState {
   Pending = 'pending',

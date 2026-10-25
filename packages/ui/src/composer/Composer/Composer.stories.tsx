@@ -8,8 +8,7 @@ import { Brand } from '../../foundations/brands/brands'
 import { DictationSetup } from '../../foundations/vocabulary'
 import { ContextRing } from '../ContextRing/ContextRing'
 import { DictationTray, type DictationState } from '../DictationTray/DictationTray'
-import { Listening } from '../Listening/Listening'
-import { Running } from '../Running/Running'
+import { Behind } from '../Behind/Behind'
 import { ModelPick } from '../ModelPick/ModelPick'
 import { Composer, type ComposerImage, type ComposerProps, type DictationInput } from './Composer'
 import { States, statesOn } from '../../storybook/States'
@@ -472,11 +471,11 @@ export const DictatedWhileAway: Story = {
   ),
 }
 /** What floats on the edge sits above the tray, not over it. */
-export const DictationTrayAndListening: Story = {
+export const DictationTrayAndBehind: Story = {
   render: () => (
     <Example
       busy
-      above={<Listening sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]} />}
+      above={<Behind sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]} />}
       tray={<DictationTray state={{ kind: DictationSetup.Denied }} onOpenSettings={() => {}} onDismiss={() => {}} />}
       dictation={{ elapsed: null, expanded: true, onStart: () => {}, onStop: () => {} }}
     />
@@ -581,24 +580,23 @@ export const LongQueuedWide: Story = {
     </div>
   ),
 }
-export const Listening_: Story = {
-  name: 'Listening',
+/** What goes on behind the task, on the composer's edge: the pull request it listens to. */
+export const Behind_: Story = {
+  name: 'Behind',
   render: () => (
-    <Example
-      busy
-      above={<Listening sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]} />}
-    />
+    <Example busy above={<Behind sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]} />} />
   ),
 }
-/** Listening, and a dev server the agent started and left running. */
-export const ListeningAndRunning: Story = {
+/** Waiting for a place, a dev server the agent started and left running, and the pull request: one chip. */
+export const BehindAll: Story = {
   render: () => (
     <Example
       above={
-        <>
-          <Listening sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]} />
-          <Running processes={[{ id: 'dev', command: 'bun dev', url: 'localhost:5173', since: '12m' }]} />
-        </>
+        <Behind
+          wait={{ place: '2nd in Up next', holders: [{ id: 't2', title: 'Prototype the board' }] }}
+          sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]}
+          processes={[{ id: 'dev', name: 'Site dev server', command: 'bun dev', url: 'localhost:5173', since: '12m' }]}
+        />
       }
     />
   ),

@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
+import { SECRET_PLACES } from '@althar/provider-adapters'
 import { BUILT, BUILT_SETTLED, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -24,7 +25,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
-import { callTool, notices, repository, runtime, task as newTask, turns, until } from './support'
+import { callTool, notices, repository, runtime, sessionMetas, task as newTask, turns, until } from './support'
 
 /*
  * The coordinator loop (docs/plans/mvp.md): the person asks the coordinator,
@@ -1408,5 +1409,52 @@ describe('a step whose agent stalls or goes round in circles', () => {
         1,
       )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: { ...FAST, turns: 1 } }))),
+  )
+})
+
+describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => {
+  it.live('is started with its folder as its sandbox’s, and its commands meet the trusted reader’s rules', () =>
+    Effect.gen(function* () {
+      const config = yield* RuntimeConfig
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId } = yield* opened
+      const [project] = yield* sql<{ slug: string }>`SELECT slug FROM projects WHERE id = ${projectId}`
+      // Its first turn carries its brief; the commands come after.
+      yield* say(threadId, 'hello')
+      yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
+      const ran = (command: string) =>
+        Effect.gen(function* () {
+          yield* say(threadId, `${scenarios.run}${command}`)
+          const [decided] = yield* until(
+            sql<{ outcome: string; reason: string | null }>`
+              SELECT d.outcome, d.reason FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
+              WHERE json_extract(r.raw_input, '$.command') = ${command}`,
+            (rows) => rows.length > 0,
+          )
+          return decided
+        })
+      assert.strictEqual((yield* ran('git log --oneline "$(git describe --tags --abbrev=0)..HEAD"'))?.outcome, 'allow')
+      assert.strictEqual((yield* ran('uptime'))?.outcome, 'allow')
+      const fetched = yield* ran('git fetch origin')
+      assert.strictEqual(fetched?.outcome, 'reject')
+      assert.include(fetched?.reason ?? '', 'this role only reads')
+      // Its session's, not the one Althar lists models with.
+      const contained = sessionMetas.findLast((meta) => meta.options?.contained !== undefined)?.options?.contained
+      const folder = join(config.worktreeRoot, project?.slug ?? '', '.coordinator')
+      assert.strictEqual(contained?.folder, folder)
+      const real = (path: string) => realpathSync(path)
+      const { allowed = [], denied = [] } = contained?.reads ?? {}
+      // None of the home folder, the person's checkout or the project's task folders, but its own folder and what it fetches from.
+      assert.includeMembers([...denied], [real(homedir()), real(join(config.worktreeRoot, project?.slug ?? ''))])
+      const [checkout] = yield* sql<{ path: string }>`SELECT path FROM repository_locations`
+      assert.include(denied, real(checkout?.path ?? ''))
+      assert.includeMembers([...allowed], [real(folder), real(join(config.worktreeRoot, project?.slug ?? '', '.coordinator-mirrors'))])
+      assert.notInclude(allowed, real(checkout?.path ?? ''))
+      // Nothing it is given back holds a key: no place of the person's keys is in one, nor one in a place of keys.
+      for (const place of SECRET_PLACES) {
+        const secret = join(homedir(), place)
+        for (const given of allowed) assert.isFalse(secret.startsWith(`${given}/`) || given.startsWith(secret), `${given} and ${secret}`)
+      }
+    }).pipe(Effect.provide(runtime())),
   )
 })

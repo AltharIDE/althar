@@ -1,10 +1,10 @@
 import { readdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 
 import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
 import { claudeWho, type SignInFlowEvent, type SignInFlowOptions, startSignInFlow } from '../src/signInFlow'
+import { ownTemp } from './ownTemp'
 
 /*
  * Each agent's sign-in, run against a stand-in for its login: a script that
@@ -48,14 +48,19 @@ process.stdin.on('data', (data) => {
   }
 })`
 
-/* A Codex that answers, then stops reading: under Node, whose closed pipe breaks the next write, as a native app-server's does. */
+/*
+ * A Codex that answers, then stops reading: under Node, whose closed pipe breaks the next write, as a native app-server's does.
+ * libuv leaves fd 0 open when its handle closes, so the script closes it after; closing it under a live handle aborts Node.
+ */
 const CODEX_DEAF = `
 process.stdin.once('data', (data) => {
   const message = JSON.parse(String(data).split('\\n')[0])
-  process.stdin.pause()
-  require('node:fs').closeSync(0)
-  process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n')
-  setTimeout(() => process.exit(0), 2000)
+  process.stdin.once('close', () => {
+    require('node:fs').closeSync(0)
+    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n')
+    setTimeout(() => process.exit(0), 2000)
+  })
+  process.stdin.destroy()
 })`
 
 /**
@@ -212,7 +217,7 @@ describe('signing in inside Althar', () => {
       },
     }
     const said = await run(deaf, { way: 'browser' })
-    expect(said.at(-1)?.kind).toBe('failed')
+    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'The agent stopped listening while signing in.' })
   })
 
   it('signs Antigravity in over ACP: opens the page it prints, on either stream and however its line arrives, and ends when it answers', async () => {
@@ -228,11 +233,15 @@ describe('signing in inside Althar', () => {
   })
 
   it('says, in the person’s words, that Antigravity turned the account down, and leaves no temporary folder', async () => {
-    const before = readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length
-    const said = await run(antigravity('subscription'), { way: 'browser' })
-    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(readdirSync(tmpdir()).filter((name) => name.startsWith('althar-agent-')).length).toBeLessThanOrEqual(before)
+    const { folder, restore } = ownTemp()
+    try {
+      const said = await run(antigravity('subscription'), { way: 'browser' })
+      expect(said.at(-1)).toEqual({ kind: 'failed', message: 'Google Antigravity needs an eligible subscription on this account.' })
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(readdirSync(folder)).toEqual([])
+    } finally {
+      restore()
+    }
   })
 
   it('says each other way Antigravity turns a sign-in down in the person’s words, and its own where it has none for it', async () => {

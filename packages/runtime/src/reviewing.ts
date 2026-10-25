@@ -18,8 +18,8 @@ import { checksLine, checksOf, commentLine, reviewLine, standing } from './pullR
  */
 
 /** How many failed checks' logs a reading of the pull request gives, and how much of what people said: its latest. */
-const LOGS_SHOWN = 2
-const SAID_SHOWN = 40
+export const LOGS_SHOWN = 2
+export const SAID_SHOWN = 40
 
 /** Someone else's pull request, as a review task keeps it. */
 export const Reviewed = Schema.Struct({

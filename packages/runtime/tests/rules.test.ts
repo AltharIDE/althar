@@ -1291,6 +1291,17 @@ describe('a task of several repositories', () => {
 describe('how a command reads at a glance', () => {
   it('drops a leading cd, however many, with && or ;', () => {
     assert.strictEqual(shortCommand('cd /Users/x/long/worktree/path && bun run dev'), 'bun run dev')
+    // A program as a package manager keeps it, and the flags that only name a file: the last meaningful part.
+    assert.strictEqual(shortCommand('node_modules/.bin/vp dev --config ../../a/vite.config.ts'), 'vp dev')
+    assert.strictEqual(shortCommand('cd /w/site && ./node_modules/.bin/vp dev --config=/w/a/vite.config.ts 2>&1 | tail -20'), 'vp dev')
+    assert.strictEqual(shortCommand('npx -y vite --port 5173'), 'vite --port 5173')
+    assert.strictEqual(shortCommand('bunx vitest run'), 'vitest run')
+    assert.strictEqual(shortCommand('pnpm dlx serve --cwd /srv/site'), 'serve')
+    assert.strictEqual(shortCommand('bun x vite'), 'vite')
+    // Only a flag that names a place goes: not one with another sort of value, nor the line's own program.
+    assert.strictEqual(shortCommand('vite --config vite.dev'), 'vite --config vite.dev')
+    assert.strictEqual(shortCommand('vite --mode ../x'), 'vite --mode ../x')
+    assert.strictEqual(shortCommand('npx'), 'npx')
     assert.strictEqual(shortCommand('cd /a; cd b && pnpm test'), 'pnpm test')
     assert.strictEqual(shortCommand('cd /a || exit 1'), 'cd /a || exit 1')
   })

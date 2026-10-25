@@ -43,11 +43,11 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
   fresh read-only session using its agent and model, without delaying the
   conversation ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
 
-It never edits a repository, runs builds or tests, or merges, even for a
+It never edits a repository, installs or builds, or merges, even for a
 one-line change. A change is always a task with a lead, and so is trying
-something out. Althar refuses the coordinator's commands that change anything,
-for its role, and its brief says so, so it doesn't take that for the person
-saying no. What a task has built is in that task's worktree, so the coordinator
+something out that needs the project set up. Althar refuses the coordinator's
+commands that change anything beyond its own copies, for its role, and its
+brief says so, so it doesn't take that for the person saying no. What a task has built is in that task's worktree, so the coordinator
 asks its lead to try it.
 
 ## Shape
@@ -59,7 +59,7 @@ flowchart LR
     Brief --> Session["Coordinator session<br/>any agent, over ACP"]
     Session <-->|"MCP"| Tools["Althar tools"]
     Tools --> Runtime["Runtime commands and queries"]
-    Session -.->|"reads"| Repos["Read-only worktrees"]
+    Session -.->|"reads"| Repos["Copies of its own"]
     Runtime --> Tasks["Tasks, leads, and steps"]
 ```
 
@@ -71,25 +71,39 @@ role: its brief, its tools, and its read-only rule.
 
 Read-only is enforced by what the coordinator can reach, not by its prompt,
 in three layers ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)).
-A reviewer, the other role that only reads, gets the same.
+A reviewer, the other role that only reads, gets the same, but for what the
+coordinator may run in copies of its own
+([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)).
 
 - It reads throwaway copies. Its working directory is an Althar-owned
-  folder holding one worktree per bound repository, detached at the default
-  branch. They are refreshed from the remote's default branch when you start
-  a turn, so nothing written there survives or reaches a task. A project with
-  no repositories gets an empty folder. A reviewer reads a copy of the lead's
+  folder holding one copy per bound repository, detached at the default
+  branch. Each is a repository of its own, whose git folder is made again
+  for every turn: it borrows the person's repository's objects, and fetches
+  only from a mirror of that repository's refs Althar keeps beside the
+  folder, after Althar fetched the remote there. So its `git fetch`
+  and `git tag` write only the copy, and nothing written there survives or
+  reaches a task, nor is read by Althar's own git. A project with no
+  repositories gets an empty folder. A reviewer reads a copy of the lead's
   worktree, snapshotted when its round begins, so it reads what the round is
   about even if the lead moves on, and the record keeps which code it was.
 - The agent's own sandbox is read-only where it has one that still lets it
   call Althar's tools: Codex's `read-only` sandbox, and Claude Code with its
-  edit tools denied (which also denies its sandbox's writes) and every shell
-  command asking. Claude Code's plan mode and OpenCode's plan agent would be
-  simpler, but both refuse MCP tools. OpenCode has no sandbox yet, so for it
-  the copy is the boundary.
+  edit tools denied and every shell command asking. The coordinator's Claude
+  Code, where its sandbox can start, runs its commands in it without asking,
+  held to its folder: writes only there, no network, no socket, reads none
+  of the home folder, the person's checkouts or the task folders but its
+  folder, the mirrors, the objects its copies borrow, the toolchains and
+  git's config files (never its credential store), and never outside it;
+  it loads no settings file and runs no hook. The reader rules hold its own
+  read and search tools to the same places. Claude
+  Code's plan mode
+  and OpenCode's plan agent would be simpler, but both refuse MCP tools.
+  OpenCode has no sandbox yet, so for it the copy is the boundary.
 - Althar's reader rules are the backstop. They allow reads, searches and
   fetches, and commands that only look, each with the flags it may take (no
-  `rg --pre`, `git -c`, `sort -o`). They refuse everything else with a reason,
-  and never ask you.
+  `rg --pre`, `git -c`, `sort -o`). For the coordinator they also take
+  `$(…)` whose commands only look, `uptime` and the like, and `git tag`
+  listing. They refuse everything else with a reason, and never ask you.
 - Its only way to change anything is its tools. They issue the same commands
   the interface does: validated, recorded, idempotent, and never beyond your
   own authority.
@@ -106,6 +120,8 @@ provisional.
 | `find_tasks` | The project's tasks found by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number, an issue's key, a branch or a file; best first, a line each with where it stands, its pull request, its id and what matched ([02](02-desktop-runtime.md#queries)) | Read |
 | `read_thread` | A task's thread, or, without a task, its own conversation: the latest part, then further back a part at a time | Read |
 | `read_change` | A task's diff and checks | Read |
+| `read_pull_request` | Any of the project's pull requests, whoever opened it, by its number or link, as its host has it now: state, where it goes and whether it conflicts there, size, description, checks with the end of a failed one's log, and what everyone said on it, as data ([ADR-058](../decisions/058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md)) | Read |
+| `read_check_log` | A check's whole log on one of the project's pull requests, a page at a time ([ADR-041](../decisions/041-what-failed-said-in-full.md)) | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
 | `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
 | `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
@@ -114,19 +130,26 @@ provisional.
 | `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done; a plain task (a quick task), with no branch until its lead changes the repository, and then one that stays on this Mac | Command |
 | `find_pull_requests` | The pull requests in the project's repositories, whoever opened them: open unless said, by author, words in the title, those asking the person's review, or drafts; at most 30 a repository, newest change first. A line each, with its title quoted as data and never its description, and whether Althar opened it (for which task) or a task reviews it already. Each host's list call (`CodeHost.listChanges`), read-only | Read |
 | `review_pull_request` | Starts a review of someone else's pull request, by its link or its number in the project's repository, with the lead it picks: a task on a read-only copy of the pull request's head, whose lead drafts a review the person posts ([06](06-integrations-and-skills.md#reviewing-someone-elses-pull-request)). Asked again, the task still reviewing it; once that one is done, a new review | Command |
-| `list_automations` | The project's automations on this computer: when each runs, what each run does, where it stands, and how its last run went ([ADR-057](../decisions/057-automations-start-ordinary-tasks-on-a-schedule.md)) | Read |
+| `list_automations` | The project's automations on this computer: when each runs, what each run does, where it stands, and how its last run went ([ADR-059](../decisions/059-automations-start-ordinary-tasks-on-a-schedule.md)) | Read |
 | `propose_automation`, `change_automation` | An automation as the person asked for it, or a change to one: a name, the prompt each run is asked, days and a time or every hour, the lead, and what each run ends in (nothing, a draft or ready pull request, or reviews of each new pull request). Each on a card in its thread; nothing runs until the person turns it on, and a change that reaches further needs them to turn it on again, with Undo | Command |
 | `pause_automation` | Pauses one when the person says, since it only stops | Command |
 | `resume_automation`, `run_automation_now` | A small card the person presses, since both spend their plan and the coordinator reads text from outside | Command |
 | `rename_task` | Gives a task another title, as the person can, where its title no longer says what it does; its slug and branch stay, and what the person asked stays in its thread | Command |
 | `make_it_a_change` | A lead's, not the coordinator's: offered only on a quick task not made a change yet, and refused, with why, on any other. Called when the person asks to turn what the lead made into a real thing: a title for what it does now, a reviewer named as `propose_plan` names one (none only where the person said so), and a pull request, a draft or ready for review. Makes its branch where it has none; renames the task and gives its plan, and the run under way, the review and the ending, or opens a round with them where its last run had ended; its thread and the coordinator's news say so. The lead's next `finish_step` goes through the review, then the pull request opens ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)) | Command |
 | `run_project` | Runs the project with no agent, its default or one of what it runs by name: the default branch in a copy of its own, or a task's worktree (ADR-023, ADR-044) | Command |
+| `screenshot` | A picture of a page served on this computer, a run's or a dev server's, drawn offscreen by the desktop app at a viewport, whole or one element; leads have it too (ADR-057) | Read |
 | `set_run_command` | Keeps how a repository runs, its own way to run, for Althar to run it; leads have it too (ADR-023) | Command |
 | `keep_run` | Keeps something more for the project to run by a name and a command, or drops it; leads have it too (ADR-044) | Command |
 | `order_tasks` | Orders a batch | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |
 | `keep_note`, `list_notes`, `drop_note` | The project's notes: a decision the person made, in a sentence; at most 40 (ADR-031) | Command |
 | `recommend_lead` | Records a lead recommendation and its reasons | Command |
+
+A lead's own tools, beside `finish_step` and its pull request's, do what its
+sandbox would refuse, outside it (ADR-057): `install_dependencies` runs its
+worktree's setup again; `run_project` and `stop_project` run the project in
+its worktree, as the run the person sees; `screenshot`, as above; and
+`rerun_check` runs checks on its pull request again.
 
 The same server serves every session. The read tools are how a lead, a step,
 or an agent that took over a task reads the record its brief left out. Command

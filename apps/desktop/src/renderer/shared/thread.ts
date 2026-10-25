@@ -63,6 +63,7 @@ export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
+export type IssueChangesContent = Extract<ThreadItem, { kind: 'issue_changes' }>['content']
 export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
 export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['content']
 export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['content']
@@ -111,6 +112,8 @@ export type Block =
   | { readonly kind: 'run'; readonly id: string; readonly run: RunContent }
   /** An issue the coordinator drafted, filed only when the person says. */
   | { readonly kind: 'draft'; readonly id: string; readonly draft: IssueDraftContent }
+  /** Changes to issues the coordinator, a lead or Althar proposed, applied only when the person says; or a comment or link, applied at once. */
+  | { readonly kind: 'changes'; readonly id: string; readonly changes: IssueChangesContent }
   /** Althar setting up the task's worktree, before its lead starts (ADR-023). */
   | { readonly kind: 'setup'; readonly id: string; readonly setup: SetupContent }
   /** The lead asking the person to push its new commits to the task's pull request: when it asked, or when it settled. */
@@ -486,6 +489,9 @@ export const blocksOf = (
         continue
       case 'issue_draft':
         blocks.push({ kind: 'draft', id: item.id, draft: item.content })
+        continue
+      case 'issue_changes':
+        blocks.push({ kind: 'changes', id: item.id, changes: item.content })
         continue
       case 'setup':
         blocks.push({ kind: 'setup', id: item.id, setup: item.content })

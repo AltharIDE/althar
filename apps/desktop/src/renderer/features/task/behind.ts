@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import type { ThreadItem, ThreadSnapshot } from '@althar/contracts'
-import type { Heard, ListenSource } from '@althar/ui'
+import type { BehindText, BehindWait, Heard, ListenSource } from '@althar/ui'
 
 import { productBrand } from '../../shared/products'
 import type { ArrivalContent } from '../../shared/thread'
@@ -9,17 +9,41 @@ import { heardVerb } from '../../shared/ThreadBlocks'
 import { ago } from '../../shared/time'
 
 /*
- * What goes on behind a task, outside its conversation, as the pills over
- * its composer show it: the pull requests it listens to, and what was last
- * heard from them. What runs behind it is shared/running.ts's.
+ * What goes on behind a task, outside its conversation, as the chip over its
+ * composer shows it: why it waits, the pull requests it listens to, and what
+ * was last heard from them. What runs behind it is shared/running.ts's.
  */
 
 export const behindText = {
   /** What listening to a pull request hears. */
   listensFor: 'review comments and checks',
-  /** Under the list: what becomes of what it hears. */
-  note: 'Failed checks, and what you and the repository’s people say, go to the lead.',
 }
+
+/** What it listens to is only ever its pull requests, so the chip counts them as such. */
+export const listeningText: Partial<BehindText> = { sources: (n) => (n === 1 ? '1 pull request' : `${n} pull requests`) }
+
+/**
+ * Why it waits, where it does (ADR-032): where it stands in its project's
+ * line, and the tasks that hold the places, those kept only by what they left
+ * running by its names, which can be stopped from here where its thread is
+ * known. Null where it doesn't wait.
+ */
+export const waitOf = (task: ThreadSnapshot['task'], placeWords: (place: number) => string): BehindWait | null =>
+  task.queued === null && task.place === undefined
+    ? null
+    : {
+        ...(task.place === undefined ? {} : { place: placeWords(task.place) }),
+        holders: (task.queued?.holders ?? []).map((holder) => ({
+          id: holder.taskId,
+          title: holder.title,
+          ...(holder.kept
+            ? {
+                keptBy: holder.running.map((command) => command.name ?? command.label ?? command.command),
+                stoppable: holder.threadId !== null && holder.running.length > 0,
+              }
+            : {}),
+        })),
+      }
 
 type Arrival = Extract<ThreadItem, { kind: 'arrival' }>
 

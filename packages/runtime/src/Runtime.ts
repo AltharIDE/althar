@@ -11,6 +11,7 @@ import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } fro
 import { Connections } from './Connections'
 import { Installs } from './Installs'
 import { Instance } from './Instance'
+import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { Issues } from './Issues'
 import { Launches } from './Launches'
@@ -93,10 +94,12 @@ export const layer = (options: RuntimeLayerOptions) => {
   )
   // How many tasks are at work at once on this machine, and what waits for a place among them.
   const busy = Busy.layer.pipe(Layer.provideMerge(core))
-  // A task's pull request and issue, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
-  const linked = Layer.mergeAll(Changes.layer, Issues.layer, IssueDrafts.layer, Reviews.layer).pipe(
-    Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(busy))),
+  // A task's issue, and changes to issues on the person's trackers, which its pull request offers as it opens and merges.
+  const tracked = IssueChanges.layer.pipe(
+    Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(busy))))),
   )
+  // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
+  const linked = Layer.mergeAll(Changes.layer, IssueDrafts.layer, Reviews.layer).pipe(Layer.provideMerge(tracked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
   const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer).pipe(

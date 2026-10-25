@@ -146,6 +146,13 @@ export const PlainWithFiles: Story = {
 export const WaitingForAnAgent: Story = { args: CHANGE_QUEUED }
 /** Waiting for a free agent after real work: its done steps and branch stay, and the step it waits for is empty and still. */
 export const WaitingForAnAgentMidway: Story = { args: CHANGE_QUEUED_MIDWAY }
+/** Waiting while more agents are busy than the computer runs at once, by what the person started: how many more. */
+export const WaitingOverTheNumber: Story = {
+  args: { ...CHANGE_QUEUED_MIDWAY, why: '6 of 6 agents busy on this Mac, and 1 more' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('6 of 6 agents busy on this Mac, and 1 more')).toBeInTheDocument()
+  },
+}
 export const Stopped: Story = { args: CHANGE_STOPPED }
 export const Current: Story = { args: { current: true } }
 export const LongTitle: Story = {

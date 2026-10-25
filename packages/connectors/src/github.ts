@@ -13,10 +13,12 @@ import type {
   ChangeToReview,
   Check,
   CheckState,
+  Choice,
   CodeHost,
   Comment,
   Container,
   Issue,
+  IssueField,
   ListedChange,
   Person,
   Repository,
@@ -25,7 +27,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { branchPath, lacking, leftAsItIs, stillOpen } from './model'
+import { branchPath, cantChange, lacking, leftAsItIs, stillOpen, unchangeable } from './model'
 import {
   type Answer,
   answered,
@@ -412,6 +414,16 @@ const HEADERS = { accept: 'application/vnd.github+json', 'x-github-api-version':
 /** `owner/repo#12`: the ref GitHub's issues go by. */
 const issueRef = /^([^/\s]+)\/([^#\s]+)#(\d+)$/
 
+/** What GitHub changes of an issue: all but its priority, which GitHub's issues haven't (a project board's field is the board's own). */
+const ISSUE_CHANGES: ReadonlyArray<IssueField> = ['status', 'close', 'assignee', 'labels', 'project', 'title']
+
+/** An issue's statuses on GitHub: open, or closed as done or as not planned, by the state reason each closes with. */
+const ISSUE_STATES: ReadonlyArray<Choice> = [
+  { id: 'open', name: 'Open', also: ['reopened'] },
+  { id: 'completed', name: 'Closed', also: ['done', 'completed'] },
+  { id: 'not_planned', name: 'Closed as not planned', also: ['not planned', 'cancelled', 'canceled'] },
+]
+
 /** `owner/repo`: a repository, where an issue is filed. */
 const repositoryRef = /^([^/\s]+)\/([^/#\s]+)$/
 
@@ -506,10 +518,74 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       : Effect.succeed({ owner: match[1] ?? '', name: match[2] ?? '', number: Number(match[3]) })
   }
 
+  /** Every page of a repository's list, a hundred at a time: a page short of a hundred is the last. */
+  const everyPage = <A>(schema: Schema.Codec<A, unknown>, url: string) =>
+    paged(1, (page) =>
+      Effect.map(http.json(Schema.Array(schema), 'GET', `${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`), (items) => ({
+        items,
+        next: items.length < 100 ? undefined : page + 1,
+      })),
+    )
+
+  const issueChoices: Tracker['choices'] = (issue, field) =>
+    Effect.gen(function* () {
+      const { owner, name } = yield* parseRef(issue.ref)
+      const at = repo([owner, name])
+      switch (field) {
+        case 'status':
+          return ISSUE_STATES
+        case 'labels':
+          return (yield* everyPage(Schema.Struct({ name: Schema.String }), `${at}/labels`)).map((label): Choice => ({
+            id: label.name,
+            name: label.name,
+          }))
+        // Those GitHub lets it be assigned to: the repository's people.
+        case 'assignee':
+          return (yield* everyPage(User, `${at}/assignees`)).map((user): Choice => ({
+            id: user.login,
+            name: user.name ?? user.login,
+            also: [user.login],
+          }))
+        // A milestone, still open, is where GitHub groups an issue's work.
+        case 'project':
+          return (yield* everyPage(Schema.Struct({ number: Schema.Number, title: Schema.String }), `${at}/milestones?state=open`)).map(
+            (milestone): Choice => ({ id: String(milestone.number), name: milestone.title }),
+          )
+      }
+    })
+
+  const changeIssue: Tracker['update'] = (issue, wanted) =>
+    Effect.gen(function* () {
+      const refused = unchangeable({ links: false, starts: false, changes: ISSUE_CHANGES }, wanted)
+      if (refused !== undefined) return yield* cantChange(product, refused, 'GitHub’s issues have no priority')
+      const { owner, name, number } = yield* parseRef(issue.ref)
+      const at = `${repo([owner, name])}/issues/${number}`
+      // Open, or closed with a reason: done, or not planned.
+      const state = wanted.close === true && wanted.status === undefined ? 'completed' : wanted.status?.id
+      const edit = {
+        ...(wanted.title === undefined ? {} : { title: wanted.title }),
+        ...(state === undefined ? {} : state === 'open' ? { state: 'open' } : { state: 'closed', state_reason: state }),
+        ...(wanted.assignee === undefined ? {} : { assignees: wanted.assignee === null ? [] : [wanted.assignee.id] }),
+        ...(wanted.project === undefined ? {} : { milestone: wanted.project === null ? null : Number(wanted.project.id) }),
+      }
+      if (Object.keys(edit).length > 0) yield* http.json(Schema.Unknown, 'PATCH', at, edit)
+      const add = wanted.labels?.add ?? []
+      if (add.length > 0) yield* http.json(Schema.Unknown, 'POST', `${at}/labels`, { labels: add.map((label) => label.name) })
+      // One already off is nothing to take off.
+      for (const label of wanted.labels?.remove ?? [])
+        yield* http.json(Schema.Unknown, 'DELETE', `${at}/labels/${encodeURIComponent(label.name)}`).pipe(
+          Effect.catchIf(
+            (error) => error.reason === 'not_found',
+            () => Effect.void,
+          ),
+        )
+      return issueOf(yield* http.json(IssueAnswer, 'GET', at), owner, name)
+    })
+
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, links: false, starts: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, links: false, starts: false, changes: ISSUE_CHANGES },
     account,
     repository: (path) =>
       Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
@@ -787,6 +863,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         })
         return issueOf(filed, owner, name)
       }),
+    choices: issueChoices,
+    update: changeIssue,
   }
 }
 

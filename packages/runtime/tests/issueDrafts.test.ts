@@ -6,6 +6,7 @@ import type { IssueDraftCard } from '@althar/contracts'
 import { ConnectorFailed, makeLinear, products } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
+import { migrations } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -113,6 +114,7 @@ describe('issue drafts', () => {
         title: 'Refunds skip the rate limiter',
         body: 'Charges go through it; refunds don’t.',
         labels: ['payments'],
+        priority: null,
         state: 'pending',
         error: null,
         issue: null,
@@ -155,6 +157,23 @@ describe('issue drafts', () => {
         (yield* transcript(threadId, 10_000)).text,
         /\[issue draft\] Refunds skip the rate limiter \(filed, MER-1 https:\/\/linear\.app\//,
       )
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('drafted before priorities still show, with none, once the store is migrated', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, access } = yield* project()
+      yield* callTool(access, 'draft_issue', { title: 'Refunds skip the rate limiter' })
+      // Its card as a thread kept it before priorities: it reads as nothing, until the store is migrated.
+      yield* sql`UPDATE thread_items SET content = json_remove(content, '$.priority') WHERE kind = 'issue_draft'`
+      assert.lengthOf(yield* cardsOf(projectId), 0)
+      const changes = migrations.find((migration) => migration.key === '0040_issue_changes') ?? assert.fail('no migration')
+      for (const statement of changes.statements.filter((each) => each.startsWith('UPDATE thread_items'))) yield* sql.unsafe(statement)
+      const [card] = yield* cardsOf(projectId)
+      assert.deepInclude(card, { title: 'Refunds skip the rate limiter', priority: null, state: 'pending' })
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 

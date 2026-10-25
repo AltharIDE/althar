@@ -752,10 +752,10 @@ describe('running what a task built, with no agent', () => {
       emit({ _tag: 'Launches', projectId: 'p1', launches: [launch, { ...launch, id: 'proc_2', taskId: 't9', command: 'make serve' }] }),
     )
     act(() => emit({ _tag: 'Launches', projectId: 'p9', launches: [{ ...launch, id: 'proc_3', command: 'cargo run' }] }))
-    const pill = await screen.findByRole('button', { name: /^Running/ })
-    await waitFor(() => expect(pill.textContent).toContain('2 processes'))
-    await userEvent.click(pill)
-    const list = within(await screen.findByRole('dialog', { name: 'Running' }))
+    // One chip over the composer counts what runs here, the run and what the lead left.
+    const chip = await screen.findByRole('button', { name: '2 running' })
+    await userEvent.click(chip)
+    const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
     expect(list.queryByText('make serve')).toBeNull()
     expect(list.queryByText('cargo run')).toBeNull()
     // Each stops its own way: Althar's run, and what the lead left running.
@@ -850,7 +850,7 @@ describe('running what a task built, with no agent', () => {
 })
 
 describe('what keeps the places a task waits for', () => {
-  it('names the task whose server keeps a place, over the composer of the task that waits, and stops it from there', async () => {
+  it('says why the task waits in a few words, and lists who holds the places behind it, stopping a server that keeps one', async () => {
     const server = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
     const thread = snapshot()
     const holders = [
@@ -861,16 +861,17 @@ describe('what keeps the places a task waits for', () => {
       getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, queued: { busy: 2, atOnce: 2, holders } } })),
     })
     withServices(<Task />, client)
-    const pill = await screen.findByRole('button', { name: /^Keeping a place/ })
-    expect(pill.textContent).toContain('bun dev')
-    await userEvent.click(pill)
-    const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
-    // Which task it is from; a task at work in its turn is not a server to stop.
-    expect(list.getByText(/Prototype the board/)).toBeTruthy()
-    expect(list.queryByText(/Fix the login/)).toBeNull()
-    // Every task that holds a place is named beside the wait, the server's by what it left running.
-    expect(screen.getByText('Held by Prototype the board (a server it left running), Fix the login')).toBeTruthy()
-    await userEvent.click(list.getByRole('button', { name: 'Stop bun dev' }))
+    // The chip says it waits, not who holds the places.
+    const chip = await screen.findByRole('button', { name: 'Waiting for a place' })
+    expect(chip.textContent).not.toContain('Prototype the board')
+    await userEvent.click(chip)
+    const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
+    // Each task that holds a place, the server's by what it left running; a task at work in its turn has nothing to stop.
+    expect(list.getByText('2 tasks are running; 1 of them only for a server it left running.')).toBeTruthy()
+    expect(list.getByText('Fix the login')).toBeTruthy()
+    expect(list.getByText('Only its bun dev keeps the place')).toBeTruthy()
+    expect(list.getAllByRole('button', { name: /^Stop what/ })).toHaveLength(1)
+    await userEvent.click(list.getByRole('button', { name: 'Stop what Prototype the board left running' }))
     expect(client.stopBackground).toHaveBeenCalledWith('th2', 'bg-1')
   })
 })
@@ -884,13 +885,15 @@ describe('a task waiting in its project’s line', () => {
       getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, place, queued: { busy: 1, atOnce: 1, holders } } })),
     })
     withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Waiting for a place, 2nd in Up next' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Move to the front of the line' }))
     expect(client.moveInLine).toHaveBeenCalledWith(thread.task.id, 0)
     // First in line, it has nowhere further to go.
     place = 1
     act(() => emit(changed('task', 't1')))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Move to the front of the line' })).toBeNull())
-    expect(screen.getByText('Held by Fix the login')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Waiting for a place, First in Up next' })).toBeTruthy()
+    expect(within(screen.getByRole('dialog', { name: 'Behind this task' })).getByText('Fix the login')).toBeTruthy()
   })
 })
 
@@ -903,12 +906,15 @@ describe('a waiting task’s open view', () => {
       getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, queued: { busy: 1, atOnce: 1, holders } } })),
     })
     withServices(<Task />, client)
-    expect(await screen.findByText('Held by Prototype the board (a server it left running)')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Keeping a place/ })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Waiting for a place' }))
+    const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
+    expect(list.getByText('Prototype the board')).toBeTruthy()
+    expect(list.getByRole('button', { name: 'Stop what Prototype the board left running' })).toBeTruthy()
     holders = [{ taskId: 't3', title: 'Fix the login', threadId: 'th3', kept: false, running: [] }]
     act(() => emit(changed('task', 't1')))
-    expect(await screen.findByText('Held by Fix the login')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^Keeping a place/ })).toBeNull()
+    expect(await list.findByText('Fix the login')).toBeTruthy()
+    expect(list.queryByText('Prototype the board')).toBeNull()
+    expect(list.queryByRole('button', { name: /^Stop what/ })).toBeNull()
   })
 })
 
@@ -921,12 +927,12 @@ describe('what a task’s lead left running', () => {
       getThread: vi.fn(async () => ({ ...thread, session: thread.session === null ? null : { ...thread.session, background: [serving] } })),
     })
     withServices(<Task />, client)
-    const pill = await screen.findByRole('button', { name: /^Running/ })
-    expect(pill.textContent).toContain('bun dev')
-    expect(pill.textContent).toContain('localhost:5173')
+    const chip = await screen.findByRole('button', { name: 'bun dev, localhost:5173' })
+    expect(chip.textContent).toContain('bun dev')
+    expect(chip.textContent).toContain('localhost:5173')
     // Where it answers opens in the person's browser; Stop stops it.
-    await userEvent.click(pill)
-    const list = within(await screen.findByRole('dialog', { name: 'Running' }))
+    await userEvent.click(chip)
+    const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
     await userEvent.click(list.getByRole('button', { name: 'Open localhost:5173' }))
     expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank')
     await userEvent.click(list.getByRole('button', { name: 'Stop bun dev' }))
@@ -940,26 +946,74 @@ describe('what a task’s lead left running', () => {
         background: [{ ...serving, id: 'bg-2', command: 'bun run seed', url: null, ended: { at: '2026-10-10T09:10:00.000Z', code: 1 } }],
       }),
     )
-    const ran = await screen.findByRole('button', { name: /^Ran/ })
-    expect(ran.textContent).toContain('exited 1')
+    const ran = await screen.findByRole('button', { name: 'bun run seed exited 1' })
     await userEvent.click(ran)
-    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Ran' })).getByRole('button', { name: 'Clear bun run seed' }))
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Behind this task' })).getByRole('button', { name: 'Clear bun run seed' }),
+    )
     expect(client.clearBackground).toHaveBeenCalledWith('th1', 'bg-2')
     act(() => emit({ _tag: 'Background', threadId: 'th1', background: [] }))
-    await waitFor(() => expect(screen.queryByRole('button', { name: /^(Running|Ran)/ })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('button', { name: /bun run seed/ })).toBeNull())
+    // What finished well isn't named on the chip: with nothing else behind the task, it is a quiet count, and its output still opens.
+    act(() =>
+      emit({ _tag: 'Background', threadId: 'th1', background: [{ ...serving, ended: { at: '2026-10-10T09:10:00.000Z', code: 0 } }] }),
+    )
+    const finished = await screen.findByRole('button', { name: '1 finished' })
+    expect(finished.textContent).not.toContain('bun dev')
+    await userEvent.click(finished)
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Behind this task' })).getByRole('button', { name: 'Show the output of bun dev' }),
+    )
+    expect(client.readBackgroundOutput).toHaveBeenCalledWith('th1', 'bg-1')
+    await userEvent.keyboard('{Escape}')
+    act(() => emit({ _tag: 'Background', threadId: 'th1', background: [] }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '1 finished' })).toBeNull())
     // Another thread's says nothing here.
     act(() => emit({ _tag: 'Background', threadId: 'th9', background: [serving] }))
-    expect(screen.queryByRole('button', { name: /^Running/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /bun dev/ })).toBeNull()
+  })
+})
+
+describe('a server a task’s lead left running, as it named it', () => {
+  it('leads with its name and address, quietly says the command at a glance, and shows what it prints', async () => {
+    const server = {
+      id: 'bg-1',
+      name: 'Site dev server',
+      command: 'cd /w/site && node_modules/.bin/vp dev --config ../../a/vite.config.ts 2>&1 | tail -20',
+      label: 'vp dev',
+      url: 'http://localhost:5173/',
+      startedAt: '2026-10-10T09:00:00.000Z',
+      ended: null,
+    }
+    const thread = snapshot()
+    const readBackgroundOutput = vi.fn(async () => ({ text: 'VITE ready in 312 ms\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 }))
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...thread, session: thread.session === null ? null : { ...thread.session, background: [server] } })),
+      readBackgroundOutput,
+    })
+    withServices(<Task />, client)
+    const chip = await screen.findByRole('button', { name: 'Site dev server, localhost:5173' })
+    expect(chip.textContent).toBe('Site dev server· localhost:5173')
+    await userEvent.click(chip)
+    const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
+    expect(list.getByText('Site dev server')).toBeTruthy()
+    expect(list.getByText('vp dev').getAttribute('title')).toBe(server.command)
+    await userEvent.click(list.getByRole('button', { name: 'Show the output of Site dev server' }))
+    const output = within(await screen.findByRole('dialog', { name: 'Output of Site dev server' }))
+    expect(await output.findByText(/VITE ready in 312 ms/)).toBeTruthy()
+    expect(readBackgroundOutput).toHaveBeenCalledWith('th1', 'bg-1')
+    await userEvent.click(output.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Output of Site dev server' })).toBeNull())
   })
 })
 
 describe('a task’s pull request', () => {
-  it('says over the composer that it listens to it, says for a moment what it hears, and stops when asked', async () => {
+  it('says on the chip over the composer that it listens to it, says for a moment what it hears, and stops when asked', async () => {
     let thread = snapshot({ task: { ...snapshot().task, changes: [change()] }, items: [items.arrival()] })
     const checks = items.arrival({ kind: 'checks', from: null, text: null, passed: 2, failed: 0 })
     const { client, emit } = fakeClient({ getThread: vi.fn(async () => thread), getThreadItem: vi.fn(async () => checks) })
     withServices(<Task />, client)
-    const pill = await screen.findByRole('button', { name: /^Listening to/ })
+    const pill = await screen.findByRole('button', { name: 'Listening to PR #12' })
     expect(pill.textContent).toContain('PR #12')
     // What it heard before the task opened isn't said again.
     expect(within(pill).queryByText(/dana/)).toBeNull()
@@ -968,7 +1022,9 @@ describe('a task’s pull request', () => {
     expect(await within(pill).findByText('Checks passed on PR #12')).toBeTruthy()
     // Its list says what it listens for and when it last heard, and stops it.
     await userEvent.click(pill)
-    const list = within(await screen.findByRole('dialog', { name: 'Listening to' }))
+    const list = within(await screen.findByRole('dialog', { name: 'Behind this task' }))
+    // Only what it hears is said, not where it goes.
+    expect(list.queryByText(/go to the lead/)).toBeNull()
     expect(list.getByText('meridian/api')).toBeTruthy()
     expect(list.getByText(/^review comments and checks · ./)).toBeTruthy()
     await userEvent.click(list.getByRole('button', { name: 'Stop listening to PR #12' }))
@@ -976,7 +1032,7 @@ describe('a task’s pull request', () => {
     // Once it no longer listens, the pill goes.
     thread = { ...thread, task: { ...thread.task, changes: [change({ listening: false })] } }
     act(() => emit(changed('external_link', 'l1')))
-    await waitFor(() => expect(screen.queryByRole('button', { name: /^Listening to/ })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Listening to/ })).toBeNull())
   })
 
   it('shows on its outputs, with its checks, its review and files, and is marked ready there; the issue heads the thread', async () => {

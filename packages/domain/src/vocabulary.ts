@@ -97,6 +97,12 @@ export const ThreadItemKind = Schema.Literals([
   'push_request',
   /** A review the lead drafted of someone else's pull request, in the task's thread: the person posts it, changes it or discards it there. */
   'review_draft',
+  /**
+   * Changes to issues on the person's trackers, in the thread of whoever
+   * proposed them: a card the person applies or discards, or, applied
+   * already (a comment, a link, or a change the project lets through), a line.
+   */
+  'issue_changes',
   /** An automation the coordinator proposed or changed, or asks the person to resume or run now, in its thread: the person turns it on there. Althar posts it and keeps it current. */
   'automation',
 ])
@@ -234,6 +240,14 @@ export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'f
 export type IssueDraftState = typeof IssueDraftState.Type
 
 /**
+ * Where changes to issues stand: waiting on the person, being applied,
+ * applied, not all applied (each issue says why; applying again is safe,
+ * since a change made twice changes nothing more), or discarded.
+ */
+export const IssueChangeState = Schema.Literals(['pending', 'applying', 'applied', 'failed', 'discarded'])
+export type IssueChangeState = typeof IssueChangeState.Type
+
+/**
  * Where a review the lead drafted of someone else's pull request stands:
  * waiting on the person, being posted, posted, not posted for a reason the
  * host gave, perhaps posted (its answer was lost, so the pull request is
@@ -331,6 +345,7 @@ export const AggregateType = Schema.Literals([
   'conflict_resolution',
   'project_note',
   'review_draft',
+  'issue_change',
   'automation',
   'automation_occurrence',
 ])
