@@ -209,7 +209,7 @@ describe('allow everything on a task (ADR-043)', () => {
       yield* allow(created.taskId, true)
       yield* ended(created.threadId, 1)
       // The rule's refusal is rejected to the agent, then said as Althar's.
-      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=decline', 'carrying on without it'])
+      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=declinecarrying on without it'])
       const [decision] = yield* sql<{ outcome: string; reason: string }>`
         SELECT d.outcome, d.reason FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
         JOIN provider_sessions s ON s.id = r.provider_session_id JOIN threads t ON t.id = s.thread_id
