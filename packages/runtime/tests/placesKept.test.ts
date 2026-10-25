@@ -212,7 +212,9 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
   it.live(
     'goes by the project’s rule, as a review starting at once would: held until the reset, where it waits',
     () => {
-      const back = Date.now() + 3_000
+      // Long enough that the hold is seen and the other task takes the place before Codex is back on a slow runner,
+      // short enough that it still holds it then, as its lead works five seconds.
+      const back = Date.now() + 5_000
       return Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const sessions = yield* Sessions
