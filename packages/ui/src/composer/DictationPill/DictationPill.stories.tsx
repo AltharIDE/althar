@@ -4,8 +4,7 @@ import { expect, userEvent, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
 import { Composer } from '../Composer/Composer'
-import { Listening } from '../Listening/Listening'
-import { Running } from '../Running/Running'
+import { Behind } from '../Behind/Behind'
 import { DictationPill } from './DictationPill'
 
 const TO = 'To the coordinator · althar'
@@ -104,10 +103,11 @@ export const OverAComposer: Story = {
       onAddImages={() => {}}
       carried={<DictationPill {...args} />}
       above={
-        <>
-          <Listening sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 166', where: 'althar' }]} />
-          <Running processes={[{ id: 'dev', command: 'bun run dev', url: 'localhost:5173', since: '4m' }]} onStop={() => {}} />
-        </>
+        <Behind
+          sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 166', where: 'althar' }]}
+          processes={[{ id: 'dev', command: 'bun run dev', url: 'localhost:5173', since: '4m' }]}
+          onStop={() => {}}
+        />
       }
     />
   ),

@@ -142,73 +142,90 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
       <div className={s.head} aria-hidden="true">
         {live ? t.title : t.ran}
       </div>
-      <ul className={s.list}>
-        {processes.map((p) => (
-          <li className={s.row} key={p.id}>
-            <span className={s.rowGlyph}>{p.exited === undefined ? <LiveDot /> : <Icon name="terminal" size={12} />}</span>
-            <span className={s.rowMain}>
-              <span className={s.rowTitle}>
-                {p.name === undefined ? (
-                  <code className={s.command} title={p.command}>
+      <RunningList processes={processes} onStop={onStop} onDismiss={onDismiss} onOutput={onOutput} onOpenUrl={onOpenUrl} text={text} />
+    </Popover>
+  )
+}
+
+export interface RunningListProps {
+  processes: readonly RunningProcess[]
+  onStop?: ((id: string) => void) | undefined
+  onDismiss?: ((id: string) => void) | undefined
+  onOutput?: ((id: string) => void) | undefined
+  onOpenUrl?: ((id: string) => void) | undefined
+  text?: Partial<RunningText> | undefined
+}
+
+/** The pill's list, on its own, for what shows what runs elsewhere: each one, where it answers, and how to stop, clear or read it. */
+export function RunningList({ processes, onStop, onDismiss, onOutput, onOpenUrl, text }: RunningListProps) {
+  const t = { ...runningText, ...text }
+  return (
+    <ul className={s.list}>
+      {processes.map((p) => (
+        <li className={s.row} key={p.id}>
+          <span className={s.rowGlyph}>{p.exited === undefined ? <LiveDot /> : <Icon name="terminal" size={12} />}</span>
+          <span className={s.rowMain}>
+            <span className={s.rowTitle}>
+              {p.name === undefined ? (
+                <code className={s.command} title={p.command}>
+                  {p.label ?? p.command}
+                </code>
+              ) : (
+                <span className={s.called} title={p.command}>
+                  {p.name}
+                </span>
+              )}
+              {p.url &&
+                (onOpenUrl ? (
+                  <LinkButton className={s.url} title={p.url} aria-label={t.openLabel(p.url)} onClick={() => onOpenUrl(p.id)}>
+                    {p.url}
+                  </LinkButton>
+                ) : (
+                  <span className={s.url} title={p.url}>
+                    {p.url}
+                  </span>
+                ))}
+            </span>
+            <span className={s.rowMeta}>
+              {[
+                p.name !== undefined && (
+                  <code key="command" className={s.line} title={p.command}>
                     {p.label ?? p.command}
                   </code>
-                ) : (
-                  <span className={s.called} title={p.command}>
-                    {p.name}
+                ),
+                p.where !== undefined && (
+                  <span key="where" className={s.where}>
+                    {p.where}
                   </span>
-                )}
-                {p.url &&
-                  (onOpenUrl ? (
-                    <LinkButton className={s.url} title={p.url} aria-label={t.openLabel(p.url)} onClick={() => onOpenUrl(p.id)}>
-                      {p.url}
-                    </LinkButton>
-                  ) : (
-                    <span className={s.url} title={p.url}>
-                      {p.url}
-                    </span>
-                  ))}
-              </span>
-              <span className={s.rowMeta}>
-                {[
-                  p.name !== undefined && (
-                    <code key="command" className={s.line} title={p.command}>
-                      {p.label ?? p.command}
-                    </code>
-                  ),
-                  p.where !== undefined && (
-                    <span key="where" className={s.where}>
-                      {p.where}
-                    </span>
-                  ),
-                  p.exited !== undefined && (
-                    <span key="exited" className={cx(bad(p.exited) && s.bad)}>
-                      {t.exited(p.exited)}
-                    </span>
-                  ),
-                  p.since !== undefined && <span key="since">{p.since}</span>,
-                ]
-                  .filter(Boolean)
-                  .flatMap((part, at) => (at === 0 ? [part] : [<span key={`and${at}`}> · </span>, part]))}
-              </span>
+                ),
+                p.exited !== undefined && (
+                  <span key="exited" className={cx(bad(p.exited) && s.bad)}>
+                    {t.exited(p.exited)}
+                  </span>
+                ),
+                p.since !== undefined && <span key="since">{p.since}</span>,
+              ]
+                .filter(Boolean)
+                .flatMap((part, at) => (at === 0 ? [part] : [<span key={`and${at}`}> · </span>, part]))}
             </span>
-            {onOutput && p.output !== false && (
-              <ActionButton size="small" aria-label={t.outputLabel(calledOf(p))} onClick={() => onOutput(p.id)}>
-                {t.output}
-              </ActionButton>
-            )}
-            {onStop && p.exited === undefined && (
-              <ActionButton size="small" aria-label={t.stopLabel(calledOf(p))} onClick={() => onStop(p.id)}>
-                {t.stop}
-              </ActionButton>
-            )}
-            {onDismiss && p.exited !== undefined && (
-              <ActionButton size="small" aria-label={t.dismissLabel(calledOf(p))} onClick={() => onDismiss(p.id)}>
-                {t.dismiss}
-              </ActionButton>
-            )}
-          </li>
-        ))}
-      </ul>
-    </Popover>
+          </span>
+          {onOutput && p.output !== false && (
+            <ActionButton size="small" aria-label={t.outputLabel(calledOf(p))} onClick={() => onOutput(p.id)}>
+              {t.output}
+            </ActionButton>
+          )}
+          {onStop && p.exited === undefined && (
+            <ActionButton size="small" aria-label={t.stopLabel(calledOf(p))} onClick={() => onStop(p.id)}>
+              {t.stop}
+            </ActionButton>
+          )}
+          {onDismiss && p.exited !== undefined && (
+            <ActionButton size="small" aria-label={t.dismissLabel(calledOf(p))} onClick={() => onDismiss(p.id)}>
+              {t.dismiss}
+            </ActionButton>
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
