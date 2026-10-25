@@ -74,7 +74,7 @@ export const text = {
   },
   reminded: { what: 'Reminded it to say when the step is done', result: 'it stopped again without saying' },
   /** Its service tried again after growing pauses (ADR-059). */
-  waited: { what: 'Tried again three times, waiting longer each time', result: 'it failed each time' },
+  waited: ['15 seconds', 'a minute', '4 minutes'].map((pause) => ({ what: `Tried again after ${pause}`, result: 'it failed again' })),
   /** An agent out of usage: told nothing, since it would hit the same limit; handed on, or tried again once it is back. */
   out: {
     again: (agent: string) => `Try ${agent} again`,
@@ -148,7 +148,7 @@ function StuckCard({
     stuck.why === 'no_report'
       ? [{ id: 'reminded', ...text.reminded }]
       : stuck.why === 'transient'
-        ? [{ id: 'waited', ...text.waited }]
+        ? text.waited.map((each, at) => ({ id: `waited-${at}`, ...each }))
         : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))
   const review = stuck.step === 'review'
   // Handed on, a step goes to another agent: trying again is the agent it had.

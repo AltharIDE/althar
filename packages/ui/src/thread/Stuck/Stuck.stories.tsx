@@ -39,17 +39,26 @@ export const ServiceKeptFailing: Story = {
   args: {
     step: 'Implement',
     what: "Anthropic's service kept failing: API Error: 500 Internal server error. This is a server-side issue, usually temporary — try again in a moment. Try again, or hand the step to another agent.",
-    tried: [{ id: 'waited', what: 'Tried again three times, waiting longer each time', result: 'it failed each time' }],
+    tried: ['15 seconds', 'a minute', '4 minutes'].map((pause) => ({
+      id: pause,
+      what: `Tried again after ${pause}`,
+      result: 'it failed again',
+    })),
     read: undefined,
     output: undefined,
     onAgain: fn(),
     againFirst: true,
   },
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    const [first] = c.getAllByRole('button')
+  play: async ({ canvasElement }) => {
+    const [first] = within(canvasElement).getAllByRole('button')
     await expect(first).toHaveAccessibleName('Try again')
-    await userEvent.click(c.getByRole('button', { name: 'Try again' }))
+  },
+}
+
+export const TryingAgain: Story = {
+  args: ServiceKeptFailing.args,
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Try again' }))
     await expect(args.onAgain).toHaveBeenCalled()
     await expect(document.activeElement).toHaveTextContent('Trying again')
   },
