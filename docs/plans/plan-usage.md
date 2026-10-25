@@ -273,7 +273,7 @@ before building on it):
 
 | | Claude Code | Codex | OpenCode |
 |---|---|---|---|
-| Adapter now / latest | `claude-agent-acp` 0.94.0 (Althar pins it, patched) / 0.94.0 | `codex-acp` 2.2.2 / 2.2.2 | OpenCode's own |
+| Adapter now / latest | `claude-agent-acp` 0.95.0 (Althar pins it, patched) / 0.95.0 | `codex-acp` 2.2.2 / 2.2.2 | OpenCode's own |
 | Plan windows over ACP today | Partly: `_meta` on `usage_update`, one window per event, dropped before a turn's first usage | No: held, not sent | No |
 | Context and cost `usage_update` | `used`, `size`, `cost` | `used`, `size` | `used`, `size`, `cost` |
 | ACP version | v1 (v2 opt-in) | v1 and v2 on `main` | v1 |
