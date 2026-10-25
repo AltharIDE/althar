@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import { assert, describe, expect, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { canonicalJson, sha256Hex } from '../src/canonicalJson'
@@ -37,6 +37,9 @@ const readableSchema = Effect.gen(function* () {
     '',
   ].join('\n')
 })
+
+/** Whether a statement went through, rather than being refused. */
+const succeeds = (statement: Effect.Effect<unknown, unknown, SqlClient.SqlClient>) => Effect.map(Effect.exit(statement), Exit.isSuccess)
 
 const withFile = <A, E, R>(use: (filename: string) => Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
@@ -313,6 +316,64 @@ describe('schema', () => {
           ],
         )
         for (const row of after) assert.match(row.id, /^rnbl_[0-9a-f]{32}$/)
+      }),
+    ),
+  )
+
+  it.effect('keeps a connection made before workspaces, and lets one account connect once per workspace and a project bind to one', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0041_tracker_workspaces')
+        const connection = (id: string, createdAt: string, workspace: { key: string; name: string } | null) => ({
+          id,
+          deviceId: '',
+          product: 'linear',
+          webUrl: 'https://linear.app',
+          apiUrl: 'https://api.linear.app',
+          accountId: 'u1',
+          accountLogin: 'mate',
+          auth: 'pkce',
+          credentialRef: id,
+          state: 'ready',
+          createdAt,
+          updatedAt: createdAt,
+          ...(workspace === null ? {} : { workspaceKey: workspace.key, workspaceName: workspace.name }),
+        })
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, deviceId, createdAt } = yield* seed
+          const old = yield* newId(Ids.connection)
+          yield* sql`INSERT INTO connections ${sql.insert({ ...connection(old, createdAt, null), deviceId })}`
+          return { projectId, deviceId, createdAt, old }
+        }).pipe(Effect.provide(WebCrypto))
+        const { projectId, deviceId, createdAt, old } = yield* Effect.provide(
+          made,
+          Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })),
+        )
+        const after = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const insert = (id: string, workspace: { key: string; name: string } | null) =>
+            succeeds(sql`INSERT INTO connections ${sql.insert({ ...connection(id, createdAt, workspace), deviceId })}`)
+          // The one made before keeps its row, and knows no workspace yet.
+          const [kept] = yield* sql<{ workspaceKey: string | null; workspaceName: string | null }>`
+            SELECT workspace_key, workspace_name FROM connections WHERE id = ${old}`
+          assert.deepStrictEqual(kept, { workspaceKey: null, workspaceName: null })
+          // The same account in two workspaces is two connections; in the same one twice, one.
+          const althar = yield* newId(Ids.connection)
+          assert.isTrue(yield* insert(althar, { key: 'althar', name: 'althar' }))
+          assert.isTrue(yield* insert(yield* newId(Ids.connection), { key: 'fnt', name: 'FNT' }))
+          assert.isFalse(yield* insert(yield* newId(Ids.connection), { key: 'fnt', name: 'FNT' }))
+          assert.isFalse(yield* insert(yield* newId(Ids.connection), null))
+          // A project is bound to a connection, and to a team there only with it, by its id and its name together.
+          const bind = (set: Readonly<Record<string, unknown>>) =>
+            succeeds(sql`UPDATE projects SET ${sql.update(set)} WHERE id = ${projectId}`)
+          assert.isFalse(yield* bind({ trackerContainerId: 'team-1', trackerContainerName: 'FNT' }))
+          assert.isFalse(yield* bind({ trackerConnectionId: althar, trackerContainerId: 'team-1' }))
+          assert.isFalse(yield* bind({ trackerConnectionId: `conn_${'f'.repeat(32)}` }))
+          assert.isTrue(yield* bind({ trackerConnectionId: althar, trackerContainerId: 'team-1', trackerContainerName: 'Althar' }))
+          assert.isTrue(yield* bind({ trackerConnectionId: null, trackerContainerId: null, trackerContainerName: null }))
+        })
+        yield* Effect.provide(after, Layer.fresh(Database.layer({ filename }))).pipe(Effect.provide(WebCrypto))
       }),
     ),
   )

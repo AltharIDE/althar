@@ -11,6 +11,7 @@ import { Instance } from './Instance'
 import { outward } from './outward'
 import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
+import { projectTracker } from './projectTracker'
 import { indexTask } from './Search'
 import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
@@ -100,7 +101,7 @@ export class Issues extends Context.Service<
     unfurlInput(commandId: string): Effect.Effect<void>
     /** An issue by its link, or its key on a connected tracker: for tools, and for a task that comes from one. */
     read(text: string, projectId?: string): Effect.Effect<IssueSummary & { readonly body: string; readonly connectionId: string }, unknown>
-    /** The person's open issues, on every connected tracker; a code host's only in the project's repository. */
+    /** The person's open issues, on every connected tracker, or the project's own where it is bound to one; a code host's only in the project's repository. */
     mine(projectId: string): Effect.Effect<ReadonlyArray<IssueSummary>, unknown>
     /** Ties a task to the issue it came from. */
     attach(input: { readonly projectId: ProjectId; readonly taskId: string; readonly issue: string }): Effect.Effect<IssueSummary, unknown>
@@ -206,8 +207,13 @@ export class Issues extends Context.Service<
             const issue = yield* adapters.tracker.issue(`${host.path.join('/')}#${number}`)
             return { ...summaryOf(adapters.info.product, issue), body: issue.body, connectionId: host.connectionId }
           }
-          // MER-231, or a Trello card's short link: whichever tracker has it, each reading its own keys as typed.
-          for (const { connectionId, product, tracker } of yield* connections.trackers) {
+          // MER-231, or a Trello card's short link: the project's own tracker first, where it is bound to one (ADR-059), then
+          // whichever has it, each reading its own keys as typed.
+          const bound = projectId === undefined ? null : yield* projectTracker(projectId)
+          const trackers = (yield* connections.trackers).toSorted(
+            (a, b) => Number(b.connectionId === bound?.connectionId) - Number(a.connectionId === bound?.connectionId),
+          )
+          for (const { connectionId, product, tracker } of trackers) {
             if (product === 'github' || product === 'gitlab') continue
             const issue = yield* tracker.issue(wanted).pipe(Effect.orElseSucceed(() => null))
             if (issue !== null) return { ...summaryOf(product, issue), body: issue.body, connectionId }
@@ -218,8 +224,13 @@ export class Issues extends Context.Service<
       const mine = (projectId: string) =>
         Effect.gen(function* () {
           const host = yield* projectRepository(projectId)
+          // A project bound to a tracker lists its issues there alone, beside its own repository's (ADR-059).
+          const bound = yield* projectTracker(projectId)
+          const trackers = (yield* connections.trackers).filter(
+            ({ connectionId }) => bound === null || connectionId === bound.connectionId || connectionId === host?.connectionId,
+          )
           const lists = yield* Effect.forEach(
-            yield* connections.trackers,
+            trackers,
             ({ connectionId, product, tracker }) => {
               // A code host's issues are listed for the project's own repository only.
               const listed =

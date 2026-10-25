@@ -95,7 +95,7 @@ CREATE TABLE projects (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   archived_at TEXT CHECK (archived_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'))) STRICT;
+, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber')), tracker_connection_id TEXT REFERENCES connections (id), tracker_container_id TEXT CHECK (tracker_container_id IS NULL OR tracker_connection_id IS NOT NULL), tracker_container_name TEXT CHECK ((tracker_container_name IS NULL) = (tracker_container_id IS NULL))) STRICT;
 
 CREATE TABLE policies (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'pol_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
@@ -893,9 +893,7 @@ CREATE TABLE connections (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-, cli TEXT REFERENCES vocab_connection_cli (word)) STRICT;
-
-CREATE UNIQUE INDEX one_connection_per_account ON connections (device_id, product, web_url, account_id) WHERE state <> 'removed';
+, cli TEXT REFERENCES vocab_connection_cli (word), workspace_key TEXT, workspace_name TEXT) STRICT;
 
 CREATE TABLE external_links (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 6) = 'xlink_' AND length(id) = 38 AND substr(id, 7) NOT GLOB '*[^0-9a-f]*'),
@@ -1198,6 +1196,8 @@ CREATE TABLE issue_changes (
 CREATE INDEX issue_changes_by_project ON issue_changes (project_id);
 
 CREATE INDEX issue_changes_by_thread ON issue_changes (thread_id, state);
+
+CREATE UNIQUE INDEX one_connection_per_account ON connections (device_id, product, web_url, account_id, coalesce(workspace_key, '')) WHERE state <> 'removed';
 
 CREATE TABLE plan_usage_readings (
   account_id TEXT NOT NULL REFERENCES agent_accounts (id),

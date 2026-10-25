@@ -28,7 +28,7 @@ import {
 import { majorOf } from '../src/version'
 
 /*
- * The contract of the usage read (ADR-059): every agent's plan says where its
+ * The contract of the usage read (ADR-060): every agent's plan says where its
  * usage comes from or why it has none, every endpoint is on the allowlist,
  * and the reader does only what the ADR lets it, against a fake home, token,
  * keychain and server.
@@ -98,7 +98,7 @@ describe('the allowlist', () => {
         .sort(),
     ).toEqual(['claude-oauth', 'codex-chatgpt', 'grok-billing', 'kimi-usages'])
     for (const source of endpointSources()) expect(endpointProblem(source), source.id).toBeNull()
-    // Anthropic's is on it: the person lifted the ban (ADR-059).
+    // Anthropic's is on it: the person lifted the ban (ADR-060).
     expect(allowedEndpoints.map((entry) => entry.host)).toContain('api.anthropic.com')
   })
 

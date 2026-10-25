@@ -10,7 +10,7 @@
 Researched on 15 October 2026 against upstream `main` (`af3023a`), and again
 on 21 October for the agents #266 added. Built (see Stages): every source in
 the table below, the usage read and its exception to rule 3
-([ADR-059](../decisions/059-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+([ADR-060](../decisions/060-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
 the limits recognised in each agent's own words, new work steered by the
 windows, and how the window shows them: the design the person picked on a
 prototype (direction A, 22 October 2026), a plan gauge in the bar and each
@@ -45,7 +45,7 @@ not in errors, and ACP stays the preferred source.
 > agent's own documented control channel, which Althar starts with the
 > account's home (Codex's app-server; Claude's Agent SDK); (4) **the
 > provider's usage endpoint**, read-only, called by Althar with the account's
-> sign-in under the narrow exception below (ADR-059). Errors (`failures.ts`) are the
+> sign-in under the narrow exception below (ADR-060). Errors (`failures.ts`) are the
 > floor under all four: they say a limit was *reached*, never how much is
 > left, so they are never a substitute for a source.
 
@@ -67,7 +67,7 @@ Per agent and provider, today:
 
 ### The exception to rule 3
 
-Decided in [ADR-059](../decisions/059-a-usage-read-may-use-an-account-s-own-sign-in-once.md)
+Decided in [ADR-060](../decisions/060-a-usage-read-may-use-an-account-s-own-sign-in-once.md)
 (21 October 2026), from ninemate's draft in #218 (`59955fe`), with Anthropic's
 endpoint on the allowlist, as the person decided: Orca reads it the same way.
 The reader is `packages/provider-adapters/src/usageRead.ts`; the one module
@@ -81,7 +81,7 @@ native Anthropic apps ([legal and compliance](https://code.claude.com/docs/en/le
 acc. 15 Oct). The person weighed that and decided on 21 October 2026 that
 Althar reads Anthropic's usage endpoint with Claude Code's own sign-in, as
 Orca does: read-only, at most every five minutes, waiting as long as a 429
-asks (ADR-059).
+asks (ADR-060).
 
 ### What counts as a subscription
 
@@ -278,7 +278,7 @@ before building on it):
 | Context and cost `usage_update` | `used`, `size`, `cost` | `used`, `size` | `used`, `size`, `cost` |
 | ACP version | v1 (v2 opt-in) | v1 and v2 on `main` | v1 |
 | Native channel | Agent SDK `rate_limit_event`; `usage_EXPERIMENTAL…()`; statusline `rate_limits` ([docs](https://code.claude.com/docs/en/statusline), acc.) | App-server `account/rateLimits/read` and `…/updated` ([docs](https://learn.chatgpt.com/docs/app-server), acc.) | None |
-| Provider endpoint (step 4) | `api/oauth/usage`, for any account (ADR-059) | `wham/usage`, undocumented; fallback only | Not read: its sign-ins are in its own database |
+| Provider endpoint (step 4) | `api/oauth/usage`, for any account (ADR-060) | `wham/usage`, undocumented; fallback only | Not read: its sign-ins are in its own database |
 | Windows | 5 hours, 1 week, per model | 5 hours, 1 week | as the provider returns |
 
 ## Stages
@@ -291,12 +291,12 @@ before building on it):
   classification and allowlist, OpenCode's sign-in listing (`usageSources.ts`);
   with the contract test (`tests/usageSources.test.ts`) that every
   subscription has a source and a way to be told from a key.
-- `packages/persistence-sqlite`: migration 0041, `plan_usage_readings`.
+- `packages/persistence-sqlite`: migration 0042, `plan_usage_readings`.
 - `packages/runtime`: `PlanUsage.ts` keeps each account's windows (Codex read
   through its app-server, Claude heard from its sessions, OpenCode by its own
   listing) and tells the window; the API has `GetPlanUsage`, `GetModelRooms`
   and a `PlanUsage` watch event.
-- **The usage read** (ADR-059): Claude Code's idle accounts, Codex's
+- **The usage read** (ADR-060): Claude Code's idle accounts, Codex's
   fallback, Kimi Code and Grok Build, through `usageRead.ts`.
 - **No reading**, said calmly with why: OpenCode's plan sign-ins, Copilot,
   Junie, Mistral Vibe, Qwen Code and Antigravity (the table above).
@@ -319,7 +319,7 @@ in the pickers; see Where the window shows it) is built in `apps/desktop` and
 One pull request each. Stages 0 to 5 are Althar's; 6 to 8 are upstream and
 run in parallel.
 
-0. **Amend rule 3**: the narrow usage read, ADR-059. Done.
+0. **Amend rule 3**: the narrow usage read, ADR-060. Done.
 1. **Model and Codex source.** `AccountStatus` with its `windows`
    (`provider-adapters`), a Codex source (app-server with the account's
    home), the threshold rule above as a pure function with tests (each
@@ -358,7 +358,7 @@ run in parallel.
 - Anthropic's endpoint 429s under frequent polling and may answer "wait an
   hour": Althar asks it at most every five minutes, not while a session has
   just said its windows, and waits as long as it asks.
-- The usage read (ADR-059) reads agents' tokens. It is the largest security
+- The usage read (ADR-060) reads agents' tokens. It is the largest security
   change in this plan: it is kept in one module, with tests that nothing is
   written, logged or sent elsewhere.
 - None of the endpoint reads was tried against a real account here: each

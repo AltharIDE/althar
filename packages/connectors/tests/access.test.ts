@@ -888,7 +888,7 @@ describe('checking a Bitbucket Data Center connection', () => {
 })
 
 const LINEAR = 'https://api.linear.app/graphql'
-const viewer = { viewer: { id: 'u1', name: 'Ada Park', displayName: 'ada' }, organization: { name: 'Northwind' } }
+const viewer = { viewer: { id: 'u1', name: 'Ada Park', displayName: 'ada' }, organization: { name: 'Northwind', urlKey: 'northwind' } }
 
 /** A Linear check, its two queries answered in turn. */
 const linear = (answers: ReadonlyArray<Canned>, auth: AccessInput['auth'] = 'pkce') => {
@@ -917,7 +917,7 @@ describe('checking a Linear connection', () => {
         { json: { data: { teams: { nodes: [{ key: 'MER' }, { key: 'OPS' }] } } } },
       ])
       assert.deepStrictEqual(yield* check, {
-        account: { id: 'u1', login: 'ada', name: 'Ada Park' },
+        account: { id: 'u1', login: 'ada', name: 'Ada Park', workspace: { key: 'northwind', name: 'Northwind' } },
         lines: [
           line('account', 'ok', { fact: 'Ada Park · Northwind' }),
           line('read', 'ok', { count: 2 }),
@@ -944,7 +944,12 @@ describe('checking a Linear connection', () => {
       assert.deepStrictEqual(report.account?.login, 'ada')
       // Someone without a display name goes by their name.
       const plain = yield* linear([{ json: { data: { ...viewer, viewer: { id: 'u1', name: 'Ada Park' } } } }]).check
-      assert.deepStrictEqual(plain.account, { id: 'u1', login: 'Ada Park', name: 'Ada Park' })
+      assert.deepStrictEqual(plain.account, {
+        id: 'u1',
+        login: 'Ada Park',
+        name: 'Ada Park',
+        workspace: { key: 'northwind', name: 'Northwind' },
+      })
     }),
   )
 
