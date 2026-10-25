@@ -108,6 +108,15 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
     : []),
   // Its rules, which an answer can change too (Allow always, Deny always), only while they show.
   ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
+  // Each model's room where work would start, which its project's rules (the accounts allowed, moving work through them) say, only while it shows.
+  ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.modelRooms(event.projectId), offScreen: false }] : []),
+  // Every model's room that shows, as an agent's accounts or their holds change: which account work starts on.
+  ...(event.aggregateType === 'agent_account' || event.aggregateType === 'account_status'
+    ? cache
+        .getQueryCache()
+        .findAll({ queryKey: ['modelRooms'] })
+        .map((query) => ({ key: query.queryKey, offScreen: false }))
+    : []),
   // Its notes, which the coordinator keeps as the person decides, only while they show.
   ...(event.projectId !== null && event.aggregateType === 'project_note' ? [{ key: keys.notes(event.projectId), offScreen: false }] : []),
   // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).

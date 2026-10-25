@@ -11,7 +11,7 @@ import { limitWords, planOf, roomOf, windowName } from '../src/renderer/features
 import { waitsWords } from '../src/renderer/shared/agents'
 import { ModelChoice } from '../src/renderer/shared/ModelChoice'
 import { clock } from '../src/renderer/shared/time'
-import { agents, fakeClient, fakeHost, planUsage, project, usageAccount } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, planUsage, project, usageAccount } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -92,6 +92,22 @@ describe('what the window says of a plan', () => {
       ['Opus week', 1],
     ])
     expect(silent).toEqual([{ name: 'GitHub Copilot', why: 'Copilot shares no plan usage with other apps.' }])
+  })
+
+  it('gives an agent the room of an account that can run, keeping one signed out with its last numbers in the detail', () => {
+    const signedOut = usageAccount({
+      accountId: 'acc_codex_side',
+      accountName: 'side',
+      windows: [{ kind: 'five_hour', label: null, usedPercent: 20, resetsAt: RESET }],
+      fault: { kind: 'sign_in_again', message: 'Sign in to Codex to see its usage.' },
+    })
+    const work = usageAccount({ windows: [{ kind: 'five_hour', label: null, usedPercent: 97, resetsAt: RESET }] })
+    const [codex] = planOf(planUsage([work, signedOut]), NOW).agents
+    // Side's saved 80% runs nothing: new work starts on Work, at 3%.
+    expect([codex?.left, codex?.account]).toEqual([3, 'work'])
+    expect(codex?.accounts.map((account) => account.name)).toEqual(['work', 'side'])
+    // With every account signed out, its last numbers are all there is to say.
+    expect(planOf(planUsage([signedOut]), NOW).agents[0]?.left).toBe(80)
   })
 
   it('says how old numbers are only once they are old, and why a read failed', () => {
@@ -263,6 +279,45 @@ describe('each model’s room in the pickers', () => {
     expect(fake.client.getModelRooms).toHaveBeenCalledWith('p1')
     await userEvent.click(screen.getByRole('button', { name: /^Lead: / }))
     expect((await screen.findByRole('radio', { name: /gpt-5\.2-codex/ })).textContent).toContain(`3% · until ${clock(RESET)}`)
+  })
+
+  it('reads a shown picker’s rooms again as its project’s rules or an agent’s accounts change', async () => {
+    const room = (accountName: string, leftPercent: number) => ({
+      agentId: 'codex',
+      model: 'gpt-5.2-codex',
+      accountId: `acc_codex_${accountName}`,
+      accountName,
+      several: true,
+      leftPercent,
+      resetsAt: RESET,
+      kind: 'five_hour' as const,
+      label: null,
+    })
+    const getModelRooms = vi.fn(async () => [room('side', 80)])
+    const fake = fakeClient({ getPlanUsage: vi.fn(async () => planUsage([codexWork, codexSide])), getModelRooms })
+    withServices(
+      <ModelChoice
+        owner="Lead"
+        agents={agents.filter((agent) => agent.signIn !== 'signed_out')}
+        projectId="p1"
+        value={{ agentId: 'codex', model: 'gpt-5.2-codex', effort: null }}
+        onChange={vi.fn()}
+      />,
+      fake.client,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /^Lead: / }))
+    await waitFor(() => expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ }).textContent).toContain('80%'))
+    // The project stops moving work through Codex's accounts: new work starts on Work, at 3%.
+    getModelRooms.mockImplementation(async () => [room('work', 3)])
+    act(() => fake.emit(changed('policy', 'p1', null, 'p1')))
+    await waitFor(() => expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ }).textContent).toContain('3%'))
+    // Another project's rules leave it be; Work held for a limit reads it again.
+    const reads = getModelRooms.mock.calls.length
+    act(() => fake.emit(changed('policy', 'p2', null, 'p2')))
+    getModelRooms.mockImplementation(async () => [room('side', 80)])
+    act(() => fake.emit(changed('account_status', 'acc_codex_work', null, null)))
+    await waitFor(() => expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ }).textContent).toContain('80%'))
+    expect(getModelRooms.mock.calls.length).toBe(reads + 1)
   })
 })
 

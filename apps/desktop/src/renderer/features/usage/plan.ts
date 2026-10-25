@@ -84,7 +84,9 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       if (why !== undefined) silent.push({ name: first.agentName, why })
       continue
     }
-    const route = read.reduce((most, one) => (leftOf(one.window) > leftOf(most.window) ? one : most))
+    // The figure is of the account new work would start on: one signed out keeps its last numbers in the peek, but runs nothing, as the runtime skips it.
+    const usable = read.filter(({ account }) => account.fault?.kind !== 'sign_in_again')
+    const route = (usable.length > 0 ? usable : read).reduce((most, one) => (leftOf(one.window) > leftOf(most.window) ? one : most))
     const several = accounts.length > 1
     const brand = brandOf(agentId)
     agents.push({

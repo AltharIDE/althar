@@ -4,7 +4,7 @@ import { tabsStoreOf } from '../features/tabs/store'
 import { makeRouter } from '../router'
 import { connect } from './client'
 import { follow } from './feed'
-import { readModelsAhead } from './models'
+import { onModelsRead, readModelsAhead } from './models'
 import { makeQueryClient, reads, recheckStatus } from './reads'
 import type { Host, Services } from './services'
 
@@ -15,7 +15,7 @@ import type { Host, Services } from './services'
  * opened, so going to any of them is instant without the launch waiting on
  * the slowest; one clicked before its read is done joins that read. Each
  * agent is asked again, once a launch, and its models read, without waiting
- * for either.
+ * for either; each model's room is read again whenever they are.
  */
 
 export const openWindow = async (port: DomMessagePort, host: Host) => {
@@ -29,6 +29,8 @@ export const openWindow = async (port: DomMessagePort, host: Host) => {
   const router = makeRouter({ client, cache })
   void recheckStatus(client, cache).catch(() => undefined)
   readModelsAhead(client)
+  // Each model's room follows from which agents are signed in and which models are offered.
+  onModelsRead(client, () => void cache.invalidateQueries({ queryKey: ['modelRooms'] }))
   await router.load()
 
   const kept = tabsStoreOf(client).get().kept
