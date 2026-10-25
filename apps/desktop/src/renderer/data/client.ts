@@ -259,6 +259,9 @@ export interface Client {
   /** Files an issue the coordinator drafted, or one that wasn't filed, again: its card says how it went. */
   readonly fileIssueDraft: (draftId: string) => Promise<void>
   readonly discardIssueDraft: (draftId: string) => Promise<void>
+  /** Applies changes to issues, or what of them didn't apply, again: their card says how it went. */
+  readonly applyIssueChanges: (changesId: string) => Promise<void>
+  readonly discardIssueChanges: (changesId: string) => Promise<void>
   /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
   readonly changeReviewDraft: (
     draftId: string,
@@ -595,6 +598,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
     discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),
+    applyIssueChanges: (changesId) => command((commandId) => api.ApplyIssueChanges({ commandId, changesId })),
+    discardIssueChanges: (changesId) => command((commandId) => api.DiscardIssueChanges({ commandId, changesId })),
     changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
     postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
     discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),

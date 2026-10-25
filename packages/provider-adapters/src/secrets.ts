@@ -19,6 +19,8 @@ export const SECRET_PLACES: ReadonlyArray<string> = [
   '.password-store',
   '.netrc',
   '.git-credentials',
+  // Git's credential store where XDG_CONFIG_HOME isn't set, its passwords in plain text.
+  '.config/git/credentials',
   '.npmrc',
   '.pypirc',
   '.gem/credentials',

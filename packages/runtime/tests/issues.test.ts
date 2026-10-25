@@ -11,6 +11,7 @@ import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotAnIssue, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
+import { IssueChanges } from '../src/IssueChanges'
 import { Issues } from '../src/Issues'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
@@ -163,9 +164,35 @@ describe('an issue', () => {
       // Its project counts it as ready for the person, and nothing under way.
       const [listed] = (yield* queries.projects).projects
       assert.deepInclude(listed, { working: 0, ready: 1, waiting: 0 })
+
+      // As its pull request opened, Althar offered to move its issue to In Review, on a card in the task's thread; applied, it moves.
+      const changesIn = (thread: string) =>
+        Effect.map(items(thread), (all) =>
+          all.flatMap((item) =>
+            item.kind === 'issue_changes'
+              ? [item.content as { changesId: string; note: string | null; issues: ReadonlyArray<{ changes: unknown }> }]
+              : [],
+          ),
+        )
+      const [review] = yield* changesIn(ready?.threadId ?? '')
+      assert.deepStrictEqual([review?.note, review?.issues[0]?.changes], ['PR #1 opened.', [{ field: 'status', to: 'In Review' }]])
+      const instance = yield* Instance
+      yield* (yield* IssueChanges).apply(review?.changesId ?? '', instance.personId)
+      assert.strictEqual((yield* tracker.issue('MER-231')).status.name, 'In Review')
+      // Merged on the host, the task settles, and the card to close its issue as done is in the coordinator's thread.
+      github.mergeByHand(1)
+      const [done] = yield* until(changesIn(threadId), (all) => all.length > 0, Duration.seconds(20))
+      assert.match(done?.note ?? '', /: PR #1 merged\.$/)
+      assert.deepStrictEqual(done?.issues[0]?.changes, [{ field: 'close', to: null }])
+      yield* (yield* IssueChanges).apply(done?.changesId ?? '', instance.personId)
+      assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
     }).pipe(
       Effect.provide(
-        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) }))),
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }), listenEvery: Duration.millis(100) }),
+          ),
+        ),
       ),
     )
   })

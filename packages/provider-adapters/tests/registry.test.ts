@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
 
-import { agents } from '../src/registry'
+import { agents, type Contained } from '../src/registry'
 import { SECRET_PLACES, secretReadRules } from '../src/secrets'
 
 describe('the agent registry', () => {
@@ -245,6 +245,62 @@ describe('the agent registry', () => {
     assert.isUndefined(optionsOf().settings.disableAllHooks)
     // A lead's session is never untrusted this way: the option is a review's lead's.
     assert.isUndefined((metaOf('lead', { untrusted: true }) as { claudeCode: { options: Options } }).claudeCode.options.settingSources)
+  })
+
+  it('holds the coordinator’s Claude Code to its folder: commands run sandboxed without asking, writing only there, with no network', () => {
+    type Options = {
+      settingSources?: Array<string>
+      settings: {
+        disableAllHooks?: boolean
+        permissions: { deny: Array<string>; ask: Array<string> }
+        sandbox: {
+          enabled: boolean
+          autoAllowBashIfSandboxed: boolean
+          allowUnsandboxedCommands: boolean
+          failIfUnavailable: boolean
+          network?: Record<string, unknown>
+          filesystem?: Record<string, unknown>
+        }
+      }
+    }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const optionsOf = (options: { contained?: Contained; untrusted?: boolean; offline?: boolean }) =>
+      (metaOf('reader', options) as { claudeCode: { options: Options } }).claudeCode.options
+    const folder = '/work/meridian/.coordinator'
+    const reads = { allowed: [folder, '/work/meridian/.coordinator-mirrors', '/home/dana/.bun'], denied: ['/home/dana', '/work/meridian'] }
+    const contained = optionsOf({ contained: { folder, reads } })
+    // Only where its sandbox can start: there, failing to start it fails the session rather than running commands without it.
+    const starts = process.platform === 'darwin' || (process.platform === 'linux' && process.env.FLATPAK_ID === undefined)
+    if (!starts || contained.settings.sandbox.autoAllowBashIfSandboxed === false) {
+      assert.deepStrictEqual(contained, optionsOf({}))
+      return
+    }
+    assert.deepStrictEqual(contained.settings.sandbox, {
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      failIfUnavailable: true,
+      network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+      // It writes only its folder, and reads none of the home folder or the person's checkouts but what it is given back.
+      filesystem: { allowWrite: [folder], denyRead: reads.denied, allowRead: reads.allowed },
+    })
+    // No settings file loads, the person's or the repository's, and no hook runs: none of their allow rules or sandbox exemptions
+    // lets a command out, and none of their hooks runs beside it.
+    assert.deepStrictEqual(contained.settingSources, [])
+    assert.isTrue(contained.settings.disableAllHooks)
+    // Its edit tools and the person's keys stay denied; no command asks, as each runs in the sandbox.
+    assert.includeMembers(contained.settings.permissions.deny, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()])
+    assert.notInclude(contained.settings.permissions.ask, 'Bash')
+    // A review's lead never gets it, whatever it is passed: it reads a repository it doesn't trust.
+    for (const options of [
+      { contained: { folder, reads }, untrusted: true },
+      { contained: { folder, reads }, untrusted: true, offline: true },
+    ]) {
+      const held = optionsOf(options)
+      assert.include(held.settings.permissions.ask, 'Bash', JSON.stringify(options))
+      assert.isFalse(held.settings.sandbox.autoAllowBashIfSandboxed)
+    }
   })
 
   it('reviews a pull request from outside only on an agent its session holds to reading', () => {

@@ -87,6 +87,8 @@ export interface ProjectModel {
     edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
   ) => Promise<void>
   readonly discardIssueDraft: (draftId: string) => Promise<void>
+  readonly applyIssueChanges: (changesId: string) => Promise<void>
+  readonly discardIssueChanges: (changesId: string) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -371,6 +373,8 @@ export const useProject = (projectId: string): ProjectModel => {
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
+    applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
+    discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
     dismissError: () => setError(null),
   }
 }

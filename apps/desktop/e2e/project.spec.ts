@@ -64,7 +64,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     )
     // Tasks: each switch says when it acts.
     await expect(page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })).not.toBeChecked()
-    await expect(page.getByRole('switch', { name: 'Move issues to In Progress' })).toBeChecked()
+    await expect(page.getByRole('switch', { name: 'Move issues along with their tasks' })).toBeChecked()
     await page.screenshot({ path: 'test-results/project-settings-general.png', animations: 'disabled' })
 
     // A repository added, with its role, and where its work goes; GitHub connected from there; then left out again.

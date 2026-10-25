@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { Holder, SessionSummary } from '@althar/contracts'
 
-import { queuedOfWords } from '../src/renderer/shared/agents'
+import { queuedOfWords, queuedWords } from '../src/renderer/shared/agents'
 import { titleOf } from '../src/renderer/shared/callCommand'
 import { contextMeter } from '../src/renderer/shared/ContextMeter'
 import { Holders } from '../src/renderer/shared/Holders'
@@ -100,7 +100,12 @@ describe('what runs, and what waits', () => {
 
   it('says how many of a project’s tasks wait, and for how many agents', () => {
     expect(queuedOfWords(1, { busy: 4, atOnce: 4 })).toBe('Waiting: 4 of 4 agents busy')
-    expect(queuedOfWords(3, { busy: 6, atOnce: 2 })).toBe('3 waiting: 6 agents busy, 2 at once')
+    expect(queuedOfWords(3, { busy: 6, atOnce: 2 })).toBe('3 waiting: 2 of 2 agents busy, and 4 more')
+  })
+
+  it('says why a task waits in plain words, over the number too', () => {
+    expect(queuedWords({ busy: 6, atOnce: 6 }, 'this Mac')).toBe('Waiting: 6 of 6 agents busy on this Mac')
+    expect(queuedWords({ busy: 7, atOnce: 6 }, 'this Mac')).toBe('Waiting: 6 of 6 agents busy on this Mac, and 1 more')
   })
 
   it('merges here only the repositories whose branch could be read', () => {

@@ -446,7 +446,7 @@ in two layers:
    3. the agent's own control channel, started with the account's home;
    4. the provider's usage endpoint, read with the account's own sign-in:
       the usage read, rule 3's one exception
-      ([ADR-058](../decisions/058-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
+      ([ADR-059](../decisions/059-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
 
    Today (`usageSources.ts` declares each pair's sources, or why it has none):
    - Claude Code: live, `claude-agent-acp` forwards one window per event in
@@ -608,7 +608,7 @@ Rules:
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
    synchronizes the CLI's credential cache, but for one exception: the
-   usage read ([ADR-058](../decisions/058-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+   usage read ([ADR-059](../decisions/059-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
    an account's access token read into memory for one allowlisted `GET` to
    its provider's usage URL, and dropped.
 4. It never asks for a provider password or browser session cookie.

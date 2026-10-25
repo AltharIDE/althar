@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable, machine_busy
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -55,6 +55,7 @@
 -- conflict_resolution_state: resolving, checking, resolved, failed
 -- review_draft_state: pending, posting, posted, failed, uncertain, discarded
 -- review_verdict: approve, changes, comment
+-- issue_change_state: pending, applying, applied, failed, discarded
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -1003,7 +1004,7 @@ CREATE TABLE issue_drafts (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   decided_at TEXT CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), priority TEXT CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   UNIQUE (id, project_id),
   CHECK ((state = 'filed') = (issue_url IS NOT NULL AND issue_ref IS NOT NULL AND issue_key IS NOT NULL)),
@@ -1173,6 +1174,30 @@ CREATE TABLE "change_sets" (
 ) STRICT;
 
 CREATE INDEX change_sets_by_task ON change_sets (task_id);
+
+CREATE TABLE issue_changes (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'ich_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  thread_id TEXT NOT NULL,
+  changes TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(changes)),
+  note TEXT,
+  state TEXT NOT NULL REFERENCES vocab_issue_change_state (word),
+  error TEXT,
+  direct INTEGER NOT NULL DEFAULT 0 CHECK (direct IN (0, 1)),
+  proposed_by TEXT NOT NULL CHECK (proposed_by IN ('coordinator', 'lead', 'althar')),
+  proposed_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  decided_at TEXT CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
+  UNIQUE (id, project_id),
+  CHECK ((state = 'failed') = (error IS NOT NULL))
+) STRICT;
+
+CREATE INDEX issue_changes_by_project ON issue_changes (project_id);
+
+CREATE INDEX issue_changes_by_thread ON issue_changes (thread_id, state);
 
 CREATE TABLE plan_usage_readings (
   account_id TEXT NOT NULL REFERENCES agent_accounts (id),

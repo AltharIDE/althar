@@ -36,9 +36,12 @@
        the person starts it.
   - **A task keeps its place between its own steps.** A step after another
     on the same task (the review after the lead's step, the lead settling
-    after a review) takes the place of the agent before it, ahead of
-    whatever waits. Unless what that agent left running still runs: the two
-    would be two agents at work, so it waits, as work under way.
+    after a review, a follow-up's review) takes the place of the agent
+    before it, ahead of whatever waits, whatever that agent left running:
+    its servers go on in the task's one place (ADR-032's follow-up of 21
+    October). Any work of a task kept only by what it left running starts
+    in that place too. Work of a task that has to wait while another of its
+    agents is at work has the task's place first once it frees.
   - **What the person said to an agent, still to be delivered, counts as
     its next turn on its way:** the place isn't given to anything else in
     the moment between one turn and the next.
@@ -66,7 +69,7 @@
     ([ADR-035](035-a-task-s-kind-is-read-from-what-it-has.md)).
 - **Trade-off:** the number is now a limit on what Althar starts by itself,
   not a hard ceiling: the person's own actions can take the machine past it
-  for a while, and the cards say so ("5 agents busy, 4 at once"). Five
+  for a while, and the cards say so ("4 of 4 agents busy, and 1 more"). Five
   minutes of a place held for a question the person may not answer soon is
   five minutes another task waits.
 - **Revisit when:** heavy commands take turns instead of whole agents (the

@@ -7,8 +7,7 @@ import { RoomSwitch } from '../chrome/RoomSwitch/RoomSwitch'
 import { TitleBar } from '../chrome/TitleBar/TitleBar'
 import { WorkStatus } from '../chrome/WorkStatus/WorkStatus'
 import { Composer } from '../composer/Composer/Composer'
-import { Listening } from '../composer/Listening/Listening'
-import { Running } from '../composer/Running/Running'
+import { Behind } from '../composer/Behind/Behind'
 import { Brand } from '../foundations/brands/brands'
 import { Icon, type IconName } from '../foundations/Icon/Icon'
 import { Logo } from '../foundations/Logo/Logo'
@@ -179,15 +178,15 @@ export function Specimen() {
           busy
           onStopAgent={() => {}}
           above={
-            <>
-              <Listening sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]} />
-              <Running processes={[{ id: 'dev', command: 'bun dev', url: 'localhost:5173', since: '12m' }]} />
-            </>
+            <Behind
+              sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]}
+              processes={[{ id: 'dev', command: 'bun dev', url: 'localhost:5173', since: '12m' }]}
+            />
           }
         />
       </div>
       <figcaption className={s.caption}>
-        TitleBar, ProjectSwitcher, RoomSwitch, WorkStatus, You, Turn, Tool, Composer, Listening and Running, live.
+        TitleBar, ProjectSwitcher, RoomSwitch, WorkStatus, You, Turn, Tool, Composer and Behind, live.
       </figcaption>
     </figure>
   )

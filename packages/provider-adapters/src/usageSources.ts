@@ -7,7 +7,7 @@ import { isoSeconds, record, Unrecognized, type UsageWindow, windowKind } from '
 
 /*
  * Where each (agent, provider) pair's plan usage comes from
- * (docs/plans/plan-usage.md, ADR-058). A pair that can be a plan declares its
+ * (docs/plans/plan-usage.md, ADR-059). A pair that can be a plan declares its
  * sources, best first: ACP, an adapter's extension, the agent's own channel,
  * the provider's usage endpoint read with the account's own sign-in (the
  * usage read, `usageRead.ts`). One with none says why, in words the person
@@ -28,7 +28,7 @@ export type TokenSource =
   | { readonly kind: 'claude'; readonly path: ReadonlyArray<PathStep> }
 
 /**
- * A provider's usage URL, called with an account's token under ADR-058: only
+ * A provider's usage URL, called with an account's token under ADR-059: only
  * `https`, `GET`, one host and one path, on the allowlist. `seen` is where the
  * request and its answer were seen working.
  */
@@ -391,7 +391,7 @@ export const noReadingOf = (pair: UsagePair): string | null =>
 /** An agent's plan pair: the first it declares (OpenCode's are per provider, read from its own listing). */
 export const planPairOf = (agent: string): UsagePair | undefined => usagePairs.find((pair) => pair.agent === agent && pair.pays === 'plan')
 
-/** The hosts and paths a usage read may call, and no others (ADR-058), each with the one query it may carry. */
+/** The hosts and paths a usage read may call, and no others (ADR-059), each with the one query it may carry. */
 export const allowedEndpoints: ReadonlyArray<{ readonly host: string; readonly path: string; readonly search?: string }> = deepFreeze([
   { host: 'api.anthropic.com', path: '/api/oauth/usage' },
   { host: 'chatgpt.com', path: '/backend-api/wham/usage' },
