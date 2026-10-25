@@ -305,9 +305,9 @@ before building on it):
   model's room (above).
 - **Claude Code's adapter drops a window that arrives before a turn's first
   usage figure** (#1127): Althar carries a patch for it (`patches/`, applied
-  by bun to the pinned 0.94.0; a test fails if it is not applied, and a bump
+  by bun to the pinned 0.95.0; a test fails if it is not applied, and a bump
   of the adapter needs the patch made again). The patched event carries the
-  context as last known (`session.contextUsedTokens`, set by 0.94.0 on each
+  context as last known (`session.contextUsedTokens`, set by 0.95.0 on each
   usage figure and after a compaction), or 0 where the session has none yet;
   `events.ts` makes such a 0 a `PlanWindow` alone, so the context meter and
   the handover check keep theirs. Accounts with no session show a fault.
