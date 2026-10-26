@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, startTask, toConversation } from './support'
 
 /*
  * Files and folders added to a message, in a real window with the fake
