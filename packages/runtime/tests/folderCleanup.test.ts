@@ -463,6 +463,9 @@ describe('a removed folder set up again', () => {
       const launches = yield* Launches
       const setups = yield* Setups
       const sql = yield* SqlClient.SqlClient
+      // Its first setup, begun as it was made, done before the one kept below: one reading it late would wait in the
+      // folder, which Windows won't remove while a process works in it.
+      yield* setups.ready(task.taskId)
       // Its setup waits until the test says.
       const go = join(realpathSync(mkdtempSync(join(tmpdir(), 'althar-go-'))), 'go')
       yield* launches.keep({
