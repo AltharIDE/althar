@@ -87,6 +87,11 @@ export const Paused: Story = {
   },
 }
 
+/** Its step waits for the connection, the computer offline: Paused, and it carries on by itself once it is back. */
+export const WaitingForTheConnection: Story = {
+  args: { status: TaskStatus.Paused, now: 'Waiting for the connection', started: '12m ago' },
+}
+
 /** Stopped by you: it keeps its branch and record. */
 export const Stopped: Story = {
   args: {

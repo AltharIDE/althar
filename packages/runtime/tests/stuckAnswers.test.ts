@@ -164,21 +164,27 @@ describe('a lead’s step that needs the person, handed back to its own agent on
 })
 
 describe('a lead whose turn fails', () => {
-  it.live('is reminded of its step, and then needs the person', () =>
+  it.live("isn't reminded of its step: its service is tried again after pauses, and then it needs the person", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      // Its first turn fails as Claude Code's does when Anthropic's API gives up.
+      // Every turn fails as Claude Code's did when Anthropic's API gave up, its brief, which it never read, sent again each time.
       const task = yield* planned('Do it. [fails-after:0s]')
       const call = yield* stuckCall(task.taskId)
-      assert.deepStrictEqual([call.step, call.why], ['implement', 'no_report'])
-      const turns = yield* sql<{ state: string; prompt: string | null }>`
-        SELECT state, prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at, rowid`
+      assert.deepStrictEqual([call.step, call.why], ['implement', 'transient'])
+      assert.match(call.detail ?? '', /^API Error: 500/)
+      const turns = yield* sql<{ state: string; errorClass: string | null; prompt: string | null }>`
+        SELECT state, error_class, prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at, rowid`
+      // Its first turn, and a try again after each of the three pauses: none of them a reminder.
       assert.deepStrictEqual(
-        turns.map((turn) => turn.state),
-        ['failed', 'completed'],
+        turns.map((turn) => [turn.state, turn.errorClass]),
+        Array.from({ length: 4 }, () => ['failed', 'transient']),
       )
-      assert.match(turns[1]?.prompt ?? '', /^Your step isn't done until you call Althar's finish_step tool/)
-    }).pipe(Effect.provide(withQueries())),
+      assert.isFalse(turns.some((turn) => /^Your step isn't done/.test(turn.prompt ?? '')))
+    }).pipe(
+      Effect.provide(
+        withQueries(':memory:', {}, { connectivity: { pauses: [Duration.millis(20), Duration.millis(40), Duration.millis(60)] } }),
+      ),
+    ),
   )
 })
 

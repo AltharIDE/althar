@@ -16,6 +16,7 @@ import {
   IssueDraftCard,
   ReviewDraftCard,
   type IssueSummary,
+  type HeldForConnection,
   type HeldForLimit,
   LimitCall,
   LimitChoice,
@@ -1898,6 +1899,7 @@ export class Queries extends Context.Service<
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
+            ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
@@ -1922,6 +1924,22 @@ export class Queries extends Context.Service<
           ...(typeof account === 'string' ? { accountId: account } : {}),
           ...(why === 'waits' || why === 'nothing_free' || why === 'asked' ? { why } : {}),
           ...(Array.isArray(choices) ? { choices: choices.flatMap(choiceOf) } : {}),
+        }
+      }
+
+      /** What a step held for the connection waits for: its agent and service, and whether it waits for the connection or a try again. */
+      const reconnectsOf = (held: string | null): HeldForConnection | null => {
+        const output = held === null ? undefined : parse(held)
+        const agentId = text(output, 'heldFor')
+        if (agentId === '') return null
+        const offline = field(output, 'offline') === true
+        const failure = field(output, 'failure')
+        return {
+          agentId,
+          service: text(output, 'service') || agentId,
+          offline,
+          next: offline ? null : text(output, 'until') || null,
+          failure: typeof failure === 'string' ? failure : null,
         }
       }
 
@@ -2461,6 +2479,7 @@ export class Queries extends Context.Service<
               handedBack: card?.handedBack ?? null,
               madeChangeAt: head.madeChangeAt,
               waits: card?.waits ?? null,
+              ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),
               queued: card?.queued ?? null,
               ...(card?.inLine === true && card.place !== undefined ? { place: card.place } : {}),
               steps: card?.plan?.steps ?? [],

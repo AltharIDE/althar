@@ -36,6 +36,8 @@ export type LiveEvent =
       readonly model?: string
     }
   | { readonly _tag: 'SessionEnded'; readonly threadId: string; readonly sessionId: string; readonly state: string }
+  /** The computer came online, or went offline, as the app says (`Connectivity.ts`). */
+  | { readonly _tag: 'Connection'; readonly online: boolean }
   /** A turn began; `byPerson` when it carries something the person said, not only what Althar wrote. */
   | { readonly _tag: 'TurnStarted'; readonly threadId: string; readonly turnId: string; readonly byPerson?: boolean }
   | {
@@ -44,6 +46,8 @@ export type LiveEvent =
       readonly turnId: string
       readonly state: string
       readonly errorClass?: string
+      /** What the agent said went wrong, where the turn failed. */
+      readonly failure?: string
       /** Why the agent stopped, as it said: `max_tokens` when its output ran out, say. */
       readonly stopReason?: string
     }
