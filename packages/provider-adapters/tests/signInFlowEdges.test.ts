@@ -48,6 +48,9 @@ const codex = (plan: Readonly<Record<string, unknown>>, marker?: string): AgentD
   },
 })
 
+/** A test whose stand-in closes its own end of a pipe while it runs, which Althar sees on a Mac and Linux only. */
+const pipeClosed = it.skipIf(process.platform === 'win32')
+
 const STARTED = { result: { loginId: 'l1', authUrl: 'https://auth.openai.com/oauth/authorize?x=1' } }
 const SIGNED_IN = { method: 'account/login/completed', params: { loginId: 'l1', success: true } }
 
@@ -207,7 +210,9 @@ describe('signing in inside Althar, when it goes otherwise', () => {
     expect(seen.map((env) => env.CLAUDE_CONFIG_DIR)).toEqual(['/accounts/work/.claude', '/accounts/work/.claude'])
   })
 
-  it('opens the page an ACP agent printed on a last line it never ended, once that stream closes', async () => {
+  // Not on Windows: there a Node stand-in closing its own end of a pipe (fd 2) doesn't close it for Althar while it
+  // runs, as the Windows checks on #342 showed, so the stream never ends before the answer; the code is the same there.
+  pipeClosed('opens the page an ACP agent printed on a last line it never ended, once that stream closes', async () => {
     const server = `
 const fs = require('node:fs')
 let buffer = ''
