@@ -425,14 +425,18 @@ in two layers:
    (Europe/Budapest)", "try again at 3:05 PM"), or a date. Some agents give
    it as a code (Junie's -32010, Mistral Vibe's -31001) or in the error's
    data (OpenCode's `provider.quota`), and Copilot says it as a message and
-   ends its turn as if done (the registry's `failsInText`). Claude's
-   adapter also reports failures in structured form when the client asks (the
-   JetBrains AIR `sessionFailure` extension, in `_meta`): its category and the
-   actions it suggests tell an exhausted quota from a short rate limit and a
-   full context, where the text alone can't. Every failure is one of
-   `usage_limit`, `context_full` (start a new session from a brief),
-   `transient` (a short rate limit or an overloaded service: retry after a
-   pause), `auth_required`, `invalid_request` or `unknown`.
+   ends its turn as if done (the registry's `failsInText`). Claude's and
+   Codex's adapters also report failures in structured form when the client
+   asks (the JetBrains AIR `sessionFailure` extension, in `_meta`): its
+   category and the actions it suggests tell an exhausted quota from a short
+   rate limit and a full context, where the text alone can't. A
+   failure that ends a turn comes on the prompt's response, the turn
+   `end_turn` like any other; a warning while the agent retries by itself
+   comes on a `session_info_update`. Every failure is one of `usage_limit`,
+   `context_full` (start a new session from a brief), `transient` (a lost
+   connection, a short rate limit, an overloaded or failing service: waited
+   out while offline, and retried after a pause, ADR-060), `auth_required`,
+   `invalid_request` or `unknown`.
 2. **From account status, before the limit is reached.** Plan usage is
    required for every agent and every subscription account
    ([plan](../plans/plan-usage.md)). An account's windows (five hours, a
@@ -446,7 +450,7 @@ in two layers:
    3. the agent's own control channel, started with the account's home;
    4. the provider's usage endpoint, read with the account's own sign-in:
       the usage read, rule 3's one exception
-      ([ADR-060](../decisions/060-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
+      ([ADR-061](../decisions/061-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
 
    Today (`usageSources.ts` declares each pair's sources, or why it has none):
    - Claude Code: live, `claude-agent-acp` forwards one window per event in
@@ -608,7 +612,7 @@ Rules:
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
    synchronizes the CLI's credential cache, but for one exception: the
-   usage read ([ADR-060](../decisions/060-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+   usage read ([ADR-061](../decisions/061-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
    an account's access token read into memory for one allowlisted `GET` to
    its provider's usage URL, and dropped.
 4. It never asks for a provider password or browser session cookie.
@@ -1082,7 +1086,7 @@ The adapter classifies failures without collapsing them:
 |---|---|---|
 | `auth_required` | Logged out or expired grant | Pause and request authentication |
 | `unsupported_version` | CLI schema outside support matrix | Block or degraded mode; never guess |
-| `transient_provider` | Short rate limit or temporary network failure | Bounded retry with jitter and provider hint |
+| `transient` | Lost connection, short rate limit, overloaded or failing service | Never a missing report. Offline, or the service out of reach: the step is held for the connection, and its turn goes again in the same session once the computer is back and the service answers, however long that takes. The service answering with errors: retried after 15 s, 1 min, 4 min, then the step needs the person, with what it said (ADR-060) |
 | `usage_limit` | The account's allowance is used up until a reset | Pause every session on that account; move or hold work under the project rule |
 | `invalid_request` | Unsupported model/tool option | Fail node with actionable detail |
 | `provider_refusal` | Policy refusal | Record terminal provider outcome |

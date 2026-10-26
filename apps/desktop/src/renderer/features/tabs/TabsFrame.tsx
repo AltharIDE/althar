@@ -2,7 +2,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useS
 import { createPortal } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
 
-import { LoadMeter, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
+import { LoadMeter, Offline, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
@@ -10,6 +10,7 @@ import { QuickSettings } from '../settings/QuickSettings'
 import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
 import { PlanBar } from '../usage/PlanBar'
 import { useWindowChrome } from '../../shared/useWindowChrome'
+import { useOnline } from '../../shared/useOnline'
 import { useUpdate } from '../../shared/useUpdate'
 import type { Destination } from '../../shared/dictation/sessions'
 import { tabsStoreOf } from './store'
@@ -25,15 +26,15 @@ import { useTabs } from './useTabs'
  * (with Shift, the one before), as in a browser. ⌘N starts a new project in
  * a tab of its own, as the + does. ⌘K finds a task: in the project whose tab
  * has the window, or, on the home, in every project. ⌘U opens the peek of
- * the plan gauge, after CPU and memory, and again closes it. The tabs are the window's one bar: a screen puts
- * its own controls at the bar's end with BarEnd, and its way back, where it
- * has one, at the top of its page. Before it, on every screen, how hard the
- * computer works, in two short meters the person may turn off (`useLoad`),
- * and a newer Althar ready to install, in one quiet line; after it, at the
- * very end, Althar's settings' gear, whose quick settings ⌘, opens and
- * closes, and whose All settings, or ⌘⇧,, opens the settings' tab. Before
- * there is any project there are no tabs: the first screen has the whole
- * window.
+ * the plan gauge, after CPU and memory, and again closes it. The tabs are the
+ * window's one bar: a screen puts its own controls at the bar's end with
+ * BarEnd, and its way back, where it has one, at the top of its page.
+ * Before it, on every screen, how hard the computer works, in two short
+ * meters the person may turn off (`useLoad`), that the computer is offline,
+ * where it is, and a newer Althar ready to install, each in one quiet line; after it, at the very end, Althar's settings'
+ * gear, whose quick settings ⌘, opens and closes, and whose All settings,
+ * or ⌘⇧,, opens the settings' tab. Before there is any project there are no
+ * tabs: the first screen has the whole window.
  */
 
 /** The settings' tab among the projects' ids, stepping from tab to tab: no project's id is empty. */
@@ -112,6 +113,7 @@ function TabsBar({
   const { host } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
+  const online = useOnline()
   const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
   const { select, current } = tabs
   return (
@@ -134,6 +136,7 @@ function TabsBar({
             <LoadMeter load={load.glance} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
           )}
           <PlanBar open={usage.open} onOpenChange={usage.set} />
+          {!online && <Offline />}
           {update.ready !== null && <UpdateReady {...update.ready} />}
           <div ref={endRef} className={s.end} />
           <QuickSettings open={quick} onOpenChange={onQuick} onSettings={tabs.openSettings} />

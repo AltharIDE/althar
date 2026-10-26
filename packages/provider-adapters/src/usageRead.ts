@@ -6,7 +6,7 @@ import type { AccountUsage } from './usage'
 import { allowedEndpoints, type EndpointSource, endpointProblem, type TokenSource, type UsagePair, usagePairs } from './usageSources'
 
 /*
- * The usage read (ADR-060): an account's access token, read in memory for one
+ * The usage read (ADR-061): an account's access token, read in memory for one
  * call to its provider's usage URL on the allowlist, and dropped. The token is
  * a local of one call. It is never written, refreshed, cached, logged, put in
  * a message or sent anywhere but the one URL; what leaves is windows, or a

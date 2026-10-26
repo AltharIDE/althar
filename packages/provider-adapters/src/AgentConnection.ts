@@ -911,6 +911,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               return
             }
             const usage = normalizeUsage(response.usage)
+            // Claude Code and Codex end a turn that failed as any other, `end_turn`, with the failure on the response itself.
+            const reported = structuredFailure(response._meta, yield* DateTime.nowAsDate)
+            if (reported?.severity === 'error') turn.failure = reported.classified
             yield* endTurn(
               turn,
               Effect.gen(function* () {

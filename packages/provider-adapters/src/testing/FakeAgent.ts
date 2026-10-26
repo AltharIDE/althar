@@ -9,6 +9,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import type { InProcessAgent } from '../AgentConnection'
 import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
+import { recorded } from './recorded'
 
 /*
  * A scripted ACP agent for tests, so the adapter's contract runs in CI without
@@ -238,6 +239,14 @@ export interface FakeAgentOptions {
    * for good, saying no reset time.
    */
   readonly outOfUsage?: { readonly until?: number }
+  /**
+   * Its connection, asked as each prompt starts: while it is down, every
+   * prompt ends as the agents' did when theirs was (`recorded.ts`): offline
+   * or given a server error, as Claude Code ends its turn, having used
+   * nothing; `waits`, as Codex waits for the network, its turn not ending
+   * until the connection is back, when it carries on, or it is cancelled.
+   */
+  readonly connection?: () => 'offline' | 'server' | 'waits' | undefined
   /**
    * Offer effort as OpenCode does: as a model's variants, with a `default`
    * that leaves it at its own. The small model has none, and a third, huge
@@ -1304,6 +1313,19 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         )
       const update = (value: acp.SessionUpdate) =>
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
+      const down = options.connection?.()
+      // The agent keeps what it was sent, though its service never answered it, as the real ones do: its role's markers too.
+      if (down !== undefined) for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
+      if (down === 'offline' || down === 'server') {
+        const said = down === 'offline' ? recorded.claude.offline : recorded.claude.serverError
+        await update(said.retrying)
+        return said.ended
+      }
+      if (down === 'waits') {
+        await update(recorded.codex.waiting)
+        while (!session.cancelled && options.connection?.() === 'waits') await pause(10)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+      }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five

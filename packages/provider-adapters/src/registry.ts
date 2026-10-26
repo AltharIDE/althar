@@ -200,6 +200,14 @@ export interface AgentDefinition {
     readonly accounts?: 'one'
   }
   readonly permissions: PermissionMeanings
+  /**
+   * The service its model runs on: its name, as a step that keeps failing
+   * there says it, and an address of its API that Althar asks whether it
+   * answers while that step waits for the connection (ADR-060). None where
+   * it runs on whichever provider the person picks: then only whether the
+   * computer is online counts.
+   */
+  readonly service?: { readonly name: string; readonly url: string }
   /** What prints its own version, for Settings; without it, none is shown. */
   readonly version?: (node: string) => LaunchSpec
   /**
@@ -709,6 +717,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
+    service: { name: 'Anthropic', url: 'https://api.anthropic.com' },
     source: 'bundled',
     launch: (node) => ({
       command: node,
@@ -775,6 +784,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   codex: {
     id: 'codex',
     name: 'Codex',
+    service: { name: 'OpenAI', url: 'https://api.openai.com' },
     source: 'bundled',
     /*
      * `CODEX_HOME` is the account's home, always. `CODEX_PATH` names the Codex
@@ -949,6 +959,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   copilot: {
     id: 'copilot',
     name: 'GitHub Copilot',
+    service: { name: 'GitHub', url: 'https://api.githubcopilot.com' },
     source: 'user_installed',
     /*
      * The version it was installed as, not one it downloaded since
@@ -1089,6 +1100,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   grok: {
     id: 'grok',
     name: 'Grok Build',
+    service: { name: 'xAI', url: 'https://api.x.ai' },
     source: 'user_installed',
     /*
      * A process of its own rather than one a config's leader mode shares, not
@@ -1198,6 +1210,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   'mistral-vibe': {
     id: 'mistral-vibe',
     name: 'Mistral Vibe',
+    service: { name: 'Mistral', url: 'https://api.mistral.ai' },
     source: 'user_installed',
     /* Its settings from the environment win over the person's and the repository's: asking, with no model judging what is safe. */
     launch: () => ({
