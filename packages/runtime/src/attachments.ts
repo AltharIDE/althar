@@ -16,7 +16,7 @@ import { basename, extname, join } from 'node:path'
 import { MESSAGE_FILES } from '@althar/contracts'
 
 /*
- * The person's files and folders sent with a message, on disk (ADR-060):
+ * The person's files and folders sent with a message, on disk (ADR-061):
  * what one is and how large, read before it is copied, and its copy, where
  * the thread's agent reads. Pure Node, shared with the app's main process,
  * which measures what is dropped before the window shows it, so the window

@@ -1,4 +1,4 @@
-# ADR-060: A file sent with a message is copied where the agent reads, and linked
+# ADR-061: A file sent with a message is copied where the agent reads, and linked
 
 - **Status:** Accepted
 - **Date:** 2026-10-26

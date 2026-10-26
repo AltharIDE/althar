@@ -4,7 +4,7 @@ import { AttachmentKind, type MessageAttachment } from '@althar/ui'
 import { bytesText } from './handed'
 
 /*
- * Files and folders the person sends with a message (ADR-060), as the window
+ * Files and folders the person sends with a message (ADR-061), as the window
  * shows them: a chip with its name and size, waiting in the composer and on
  * the sent message. Main measures each as it is added and grants it, so the
  * window never has its path; the runtime copies it where the agent reads as

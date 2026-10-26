@@ -67,4 +67,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md) | A lead installs, runs the project, takes screenshots and runs checks again through Althar's tools, outside its sandbox; the coordinator takes screenshots too |
 | [058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md) | The coordinator is a trusted reader, in copies of its own, held by a sandbox where it has one |
 | [059](059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md) | A tracker's workspaces are connected side by side, and a project may be bound to one |
-| [060](060-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md) | A file or folder sent with a message is copied into the thread's folder, which git ignores, and linked for the agent to open |
+| [060](060-a-lost-connection-is-waited-out-and-a-failing-service-tried-again.md) | A lost connection is waited out, and a failing service tried again, as a usage limit is held |
+| [061](061-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md) | A file or folder sent with a message is copied into the thread's folder, which git ignores, and linked for the agent to open |

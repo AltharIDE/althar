@@ -2135,7 +2135,7 @@ describe('a task', () => {
       ),
     ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Review again' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Review with another agent' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Claude Code/ }))
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'retry', agentId: 'claude-code' } }),
@@ -2208,7 +2208,7 @@ describe('a task', () => {
     const at = (why: StuckStep['why'], detail: string | null = null, open = 0) =>
       stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
-      'Codex closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      'Codex closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       'Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, start Codex again.',
       "Codex couldn't start. Check that it's installed and signed in, or hand the step to another agent.",
       "The work has been reviewed three times, and the lead's last changes haven't been reviewed yet. One finding is still open. Review it again, or accept it as it is.",
@@ -2218,7 +2218,7 @@ describe('a task', () => {
     const inReview = (why: StuckStep['why']) =>
       stuckWords.what({ step: 'review', why, detail: null, agentId: null, round: 0, open: 0 }, 'Codex')
     expect([inReview('session_ended'), inReview('restarted'), inReview('refused')]).toEqual([
-      'Codex closed before finishing the step. This is usually harmless: review again, or skip the review.',
+      'Codex closed before finishing the step. This is usually harmless: try again, or skip the review.',
       'Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, review again.',
       'Codex refused to go on with this step. Review again with another agent, or skip the review.',
     ])

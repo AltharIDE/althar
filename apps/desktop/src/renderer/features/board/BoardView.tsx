@@ -36,7 +36,7 @@ import {
 import { type ReactNode, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
-import { busyWords, inLineWords, waitsWords } from '../../shared/agents'
+import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
@@ -257,9 +257,11 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
             word: text.status[TaskStatus.Paused],
             why: waitsWords(name(work.waits.agentId), clock(work.waits.until)),
           }
-        : work.phase === 'stopped'
-          ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped], why: text.stopped }
-          : null
+        : work.reconnects != null
+          ? { status: TaskStatus.Paused, word: text.status[TaskStatus.Paused], why: reconnectsWords(work.reconnects, clock) }
+          : work.phase === 'stopped'
+            ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped], why: text.stopped }
+            : null
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),

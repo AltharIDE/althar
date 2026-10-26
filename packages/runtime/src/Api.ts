@@ -826,6 +826,7 @@ export const handlers = Api.toLayer(
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+      TryAgain: ({ commandId, threadId }) => once(commandId, api(Effect.asVoid(sessions.tryAgain(threadId)))),
       CompactContext: ({ commandId, threadId }) =>
         once(
           commandId,
