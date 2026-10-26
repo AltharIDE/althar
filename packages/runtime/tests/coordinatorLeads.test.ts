@@ -62,9 +62,10 @@ describe('a quick task’s lead making it a change', () => {
         turns(task?.threadId ?? ''),
         (rows) => rows.length >= 1 && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
       )
-      // Its agent stopped first, as Windows won't remove the folder a process works in.
+      // Its agent stopped first, as Windows won't remove the folder a process works in, and tried again while what ended
+      // there still holds it a moment.
       yield* (yield* Sessions).stop(task?.threadId ?? '')
-      rmSync(task?.path ?? '', { recursive: true, force: true })
+      rmSync(task?.path ?? '', { recursive: true, force: true, maxRetries: 5 })
       const lead: ToolAccess = {
         role: 'lead',
         projectId: project.projectId,

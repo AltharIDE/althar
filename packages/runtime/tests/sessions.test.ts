@@ -60,6 +60,11 @@ const ended = (threadId: string, count: number) =>
   )
 
 /** Waits until the thread has `count` turns, all ended. */
+/**
+ * How long a quiet server is waited for, as its port is looked up every two seconds: on Windows each lookup starts
+ * PowerShell to list the processes, which takes seconds on a busy machine, where Althar goes on looking ten minutes.
+ */
+const LOOKUPS = Duration.seconds(30)
 const settled = (threadId: string, count: number) => until(turns(threadId), (rows) => rows.length >= count && rows.every(done))
 
 /** Starts a session, and waits for the turn that delivers its brief to end. */
@@ -653,7 +658,7 @@ describe('sessions', () => {
         yield* begin(created.threadId, 'claude-code')
         yield* say(created.threadId, scenarios.backgroundQuiet)
         yield* ended(created.threadId, 1)
-        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null, LOOKUPS)
         assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
         assert.strictEqual(serving?.name, 'Start the dev server')
         yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
@@ -668,7 +673,7 @@ describe('sessions', () => {
         yield* begin(created.threadId, 'process')
         yield* say(created.threadId, scenarios.backgroundCodexQuiet)
         yield* ended(created.threadId, 1)
-        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null, LOOKUPS)
         assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
         yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
       }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),

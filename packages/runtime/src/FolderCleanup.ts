@@ -189,11 +189,16 @@ export const goneWords = (why: Why, days: number, bytes: number | null) => {
 /** Fails unless nothing of a folder is left. */
 const gone = (path: string) => Effect.suspend(() => (existsSync(path) ? Effect.fail(new FolderStayed({ path })) : Effect.void))
 
-/** Removes a folder that isn't a worktree, or one git won't remove: whatever is in it. Fails unless nothing of it is left. */
+/**
+ * Removes a folder that isn't a worktree, or one git won't remove: whatever is in it. Fails unless nothing of it is left.
+ * Tried again a few times, over a second or so, where Windows says it is busy: a process that just ended, or a scanner
+ * reading what was just written, still holds it a moment.
+ */
 const erase = (path: string) =>
-  Effect.try({ try: () => rmSync(path, { recursive: true, force: true }), catch: () => new FolderStayed({ path }) }).pipe(
-    Effect.andThen(gone(path)),
-  )
+  Effect.try({
+    try: () => rmSync(path, { recursive: true, force: true, maxRetries: 5 }),
+    catch: () => new FolderStayed({ path }),
+  }).pipe(Effect.andThen(gone(path)))
 
 /** Removes a worktree, or, where git won't, whatever is in its folder. Fails unless nothing of it is left. */
 const removeWorktree = (repository: string, path: string) =>
