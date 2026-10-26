@@ -18,7 +18,9 @@ import { reducedMotion } from './motion'
  * The pointer stays with the item (captured) however far it goes: from the
  * press, where the item is itself the button that is held (`grab: 'press'`),
  * or from the first move, where the item holds buttons of its own that a
- * click must still reach (`grab: 'drag'`).
+ * click must still reach (`grab: 'drag'`). Until then the press's moves are
+ * followed on the window too: pressed on a grip in the list's margin, the
+ * pointer can leave the item before it has gone far enough to drag it.
  */
 
 export type Axis = 'x' | 'y'
@@ -232,6 +234,25 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
     [],
   )
 
+  /** The held pointer moved: a drag once it has gone far enough, which then takes the pointer (`hold`) where the item asks. */
+  const moved = (pointer: number, buttons: number, client: number, hold: () => void) => {
+    const p = press.current
+    if (p === null || p.pointer !== pointer) return
+    // The button is no longer down, so its release was missed: this is hover, not a drag.
+    if (buttons === 0) {
+      finish(false)
+      return
+    }
+    p.client = client
+    if (!p.moving) {
+      if (Math.abs(p.client - p.start) < SLOP) return
+      p.moving = true
+      p.frame = requestAnimationFrame(scrolling)
+      if (latest.current.grab === 'drag') hold()
+    }
+    place()
+  }
+
   /** What an item (or the button in it) takes to be held and moved, and moved by key. */
   const bind = (id: string) => ({
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
@@ -258,7 +279,7 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
       const sizes = items.map((rect) => rect[at.size])
       const next = items[from + 1]
       const gap = next === undefined ? (a === 'x' ? 2 : 0) : next[at.start] - (items[from]?.[at.end] ?? 0)
-      press.current = {
+      const held: Press = {
         id,
         pointer: event.pointerId,
         start: event[at.client],
@@ -273,26 +294,32 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
         moving: false,
         frame: 0,
       }
+      press.current = held
       // Held from the press, so the release reaches this button wherever the pointer has gone.
-      if (how === 'press') capture(event)
-    },
-    onPointerMove: (event: PointerEvent<HTMLElement>) => {
-      const p = press.current
-      if (p === null || p.pointer !== event.pointerId) return
-      // The button is no longer down, so its release was missed: this is hover, not a drag.
-      if (event.buttons === 0) {
-        finish(false)
+      if (how === 'press') {
+        capture(event)
         return
       }
-      p.client = event[along[latest.current.axis].client]
-      if (!p.moving) {
-        if (Math.abs(p.client - p.start) < SLOP) return
-        p.moving = true
-        p.frame = requestAnimationFrame(scrolling)
-        if (latest.current.grab === 'drag') capture(event)
+      // Off the item, until it is dragged and takes the pointer, its moves reach none of its handlers: followed here.
+      const item = event.currentTarget
+      const follow = (move: globalThis.PointerEvent) => {
+        if (press.current !== held || held.moving) {
+          window.removeEventListener('pointermove', follow, true)
+          return
+        }
+        if (item.contains(move.target as Node)) return
+        moved(move.pointerId, move.buttons, move[along[latest.current.axis].client], () => {
+          try {
+            item.setPointerCapture(move.pointerId)
+          } catch {
+            // Not an active pointer: the buttons check on a move still ends a missed press.
+          }
+        })
       }
-      place()
+      window.addEventListener('pointermove', follow, true)
     },
+    onPointerMove: (event: PointerEvent<HTMLElement>) =>
+      moved(event.pointerId, event.buttons, event[along[latest.current.axis].client], () => capture(event)),
     onPointerUp: (event: PointerEvent<HTMLElement>) => {
       if (press.current?.pointer === event.pointerId) finish(true)
     },
