@@ -370,8 +370,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         return event.byAgent
           ? notice({ source: 'runtime', severity: 'info', title: `The agent moved to its ${event.modeId} mode.` })
           : Effect.void
+      // The agent is told why; the person reads it on the refused call, not as a notice of its own.
       case 'Resumed':
-        return notice({ source: 'runtime', severity: 'info', title: 'Resumed after a rejection.', description: event.reason })
+        return Effect.void
       default:
         return Effect.void
     }

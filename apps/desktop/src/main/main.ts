@@ -27,6 +27,7 @@ import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
 import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
+import { watchOnline } from './online'
 import { afterExit } from './restarts'
 import { alertSounds, playSound } from './sounds'
 import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
@@ -507,6 +508,14 @@ const startRuntime = () => {
   })
   logs.keepOutput(child)
   child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
+  // Whether the computer is online, so work waits out a lost connection rather than fail on it (ADR-060).
+  const stopWatchingOnline = watchOnline(
+    () => net.isOnline(),
+    (online) => {
+      logs.info(online ? 'Online' : 'Offline')
+      child.postMessage({ type: 'online', online })
+    },
+  )
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'screenshot') return screenshot(child, message)
@@ -530,6 +539,7 @@ const startRuntime = () => {
     granting.delete(message.requestId)
   })
   child.once('exit', (code) => {
+    stopWatchingOnline()
     runtime = undefined
     if (quitting) logs.info('Runtime exited', { code })
     else logs.error('Runtime exited', { code })

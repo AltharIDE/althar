@@ -8,7 +8,16 @@ import { type Question, type QuestionAnswer, questionContent } from '../src/ques
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
 import { changeOf, type SessionEvent } from '../src/events'
 import type { Classified } from '../src/failures'
-import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, HANDED_DOCUMENT, SCREENSHOT_PNG, scenarios, WHY } from '../src/testing'
+import {
+  codexLikeMeanings,
+  fakeAgent,
+  type FakeAgentOptions,
+  HANDED_DOCUMENT,
+  recorded,
+  SCREENSHOT_PNG,
+  scenarios,
+  WHY,
+} from '../src/testing'
 import { type ContractSubject, type Decide, text, withConnection } from './contract'
 
 const fake: ContractSubject = {
@@ -839,6 +848,32 @@ describe('AgentConnection', () => {
         })
       }),
     )
+
+    for (const [how, down, title] of [
+      ['offline', 'offline', recorded.claude.offline.title],
+      ['given a server error', 'server', recorded.claude.serverError.title],
+    ] as const)
+      it.live(`a lost connection, ${how}, on the turn's response as Claude Code ends it`, () =>
+        Effect.gen(function* () {
+          const subject: ContractSubject = {
+            ...fake,
+            transport: () => ({ _tag: 'InProcess', agent: fakeAgent({ connection: () => down }) }),
+          }
+          const events = yield* withConnection(subject, (connection) =>
+            Effect.gen(function* () {
+              const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+              return yield* Stream.runCollect(session.prompt('Say hi.'))
+            }),
+          )
+          // Its own retry, a warning first; then the turn ends as any other, but failed.
+          assert.deepStrictEqual(find(events, 'AgentFailure')[0]?.severity, 'warning')
+          const last = events.at(-1)
+          assert.deepStrictEqual(last?._tag === 'TurnEnded' ? [last.stopReason, last.failure] : [], [
+            'end_turn',
+            { failure: 'transient', message: title },
+          ])
+        }),
+      )
 
     it.live('a warning, which does not fail the turn', () =>
       Effect.gen(function* () {

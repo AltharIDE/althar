@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import { backupsIn, connection, databaseIn, Failures, Folders, Nudges, Secrets, services, UsageData } from '@althar/runtime'
+import { backupsIn, connection, Connectivity, databaseIn, Failures, Folders, Nudges, Secrets, services, UsageData } from '@althar/runtime'
 import { Cause, Context, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { appFetchOf } from './appFetch'
@@ -305,6 +305,9 @@ const allowFolder = (requestId: string, path: string) =>
     ),
   )
 
+/** Whether the computer is online, as the main process reads it (ADR-060): the last said, once the store is open. */
+const tellOnline = (online: boolean) => void ready.then((context) => Effect.runPromise(Context.get(context, Connectivity).set(online)))
+
 parent.on('message', (message) => {
   const data = message.data as {
     readonly type?: string
@@ -315,6 +318,7 @@ parent.on('message', (message) => {
     readonly keyring?: boolean
     readonly threadId?: string
     readonly shot?: unknown
+    readonly online?: boolean
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
@@ -325,6 +329,7 @@ parent.on('message', (message) => {
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
   if (data?.type === 'names' && data.requestId !== undefined) tellNames(data.requestId)
+  if (data?.type === 'online' && typeof data.online === 'boolean') tellOnline(data.online)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
   if (data?.type === 'shutdown') {
     Effect.runFork(Effect.logInfo('Runtime stopping').pipe(Effect.provide(Logger.layer([stdoutLogger]))))

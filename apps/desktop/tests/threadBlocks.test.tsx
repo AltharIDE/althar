@@ -16,7 +16,10 @@ import { withServices } from './render'
  * work, with what the project's rules let through.
  */
 
-const show = (thread: ReadonlyArray<ThreadItem>, props: { project?: string; openFile?: (path: string) => void } = {}) => {
+const show = (
+  thread: ReadonlyArray<ThreadItem>,
+  props: { project?: string; openFile?: (path: string) => void; onTryAgain?: () => void } = {},
+) => {
   const { client } = fakeClient()
   const blocks = blocksOf({ items: thread, turnRunning: false, worktree: '/w/meridian' }, new Map(), () => 'just now')
   withServices(<ThreadBlocks blocks={blocks} threadId="th1" worktree="/w/meridian" {...props} />, client)
@@ -162,5 +165,35 @@ describe('a turn’s work', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: /Open/ }))
     expect(openFile).toHaveBeenCalledWith('/w/meridian/report.csv')
+  })
+})
+
+describe('a turn that failed on its connection', () => {
+  // As Claude Code's ends offline: it warns it reconnects, then the turn ends in its error (ADR-060).
+  const reconnecting = items.notice({ severity: 'warning', title: 'Reconnecting to Claude, attempt 1 of 10.' })
+  const failed = items.notice({
+    severity: 'error',
+    title: "Claude Code couldn't answer.",
+    description: 'API Error: Connection error.',
+  })
+
+  it('offers Try again under it, which sends what the person said again', async () => {
+    const onTryAgain = vi.fn()
+    show([items.you('What is left on the checkout?'), reconnecting, failed], { onTryAgain })
+    expect(screen.getByText(/API Error: Connection error\./)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onTryAgain).toHaveBeenCalledOnce()
+  })
+
+  it('offers it only under the last turn, where it ended in an error, and where the screen can try again', () => {
+    const onTryAgain = vi.fn()
+    show([items.you('Hi'), reconnecting, items.says('Back now.')], { onTryAgain })
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    document.body.innerHTML = ''
+    show([items.you('Hi'), failed, items.you('Again'), items.says('Answered.')], { onTryAgain })
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    document.body.innerHTML = ''
+    show([items.you('Hi'), failed])
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
   })
 })

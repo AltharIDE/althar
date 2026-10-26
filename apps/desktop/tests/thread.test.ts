@@ -8,6 +8,7 @@ import {
   type ThreadSource,
   planStateOf,
   type Streamed,
+  declinedWords,
   targetOf,
   toolKindOf,
   toolStateOf,
@@ -376,6 +377,19 @@ describe('tool calls', () => {
         verbFor(ToolKind.Run, state),
       ),
     ).toEqual(['Running', 'Ran', 'Run', 'Run', 'Run'])
+  })
+
+  it('says on a refused call who refused it and why, and nothing where the person did', () => {
+    expect(declinedWords('rules', '`git pull` changes the repository; this role only reads.')).toBe(
+      'Althar’s rules: git pull changes the repository; this role only reads',
+    )
+    expect(declinedWords('coordinator', 'Outside the task.')).toBe('The coordinator: Outside the task')
+    expect(declinedWords('rules')).toBe('Althar’s rules')
+    expect(declinedWords('person', 'Not today')).toBeUndefined()
+    const refused = items.tool({ toolKind: 'execute', declined: true, command: 'git pull', declinedBy: 'rules', declinedWhy: 'No writes.' })
+    const [turn] = blocksOf(source([refused]), new Map(), at)
+    const tool = turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
+    expect(tool).toMatchObject({ state: ToolState.Declined, why: 'Althar’s rules: No writes' })
   })
 
   it('says what it acted on: the file, the command, or its title', () => {

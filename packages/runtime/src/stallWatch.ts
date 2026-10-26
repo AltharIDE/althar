@@ -235,6 +235,8 @@ export const makeStallWatch = (limits: StallLimits) => {
   const observe = (event: LiveEvent, now: number): ReadonlyArray<StallAction> => {
     // What Althar runs of a project itself is no thread's, and no turn's work.
     if (event._tag === 'Launches') return []
+    // Nor is the computer's connection.
+    if (event._tag === 'Connection') return []
     const watch = watchOf(event.threadId, now)
     switch (event._tag) {
       case 'TurnStarted': {

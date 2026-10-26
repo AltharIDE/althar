@@ -654,6 +654,8 @@ describe('the API', () => {
         // What the person turned down says so.
         const deploy = after.items.find((item) => item.kind === 'tool_call')
         assert.isTrue(deploy?.kind === 'tool_call' && deploy.content.declined)
+        // ...and who did, and what they said.
+        assert.deepInclude(deploy?.kind === 'tool_call' ? deploy.content : {}, { declinedBy: 'person', declinedWhy: 'Not today' })
       }),
     ),
   )

@@ -132,6 +132,18 @@ export interface RuntimeOptions {
   readonly idle?: IdleOptions
   /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
   readonly busy?: BusyOptions
+  /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
+  readonly connectivity?: ConnectivityOptions
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface ConnectivityOptions {
+  /** Whether a service answers at its address: whether a light request there gets any answer within five seconds. */
+  readonly answers?: (url: string) => Effect.Effect<boolean>
+  /** How long a step waits before each try again at a service that keeps failing while the computer is online: 15 s, 1 min, 4 min. */
+  readonly pauses?: ReadonlyArray<Duration.Duration>
+  /** How often a step waiting for the connection asks again whether its service answers, while the computer says it is online: 30 s. */
+  readonly every?: Duration.Duration
 }
 
 /** Each is the default unless a test says otherwise. */

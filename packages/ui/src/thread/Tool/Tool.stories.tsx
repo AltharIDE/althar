@@ -95,9 +95,21 @@ export const Failed: Story = {
   },
 }
 
-/** You said no to it: it never ran. Set back, and not red. */
+/** You said no to it: it never ran. Set back, and not red. Nothing more is said, as you know why. */
 export const Declined: Story = {
   args: { kind: ToolKind.Run, verb: 'Run', target: 'psql $STAGING_URL -f backfill.sql', state: ToolState.Declined, meta: undefined },
+}
+
+/** Refused by the project's rules: the row says who, and why in a few words. */
+export const DeclinedByRules: Story = {
+  args: {
+    kind: ToolKind.Run,
+    verb: 'Run',
+    target: 'git pull -q 2>/dev/null; git log --oneline -5; grep -n "network\\|offline" docs/*.md | head',
+    state: ToolState.Declined,
+    why: 'Althar’s rules: git pull changes the repository; this role only reads',
+    meta: undefined,
+  },
 }
 
 /** A command written over several lines, such as a script fed in with a heredoc: the row shows its first line and says there is more. */
@@ -199,7 +211,8 @@ export const AllStates: Story = {
         { state: 'command, open', node: <Tool {...args} {...Command.args} /> },
         { state: 'edit, open', node: <Tool {...args} {...Edit.args} /> },
         { state: 'failed', node: <Tool {...args} {...Failed.args} /> },
-        { state: 'declined', node: <Tool {...args} {...Declined.args} /> },
+        { state: 'declined by you', node: <Tool {...args} {...Declined.args} /> },
+        { state: 'declined by rules', node: <Tool {...args} {...DeclinedByRules.args} /> },
         { state: 'cancelled', node: <Tool {...args} {...Cancelled.args} /> },
         { state: 'long command', node: <Tool {...args} {...LongCommand.args} /> },
         { state: 'live', node: <Tool {...args} {...Live.args} /> },

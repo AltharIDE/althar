@@ -989,6 +989,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     moveInLine: vi.fn(async () => {}),
     lineOldestFirst: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
+    tryAgain: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
