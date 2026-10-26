@@ -79,6 +79,7 @@ import { dropNote, editNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
+import { projectTracker } from './projectTracker'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { Busy } from './Busy'
@@ -324,6 +325,7 @@ export const handlers = Api.toLayer(
       account: { login: info.account.login, name: info.account.name },
       auth: info.auth,
       state: info.state,
+      workspace: info.workspace,
     })
 
     /**
@@ -646,6 +648,38 @@ export const handlers = Api.toLayer(
               yield* projects.setInk(projectId, ink, said.commandId)
             }),
           ),
+        ),
+      GetProjectTracker: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const [project] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            const bound = yield* projectTracker(projectId)
+            if (bound === null) return null
+            return {
+              connectionId: bound.connectionId,
+              container: bound.container,
+              gone: bound.gone === null ? null : { product: bound.product, ...bound.gone },
+            }
+          }),
+        ),
+      SetProjectTracker: ({ commandId, projectId, tracker }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.set_tracker', { projectId, tracker }, commandId)
+              yield* projects.setTracker(projectId, tracker, said.commandId)
+            }),
+          ),
+        ),
+      ListContainers: ({ connectionId }) =>
+        api(
+          Effect.gen(function* () {
+            const found = (yield* connections.trackers).find((one) => one.connectionId === connectionId)
+            if (found === undefined) return yield* new NotFound({ kind: 'connection', id: connectionId })
+            return yield* found.tracker.containers()
+          }),
         ),
       RemoveProject: ({ commandId, projectId }) =>
         once(
@@ -1126,6 +1160,7 @@ export const handlers = Api.toLayer(
                   tracker: info.tracker,
                   hostedUrl: info.hosted?.webUrl ?? null,
                   selfHosted: info.selfHosted,
+                  workspaces: info.workspaces === true,
                   browserSignIn: info.browserSignIn,
                   tokenNeeds: info.token.needs,
                   tokenPrefixes: info.token.prefixes,

@@ -63,7 +63,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `graph.ts` | A task's rounds of work for its Graph face (ADR-054), from its runs', steps' and tries' rows: each step where its last try stands and who made it, then what its plan still has to come; never stored |
 | `Api.ts` | The API of `@althar/contracts`, served over a port: handlers, and the change feed and streaming text as one `Watch` stream |
 | `Folders.ts` | Folders the person chose, by grant: the app's main process allows them, and the window opens them by grant |
-| `Skills.ts` | The skills a task's lead is given (ADR-059): the store's active set, laid out as read-only copies for the session's agent and handed over as its registry entry says; Althar's catalog installed as the runtime starts; installs from GitHub, their review, updates and roll-back, for the API |
+| `Skills.ts` | The skills a task's lead is given (ADR-062): the store's active set, laid out as read-only copies for the session's agent and handed over as its registry entry says; Althar's catalog installed as the runtime starts; installs from GitHub, their review, updates and roll-back, for the API |
 | `repositoryGuard.ts` | Before every push Althar makes for a task, holds back skill and OpenSpec files its own commits changed unless the project's Repository files switches allow them (ADR-060) |
 | `words.ts` | What went wrong, in the words the window shows |
 | `git.ts` | The git commands the runtime runs itself |

@@ -66,6 +66,7 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [056](056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md) | A finished task's folder goes after a wait that suits how it ended, and comes back when the task needs it |
 | [057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md) | A lead installs, runs the project, takes screenshots and runs checks again through Althar's tools, outside its sandbox; the coordinator takes screenshots too |
 | [058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md) | The coordinator is a trusted reader, in copies of its own, held by a sandbox where it has one |
-| [059](059-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |
+| [059](059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md) | A tracker's workspaces are connected side by side, and a project may be bound to one |
 | [060](060-skill-and-openspec-files-stay-off-the-repository.md) | Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them |
 | [061](061-git-over-ssh-in-the-flatpak-goes-through-the-device.md) | git over SSH in the Flatpak: Althar's own goes through the device's ssh, ssh in the sandbox trusts pinned code hosts, and nothing asks |
+| [062](062-skills-one-store-a-curated-catalog.md) | Skills are one store on the computer, from a curated catalog, given to each lead for its session |

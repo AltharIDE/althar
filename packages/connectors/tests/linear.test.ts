@@ -31,6 +31,8 @@ const issue = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+const organization = { name: 'Meridian', urlKey: 'meridian' }
+
 describe('Linear', () => {
   it('reads a state’s type as a category', () => {
     assert.deepStrictEqual(['triage', 'backlog', 'unstarted', 'started', 'completed', 'canceled', 'other'].map(categoryOf), [
@@ -46,16 +48,42 @@ describe('Linear', () => {
 
   it.effect('sends a personal key as it is, and an OAuth token as a bearer', () =>
     Effect.gen(function* () {
-      const viewer: Route = ['POST', URL, { json: { data: { viewer: { id: 'u1', name: 'You Person', displayName: 'you' } } } }]
+      const viewer: Route = [
+        'POST',
+        URL,
+        { json: { data: { viewer: { id: 'u1', name: 'You Person', displayName: 'you' }, organization } } },
+      ]
       const key = linear([viewer])
-      assert.deepStrictEqual(yield* key.tracker.account, { id: 'u1', login: 'you', name: 'You Person' })
+      assert.deepStrictEqual(yield* key.tracker.account, {
+        id: 'u1',
+        login: 'you',
+        name: 'You Person',
+        workspace: { key: 'meridian', name: 'Meridian' },
+      })
       assert.strictEqual(key.sent[0]?.headers.authorization, 'lin_api_k')
-      const oauth = linear([['POST', URL, { json: { data: { viewer: { id: 'u1', name: 'You Person' } } } }]], {
+      const oauth = linear([['POST', URL, { json: { data: { viewer: { id: 'u1', name: 'You Person' }, organization } } }]], {
         kind: 'bearer',
         token: 'oauth',
       })
       assert.strictEqual((yield* oauth.tracker.account).login, 'You Person')
       assert.strictEqual(oauth.sent[0]?.headers.authorization, 'Bearer oauth')
+    }),
+  )
+
+  it.effect('reads the one workspace a token reaches, by the key its links carry', () =>
+    Effect.gen(function* () {
+      const fnt = linear([
+        [
+          'POST',
+          URL,
+          { json: { data: { viewer: { id: 'u9', name: 'Mate', displayName: 'mate' }, organization: { name: 'FNT', urlKey: 'fnt' } } } },
+        ],
+      ])
+      assert.deepStrictEqual((yield* fnt.tracker.account).workspace, { key: 'fnt', name: 'FNT' })
+      assert.match(JSON.stringify(fnt.sent[0]?.body), /organization \{ name urlKey \}/)
+      // An answer without its workspace isn't one Althar can tell apart from another's.
+      const bare = linear([['POST', URL, { json: { data: { viewer: { id: 'u9', name: 'Mate' } } } }]])
+      assert.strictEqual((yield* Effect.flip(bare.tracker.account)).reason, 'invalid_response')
     }),
   )
 

@@ -30,6 +30,10 @@ export const keys = {
   /** A project's repositories, as this Mac has them: read again whenever the project changes. */
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
+  /** The tracker a project is bound to (ADR-059). */
+  projectTracker: (projectId: string) => ['projectTracker', projectId] as const,
+  /** Where issues can be filed on a tracker connected: its teams. */
+  containers: (connectionId: string) => ['containers', connectionId] as const,
   settings: ['settings'] as const,
   /** The skills store: read before the skills show, and again as a skill changes, in this window or another (feed.ts). */
   skills: ['skills'] as const,
@@ -120,6 +124,11 @@ export const reads = (client: Client) => ({
   repositories: (projectId: string) =>
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
+  projectTracker: (projectId: string) =>
+    queryOptions({ queryKey: keys.projectTracker(projectId), queryFn: () => client.getProjectTracker(projectId) }),
+  // Asked of the tracker itself, so kept a while: its teams change slowly.
+  containers: (connectionId: string) =>
+    queryOptions({ queryKey: keys.containers(connectionId), queryFn: () => client.listContainers(connectionId), staleTime: 60_000 }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
   skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.

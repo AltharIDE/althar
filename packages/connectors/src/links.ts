@@ -53,7 +53,14 @@ export const parseRemote = (remote: string): RemoteRef | null => {
 
 /** What a pasted link points at: an issue, or a change, on a product at a host. */
 export type LinkRef =
-  | { readonly kind: 'issue'; readonly product: Product; readonly host: string; readonly ref: string }
+  | {
+      readonly kind: 'issue'
+      readonly product: Product
+      readonly host: string
+      readonly ref: string
+      /** The workspace its link names, where a sign-in reaches only one (ADR-059): Linear's, in lower case. */
+      readonly workspace?: string
+    }
   | {
       readonly kind: 'change'
       readonly product: Product
@@ -111,7 +118,10 @@ export const parseLink = (link: string, hosts: KnownHosts = HOSTED): LinkRef | n
       // https://linear.app/<workspace>/issue/MER-231/<slug>
       const at = segments.indexOf('issue')
       const key = at === -1 ? undefined : segments[at + 1]
-      return key !== undefined && /^[A-Z][A-Z0-9]*-\d+$/i.test(key) ? { kind: 'issue', product, host, ref: key.toUpperCase() } : null
+      const workspace = at === 1 ? segments[0]?.toLowerCase() : undefined
+      return key !== undefined && /^[A-Z][A-Z0-9]*-\d+$/i.test(key)
+        ? { kind: 'issue', product, host, ref: key.toUpperCase(), ...(workspace === undefined ? {} : { workspace }) }
+        : null
     }
     case 'jira_cloud':
     case 'jira_dc': {

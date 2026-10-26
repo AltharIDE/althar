@@ -60,10 +60,10 @@ export class Secrets extends Context.Service<
     remove(name: string): Effect.Effect<void, SecretsUnavailable>
   }
 >()('@althar/runtime/Secrets') {
-  /** Secrets in memory, for tests. */
-  static readonly memory = (): Layer.Layer<Secrets> =>
+  /** Secrets in memory, for tests: kept for each runtime, or across several given the same map, as a keychain is across launches. */
+  static readonly memory = (shared?: Map<string, string>): Layer.Layer<Secrets> =>
     Layer.sync(Secrets, () => {
-      const kept = new Map<string, string>()
+      const kept = shared ?? new Map<string, string>()
       return Secrets.of({
         set: (name, value) => Effect.sync(() => void kept.set(name, value)),
         get: (name) => Effect.sync(() => kept.get(name) ?? null),

@@ -1,4 +1,4 @@
-# ADR-059: Skills are one store on the computer, from a curated catalog, given to each lead for its session
+# ADR-062: Skills are one store on the computer, from a curated catalog, given to each lead for its session
 
 - **Status:** Accepted
 - **Date:** 2026-10-18

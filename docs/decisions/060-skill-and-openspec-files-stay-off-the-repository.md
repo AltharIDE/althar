@@ -4,7 +4,7 @@
 - **Date:** 2026-10-18
 - **Owner:** Repository maintainers
 - **Context:** Althar gives its leads skills from a store outside the
-  repository ([ADR-059](059-skills-one-store-a-curated-catalog.md)), but an
+  repository ([ADR-062](062-skills-one-store-a-curated-catalog.md)), but an
   agent can still write `.claude/skills/…`, `.agents/skills/…`,
   `.opencode/skills/…` or `openspec/…` into the worktree, a skill can tell it
   to, and the agent commits by itself, where Althar can't see its staging.
