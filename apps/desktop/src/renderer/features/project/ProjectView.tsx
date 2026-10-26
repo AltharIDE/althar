@@ -542,6 +542,7 @@ export function ProjectView({
                         )}
                         threadId={coordinator.threadId}
                         session={session}
+                        {...(busy ? {} : { onTryAgain: () => void model.tryAgain() })}
                         card={(card) => <Card card={card} actions={actions} />}
                         draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                         automation={(card, itemId) => (

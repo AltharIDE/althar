@@ -297,6 +297,31 @@ export type ProjectSummary = typeof ProjectSummary.Type
 
 export const ProjectList = Schema.Struct({ cursor: Cursor, projects: Schema.Array(ProjectSummary) })
 
+/** Where issues are filed on a tracker, by its own id and its name: a Linear team, a Jira project, a Trello list, a repository. */
+export const TrackerContainer = Schema.Struct({
+  id: Schema.String,
+  /** A short name a person may type for it, where the tracker has one: a team's key (MER). */
+  key: Schema.NullOr(Schema.String),
+  name: Schema.String,
+})
+export type TrackerContainer = typeof TrackerContainer.Type
+
+/**
+ * The tracker a project is bound to (ADR-059): one connection, and where its
+ * issues are filed there, null to be asked. Its drafts go there unless
+ * another is named, its issues are listed from it alone, and a bare key is
+ * looked for there first.
+ */
+export const ProjectTracker = Schema.Struct({
+  connectionId: Schema.String,
+  container: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** Where it was bound to a connection removed since and not made again: its service and server, and the workspace it reached. */
+  gone: Schema.optional(
+    Schema.NullOr(Schema.Struct({ product: Schema.String, webUrl: Schema.String, workspace: Schema.NullOr(Schema.String) })),
+  ),
+})
+export type ProjectTracker = typeof ProjectTracker.Type
+
 /** What a repository is to its project. The runtime's vocabulary, said again here, as the contract stands alone. */
 export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
 export type RepositoryRole = typeof RepositoryRole.Type
@@ -530,6 +555,12 @@ export const ConnectionSummary = Schema.Struct({
   auth: Schema.Literals(['device_flow', 'pkce', 'token']),
   /** Ready, or its token stopped working and it needs signing in again. */
   state: Schema.Literals(['ready', 'reauth_required']),
+  /**
+   * The workspace its sign-in reaches, where it reaches only one (ADR-059):
+   * Linear's, by the key its links carry and its name. Null, or left out,
+   * where it reaches more, or isn't known yet.
+   */
+  workspace: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.String, name: Schema.String }))),
 })
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
@@ -549,6 +580,8 @@ export const ProductOption = Schema.Struct({
   hostedUrl: Schema.NullOr(Schema.String),
   /** An instance on a company's own server can be connected, by its address. */
   selfHosted: Schema.Boolean,
+  /** A sign-in reaches one of its workspaces, and another is connected beside it (ADR-059): Linear's. Left out for none. */
+  workspaces: Schema.optional(Schema.Boolean),
   /** The service's own sign-in, in the browser, is set up here; otherwise a pasted token. */
   browserSignIn: Schema.Boolean,
   /** What a pasted token goes with: the account's email, or the API key it was made for. */
@@ -966,6 +999,9 @@ export const ToolCallItem = Schema.Struct({
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
+    /** For a refused call: who refused it, and the reason they gave where they gave one. */
+    declinedBy: Schema.optional(Schema.Literals(['rules', 'coordinator', 'person'])),
+    declinedWhy: Schema.optional(Schema.String),
     /** The agent asking the person something: its question stands in the thread in its place. */
     asks: Schema.optional(Schema.Boolean),
     /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
@@ -1332,6 +1368,22 @@ export const HeldForLimit = Schema.Struct({
 export type HeldForLimit = typeof HeldForLimit.Type
 
 /**
+ * A step held for the connection (ADR-060): its agent, and its service by
+ * name; `offline` while the computer is offline or its service doesn't
+ * answer, when it carries on once it does; else when its service, which
+ * failed, is tried again, and what it said.
+ */
+export const HeldForConnection = Schema.Struct({
+  agentId: Schema.String,
+  service: Schema.String,
+  offline: Schema.Boolean,
+  /** When it is tried again; null while it waits for the connection. */
+  next: Schema.NullOr(Schema.String),
+  failure: Schema.NullOr(Schema.String),
+})
+export type HeldForConnection = typeof HeldForConnection.Type
+
+/**
  * A task as its card shows it, in the coordinator's thread and on the board:
  * where it stands, its plan, the issue it came from, its pull request, the
  * step it is on, what its lead last reported, who leads it.
@@ -1392,6 +1444,8 @@ export const TaskCard = Schema.Struct({
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(HeldForLimit),
+  /** The step is held for the connection: absent or null otherwise (ADR-060). */
+  reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
   /**
    * Ready, but its lead couldn't resolve the conflict its branch has with its
    * default branch, or fix the checks that failed on the merge Althar pushed,
@@ -1856,6 +1910,8 @@ export const StuckStep = Schema.Struct({
     'looping',
     'over_budget',
     'refused',
+    // Its agent's service kept failing while the computer was online (ADR-060).
+    'transient',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -1869,6 +1925,8 @@ export const StuckStep = Schema.Struct({
   tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
   /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
   limit: Schema.optional(LimitCall),
+  /** For a service that kept failing: its name. */
+  service: Schema.optional(Schema.String),
 })
 export type StuckStep = typeof StuckStep.Type
 
@@ -2084,6 +2142,8 @@ export const ThreadSnapshot = Schema.Struct({
     madeChangeAt: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
     waits: Schema.NullOr(HeldForLimit),
+    /** Its step held for the connection: absent or null otherwise (ADR-060). */
+    reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
     /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
@@ -2562,6 +2622,12 @@ export const Api = RpcGroup.make(
   command('RenameProject', { projectId: Schema.String, name: Schema.String }, Schema.Void),
   /** Draws a project's mark in another ink, wherever it shows. The drawing, which comes from its id, stays. */
   command('SetProjectInk', { projectId: Schema.String, ink: ProjectInk }, Schema.Void),
+  /** The tracker a project is bound to, through a connection still there; null where its issues' tracker is learned. */
+  call('GetProjectTracker', { projectId: Schema.String }, Schema.NullOr(ProjectTracker)),
+  /** Binds a project to a tracker, and where its issues are filed there, or, with null, leaves it to be learned again. */
+  command('SetProjectTracker', { projectId: Schema.String, tracker: Schema.NullOr(ProjectTracker) }, Schema.Void),
+  /** Where issues can be filed on a connected tracker: its teams, projects or lists, as it says them. */
+  call('ListContainers', { connectionId: Schema.String }, Schema.Array(TrackerContainer)),
   /**
    * Removes a project from Althar: its agents stop, its plans don't start and
    * its runs end. Its folders, its tasks' worktrees and their branches stay.
@@ -2846,6 +2912,11 @@ export const Api = RpcGroup.make(
   /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
   command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
+  /**
+   * Tries the thread's last turn again, where it failed, as on the
+   * connection: what the person said in it goes to its agent again (ADR-060).
+   */
+  command('TryAgain', { threadId: Schema.String }, Schema.Void),
   /**
    * Asks the thread's agent to compact its context, as a turn of its own after
    * what was said before; it never waits for a place among the agents at work.

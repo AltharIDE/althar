@@ -17,6 +17,7 @@ import {
   IssueDraftCard,
   ReviewDraftCard,
   type IssueSummary,
+  type HeldForConnection,
   type HeldForLimit,
   LimitCall,
   LimitChoice,
@@ -205,6 +206,9 @@ interface ItemRow {
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
   readonly rule?: string | null
+  /** For a refused tool call: why it was, and who decided: Althar's rules, the lead or the person. */
+  readonly reason?: string | null
+  readonly decidedBy?: 'rules' | 'coordinator' | 'person' | null
   /** For a question: its call's state and payload, where its answer is. */
   readonly questionState?: string | null
   readonly questionPayload?: string | null
@@ -444,6 +448,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             return path === '' ? [] : [{ path, ...(typeof line === 'number' ? { line } : {}) }]
           }),
           declined: row.decision === 'reject',
+          ...(row.decision === 'reject' && row.decidedBy ? { declinedBy: row.decidedBy } : {}),
+          ...(row.decision === 'reject' && row.reason ? { declinedWhy: row.reason } : {}),
           ...(row.asks === 1 ? { asks: true } : {}),
           ...(allowedBy === undefined ? {} : { allowedBy }),
           pictures: picturesOf(field(content, 'pictures')),
@@ -470,6 +476,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       const severity = text(content, 'severity')
       const description = text(content, 'description')
       const role = text(content, 'role')
+      // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
+      const title = text(content, 'title')
+      if (title === 'Resumed after a rejection.') return undefined
+      // Likewise the coordinator's receipt of a denial, kept by older threads.
+      if (title?.startsWith('Denied ') && description?.startsWith('By the coordinator:') && text(content, 'about') === 'permission')
+        return undefined
       return {
         ...base,
         kind: 'notice',
@@ -850,6 +862,13 @@ export class Queries extends Context.Service<
               (SELECT d.rule FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule,
+              (SELECT d.reason FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
+                WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS reason,
+              (SELECT CASE d.decided_by_actor_id WHEN ${instance.systemId} THEN 'rules' WHEN ${instance.coordinatorId} THEN 'coordinator' ELSE 'person' END
+                FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
+                WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decided_by,
               q.state AS question_state, q.payload AS question_payload,
               -- An agent's tool call that asks the person is the question it asks, which stands in its place.
               (x.tool_call_id IS NOT NULL) AS asks
@@ -1906,6 +1925,7 @@ export class Queries extends Context.Service<
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
+            ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
@@ -1942,6 +1962,22 @@ export class Queries extends Context.Service<
           ...(typeof account === 'string' ? { accountId: account } : {}),
           ...(why === 'waits' || why === 'nothing_free' || why === 'asked' ? { why } : {}),
           ...(Array.isArray(choices) ? { choices: choices.flatMap(choiceOf) } : {}),
+        }
+      }
+
+      /** What a step held for the connection waits for: its agent and service, and whether it waits for the connection or a try again. */
+      const reconnectsOf = (held: string | null): HeldForConnection | null => {
+        const output = held === null ? undefined : parse(held)
+        const agentId = text(output, 'heldFor')
+        if (agentId === '') return null
+        const offline = field(output, 'offline') === true
+        const failure = field(output, 'failure')
+        return {
+          agentId,
+          service: text(output, 'service') || agentId,
+          offline,
+          next: offline ? null : text(output, 'until') || null,
+          failure: typeof failure === 'string' ? failure : null,
         }
       }
 
@@ -2481,6 +2517,7 @@ export class Queries extends Context.Service<
               handedBack: card?.handedBack ?? null,
               madeChangeAt: head.madeChangeAt,
               waits: card?.waits ?? null,
+              ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),
               queued: card?.queued ?? null,
               ...(card?.inLine === true && card.place !== undefined ? { place: card.place } : {}),
               steps: card?.plan?.steps ?? [],

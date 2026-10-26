@@ -8,8 +8,8 @@ import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } fr
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { type Fetch, products } from '@althar/connectors'
-import type { FakeService } from '@althar/connectors/testing'
+import { type AdapterOptions, type Fetch, products } from '@althar/connectors'
+import { byToken, type FakeService } from '@althar/connectors/testing'
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -100,6 +100,9 @@ export const definition = (
   launch: () => ({ command: 'bun', args: [fakeAgentMain] }),
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
+  // Claude Code's runs on Anthropic's and Codex on OpenAI's, as the registry says; OpenCode on whichever the person picks.
+  ...(id === 'claude-code' ? { service: { name: 'Anthropic', url: 'https://api.anthropic.test' } } : {}),
+  ...(id === 'codex' ? { service: { name: 'OpenAI', url: 'https://api.openai.test' } } : {}),
   // Its status says the home it ran in: signed out, or paid per use, where the test names the agent or that home.
   signIn: {
     status: () => ({ command: 'sh', args: ['-c', 'printf %s "$FAKE_HOME"'] }),
@@ -184,8 +187,24 @@ export const fakeAgents = (
  * Code hosts and trackers for tests: GitHub and Linear, each answered by a
  * fake service, and sign-in endpoints answered by `fetch`, a stand-in.
  */
+/** Linear, through one fake, or through the workspace's a connection's token signs in to. */
+const linearOf = (linear: FakeService | Readonly<Record<string, FakeService>> | undefined) => {
+  if (linear === undefined) return { ...products.linear, make: () => ({}), access: null }
+  if ('product' in linear && typeof linear.product === 'string') {
+    const one = linear as FakeService
+    return { ...products.linear, make: () => ({ tracker: one }), access: one.access }
+  }
+  const routed = byToken(linear as Readonly<Record<string, FakeService>>)
+  return { ...products.linear, make: (options: AdapterOptions) => ({ tracker: routed.tracker(options) }), access: routed.access }
+}
+
 export const fakeConnectors = (
-  services: { readonly github?: FakeService; readonly linear?: FakeService; readonly trello?: FakeService },
+  services: {
+    readonly github?: FakeService
+    /** Linear's fake, or one for each workspace, by the token that signs in to it. */
+    readonly linear?: FakeService | Readonly<Record<string, FakeService>>
+    readonly trello?: FakeService
+  },
   more: {
     readonly fetch?: Fetch
     readonly clientIds?: Readonly<Record<string, string>>
@@ -202,11 +221,7 @@ export const fakeConnectors = (
           make: () => (services.github === undefined ? {} : { host: services.github, tracker: services.github }),
           access: services.github?.access ?? null,
         },
-        {
-          ...products.linear,
-          make: () => (services.linear === undefined ? {} : { tracker: services.linear }),
-          access: services.linear?.access ?? null,
-        },
+        linearOf(services.linear),
         {
           ...products.trello,
           make: () => (services.trello === undefined ? {} : { tracker: services.trello }),
@@ -260,12 +275,16 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
+    /** The keychain, kept across runtimes given the same one; else each its own. */
+    readonly keychain?: Map<string, string>
     /** How a screenshot is taken, where a test takes one; without, none can be. */
     readonly screenshot?: RuntimeOptions['screenshot']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
+    /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
+    readonly connectivity?: RuntimeOptions['connectivity']
   } = {},
 ) =>
   Runtime.layer({
@@ -279,7 +298,7 @@ export const runtime = (
     deviceName: 'Test Mac',
     agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure),
     countdown: more.countdown ?? Duration.millis(300),
-    secrets: Secrets.memory(),
+    secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
     checksAppear: more.checksAppear ?? Duration.zero,
@@ -297,6 +316,8 @@ export const runtime = (
     busy: { machine: ROOMY, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
+    // No test reaches a real service: one asked about answers, as it would online, unless the test says.
+    connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },
   })
 
 /** A disk with half of its 1 TB free: room enough that no finished task's folder goes for want of space. */

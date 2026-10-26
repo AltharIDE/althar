@@ -47,8 +47,15 @@ describe('a pasted link', () => {
       product: 'linear',
       host: 'linear.app',
       ref: 'MER-231',
+      workspace: 'meridian',
     })
     expect(parseLink('https://linear.app/meridian/project/payments')).toBeNull()
+  })
+
+  it('to a Linear issue, keeping the workspace its link names, in lower case', () => {
+    expect(parseLink('https://linear.app/FNT/issue/FNT-12')).toMatchObject({ ref: 'FNT-12', workspace: 'fnt' })
+    // A link without a workspace before `issue` names none.
+    expect(parseLink('https://linear.app/issue/FNT-12')).toEqual({ kind: 'issue', product: 'linear', host: 'linear.app', ref: 'FNT-12' })
   })
 
   it('to GitLab, with nested groups', () => {

@@ -547,6 +547,15 @@ export class Sessions extends Context.Service<
     startLast(
       threadId: string,
     ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
+    /**
+     * Tries the thread's last turn again, as the person asked, where it
+     * failed (ADR-060): what they said in it goes again, with what waits
+     * since, to the agent on the thread, started again where it went. False,
+     * and nothing done, where its last turn didn't fail.
+     */
+    tryAgain(
+      threadId: string,
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
@@ -1443,6 +1452,8 @@ export class Sessions extends Context.Service<
           const errorClass = errorClassOf(failure, Exit.isFailure(streamed)) ?? ended?.failure?.failure
           // The agent refused the prompt: nothing was delivered, so the input goes back in the queue.
           const refused = errorClass === 'turn_in_progress'
+          // Out of usage, or its service out of reach (ADR-060): nothing more goes to it until what carries the work on says so.
+          const held = errorClass === 'usage_limit' || errorClass === 'transient'
           const state = errorClass !== undefined ? 'failed' : ended?.stopReason === 'cancelled' ? 'interrupted' : 'completed'
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -1462,9 +1473,9 @@ export class Sessions extends Context.Service<
                 payload: { stopReason: ended?.stopReason, errorClass },
                 actorId: instance.systemId,
               })
-              // Refused, nothing was delivered. Out of usage, what the person said waits for the agent that carries on;
-              // Althar's own prompts are given again by what carries the work on.
-              const back = refused ? inputs : errorClass === 'usage_limit' ? inputs.filter((input) => input.author === 'person') : []
+              // Refused, nothing was delivered. Out of usage, or its service out of reach, what the person said waits for the
+              // agent that carries on; Althar's own prompts are given again by what carries the work on.
+              const back = refused ? inputs : held ? inputs.filter((input) => input.author === 'person') : []
               for (const input of back) {
                 const inputRevision = yield* change('user_inputs', input.id, { state: 'queued' })
                 yield* fact({
@@ -1480,14 +1491,19 @@ export class Sessions extends Context.Service<
           )
           // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
           // A compaction left the brief where it was.
-          if ((refused || errorClass === 'usage_limit') && !compacting) running.brief = brief
+          if ((refused || held) && !compacting) running.brief = brief
           if (refused) {
             // Tried again shortly, rather than straight away.
             yield* Effect.forkIn(Effect.delay(Queue.offer(running.wake, undefined), Duration.seconds(1)), running.scope)
           }
-          // A prompt the agent failed ends its turn with the agent's error, or the person waits on an answer that isn't coming.
-          // A usage limit is said by what carries the work on.
-          if (Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' && errorClass !== 'usage_limit')
+          // What the agent said went wrong, for what carries the work on to say.
+          const said = Option.isSome(failure) && 'message' in failure.value ? failure.value.message : ended?.failure?.message
+          // A prompt the agent failed ends its turn with the agent's error, or the person waits on an answer that isn't coming:
+          // thrown, or on the prompt's response, as Claude Code and Codex end a turn on a lost connection (ADR-060).
+          // A usage limit is said by what carries the work on, as a step's lost connection is; a refused prompt is tried again.
+          const failed = (Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed') || ended?.failure !== undefined
+          const saidElsewhere = errorClass === 'usage_limit' || (errorClass === 'transient' && thread.role !== 'coordinator')
+          if (failed && !saidElsewhere && !refused)
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
               'notice',
@@ -1495,7 +1511,7 @@ export class Sessions extends Context.Service<
                 source: 'agent',
                 severity: 'error',
                 title: `${running.entry.definition.name} couldn't answer.`,
-                description: failure.value.message,
+                ...(typeof said === 'string' && said !== '' ? { description: said } : {}),
                 failure: errorClass,
               },
             )
@@ -1528,10 +1544,11 @@ export class Sessions extends Context.Service<
             turnId,
             state,
             ...(errorClass === undefined ? {} : { errorClass }),
+            ...(errorClass === undefined || typeof said !== 'string' || said === '' ? {} : { failure: said }),
             ...(ended === undefined ? {} : { stopReason: ended.stopReason }),
           })
-          // Out of usage, nothing more goes to it until what carries the work on says so.
-          return !refused && errorClass !== 'usage_limit'
+          // Out of usage, or out of reach, nothing more goes to it until what carries the work on says so.
+          return !refused && !held
         })
 
       /** A usage limit belongs to the account the session runs on (docs/architecture/03, ADR-012), not the agent. */
@@ -2858,9 +2875,46 @@ export class Sessions extends Context.Service<
           return true
         })
 
+      const tryAgain = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ id: string; state: string; projectId: ProjectId }>`
+            SELECT d.id, d.state, t.project_id FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
+            WHERE d.thread_id = ${threadId} ORDER BY d.requested_at DESC, d.rowid DESC LIMIT 1`
+          if (last?.state !== 'failed') return false
+          // What the person said in it, unless it waits already, as after a usage limit or a lost connection.
+          const said = yield* sql<{ id: string }>`
+            SELECT i.id FROM turn_delivery_inputs di JOIN user_inputs i ON i.id = di.user_input_id
+            JOIN actors a ON a.id = i.author_actor_id
+            WHERE di.delivery_id = ${last.id} AND a.kind = 'person' AND i.state <> 'queued'`
+          yield* sql.withTransaction(
+            Effect.forEach(
+              said,
+              (input) =>
+                Effect.gen(function* () {
+                  const revision = yield* change('user_inputs', input.id, { state: 'queued' })
+                  yield* fact({
+                    projectId: last.projectId,
+                    aggregateType: 'user_input',
+                    aggregateId: input.id,
+                    revision,
+                    type: 'user_input.requeued',
+                    actorId: instance.personId,
+                  })
+                }),
+              { discard: true },
+            ),
+          )
+          const running = threads.get(threadId)
+          if (running !== undefined && !running.stopping) yield* Queue.offer(running.wake, undefined)
+          else yield* startLast(threadId)
+          return true
+        })
+
       return Sessions.of({
         start: (input) => run(start(input)),
         startLast: (threadId) => run(startLast(threadId)),
+        tryAgain: (threadId) => run(tryAgain(threadId)),
         send: (input) => run(send(input)),
         compact: (input) =>
           run(

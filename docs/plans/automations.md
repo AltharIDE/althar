@@ -663,7 +663,7 @@ version waits on either.
    release notes, the nightly bump, the weekly polish and flaky sweeps, and
    the morning review, a schedule with a pull request query.
 
-   **Built** ([ADR-059](../decisions/059-automations-start-ordinary-tasks-on-a-schedule.md)):
+   **Built** ([ADR-061](../decisions/061-automations-start-ordinary-tasks-on-a-schedule.md)):
    schedules (days at a time, or hourly), the three tables, the clock with
    catching up once and missing past the window, one place after the
    person's work for every step, a run's minutes over its turns, the skips

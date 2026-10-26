@@ -1040,7 +1040,7 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Conversation')).toBeTruthy()
     expect(
       screen.getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       ),
     ).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
@@ -1476,7 +1476,7 @@ describe('each kind’s card', () => {
     expect(stuck.getByText('Stuck')).toBeTruthy()
     expect(
       stuck.getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       ),
     ).toBeTruthy()
     // Merged, with commits after it: its branch, with what is in no pull request yet.

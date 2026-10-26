@@ -9,9 +9,11 @@ import { LimitCall, limitText } from './LimitCall'
 
 /*
  * A step of the task's plan that needs the person (docs/architecture/05):
- * what went wrong, what Althar tried, and the ways on. The lead's steps
- * can be told what to do, handed to another agent, or abandoned; a review
- * can be run again, on the same agent or another, or gone on without.
+ * what went wrong, what Althar tried, and the ways on. Every one can be
+ * tried again on the agent it was on, in the session it was in: first,
+ * where the connection or the session failed rather than the work (ADR-060).
+ * The lead's steps can also be told what to do, handed to another agent, or
+ * abandoned; a review can be run again on another agent, or gone on without.
  */
 
 export const text = {
@@ -23,7 +25,9 @@ export const text = {
       case 'no_report':
         return `${agent} stopped twice without saying whether the step is done, even after Althar reminded it. ${review ? 'Review again, or skip the review.' : 'Tell it what to do next, or hand the step to another agent.'}`
       case 'session_ended':
-        return `${agent} closed before finishing the step. This is usually harmless: ${review ? 'review again, or skip the review.' : 'tell it to carry on, or hand the step to another agent.'}`
+        return `${agent} closed before finishing the step. This is usually harmless: ${review ? 'try again, or skip the review.' : 'try again, or hand the step to another agent.'}`
+      case 'transient':
+        return `${stuck.service ?? agent}'s service kept failing${stuck.detail === null ? '.' : `: ${stuck.detail.replace(/\.?$/, '.')}`} ${review ? 'Try again, or review with another agent.' : 'Try again, or hand the step to another agent.'}`
       case 'failed_to_start':
         return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`} Check that it's installed and signed in, or ${review ? 'review with another agent.' : 'hand the step to another agent.'}`
       case 'restarted':
@@ -69,13 +73,18 @@ export const text = {
     abandonedNote: 'the task is ready on its branch',
   },
   reminded: { what: 'Reminded it to say when the step is done', result: 'it stopped again without saying' },
+  /** Its service tried again after growing pauses (ADR-060): one line for all the tries. */
+  waited: { what: 'Tried again 3 times, waiting longer each time', result: 'it failed each time', tries: 3 },
   /** An agent out of usage: told nothing, since it would hit the same limit; handed on, or tried again once it is back. */
   out: {
     again: (agent: string) => `Try ${agent} again`,
     tryingAgain: (agent: string) => `Trying ${agent} again`,
   },
   review: {
-    retry: 'Review again',
+    /** Its try again: the review again, on the reviewer it had. */
+    again: 'Review again',
+    tryingAgain: 'Reviewing again',
+    retry: 'Review with another agent',
     retryLabel: 'Review with',
     retried: (agent: string) => `Reviewing with ${agent}`,
     retriedNote: 'a new round starts',
@@ -138,14 +147,19 @@ function StuckCard({
   const tried: ReadonlyArray<StuckAttempt> =
     stuck.why === 'no_report'
       ? [{ id: 'reminded', ...text.reminded }]
-      : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))
+      : stuck.why === 'transient'
+        ? [{ id: 'waited', what: text.waited.what, result: text.waited.result }]
+        : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))
   const review = stuck.step === 'review'
-  // A review can run again on the agent it had; a lead's step goes to another.
-  const others = agents.filter((candidate) => review || candidate.id !== stuck.agentId)
+  // Handed on, a step goes to another agent: trying again is the agent it had.
+  const others = agents.filter((candidate) => stuck.agentId === null || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
   const out = stuck.why === 'usage_limit'
-  // Gone quiet, long at it, or stopped by restarts, a lead's agent can start again, or carry on; a review runs again by its own button.
-  const again = stuck.why === 'stalled' || stuck.why === 'over_budget' || stuck.why === 'restarted' ? text.again[stuck.why] : undefined
+  // Gone quiet, long at it, or stopped by restarts, a lead's agent starts again, or carries on, in its own words; any other tries again.
+  const again =
+    !review && (stuck.why === 'stalled' || stuck.why === 'over_budget' || stuck.why === 'restarted') ? text.again[stuck.why] : undefined
+  // Where the connection or the session failed rather than the work, trying again is the way on.
+  const againFirst = stuck.why === 'transient' || stuck.why === 'session_ended'
   // Opening the pull request is Althar's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')
     return (
@@ -164,21 +178,23 @@ function StuckCard({
       step={text.step[stuck.step]}
       what={text.what(stuck, agent)}
       tried={tried}
+      {...(stuck.why === 'transient' ? { tries: text.waited.tries } : {})}
       agents={others.filter((candidate) => !out || candidate.id !== stuck.agentId).map((candidate) => ({ model: named(candidate.id) }))}
       {...(review || out ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
-      {...((out || (again !== undefined && !review)) && stuck.agentId !== null
-        ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) }
-        : {})}
+      {...(stuck.agentId !== null ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) } : {})}
+      againFirst={againFirst}
       onRetry={(model) => onAnswer(request.id, { kind: 'retry', agentId: model.runtime })}
       onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
       {...(onReport === undefined ? {} : { onReport: () => onReport(text.step[stuck.step]) })}
       {...(out
         ? { text: { again: text.out.again(agent), tryingAgain: text.out.tryingAgain(agent) } }
-        : again !== undefined && !review
+        : again !== undefined
           ? { text: { again: again.again(agent), tryingAgain: again.tryingAgain(agent) } }
           : review
             ? {
                 text: {
+                  again: text.review.again,
+                  tryingAgain: text.review.tryingAgain,
                   retry: text.review.retry,
                   retryLabel: text.review.retryLabel,
                   retried: text.review.retried,

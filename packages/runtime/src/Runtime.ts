@@ -9,6 +9,7 @@ import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Connections } from './Connections'
+import { Connectivity } from './Connectivity'
 import { Installs } from './Installs'
 import { Instance } from './Instance'
 import { IssueChanges } from './IssueChanges'
@@ -82,9 +83,11 @@ export const layer = (options: RuntimeLayerOptions) => {
   )
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
+  // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
+  const connected = Connectivity.layer.pipe(Layer.provideMerge(base))
   const able = Layer.mergeAll(Limits.layer, Models.layer).pipe(
     Layer.provideMerge(
-      SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(base)))))),
+      SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(connected)))))),
     ),
   )
   const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))

@@ -1,4 +1,4 @@
-# ADR-059: Automations start ordinary tasks on a schedule, on this computer
+# ADR-061: Automations start ordinary tasks on a schedule, on this computer
 
 - **Status:** Accepted
 - **Date:** 2026-10-21

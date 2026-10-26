@@ -66,6 +66,8 @@ const LONG_COMMAND = 72
 
 export const text = {
   thought: 'Thought',
+  /** Under a last turn that failed, as on the connection: what the person said in it goes again. */
+  tryAgain: 'Try again',
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
     StepResult['step'],
@@ -174,6 +176,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
       verb={part.verb}
       target={part.target}
       state={part.state}
+      {...(part.why === undefined ? {} : { why: part.why })}
       {...(part.command === null ? {} : { copy: part.command })}
       {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}
       open={open}
@@ -397,6 +400,7 @@ export function ThreadBlocks({
   review,
   automation,
   queued,
+  onTryAgain,
   onPassOn,
   onAnswerQuestion,
   focusQuestion,
@@ -435,6 +439,8 @@ export function ThreadBlocks({
   automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
+  /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
+  onTryAgain?: () => void
 }) {
   const named = useModelNames()
   // What each document was last changed by, so it is read again after an edit.
@@ -445,6 +451,10 @@ export function ThreadBlocks({
   // A turn of the thread's own agent, on its session's model and account; another's, on its own model.
   const turnModel = (agentId: string | null) =>
     session != null && agentId === session.agentId ? named(agentId, session.model, session.account) : named(agentId)
+  // The thread's last turn, where an error ended it: it can be tried again. What the person said in it may wait after it.
+  const last = blocks.findLast((block) => block.kind === 'turn' || block.kind === 'waiting')
+  const ending = last?.kind === 'turn' && !last.live ? last.said.at(-1) : undefined
+  const failed = ending?.kind === 'notice' && ending.tone === 'error' ? last?.id : undefined
   return blocks.map((block) => {
     switch (block.kind) {
       case 'you':
@@ -521,6 +531,7 @@ export function ThreadBlocks({
             {block.said.map((part) => (
               <PartView key={part.id} part={part} threadId={threadId} />
             ))}
+            {block.id === failed && onTryAgain !== undefined && <LinkButton onClick={onTryAgain}>{text.tryAgain}</LinkButton>}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>
         )

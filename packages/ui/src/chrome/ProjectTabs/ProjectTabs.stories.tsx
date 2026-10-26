@@ -7,6 +7,7 @@ import { Room } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
+import { Offline } from '../Offline/Offline'
 import { RoomSwitch } from '../RoomSwitch/RoomSwitch'
 import { WorkStatus } from '../WorkStatus/WorkStatus'
 import { type ProjectTab, ProjectTabs, type ProjectTabsProps } from './ProjectTabs'
@@ -43,13 +44,17 @@ const TWENTY: ProjectTab[] = Array.from({ length: 20 }, (_, i) => {
   return { ...base, id, seed: id, name: i < ALL.length ? base.name : `${base.name} ${i}`, running: i % 5 === 1, yours: i % 7 === 3 ? 1 : 0 }
 })
 
-/* The bar at the top of a window, with the screen's own controls at its end, as the app puts them; with `withSettings`, Althar's settings open in their tab. */
+/*
+ * The bar at the top of a window, with the screen's own controls at its end, as the app puts them; with `withSettings`,
+ * Althar's settings open in their tab; `offline`, the computer offline, as the app's line says before them.
+ */
 function Window({
   initial,
   current: start = 'meridian',
   withSettings = false,
+  offline = false,
   ...props
-}: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[]; withSettings?: boolean }) {
+}: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[]; withSettings?: boolean; offline?: boolean }) {
   const [open, setOpen] = useState<readonly ProjectTab[]>(initial ?? ALL.slice(0, 3))
   const [current, setCurrent] = useState<string | null>(start)
   const [settings, setSettings] = useState<'none' | 'open' | 'current'>(withSettings ? 'current' : 'none')
@@ -97,6 +102,7 @@ function Window({
         end={
           shown ? (
             <>
+              {offline && <Offline />}
               <RoomSwitch value={Room.Talk} onChange={fn()} />
               {shown.yours > 0 && <WorkStatus yours={shown.yours} onYours={fn()} />}
               <ChromeButton icon="plus" label="New task" onClick={fn()} />
@@ -123,6 +129,8 @@ type Story = StoryObj<typeof meta>
 export const InAProject: Story = {}
 /** The home has the window; its tab counts what waits across every project. */
 export const AtHome: Story = { args: { current: null } }
+/** The computer is offline: one quiet line for the whole app, before the screen's own controls. */
+export const WhileOffline: Story = { args: { offline: true } }
 /** More open than fit: each tab gives way down to its mark and a few letters, and the tabs scroll. */
 export const ManyOpen: Story = { args: { initial: MANY, current: 'billing-web' } }
 /** Twenty open: every tab gives way down to its mark, and the tabs scroll, by wheel too. */

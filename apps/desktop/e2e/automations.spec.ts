@@ -8,7 +8,7 @@ import { repository } from '../tests/repository'
 import { launch, openFirstProject, say } from './support'
 
 /*
- * Automations (ADR-059), the person's way through: asking the coordinator
+ * Automations (ADR-061), the person's way through: asking the coordinator
  * for one, which proposes it on a card; turning it on there; finding it on
  * the project's Automations view, and on its own page, with its limits and
  * its runs; making one by hand; running it now, its run on its page until

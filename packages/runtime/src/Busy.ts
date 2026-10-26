@@ -8,6 +8,7 @@ import { type AtOnceDefault, atOnceFor, clamp } from './atOnce'
 import { automatedTasks } from './automated'
 import { touchTask } from './cards'
 import { RuntimeConfig } from './Config'
+import { Connectivity } from './Connectivity'
 import { Live } from './Live'
 import { treeMembers, workedBetween } from './processTree'
 import { timestamp } from './records'
@@ -66,6 +67,11 @@ import { Sessions } from './Sessions'
  * seconds while anything waits. One agent's work follows on in its own place:
  * a lead at work on a step takes no other for its turns.
  *
+ * While the computer is offline, nothing but what the person did takes a
+ * place it hasn't already (ADR-060): work waiting in Up next, or the next
+ * step of a task, would only start into a dead connection and fail, so it
+ * waits until the computer is back, when the queue is looked at again.
+ *
  * How many may be at once is the person's number, kept in the profile's
  * settings once they change it; otherwise the default this machine's cores
  * and memory give, worked out at each launch (atOnce.ts).
@@ -87,7 +93,7 @@ export interface AtOnce {
 /**
  * Where work that waits for a place stands (ADR-037): what the person did,
  * which starts at once; the work of a task already under way; new work; and
- * last, an automation's run, every step of it (ADR-059).
+ * last, an automation's run, every step of it (ADR-061).
  */
 export type Order = 'person' | 'underway' | 'new' | 'automation'
 
@@ -170,6 +176,9 @@ export interface Line {
 /** What a time a millisecond later is, as the store keeps times. */
 const after = (at: string) => new Date(Date.parse(at) + 1).toISOString()
 
+/** What Busy reads: the store, the sessions, what happens, its settings, and whether the computer is online. */
+type Reads = SqlClient.SqlClient | Sessions | Live | Ledger | RuntimeConfig | Connectivity
+
 export class Busy extends Context.Service<
   Busy,
   {
@@ -217,7 +226,7 @@ export class Busy extends Context.Service<
     readonly wake: Effect.Effect<void>
   }
 >()('@althar/runtime/Busy') {
-  static readonly layer: Layer.Layer<Busy, never, SqlClient.SqlClient | Sessions | Live | Ledger | RuntimeConfig> = Layer.effect(
+  static readonly layer: Layer.Layer<Busy, never, Reads> = Layer.effect(
     Busy,
     Effect.gen(function* () {
       const context = yield* Effect.context<SqlClient.SqlClient | Ledger>()
@@ -225,6 +234,7 @@ export class Busy extends Context.Service<
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const live = yield* Live
+      const connectivity = yield* Connectivity
       const options = (yield* RuntimeConfig).busy ?? {}
       const every = options.every ?? Duration.seconds(5)
       const sampleEvery = options.sample ?? Duration.seconds(2)
@@ -444,7 +454,7 @@ export class Busy extends Context.Service<
         return all
           .map((waiter): Ranked => {
             const inLine = waiter.order !== 'person' && waiter.review !== true && line.has(waiter.taskId)
-            // An automation's run waits after everything else, in the line or not (ADR-059).
+            // An automation's run waits after everything else, in the line or not (ADR-061).
             const order = orderIn(waiter.order, waiter.taskId, tasks)
             return {
               waiter,
@@ -478,7 +488,10 @@ export class Busy extends Context.Service<
           const key = keyOf(agent.taskId, agent.review)
           const tasks = yield* automated
           const order = orderIn(asked, agent.taskId, tasks)
-          if (order === 'person' || at.has(key) || keptPlace(agent.taskId, holders) !== undefined) return true
+          if (order === 'person' || at.has(key)) return true
+          // Offline, it waits for the computer to be back rather than start into a dead connection.
+          if (!(yield* connectivity.online)) return false
+          if (keptPlace(agent.taskId, holders) !== undefined) return true
           if (at.size >= (yield* atOnce).count) return false
           // An automation's run takes a place only while fewer automations than it may have are at work.
           if (order === 'automation' && automationsAt(at, tasks) >= automationsAtOnce) return false
@@ -511,6 +524,7 @@ export class Busy extends Context.Service<
           const { at: busy, holders } = yield* atWork
           const most = (yield* atOnce).count
           const tasks = yield* automated
+          const online = yield* connectivity.online
           const left: Array<string> = []
           // The tasks whose place kept by what they left running is taken in this look: by one of their work only.
           const taken = new Set<string>()
@@ -518,6 +532,11 @@ export class Busy extends Context.Service<
             const key = waiterKey(waiter)
             // On its way already: it is counted, and not started twice.
             if (starting.has(key)) continue
+            // Offline, only what the person did starts, and what follows on for an agent at work.
+            if (!online && waiter.order !== 'person' && !busy.has(key)) {
+              left.push(waiter.taskId)
+              continue
+            }
             const kept = taken.has(waiter.taskId) ? undefined : keptPlace(waiter.taskId, holders)
             // Owed its task's place, which its agent has freed since: it takes that place, though others hold every one.
             const back = owed.has(waiter.taskId) && !holders.some((holder) => holder.taskId === waiter.taskId)
@@ -624,7 +643,10 @@ export class Busy extends Context.Service<
                   said = ''
                   return wake
                 })
-              : event._tag === 'TurnEnded' || event._tag === 'AttentionNeeded' || event._tag === 'AttentionClosed'
+              : event._tag === 'TurnEnded' ||
+                  event._tag === 'AttentionNeeded' ||
+                  event._tag === 'AttentionClosed' ||
+                  event._tag === 'Connection'
                 ? wake
                 : Effect.void,
         ),

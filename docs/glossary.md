@@ -25,7 +25,10 @@ say the right. When something new needs a name on screen, add it here first.
 | Account | `AgentAccount`, its home | One sign-in of an agent, kept in a folder of its own. The agent's usual sign-in is its first account; the person can add more, or bring in folders a switcher made. Named by the person ("work"), it shows after the agent's name: "Codex (work)". |
 | Signed in as | `ProviderPrincipal` | Who the agent says you are, for an account. The agent keeps its own sign-in; Althar never holds the credential. |
 | Sign in | vendor login, `auth_required` | Opens the agent's own sign-in, for an account. |
-| Out of usage | usage limit, `transient_provider` | The account has used its allowance until a reset. Depending on the project rules, the task is Paused, moves to another of the agent's accounts, then to another agent, or waits on the person, who moves it to a model that is free or waits for the reset. A call for it has the kind Out of usage. |
+| Out of usage | usage limit (`usage_limit`) | The account has used its allowance until a reset. Depending on the project rules, the task is Paused, moves to another of the agent's accounts, then to another agent, or waits on the person, who moves it to a model that is free or waits for the reset. A call for it has the kind Out of usage. |
+| Waiting for the connection | a step held for `agent_unavailable`, after a `transient` failure (ADR-060) | The step lost its connection, offline or its agent's service out of reach: the task is Paused, and carries on by itself once the computer is back and the service answers. While the service answers with errors, it says when it tries again instead; after a few tries, Stuck. Not Stuck, and no reminder is spent. |
+| Offline | the app's reading of the network, `Connectivity` | One word in the window's bar while the computer is offline. Work under way carries on once it is back; new work waits rather than start. |
+| Try again | the person's answer `retry`, on the agent the step was on; `TryAgain` in a chat | On every Stuck call: runs the step's turn again in the session it was in. First where the connection or the session failed. A review's is Review again. Under a coordinator's turn that ended in an error, it sends what the person said again. |
 
 ## Who does the work
 
@@ -101,7 +104,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 
 | On screen | In the model | What it is |
 |---|---|---|
-| Automations | `Room.Automations`, `automations` (ADR-059) | A project's view between Board and Settings: the work that starts by itself on a schedule, on this computer while Althar is open, as cards, the one that paused itself first, with a violet dot on the view's name. A card opens its automation's own page there. |
+| Automations | `Room.Automations`, `automations` (ADR-061) | A project's view between Board and Settings: the work that starts by itself on a schedule, on this computer while Althar is open, as cards, the one that paused itself first, with a violet dot on the view's name. A card opens its automation's own page there. |
 | Automation | an automation and its definitions | A kept request and a schedule: what each run is asked, its lead, what it ends in (nothing outside this computer, a draft or ready pull request, or a review of each new pull request), when it runs (days at a time where the computer is, or every hour), and its limits. Made by asking the coordinator, on its card, or with New automation. |
 | Run, Runs, Run now | an automation's occurrence, and the task it started | One time an automation ran, or didn't: made something, nothing to do, failed, missed while the computer slept, or skipped and why. Its page lists them, its card shows the last seven as marks. The one place "run" is said on screen. Run now runs it once, with every limit a run has. |
 | Try it once now | `RunAutomationNow` on a proposed automation | On an automation not turned on yet: one run as it would run. |

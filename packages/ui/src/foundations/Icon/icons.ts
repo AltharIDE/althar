@@ -53,6 +53,7 @@ import {
   TaskList,
   Terminal,
   Tools,
+  WifiOff,
   Xmark,
 } from 'iconoir-react'
 import { type ComponentType, createElement, type SVGProps } from 'react'
@@ -123,6 +124,8 @@ export const ICONS = {
   move: PageRight,
   tool: Tools,
   globe: Globe,
+  /** The computer is offline. */
+  offline: WifiOff,
   /** An MCP server. */
   plug: ServerConnection,
   agents: Community,

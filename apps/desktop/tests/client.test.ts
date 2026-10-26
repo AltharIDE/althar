@@ -284,6 +284,7 @@ describe('the client', () => {
             commands.push(commandId)
             return refuse()
           },
+          TryAgain: () => Effect.die('unused'),
           StopSession: () => Effect.die('unused'),
           StopTask: () => Effect.die('unused'),
           SetTaskResolveConflicts: () => Effect.die('unused'),
@@ -334,6 +335,9 @@ describe('the client', () => {
           GetVocabulary: () => Effect.die('unused'),
           RenameProject: () => Effect.die('unused'),
           SetProjectInk: () => Effect.die('unused'),
+          GetProjectTracker: () => Effect.die('unused'),
+          SetProjectTracker: () => Effect.die('unused'),
+          ListContainers: () => Effect.die('unused'),
           RemoveProject: () => Effect.die('unused'),
           GetRepositories: () => Effect.die('unused'),
           AddRepositories: () => Effect.die('unused'),

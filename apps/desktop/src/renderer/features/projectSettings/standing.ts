@@ -19,8 +19,8 @@ export type Standing =
  * Althar's standing with a tracker. Where its issues name the connections
  * they are read and moved through, by those alone, as its issues go on
  * through them whoever else is signed in there: one signed out is, and one
- * removed leaves them not connected, as a connection made again is a new
- * one they don't go through. Where they name none, by its server, as an
+ * removed leaves them not connected, until the same account or workspace is
+ * connected again, which they then go through. Where they name none, by its server, as an
  * issue is read next: a connection to another server of the same product
  * doesn't count.
  */
