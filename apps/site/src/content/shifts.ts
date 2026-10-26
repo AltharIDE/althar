@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -55,6 +55,15 @@ export interface Upcoming extends Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'claude-api-sampling-removed',
+    date: '2026-10-21',
+    kind: ShiftKind.Tools,
+    who: 'Anthropic',
+    title: 'Claude API 2026-10-21 rejects temperature, top_p and top_k',
+    what: 'Sending any of them returns a 400, even at the default. The new major SDK and CLI releases use this version, so upgrading breaks code that still sets them.',
+    source: { name: 'Claude Platform docs', url: 'https://platform.claude.com/docs/en/api/migration-2026-10-21' },
+  },
   {
     id: 'cursor-new-plans',
     date: '2026-10-18',
