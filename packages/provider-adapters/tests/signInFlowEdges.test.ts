@@ -210,6 +210,60 @@ describe('signing in inside Althar, when it goes otherwise', () => {
     expect(seen.map((env) => env.CLAUDE_CONFIG_DIR)).toEqual(['/accounts/work/.claude', '/accounts/work/.claude'])
   })
 
+  it('opens no page and says nothing for one the agent prints after a cancel, while it has a moment to stop', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-sign-in-'))
+    folders.push(folder)
+    const asked = join(folder, 'asked')
+    const printed = join(folder, 'printed')
+    const server = `
+const fs = require('node:fs')
+let buffer = ''
+const say = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
+process.stdin.on('data', (data) => {
+  buffer += data
+  for (let at = buffer.indexOf('\\n'); at >= 0; at = buffer.indexOf('\\n')) {
+    const message = JSON.parse(buffer.slice(0, at))
+    buffer = buffer.slice(at + 1)
+    if (message.method === 'initialize') say({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: 1 } })
+    if (message.method === 'authenticate') {
+      fs.writeFileSync(${JSON.stringify(asked)}, '')
+      setTimeout(() => {
+        process.stderr.write('Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/v2/auth?state=s3\\n')
+        fs.writeFileSync(${JSON.stringify(printed)}, '')
+      }, 200)
+    }
+  }
+})
+setInterval(() => {}, 1000)`
+    const agent: AgentDefinition = {
+      ...agents.antigravity,
+      signIn: {
+        ...agents.antigravity.signIn,
+        inApp: {
+          kind: 'acp-authenticate',
+          ways: ['browser'],
+          run: () => ({ command: 'node', args: ['-e', server] }),
+          method: 'oauth-personal',
+          link: /Open the following link to authenticate the ACP server:\s*(\S+)/,
+        },
+      },
+    }
+    const until = async (path: string) => {
+      for (let waited = 0; waited < 5000 && !existsSync(path); waited += 20) await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    const opened: string[] = []
+    const said: SignInFlowEvent[] = []
+    const handle = startSignInFlow(agent, (event) => void said.push(event), { way: 'browser', openUrl: (url) => void opened.push(url) })
+    // Cancelled while it authenticates, it prints its page after, before it is killed.
+    await until(asked)
+    handle?.cancel()
+    await until(printed)
+    expect(existsSync(printed)).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(opened).toEqual([])
+    expect(said).toEqual([])
+  })
+
   // Not on Windows: there a Node stand-in closing its own end of a pipe (fd 2) doesn't close it for Althar while it
   // runs, as the Windows checks on #342 showed, so the stream never ends before the answer; the code is the same there.
   pipeClosed('opens the page an ACP agent printed on a last line it never ended, once that stream closes', async () => {
