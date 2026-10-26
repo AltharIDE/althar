@@ -11,6 +11,8 @@ import {
   isCurrent,
   LANE,
   layoutOf,
+  MARKER,
+  markerSlots,
   nowView,
   openingView,
   showing,
@@ -304,9 +306,9 @@ describe('a task’s graph on screen', () => {
     expect(Number.parseFloat(marker.style.left)).toBeGreaterThan(0)
     act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { deltaX: 400, bubbles: true, cancelable: true })))
     expect(marker.style.left).toBe('0px')
-    // Panned past all of it, it goes with it.
+    // Panned past all of it, it is gone.
     act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { deltaX: 4000, bubbles: true, cancelable: true })))
-    expect(Number.parseFloat(marker.style.left)).toBeLessThan(0)
+    expect(screen.queryByText('You asked')).toBeNull()
   })
 
   it('brings a card it tabs to into view', () => {
@@ -315,5 +317,70 @@ describe('a task’s graph on screen', () => {
     const at = world.style.transform
     fireEvent.focus(screen.getByRole('button', { name: /Pull request/ }))
     expect(world.style.transform).not.toBe(at)
+  })
+})
+
+describe('markerSlots', () => {
+  const size = { full: 120, bare: 90 }
+  const edges = (slots: ReturnType<typeof markerSlots>) =>
+    slots.map((slot) => (slot === null ? null : { from: slot.left + MARKER.pad, to: slot.left + MARKER.pad + slot.width }))
+
+  it('puts a marker at its round’s start, whole where it fits', () => {
+    expect(markerSlots([{ from: 40, w: 400 }], [size])).toEqual([{ left: 40, width: 120, after: true }])
+  })
+
+  it('holds a marker at the left edge while its round shows past it', () => {
+    expect(markerSlots([{ from: -100, w: 400 }], [size])).toEqual([{ left: 0, width: 120, after: true }])
+  })
+
+  it('has the next marker push a held one out to the left', () => {
+    const [held] = markerSlots(
+      [
+        { from: -100, w: 180 },
+        { from: 80, w: 300 },
+      ],
+      [size, size],
+    )
+    expect(held).toEqual({ left: 80 - MARKER.gap - MARKER.pad - 120, width: 120, after: true })
+  })
+
+  it('drops the “after” first, then cuts the label, in a round narrower than it', () => {
+    const [bare, cut] = markerSlots(
+      [
+        { from: 0, w: 120 },
+        { from: 200, w: 60 },
+      ],
+      [size, size],
+    )
+    expect(bare).toEqual({ left: 0, width: 90, after: false })
+    expect(cut).toEqual({ left: 200, width: 60 - MARKER.pad - MARKER.gap, after: false })
+  })
+
+  it('leaves out a marker pushed wholly out of view', () => {
+    expect(markerSlots([{ from: -300, w: 100 }], [size])).toEqual([null])
+  })
+
+  it('never overlaps two markers, at any pan, with short rounds in a row', () => {
+    const widths = [90, 140, 60, 200, 75]
+    for (let pan = -400; pan <= 900; pan += 7) {
+      let x = pan
+      const spans = widths.map((w) => {
+        const span = { from: x, w }
+        x += w
+        return span
+      })
+      const placed = edges(
+        markerSlots(
+          spans,
+          spans.map(() => size),
+        ),
+      ).flatMap((edge, index) => (edge === null ? [] : [{ ...edge, index }]))
+      placed.forEach((edge, i) => {
+        const span = spans[edge.index]!
+        expect(edge.to).toBeLessThanOrEqual(span.from + span.w)
+        const next = placed[i + 1]
+        if (next !== undefined) expect(edge.to + MARKER.gap).toBeLessThanOrEqual(next.from - MARKER.pad + 1e-9)
+      })
+    }
   })
 })

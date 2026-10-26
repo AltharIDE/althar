@@ -29,6 +29,9 @@ import {
   LANE,
   type Layout,
   layoutOf,
+  MARKER,
+  type MarkerSize,
+  markerSlots,
   nowView,
   openingView,
   type Room,
@@ -147,6 +150,8 @@ export type StepGraphProps = RootProps<
 const GUTTER = 168
 const STRIP = 44
 /** How far an arrow key moves the canvas, and how much a press of a zoom control zooms. */
+/** The space between a marker's dot, its words and its "after". */
+const MARKER_GAP = 7
 const NUDGE = 64
 const STEP_ZOOM = 1.2
 /** The dot grid's spacing, before zooming. */
@@ -185,6 +190,30 @@ export function StepGraph({ lanes, rounds, steps, detail, open, onOpenChange, on
   // Whether the canvas is being dragged: past a few pixels a press is a drag, which closes what is open rather than opening.
   const drag = useRef<{ x: number; y: number; from: View; moved: boolean } | null>(null)
   const [dragging, setDragging] = useState(false)
+  // How wide each round's marker is, whole and without its "after", measured from an unconstrained copy.
+  const sizing = useRef<HTMLOListElement>(null)
+  const ready = view !== null
+  const [sizes, setSizes] = useState<Readonly<Record<string, MarkerSize>>>({})
+  useLayoutEffect(() => {
+    const list = sizing.current
+    if (list === null) return
+    const measure = () => {
+      const next: Record<string, MarkerSize> = {}
+      rounds.forEach((round, index) => {
+        const marker = list.children[index]?.firstElementChild
+        if (!(marker instanceof HTMLElement)) return
+        const full = Math.ceil(marker.getBoundingClientRect().width)
+        const tail =
+          round.after === undefined ? 0 : Math.ceil((marker.lastElementChild as HTMLElement).getBoundingClientRect().width) + MARKER_GAP
+        next[round.id] = { full, bare: full - tail }
+      })
+      setSizes((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next))
+    }
+    measure()
+    const watch = new ResizeObserver(measure)
+    for (const item of list.children) if (item.firstElementChild !== null) watch.observe(item.firstElementChild)
+    return () => watch.disconnect()
+  }, [rounds, ready])
 
   useLayoutEffect(() => {
     const element = box.current
@@ -252,6 +281,13 @@ export function StepGraph({ lanes, rounds, steps, detail, open, onOpenChange, on
   const placedAt = new Map(layout.cards.map((card) => [card.id, card]))
   const shown = steps.filter((step) => placedAt.has(step.id))
   const placedRounds = new Map(layout.rounds.map((round) => [round.id, round]))
+  const slots = markerSlots(
+    rounds.map((round) => {
+      const span = placedRounds.get(round.id)
+      return span === undefined ? { from: 0, w: 0 } : { from: at(span.x) - GUTTER, w: span.w * (view?.k ?? 1) }
+    }),
+    rounds.map((round) => sizes[round.id] ?? { full: 0, bare: 0 }),
+  )
 
   return (
     <div className={cx(s.graph, className)} {...rest}>
@@ -378,18 +414,31 @@ export function StepGraph({ lanes, rounds, steps, detail, open, onOpenChange, on
 
             {/* Where each round starts, held at the top as the canvas moves. */}
             <ol className={s.strip} style={{ height: STRIP, left: GUTTER }} aria-label={t.started}>
-              {rounds.map((round) => {
-                const span = placedRounds.get(round.id)
-                if (span === undefined) return null
-                // Its start panned off to the left while the rest of it shows, its marker holds at the strip's edge.
-                const from = at(span.x) - GUTTER
-                const held = from < 0 && at(span.x + span.w) - GUTTER > 0
+              {rounds.map((round, index) => {
+                const slot = slots[index]
+                if (slot === null || slot === undefined) return null
                 return (
-                  <li key={round.id} className={cx(s.markerAt, held && s.pinned)} style={{ left: held ? 0 : from }}>
-                    <Marker round={round} onRound={onRound} toSaid={t.toSaid} />
+                  <li
+                    key={round.id}
+                    className={cx(s.markerAt, slot.left <= 0 && s.pinned)}
+                    style={{ left: slot.left, width: MARKER.pad + slot.width + 1 }}
+                  >
+                    <Marker round={round} onRound={onRound} toSaid={t.toSaid} after={slot.after} />
                   </li>
                 )
               })}
+            </ol>
+            {/* The same markers unconstrained and out of sight, for their widths: their words drawn from data-text, so they read once. */}
+            <ol className={s.measure} aria-hidden="true" ref={sizing}>
+              {rounds.map((round) => (
+                <li key={round.id}>
+                  <span className={s.marker}>
+                    <span className={s.dot} />
+                    <span className={s.ghost} data-text={round.by} />
+                    {round.after !== undefined && <span className={cx(s.after, s.ghost)} data-text={round.after} />}
+                  </span>
+                </li>
+              ))}
             </ol>
 
             {/* The agents, held at the left as the canvas moves. The cards say their agent too. */}
@@ -486,7 +535,18 @@ function Card({ interactive, step, n, who, state, opened, ...button }: CardProps
   )
 }
 
-function Marker({ round, onRound, toSaid }: { round: StepGraphRound; onRound: ((id: string) => void) | undefined; toSaid: string }) {
+function Marker({
+  round,
+  onRound,
+  toSaid,
+  after,
+}: {
+  round: StepGraphRound
+  onRound: ((id: string) => void) | undefined
+  toSaid: string
+  after: boolean
+}) {
+  const title = round.after === undefined ? round.by : `${round.by} · ${round.after}`
   const said = (
     <span className={s.saidCard}>
       <span className={s.said}>{round.said}</span>
@@ -497,18 +557,18 @@ function Marker({ round, onRound, toSaid }: { round: StepGraphRound; onRound: ((
   const face = (
     <>
       <span className={cx(s.dot, round.changed !== undefined && s.dotChanged)} aria-hidden="true" />
-      {round.by}
-      {round.after !== undefined && <span className={s.after}>{round.after}</span>}
+      <span className={s.by}>{round.by}</span>
+      {after && round.after !== undefined && <span className={s.after}>{round.after}</span>}
     </>
   )
   return (
     <HoverCard card={said} placement="below" width={340}>
       {onRound === undefined ? (
-        <span className={s.marker} tabIndex={0}>
+        <span className={s.marker} tabIndex={0} title={title}>
           {face}
         </span>
       ) : (
-        <button type="button" className={s.marker} onClick={() => onRound(round.id)}>
+        <button type="button" className={s.marker} title={title} onClick={() => onRound(round.id)}>
           {face}
         </button>
       )}
