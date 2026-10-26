@@ -88,6 +88,20 @@ const heldFor = (taskId: string, reason: 'machine_busy' | 'usage_limit') =>
   )
 
 /**
+ * A reviewer out of usage until a reset some seconds after it first says so: after the other task's lead takes the one
+ * place, at once, and before that lead stops working, five seconds in. A reset fixed from the test's start may fall either
+ * side on a busy machine.
+ */
+const outUntilSoon = () => {
+  let until: number | undefined
+  return {
+    get until() {
+      return (until ??= Date.now() + 2_500)
+    },
+  }
+}
+
+/**
  * The task's review, once it waits for a place behind another task: its reviewer is out of usage until its reset, another
  * task's lead takes the one place meanwhile, and at the reset there is none. The other task, and the review waiting.
  */
@@ -120,9 +134,8 @@ const ranOn = (threadId: string) =>
   })
 
 describe('a step waiting for a place, as an earlier Althar kept it', () => {
-  it.live('starts a review kept with no reviewer named on the plan’s reviewer, once there is a place', () => {
-    const back = Date.now() + 5_000
-    return Effect.gen(function* () {
+  it.live('starts a review kept with no reviewer named on the plan’s reviewer, once there is a place', () =>
+    Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const policies = yield* Policies
@@ -143,12 +156,11 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
       const [reviewer] = yield* sql<{ agentId: string }>`
         SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       assert.strictEqual(reviewer?.agentId, 'codex')
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
-  })
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: outUntilSoon() } } }))),
+  )
 
-  it.live('starts a review kept as resumed with no reviewer named at once, on the plan’s reviewer', () => {
-    const back = Date.now() + 5_000
-    return Effect.gen(function* () {
+  it.live('starts a review kept as resumed with no reviewer named at once, on the plan’s reviewer', () =>
+    Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const policies = yield* Policies
       const instance = yield* Instance
@@ -165,8 +177,8 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
         since,
       })} WHERE id = ${review.id}`
       yield* readyIs(projectId, task.taskId)
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
-  })
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: outUntilSoon() } } }))),
+  )
 
   it.live('carries on one whose record can’t be read as after a restart, once there is a place, and its plan can’t be changed', () =>
     Effect.gen(function* () {
