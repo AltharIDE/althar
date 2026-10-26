@@ -105,6 +105,8 @@ export interface StuckProps {
   what: ReactNode
   /** What Althar tried on its own, in order. */
   tried: readonly StuckAttempt[]
+  /** How many tries, where one line of `tried` stands for several (Tried again 3 times); else one for each line. */
+  tries?: number
   /** The lead's read of why, and who the lead is. */
   read?: { by: ModelInfo; says: ReactNode }
   /** The output that keeps failing, as it last ran. */
@@ -143,6 +145,7 @@ export function Stuck({
   step,
   what,
   tried,
+  tries = tried.length,
   read,
   output,
   agents = [],
@@ -219,7 +222,7 @@ export function Stuck({
     </Button>
   )
   return (
-    <AskCard icon="stop" kicker={t.kicker} who={t.after(step, tried.length)} what={what} className={className}>
+    <AskCard icon="stop" kicker={t.kicker} who={t.after(step, tries)} what={what} className={className}>
       {/* when it came straight to you, as when the agent couldn't start, there is nothing it tried */}
       {tried.length > 0 && (
         <section className={s.section}>

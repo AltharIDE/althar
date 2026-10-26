@@ -150,6 +150,13 @@ describe('trying a step again', () => {
     )
   })
 
+  it('says what Althar tried for a failing service in one line, not one for each try', async () => {
+    show(stuck({ why: 'transient', service: 'Anthropic' }))
+    expect(await screen.findByText(/Tried again 3 times, waiting longer each time/)).toBeTruthy()
+    expect(screen.queryByText(/Tried again after/)).toBeNull()
+    expect(screen.getByText('Implement, after 3 tries')).toBeTruthy()
+  })
+
   it('runs a review again on its reviewer, or hands it to another', async () => {
     const onAnswer = show(stuck({ step: 'review', why: 'stalled' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Review again' }))
