@@ -4,6 +4,7 @@ import { isAbsolute, join, sep } from 'node:path'
 
 import {
   AllowedBy,
+  AttachedFile,
   AttentionRequest,
   type BoardSnapshot,
   type ChangeSummary,
@@ -378,6 +379,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
+const decodeAttached = Schema.decodeUnknownOption(Schema.Array(AttachedFile))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
 const decodeIssueChanges = Schema.decodeUnknownOption(IssueChangesCard)
 const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
@@ -404,6 +406,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           text: text(content, 'text'),
           links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
           pictures: picturesOf(field(content, 'pictures')),
+          files: Option.getOrElse(decodeAttached(field(content, 'files') ?? []), () => []),
         },
         input:
           row.inputState === null

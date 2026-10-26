@@ -1,7 +1,8 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import * as acp from '@agentclientprotocol/sdk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -16,8 +17,27 @@ import { stopBackgroundMethod, type StopBackgroundResponse } from '../background
  * use. The prompt's text picks a scenario. It starts every session in a bypass
  * mode, so tests show the adapter always moves a session out of it. It takes
  * images in a prompt unless told not to, and says first what images it was
- * sent: `saw images: image/png 68 B, …`.
+ * sent: `saw images: image/png 68 B, …`. Then what files and folders: one
+ * linked it opens by its path, as an agent does with its own tools, and says
+ * its first line, or a folder's files; one whose words came in the prompt it
+ * says so of (`saw files: notes.log (linked, 2 KB): first line …`).
  */
+
+/** What it makes of a file sent in a prompt: a linked one opened by its path, its first line or a folder's files; one embedded, its words. */
+const sawFile = (block: acp.ContentBlock): string => {
+  if (block.type === 'resource') {
+    const words = 'text' in block.resource ? block.resource.text : ''
+    return `${block.resource.uri.split('/').pop() ?? ''} (embedded): ${words.split('\n')[0] ?? ''}`
+  }
+  if (block.type !== 'resource_link') return ''
+  try {
+    const path = fileURLToPath(block.uri)
+    if (statSync(path).isDirectory()) return `${block.name} (linked folder): ${readdirSync(path).sort().join(', ')}`
+    return `${block.name} (linked, ${block.mimeType ?? 'no type'}, ${block.size ?? '?'} B): ${readFileSync(path, 'utf8').split('\n')[0] ?? ''}`
+  } catch {
+    return `${block.name} (linked): couldn't open it`
+  }
+}
 
 export const scenarios = {
   /** Two message chunks, then the turn ends with usage. */
@@ -248,6 +268,8 @@ export interface FakeAgentOptions {
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
+  /** Whether it says it takes a file's words in a prompt, as Claude Code and Codex do. False unless true. */
+  readonly embeddedContext?: boolean
   /**
    * How many of each session's first prompts end at once, having said nothing
    * and used no tokens, as Claude Code's do while another of its processes
@@ -1161,7 +1183,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
               loadSession: false,
               mcpCapabilities: { http: true, sse: false },
               sessionCapabilities: { close: {} },
-              promptCapabilities: { image: options.images !== false },
+              promptCapabilities: { image: options.images !== false, embeddedContext: options.embeddedContext === true },
             },
             authMethods: [],
             agentInfo: { name: 'fake-agent', version: '0.0.0' },
@@ -1363,6 +1385,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
       if (images.length > 0)
         await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
+      // What files it was sent, in order: each linked one opened by its path, as an agent reads one with its own tools.
+      const sent = params.prompt.flatMap((block) => (block.type === 'resource_link' || block.type === 'resource' ? [block] : []))
+      if (sent.length > 0) await say(`saw files: ${sent.map(sawFile).join('; ')}\n\n`)
 
       // How many asks wait at once, as several do from `run each`: they share one abort, let go as the last is answered.
       let asking = 0

@@ -2634,7 +2634,7 @@ describe('thread items', () => {
       agentId: 'codex',
       createdAt: '2026-09-29T12:00:00.000Z',
       kind: 'user_message',
-      content: { text: 'Now', links: [], pictures: [] },
+      content: { text: 'Now', links: [], pictures: [], files: [] },
       input: { state: 'queued', interrupting: true },
     })
     const tool = itemOf(

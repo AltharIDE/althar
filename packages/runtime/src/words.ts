@@ -1,8 +1,9 @@
+import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, DocumentRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
 import type { ReviewDraftIncomplete } from './Reviews'
@@ -150,6 +151,12 @@ export const words = (
         return (
           imageRefused[text(error, 'reason') as ImageRefused['reason']]?.(name === '' ? 'An image' : name) ??
           "Althar can't send that image."
+        )
+      }
+      case 'FileRefused': {
+        const name = text(error, 'name')
+        return (
+          fileRefused[text(error, 'reason') as FileRefused['reason']]?.(name === '' ? 'A file' : name) ?? "Althar can't send that file."
         )
       }
       case 'NoteRefused':
@@ -402,6 +409,7 @@ export const expected = new Set([
   'ProjectRefused',
   'DocumentRefused',
   'ImageRefused',
+  'FileRefused',
   'NotFound',
   'NoteRefused',
   'UnknownAgent',
@@ -440,6 +448,18 @@ const imageRefused = {
   missing: (name) => `${name} isn't kept any more. Add it again.`,
   unkept: () => 'Althar has nowhere to keep images here, so none can be sent.',
 } as const satisfies Record<ImageRefused['reason'], (name: string) => string>
+
+/** Why a file or folder sent with a message isn't sent, by reason, of it by its name. */
+const fileRefused = {
+  too_large: (name) => `${name} is larger than ${MESSAGE_FILES.bytes / (1024 * 1024)} MB, so it can't be sent.`,
+  too_many_files: (name) => `${name} holds more than ${MESSAGE_FILES.entries.toLocaleString('en')} files, so it can't be sent.`,
+  too_many: () => `A message can carry at most ${MESSAGE_FILES.count} files and folders.`,
+  too_much: () =>
+    `A message's files can come to at most ${MESSAGE_FILES.total / (1024 * 1024)} MB together. Send some in a message of their own.`,
+  unreadable: (name) => `Althar couldn't read ${name}.`,
+  missing: (name) => `${name} isn't there any more. Add it again.`,
+  nowhere: () => "The task's folder isn't ready on this computer, so files can't be sent to it yet.",
+} as const satisfies Record<FileRefused['reason'], (name: string) => string>
 
 /** Why a project can't be changed so, by reason. */
 const projectRefused = {
