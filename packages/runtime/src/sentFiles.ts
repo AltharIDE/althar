@@ -111,20 +111,28 @@ export const keepFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
     const fresh = found.some((one) => !('kept' in one))
     const own = fresh ? join(attachmentsIn(folder), randomBytes(6).toString('hex')) : null
     const taken = new Set<string>()
+    // What is copied is counted again as it is, against the limits: what was measured may have grown since.
+    let copiedBytes = 0
     return yield* Effect.forEach(found, (one) =>
       Effect.gen(function* () {
         if ('kept' in one) return one.kept
         const target = join(own ?? folder, freeName(one.name, taken))
-        yield* Effect.tryPromise({
-          try: () => copyTo(one.source, target),
+        const room = MESSAGE_FILES.total - copiedBytes
+        const copied = yield* Effect.tryPromise({
+          try: () => copyTo(one.source, target, { bytes: Math.min(MESSAGE_FILES.bytes, room), entries: MESSAGE_FILES.entries }),
           catch: () => new FileRefused({ reason: 'unreadable', name: one.name }),
         })
+        if (!copied.ok)
+          return yield* copied.why === 'too_large' && room < MESSAGE_FILES.bytes
+            ? new FileRefused({ reason: 'too_much', name: null })
+            : new FileRefused({ reason: copied.why, name: one.name })
+        copiedBytes += copied.bytes
         return {
           name: one.name,
-          kind: one.measured.kind,
-          mediaType: one.measured.kind === 'folder' ? null : mediaTypeOf(one.name),
-          bytes: one.measured.bytes,
-          entries: one.measured.entries,
+          kind: copied.kind,
+          mediaType: copied.kind === 'folder' ? null : mediaTypeOf(one.name),
+          bytes: copied.bytes,
+          entries: copied.entries,
           path: target,
         } satisfies InputFile
       }),

@@ -1,6 +1,18 @@
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
@@ -13,7 +25,7 @@ import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
 import { connection, services } from '../src/Api'
-import { measure, wordsOf } from '../src/attachments'
+import { copyTo, measure, wordsOf } from '../src/attachments'
 import { Folders } from '../src/Folders'
 import { promptFor } from '../src/Sessions'
 import { Secrets } from '../src/Secrets'
@@ -279,6 +291,53 @@ describe('measure', () => {
     assert.isNull(wordsOf(join(folder, 'b.bin'), 6))
     assert.isNull(wordsOf(join(folder, 'c.txt'), 2), 'not UTF-8')
     assert.isNull(wordsOf(join(folder, 'a.csv'), MESSAGE_FILES.embedded + 1), 'too large to embed')
+  })
+})
+
+describe('copyTo', () => {
+  it('counts what it copies, not what was measured: a file grown since is refused, and nothing of it is left', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-grown-'))
+    const log = join(folder, 'run.log')
+    writeFileSync(log, 'one line\n')
+    assert.deepStrictEqual(measure(log), { ok: true, kind: 'file', bytes: 9, entries: null })
+    // The log grows between being measured and being copied.
+    appendFileSync(log, 'x'.repeat(64))
+    const target = join(folder, 'copy.log')
+    assert.deepStrictEqual(await copyTo(log, target, { bytes: 32, entries: 10 }), { ok: false, why: 'too_large' })
+    assert.isFalse(existsSync(target))
+    // Within the budget, the copy says what it copied: all of it, as it is now.
+    assert.deepStrictEqual(await copyTo(log, target, { bytes: 100, entries: 10 }), { ok: true, kind: 'file', bytes: 73, entries: null })
+    assert.strictEqual(readFileSync(target, 'utf8').length, 73)
+  })
+
+  it('stops copying a folder given more files since it was measured, and takes the copy away', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-filling-'))
+    const logs = join(folder, 'logs')
+    mkdirSync(join(logs, 'older'), { recursive: true })
+    writeFileSync(join(logs, 'a.log'), 'a\n')
+    assert.deepStrictEqual(measure(logs), { ok: true, kind: 'folder', bytes: 2, entries: 1 })
+    writeFileSync(join(logs, 'b.log'), 'b\n')
+    writeFileSync(join(logs, 'older', 'c.log'), 'c\n')
+    const target = join(folder, 'copy')
+    assert.deepStrictEqual(await copyTo(logs, target, { bytes: 1000, entries: 2 }), { ok: false, why: 'too_many_files' })
+    assert.isFalse(existsSync(target))
+    assert.deepStrictEqual(await copyTo(logs, target, { bytes: 5, entries: 10 }), { ok: false, why: 'too_large' })
+    assert.isFalse(existsSync(target))
+  })
+
+  it('copies a folder’s files with their modes, and leaves its links out', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-copy-'))
+    const tools = join(folder, 'tools')
+    mkdirSync(join(tools, 'bin'), { recursive: true })
+    writeFileSync(join(tools, 'bin', 'run.sh'), '#!/bin/sh\n')
+    chmodSync(join(tools, 'bin', 'run.sh'), 0o755)
+    symlinkSync('/etc/hosts', join(tools, 'hosts'))
+    symlinkSync('/etc', join(tools, 'etc'))
+    const target = join(folder, 'copy')
+    assert.deepStrictEqual(await copyTo(tools, target), { ok: true, kind: 'folder', bytes: 10, entries: 1 })
+    assert.strictEqual(statSync(join(target, 'bin', 'run.sh')).mode & 0o777, 0o755)
+    assert.isFalse(existsSync(join(target, 'hosts')))
+    assert.isFalse(existsSync(join(target, 'etc')))
   })
 })
 

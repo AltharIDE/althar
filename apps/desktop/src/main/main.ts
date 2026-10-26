@@ -9,7 +9,7 @@ import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } 
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
 import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { keepingAwake } from './awake'
-import { attachedOf, clipboardPaths, rawFormat } from './attachments'
+import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
 import { startDictation } from './dictation'
@@ -744,7 +744,7 @@ ipcMain.handle('althar:attach-pasted', async () => {
     }
     return null
   }, process.platform)
-  return Promise.all(paths.map((path) => attachedOf(path, allowFolder)))
+  return Promise.all(paths.map((path) => pastedOf(path, allowFolder)))
 })
 
 /* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */

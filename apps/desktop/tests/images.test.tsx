@@ -260,6 +260,39 @@ describe('the images waiting in a composer', () => {
     expect(result.current.props(claude).fileNote).toBe(text.stillReading)
   })
 
+  it('reads a picture copied in the file manager and pasted as an image, from its own bytes; anything beside it, and it for an agent that takes no images, as a file', async () => {
+    const bytes = png(640, 400)
+    const copied = [
+      {
+        ok: true as const,
+        grant: 'grant_shot',
+        name: 'shot.png',
+        kind: 'file' as const,
+        bytes: bytes.length,
+        entries: null,
+        picture: { type: 'image/png', data: bytes },
+      },
+      { ok: true as const, grant: 'grant_log', name: 'run.log', kind: 'file' as const, bytes: 12, entries: null },
+    ]
+    const host = { attach: async () => null, attachPasted: async () => copied }
+    const { result } = renderHook(() => useAttachments('thread:th1', host, asIs))
+    // The page gets Finder's picture of the files, which isn't what goes.
+    act(() => result.current.props(claude).onAddFiles([fileOf(png(16, 16), 'icon.png')], 'paste'))
+    await waitFor(() => expect(result.current.props(claude).images[0]?.src).toMatch(/^data:image\/png;base64,/))
+    expect(result.current.props(claude).images).toHaveLength(1)
+    expect(result.current.props(claude).files).toEqual([{ id: expect.any(String), name: 'run.log', meta: '12 B' }])
+    let outgoing = null as ReturnType<typeof result.current.take>
+    act(() => {
+      outgoing = result.current.take(claude)
+    })
+    expect(outgoing?.pictures).toMatchObject([{ digest: digest(bytes), width: 640, height: 400, name: 'shot.png' }])
+    expect(outgoing?.files).toEqual([{ grant: 'grant_log' }])
+    act(() => result.current.clear())
+    act(() => result.current.props(codex).onAddFiles([], 'paste'))
+    await waitFor(() => expect(result.current.props(codex).files.map((one) => one.name)).toEqual(['shot.png', 'run.log']))
+    expect(result.current.props(codex).images).toEqual([])
+  })
+
   it('takes none for an agent that doesn’t take images, and holds back those added before it was picked, saying why', async () => {
     const { result } = renderHook(() => useAttachments('thread:th1', noFiles, asIs))
     // A picture with no file behind it, as a pasted one, can't go to it as a file either.

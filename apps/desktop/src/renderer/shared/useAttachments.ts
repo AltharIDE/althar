@@ -199,10 +199,18 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
 
   const add = async (files: ReadonlyArray<File>, receiver: Receiver, how: AddedBy) => {
     setNote(null)
-    // Copied in the file manager and pasted: the clipboard names the files, which go as files, whatever picture of them it holds too.
+    // Copied in the file manager and pasted: the clipboard names the files, which go as dropped, whatever picture of them the page has.
     if (how === 'paste') {
       const copied = await host.attachPasted().catch(() => [])
-      if (copied.length > 0) return addFiles(copied.map((attached) => ({ name: attached.name, read: () => Promise.resolve(attached) })))
+      if (copied.length > 0) {
+        // A picture among them is an image, read from its own bytes, for an agent that takes them; anything else, a file.
+        const images = receiver.takes === false ? [] : copied.flatMap((one) => (one.ok && one.picture !== undefined ? [one] : []))
+        if (images.length > 0)
+          addImages(images.map((one) => new File([new Uint8Array(one.picture?.data ?? [])], one.name, { type: one.picture?.type ?? '' })))
+        const rest = copied.filter((one) => !images.some((image) => image === one))
+        if (rest.length > 0) addFiles(rest.map((attached) => ({ name: attached.name, read: () => Promise.resolve(attached) })))
+        return
+      }
     }
     const pictured = (file: File) => PICTURE_TYPES.includes(file.type)
     // An image for an agent that doesn't take them goes as a file, where there is one behind it.

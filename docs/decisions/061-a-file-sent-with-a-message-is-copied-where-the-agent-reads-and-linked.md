@@ -37,7 +37,8 @@
     gets the grant, the name and the size, and refuses at once, in the line
     over the field, what is too large. A file copied in the file manager
     and pasted is read off the clipboard by main, as each system names it
-    there.
+    there; a PNG, JPEG, GIF or WebP so copied comes with its bytes, and goes
+    as an image, as it would dropped.
   - **Copied into the thread's own folder, under `.althar/attachments`.**
     As the message is sent, before its command runs, the runtime copies
     each into `.althar/attachments/<message>/` in the folder its agent
@@ -46,7 +47,11 @@
     repositories, which its turns make afresh without touching it. That
     folder's own `.gitignore` (`*`) keeps the copies out of git, so none
     is committed or pushed. A folder is copied without following a link in
-    it; a dropped link is copied as what it points at.
+    it; a dropped link is copied as what it points at. What is copied is
+    counted again as it is copied, a piece at a time, against the same
+    limits, since a log or a folder may have grown since it was measured:
+    one that goes over stops, its copy goes, and the message is refused.
+    The message records what was copied, not what was measured.
   - **Linked in every turn that delivers the message.** Each copy goes as a
     `resource_link` to its `file://` address, a folder with
     `inode/directory`, to every agent. A text file of at most 100 KB

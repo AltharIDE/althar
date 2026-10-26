@@ -1,4 +1,5 @@
-import { basename } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { basename, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { measure } from '@althar/runtime/attachments'
@@ -12,7 +13,9 @@ import { measure } from '@althar/runtime/attachments'
  *
  * Pasting a file copied in the file manager (⌘C in Finder, Ctrl+C in
  * Explorer or Files) works as dropping it: the clipboard names it by its
- * path, read here as each system puts it there.
+ * path, read here as each system puts it there. A picture copied so comes
+ * with its bytes too, as the window would read it dropped, to go as an image
+ * to an agent that takes them.
  */
 
 /** What the window is told of a file or folder added to a message. */
@@ -24,8 +27,28 @@ export type Attached =
       readonly kind: 'file' | 'folder'
       readonly bytes: number
       readonly entries: number | null
+      /** A PNG, JPEG, GIF or WebP copied in the file manager: its bytes, for the window to read as an image. */
+      readonly picture?: { readonly type: string; readonly data: Uint8Array }
     }
   | { readonly ok: false; readonly name: string; readonly why: 'too_large' | 'too_many_files' | 'unreadable' }
+
+/** What a picture's name says it is, for the four kinds a message sends as images. */
+const PICTURES: Readonly<Record<string, string>> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+}
+
+/** One copied in the file manager and pasted: as one dropped, and a picture with its bytes. */
+export const pastedOf = async (path: string, allow: (path: string) => Promise<string | null>): Promise<Attached> => {
+  const attached = await attachedOf(path, allow)
+  const type = PICTURES[extname(path).toLowerCase()]
+  if (!attached.ok || attached.kind !== 'file' || type === undefined) return attached
+  const data = await readFile(path).catch(() => null)
+  return data === null ? attached : { ...attached, picture: { type, data: new Uint8Array(data) } }
+}
 
 /** Measures what is at `path` and grants it: what the window is told of it. */
 export const attachedOf = async (path: string, allow: (path: string) => Promise<string | null>): Promise<Attached> => {

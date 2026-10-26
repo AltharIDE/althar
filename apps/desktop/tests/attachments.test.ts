@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { MESSAGE_FILES } from '@althar/contracts'
 import { describe, expect, it, vi } from 'vitest'
 
-import { attachedOf, clipboardPaths, pathsInNames, rawFormat } from '../src/main/attachments'
+import { attachedOf, clipboardPaths, pastedOf, pathsInNames, rawFormat } from '../src/main/attachments'
 import { fileAttachments, metaOf } from '../src/renderer/shared/files'
 
 describe('a file or folder added to a message, as main tells the window of it', () => {
@@ -34,6 +34,23 @@ describe('a file or folder added to a message, as main tells the window of it', 
     expect(await attachedOf(huge, allow)).toEqual({ ok: false, name: 'disk.img', why: 'too_large' })
     expect(await attachedOf(join(downloads, 'gone.txt'), allow)).toEqual({ ok: false, name: 'gone.txt', why: 'unreadable' })
     expect(allow).not.toHaveBeenCalled()
+  })
+
+  it('gives a picture copied in the file manager its bytes, to go as an image; anything else as it is', async () => {
+    const copied = mkdtempSync(join(tmpdir(), 'althar-copied-'))
+    writeFileSync(join(copied, 'Shot.PNG'), 'png bytes')
+    writeFileSync(join(copied, 'run.log'), 'log')
+    const allow = async () => 'grant'
+    expect(await pastedOf(join(copied, 'Shot.PNG'), allow)).toEqual({
+      ok: true,
+      grant: 'grant',
+      name: 'Shot.PNG',
+      kind: 'file',
+      bytes: 9,
+      entries: null,
+      picture: { type: 'image/png', data: new Uint8Array(Buffer.from('png bytes')) },
+    })
+    expect(await pastedOf(join(copied, 'run.log'), allow)).not.toHaveProperty('picture')
   })
 
   it('reads the files the file manager copied off the clipboard, as each system puts them', async () => {

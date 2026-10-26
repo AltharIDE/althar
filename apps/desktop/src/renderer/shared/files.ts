@@ -20,6 +20,8 @@ export type Attached =
       readonly kind: 'file' | 'folder'
       readonly bytes: number
       readonly entries: number | null
+      /** A PNG, JPEG, GIF or WebP copied in the file manager and pasted: its bytes, read as an image would be dropped. */
+      readonly picture?: { readonly type: string; readonly data: Uint8Array }
     }
   | { readonly ok: false; readonly name: string; readonly why: 'too_large' | 'too_many_files' | 'unreadable' }
 

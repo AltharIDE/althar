@@ -1,5 +1,6 @@
 import {
   closeSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -10,8 +11,8 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { cp } from 'node:fs/promises'
-import { basename, extname, join } from 'node:path'
+import { lstat, mkdir, open, readdir, rm, stat } from 'node:fs/promises'
+import { basename, dirname, extname, join } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 
@@ -102,20 +103,87 @@ export const copyName = (name: string) => {
   return `${named.slice(0, 200 - extension.length)}${extension}`
 }
 
-/** Copies a file or a folder to `target`, which isn't there yet: what is dropped is followed if it is a link; a folder's links, sockets and devices are left out. */
-export const copyTo = (dropped: string, target: string) => {
+/** How much one copy may hold: its bytes, and a folder's files. */
+export type Budget = { readonly bytes: number; readonly entries: number }
+
+// A link put where a file was, after the folder was listed, isn't followed (where the system can say so).
+const READ = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+const PIECE = 1024 * 1024
+
+/**
+ * Copies a file or a folder to `target`, which isn't there yet, counting
+ * what it copies against `budget`: what it was measured at before may have
+ * grown since, so a file is copied a piece at a time, and the copy stops,
+ * and goes, as soon as it is over. What is dropped is followed if it is a
+ * link; a folder's links, sockets and devices are left out. What was
+ * copied, as `measure` says it; or why not, with nothing left at `target`.
+ * Throws where it can't be read or written.
+ */
+export const copyTo = async (dropped: string, target: string, budget: Budget = MESSAGE_FILES): Promise<Measured> => {
   const source = realpathSync(dropped)
-  return cp(source, target, {
-    recursive: true,
-    dereference: false,
-    errorOnExist: true,
-    force: false,
-    filter: (from) => {
-      if (from === source) return true
-      const found = lstatSync(from, { throwIfNoEntry: false })
-      return found !== undefined && (found.isFile() || found.isDirectory())
-    },
-  })
+  let bytes = 0
+  let entries = 0
+  // Only what this copy made is taken away: never something already at `target`.
+  let made = false
+  /** Copies one file, false as soon as it takes the copy over. */
+  const copyFile = async (from: string, to: string) => {
+    const input = await open(from, READ)
+    try {
+      const output = await open(to, 'wx', (await input.stat()).mode & 0o777)
+      made = true
+      try {
+        const piece = Buffer.alloc(PIECE)
+        for (;;) {
+          const { bytesRead } = await input.read(piece, 0, PIECE, null)
+          if (bytesRead === 0) return true
+          bytes += bytesRead
+          if (bytes > budget.bytes) return false
+          await output.write(piece, 0, bytesRead)
+        }
+      } finally {
+        await output.close()
+      }
+    } finally {
+      await input.close()
+    }
+  }
+  const copied = async (): Promise<Measured> => {
+    const top = await stat(source)
+    await mkdir(dirname(target), { recursive: true })
+    if (top.isFile())
+      return (await copyFile(source, target)) ? { ok: true, kind: 'file', bytes, entries: null } : { ok: false, why: 'too_large' }
+    if (!top.isDirectory()) return { ok: false, why: 'unreadable' }
+    await mkdir(target)
+    made = true
+    const folders: Array<readonly [string, string]> = [[source, target]]
+    while (folders.length > 0) {
+      const [from, to] = folders.pop() ?? [source, target]
+      for (const entry of await readdir(from, { withFileTypes: true })) {
+        const inside = join(from, entry.name)
+        const copy = join(to, entry.name)
+        if (entry.isDirectory()) {
+          // Listed as a folder; one that is a link by now isn't walked.
+          if ((await lstat(inside)).isSymbolicLink()) continue
+          await mkdir(copy)
+          folders.push([inside, copy])
+        } else if (entry.isFile()) {
+          entries += 1
+          if (entries > budget.entries) return { ok: false, why: 'too_many_files' }
+          if (!(await copyFile(inside, copy))) return { ok: false, why: 'too_large' }
+        }
+      }
+    }
+    return { ok: true, kind: 'folder', bytes, entries }
+  }
+  const gone = () => (made ? rm(target, { recursive: true, force: true }) : Promise.resolve())
+  try {
+    const done = await copied()
+    if (!done.ok) await gone()
+    return done
+  } catch (error) {
+    await gone()
+    throw error
+  }
 }
 
 /** What a file's name says it is, for the few kinds an agent reads differently; null where it says nothing Althar knows. */
