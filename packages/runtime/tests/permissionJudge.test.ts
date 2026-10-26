@@ -458,12 +458,8 @@ describe('coordinator permission judgments', () => {
         actor: string
       }>`SELECT agent_option_id AS option, decided_by_actor_id AS actor FROM decisions`
       assert.deepStrictEqual(row, { option: 'decline', actor: instance.coordinatorId })
-      assert.isTrue(
-        (yield* items(context.threadId)).some(
-          (item) =>
-            item.content.title === 'Denied npm test' && item.content.description === 'By the coordinator: Not needed for this task.',
-        ),
-      )
+      // The refusal is read on the call's row, not as a notice of its own.
+      assert.isFalse((yield* items(context.threadId)).some((item) => String(item.content.title ?? '').startsWith('Denied ')))
     }).pipe(Effect.provide(runtime(':memory:', { judgment: async () => '{"decision":"deny","reason":"Not needed for this task."}' }))),
   )
 
@@ -478,8 +474,9 @@ describe('coordinator permission judgments', () => {
       })
       yield* until(turns(context.threadId), (rows) => rows.length === 2 && rows.every((row) => row.state === 'completed'))
       const thread = yield* items(context.threadId)
-      assert.isTrue(thread.some((item) => String(item.content.description).includes('not allowed by the coordinator: Outside the task.')))
-      assert.isTrue(thread.some((item) => item.content.text === 'carrying on without it'))
+      // The lead is told why (see the connection tests); the thread shows the refusal on the call, not as a notice.
+      assert.isFalse(thread.some((item) => item.kind === 'notice' && String(item.content.description).includes('Outside the task.')))
+      assert.isTrue(thread.some((item) => String(item.content.text).includes('carrying on without it')))
     }).pipe(Effect.provide(runtime(':memory:', { judgment: async () => '{"decision":"deny","reason":"Outside the task."}' }))),
   )
 
@@ -490,14 +487,14 @@ describe('coordinator permission judgments', () => {
       const action = { ...request(), title: 'A long action '.repeat(30) }
       yield* permissions.decide(context, action)
       const [receipt] = (yield* items(context.threadId)).filter((item) => item.content.about === 'permission')
-      assert.isAtMost(String(receipt?.content.title).length, 127)
+      assert.isAtMost(String(receipt?.content.title).length, 128)
       assert.strictEqual(String(receipt?.content.description).length, 200)
       assert.isTrue(String(receipt?.content.description).endsWith('…'))
       const [stored] = yield* sql<{ reason: string }>`SELECT reason FROM decisions`
       assert.strictEqual(stored?.reason, reason)
       const [judged] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'permission_request.judged'`
       assert.strictEqual(JSON.parse(judged?.payload ?? '{}').reason, reason)
-    }).pipe(Effect.provide(runtime(':memory:', { judgment: async () => JSON.stringify({ decision: 'deny', reason }) })))
+    }).pipe(Effect.provide(runtime(':memory:', { judgment: async () => JSON.stringify({ decision: 'allow', reason }) })))
   })
 
   for (const [label, response] of [

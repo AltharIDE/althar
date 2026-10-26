@@ -461,14 +461,16 @@ export class Permissions extends Context.Service<
                   ...(judgment.decision === 'deny' ? { decidedBy: 'coordinator' as const } : {}),
                 }
                 yield* recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.coordinatorId })
-                yield* addItem(requestContext, 'notice', {
-                  source: 'runtime',
-                  severity: 'info',
-                  about: 'permission',
-                  requestId,
-                  title: `${judgment.decision === 'allow' ? 'Allowed' : 'Denied'} ${receiptLine(request.title, 120)}`,
-                  description: receiptLine(`By the coordinator: ${judgment.reason}`),
-                })
+                // A denial is read on the refused call's own row, so it gets no receipt of its own.
+                if (judgment.decision === 'allow')
+                  yield* addItem(requestContext, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    about: 'permission',
+                    requestId,
+                    title: `Allowed ${receiptLine(request.title, 120)}`,
+                    description: receiptLine(`By the coordinator: ${judgment.reason}`),
+                  })
                 return { decision }
               }
               // Left to the person: not held, so their card offers the always answers, and an allow rule they keep answers next time first.
