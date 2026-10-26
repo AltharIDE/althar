@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
@@ -162,17 +162,20 @@ describe('files sent with a message', () => {
           said(value.items).some((text) => text.includes('echo: Again')),
         )
         assert.strictEqual(messages(again.items)[1]?.content.files[0]?.path, kept[0]?.path)
-        // Files alone are a message too.
+        // Files alone are a message too; one dropped as a link goes as what it points at.
         yield* client.Send({
           commandId: commandId(),
           threadId: task.threadId,
           body: '',
           disposition: 'after_current',
-          files: [{ grant: yield* grant(join(from, 'spec.pdf')) }],
+          files: [{ grant: yield* grant(join(from, 'logs', 'linked.pdf')) }],
         })
-        yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
-          said(value.items).some((text) => text.startsWith('saw files: spec.pdf (linked')),
+        const alone = yield* eventually(client.GetThread({ threadId: task.threadId }), (value) =>
+          said(value.items).some((text) => text.startsWith('saw files: linked.pdf (linked')),
         )
+        const linkedCopy = messages(alone.items)[2]?.content.files[0]?.path ?? ''
+        assert.isFalse(lstatSync(linkedCopy).isSymbolicLink())
+        assert.strictEqual(readFileSync(linkedCopy, 'utf8'), '%PDF-1.7\nthe spec\n')
       }),
     ),
   )

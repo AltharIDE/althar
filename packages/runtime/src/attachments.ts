@@ -1,4 +1,15 @@
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { cp } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 
@@ -91,20 +102,21 @@ export const copyName = (name: string) => {
   return `${named.slice(0, 200 - extension.length)}${extension}`
 }
 
-/** Copies a file or a folder to `target`, which isn't there yet: a folder's links, sockets and devices are left out. */
-export const copyTo = (source: string, target: string) =>
-  cp(source, target, {
+/** Copies a file or a folder to `target`, which isn't there yet: what is dropped is followed if it is a link; a folder's links, sockets and devices are left out. */
+export const copyTo = (dropped: string, target: string) => {
+  const source = realpathSync(dropped)
+  return cp(source, target, {
     recursive: true,
     dereference: false,
     errorOnExist: true,
     force: false,
-    // What is dropped is followed if it is a link; inside a folder, a link isn't.
     filter: (from) => {
       if (from === source) return true
       const found = lstatSync(from, { throwIfNoEntry: false })
       return found !== undefined && (found.isFile() || found.isDirectory())
     },
   })
+}
 
 /** What a file's name says it is, for the few kinds an agent reads differently; null where it says nothing Althar knows. */
 export const mediaTypeOf = (name: string): string | null => MEDIA_TYPES[extname(name).toLowerCase()] ?? null
