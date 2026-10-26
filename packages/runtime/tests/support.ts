@@ -97,6 +97,9 @@ export const definition = (
   launch: () => ({ command: 'bun', args: [fakeAgentMain] }),
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
+  // Claude Code's runs on Anthropic's and Codex on OpenAI's, as the registry says; OpenCode on whichever the person picks.
+  ...(id === 'claude-code' ? { service: { name: 'Anthropic', url: 'https://api.anthropic.test' } } : {}),
+  ...(id === 'codex' ? { service: { name: 'OpenAI', url: 'https://api.openai.test' } } : {}),
   // Its status says the home it ran in: signed out, or paid per use, where the test names the agent or that home.
   signIn: {
     status: () => ({ command: 'sh', args: ['-c', 'printf %s "$FAKE_HOME"'] }),
@@ -272,6 +275,8 @@ export const runtime = (
     readonly screenshot?: RuntimeOptions['screenshot']
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
+    /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
+    readonly connectivity?: RuntimeOptions['connectivity']
   } = {},
 ) =>
   Runtime.layer({
@@ -302,6 +307,8 @@ export const runtime = (
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     busy: { machine: ROOMY, ...more.busy },
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
+    // No test reaches a real service: one asked about answers, as it would online, unless the test says.
+    connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },
   })
 
 /** A disk with half of its 1 TB free: room enough that no finished task's folder goes for want of space. */

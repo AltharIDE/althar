@@ -22,6 +22,7 @@ import type { Artifacts } from './Artifacts'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
+import { Connectivity } from './Connectivity'
 import { NotConnected } from './Connections'
 import { AttentionClosed, NoChangeToOpen, NotFound, NotHeld, NothingToWaitFor } from './errors'
 import { backoff, contained, keptGoing } from './Failures'
@@ -85,6 +86,17 @@ const CONTINUES = 3
 
 /** What it is told when it was cut off so. */
 const CONTINUING = "Your last turn stopped at the agent's own limit on a turn's output or steps. Carry on from where you were."
+
+/** What it is told, as quietly, when its turn is sent again once its connection, or its service, is back (ADR-060). */
+const RECONNECTED = "Your last turn stopped because the connection to your model's service failed. It's back: carry on from where you were."
+
+/** A pause before a step tries its service again, as a thread says it. */
+const pauseWords = (pause: Duration.Duration) => {
+  const seconds = Math.round(Duration.toSeconds(pause))
+  if (seconds < 60) return `${seconds} seconds`
+  const minutes = Math.round(seconds / 60)
+  return minutes === 1 ? 'a minute' : `${minutes} minutes`
+}
 
 /**
  * How often a step's agent whose turn ended having done nothing at all is
@@ -189,6 +201,16 @@ const Hold = Schema.Struct({
   model: Schema.optional(Schema.NullOr(Schema.String)),
   why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
   choices: Schema.optional(Schema.Array(LimitChoice)),
+  /**
+   * Held for the connection (`agent_unavailable`, ADR-060): offline, until
+   * the computer is back and its service answers; else until `until`, when
+   * its service, which failed `tries` times in a row, is tried again. The
+   * service, by name, and what it said last.
+   */
+  offline: Schema.optional(Schema.Boolean),
+  tries: Schema.optional(Schema.Int),
+  service: Schema.optional(Schema.String),
+  failure: Schema.optional(Schema.NullOr(Schema.String)),
 })
 /** Why a step held for a usage limit waits: its project waits for resets, nothing else was free to move it to, or the person said to. */
 type HoldWhy = NonNullable<typeof Hold.Type.why>
@@ -273,6 +295,7 @@ type Store =
   | Busy
   | Questions
   | Artifacts
+  | Connectivity
 
 /**
  * Why a step needs the person (docs/architecture/05): its agent didn't report
@@ -292,6 +315,8 @@ export type StuckWhy =
   | 'looping'
   | 'over_budget'
   | 'refused'
+  /** Its agent's service kept failing while the computer was online, however long Althar waited between tries (ADR-060). */
+  | 'transient'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -305,6 +330,8 @@ export interface StuckInfo {
   readonly tried?: ReadonlyArray<Tried>
   /** For a usage limit: whose account, when it resets where it said, and who could take the step over. */
   readonly limit?: LimitCall
+  /** For a service that kept failing: its name, where the registry names one (`Anthropic`); else the call says the agent's. */
+  readonly service?: string
 }
 
 /**
@@ -355,7 +382,14 @@ export type Place =
   | { readonly how: 'answered'; readonly info: StuckInfo; readonly answer: Exclude<StuckAnswer, { readonly kind: 'wait' }> }
   /** A lead's step held for a usage limit that the person handed to another agent: the work of a task under way, so it waits its turn. */
   | { readonly how: 'handed'; readonly info: StuckInfo; readonly answer: Extract<StuckAnswer, { readonly kind: 'retry' }> }
-  | { readonly how: 'reset'; readonly agentId: string; readonly accountId: string | null; readonly model: string | null }
+  /** Back from a usage limit, or, `connection`, from waiting for its service (ADR-060), with how often that had failed in a row. */
+  | {
+      readonly how: 'reset'
+      readonly agentId: string
+      readonly accountId: string | null
+      readonly model: string | null
+      readonly connection?: { readonly tries: number }
+    }
 
 /** What a step waiting for a place keeps in its output: how it starts, and since when it waits. */
 interface Waiting {
@@ -507,6 +541,8 @@ export class Runs extends Context.Service<
       const limits = yield* Limits
       const policies = yield* Policies
       const busy = yield* Busy
+      const connectivity = yield* Connectivity
+      const agentsHere = yield* Agents
       const scope = yield* Effect.scope
       const blankPause = (yield* RuntimeConfig).idle?.blank ?? BLANK_PAUSE
       // Asked when a step is held for a reset, so the wait for it starts again.
@@ -1308,6 +1344,16 @@ export class Runs extends Context.Service<
       const watch = (event: LiveEvent) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Back online, or offline: what waits for the connection looks again.
+          if (event._tag === 'Connection') return yield* Queue.offer(holdsChanged, undefined)
+          // An agent that says it is trying its service again may be waiting on a dead connection, its turn never ending (Codex).
+          if (
+            event._tag === 'Agent' &&
+            event.event._tag === 'AgentFailure' &&
+            event.event.severity === 'warning' &&
+            event.event.classified.failure === 'transient'
+          )
+            return yield* reconnecting(event.threadId, event.event.classified.message)
           if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
           // A quick task whose lead changed the repository in the turn that ended has its work on a branch of its own now.
           yield* firstWriteOn(event.threadId)
@@ -1329,6 +1375,15 @@ export class Runs extends Context.Service<
               : outOfUsage(on, turn.agentId, turn.accountId)
           }
           if (on === undefined) return
+          // Its connection or its service failed (ADR-060): not a missing report, so it isn't reminded. It waits, and is tried again.
+          if (event._tag === 'TurnEnded' && event.errorClass === 'transient') {
+            const [turn] = yield* sql<{ sessionId: string | null; agentId: string; accountId: string | null }>`
+              SELECT t.provider_session_id AS session_id, s.agent_id, s.account_id FROM turn_deliveries t
+              JOIN provider_sessions s ON s.id = t.provider_session_id WHERE t.id = ${event.turnId}`
+            const live = yield* sessions.running(event.threadId)
+            if (turn === undefined || Option.isNone(live) || live.value.sessionId !== turn.sessionId) return
+            return yield* unavailable(on, turn.agentId, turn.accountId, event.failure ?? null)
+          }
           const [agent] = yield* sql<{ agentId: string }>`
             SELECT agent_id FROM provider_sessions WHERE thread_id = ${event.threadId} ORDER BY started_at DESC LIMIT 1`
           const info = (why: StuckWhy, detail: string | null): StuckInfo => ({
@@ -1361,7 +1416,8 @@ export class Runs extends Context.Service<
           if (inARow > 0) return yield* blankTurn(event.threadId, event.turnId, on, inARow, info)
           // A round whose lead made nothing new, as for a question answered, ends there: the task is back where it was (ADR-034).
           if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
-          const output = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number }
+          // A turn that went through after its service failed starts the count of its failures again (ADR-060).
+          const { tries: _tries, ...output } = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number; tries?: number }
           // Refused, it won't go on however it's reminded.
           if (event.stopReason === 'refusal') return yield* stuck(on.run, { id: on.attemptId }, info('refused', null))
           // Cut off by the agent's own limit on a turn, it carries on where it was, a few times, before it is reminded.
@@ -2266,6 +2322,163 @@ export class Runs extends Context.Service<
           yield* sayOut(threadId, thread.projectId, outWords({ from, resetsAt, waits: 'message' }))
           // Back at its reset, it takes what waits: the same loop as a held step's, so after a restart too.
           yield* Queue.offer(holdsChanged, undefined)
+        })
+
+      /** The service an agent's model runs on, as the registry names it; none where it depends on the provider the person picks. */
+      const serviceOf = (agentId: string) =>
+        agentsHere.get(agentId).pipe(
+          Effect.map((entry) => entry.definition.service),
+          Effect.orElseSucceed(() => undefined),
+        )
+
+      /** A service's name, as a thread says it: the agent's own, where the registry names none. */
+      const serviceNamed = (agentId: string) =>
+        Effect.gen(function* () {
+          const service = yield* serviceOf(agentId)
+          return service?.name ?? `${(yield* limits.named(agentId, null)).agent}'s service`
+        })
+
+      /**
+       * Holds a step for the connection (ADR-060), as a usage limit holds one
+       * for its reset (`Hold`): it gives up its place among the agents at
+       * work here, as a step held for a reset does, and asks for one again as
+       * the work of a task under way when it carries on. False where the step
+       * isn't running any more.
+       */
+      const holdForConnection = (
+        on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>,
+        agentId: string,
+        accountId: string | null,
+        held: { readonly until: string; readonly offline: boolean; readonly tries: number; readonly failure: string | null },
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const service = yield* serviceNamed(agentId)
+          const model = yield* modelOnStep(on.run.taskId, on.step, agentId)
+          const done = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${on.attemptId}`
+              if (still?.state !== 'running' || !(yield* going(on.run))) return false
+              const revision = yield* change('node_attempts', on.attemptId, {
+                state: 'held',
+                holdReason: 'agent_unavailable',
+                output: JSON.stringify({
+                  heldFor: agentId,
+                  until: held.until,
+                  account: accountId,
+                  model,
+                  offline: held.offline,
+                  tries: held.tries,
+                  service,
+                  failure: held.failure,
+                } satisfies typeof Hold.Encoded),
+              })
+              yield* fact({
+                projectId: on.run.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: on.attemptId,
+                revision,
+                type: 'node_attempt.held',
+                payload: { reason: 'agent_unavailable', agentId, until: held.until, offline: held.offline },
+                actorId: instance.systemId,
+              })
+              return true
+            }),
+          )
+          if (!done) return false
+          const step = on.step === 'publish' ? undefined : outStep[on.step]
+          const waits = `${step?.work ?? 'the step'} ${step?.waits ?? 'waits'}`
+          yield* addItem({ projectId: on.run.projectId, threadId: on.run.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: held.offline
+              ? `Lost the connection to ${service}. ${capitalized(waits)} for it, and carries on by itself when it's back.`
+              : `${service} failed, so ${waits}: Althar tries again in ${pauseWords(connectivity.pauses[held.tries - 1] ?? connectivity.every)}.`,
+            ...(held.failure === null ? {} : { description: held.failure }),
+          })
+          yield* touchCard(on.run.taskId)
+          yield* Queue.offer(holdsChanged, undefined)
+          return true
+        })
+
+      /**
+       * A step's turn failed on its connection or its service (ADR-060).
+       * Where the service doesn't answer, the computer offline or the service
+       * out of reach, the step waits for the connection, however long that
+       * takes, and none of it counts. Where it answers, the step is tried
+       * again after a pause that grows (15 seconds, a minute, four); once
+       * those are spent, it needs the person, with what the service said.
+       */
+      const unavailable = (
+        on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>,
+        agentId: string,
+        accountId: string | null,
+        failure: string | null,
+      ) =>
+        Effect.gen(function* () {
+          const service = yield* serviceOf(agentId)
+          const answers = yield* connectivity.answers(service?.url)
+          const tries = (JSON.parse(on.output ?? '{}') as { tries?: number }).tries ?? 0
+          const at = Date.parse(yield* timestamp)
+          if (answers && tries >= connectivity.pauses.length)
+            return yield* stuck(
+              on.run,
+              { id: on.attemptId },
+              {
+                step: on.step,
+                why: 'transient',
+                detail: failure,
+                agentId,
+                round: on.iteration,
+                open: 0,
+                ...(service === undefined ? {} : { service: service.name }),
+              },
+            )
+          const pause = answers ? (connectivity.pauses[tries] ?? Duration.zero) : Duration.zero
+          yield* holdForConnection(on, agentId, accountId, {
+            until: new Date(at + Duration.toMillis(pause)).toISOString(),
+            offline: !answers,
+            tries: answers ? tries + 1 : tries,
+            failure,
+          })
+        })
+
+      /* The threads whose agent's warning is being looked into, so each is looked into once at a time. */
+      const looking = new Set<string>()
+
+      /**
+       * A step's agent says it is trying its service again, mid-turn. Where
+       * the service answers, its own retry may get through, and it is left
+       * to it. Where it doesn't, the step waits for the connection now, and
+       * the turn that would only wait on it, or fail, is stopped: Codex,
+       * offline, waits for the network without ending its turn, and Claude
+       * Code tries for three minutes before it gives up.
+       */
+      const reconnecting = (threadId: string, said: string) =>
+        Effect.gen(function* () {
+          if (looking.has(threadId)) return
+          const on = yield* stepOn(threadId)
+          const live = yield* sessions.running(threadId)
+          if (on === undefined || Option.isNone(live)) return
+          looking.add(threadId)
+          const look = Effect.gen(function* () {
+            const service = yield* serviceOf(live.value.agentId)
+            if (yield* connectivity.answers(service?.url)) return
+            const tries = (JSON.parse(on.output ?? '{}') as { tries?: number }).tries ?? 0
+            const held = yield* holdForConnection(on, live.value.agentId, live.value.accountId, {
+              until: yield* timestamp,
+              offline: true,
+              tries,
+              failure: said,
+            })
+            if (held) yield* Effect.ignore(sessions.interrupt(threadId))
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.logWarning('Could not look into a step’s connection', cause),
+            ),
+            Effect.ensuring(Effect.sync(() => looking.delete(threadId))),
+          )
+          yield* Effect.forkIn(provide(look), scope)
         })
 
       const run = (planId: string) =>
@@ -3644,6 +3857,9 @@ export class Runs extends Context.Service<
        * account and model it was held for, once it has a place among the
        * agents at work on this machine; until then it waits for one.
        * `placed`, it waited for a place after its reset, and has one now.
+       * One held for the connection (`connection`, ADR-060) goes the same
+       * way, its turn sent again in the session it was in, told quietly to
+       * carry on; started again as after a reset where that session went.
        */
       const resumeHeld = (
         held: {
@@ -3656,11 +3872,14 @@ export class Runs extends Context.Service<
           readonly model: string | null
         },
         placed = false,
+        /** Held for the connection, rather than a reset: how often its service had failed in a row. */
+        connection?: { readonly tries: number },
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const current = yield* currentRun(held.taskId)
           if (current === undefined) return
+          const reason = connection === undefined ? 'usage_limit' : 'agent_unavailable'
           const resumed = yield* busy.enter(
             held.taskId,
             (room) =>
@@ -3670,17 +3889,23 @@ export class Runs extends Context.Service<
                   // Handed to another agent by the person meanwhile, it isn't held for the reset any more, though it may wait for a place.
                   const [still] = yield* sql<{ state: string; holdReason: string | null }>`
                     SELECT state, hold_reason FROM node_attempts WHERE id = ${held.attemptId}`
-                  if (placed ? still?.state !== 'admitted' : still?.state !== 'held' || still.holdReason !== 'usage_limit') return false
+                  if (placed ? still?.state !== 'admitted' : still?.state !== 'held' || still.holdReason !== reason) return false
                   if (!room) {
                     yield* waitForPlace(current, held.attemptId, {
                       how: 'reset',
                       agentId: held.agentId,
                       accountId: held.accountId,
                       model: held.model,
+                      ...(connection === undefined ? {} : { connection }),
                     })
                     return false
                   }
-                  const revision = yield* change('node_attempts', held.attemptId, { state: 'running', holdReason: null, output: null })
+                  // Back from the connection, it keeps how often its service failed, so one that keeps failing comes to the person.
+                  const revision = yield* change('node_attempts', held.attemptId, {
+                    state: 'running',
+                    holdReason: null,
+                    output: connection === undefined || connection.tries === 0 ? null : JSON.stringify({ tries: connection.tries }),
+                  })
                   yield* fact({
                     projectId: current.projectId,
                     aggregateType: 'node_attempt',
@@ -3692,19 +3917,39 @@ export class Runs extends Context.Service<
                   return true
                 }),
               ),
-            // Back from a usage limit: the work of a task under way.
+            // Back from a usage limit, or the connection: the work of a task under way.
             { review: held.nodeKey === 'review', order: 'underway' },
           )
           if (!resumed) return yield* touchCard(held.taskId)
+          const resuming = yield* envelope('thread.send', { threadId: current.threadId, resumed: held.attemptId })
+          if (connection !== undefined) {
+            // Its turn again, in the session it was in, where that is still there on the agent it was on.
+            const [review] =
+              held.nodeKey === 'review'
+                ? yield* sql<{
+                    id: string
+                  }>`SELECT id FROM threads WHERE task_id = ${held.taskId} AND kind = 'step' AND node_key = 'review'`
+                : []
+            const threadId = review?.id ?? current.threadId
+            const live = Option.filter(yield* sessions.running(threadId), (session) => !session.stopping)
+            if (Option.isSome(live) && live.value.agentId === held.agentId) {
+              yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: 'The connection is back; the step carried on from here.',
+              })
+              yield* sessions.send({ envelope: resuming, threadId, body: RECONNECTED, quiet: true })
+              return yield* touchCard(held.taskId)
+            }
+          }
           const info: StuckInfo = {
             step: stepOf(held.nodeKey),
-            why: 'usage_limit',
+            why: connection === undefined ? 'usage_limit' : 'transient',
             detail: null,
             agentId: held.agentId,
             round: held.iteration,
             open: 0,
           }
-          const resuming = yield* envelope('thread.send', { threadId: current.threadId, resumed: held.attemptId })
           yield* carryOn(
             current,
             held.attemptId,
@@ -3717,6 +3962,42 @@ export class Runs extends Context.Service<
             },
             resuming,
           )
+        })
+
+      /**
+       * A step held for the connection, due (ADR-060): where its service
+       * answers, it carries on; where it doesn't yet, though the computer says
+       * it is online, it waits for the connection, and asks again a while
+       * later.
+       */
+      const backOnline = (
+        step: { readonly taskId: string; readonly attemptId: string; readonly nodeKey: string; readonly iteration: number },
+        hold: typeof Hold.Type,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const service = yield* serviceOf(hold.heldFor)
+          const tries = hold.tries ?? 0
+          if (yield* connectivity.answers(service?.url))
+            return yield* resumeHeld(
+              { ...step, agentId: hold.heldFor, accountId: hold.account ?? null, model: hold.model ?? null },
+              false,
+              { tries },
+            )
+          const until = new Date(Date.parse(yield* timestamp) + Duration.toMillis(connectivity.every)).toISOString()
+          const waited = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [still] = yield* sql<{ state: string; holdReason: string | null }>`
+                SELECT state, hold_reason FROM node_attempts WHERE id = ${step.attemptId}`
+              if (still?.state !== 'held' || still.holdReason !== 'agent_unavailable') return false
+              yield* change('node_attempts', step.attemptId, {
+                output: JSON.stringify({ ...hold, until, offline: true } satisfies typeof Hold.Encoded),
+              })
+              return true
+            }),
+          )
+          // It waits for the connection now, rather than for a try again: its card says so.
+          if (waited && hold.offline !== true) yield* touchCard(step.taskId)
         })
 
       /** A message that waited for an agent's reset goes to it then: to its session, or, after a restart, to one started for it. */
@@ -3744,11 +4025,20 @@ export class Runs extends Context.Service<
       const holds = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         for (;;) {
-          const held = yield* sql<{ taskId: string; attemptId: string; nodeKey: string; iteration: number; output: string }>`
-            SELECT r.task_id, a.id AS attempt_id, n.node_key, n.iteration, a.output
+          const held = yield* sql<{
+            taskId: string
+            attemptId: string
+            nodeKey: string
+            iteration: number
+            output: string
+            holdReason: string
+          }>`
+            SELECT r.task_id, a.id AS attempt_id, n.node_key, n.iteration, a.output, a.hold_reason
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id
-            WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason = 'usage_limit'`
+            WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason IN ('usage_limit', 'agent_unavailable')`
+          // Offline, nothing waiting for the connection is due: the computer coming back says so.
+          const online = yield* connectivity.online
           // A message waits where the thread's last turn reached the limit, outside a step, and the person's input is queued.
           const messages = yield* sql<{ threadId: string; turnId: string; agentId: string; accountId: string | null }>`
             SELECT t.id AS thread_id, d.id AS turn_id, s.agent_id, s.account_id FROM threads t
@@ -3763,10 +4053,14 @@ export class Runs extends Context.Service<
           for (const step of held) {
             const hold = yield* decodeHold(step.output).pipe(contained('Runs.held', () => undefined))
             if (hold === undefined) continue
+            const connection = step.holdReason === 'agent_unavailable'
+            if (connection && !online) continue
             due.push({
               key: step.attemptId,
               at: Date.parse(hold.until),
-              run: resumeHeld({ ...step, agentId: hold.heldFor, accountId: hold.account ?? null, model: hold.model ?? null }),
+              run: connection
+                ? backOnline(step, hold)
+                : resumeHeld({ ...step, agentId: hold.heldFor, accountId: hold.account ?? null, model: hold.model ?? null }),
             })
           }
           for (const message of messages) {
@@ -3900,7 +4194,11 @@ export class Runs extends Context.Service<
               return yield* touchCard(current.taskId)
             }
             case 'reset':
-              return yield* resumeHeld({ ...row, agentId: place.agentId, accountId: place.accountId, model: place.model }, true)
+              return yield* resumeHeld(
+                { ...row, agentId: place.agentId, accountId: place.accountId, model: place.model },
+                true,
+                place.connection,
+              )
             case 'answered':
               return yield* carryOn(
                 current,

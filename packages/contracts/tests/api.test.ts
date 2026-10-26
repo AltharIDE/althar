@@ -491,6 +491,7 @@ describe('the API', () => {
               SwitchAgent: () => Effect.die('unused'),
               SetModel: () => Effect.void,
               Interrupt: () => Effect.void,
+              TryAgain: () => Effect.void,
               CompactContext: () => Effect.void,
               StopSession: () => Effect.void,
               StopTask: () => Effect.void,

@@ -1,6 +1,7 @@
 import { assert, describe, it } from '@effect/vitest'
 
 import { classify, resetTime, structuredFailure } from '../src/failures'
+import { recorded } from '../src/testing/recorded'
 
 const now = new Date('2026-09-28T20:00:00.000Z')
 
@@ -108,5 +109,53 @@ describe('structuredFailure', () => {
     ]) {
       assert.isUndefined(structuredFailure(other, now))
     }
+  })
+})
+
+describe('what agents said when their connection failed', () => {
+  const ended = (response: { readonly _meta?: unknown }) => structuredFailure(response._meta, now)
+  const warned = (update: { readonly _meta?: unknown }) => structuredFailure(update._meta, now)
+
+  it.each([
+    ['refused', recorded.claude.refused],
+    ['offline', recorded.claude.offline],
+    ['dropped', recorded.claude.dropped],
+    ['a server error', recorded.claude.serverError],
+    ['overloaded', recorded.claude.overloaded],
+    ['rate limited', recorded.claude.rateLimited],
+  ] as const)('Claude Code, %s, ends its turn with a transient failure, after warnings of the same', (_, said) => {
+    assert.deepStrictEqual(
+      [ended(said.ended)?.severity, ended(said.ended)?.classified.failure, ended(said.ended)?.classified.message],
+      ['error', 'transient', said.title],
+    )
+    assert.strictEqual(said.ended.stopReason, 'end_turn')
+    assert.deepStrictEqual([warned(said.retrying)?.severity, warned(said.retrying)?.classified.failure], ['warning', 'transient'])
+  })
+
+  it('Codex, offline, warns that it waits for the network, which is transient', () => {
+    assert.deepStrictEqual(
+      [warned(recorded.codex.waiting)?.severity, warned(recorded.codex.waiting)?.classified.failure],
+      ['warning', 'transient'],
+    )
+  })
+
+  it('Codex, given errors, ends its turn with a transient failure', () => {
+    const failed = ended(recorded.codex.serverError.ended)
+    assert.deepStrictEqual([failed?.severity, failed?.classified.failure], ['error', 'transient'])
+    assert.deepStrictEqual(
+      [warned(recorded.codex.serverError.retrying)?.severity, warned(recorded.codex.serverError.retrying)?.classified.failure],
+      ['warning', 'transient'],
+    )
+  })
+
+  it.each([
+    ['refused', recorded.opencode.refused],
+    ['a server error', recorded.opencode.serverError],
+  ] as const)('OpenCode, %s, fails its prompt with an error that is transient', (_, error) => {
+    assert.deepStrictEqual(classify(error, now), { failure: 'transient', message: error.message })
+  })
+
+  it('a generic internal error is not', () => {
+    assert.strictEqual(classify({ code: -32603, message: 'Internal error' }, now).failure, 'unknown')
   })
 })
