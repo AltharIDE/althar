@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -19,22 +19,10 @@ import { fakeConnectors, HOST, hosted, runtime, until } from './support'
 
 const say = (line: string) => void process.stderr.write(`BENCH ${line}\n`)
 
-// Every git the runtime runs, counted: a shim ahead of git on the PATH logs each call, then runs it.
-const shim = mkdtempSync(join(tmpdir(), 'althar-git-shim-'))
-const log = join(shim, 'calls')
-const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
-writeFileSync(join(shim, 'git'), `#!/bin/sh\necho "$*" >> ${log}\nexec ${real} "$@"\n`)
-chmodSync(join(shim, 'git'), 0o755)
-const calls = () => {
-  try {
-    return readFileSync(log, 'utf8').split('\n').filter(Boolean)
-  } catch {
-    return []
-  }
-}
+const real = () => execFileSync('sh', ['-c', 'command -v git']).toString().trim()
 
 const git = (cwd: string, ...args: Array<string>) =>
-  execFileSync(real, ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd })
+  execFileSync(real(), ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd })
     .toString()
     .trim()
 
@@ -62,6 +50,19 @@ describe('opening with tasks whose pull requests merged (bench)', () => {
       git(working, 'config', 'user.name', 'Fake')
       git(working, 'config', 'user.email', 'fake@althar.test')
       const many = Number(process.env.BENCH_MERGED)
+      // Every git the runtime runs, counted: a shim ahead of git on the PATH logs each call, then runs it.
+      const shim = mkdtempSync(join(tmpdir(), 'althar-git-shim-'))
+      const log = join(shim, 'calls')
+      writeFileSync(join(shim, 'git'), `#!/bin/sh\necho "$*" >> ${log}\nexec ${real()} "$@"\n`)
+      chmodSync(join(shim, 'git'), 0o755)
+      const calls = () => {
+        try {
+          return readFileSync(log, 'utf8').split('\n').filter(Boolean)
+        } catch {
+          return []
+        }
+      }
+      const path = process.env.PATH
       return Effect.gen(function* () {
         const instance = yield* Instance
         yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
@@ -96,7 +97,7 @@ describe('opening with tasks whose pull requests merged (bench)', () => {
         )
         // Main moves on, as it does: a hundred commits since the tasks branched.
         const clone = mkdtempSync(join(tmpdir(), 'althar-main-'))
-        execFileSync(real, ['clone', '-q', bare, clone])
+        execFileSync(real(), ['clone', '-q', bare, clone])
         for (let n = 0; n < 100; n++) {
           writeFileSync(join(clone, `later-${n % 10}.txt`), `${n}\n`.repeat(n + 1))
           git(clone, 'add', '-A')
@@ -109,7 +110,7 @@ describe('opening with tasks whose pull requests merged (bench)', () => {
         say(`seeded ${many} merged tasks in ${(performance.now() - from).toFixed(0)} ms, worktrees ready ${kept?.n ?? 0}`)
         const [task] = yield* sql<{ threadId: string }>`SELECT t.id AS thread_id FROM threads t WHERE t.kind = 'task' LIMIT 1`
         const queries = yield* Queries
-        process.env.PATH = `${shim}:${process.env.PATH ?? ''}`
+        process.env.PATH = `${shim}:${path ?? ''}`
         for (let round = 0; round < 3; round++) {
           const reads = [
             ['coordinator', queries.coordinator(project.projectId)],
@@ -161,6 +162,12 @@ describe('opening with tasks whose pull requests merged (bench)', () => {
         }
         yield* Fiber.interrupt(churn)
       }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            process.env.PATH = path
+            rmSync(shim, { recursive: true, force: true })
+          }),
+        ),
         Effect.provide(
           Queries.layer.pipe(
             Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100) })),

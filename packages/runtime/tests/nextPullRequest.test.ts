@@ -228,21 +228,33 @@ describe('a task’s next pull request, from its worktree as it is', () => {
 })
 
 describe('a settled task’s card, its worktree kept', () => {
-  // Not on Windows: git is counted by a shell script on the PATH.
-  it.live.skipIf(process.platform === 'win32')(
-    'reads what is after its pull request from git once, then only the commits that follows from, until one moves',
-    () => {
-      const { working, bare, github } = onGitHub()
-      // Every git run, by the folder it runs in, counted by a git in front of the real one.
-      const shim = realpathSync(mkdtempSync(join(tmpdir(), 'althar-git-count-')))
-      const log = join(shim, 'calls')
-      const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
-      writeFileSync(join(shim, 'git'), ['#!/bin/sh', `echo "$(pwd -P) $*" >> '${log}'`, `exec '${real}' "$@"`, ''].join('\n'), {
-        mode: 0o755,
-      })
-      const path = process.env.PATH
-      const ranIn = (folder: string) => {
+  /**
+   * Every git run, by the folder it runs in, counted by a git in front of the
+   * real one on the PATH; while `failing` is set, its `rev-list` fails as git
+   * does timed out or out of processes. `done` puts the PATH back.
+   */
+  const counted = () => {
+    const shim = realpathSync(mkdtempSync(join(tmpdir(), 'althar-git-count-')))
+    const log = join(shim, 'calls')
+    const flag = join(shim, 'failing')
+    const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
+    writeFileSync(
+      join(shim, 'git'),
+      [
+        '#!/bin/sh',
+        `echo "$(pwd -P) $*" >> '${log}'`,
+        `case " $* " in *" rev-list "*) [ -e '${flag}' ] && exit 128 ;; esac`,
+        `exec '${real}' "$@"`,
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+    const path = process.env.PATH
+    process.env.PATH = `${shim}:${path ?? ''}`
+    return {
+      ranIn: (folder: string) => {
         const lines = existsSync(log) ? readFileSync(log, 'utf8').split('\n') : []
+        rmSync(log, { force: true })
         // Each by its command: what comes before it, such as `-c core.hooksPath=/dev/null`, left out.
         return lines
           .filter((line) => line.startsWith(`${folder} `))
@@ -252,27 +264,74 @@ describe('a settled task’s card, its worktree kept', () => {
               .split(' ')
               .find((word) => !word.startsWith('-') && !word.includes('=')),
           )
-      }
+      },
+      failing: (on: boolean) => (on ? writeFileSync(flag, '') : rmSync(flag, { force: true })),
+      done: Effect.sync(() => {
+        process.env.PATH = path
+        rmSync(shim, { recursive: true, force: true })
+      }),
+    }
+  }
+
+  // Not on Windows: git is counted by a shell script on the PATH.
+  it.live.skipIf(process.platform === 'win32')(
+    'reads what is after its pull request from git once, then only the commits that follows from, until one moves',
+    () => {
+      const { working, bare, github } = onGitHub()
       return Effect.gen(function* () {
         const task = yield* merged(working, bare, github)
         const folder = realpathSync(task.path)
-        process.env.PATH = `${shim}:${path ?? ''}`
-        yield* cards(task.projectId)
-        rmSync(log, { force: true })
-        // A coordinator's thread, a board and the home read every card, each time any task changes: the same commits, no more git.
-        const [again] = yield* cards(task.projectId)
-        assert.strictEqual(again?.phase, 'settled')
-        assert.deepStrictEqual(
-          ranIn(folder).filter((command) => command !== 'cat-file'),
-          [],
-        )
-        // A commit after it: read again, it shows.
+        const git = counted()
+        yield* Effect.gen(function* () {
+          yield* cards(task.projectId)
+          git.ranIn(folder)
+          // A coordinator's thread, a board and the home read every card, each time any task changes: the same commits, no more git.
+          const [again] = yield* cards(task.projectId)
+          assert.strictEqual(again?.phase, 'settled')
+          assert.deepStrictEqual(
+            git.ranIn(folder).filter((command) => command !== 'cat-file'),
+            [],
+          )
+          // A commit after it: read again, it shows.
+          commitIn(task.path, 'slider.txt', 'Slider')
+          const [moved] = yield* cards(task.projectId)
+          assert.strictEqual(moved?.phase, 'ready')
+          assert.deepStrictEqual(moved?.unshipped, { commits: 1, add: 1, del: 0 })
+          assert.include(git.ranIn(folder), 'rev-list')
+        }).pipe(Effect.ensuring(git.done))
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live.skipIf(process.platform === 'win32')(
+    'keeps nothing git failed to read: the next read, its commits the same, finds what is after its pull request',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const task = yield* merged(working, bare, github)
+        const folder = realpathSync(task.path)
         commitIn(task.path, 'slider.txt', 'Slider')
-        const [moved] = yield* cards(task.projectId)
-        assert.strictEqual(moved?.phase, 'ready')
-        assert.deepStrictEqual(moved?.unshipped, { commits: 1, add: 1, del: 0 })
-        assert.include(ranIn(folder), 'rev-list')
-      }).pipe(Effect.ensuring(Effect.sync(() => (process.env.PATH = path))), Effect.provide(runtimeWith(github)))
+        const git = counted()
+        yield* Effect.gen(function* () {
+          git.failing(true)
+          const [failed] = yield* cards(task.projectId)
+          assert.include(git.ranIn(folder), 'rev-list')
+          // git couldn't list them: the card says less than there is, this once.
+          assert.strictEqual(failed?.phase, 'settled')
+          git.failing(false)
+          const [after] = yield* cards(task.projectId)
+          assert.strictEqual(after?.phase, 'ready')
+          assert.deepStrictEqual(after?.unshipped, { commits: 1, add: 1, del: 0 })
+          // Once read in full, it is kept.
+          git.ranIn(folder)
+          yield* cards(task.projectId)
+          assert.deepStrictEqual(
+            git.ranIn(folder).filter((command) => command !== 'cat-file'),
+            [],
+          )
+        }).pipe(Effect.ensuring(git.done))
+      }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,
   )
