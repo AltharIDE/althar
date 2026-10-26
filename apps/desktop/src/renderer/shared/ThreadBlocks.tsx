@@ -27,6 +27,7 @@ import {
 import { CommandOutput } from './CommandOutput'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
+import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { keyOf, pastedIn } from './pasted'
@@ -451,8 +452,10 @@ export function ThreadBlocks({
             at={block.at}
             delivery={block.delivery}
             {...(queued === undefined ? {} : { text: { queued } })}
-            // The images sent with it, each opening full size with the others.
-            {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
+            // The images sent with it, each opening full size with the others; then its files and folders, a chip each.
+            {...(block.pictures.length + block.files.length === 0
+              ? {}
+              : { attach: [...sentAttachments(block.pictures), ...fileAttachments(block.files)] })}
             // The links in it that unfurled, in the bubble under the words, so they read as part of what the person said.
             {...(block.links.length === 0 ? {} : { unfurl: block.links.map((link) => <LinkView key={link.url} link={link} />) })}
           >

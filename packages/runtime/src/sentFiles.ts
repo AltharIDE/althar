@@ -94,7 +94,8 @@ export const keepFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
             SELECT name, kind, media_type, bytes, entries, path FROM user_input_files
             WHERE project_id = ${projectId} AND user_input_id = ${inputId ?? ''} AND position = ${Number(position)}`
           if (row === undefined || !existsSync(row.path)) return yield* new FileRefused({ reason: 'missing', name: row?.name ?? null })
-          return { kept: { ...row, kind: row.kind === 'folder' ? ('folder' as const) : ('file' as const) } }
+          const kept: InputFile = { ...row, kind: row.kind === 'folder' ? 'folder' : 'file' }
+          return { kept }
         }
         const source = yield* folders
           .path(file.grant)
@@ -112,7 +113,7 @@ export const keepFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
     const taken = new Set<string>()
     return yield* Effect.forEach(found, (one) =>
       Effect.gen(function* () {
-        if ('kept' in one) return one.kept satisfies InputFile
+        if ('kept' in one) return one.kept
         const target = join(own ?? folder, freeName(one.name, taken))
         yield* Effect.tryPromise({
           try: () => copyTo(one.source, target),

@@ -7,6 +7,7 @@ import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
 import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
 import type { UpdateGlance } from '../../main/updates'
 
+import type { Attached } from '../shared/files'
 import type { Client } from './client'
 import type { Feed } from './feed'
 
@@ -164,6 +165,10 @@ export interface Host {
   readonly pickFolders: () => Promise<ReadonlyArray<string>>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
+  /** A file or folder added to a message, measured and granted: its grant, name and size, or why it can't go; null for one with no file behind it, as a pasted picture. */
+  readonly attach: (file: File) => Promise<Attached | null>
+  /** The files copied in the file manager, as the clipboard names them, each as `attach` says it; none where what was copied isn't files. */
+  readonly attachPasted: () => Promise<ReadonlyArray<Attached>>
   /** The git repositories where people usually keep code on this computer, newest work first, and where it looked; a new project offers them too. */
   readonly findRepositories: () => Promise<FoundRepositories>
   /** A grant for a repository it found, by its id; null for one it didn't. */

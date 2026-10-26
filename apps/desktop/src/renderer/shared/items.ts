@@ -1,9 +1,13 @@
-import type { Picture, ThreadItem } from '@althar/contracts'
+import type { AttachedFile, Picture, ThreadItem } from '@althar/contracts'
 
 import { text as imagesText } from './images'
 import type { Streamed } from './thread'
 
 /* A thread's items as a window holds them: read a page at a time, and changed one by one. */
+
+/** What went with a queued message, in words: "2 images", "1 file", "1 image, 2 files". */
+const attachedText = (images: number, files: number) =>
+  [...(images === 0 ? [] : [imagesText.attached(images)]), ...(files === 0 ? [] : [files === 1 ? '1 file' : `${files} files`])].join(', ')
 
 /** The ids the window gives what the person sent until the store's copy arrives. */
 const SENDING = 'sending:'
@@ -23,6 +27,8 @@ export const sending = (
     readonly dictated?: boolean
     /** The images sent with it. */
     readonly pictures?: ReadonlyArray<Picture>
+    /** The files and folders sent with it. */
+    readonly files?: ReadonlyArray<AttachedFile>
   },
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
   sent += 1
@@ -33,7 +39,7 @@ export const sending = (
     sequence: (items.at(-1)?.sequence ?? 0) + 0.5,
     agentId: null,
     createdAt: new Date().toISOString(),
-    content: { text: message.text, links: [], pictures: message.pictures ?? [] },
+    content: { text: message.text, links: [], pictures: message.pictures ?? [], files: message.files ?? [] },
     input: {
       state: message.queued ? 'queued' : 'delivered',
       interrupting: message.interrupting,
@@ -174,6 +180,7 @@ export const queuedOf = (
   readonly text: string
   readonly attached?: string
   readonly pictures: ReadonlyArray<Picture>
+  readonly files: ReadonlyArray<AttachedFile>
   readonly dictated?: boolean
 }> =>
   !shown
@@ -184,8 +191,11 @@ export const queuedOf = (
               {
                 id: item.id,
                 text: item.content.text,
-                ...(item.content.pictures.length === 0 ? {} : { attached: imagesText.attached(item.content.pictures.length) }),
+                ...(item.content.pictures.length + item.content.files.length === 0
+                  ? {}
+                  : { attached: attachedText(item.content.pictures.length, item.content.files.length) }),
                 pictures: item.content.pictures,
+                files: item.content.files,
                 ...(item.input.dictated === true ? { dictated: true } : {}),
               },
             ]

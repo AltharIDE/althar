@@ -559,7 +559,7 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('img', { name: 'bug.png' })).toBeTruthy()
     await userEvent.type(box, 'This is the bug{Enter}')
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('This is the bug'))
-    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: '1 attachment to send' })).toBeTruthy()
     expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
   })
 

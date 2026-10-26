@@ -21,7 +21,7 @@ import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsen
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
-import { type Outgoing, sentWith } from '../../shared/useImages'
+import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
@@ -434,7 +434,7 @@ export const useTask = (threadId: string): TaskModel => {
         queued,
         interrupting: disposition === 'interrupt_and_continue',
         ...(images?.dictated === true ? { dictated: true } : {}),
-        ...(images === undefined ? {} : { pictures: images.pictures }),
+        ...(images === undefined ? {} : { pictures: images.pictures, files: images.attached }),
       })
       id = next.id
       return { ...current, items: next.items }

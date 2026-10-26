@@ -9,6 +9,7 @@ import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } 
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
 import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { keepingAwake } from './awake'
+import { attachedOf, clipboardPaths, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
 import { startDictation } from './dictation'
@@ -714,6 +715,26 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
   const found = await stat(path).catch(() => undefined)
   return found?.isDirectory() === true ? allowFolder(path) : null
+})
+
+// A file or folder added to a message, by the path the preload read from the drop or the picker: measured, and granted where a message may carry it.
+ipcMain.handle('althar:attach', async (_event, path: unknown) => {
+  if (typeof path !== 'string' || path === '') return null
+  return attachedOf(path, allowFolder)
+})
+
+// The files copied in the file manager and pasted into a message, as the clipboard names them: each as one dropped.
+ipcMain.handle('althar:attach-pasted', async () => {
+  const paths = await clipboardPaths(async (format, raw) => {
+    const type = raw ? rawFormat(format) : format
+    for (const item of await clipboard.read()) {
+      if (!item.types.includes(type)) continue
+      const got = await item.getType(type)
+      if (got instanceof Blob) return Buffer.from(await got.arrayBuffer())
+    }
+    return null
+  }, process.platform)
+  return Promise.all(paths.map((path) => attachedOf(path, allowFolder)))
 })
 
 /* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */

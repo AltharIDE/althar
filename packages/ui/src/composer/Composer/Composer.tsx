@@ -74,6 +74,9 @@ export interface ComposerImage {
   reading?: boolean
 }
 
+/** How files came to the composer: dropped on it, pasted into it, or picked with its button. */
+export type AddedBy = 'drop' | 'paste' | 'pick'
+
 /** A file or folder waiting to go with what you write: a chip with its name and size, and a way to take it off. */
 export interface ComposerFile {
   id: string
@@ -220,7 +223,7 @@ export interface ComposerProps {
    * `images` or `files`, or refuse in `fileNote`. Without it, the composer
    * takes none, and offers no button.
    */
-  onAddFiles?: (files: readonly File[]) => void
+  onAddFiles?: (files: readonly File[], how: AddedBy) => void
   /** Takes an image off. Without it, images have no remove button. */
   onRemoveImage?: (id: string) => void
   /** Takes a file or folder off. Without it, they have no remove button. */
@@ -275,7 +278,7 @@ export function Composer({
   const own = useRef<HTMLTextAreaElement>(null)
   const filePicker = useRef<HTMLInputElement>(null)
   /* files held over any part of it, the tray and what floats over it included */
-  const drop = useDragOver(onAddFiles)
+  const drop = useDragOver(onAddFiles === undefined ? undefined : (dropped) => onAddFiles(dropped, 'drop'))
   const ref = inputRef ?? own
   const hintId = useId()
   const elapsed = dictation?.elapsed ?? null
@@ -512,7 +515,7 @@ export function Composer({
               const pasted = [...e.clipboardData.files]
               if (!onAddFiles || pasted.length === 0) return
               e.preventDefault()
-              onAddFiles(pasted)
+              onAddFiles(pasted, 'paste')
             }}
             onKeyDown={(e) => {
               /* Tab takes the suggestion into the field, to send with Enter or change first. */
@@ -566,7 +569,7 @@ export function Composer({
                     const picked = [...(e.target.files ?? [])]
                     // Picking the same file again is a change too.
                     e.target.value = ''
-                    if (picked.length > 0) onAddFiles(picked)
+                    if (picked.length > 0) onAddFiles(picked, 'pick')
                   }}
                 />
               </>
