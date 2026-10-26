@@ -70,16 +70,18 @@ jobs:
       run:
         shell: bash
     env:
-      # The runner's own temporary folder is under a short name (C:\Users\RUNNER~1), which git and Node's realpath give
-      # whole, and so differently from the paths the tests made; a person's is named whole. This one has no short name.
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
       # The runner's git checks text out with CRLF (core.autocrlf), which the repositories the tests make and read back
       # don't expect: they write LF and compare it.
       GIT_CONFIG_COUNT: '1'
       GIT_CONFIG_KEY_0: core.autocrlf
       GIT_CONFIG_VALUE_0: 'false'
     steps:
+      # The runner's own temporary folder is under a short name (C:\Users\RUNNER~1), which git and Node's realpath give
+      # whole, and so differently from the paths the tests made; a person's is named whole. This one has no short name.
+      # Set from a step: a job's env can't read the runner context, and GitHub refuses the whole workflow if it does.
+      - run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
