@@ -467,7 +467,11 @@ describe('a removed folder set up again', () => {
       const go = join(realpathSync(mkdtempSync(join(tmpdir(), 'althar-go-'))), 'go')
       yield* launches.keep({
         projectId: task.projectId,
-        run: { command: LONG, setup: `while [ ! -f '${go}' ]; do sleep 0.05; done` },
+        // In Node, which both a POSIX shell and cmd.exe run, and by a path with /, which Node takes on Windows too.
+        run: {
+          command: LONG,
+          setup: `node -e "const fs = require('fs'); const wait = () => fs.existsSync('${go.replaceAll('\\', '/')}') || setTimeout(wait, 50); wait()"`,
+        },
         actorId: yield* person,
       })
       yield* cleanup.sweep

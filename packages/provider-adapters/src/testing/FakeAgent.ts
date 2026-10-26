@@ -739,10 +739,11 @@ const playRole = async (
             { severity: 'nit', file: 'README.md', claim: 'A typo.' },
           ],
         })
-      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found.
+      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found: by its absolute
+      // path, a Windows one (`D:\…`) too.
       const looked = session.markers.has('[review:evidence]')
-        ? ` Read: ${[...text.matchAll(/^- [^\n]*: (\/[^\n]+)$/gm)]
-            .map(([, path = '']) => `${path.split('/').at(-1) ?? ''} (${statSync(path).size} bytes)`)
+        ? ` Read: ${[...text.matchAll(/^- [^\n]*: ((?:\/|[A-Za-z]:\\)[^\n]+)$/gm)]
+            .map(([, path = '']) => `${path.split(/[\\/]/).at(-1) ?? ''} (${statSync(path).size} bytes)`)
             .join(', ')}.`
         : ''
       if (text.includes('[review:findings]') && !text.startsWith('Round '))

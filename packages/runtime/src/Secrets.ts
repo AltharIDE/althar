@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
@@ -110,7 +110,9 @@ export class Secrets extends Context.Service<
                 try {
                   return readFileSync(path, 'utf8')
                 } catch (error) {
-                  if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+                  // None kept, unless its folder is a file: Windows says a name under one isn't there, POSIX that it isn't a folder.
+                  const blocked = statSync(folder, { throwIfNoEntry: false })?.isDirectory() === false
+                  if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !blocked) return null
                   throw error
                 }
               })
