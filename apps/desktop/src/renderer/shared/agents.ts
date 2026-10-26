@@ -56,6 +56,9 @@ const ordinal = (n: number) => {
 /** Where a task waiting for a free agent stands in its project's line: Next in line, 2nd in line. */
 export const inLineWords = (place: number) => `${ordinal(place)} in line`
 
+/** Where a task waiting for a free agent stands in its project's line, as the chip over its composer says it: First in Up next, 2nd in Up next. */
+export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal(place)} in Up next`
+
 /** How busy this computer's agents are, as work that waits for one says it. */
 export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
   `${Math.min(busy, atOnce)} of ${atOnce} agents busy on ${where}${busy > atOnce ? `, and ${busy - atOnce} more` : ''}`

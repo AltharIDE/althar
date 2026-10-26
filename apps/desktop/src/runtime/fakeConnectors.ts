@@ -9,7 +9,7 @@ import {
   type ProductInfo,
   products,
 } from '@althar/connectors'
-import { type FakeCheck, makeFakeService } from '@althar/connectors/testing'
+import { type FakeCheck, makeFakeService, routed } from '@althar/connectors/testing'
 import { Connectors } from '@althar/runtime'
 import { Effect, Layer } from 'effect'
 
@@ -71,13 +71,27 @@ export const fakeConnectors = Layer.succeed(
  * address, which no network reaches, with the accounts of the people in
  * the design's world. gh is signed in to github.com and glab to
  * gitlab.com; a company's GitLab answers at git.halyard.dev, and Jira at
- * northwind.atlassian.net. A GitHub token with `readonly` in it can't open
- * pull requests the first time it is checked; an Atlassian token with
- * `old` in it ran out.
+ * northwind.atlassian.net. Linear has two workspaces, Northwind and, for
+ * a key with `halyard` in it, Halyard, side by side (ADR-059). A GitHub
+ * token with `readonly` in it can't open pull requests the first time it is
+ * checked; an Atlassian token with `old` in it ran out.
  */
 
-const fake = (product: Product, login: string, repositories: ReadonlyArray<ReadonlyArray<string>> = []) => {
-  const service = makeFakeService({ product, account: { id: login, login, name: null } })
+const fake = (
+  product: Product,
+  login: string,
+  repositories: ReadonlyArray<ReadonlyArray<string>> = [],
+  workspace?: { readonly key: string; readonly name: string },
+) => {
+  const service = makeFakeService({
+    product,
+    account: {
+      id: workspace === undefined ? login : `${login}@${workspace.key}`,
+      login,
+      name: null,
+      ...(workspace === undefined ? {} : { workspace }),
+    },
+  })
   for (const path of repositories) service.addRepository(path)
   return service
 }
@@ -90,11 +104,17 @@ const demo = {
   gitlab: fake('gitlab', 'balazs.k', [['halyard', 'gateway']]),
   bitbucket_cloud: fake('bitbucket_cloud', 'balazs@tessera.studio', [['tessera-studio', 'tessera-app']]),
   bitbucket_dc: fake('bitbucket_dc', 'balazs'),
-  linear: fake('linear', 'Balázs · Northwind'),
+  linear: fake('linear', 'balazs', [], { key: 'northwind', name: 'Northwind' }),
   jira_cloud: fake('jira_cloud', 'balazs@northwind.io'),
   jira_dc: fake('jira_dc', 'balazs'),
   trello: fake('trello', 'balazsk'),
 } satisfies Record<Product, ReturnType<typeof makeFakeService>>
+
+/** Linear's other workspace, which a key with `halyard` in it signs in to. */
+const halyard = fake('linear', 'balazs', [], { key: 'halyard', name: 'Halyard' })
+
+/** The fake a token signs in to: Linear's by its workspace, every other product's own. */
+const serviceFor = (product: Product, token: string) => (product === 'linear' && token.includes('halyard') ? halyard : demo[product])
 
 /* Tokens checked once, so a token changed on its page reads as changed when checked again. */
 const checked = new Set<string>()
@@ -103,7 +123,7 @@ const checked = new Set<string>()
 const demoAccess =
   (product: Product): Access =>
   (input) =>
-    Effect.map(demo[product].access(input), (report): AccessReport => {
+    Effect.map(serviceFor(product, input.credential.token).access(input), (report): AccessReport => {
       const token = input.credential.token
       const first = !checked.has(token)
       checked.add(token)
@@ -144,8 +164,10 @@ const demoMake =
     const account = Effect.flatMap(options.credential, (credential) =>
       credential.token.includes('old')
         ? Effect.fail(new ConnectorFailed({ product, reason: 'unauthorized', status: 401, message: 'Unauthorized' }))
-        : service.account,
+        : serviceFor(product, credential.token).account,
     )
+    // Linear's two workspaces, each through the token that signs in to it.
+    if (product === 'linear') return { tracker: { ...routed((token) => serviceFor(product, token)).tracker(options), account } }
     const adapter = { ...service, account }
     return products[product].host ? { host: adapter, ...(products[product].tracker ? { tracker: adapter } : {}) } : { tracker: adapter }
   }

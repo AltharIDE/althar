@@ -9,6 +9,7 @@ import { envelope } from './envelope'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { projectRepository } from './Issues'
+import { projectTracker } from './projectTracker'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
@@ -62,7 +63,15 @@ export interface DraftCard {
  * was that it hasn't). `choices` are what can be named instead.
  */
 export class IssueTargetNeeded extends Schema.TaggedError<IssueTargetNeeded>()('IssueTargetNeeded', {
-  reason: Schema.Literals(['no_tracker', 'tracker_needed', 'unknown_tracker', 'container_needed', 'unknown_container']),
+  reason: Schema.Literals([
+    'no_tracker',
+    'tracker_needed',
+    'unknown_tracker',
+    'container_needed',
+    'unknown_container',
+    'tracker_gone',
+    'tracker_signed_out',
+  ]),
   /** What was named and not found. */
   named: Schema.NullOr(Schema.String),
   /** The tracker the draft would go to, for a container to name. */
@@ -110,6 +119,14 @@ export const refusedDraft = (error: unknown): unknown => {
       return new ToolRefused({ message: `Say which tracker it goes on, as tracker: ${choices}.` })
     case 'unknown_tracker':
       return new ToolRefused({ message: `No tracker called ${error.named ?? ''} is connected. Connected: ${choices}.` })
+    case 'tracker_gone':
+      return new ToolRefused({
+        message: `This project's issues go to ${where}, which is no longer connected. The person connects it again in Settings, or binds the project to another in its settings; or name another tracker for this one${choices === '' ? '' : `, as tracker: ${choices}`}.`,
+      })
+    case 'tracker_signed_out':
+      return new ToolRefused({
+        message: `This project's issues go to ${where}, which needs signing in again. The person signs in to it again in Settings; or name another tracker for this one${choices === '' ? '' : `, as tracker: ${choices}`}.`,
+      })
     case 'container_needed':
       return new ToolRefused({ message: `Say where on ${where} it goes, as container: ${choices}.` })
     case 'unknown_container':
@@ -192,10 +209,16 @@ interface Candidate {
   readonly connectionId: string
   readonly product: Product
   readonly tracker: Tracker
-  /** Its product's name, and its site, or its site and account, where another connection would share the name: Jira (acme.atlassian.net). */
+  /**
+   * Its product's name, and its workspace, its site, or its site and account,
+   * where another connection would share the name: Linear (FNT), Jira
+   * (acme.atlassian.net).
+   */
   readonly label: string
   readonly host: string
   readonly login: string
+  /** The workspace its sign-in reaches, by its key and name, where it reaches one (ADR-059). */
+  readonly workspace: { readonly key: string; readonly name: string } | null
 }
 
 /**
@@ -210,6 +233,7 @@ const trackerNamed = (candidate: Candidate, typed: string) =>
   same(candidate.label, typed) ||
   same(candidate.connectionId, typed) ||
   same(candidate.login, typed) ||
+  (candidate.workspace !== null && (same(candidate.workspace.key, typed) || same(candidate.workspace.name, typed))) ||
   hostOf(typed) === candidate.host
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | Sessions
@@ -357,14 +381,23 @@ export class IssueDrafts extends Context.Service<
         const told = known.map((one): Candidate => {
           const named = known.filter((other) => other.name === one.name)
           const hosted = named.filter((other) => other.host === one.host)
+          const workspace = one.workspace
+          const inWorkspace = workspace === null ? [] : named.filter((other) => other.workspace?.name === workspace.name)
           return {
             connectionId: one.connectionId,
             product: one.product,
             tracker: one.tracker,
             host: one.host,
             login: one.login,
+            workspace,
             label:
-              named.length === 1 ? one.name : hosted.length === 1 ? `${one.name} (${one.host})` : `${one.name} (${one.host}, ${one.login})`,
+              named.length === 1
+                ? one.name
+                : workspace !== null && inWorkspace.length === 1
+                  ? `${one.name} (${workspace.name})`
+                  : hosted.length === 1
+                    ? `${one.name} (${one.host})`
+                    : `${one.name} (${one.host}, ${one.login})`,
           }
         })
         return told.toSorted((a, b) => a.label.localeCompare(b.label))
@@ -380,11 +413,28 @@ export class IssueDrafts extends Context.Service<
         Effect.gen(function* () {
           const trackers = yield* candidates
           const home = yield* projectRepository(projectId).pipe(Effect.orElseSucceed(() => null))
-          // A lead's task came from an issue, perhaps: its follow-ups go beside it.
-          const before = [...(taskId === undefined ? [] : yield* ownOf(taskId)), ...(yield* usual(projectId))]
+          // The tracker the project is bound to comes first (ADR-059); then, as where a project's issues go is learned, a
+          // lead's task came from an issue, perhaps: its follow-ups go beside it.
+          const bound = yield* projectTracker(projectId)
+          const before = [
+            ...(bound === null ? [] : [{ connectionId: bound.connectionId, container: bound.container?.name ?? '', at: '' }]),
+            ...(taskId === undefined ? [] : yield* ownOf(taskId)),
+            ...(yield* usual(projectId)),
+          ]
           const labels = trackers.map((one) => one.label)
           const typed = named.tracker?.trim() === '' ? undefined : named.tracker?.trim()
           const wanted = named.container?.trim() === '' ? undefined : named.container?.trim()
+          // Bound to a workspace no longer connected, or needing sign-in again, it waits for that one, never going to another unasked.
+          if (bound !== null && typed === undefined && !trackers.some((one) => one.connectionId === bound.connectionId)) {
+            const workspace =
+              bound.gone?.workspace ?? (yield* connections.list).find((one) => one.id === bound.connectionId)?.workspace?.name ?? null
+            return yield* new IssueTargetNeeded({
+              reason: bound.gone === null ? 'tracker_signed_out' : 'tracker_gone',
+              named: null,
+              tracker: workspace === null ? products[bound.product].name : `${products[bound.product].name} (${workspace})`,
+              choices: labels,
+            })
+          }
           const matching = typed === undefined ? trackers : trackers.filter((one) => trackerNamed(one, typed))
           if (matching.length === 0)
             return yield* new IssueTargetNeeded({
@@ -393,7 +443,7 @@ export class IssueDrafts extends Context.Service<
               tracker: null,
               choices: labels,
             })
-          /** Of several, the one the project's issues come from, then the one its repository is on. */
+          /** Of several, the one the project is bound to or its issues come from, then the one its repository is on. */
           const preferred = (among: ReadonlyArray<Candidate>) =>
             before.flatMap((one) => among.filter((candidate) => candidate.connectionId === one.connectionId))[0] ??
             among.find((one) => one.connectionId === home?.connectionId)
@@ -452,6 +502,9 @@ export class IssueDrafts extends Context.Service<
             })
           const containers = yield* chosen.tracker.containers()
           const found =
+            (bound?.connectionId === chosen.connectionId && bound.container !== null
+              ? (containers.find((one) => one.id === bound.container?.id) ?? containerNamed(containers, bound.container.name))
+              : undefined) ??
             (home?.connectionId === chosen.connectionId ? containerNamed(containers, home.path.join('/')) : undefined) ??
             before
               .filter((one) => one.connectionId === chosen.connectionId && one.container !== '')

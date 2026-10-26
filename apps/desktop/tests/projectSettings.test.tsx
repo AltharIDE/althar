@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type BoardTask, type ConnectionSummary, type ProjectSummary, type Service } from '@althar/contracts'
+import { ApiError, type BoardTask, type ConnectionSummary, type ProjectSummary, type ProjectTracker, type Service } from '@althar/contracts'
 
 import { type Host, ServicesProvider } from '../src/renderer/data/services'
 import { projectRoute } from '../src/renderer/features/project/route'
@@ -516,6 +516,23 @@ describe('a project’s trackers, in its settings', () => {
     expect(within(screen.getByRole('region', { name: 'Trackers' })).getByText('Connected as balazs')).toBeTruthy()
   })
 
+  it('says one key that reaches several teams of a workspace is connected for each team its issues are on', async () => {
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({
+        cursor: 1,
+        tasks: [taskFrom('DEV-74', 'conn_key'), taskFrom('OPS-3', 'conn_key')],
+        calls: [],
+        settledTotal: 2,
+      })),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, linear('ready', 'conn_key', 'mate')] })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings' })).toBeTruthy()
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getAllByText('Connected as mate')).toHaveLength(2)
+    expect(trackers.queryByText('Not connected')).toBeNull()
+  })
+
   it('says a tracker isn’t connected once the account its issues go through is removed, though another is signed in there', async () => {
     // Work's account was removed, so listing connections leaves it out; a personal one is signed in on the same Linear.
     windowAt('/projects/p1', {
@@ -598,6 +615,84 @@ describe('a project’s trackers, in its settings', () => {
     await userEvent.click(trackers.getByRole('button', { name: 'Open on Linear' }))
     expect(opened).toHaveBeenCalledWith('https://linear.app/northwind/team/MER', '_blank')
     opened.mockRestore()
+  })
+
+  it('sends its issues to one of two Linear workspaces, and a team there, once the person binds it (ADR-059)', async () => {
+    const althar = { ...linear('ready', 'conn_althar', 'mate'), workspace: { key: 'althar', name: 'althar' } }
+    const fnt = { ...linear('ready', 'conn_fnt', 'mate'), workspace: { key: 'fnt', name: 'FNT' } }
+    let bound: ProjectTracker | null = null
+    const { client } = windowAt('/projects/p1', {
+      ...onLinear(althar, fnt),
+      getProjectTracker: vi.fn(async () => bound),
+      setProjectTracker: vi.fn(async (_projectId: string, next: ProjectTracker | null) => {
+        bound = next
+      }),
+      listContainers: vi.fn(async (connectionId: string) =>
+        connectionId === 'conn_fnt' ? [{ id: 'team-f', key: 'FNT', name: 'Fintech' }] : [],
+      ),
+    })
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    // Unset, where its issues already are, as before.
+    const goTo = await trackers.findByRole('combobox', { name: 'Issues go to' })
+    expect(goTo.textContent).toContain('Where its issues are')
+    expect(trackers.queryByRole('combobox', { name: 'Team' })).toBeNull()
+
+    await userEvent.click(goTo)
+    await userEvent.click(await screen.findByRole('option', { name: 'Linear · FNT' }))
+    expect(client.setProjectTracker).toHaveBeenCalledWith('p1', { connectionId: 'conn_fnt', container: null })
+    const team = await trackers.findByRole('combobox', { name: 'Team' })
+    await waitFor(() => expect(team.hasAttribute('disabled')).toBe(false))
+    await userEvent.click(team)
+    await userEvent.click(await screen.findByRole('option', { name: 'FNT (Fintech)' }))
+    expect(client.setProjectTracker).toHaveBeenLastCalledWith('p1', {
+      connectionId: 'conn_fnt',
+      container: { id: 'team-f', name: 'Fintech' },
+    })
+    await waitFor(() => expect(team.textContent).toContain('FNT (Fintech)'))
+
+    // Unbound again, it goes back to where its issues are.
+    await userEvent.click(goTo)
+    await userEvent.click(await screen.findByRole('option', { name: 'Where its issues are' }))
+    expect(client.setProjectTracker).toHaveBeenLastCalledWith('p1', null)
+  })
+
+  it('says the workspace it is bound to was disconnected, rather than going back to where its issues are', async () => {
+    const althar = { ...linear('ready', 'conn_althar', 'mate'), workspace: { key: 'althar', name: 'althar' } }
+    const listContainers = vi.fn(async () => [])
+    windowAt('/projects/p1', {
+      ...onLinear(althar),
+      getProjectTracker: vi.fn(async (): Promise<ProjectTracker> => ({
+        connectionId: 'conn_fnt',
+        container: { id: 'team-f', name: 'Fintech' },
+        gone: { product: 'linear', webUrl: 'https://linear.app', workspace: 'FNT' },
+      })),
+      listContainers,
+    })
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    const goTo = await trackers.findByRole('combobox', { name: 'Issues go to' })
+    await waitFor(() => expect(goTo.textContent).toContain('Linear · FNT (disconnected)'))
+    expect(trackers.getByText(/^Disconnected\./)).toBeTruthy()
+    expect(trackers.queryByRole('combobox', { name: 'Team' })).toBeNull()
+    expect(listContainers).not.toHaveBeenCalled()
+  })
+
+  it('says why a binding didn’t hold, and puts it back', async () => {
+    const fnt = { ...linear('ready', 'conn_fnt', 'mate'), workspace: { key: 'fnt', name: 'FNT' } }
+    windowAt('/projects/p1', {
+      ...onLinear(fnt),
+      setProjectTracker: vi.fn(async () => {
+        throw new ApiError({ reason: 'NotFound', message: 'That connection is gone.' })
+      }),
+    })
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    const goTo = await trackers.findByRole('combobox', { name: 'Issues go to' })
+    await userEvent.click(goTo)
+    await userEvent.click(await screen.findByRole('option', { name: 'Linear · FNT' }))
+    expect(await trackers.findByRole('alert')).toBeTruthy()
+    await waitFor(() => expect(goTo.textContent).toContain('Where its issues are'))
   })
 
   it('says none has been named yet, offers to connect one, and leads to Althar’s own connections', async () => {

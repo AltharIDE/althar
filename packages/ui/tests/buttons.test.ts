@@ -64,7 +64,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',
   'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
-  'composer/Listening/Listening.tsx': 'the listening pill, and stop on its sunk bar',
+  'composer/Behind/Behind.tsx': 'the chip over a task’s composer, its parts parted by hairlines, which opens all of it',
   'composer/DictationPill/DictationPill.tsx': 'the words carried in the pill, stretched across it, which open it',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
   'setup/ControlCenter/ControlCenter.tsx': 'a module, the whole of which opens it out, and a round switch',
