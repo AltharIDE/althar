@@ -117,6 +117,12 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
   const dragged = useRef(false)
   // Let go, settling into its place: no new press until it has.
   const settling = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A press not yet a drag, followed on the window: let go of once it is one, or the press ends, or the list goes.
+  const following = useRef<(() => void) | null>(null)
+  const unfollow = useCallback(() => {
+    following.current?.()
+    following.current = null
+  }, [])
   const latest = useRef({ ids, movable, onReorder, axis, settle, grab })
   latest.current = { ids, movable, onReorder, axis, settle, grab }
 
@@ -155,41 +161,45 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
     window.getSelection?.()?.removeAllRanges()
   }, [])
 
-  const finish = useCallback((commit: boolean) => {
-    const p = press.current
-    if (p === null) return
-    cancelAnimationFrame(p.frame)
-    press.current = null
-    if (!p.moving) {
-      setDragging(null)
-      return
-    }
-    dragged.current = true
-    // The click that follows has come by the next turn.
-    setTimeout(() => (dragged.current = false), 0)
-    const lands = commit && p.to !== p.from
-    const done = () => {
-      if (lands) {
-        const others = latest.current.ids.filter((id) => id !== p.id)
-        latest.current.onReorder?.(p.id, others[p.to] ?? null)
+  const finish = useCallback(
+    (commit: boolean) => {
+      const p = press.current
+      if (p === null) return
+      cancelAnimationFrame(p.frame)
+      press.current = null
+      unfollow()
+      if (!p.moving) {
+        setDragging(null)
+        return
       }
-      setDragging(null)
-    }
-    const { settle: ms } = latest.current
-    if (ms <= 0 || reducedMotion()) return done()
-    // To the place it lands in, or back to its own, the others with it.
-    const from = p.starts[p.from] ?? 0
-    const target = lands
-      ? p.to > p.from
-        ? (p.starts[p.to] ?? 0) + (p.sizes[p.to] ?? 0) - (p.sizes[p.from] ?? 0) - from
-        : (p.starts[p.to] ?? 0) - from
-      : 0
-    setDragging((now) => (now === null ? now : { ...now, offset: target, shifts: lands ? now.shifts : {}, settling: true }))
-    settling.current = setTimeout(() => {
-      settling.current = null
-      done()
-    }, ms)
-  }, [])
+      dragged.current = true
+      // The click that follows has come by the next turn.
+      setTimeout(() => (dragged.current = false), 0)
+      const lands = commit && p.to !== p.from
+      const done = () => {
+        if (lands) {
+          const others = latest.current.ids.filter((id) => id !== p.id)
+          latest.current.onReorder?.(p.id, others[p.to] ?? null)
+        }
+        setDragging(null)
+      }
+      const { settle: ms } = latest.current
+      if (ms <= 0 || reducedMotion()) return done()
+      // To the place it lands in, or back to its own, the others with it.
+      const from = p.starts[p.from] ?? 0
+      const target = lands
+        ? p.to > p.from
+          ? (p.starts[p.to] ?? 0) + (p.sizes[p.to] ?? 0) - (p.sizes[p.from] ?? 0) - from
+          : (p.starts[p.to] ?? 0) - from
+        : 0
+      setDragging((now) => (now === null ? now : { ...now, offset: target, shifts: lands ? now.shifts : {}, settling: true }))
+      settling.current = setTimeout(() => {
+        settling.current = null
+        done()
+      }, ms)
+    },
+    [unfollow],
+  )
 
   // Scrolls while the pointer is held at an edge of the list.
   const scrolling = useCallback(() => {
@@ -210,10 +220,11 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
   const cancel = useCallback(() => {
     cancelAnimationFrame(press.current?.frame ?? 0)
     press.current = null
+    unfollow()
     if (settling.current !== null) clearTimeout(settling.current)
     settling.current = null
     setDragging(null)
-  }, [])
+  }, [unfollow])
 
   const active = dragging !== null
   useEffect(() => {
@@ -229,9 +240,11 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
   useEffect(
     () => () => {
       cancelAnimationFrame(press.current?.frame ?? 0)
+      press.current = null
+      unfollow()
       if (settling.current !== null) clearTimeout(settling.current)
     },
-    [],
+    [unfollow],
   )
 
   /** The held pointer moved: a drag once it has gone far enough, which then takes the pointer (`hold`) where the item asks. */
@@ -247,6 +260,7 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
     if (!p.moving) {
       if (Math.abs(p.client - p.start) < SLOP) return
       p.moving = true
+      unfollow()
       p.frame = requestAnimationFrame(scrolling)
       if (latest.current.grab === 'drag') hold()
     }
@@ -316,7 +330,9 @@ export function useReorder({ ids, movable, list, onReorder, axis = 'x', settle =
           }
         })
       }
+      unfollow()
       window.addEventListener('pointermove', follow, true)
+      following.current = () => window.removeEventListener('pointermove', follow, true)
     },
     onPointerMove: (event: PointerEvent<HTMLElement>) =>
       moved(event.pointerId, event.buttons, event[along[latest.current.axis].client], () => capture(event)),

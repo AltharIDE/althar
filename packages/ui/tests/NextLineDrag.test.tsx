@@ -100,6 +100,17 @@ describe('dragging a row up next', () => {
     expect(onMove).toHaveBeenCalledWith('d', 0)
   })
 
+  it('follows a press no longer once the line is gone: a move on the window after starts no drag', () => {
+    const { unmount } = render(draw(['a', 'b', 'c', 'd'], vi.fn()))
+    layOut()
+    fireEvent.pointerDown(grip('d'), { pointerId: 1, isPrimary: true, button: 0, buttons: 1, clientY: 140 })
+    unmount()
+    const pending = vi.getTimerCount()
+    fireEvent.pointerMove(document.body, { pointerId: 1, isPrimary: true, buttons: 1, clientY: 100 })
+    // No frame asked for to scroll a lane that isn't there.
+    expect(vi.getTimerCount()).toBe(pending)
+  })
+
   it('lifts the row with the pointer, the others giving way, and lands it where it is let go once it has settled', () => {
     const onMove = vi.fn()
     render(draw(['a', 'b', 'c', 'd'], onMove))
