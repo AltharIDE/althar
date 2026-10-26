@@ -1564,10 +1564,9 @@ export class Queries extends Context.Service<
             unshipped:
               links.changes.length === 0
                 ? 0
-                : (yield* Effect.flatMap(Changes, (changes) => changes.unshipped(taskId)).pipe(Effect.orElseSucceed(() => []))).reduce(
-                    (sum, one) => sum + one.commits.length,
-                    0,
-                  ),
+                : (yield* Effect.flatMap(Changes, (changes) => changes.unshipped(taskId, { kept: true })).pipe(
+                    Effect.orElseSucceed(() => []),
+                  )).reduce((sum, one) => sum + one.commits.length, 0),
           }
         })
 
@@ -1687,7 +1686,7 @@ export class Queries extends Context.Service<
             FROM tasks k WHERE k.id = ${taskId}`
           const after =
             shipping !== undefined && shipping.changes > 0 && shipping.state !== 'abandoned'
-              ? yield* (yield* Changes).unshipped(taskId).pipe(Effect.orElseSucceed(() => []))
+              ? yield* (yield* Changes).unshipped(taskId, { kept: true }).pipe(Effect.orElseSucceed(() => []))
               : []
           const [task] = yield* sql<{
             threadId: string

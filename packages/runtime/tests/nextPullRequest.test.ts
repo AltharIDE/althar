@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -222,6 +222,57 @@ describe('a task’s next pull request, from its worktree as it is', () => {
         assert.strictEqual(git(task.path, 'rev-parse', 'althar/add-a-retry'), mine)
         assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), main)
       }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+})
+
+describe('a settled task’s card, its worktree kept', () => {
+  // Not on Windows: git is counted by a shell script on the PATH.
+  it.live.skipIf(process.platform === 'win32')(
+    'reads what is after its pull request from git once, then only the commits that follows from, until one moves',
+    () => {
+      const { working, bare, github } = onGitHub()
+      // Every git run, by the folder it runs in, counted by a git in front of the real one.
+      const shim = realpathSync(mkdtempSync(join(tmpdir(), 'althar-git-count-')))
+      const log = join(shim, 'calls')
+      const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
+      writeFileSync(join(shim, 'git'), ['#!/bin/sh', `echo "$(pwd -P) $*" >> '${log}'`, `exec '${real}' "$@"`, ''].join('\n'), {
+        mode: 0o755,
+      })
+      const path = process.env.PATH
+      const ranIn = (folder: string) => {
+        const lines = existsSync(log) ? readFileSync(log, 'utf8').split('\n') : []
+        // Each by its command: what comes before it, such as `-c core.hooksPath=/dev/null`, left out.
+        return lines
+          .filter((line) => line.startsWith(`${folder} `))
+          .map((line) =>
+            line
+              .slice(folder.length + 1)
+              .split(' ')
+              .find((word) => !word.startsWith('-') && !word.includes('=')),
+          )
+      }
+      return Effect.gen(function* () {
+        const task = yield* merged(working, bare, github)
+        const folder = realpathSync(task.path)
+        process.env.PATH = `${shim}:${path ?? ''}`
+        yield* cards(task.projectId)
+        rmSync(log, { force: true })
+        // A coordinator's thread, a board and the home read every card, each time any task changes: the same commits, no more git.
+        const [again] = yield* cards(task.projectId)
+        assert.strictEqual(again?.phase, 'settled')
+        assert.deepStrictEqual(
+          ranIn(folder).filter((command) => command !== 'cat-file'),
+          [],
+        )
+        // A commit after it: read again, it shows.
+        commitIn(task.path, 'slider.txt', 'Slider')
+        const [moved] = yield* cards(task.projectId)
+        assert.strictEqual(moved?.phase, 'ready')
+        assert.deepStrictEqual(moved?.unshipped, { commits: 1, add: 1, del: 0 })
+        assert.include(ranIn(folder), 'rev-list')
+      }).pipe(Effect.ensuring(Effect.sync(() => (process.env.PATH = path))), Effect.provide(runtimeWith(github)))
     },
     60_000,
   )
