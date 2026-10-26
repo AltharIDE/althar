@@ -10,7 +10,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { repository, runtime, until } from './support'
+import { outFor, repository, runtime, until } from './support'
 
 /*
  * Steps that waited for a place among the agents at work (Busy.ts), as they
@@ -122,7 +122,8 @@ const readyIs = (projectId: string, taskId: string) =>
 
 describe('a step an earlier Althar kept waiting for a place as the person resumed it', () => {
   it.live('starts a review at once on the reviewer it was resumed on, though every place is taken', () => {
-    const back = Date.now() + 5_000
+    // Out until three seconds after it first turns the review away, while the other's lead is at work.
+    const out = outFor(3_000)
     return Effect.gen(function* () {
       const policies = yield* Policies
       const instance = yield* Instance
@@ -144,7 +145,7 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
       assert.notStrictEqual((yield* attempts(other.taskId)).at(-1)?.state, 'succeeded')
       const [reviewed] = (yield* attempts(task.taskId)).filter((row) => row.step === 'review')
       assert.strictEqual(reviewed?.state, 'succeeded')
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: out } } })))
   })
 
   it.live("carries a lead's step on at once on the lead it was resumed on, or as answered", () =>

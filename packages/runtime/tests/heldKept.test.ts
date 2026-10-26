@@ -11,7 +11,7 @@ import { Queries } from '../src/Queries'
 import { planWaits, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { repository, runtime, until } from './support'
+import { outFor, repository, runtime, until } from './support'
 
 /*
  * Held steps as the store keeps them, read back however an earlier Althar
@@ -121,7 +121,8 @@ const ranOn = (threadId: string) =>
 
 describe('a step waiting for a place, as an earlier Althar kept it', () => {
   it.live('starts a review kept with no reviewer named on the plan’s reviewer, once there is a place', () => {
-    const back = Date.now() + 5_000
+    // Out until three seconds after it first turns the review away, while the other's lead is at work.
+    const out = outFor(3_000)
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
@@ -143,11 +144,12 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
       const [reviewer] = yield* sql<{ agentId: string }>`
         SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
       assert.strictEqual(reviewer?.agentId, 'codex')
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: out } } })))
   })
 
   it.live('starts a review kept as resumed with no reviewer named at once, on the plan’s reviewer', () => {
-    const back = Date.now() + 5_000
+    // Out until three seconds after it first turns the review away, while the other's lead is at work.
+    const out = outFor(3_000)
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const policies = yield* Policies
@@ -165,7 +167,7 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
         since,
       })} WHERE id = ${review.id}`
       yield* readyIs(projectId, task.taskId)
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: out } } })))
   })
 
   it.live('carries on one whose record can’t be read as after a restart, once there is a place, and its plan can’t be changed', () =>

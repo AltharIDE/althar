@@ -339,6 +339,24 @@ export const task = (title = 'Retry checkout') =>
     return { project, task: created }
   })
 
+/**
+ * A fake agent's `outOfUsage`, out until a while after it first turns work
+ * away, on a whole second as its message gives the reset: for a test whose
+ * reset must come while another task's `[lead:wait]` holds the place, which
+ * it does for five seconds from when it starts. Counted from when the test
+ * began, a runner slow to get there brought the reset after that, and the
+ * place free.
+ */
+export const outFor = (millis: number): { readonly until: number } => {
+  let reset: number | undefined
+  return {
+    get until() {
+      reset ??= Math.ceil((Date.now() + millis) / 1000) * 1000
+      return reset
+    },
+  }
+}
+
 /** Waits until a query returns a row matching the check, reading the store every few milliseconds. */
 export const until = <A, R = SqlClient.SqlClient>(
   query: Effect.Effect<ReadonlyArray<A>, unknown, R>,

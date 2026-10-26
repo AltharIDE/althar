@@ -20,7 +20,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { items, repository, runtime, until } from './support'
+import { items, outFor, repository, runtime, until } from './support'
 
 /*
  * Work waiting for a place among the agents at work (Busy.ts), where
@@ -310,7 +310,8 @@ describe('an answer kept for a place, as answers once were', () => {
 
 describe('a review that waits for a place of its own', () => {
   it.live('is gone on without when the person skips it, and its reviewer never starts again', () => {
-    const back = Date.now() + 5_000
+    // Out until three seconds after it first turns the review away, while the other's lead is at work.
+    const out = outFor(3_000)
     return Effect.gen(function* () {
       const runs = yield* Runs
       const sql = yield* SqlClient.SqlClient
@@ -345,6 +346,6 @@ describe('a review that waits for a place of its own', () => {
       )
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* reviewers, before)
-    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: out } } })))
   })
 })
