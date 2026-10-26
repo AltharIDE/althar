@@ -10,10 +10,10 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The computer is offline: one line for the whole app, read out as it appears. */
+/** The computer is offline: one word for the whole app, read out as it appears. */
 export const Shown: Story = {
   play: async ({ canvasElement }) => {
     const line = within(canvasElement).getByRole('status')
-    await expect(line).toHaveTextContent('Offline: work picks up when you’re back')
+    await expect(line).toHaveTextContent('Offline')
   },
 }

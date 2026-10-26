@@ -67,7 +67,7 @@ test('waits for the connection rather than go Stuck, and carries on by itself on
     await expect(waiting).toBeVisible({ timeout: 15_000 })
     // The computer says it's offline too: once, for the whole app.
     await online(electronApp, page, false)
-    const offline = page.getByRole('status').filter({ hasText: 'Offline: work picks up when you’re back' })
+    const offline = page.getByRole('status').filter({ hasText: /^Offline$/ })
     await expect(offline).toBeVisible({ timeout: 10_000 })
     await page.screenshot({ path: 'test-results/connection-waiting.png', scale: 'css', animations: 'disabled' })
 

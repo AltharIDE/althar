@@ -52,9 +52,9 @@
     the count again.
   - **While the computer is offline, no new work starts.** Nothing but what
     the person did takes a place it hasn't already: Up next, and the next
-    step of a task, wait until the computer is back. One line in the
-    window's bar says so for the whole app ("Offline: work picks up when
-    you're back"), never a card per task.
+    step of a task, wait until the computer is back. One word in the
+    window's bar says so for the whole app ("Offline"), never a card per
+    task.
   - **Every Stuck card can be tried again**, on the agent the step was on,
     in the session it was in; first, as the card's own button, where the
     connection or the session failed rather than the work. The coordinator's

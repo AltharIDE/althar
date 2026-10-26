@@ -1,16 +1,13 @@
-/* One quiet line, as a newer Althar ready is: that it is offline, then what that means for the work. */
+/* One quiet word, as a newer Althar ready is. */
 .line {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   margin: 0;
   font-size: 11.5px;
-  color: var(--t-3);
+  color: var(--t-2);
   white-space: nowrap;
 }
 .icon {
   color: var(--t-3);
-}
-.offline {
-  color: var(--t-2);
 }

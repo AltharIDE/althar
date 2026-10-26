@@ -4,7 +4,7 @@ import { Icon } from '../../foundations/Icon/Icon'
 import s from './Offline.module.css'
 
 /*
- * The computer is offline: one quiet line in the window's bar, for the whole
+ * The computer is offline: one quiet word in the window's bar, for the whole
  * app, never a card per task. Work that was under way waits for the
  * connection and carries on by itself once it is back, and work waiting to
  * start stays waiting, so there is nothing to do but know (ADR-060).
@@ -12,12 +12,10 @@ import s from './Offline.module.css'
 
 export interface OfflineText {
   offline: string
-  then: string
 }
 
 export const offlineText: OfflineText = {
   offline: 'Offline',
-  then: 'work picks up when you’re back',
 }
 
 export type OfflineProps = RootProps<'output', { text?: Partial<OfflineText> }>
@@ -28,8 +26,7 @@ export function Offline({ text, className, ...rest }: OfflineProps) {
     // An output is a live status: the line is read out as it appears.
     <output className={cx(s.line, className)} {...rest}>
       <Icon name="offline" size={12} className={s.icon} />
-      {/* the space reads between them; the line's gap draws it */}
-      <span className={s.offline}>{`${t.offline}:`}</span> <span>{t.then}</span>
+      {t.offline}
     </output>
   )
 }
