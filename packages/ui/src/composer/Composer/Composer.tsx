@@ -511,9 +511,9 @@ export function Composer({
             aria-describedby={note ? hintId : undefined}
             onChange={(e) => onChange(e.target.value)}
             onPaste={(e) => {
-              // A picture or a file on the clipboard is added, not pasted as its name.
+              // A picture or a file on the clipboard is added, not pasted as its name; one a file manager copied may say it holds files and list none, for the host to read.
               const pasted = [...e.clipboardData.files]
-              if (!onAddFiles || pasted.length === 0) return
+              if (!onAddFiles || (pasted.length === 0 && !e.clipboardData.types.includes('Files'))) return
               e.preventDefault()
               onAddFiles(pasted, 'paste')
             }}
