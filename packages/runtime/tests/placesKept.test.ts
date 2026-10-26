@@ -87,15 +87,25 @@ const waitingStep = (taskId: string) =>
   )
 
 /**
- * The task's review, once it waits for a place behind another task: its reviewer is out of usage until its reset, another
- * task's lead takes the one place meanwhile, and at the reset there is none. The other task, and the review waiting.
+ * The task's review, once it waits for a place behind another task. The task's lead (`[lead:hold]`) keeps the one place
+ * while another task's lead is put in line behind it; told to finish, it hands the place to its review, whose reviewer is
+ * out of usage: held for its reset, the review leaves the place to the other's lead, and at the reset there is none. Each
+ * waits for the one before it, not for the clock. The other task, and the review waiting.
  */
-const reviewBehind = (projectId: ProjectId, taskId: string) =>
+const reviewBehind = (projectId: ProjectId, task: { readonly taskId: string; readonly threadId: string }) =>
   Effect.gen(function* () {
-    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
-    const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+    const sessions = yield* Sessions
+    yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+    const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:hold]', [{ key: 'implement', agentId: 'opencode' }])
+    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.holdReason === 'machine_busy', Duration.seconds(15))
+    yield* sessions.send({
+      envelope: yield* Runtime.envelope('thread.send', {}),
+      threadId: task.threadId,
+      body: '[lead:finish]',
+      disposition: 'interrupt_and_continue',
+    })
     yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
-    return { other, review: yield* waitingStep(taskId) }
+    return { other, review: yield* waitingStep(task.taskId) }
   })
 
 /** What a step waiting for a place keeps, as an earlier Althar kept it: how it starts, since when it waited. */
@@ -129,11 +139,11 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
       const instance = yield* Instance
       const projectId = yield* opened
       yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
-      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:hold] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      const { other, review } = yield* reviewBehind(projectId, task.taskId)
+      const { other, review } = yield* reviewBehind(projectId, task)
       assert.strictEqual(review.step, 'review')
       yield* keptAs(review.id, review.output, {
         how: 'resume',

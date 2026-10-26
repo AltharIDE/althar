@@ -341,11 +341,10 @@ export const task = (title = 'Retry checkout') =>
 
 /**
  * A fake agent's `outOfUsage`, out until a while after it first turns work
- * away, on a whole second as its message gives the reset: for a test whose
- * reset must come while another task's `[lead:wait]` holds the place, which
- * it does for five seconds from when it starts. Counted from when the test
- * began, a runner slow to get there brought the reset after that, and the
- * place free.
+ * away, on a whole second as its message gives the reset: a reset that comes
+ * after what the test set up once the work was turned away, however slow the
+ * runner was to get there. Counted from when the test began, a slow start
+ * brought it before that, or not at all.
  */
 export const outFor = (millis: number): { readonly until: number } => {
   let reset: number | undefined

@@ -88,15 +88,25 @@ const heldFor = (taskId: string, reason: 'machine_busy' | 'usage_limit') =>
   )
 
 /**
- * The task's review, once it waits for a place behind another task: its reviewer is out of usage until its reset, another
- * task's lead takes the one place meanwhile, and at the reset there is none. The other task, and the review waiting.
+ * The task's review, once it waits for a place behind another task. The task's lead (`[lead:hold]`) keeps the one place
+ * while another task's lead is put in line behind it; told to finish, it hands the place to its review, whose reviewer is
+ * out of usage: held for its reset, the review leaves the place to the other's lead, and at the reset there is none. Each
+ * waits for the one before it, not for the clock. The other task, and the review waiting.
  */
-const reviewBehind = (projectId: ProjectId, taskId: string) =>
+const reviewBehind = (projectId: ProjectId, task: { readonly taskId: string; readonly threadId: string }) =>
   Effect.gen(function* () {
-    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
-    const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+    const sessions = yield* Sessions
+    yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+    const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:hold]', [{ key: 'implement', agentId: 'opencode' }])
+    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.holdReason === 'machine_busy', Duration.seconds(15))
+    yield* sessions.send({
+      envelope: yield* Runtime.envelope('thread.send', {}),
+      threadId: task.threadId,
+      body: '[lead:finish]',
+      disposition: 'interrupt_and_continue',
+    })
     yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
-    return { other, review: yield* heldFor(taskId, 'machine_busy') }
+    return { other, review: yield* heldFor(task.taskId, 'machine_busy') }
   })
 
 const readyIs = (projectId: string, taskId: string) =>
@@ -130,16 +140,21 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
       const instance = yield* Instance
       const projectId = yield* opened
       yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
-      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:hold] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      const { other, review } = yield* reviewBehind(projectId, task.taskId)
+      const { other, review } = yield* reviewBehind(projectId, task)
       // Kept as the step after its lead's, with no reviewer named.
       const { since } = JSON.parse(review.output ?? '{}') as { since?: string }
       yield* sql`UPDATE node_attempts SET output = ${JSON.stringify({ place: { how: 'next' }, since })} WHERE id = ${review.id}`
       // The other's lead finishes: the review takes the place, on the plan's reviewer.
-      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: '[lead:finish]' })
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: other.threadId,
+        body: '[lead:finish]',
+        disposition: 'interrupt_and_continue',
+      })
       yield* readyIs(projectId, task.taskId)
       const [reviewer] = yield* sql<{ agentId: string }>`
         SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
@@ -156,11 +171,11 @@ describe('a step waiting for a place, as an earlier Althar kept it', () => {
       const instance = yield* Instance
       const projectId = yield* opened
       yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
-      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:hold] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      const { review } = yield* reviewBehind(projectId, task.taskId)
+      const { review } = yield* reviewBehind(projectId, task)
       const { since } = JSON.parse(review.output ?? '{}') as { since?: string }
       yield* sql`UPDATE node_attempts SET output = ${JSON.stringify({
         place: { how: 'resume', lead: { agentId: 'claude-code', model: null, effort: null } },

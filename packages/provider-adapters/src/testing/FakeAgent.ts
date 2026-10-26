@@ -497,7 +497,8 @@ const playStall = async (
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
- * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
+ * until it is stopped, for five seconds at most, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its
+ * second round; `[lead:hold]` works until it is interrupted or stopped, for half a minute at most;
  * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
@@ -988,6 +989,11 @@ const playRole = async (
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
         for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        return 'Stopped working.'
+      }
+      // Works until it is interrupted or stopped, however long the test takes to get there: for a lead that holds its place.
+      if (text.includes('[lead:hold]')) {
+        for (let waited = 0; !session.cancelled && waited < 30_000; waited += 10) await pause(10)
         return 'Stopped working.'
       }
       return undefined
