@@ -62,16 +62,178 @@
   margin-top: -18px;
 }
 
-.empty {
-  margin: 8px 0 0 2px;
-  max-width: 60ch;
+/* ——— Every one paused: a band under the head, as the page's band for one that paused itself, but quiet ——— */
+
+.band {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -8px 0 28px;
+  padding: 12px 12px 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.bandMark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--t-2);
+  background: var(--n-3);
+}
+
+.bandWords {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bandTitle {
   font-size: 13px;
-  line-height: 1.6;
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+.bandNote {
+  font-size: 12.5px;
   color: var(--t-2);
 }
 
-.example {
+/* ——— None yet: what they are for, a few to start from, and the way to make one ——— */
+
+.none {
+  margin-top: 4px;
+}
+
+.noneHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.noneMark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: var(--t-2);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.noneTitle {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--t-1);
+}
+
+.noneLede {
+  margin: 4px 0 0;
+  max-width: 60ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+
+.starters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@container (max-width: 680px) {
+  .starters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.starterItem {
+  display: grid;
+  min-width: 0;
+}
+
+.starter {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 16px 16px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  cursor: pointer;
+  transition: box-shadow var(--fast) var(--ease);
+}
+
+.starter:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-card);
+}
+
+.starter:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+
+.starterName {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--t-1);
+}
+
+.starterWhen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+.starterPrompt {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+
+.noneFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 24px;
+}
+
+.noneAsk {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+
+.example {
+  color: var(--t-2);
 }
 
 /* ——— Groups of cards ——— */
@@ -148,6 +310,20 @@
 .cardPaused .cardName,
 .cardPaused .cardPrompt {
   color: var(--t-3);
+}
+
+/* All paused: every card lies flat on the ground, its words and marks faded; the one that paused itself keeps its violet, as it still waits on you. */
+.cardsPaused .card:not(.cardYours) {
+  background: transparent;
+}
+
+.cardsPaused .card:not(.cardYours) .cardName,
+.cardsPaused .card:not(.cardYours) .cardPrompt {
+  color: var(--t-3);
+}
+
+.cardsPaused .card:not(.cardYours) .marks {
+  opacity: 0.55;
 }
 
 .cardTop {
@@ -353,7 +529,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card {
+  .card,
+  .starter {
     transition: none;
   }
 }

@@ -57,6 +57,8 @@ export interface AutomationCardText {
   promptLabel: string
   /** In the prompt's place while it says nothing yet. */
   promptPlaceholder: string
+  /** Under the prompt, where it says nothing and must. */
+  promptMissing: string
   edit: string
   done: string
   when: string
@@ -104,6 +106,7 @@ export const automationCardText: AutomationCardText = {
   kicker: (project, changed) => `Automation${changed ? ', changed' : ''} · ${project}`,
   promptLabel: 'What each run is asked',
   promptPlaceholder: 'What should each run do?',
+  promptMissing: 'Say what each run should do first.',
   edit: 'Edit',
   done: 'Done',
   when: 'When',
@@ -167,6 +170,8 @@ export type AutomationCardProps = RootProps<
     onPromptChange?: (prompt: string) => void
     /** The prompt is a field from the start, ready to type, each change said at once: a new automation's. */
     writing?: boolean
+    /** The prompt being written says nothing, and must: said under its field, which is marked invalid. */
+    promptMissing?: boolean
     /** When it runs: the choices, the one it is on, and what it was. */
     when: readonly AutomationChoice[]
     whenValue: string
@@ -368,24 +373,29 @@ function AnotherTime({
   )
 }
 
-/** The prompt: its words, or a field to change them in. */
+/** The prompt: its words, or a field to change them in; one that says nothing where it must is said under its field. */
 function Prompt({
   prompt,
   kept,
   writing,
+  missing,
   onPromptChange,
   t,
 }: {
   prompt: string
   kept: boolean
   writing: boolean
+  missing: boolean
   onPromptChange?: (prompt: string) => void
   t: AutomationCardText
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(prompt)
+  // Done on a blank prompt keeps it open, saying why.
+  const [blank, setBlank] = useState(false)
   const field = useRef<HTMLTextAreaElement>(null)
   const edit = useRef<HTMLButtonElement>(null)
+  const errorId = useId()
   const was = useRef(editing)
   useEffect(() => {
     if (editing || writing) field.current?.focus()
@@ -395,15 +405,20 @@ function Prompt({
   }, [editing, writing])
   if (writing && onPromptChange !== undefined)
     return (
-      <FieldArea
-        ref={field}
-        rows={3}
-        aria-label={t.promptLabel}
-        placeholder={t.promptPlaceholder}
-        className={s.area}
-        value={prompt}
-        onChange={(event) => onPromptChange(event.target.value)}
-      />
+      <div className={s.promptWriting}>
+        <FieldArea
+          ref={field}
+          rows={3}
+          aria-label={t.promptLabel}
+          placeholder={t.promptPlaceholder}
+          className={s.area}
+          value={prompt}
+          invalid={missing}
+          aria-describedby={missing ? errorId : undefined}
+          onChange={(event) => onPromptChange(event.target.value)}
+        />
+        {missing && <FieldError id={errorId}>{t.promptMissing}</FieldError>}
+      </div>
     )
   if (editing && onPromptChange !== undefined)
     return (
@@ -415,19 +430,31 @@ function Prompt({
           placeholder={t.promptPlaceholder}
           className={s.area}
           value={draft}
+          invalid={blank}
+          aria-describedby={blank ? errorId : undefined}
           data-own-escape=""
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            if (event.target.value.trim() !== '') setBlank(false)
+          }}
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return
             event.preventDefault()
             event.stopPropagation()
             setDraft(prompt)
+            setBlank(false)
             setEditing(false)
           }}
         />
+        {blank && <FieldError id={errorId}>{t.promptMissing}</FieldError>}
         <div className={s.promptButtons}>
           <LinkButton
             onClick={() => {
+              if (draft.trim() === '') {
+                setBlank(true)
+                field.current?.focus()
+                return
+              }
               if (draft.trim() !== prompt.trim()) onPromptChange(draft.trim())
               setEditing(false)
             }}
@@ -466,6 +493,7 @@ export function AutomationCard({
   holds = false,
   onPromptChange,
   writing = false,
+  promptMissing = false,
   when,
   whenValue,
   onWhenChange,
@@ -506,7 +534,14 @@ export function AutomationCard({
             <p className={l.title}>{name}</p>
           </>
         )}
-        <Prompt prompt={prompt} kept={kept} writing={writing} t={t} {...(onPromptChange === undefined ? {} : { onPromptChange })} />
+        <Prompt
+          prompt={prompt}
+          kept={kept}
+          writing={writing}
+          missing={promptMissing}
+          t={t}
+          {...(onPromptChange === undefined ? {} : { onPromptChange })}
+        />
       </div>
       <ol className={l.steps}>
         <Row
