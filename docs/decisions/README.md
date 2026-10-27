@@ -71,3 +71,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [061](061-automations-start-ordinary-tasks-on-a-schedule.md) | Automations start ordinary tasks on a schedule: a kept request, and an occurrence for each time it was due, on this computer while Althar runs |
 | [062](062-a-usage-read-may-use-an-account-s-own-sign-in-once.md) | A usage read may use an account's own sign-in, once, for one call to its provider's usage URL, Anthropic's included |
 | [063](063-althar-s-part-is-all-its-work-started-and-itself.md) | Althar's part of the load is everything its work started, however it runs, and Althar itself |
+| [064](064-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md) | A file or folder sent with a message is copied into the thread's folder, which git ignores, and linked for the agent to open |

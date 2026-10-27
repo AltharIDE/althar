@@ -56,6 +56,7 @@ import {
   type SignInStart,
   type SignInState,
   type Status,
+  type SentFile,
   type SentImage,
   type TaskEnd,
   type TaskFolders,
@@ -157,7 +158,12 @@ export interface Client {
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
   readonly switchAgent: (
-    input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage>; readonly dictated?: boolean },
+    input: Start & {
+      readonly body?: string
+      readonly images?: ReadonlyArray<SentImage>
+      readonly files?: ReadonlyArray<SentFile>
+      readonly dictated?: boolean
+    },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
@@ -254,6 +260,8 @@ export interface Client {
     readonly disposition: 'after_current' | 'interrupt_and_continue'
     /** Images sent with it, in order. */
     readonly images?: ReadonlyArray<SentImage>
+    /** Files and folders sent with it, in order, by their grants or kept copies. */
+    readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
   }) => Promise<void>

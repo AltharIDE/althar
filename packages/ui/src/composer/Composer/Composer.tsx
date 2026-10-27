@@ -74,8 +74,21 @@ export interface ComposerImage {
   reading?: boolean
 }
 
-/** The kinds of image the picker offers by default: the ones every agent that takes images reads. */
-export const COMPOSER_IMAGE_TYPES = 'image/png,image/jpeg,image/gif,image/webp'
+/** How files came to the composer: dropped on it, pasted into it, or picked with its button. */
+export type AddedBy = 'drop' | 'paste' | 'pick'
+
+/** A file or folder waiting to go with what you write: a chip with its name and size, and a way to take it off. */
+export interface ComposerFile {
+  id: string
+  /** What it is called, as it was on the computer: its accessible name. */
+  name: string
+  /** What else it says, formatted: its size, or a folder's files and size. */
+  meta?: string
+  /** A folder, not a file. */
+  folder?: boolean
+  /** Still being looked at: it turns until it is ready. */
+  reading?: boolean
+}
 
 export interface ComposerText {
   send: string
@@ -119,12 +132,12 @@ export interface ComposerText {
   /** Sends a queued message now, interrupting the agent with it, rather than when the agent is done. */
   sendQueuedNow: string
   unqueue: (text: string) => string
-  /** The button that picks images from the computer. */
-  addImages: string
-  /** Over the composer while images are held over it. */
-  dropImages: string
-  /** The images waiting to go, as a list. */
-  images: (n: number) => string
+  /** The button that picks files, images among them, from the computer. */
+  addFiles: string
+  /** Over the composer while files are held over it. */
+  dropFiles: string
+  /** The images, files and folders waiting to go, as a list. */
+  attachments: (n: number) => string
   removeImage: (name: string) => string
   readingImage: (name: string) => string
 }
@@ -154,9 +167,9 @@ export const composerText: ComposerText = {
   editQueued: 'Edit',
   sendQueuedNow: 'Send now',
   unqueue: (text) => `Take “${text}” out of the queue`,
-  addImages: 'Add images',
-  dropImages: 'Drop to add them to your message',
-  images: (n) => (n === 1 ? '1 image to send' : `${n} images to send`),
+  addFiles: 'Add files',
+  dropFiles: 'Drop to add to your message',
+  attachments: (n) => (n === 1 ? '1 attachment to send' : `${n} attachments to send`),
   removeImage: (name) => `Remove ${name}`,
   readingImage: (name) => `Reading ${name}`,
 }
@@ -204,19 +217,21 @@ export interface ComposerProps {
   tray?: ReactNode
   /** Images to send with what is written, in order: they go when it is sent, even with nothing written. */
   images?: readonly ComposerImage[]
+  /** Files and folders to send with what is written, after the images: they go when it is sent, even with nothing written. */
+  files?: readonly ComposerFile[]
   /**
-   * Files dropped on the composer, pasted into it, or picked with its Add
-   * images button, for the consumer to read and check, and add to `images`
-   * or refuse in `imageNote`. Without it, the composer takes none, and offers
-   * no button.
+   * Files and folders dropped on the composer, pasted into it, or picked with
+   * its Add files button, for the consumer to read and check, and add to
+   * `images` or `files`, or refuse in `fileNote`. Without it, the composer
+   * takes none, and offers no button.
    */
-  onAddImages?: (files: readonly File[]) => void
+  onAddFiles?: (files: readonly File[], how: AddedBy) => void
   /** Takes an image off. Without it, images have no remove button. */
   onRemoveImage?: (id: string) => void
-  /** What the consumer says of images, in a line over the field: one it refused, and why; or that the agent doesn't take them. */
-  imageNote?: string
-  /** The kinds the picker offers, as a file input's `accept`. */
-  imageTypes?: string
+  /** Takes a file or folder off. Without it, they have no remove button. */
+  onRemoveFile?: (id: string) => void
+  /** What the consumer says of what is added, in a line over the field: one it refused, and why; or that the agent doesn't take images. */
+  fileNote?: string
   inputRef?: RefObject<HTMLTextAreaElement | null>
   className?: string
   text?: Partial<ComposerText>
@@ -226,10 +241,10 @@ export interface ComposerProps {
  * The one composer, for the project conversation and for a task. Two rows:
  * what you are writing, then where it goes. Enter sends, Shift+Enter breaks
  * the line. The lower row holds what the consumer puts there, the model
- * picker and the context meter, quiet until you look. Images dropped on it,
- * pasted into it or picked with its button go to the consumer, which reads
- * and checks them; those it adds wait above the field, and go with what is
- * sent.
+ * picker and the context meter, quiet until you look. Files and folders
+ * dropped on it, pasted into it or picked with its button go to the consumer,
+ * which reads and checks them; those it adds wait above the field, an image
+ * drawn small and anything else as a chip, and go with what is sent.
  */
 export function Composer({
   value,
@@ -253,19 +268,20 @@ export function Composer({
   carried,
   tray,
   images = [],
-  onAddImages,
+  files = [],
+  onAddFiles,
   onRemoveImage,
-  imageNote,
-  imageTypes = COMPOSER_IMAGE_TYPES,
+  onRemoveFile,
+  fileNote,
   inputRef,
   className,
   text,
 }: ComposerProps) {
   const t = { ...composerText, ...text }
   const own = useRef<HTMLTextAreaElement>(null)
-  const files = useRef<HTMLInputElement>(null)
-  /* images held over any part of it, the tray and what floats over it included */
-  const drop = useDragOver(onAddImages)
+  const filePicker = useRef<HTMLInputElement>(null)
+  /* files held over any part of it, the tray and what floats over it included */
+  const drop = useDragOver(onAddFiles === undefined ? undefined : (dropped) => onAddFiles(dropped, 'drop'))
   const ref = inputRef ?? own
   const hintId = useId()
   const elapsed = dictation?.elapsed ?? null
@@ -302,8 +318,9 @@ export function Composer({
   const at = Math.max(0, Math.min(value.length, dictation?.at ?? value.length))
   const before = value.slice(0, at)
   const after = value.slice(at)
-  /* images alone are something to send */
-  const drafted = value.trim() !== '' || images.length > 0
+  /* images or files alone are something to send */
+  const attached = images.length + files.length
+  const drafted = value.trim() !== '' || attached > 0
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
 
@@ -351,12 +368,12 @@ export function Composer({
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
     const out = value.trim()
-    if (out || images.length > 0) onSubmit(out)
+    if (out || attached > 0) onSubmit(out)
   }
   const canSendNow = busy && drafted && onSendNow !== undefined
   const sendNow = () => {
     const out = value.trim()
-    if (out || images.length > 0) onSendNow?.(out)
+    if (out || attached > 0) onSendNow?.(out)
   }
 
   /* A suggestion to take, while nothing is written or arriving and the agent is free. */
@@ -397,8 +414,8 @@ export function Composer({
       <form className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)} onSubmit={submit}>
         {drop.over && (
           <div className={s.dropping} aria-hidden="true">
-            <Icon name="image" size={14} />
-            {t.dropImages}
+            <Icon name="clip" size={14} />
+            {t.dropFiles}
           </div>
         )}
         {queued.length > 0 && (
@@ -430,13 +447,13 @@ export function Composer({
             </ol>
           </section>
         )}
-        {onAddImages && (
-          /* what the consumer says of images, announced as it changes; empty, it takes no room */
-          <output className={s.imageNote}>{imageNote}</output>
+        {onAddFiles && (
+          /* what the consumer says of what is added, announced as it changes; empty, it takes no room */
+          <output className={s.imageNote}>{fileNote}</output>
         )}
         {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
-        {images.length > 0 && (
-          <ul className={s.images} aria-label={t.images(images.length)}>
+        {attached > 0 && (
+          <ul className={s.images} aria-label={t.attachments(attached)}>
             {images.map((image) => (
               <li key={image.id} className={s.image}>
                 {image.reading ? (
@@ -455,6 +472,30 @@ export function Composer({
                     size="small"
                     label={t.removeImage(image.name)}
                     onClick={() => onRemoveImage(image.id)}
+                  />
+                )}
+              </li>
+            ))}
+            {files.map((file) => (
+              <li key={file.id} className={s.file}>
+                <span className={s.fileIcon}>
+                  {file.reading ? (
+                    <Spinner size="small" label={t.readingImage(file.name)} />
+                  ) : (
+                    <Icon name={file.folder ? 'folder' : 'file'} size={13} />
+                  )}
+                </span>
+                <span className={s.fileMain}>
+                  <span className={s.fileName}>{file.name}</span>
+                  {file.meta && <span className={s.fileMeta}>{file.meta}</span>}
+                </span>
+                {onRemoveFile && (
+                  <IconButton
+                    className={s.fileRemove}
+                    icon="close"
+                    size="small"
+                    label={t.removeImage(file.name)}
+                    onClick={() => onRemoveFile(file.id)}
                   />
                 )}
               </li>
@@ -491,11 +532,11 @@ export function Composer({
             aria-describedby={note ? hintId : undefined}
             onChange={(e) => onChange(e.target.value)}
             onPaste={(e) => {
-              // A picture on the clipboard is added, not pasted as its name.
+              // A picture or a file on the clipboard is added, not pasted as its name; one a file manager copied may say it holds files and list none, for the host to read.
               const pasted = [...e.clipboardData.files]
-              if (!onAddImages || pasted.length === 0) return
+              if (!onAddFiles || (pasted.length === 0 && !e.clipboardData.types.includes('Files'))) return
               e.preventDefault()
-              onAddImages(pasted)
+              onAddFiles(pasted, 'paste')
             }}
             onKeyDown={(e) => {
               /* Tab takes the suggestion into the field, to send with Enter or change first. */
@@ -536,13 +577,12 @@ export function Composer({
               </Tooltip>
             )}
             {meter}
-            {onAddImages && (
+            {onAddFiles && (
               <>
-                <IconButton icon="image" label={t.addImages} onClick={() => files.current?.click()} />
+                <IconButton icon="clip" label={t.addFiles} onClick={() => filePicker.current?.click()} />
                 <input
-                  ref={files}
+                  ref={filePicker}
                   type="file"
-                  accept={imageTypes}
                   multiple
                   hidden
                   tabIndex={-1}
@@ -550,7 +590,7 @@ export function Composer({
                     const picked = [...(e.target.files ?? [])]
                     // Picking the same file again is a change too.
                     e.target.value = ''
-                    if (picked.length > 0) onAddImages(picked)
+                    if (picked.length > 0) onAddFiles(picked, 'pick')
                   }}
                 />
               </>

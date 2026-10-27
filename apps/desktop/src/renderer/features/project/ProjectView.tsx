@@ -20,6 +20,7 @@ import {
 import { contextMeter } from '../../shared/ContextMeter'
 import { platform } from '../../shared/device'
 import { useModels } from '../../data/models'
+import { useServices } from '../../data/services'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
@@ -36,7 +37,7 @@ import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
-import { outgoingOf, takesImages, useImages } from '../../shared/useImages'
+import { outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
@@ -239,8 +240,8 @@ export function ProjectView({
             take: text.carriedTake,
           },
   })
-  // Images to send with what the person says, and which agents take them.
-  const images = useImages(draftOf)
+  // Images and files to send with what the person says, and which agents take images.
+  const images = useAttachments(draftOf, useServices().host)
   const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
@@ -328,11 +329,11 @@ export function ProjectView({
   const edit = async (id: string) => {
     const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
     // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
-    if (said === undefined || !images.fits(said.pictures)) return
+    if (said === undefined || !images.fits(said)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(draftOf, true)
-      images.restore(said.pictures)
+      images.restore(said)
     }
   }
 
@@ -344,7 +345,7 @@ export function ProjectView({
     // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
     setDraft((current) => withQueued(current, said.text))
     if (said.dictated === true) setDraftDictated(draftOf, true)
-    images.restore(said.pictures)
+    images.restore(said)
   }
 
   const line: ReactNode =

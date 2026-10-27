@@ -46,6 +46,7 @@ import { statements as trackerWorkspaces } from './0041_tracker_workspaces'
 import { statements as automations } from './0042_automations'
 import { statements as planUsage } from './0043_plan_usage'
 import { statements as lookupIndexes } from './0044_lookup_indexes'
+import { statements as inputFiles } from './0045_input_files'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -109,6 +110,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0042_automations', statements: automations },
   { key: '0043_plan_usage', statements: planUsage },
   { key: '0044_lookup_indexes', statements: lookupIndexes },
+  { key: '0045_input_files', statements: inputFiles },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

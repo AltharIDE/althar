@@ -72,6 +72,7 @@ import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
+import { filesForTurn, type InputFile, keptId } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { alsoPlanned, siblingsOf } from './siblings'
 import { evidenceForReview } from './evidence'
@@ -477,6 +478,8 @@ export const promptFor = (
     readonly cutShort?: string
     /** Images the person sent with it that the agent doesn't get: it doesn't take images, or they aren't kept any more. */
     readonly withheld?: number
+    /** Files the person sent with it whose copies aren't there any more, as when the task's folder was removed and brought back. */
+    readonly filesGone?: number
     /** Some of it was dictated (1), so the agent is told it may have been misheard. */
     readonly dictated?: number
   }>,
@@ -487,10 +490,18 @@ export const promptFor = (
   const parts = inputs.map((input) => {
     // Images it doesn't get are said, so it knows they were there and can ask what they show.
     const withheld = input.withheld ?? 0
-    const noted =
-      withheld === 0
-        ? input.body
-        : `${input.body}${input.body === '' ? '' : '\n\n'}(The person sent ${withheld === 1 ? 'an image' : `${withheld} images`} with this, which Althar couldn't pass on to you.)`
+    const filesGone = input.filesGone ?? 0
+    const notes = [
+      ...(withheld === 0
+        ? []
+        : [`(The person sent ${withheld === 1 ? 'an image' : `${withheld} images`} with this, which Althar couldn't pass on to you.)`]),
+      ...(filesGone === 0
+        ? []
+        : [
+            `(The person sent ${filesGone === 1 ? 'a file' : `${filesGone} files`} with this whose copy isn't there any more. Ask for it if you need it.)`,
+          ]),
+    ]
+    const noted = [...(input.body === '' ? [] : [input.body]), ...notes].join('\n\n')
     // Dictated words are said to be, once, after them: the thread shows the person's words as they are.
     const body = input.dictated === 1 && input.body !== '' ? `${noted}\n\n${DICTATED}` : noted
     const said =
@@ -571,6 +582,8 @@ export class Sessions extends Context.Service<
       readonly disposition?: Disposition
       /** Images the person sent with it, in the store already (`keepSent`): sent with its words in every turn that delivers it. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Files and folders the person sent with it, copied where the agent reads already (`keepFiles`): linked in every turn that delivers it. */
+      readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: every turn that delivers it says so, so the agent reads past what was misheard. */
       readonly dictated?: boolean
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
@@ -604,11 +617,12 @@ export class Sessions extends Context.Service<
       readonly said?: string
       /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
       readonly about?: 'limit' | 'stall'
-      /** What the person said with it, and any images: the new agent's first turn, after its brief, and never the old one's. */
+      /** What the person said with it, and any images and files: the new agent's first turn, after its brief, and never the old one's. */
       readonly message?: {
         readonly envelope: CommandEnvelope
         readonly body: string
         readonly images?: ReadonlyArray<InputImage>
+        readonly files?: ReadonlyArray<InputFile>
         /** Some of it was dictated. */
         readonly dictated?: boolean
       }
@@ -1211,12 +1225,20 @@ export class Sessions extends Context.Service<
             queued.map((input) => input.id),
             running.connection.info.images,
           )
+          // And the files, linked where their copies are.
+          const linked = yield* filesForTurn(queued.map((input) => input.id))
           // What an agent out of usage was given goes on with word of that, by the name of the agent it went to.
           const agents = yield* Agents
           const all = queued.map(({ cutBy, ...input }) => {
             const by = cutBy === null ? undefined : (agents.list.find((entry) => entry.definition.id === cutBy)?.definition.name ?? cutBy)
             const withheld = sent.withheld.get(input.id) ?? 0
-            return { ...input, ...(by === undefined ? {} : { cutShort: by }), ...(withheld === 0 ? {} : { withheld }) }
+            const filesGone = linked.gone.get(input.id) ?? 0
+            return {
+              ...input,
+              ...(by === undefined ? {} : { cutShort: by }),
+              ...(withheld === 0 ? {} : { withheld }),
+              ...(filesGone === 0 ? {} : { filesGone }),
+            }
           })
           // Compacting the agent's context is a turn of its own, said bare as the agent's own command: what was said before it goes
           // first, and what after, next. A brief not yet read waits for the turn after, so nothing is left behind it.
@@ -1448,9 +1470,10 @@ export class Sessions extends Context.Service<
               ),
             )
           })
-          const images = inputs.flatMap((input) => sent.images.get(input.id) ?? [])
+          // Each input's images, then its files, in the order the inputs are said.
+          const parts = inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])])
           yield* notingListening(running)
-          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, images, started), (event) =>
+          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
@@ -2250,6 +2273,7 @@ export class Sessions extends Context.Service<
         readonly body: string
         readonly disposition?: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
@@ -2258,6 +2282,7 @@ export class Sessions extends Context.Service<
           const commands = yield* Commands
           const artifacts = yield* Artifacts
           const images = input.images ?? []
+          const files = input.files ?? []
           const disposition = input.disposition ?? 'after_current'
           const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
           if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: input.threadId })
@@ -2304,6 +2329,19 @@ export class Sessions extends Context.Service<
                   return { artifact, picture: { artifactId, ...image, bytes: image.size } }
                 }),
               )
+              // Its files, in order, each by where its copy is; the copies are there already.
+              for (const [index, file] of files.entries())
+                yield* sql`INSERT INTO user_input_files ${sql.insert({
+                  projectId: thread.projectId,
+                  userInputId: inputId,
+                  position: index + 1,
+                  name: file.name,
+                  kind: file.kind,
+                  mediaType: file.mediaType,
+                  bytes: file.bytes,
+                  entries: file.entries,
+                  path: file.path,
+                })}`
               if (input.quiet !== true) {
                 const itemId = yield* addItem(
                   { projectId: thread.projectId, threadId: input.threadId },
@@ -2324,6 +2362,7 @@ export class Sessions extends Context.Service<
                             name: picture.name,
                           })),
                         }),
+                    ...(files.length === 0 ? {} : { files: files.map((file, index) => ({ id: keptId(inputId, index + 1), ...file })) }),
                   },
                   { userInputId: inputId },
                 )
@@ -2337,7 +2376,12 @@ export class Sessions extends Context.Service<
                 aggregateId: inputId,
                 revision: 1,
                 type: disposition === 'interrupt_and_continue' ? 'user_input.interrupt_requested' : 'user_input.accepted',
-                payload: { disposition, sequence, ...(images.length === 0 ? {} : { images: images.map((image) => image.sha256) }) },
+                payload: {
+                  disposition,
+                  sequence,
+                  ...(images.length === 0 ? {} : { images: images.map((image) => image.sha256) }),
+                  ...(files.length === 0 ? {} : { files: files.length }),
+                },
                 actorId: input.envelope.actorId,
                 commandId: input.envelope.commandId,
               })
@@ -2761,6 +2805,7 @@ export class Sessions extends Context.Service<
           readonly envelope: CommandEnvelope
           readonly body: string
           readonly images?: ReadonlyArray<InputImage>
+          readonly files?: ReadonlyArray<InputFile>
           readonly dictated?: boolean
         }
         readonly byPerson?: boolean
@@ -2797,6 +2842,7 @@ export class Sessions extends Context.Service<
                 threadId: input.threadId,
                 body: input.message.body,
                 ...(input.message.images === undefined ? {} : { images: input.message.images }),
+                ...(input.message.files === undefined ? {} : { files: input.message.files }),
                 ...(input.message.dictated === true ? { dictated: true } : {}),
               })
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
