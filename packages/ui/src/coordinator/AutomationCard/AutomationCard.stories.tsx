@@ -292,6 +292,33 @@ export const Kept: Story = {
   },
 }
 
+/** Done on a prompt left blank keeps the field open, saying under it what it needs; typing clears it. */
+export const KeptBlank: Story = {
+  render: () => <Card stage="kept" onPromptChange={() => {}} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Edit' }))
+    const field = c.getByRole('textbox', { name: 'What each run is asked' })
+    await userEvent.clear(field)
+    await userEvent.click(c.getByRole('button', { name: 'Done' }))
+    await expect(field).toHaveAttribute('aria-invalid', 'true')
+    await expect(field).toHaveAccessibleDescription('Say what each run should do first.')
+    await expect(field).toHaveFocus()
+    await userEvent.type(field, 'Bump the patch releases only.')
+    await expect(c.queryByText('Say what each run should do first.')).toBeNull()
+  },
+}
+
+/** A new one, saved or turned on with nothing typed: what it needs is said under its field. */
+export const WritingMissing: Story = {
+  render: () => <Card stage="kept" prompt="" writing promptMissing onPromptChange={() => {}} />,
+  play: async ({ canvasElement }) => {
+    const field = within(canvasElement).getByRole('textbox', { name: 'What each run is asked' })
+    await expect(field).toHaveAttribute('aria-invalid', 'true')
+    await expect(field).toHaveAccessibleDescription('Say what each run should do first.')
+  },
+}
+
 /** A new one: the prompt is ready to type, each change kept at once. */
 export const Writing: Story = {
   render: () => <Card stage="kept" prompt="" writing onPromptChange={() => {}} />,

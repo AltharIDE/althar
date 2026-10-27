@@ -47,6 +47,11 @@
 }
 
 /* The prompt's field, blank or in an edit, as wide as the card: the kit's field takes its width from where it sits. */
+/* a new one's prompt, with what it is missing under it */
+.promptWriting {
+  min-width: 0;
+}
+
 .area {
   display: block;
   width: 100%;

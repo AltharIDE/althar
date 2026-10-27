@@ -14,7 +14,7 @@ import { AUTOMATION_DEFAULTS } from '@althar/contracts'
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { FIRST_SCHEDULE, needsYou } from './words'
+import { FIRST_SCHEDULE, needsYou, type Starter } from './words'
 
 /*
  * A project's automations, as its Automations tab shows them, and one, as
@@ -22,8 +22,8 @@ import { FIRST_SCHEDULE, needsYou } from './words'
  * says they changed. What the person does shows at once (turned on or
  * paused, changed, its reviews posting themselves, all of them paused), and
  * gives way to what the runtime kept once it is read again; what it couldn't
- * keep is said, and what it kept is read. A new one is a draft in the window
- * until it is made, turned on or tried once.
+ * keep is said, and what it kept is read. A new one is a draft in the window,
+ * blank or from a starter, until it is made: saved, off, or turned on.
  */
 
 /** What went wrong, said where it was done. */
@@ -186,26 +186,32 @@ export interface NewAutomationModel {
   readonly pending: boolean
   /** Makes it, on; its id once made, null where it couldn't be. */
   readonly turnOn: () => Promise<string | null>
-  /** Makes it, proposed, and runs it once now, as it would run; its id once made. */
-  readonly tryOnce: () => Promise<string | null>
+  /** Makes it, proposed: kept, off until it is turned on, and tried once from its page; its id once made. */
+  readonly save: () => Promise<string | null>
 }
 
-export const useNewAutomation = (projectId: string, lead: AutomationStep): NewAutomationModel => {
+/** A new one from a starter: its name, prompt, schedule and what it ends in; the rest as a blank one's. */
+export const starterDefinition = (lead: AutomationStep, starter: Starter): AutomationDefinition => ({
+  ...blankDefinition(lead),
+  name: starter.name,
+  prompt: starter.prompt,
+  schedule: starter.schedule,
+  work: starter.work,
+})
+
+export const useNewAutomation = (projectId: string, lead: AutomationStep, starter?: Starter): NewAutomationModel => {
   const { client, cache } = useServices()
-  const [definition, setDefinition] = useState(() => blankDefinition(lead))
+  const [definition, setDefinition] = useState(() => (starter === undefined ? blankDefinition(lead) : starterDefinition(lead, starter)))
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  const make = async (on: boolean, then?: (id: string) => Promise<void>): Promise<string | null> => {
+  const make = async (on: boolean): Promise<string | null> => {
     setError(null)
     setPending(true)
-    let made: string | null = null
     try {
-      made = await client.makeAutomation({ projectId, definition: { ...definition, name: definition.name.trim() }, on })
-      await then?.(made)
-      return made
+      return await client.makeAutomation({ projectId, definition: { ...definition, name: definition.name.trim() }, on })
     } catch (failure) {
       setError(failed(failure))
-      return made
+      return null
     } finally {
       setPending(false)
       void cache.invalidateQueries({ queryKey: keys.automations(projectId) })
@@ -217,7 +223,7 @@ export const useNewAutomation = (projectId: string, lead: AutomationStep): NewAu
     error,
     pending,
     turnOn: () => make(true),
-    tryOnce: () => make(false, (id) => client.runAutomationNow(id)),
+    save: () => make(false),
   }
 }
 
