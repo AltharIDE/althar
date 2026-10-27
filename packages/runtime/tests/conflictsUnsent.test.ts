@@ -28,6 +28,7 @@ import {
   PASSED,
   rounds,
   runtimeWith,
+  taskSays,
   titled,
   worktreeOf,
 } from './conflictsSupport'
@@ -157,6 +158,52 @@ describe('a conflict its lead couldn’t resolve', () => {
       moveHostMainOn(working, bare, 'rate limits, again\n')
       const all = yield* until(rounds(taskId), (now) => now.length === 2, Duration.seconds(20))
       assert.strictEqual(all[0]?.state, 'failed')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a conflict whose last round ended as Althar stopped', () => {
+  it.live('is the lead’s again, though nothing moved since: Althar’s stop wasn’t the lead failing', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      yield* taskSays(taskId, false)
+      moveHostMainOn(working, bare)
+      // As an earlier launch left it: failed for Althar's stop, with the branches where they are now.
+      const { slug, path } = yield* worktreeOf(taskId)
+      const head = git(path, 'rev-parse', 'HEAD')
+      const conflict: Conflict = {
+        repository: slug,
+        name: slug,
+        branch: 'main',
+        ref: 'origin/main',
+        target: git(bare, 'rev-parse', 'main'),
+        from: head,
+        files: ['change.txt'],
+      }
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+        id: `cres_${randomBytes(16).toString('hex')}`,
+        projectId,
+        taskId,
+        pullRequestUrl: 'https://github.com/meridian/api/pull/1',
+        conflicts: JSON.stringify([conflict]),
+        attempt: 1,
+        state: 'failed',
+        failure: 'Althar stopped while the lead was resolving it. change.txt still conflicts.',
+        ended: JSON.stringify([{ repository: slug, head }]),
+        createdAt: at,
+        updatedAt: at,
+        settledAt: at,
+      })}`
+      yield* taskSays(taskId, null)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      assert.deepStrictEqual(
+        (yield* rounds(taskId)).map((round) => round.state),
+        ['failed', 'resolved'],
+      )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })

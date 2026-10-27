@@ -332,6 +332,9 @@ const BASE_TURNS = 4
 /** How many turns running a pull request whose host hasn't worked out whether it conflicts is asked again each turn. */
 const UNKNOWN_TURNS = 5
 
+/** Why a round an earlier launch left under way ended, where it couldn't be asked again. */
+const STOPPED_MIDWAY = 'Althar stopped while the lead was resolving it.'
+
 /**
  * Whether a listened change is due to be asked again: every turn while
  * something has happened on it lately, every few turns once it is quiet.
@@ -3524,8 +3527,15 @@ export class Changes extends Context.Service<
           if (task === undefined || task.state !== 'open') return 'off'
           const force = how.force === true
           if (!force && !resolvesConflictsFor((yield* (yield* Policies).current(task.projectId)).rules, task.resolveConflicts)) return 'off'
-          const [latest] = yield* sql<{ id: string; url: string | null; state: string; conflicts: string; ended: string | null }>`
-            SELECT id, pull_request_url AS url, state, conflicts, ended FROM conflict_resolutions WHERE task_id = ${taskId}
+          const [latest] = yield* sql<{
+            id: string
+            url: string | null
+            state: string
+            conflicts: string
+            ended: string | null
+            failure: string | null
+          }>`
+            SELECT id, pull_request_url AS url, state, conflicts, ended, failure FROM conflict_resolutions WHERE task_id = ${taskId}
             ORDER BY created_at DESC, rowid DESC LIMIT 1`
           if (latest?.state === 'resolving' || latest?.state === 'checking') return 'resolving'
           // Its run still going, its lead is at work: looked at again once it ends.
@@ -3534,7 +3544,8 @@ export class Changes extends Context.Service<
           if (task.run === null) return { why: 'It has no lead yet to ask.', shown: true }
           if (force) return 'yes'
           if (task.run === 'suspended') return { why: 'You stopped it, so Althar doesn’t start its lead for a conflict.', shown: true }
-          if (latest?.state === 'failed' && latest.url === url && latest.ended !== null) {
+          // One that ended as Althar stopped, as an earlier launch settled it, wasn't the lead's to fail.
+          if (latest?.state === 'failed' && latest.url === url && latest.ended !== null && !latest.failure?.startsWith(STOPPED_MIDWAY)) {
             const left = yield* decodeEnded(latest.ended)
             const conflicts = yield* decodeConflicts(latest.conflicts)
             const now = yield* endedOf(taskId, conflicts)
@@ -4346,7 +4357,7 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const round = yield* roundOf({ id })
           if (round === undefined || round.state !== 'resolving') return
-          const stopped = 'Althar stopped while the lead was resolving it.'
+          const stopped = STOPPED_MIDWAY
           if (round.pushedHead !== null) return yield* settleRound(id, { why: stopped })
           const conflicts = yield* decodeConflicts(round.conflicts)
           const worktrees = yield* worktreesOf(round.taskId)
