@@ -45,14 +45,17 @@ import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Board.module.css'
-import { type Lanes, type Waiting } from './lanes'
+import { type Held, heldOf, holding, type Lanes, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
 /*
  * The project's work, as the kit's board lays it out: up next, running,
  * needs you, settled, each lane collapsed to a rail where the person
- * collapsed it or the board has no room for it. A card has little to press: the whole of it opens
+ * collapsed it or the board has no room for it. Up next lists what goes on
+ * by itself, in the order it will (ADR-063): what continues, saying with
+ * what and why it waits, then the line the person orders, then what is
+ * paused, then plans. A card has little to press: the whole of it opens
  * its task, where a call is answered, work is accepted and the lead is told
  * what's next. The exception is a ready change's Push and Accept and merge,
  * which do it right there. Its top line says where the task stands in a word, then its
@@ -70,6 +73,8 @@ export const text = {
   /** At the divider's end, while the line is the oldest first; once the person changed it, the way back. */
   reorder: 'Drag to change the order',
   oldestFirst: 'Back to oldest first',
+  /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
+  paused: 'Paused',
   planned: 'Planned',
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
@@ -545,25 +550,46 @@ export function BoardView({
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 
+  // While the person points at Up next or Running, or drags in the line, what would move between them stays where it was.
+  const [held, setHeld] = useState<Held | null>(null)
+  const shown = held === null ? lanes : holding(lanes, held)
+  const { continuing, free, paused } = shown
+  const pointed = (lane: BoardLane | null) =>
+    setHeld((was) => (lane === BoardLane.Next || lane === BoardLane.Running ? (was ?? heldOf(lanes)) : null))
+
   const nextRow = (work: BoardTask, index: number) => {
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
-    const free = index < lanes.free && work.queued !== null
+    // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
+    const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused)
+    const reason =
+      index < continuing
+        ? work.queued === null
+          ? text.startsIn(0)
+          : busyWords(work.queued)
+        : index < continuing + free
+          ? work.queued === null
+            ? text.startsIn(0)
+            : inLineWords(index + 1)
+          : index < continuing + free + paused
+            ? work.waits !== null
+              ? waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left)
+              : work.reconnects != null
+                ? reconnectsWords(work.reconnects, clock)
+                : text.startsIn(0)
+            : startsAt === null
+              ? text.held
+              : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
     return (
       <NextRow
         key={work.taskId}
         place={index + 1}
         task={work.slug}
         {...(kind === undefined ? {} : { kind })}
+        {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
         title={work.title}
-        wait={free || startsAt !== null ? Wait.Workers : Wait.You}
-        reason={
-          free
-            ? inLineWords(index + 1)
-            : startsAt === null
-              ? text.held
-              : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
-        }
+        wait={index < continuing + free + paused || startsAt !== null ? Wait.Workers : Wait.You}
+        reason={reason}
         onOpen={() => onOpen(work.threadId)}
         text={{ task: unnamed }}
       />
@@ -571,12 +597,18 @@ export function BoardView({
   }
 
   return (
-    <Board label={text.label} {...(folds === undefined ? {} : { folds })} {...(onFoldsChange === undefined ? {} : { onFoldsChange })}>
-      <BoardColumn lane={BoardLane.Next} count={lanes.next.length}>
-        {lanes.free > 0 && (
+    <Board
+      label={text.label}
+      {...(folds === undefined ? {} : { folds })}
+      {...(onFoldsChange === undefined ? {} : { onFoldsChange })}
+      onPointerLane={pointed}
+    >
+      <BoardColumn lane={BoardLane.Next} count={shown.upNext} filled={shown.next.length > 0}>
+        {continuing > 0 && <BoardList>{shown.next.slice(0, continuing).map(nextRow)}</BoardList>}
+        {free > 0 && (
           <BoardDivider
             end={
-              line === undefined || lanes.free < 2 ? undefined : lanes.reordered ? (
+              line === undefined || free < 2 ? undefined : shown.reordered ? (
                 <LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>
               ) : (
                 text.reorder
@@ -591,25 +623,33 @@ export function BoardView({
             {line.failed}
           </p>
         )}
-        {lanes.free > 0 && (
+        {free > 0 && (
           <NextLine
-            rows={lanes.next.slice(0, lanes.free).map((work) => ({ id: work.taskId, title: work.title }))}
-            // While a row is dragged, each says the place it would take.
+            rows={shown.next.slice(continuing, continuing + free).map((work) => ({ id: work.taskId, title: work.title }))}
+            // While a row is dragged, each says the place it would take, after what continues.
             render={(id, place) => {
-              const work = lanes.next.find((one) => one.taskId === id)
-              return work === undefined ? null : nextRow(work, place - 1)
+              const work = shown.next.find((one) => one.taskId === id)
+              return work === undefined ? null : nextRow(work, continuing + place - 1)
             }}
             {...(line === undefined ? {} : { onMove: line.move })}
           />
         )}
-        {lanes.free > 0 && lanes.free < lanes.next.length && <BoardDivider>{text.planned}</BoardDivider>}
-        {lanes.free < lanes.next.length && (
-          <BoardList>{lanes.next.slice(lanes.free).map((work, index) => nextRow(work, lanes.free + index))}</BoardList>
+        {paused > 0 && <BoardDivider>{text.paused}</BoardDivider>}
+        {paused > 0 && (
+          <BoardList>
+            {shown.next.slice(continuing + free, continuing + free + paused).map((work, index) => nextRow(work, continuing + free + index))}
+          </BoardList>
+        )}
+        {continuing + free + paused > 0 && continuing + free + paused < shown.next.length && <BoardDivider>{text.planned}</BoardDivider>}
+        {continuing + free + paused < shown.next.length && (
+          <BoardList>
+            {shown.next.slice(continuing + free + paused).map((work, index) => nextRow(work, continuing + free + paused + index))}
+          </BoardList>
         )}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
-        {lanes.running.map((work) => (
+      <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
+        {shown.running.map((work) => (
           <BoardCard key={work.taskId} {...runningCardOf(work, now, name)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>

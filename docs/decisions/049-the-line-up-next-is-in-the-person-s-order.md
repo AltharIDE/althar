@@ -1,6 +1,6 @@
 # ADR-049: The line up next is every task no agent has worked on yet, in the person's order
 
-- **Status:** Accepted
+- **Status:** Accepted; its rule that a task an agent has worked on stays in Running while its next turn waits is superseded by [ADR-063](063-running-is-what-an-agent-works-on-and-up-next-is-everything-that-waits.md)
 - **Date:** 2026-10-19
 - **Owner:** Repository maintainers
 - **Context:** PR #192 moved a task waiting for a free agent from Running to

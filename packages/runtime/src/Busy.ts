@@ -803,17 +803,20 @@ export class Busy extends Context.Service<
             ),
           )
           const lined = new Set(queue.flatMap((entry) => (entry.line ? [entry.waiter.taskId] : [])))
-          const working = new Set((yield* atWork).holders.flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
-          const continuing = new Set(
-            queue.flatMap(({ waiter: { taskId } }) => (ours.has(taskId) && !lined.has(taskId) && !working.has(taskId) ? [taskId] : [])),
-          )
+          const under = new Set(queue.flatMap(({ waiter: { taskId } }) => (ours.has(taskId) && !lined.has(taskId) ? [taskId] : [])))
+          // Who is at work is read only where something of the project's under way waits: the line alone needs none of it.
+          const working =
+            under.size === 0
+              ? new Set<string>()
+              : new Set((yield* atWork).holders.flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
+          const continuing = [...under].filter((taskId) => !working.has(taskId))
           const seen = new Set<string>()
           const line = queue.flatMap(({ waiter, at, line: inLine }) => {
             if (!inLine || !ours.has(waiter.taskId) || seen.has(waiter.taskId)) return []
             seen.add(waiter.taskId)
             return [{ taskId: waiter.taskId, at, since: waiter.since }]
           })
-          return { continuing: [...continuing], line }
+          return { continuing, line }
         })
 
       /** A project's line in the order it starts: each task once, with the time it stands at and since when it waits. */

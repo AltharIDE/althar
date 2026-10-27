@@ -17,7 +17,7 @@ import { PermissionCall } from '../task/PermissionCall'
 import { StuckCall } from '../task/StuckCall'
 import { text as boardText, type DockTarget, trackOf } from './BoardView'
 import s from './Board.module.css'
-import { startsWhenFree } from './lanes'
+import { startsWhenFree, waitsUpNext } from './lanes'
 import type { BoardModel } from './useBoard'
 
 /*
@@ -51,7 +51,7 @@ export const text = {
 const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
   const { steps, at } = trackOf(task)
   const finished = task.phase === 'ready' || task.phase === 'settled'
-  // A plan that hasn't started has all its steps to come.
+  // A plan that hasn't started has all its steps to come; one under way that waits to go on still has the one it is on.
   const waiting = task.phase === 'planned' || task.phase === 'held' || startsWhenFree(task)
   return steps.map((label, index) => ({
     label,
@@ -206,7 +206,7 @@ export function DockView({
         ? boardText.startsIn(Math.ceil((new Date(task.plan.startsAt).getTime() - new Date(now).getTime()) / 1000))
         : null
   return (
-    <Dock label={label} name={startsWhenFree(task) ? text.phase.planned : text.phase[task.phase]} sub={sub} onClose={onClose}>
+    <Dock label={label} name={waitsUpNext(task) ? text.phase.planned : text.phase[task.phase]} sub={sub} onClose={onClose}>
       <WorkPeek
         title={task.title}
         {...(waiting !== null
@@ -225,11 +225,13 @@ export function DockView({
             ? TaskStatus.Yours
             : task.queued !== null
               ? TaskStatus.Queued
-              : task.phase === 'stopped'
-                ? TaskStatus.Stopped
-                : task.phase === 'running'
-                  ? TaskStatus.Running
-                  : TaskStatus.Done
+              : task.waits !== null || task.reconnects != null
+                ? TaskStatus.Paused
+                : task.phase === 'stopped'
+                  ? TaskStatus.Stopped
+                  : task.phase === 'running'
+                    ? TaskStatus.Running
+                    : TaskStatus.Done
         }
         steps={stepsOf(task)}
         lead={lead}

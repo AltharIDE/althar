@@ -776,8 +776,8 @@ export function TaskView({
               const holder = snapshot.task.queued?.holders?.find((one) => one.taskId === taskId)
               if (holder?.threadId != null) for (const command of holder.running) void model.stopHolding(holder.threadId, command.id)
             }}
-            // 2nd or later in its project's line, it can go first from here.
-            {...((snapshot.task.place ?? 0) > 1 ? { onFront: () => void model.moveToFront() } : {})}
+            // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-063).
+            {...(snapshot.task.front === true ? { onFront: () => void model.moveToFront() } : {})}
             processes={leftRunning}
             onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
             onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
