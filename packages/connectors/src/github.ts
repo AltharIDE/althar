@@ -640,6 +640,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           return pull._tag === 'Some' ? [listedOf(pull.value)] : []
         })
         const list: ChangeList = { changes, more: search.issueCount > changes.length }
+        // A search asked a minute ago or more is asked again, so it goes, rather than stay for each cursor or query once asked.
+        for (const [asked, listing] of listings) if (now - listing.at >= LISTING_KEPT_MS) listings.delete(asked)
         listings.set(key, { at: now, list })
         return list
       }),
