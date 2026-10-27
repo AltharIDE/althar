@@ -1,5 +1,5 @@
 import { Brand } from '../foundations/brands/brands'
-import type { PlanAgent, PlanSilent } from '../chrome/PlanGauge/plan'
+import type { PlanAgent } from '../chrome/PlanGauge/plan'
 
 /* Plan usage on a Tuesday afternoon, least room first. Made up, and the same on every run. */
 
@@ -117,9 +117,3 @@ export const CLAUDE_TWO: PlanAgent = {
     },
   ],
 }
-
-export const SILENT: readonly PlanSilent[] = [
-  { name: 'GitHub Copilot', why: 'Copilot shares no plan usage with other apps.' },
-  { name: 'Junie', why: 'Junie reports credits only inside JetBrains’ own apps.' },
-  { name: 'Mistral Vibe', why: 'Vibe’s usage page has no way in for other apps.' },
-]

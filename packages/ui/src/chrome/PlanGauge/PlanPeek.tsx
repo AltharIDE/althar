@@ -5,15 +5,14 @@ import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
-import { firstRunning, type PlanAccount, type PlanAgent, type PlanSilent, type PlanWindow, SAY_UNDER, usageTone } from './plan'
+import { firstRunning, type PlanAccount, type PlanAgent, type PlanWindow, SAY_UNDER, usageTone } from './plan'
 import s from './PlanPeek.module.css'
 
 /*
  * What the plan gauge opens to. Its head says how the plans stand, in a few
  * words; then a row per agent, least room first: its name, what is left, a
  * bar, and what that figure is of. A row opens in place to every account and
- * window. The agents Althar reads nothing for are one quiet line at the foot,
- * which opens to why. Ink only, deeper as a window runs down; no new colour.
+ * window. Ink only, deeper as a window runs down; no new colour.
  */
 
 export interface PlanPeekText {
@@ -35,7 +34,6 @@ export interface PlanPeekText {
   shareOut: string
   until: (at: string) => string
   /** The agents with no reading, by name. */
-  silent: (names: string) => string
   /** "Copilot, Junie and Vibe". */
   list: (names: readonly string[]) => string
 }
@@ -55,7 +53,6 @@ export const planPeekText: PlanPeekText = {
   share: (n) => `${n}%`,
   shareOut: 'out',
   until: (at) => `until ${at}`,
-  silent: (names) => `No reading for ${names}`,
   list: (names) => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`),
 }
 
@@ -152,38 +149,17 @@ function AgentRow({ agent, t }: { agent: PlanAgent; t: PlanPeekText }) {
   )
 }
 
-function Silent({ silent, t }: { silent: readonly PlanSilent[]; t: PlanPeekText }) {
-  const [open, setOpen] = useState(false)
-  const why = useId()
-  return (
-    <div className={s.silent}>
-      <button type="button" className={s.silentLine} aria-expanded={open} aria-controls={why} onClick={() => setOpen(!open)}>
-        <Icon name="chevron" size={9} className={s.chev} />
-        {t.silent(t.list(silent.map((one) => one.name)))}
-      </button>
-      <ul id={why} className={s.whys} hidden={!open}>
-        {silent.map((one) => (
-          <li key={one.name}>
-            <span className={s.whyName}>{one.name}</span> {one.why}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
 export type PlanPeekProps = RootProps<
   'div',
   {
     /** Least room first. */
     agents: readonly PlanAgent[]
-    silent?: readonly PlanSilent[]
     headingLevel?: HeadingLevel
     text?: Partial<PlanPeekText>
   }
 >
 
-export function PlanPeek({ agents, silent = [], headingLevel = 2, text, className, ...rest }: PlanPeekProps) {
+export function PlanPeek({ agents, headingLevel = 2, text, className, ...rest }: PlanPeekProps) {
   const t = { ...planPeekText, ...text }
   return (
     <div className={cx(s.peek, className)} {...rest}>
@@ -200,7 +176,6 @@ export function PlanPeek({ agents, silent = [], headingLevel = 2, text, classNam
           ))}
         </ul>
       )}
-      {silent.length > 0 && <Silent silent={silent} t={t} />}
     </div>
   )
 }
