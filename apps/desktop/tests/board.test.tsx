@@ -669,10 +669,10 @@ describe('the board', () => {
     const onTask = vi.fn()
     const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
     withServices(<Project onTask={onTask} />, client)
-    // From the conversation, the count opens the call's task: no view changes, and nothing opens beside the board.
+    // From Home, where a project opens, the count opens the call's task: no view changes, and nothing opens beside the board.
     await userEvent.click(await screen.findByRole('button', { name: '3 need you' }))
     expect(onTask).toHaveBeenCalledWith('th3')
-    expect(screen.getByRole('radio', { name: 'Conversation', checked: true })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: 'Home', checked: true })).toBeTruthy()
     expect(screen.queryByRole('complementary', { name: 'Beside the board' })).toBeNull()
     // Pointed at, it says what each is, and each opens its own task.
     await userEvent.hover(screen.getByRole('button', { name: '3 need you' }))
