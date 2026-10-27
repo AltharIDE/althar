@@ -806,6 +806,11 @@ export class Changes extends Context.Service<
             ORDER BY sequence DESC LIMIT 1`
           // What the task built, where the lead wrote no description: since the last pull request, for a next one (ADR-034).
           const { built } = yield* taskShown(threadId, since)
+          // An automation's run is signed with its name.
+          const [automated] = yield* sql<{ name: string }>`
+            SELECT d.name FROM threads h JOIN automation_occurrences o ON o.task_id = h.task_id
+            JOIN automations a ON a.id = o.automation_id JOIN automation_definitions d ON d.automation_id = a.id AND d.number = a.definition
+            WHERE h.id = ${threadId} LIMIT 1`
           // An agent may sign what it writes as it signs a commit; that stays here too.
           return bodyOf({
             built: built === null ? null : withoutAgentCredit(built, agentNames),
@@ -814,6 +819,7 @@ export class Changes extends Context.Service<
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
             credit: yield* coAuthorOn,
+            automation: automated?.name ?? null,
           })
         })
 

@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
 
 /*
@@ -191,6 +192,8 @@ export const AppSettings = Schema.Struct({
   agentsAtOnce: AgentsAtOnce,
   /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
   postTeamReviews: Schema.Boolean,
+  /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
+  automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
   folderWait: FolderWait,
 })
@@ -1465,6 +1468,8 @@ export const TaskCard = Schema.Struct({
   place: Schema.optional(Schema.Int),
   /** With `inLine`: the line is in an order the person gave it, not the oldest first. */
   reordered: Schema.optional(Schema.Boolean),
+  /** The automation whose run it is, where one started it; null or absent otherwise. */
+  automation: Schema.optional(Schema.NullOr(FromAutomation)),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1707,6 +1712,12 @@ export const ReviewDraftCard = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   /** The review, once posted: its link and when. */
   review: Schema.NullOr(Schema.Struct({ url: Schema.String, at: Schema.String })),
+  /**
+   * The automation whose run drafted it, where one did, and whether its
+   * reviews post themselves now: its first waits for the person, who can let
+   * the next ones post. Null or absent otherwise.
+   */
+  automation: Schema.optional(Schema.NullOr(Schema.Struct({ ...FromAutomation.fields, postsReviews: Schema.Boolean }))),
 })
 export type ReviewDraftCard = typeof ReviewDraftCard.Type
 
@@ -1748,6 +1759,17 @@ export const SetupItem = Schema.Struct({
   }),
 })
 
+/**
+ * An automation in the coordinator's thread: as the coordinator proposed or
+ * changed it, or asking the person to resume it or run it now. The person
+ * turns it on there. Althar posts it and keeps it current.
+ */
+export const AutomationItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('automation'),
+  content: AutomationCard,
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -1764,6 +1786,7 @@ export const ThreadItem = Schema.Union([
   PushRequestItem,
   ReviewDraftItem,
   IssueChangesItem,
+  AutomationItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -2833,6 +2856,32 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
+  /** A project's automations, for its Automations tab. */
+  call('GetAutomations', { projectId: Schema.String }, AutomationsSnapshot),
+  /** One automation, for its own page: its definition, its limits and its runs. */
+  call('GetAutomation', { automationId: Schema.String }, AutomationSnapshot),
+  /** Makes an automation in a project, on this computer: proposed, waiting for the person to turn it on, unless `on`. */
+  command(
+    'MakeAutomation',
+    { projectId: Schema.String, definition: AutomationDefinition, on: Schema.optional(Schema.Boolean) },
+    Schema.Struct({ automationId: Schema.String }),
+  ),
+  /** The person changes an automation: it holds from its next run, and stays on where it is. */
+  command('ChangeAutomation', { automationId: Schema.String, definition: AutomationDefinition }, Schema.Void),
+  /** Turns an automation on, or back on: no time before now counts. `itemId`, where the person did it from the coordinator's card asking it. */
+  command('TurnOnAutomation', { automationId: Schema.String, itemId: Schema.optional(Schema.String) }, Schema.Void),
+  /** Pauses an automation: nothing of it starts until it is turned on again. A run under way finishes. */
+  command('PauseAutomation', { automationId: Schema.String }, Schema.Void),
+  /** Runs an automation once now, with every limit a run has, whether it is on or not yet. */
+  command('RunAutomationNow', { automationId: Schema.String, itemId: Schema.optional(Schema.String) }, Schema.Void),
+  /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
+  command('DeleteAutomation', { automationId: Schema.String }, Schema.Void),
+  /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
+  command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
+  /** Whether an automation's reviews post themselves once drafted, as the person said on its first; an outside pull request's still waits. */
+  command('SetAutomationPostsReviews', { automationId: Schema.String, on: Schema.Boolean }, Schema.Void),
+  /** Pauses every automation, or lets them run again. Runs under way finish. */
+  command('SetAutomationsPaused', { paused: Schema.Boolean }, Schema.Void),
   /**
    * How many agents may be at work at once on this machine, from now on:
    * the person's number, or, null, the default again. What waits starts if

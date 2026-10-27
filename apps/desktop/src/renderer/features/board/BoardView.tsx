@@ -245,6 +245,9 @@ const findingsOf = (reviewing: ReviewBrief) => {
 /** The card's own props, without how it opens. */
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
+/** The automation whose run a task is, as its card says it, quietly. */
+const fromOf = (work: BoardTask): Pick<Card, 'from'> => (work.automation == null ? {} : { from: work.automation.name })
+
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
   // Waiting for a free agent, held for a usage limit, or stopped, it says so rather than that it runs.
@@ -266,6 +269,7 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
   const base = {
     kind: kindOf(work),
     title: work.title,
+    ...fromOf(work),
     // Waiting before its first step has had an agent, nothing has run: no clock.
     ...(work.startedAt === null || beforeWork ? {} : { at: running(work.startedAt, now) }),
   }
@@ -313,7 +317,7 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
 
 /** A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that. */
 export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(task), title: task.title }
+  const base = { status: TaskStatus.Yours, kind: kindOf(task), title: task.title, ...fromOf(task) }
   if (call === null) return { ...base, word: text.status[TaskStatus.Yours] }
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
@@ -343,7 +347,7 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
 export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(work), title: work.title }
+  const base = { status: TaskStatus.Yours, kind: kindOf(work), title: work.title, ...fromOf(work) }
   switch (work.kind) {
     case 'plain': {
       const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>

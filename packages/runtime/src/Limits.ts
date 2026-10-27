@@ -1,7 +1,7 @@
 import { modelName } from '@althar/contracts'
 import type { ConfigOption } from '@althar/provider-adapters'
 import type { ProjectId } from '@althar/domain'
-import { Context, Duration, Effect, Layer, Option, type Schema } from 'effect'
+import { Context, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -21,6 +21,19 @@ import { SignIns } from './SignIns'
  * then the next free agent; wait for the reset; or ask the person, with who
  * could take it over.
  */
+
+/**
+ * An automation's run, which nobody watches, runs only on an account its
+ * agent's own status says a plan pays for: never per use, nor where the
+ * status can't tell, as Mistral Vibe's can't (docs/plans/automations.md).
+ */
+export class PlanOnly extends Schema.TaggedError<PlanOnly>()('PlanOnly', { message: Schema.String }) {}
+
+/** Why an automation's run can't run on these accounts, as its history and its task's thread say it. */
+export const planOnlyWords = (paidBy: ReadonlyArray<'plan' | 'key' | 'unknown'>) =>
+  paidBy.includes('unknown') || paidBy.length === 0
+    ? 'Althar can’t tell that its agent is on a plan, and automations run on a plan only for now.'
+    : 'Its agent pays per use, and automations run on a plan only for now.'
 
 /** How long an agent whose limit gave no reset time counts as out. */
 const UNKNOWN_RESET = Duration.hours(1)
@@ -94,10 +107,11 @@ export class Limits extends Context.Service<
   {
     /**
      * Whether the agent is out now, and until when: every account work could
-     * run on (in the project, where given: its first, unless it rotates),
+     * run on (in the project, where given: its first, unless it rotates;
+     * on the thread, where given: of an automation's run, those on a plan),
      * the soonest back.
      */
-    out(agentId: string, projectId?: string): Effect.Effect<Option.Option<Out>, Failure>
+    out(agentId: string, projectId?: string, threadId?: string): Effect.Effect<Option.Option<Out>, Failure>
     /** Whether the project moves work on to the agent's next account when one runs out: the person's to turn on (ADR-012). */
     rotates(projectId: string): Effect.Effect<boolean, Failure>
     /** Whether an account is out now, and until when. */
@@ -109,13 +123,16 @@ export class Limits extends Context.Service<
      * project rotates, isn't out of usage; else the first. Where it doesn't
      * rotate, an account out of usage is still the one work runs on: its
      * limit is handled as the project says (move to another agent, or wait).
+     * A thread of an automation's run, or `planOnly`, runs only on an account
+     * on a plan, given or picked: none is PlanOnly.
      */
     pick(input: {
       readonly agentId: string
       readonly projectId?: string
       readonly threadId?: string
       readonly accountId?: string
-    }): Effect.Effect<Account, Failure | NotFound>
+      readonly planOnly?: boolean
+    }): Effect.Effect<Account, Failure | NotFound | PlanOnly>
     /**
      * The first agent free to take work over, besides those given: signed in
      * on a plan, not out, in the agents' order; one the work would rather not
@@ -199,17 +216,38 @@ export class Limits extends Context.Service<
           ? Effect.succeed(true)
           : Effect.map(policies.current(projectId as ProjectId), ({ rules }) => accountsOf(rules).rotate)
 
+      /** Whether a thread is one of an automation's run's, whose sessions run on a plan only. */
+      const automated = (threadId: string | undefined) =>
+        threadId === undefined
+          ? Effect.succeed(false)
+          : Effect.map(
+              sql<{ one: number }>`
+                SELECT 1 AS one FROM threads h JOIN automation_occurrences o ON o.task_id = h.task_id WHERE h.id = ${threadId} LIMIT 1`,
+              (rows) => rows.length > 0,
+            )
+
+      /** Those of the accounts their agent's status says a plan pays for; none, PlanOnly, saying why. */
+      const onPlan = (list: ReadonlyArray<Account>) =>
+        Effect.gen(function* () {
+          const paidBy: Array<'plan' | 'key' | 'unknown'> = []
+          for (const account of list) paidBy.push((yield* signIns.account(account)).paidBy)
+          const kept = list.filter((_, index) => paidBy[index] === 'plan')
+          return kept.length > 0 ? kept : yield* new PlanOnly({ message: planOnlyWords(paidBy) })
+        })
+
       /**
        * The accounts work on the agent can run on here: those the project
-       * allows that aren't signed out. Where the project doesn't rotate, only
-       * the first of them, whose being out of usage puts the agent out.
+       * allows that aren't signed out, and, for an automation's run, are on a
+       * plan. Where the project doesn't rotate, only the first of them, whose
+       * being out of usage puts the agent out.
        */
-      const runnable = (agentId: string, projectId?: string) =>
+      const runnable = (agentId: string, projectId?: string, planOnly = false) =>
         Effect.gen(function* () {
           const rotate = yield* rotating(projectId)
           const found: Array<Account> = []
           for (const account of yield* allowed(agentId, projectId)) {
-            if ((yield* signIns.account(account)).status === 'signed_out') continue
+            const check = yield* signIns.account(account)
+            if (check.status === 'signed_out' || (planOnly && check.paidBy !== 'plan')) continue
             found.push(account)
             if (!rotate) break
           }
@@ -229,10 +267,10 @@ export class Limits extends Context.Service<
           return last?.model ?? null
         })
 
-      const out = (agentId: string, projectId?: string) =>
+      const out = (agentId: string, projectId?: string, threadId?: string) =>
         Effect.gen(function* () {
           const outs: Array<Out> = []
-          for (const account of yield* runnable(agentId, projectId)) {
+          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId))) {
             const found = yield* outOf(account)
             if (Option.isNone(found)) return Option.none<Out>()
             outs.push(found.value)
@@ -250,12 +288,16 @@ export class Limits extends Context.Service<
           ),
         pick: (input) =>
           Effect.gen(function* () {
+            const planOnly = input.planOnly === true || (yield* automated(input.threadId))
             // One given is the agent's own: another agent's would sign it in as someone else.
             if (input.accountId !== undefined) {
               const given = yield* accounts.get(input.accountId)
-              return given.agentId === input.agentId ? given : yield* new NotFound({ kind: 'account', id: input.accountId })
+              if (given.agentId !== input.agentId) return yield* new NotFound({ kind: 'account', id: input.accountId })
+              if (planOnly) yield* onPlan([given])
+              return given
             }
-            const list = yield* allowed(input.agentId, input.projectId)
+            const all = yield* allowed(input.agentId, input.projectId)
+            const list = planOnly ? yield* onPlan(all) : all
             const rotate = yield* rotating(input.projectId)
             // One it can run on: not signed out, and, where the project rotates, not out of usage.
             const runs = (account: Account) =>
