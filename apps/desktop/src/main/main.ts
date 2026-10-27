@@ -17,7 +17,7 @@ import { type Edge, startEdge } from './edgeWindows'
 import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
 import { setAppMenu } from './menu'
-import { dockCount, soundOf, tells } from './notify'
+import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
@@ -235,7 +235,7 @@ interface RuntimeMessage {
 }
 
 /* Notifications the person may still click: kept, so they aren't collected before then. */
-const shown = new Set<Notification>()
+const shown = notificationsShown<Notification>()
 
 /* The Mac held awake while work runs, by the app-suspension blocker: the display may still sleep. */
 const awake = keepingAwake({
@@ -435,12 +435,12 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
   if (!tells(event.kind, preferences) || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
   const { threadId } = event
   const notification = new Notification({ title: event.title, body: event.body, ...soundOf(preferences) })
-  shown.add(notification)
   notification.on('click', () => {
-    shown.delete(notification)
+    shown.drop(threadId, notification)
     openThread(threadId)
   })
-  notification.on('close', () => shown.delete(notification))
+  notification.on('close', () => shown.drop(threadId, notification))
+  shown.add(threadId, notification)
   notification.show()
 }
 

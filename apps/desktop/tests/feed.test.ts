@@ -268,6 +268,19 @@ describe('the window’s watch', () => {
     expect(client.listProjects).toHaveBeenCalledTimes(3)
   })
 
+  it('forgets a read the cache lets go, so reads keyed anew each time don’t pile up', async () => {
+    const { cache, emit, feed, read } = opened()
+    for (const id of ['p1', 'p2', 'p3']) await cache.fetchQuery(read.board(id))
+    emit(changed('task', 't1', 'th1', 'p1'))
+    await settle()
+    const all = feed.remembered()
+    expect(all).toBeGreaterThanOrEqual(3)
+    for (const id of ['p1', 'p2', 'p3']) cache.removeQueries({ queryKey: read.board(id).queryKey, exact: true })
+    expect(feed.remembered()).toBe(all - 3)
+    cache.removeQueries()
+    expect(feed.remembered()).toBe(0)
+  })
+
   it('marks a thread again when it was being read as a change touched it', async () => {
     const { client, cache, emit, read } = opened()
     const first = later<ThreadSnapshot>()

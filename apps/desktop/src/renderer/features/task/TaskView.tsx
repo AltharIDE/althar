@@ -82,7 +82,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
-import { chosenFaces } from './chosenFaces'
+import { chooseFace, chosenFaces } from './chosenFaces'
 import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
@@ -361,7 +361,7 @@ export function TaskView({
   const taskId = model.snapshot?.task.id
   const setFace = useCallback(
     (value: Face) => {
-      if (taskId !== undefined) chosenFaces.set(taskId, value)
+      if (taskId !== undefined) chooseFace(taskId, value)
       showFace(value)
     },
     [taskId],
