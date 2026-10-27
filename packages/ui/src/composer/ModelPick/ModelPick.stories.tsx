@@ -128,6 +128,31 @@ export const HandingOver: Story = {
   },
 }
 
+/**
+ * Each model's room where work on it would start, at its row's end: from a
+ * quarter down, until when too. Codex, nearly out, says so beside the chip.
+ */
+export const Room: Story = {
+  args: {
+    model: model('gpt-5.2-codex'),
+    pinned: [OPUS, model('gpt-5.2-codex'), model('gemini-3-pro')],
+    defaultOpen: true,
+    room: (x) =>
+      x.runtime === 'codex'
+        ? { left: 3, until: '14:00', account: null }
+        : x.runtime === OPUS.runtime
+          ? { left: 62, until: '17:00', account: 'Side' }
+          : null,
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    await expect(page.getByText('Side · 62%')).toBeInTheDocument()
+    await expect(page.getByText('3% · until 14:00')).toBeInTheDocument()
+    await expect(page.getByText('no reading')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('3% left')).toBeInTheDocument()
+  },
+}
+
 /** Claude Code offers six efforts: they share the row without spilling. */
 const SIX = { ...OPUS, efforts: ['Default', 'Low', 'Medium', 'High', 'Extra high', 'Max'] }
 export const SixEfforts: Story = {

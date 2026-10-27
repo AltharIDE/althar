@@ -40,7 +40,7 @@ const light = declarations(readFileSync(join(styles, 'tokens.css'), 'utf8'), ':r
 const dark = declarations(readFileSync(join(styles, 'dark.css'), 'utf8'), ":root[data-theme='dark']")
 
 /** What isn't a colour: stacking, radii, type, air, motion. */
-const NOT_COLOUR = /^--(z-|r-|r$|font|mono|sp$|measure|ease|fast|base|slow|fold|prose|lede|frost-blur$)/
+const NOT_COLOUR = /^--(z-|r-|r$|font|mono|sp$|measure|ease|fast|base|slow|slide|fold|prose|lede|frost-blur$)/
 
 /**
  * The same in every theme, so dark.css leaves them alone: what is drawn on

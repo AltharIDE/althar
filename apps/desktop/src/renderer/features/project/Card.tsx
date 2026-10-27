@@ -50,6 +50,8 @@ const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
 
 export interface CardActions {
   readonly project: string
+  /** The project's id, for each model's room in a step's picker; absent outside a project. */
+  readonly projectId?: string
   readonly agents: ReadonlyArray<AgentStatus>
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
@@ -125,6 +127,7 @@ function PlanCard({
               owner={owner}
               agents={actions.agents}
               value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
+              {...(actions.projectId === undefined ? {} : { projectId: actions.projectId })}
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
               variant="field"
               placement="below"
@@ -197,7 +200,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
         : card.queued !== null
           ? queuedWords(card.queued)
           : card.waits !== null
-            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
+            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
             : card.reconnects != null
               ? reconnectsWords(card.reconnects, clock)
               : card.step === null

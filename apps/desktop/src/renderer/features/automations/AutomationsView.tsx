@@ -9,13 +9,25 @@ import { usePreferences } from '../../shared/usePreferences'
 import { useNow } from '../../shared/time'
 import { AutomationCardOf } from './AutomationCardOf'
 import { type AutomationModel, useAutomation, useAutomations, useNewAutomation } from './useAutomations'
-import { endsInPullRequest, inOrder, LATE, markOf, minuteChoices, standingOf, text as words, whenWords } from './words'
+import {
+  endsInPullRequest,
+  inOrder,
+  LATE,
+  markOf,
+  minuteChoices,
+  type Starter,
+  STARTERS,
+  standingOf,
+  text as words,
+  whenWords,
+} from './words'
 import s from './Automations.module.css'
 
 /*
  * A project's Automations room: the tab, with its automations as cards,
  * or, opened from it, one automation as its own page, which is how it is
- * changed; or a new one, blank, which turning it on or trying it once makes.
+ * changed; or a new one, blank or from one of the starters the tab offers
+ * while there are none, which saving it or turning it on makes.
  * Which one is open is the address's, so it is open again after a reload.
  * Where they run is said while Althar doesn't open at login, with the way
  * to have it so, where the system can.
@@ -25,7 +37,6 @@ export const text = {
   reading: 'Reading the automations',
   readingOne: 'Reading the automation',
   where: `They run on ${device.this} while Althar is open.`,
-  promptMissing: 'Say what each run should do first.',
   /** Paused itself, where the runtime didn't say why. */
   why: 'Its last runs failed.',
 }
@@ -100,7 +111,7 @@ const limitsOf = (
 ]
 
 /** The tab: its automations as cards, the one that paused itself first; pausing them all; where they run. */
-function Tab({ projectId, onOpen }: { projectId: string; onOpen: (id: string) => void }) {
+function Tab({ projectId, onOpen, onNew }: { projectId: string; onOpen: (id: string) => void; onNew: (starter?: string) => void }) {
   const model = useAutomations(projectId)
   const { preferences, read, set } = usePreferences()
   // What it says of when each runs next moves on with the clock, a minute at a time.
@@ -120,7 +131,8 @@ function Tab({ projectId, onOpen }: { projectId: string; onOpen: (id: string) =>
     <Automations
       automations={inOrder(snapshot.automations).map((one) => tileOf(one, snapshot.allPaused, now))}
       onOpen={onOpen}
-      onNew={() => onOpen('new')}
+      onNew={onNew}
+      starters={STARTERS.map(({ id, name, prompt, schedule }) => ({ id, name, prompt, when: whenWords(schedule) }))}
       allPaused={snapshot.allPaused}
       onPauseAll={model.setAllPaused}
       where={read && !preferences.openAtLogin}
@@ -210,12 +222,17 @@ function Existing(props: { automationId: string } & Omit<Parameters<typeof Page>
   return <Page model={useAutomation(automationId)} {...rest} />
 }
 
-/** A new one, blank: its name and prompt to write, every other choice at its default; turning it on or trying it once makes it. */
+/**
+ * A new one, blank or from a starter: its name and prompt to write, every
+ * other choice at its default; saving it, off, or turning it on makes it,
+ * and opens its page. What it is missing is said under its field.
+ */
 function New({
   projectId,
   project,
   agents,
   lead,
+  starter,
   onBack,
   onMade,
 }: {
@@ -223,23 +240,28 @@ function New({
   project: string
   agents: ReadonlyArray<AgentStatus>
   lead: AutomationStep
+  starter?: Starter
   onBack: () => void
   onMade: (id: string) => void
 }) {
-  const draft = useNewAutomation(projectId, lead)
+  const draft = useNewAutomation(projectId, lead, starter)
   const [missing, setMissing] = useState(false)
   const definition = draft.definition
   const change = (next: AutomationDefinition) => {
     if (next.prompt.trim() !== '') setMissing(false)
     draft.change(next)
   }
+  const check = () => {
+    const said = definition.prompt.trim() !== ''
+    setMissing(!said)
+    return said
+  }
   const make = (how: () => Promise<string | null>) => {
-    if (definition.prompt.trim() === '') return setMissing(true)
     void how().then((id) => {
       if (id !== null) onMade(id)
     })
   }
-  const error = missing ? text.promptMissing : draft.error
+  const error = draft.error
   return (
     <AutomationPage
       making
@@ -251,8 +273,9 @@ function New({
       paused={false}
       proposed
       on={false}
-      onTryOnce={() => make(draft.tryOnce)}
+      onSave={() => make(draft.save)}
       onTurnOn={() => make(draft.turnOn)}
+      check={check}
       onBack={onBack}
       card={
         <AutomationCardOf
@@ -262,6 +285,7 @@ function New({
           fromSchedule
           stage="kept"
           writing
+          promptMissing={missing}
           onChange={change}
           editsPrompt
         />
@@ -296,12 +320,27 @@ export function AutomationsView({
   onTask: (threadId: string) => void
 }) {
   const back = () => onOpen(null)
+  // The starter a new one opened from on the tab: the window's, not the address's.
+  const [starter, setStarter] = useState<Starter | undefined>(undefined)
+  const fresh = (id?: string) => {
+    setStarter(STARTERS.find((one) => one.id === id))
+    onOpen('new')
+  }
   return (
     <div className={s.room}>
       {open === null ? (
-        <Tab projectId={projectId} onOpen={onOpen} />
+        <Tab projectId={projectId} onOpen={onOpen} onNew={fresh} />
       ) : open === 'new' ? (
-        <New projectId={projectId} project={project} agents={agents} lead={lead} onBack={back} onMade={onOpen} />
+        <New
+          key={starter?.id ?? 'blank'}
+          projectId={projectId}
+          project={project}
+          agents={agents}
+          lead={lead}
+          {...(starter === undefined ? {} : { starter })}
+          onBack={back}
+          onMade={onOpen}
+        />
       ) : (
         <Existing key={open} automationId={open} project={project} agents={agents} onBack={back} onTask={onTask} />
       )}

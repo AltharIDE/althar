@@ -33,9 +33,14 @@ const heldWork: Readonly<Record<string, string>> = { review: 'The review waits',
  * What a step held for a usage limit waits for: the agent that ran out, and
  * when it is back; with the step, what waits too, where there is room for it,
  * as in the task's header. A card says Paused and shows its step already.
+ * Held before it ran out (`left`, a new step steered clear of an agent nearly
+ * out), it says it waits for the agent, which isn't out yet.
  */
-export const waitsWords = (agent: string, at: string, step?: string | null) =>
-  `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
+export const waitsWords = (agent: string, at: string, step?: string | null, left?: number) => {
+  if (left !== undefined && left > 0)
+    return step === undefined ? `Waiting for ${agent} until ${at}` : `${heldWork[step ?? ''] ?? 'The work waits'} for ${agent} until ${at}`
+  return `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
+}
 
 /**
  * What a step held for the connection waits for (ADR-060): the connection,

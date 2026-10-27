@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { AgentStatus, AttentionRequest, HeldForLimit, LimitCall as Limit } from '@althar/contracts'
 
-import { HeldLimit, LimitCall, limitedOf, limitOptionsOf } from '../src/renderer/features/task/LimitCall'
+import { HeldLimit, LimitCall, limitedOf, limitOptionsOf, limitText } from '../src/renderer/features/task/LimitCall'
 import { clock } from '../src/renderer/shared/time'
 import { agents, fakeClient, status, usual } from './fixtures'
 import { withServices } from './render'
@@ -196,5 +196,21 @@ describe('a usage limit, in words', () => {
       efforts: [],
     })
     expect(limitOptionsOf(limit, now, bare).map((option) => option.note)).toEqual(['via Claude Code · work', 'via Codex'])
+  })
+})
+
+describe('a new step on an agent nearly out', () => {
+  it('says how little it has left, not that it ran out, with the agent itself among the ways on', () => {
+    expect(limitText.what('Codex', '14:00', 'review', 3.4)).toBe(
+      "Codex is nearly out of usage, with 3% left. It's back in full at 14:00. Pick a model to carry on now, Codex too, wait until then, or skip the review.",
+    )
+    expect(limitText.what('Codex', null, 'implement', 2)).toBe(
+      'Codex is nearly out of usage, with 2% left. Pick a model to carry on now, Codex too, or try Codex again.',
+    )
+    expect(limitText.held('Codex', '14:00', 'review', 'waits', 3)).toBe(
+      'Codex is nearly out of usage, with 3% left. This project waits for usage to reset, so the review waits until 14:00. To carry on now, pick another model, or skip the review.',
+    )
+    // Out, as before.
+    expect(limitText.held('Codex', '14:00', 'review', 'waits')).toMatch(/^Codex ran out of usage during the review\./)
   })
 })

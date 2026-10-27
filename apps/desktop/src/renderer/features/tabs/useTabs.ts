@@ -52,7 +52,7 @@ export interface TabsModel {
   readonly reorder: (id: string, beforeId: string | null) => void
   /** Starts a new project in a tab of its own, or goes to the one being made; folders dropped are added to it. */
   readonly newProject: (files?: ReadonlyArray<File>) => void
-  /** The new project was made: its tab is the project's own, open on its conversation. */
+  /** The new project was made: its tab is the project's own, open on Home, as a project with no kept view is. */
   readonly made: (projectId: string) => void
   /** The new project's tab closes, and nothing is made. */
   readonly closeNew: () => void
@@ -197,7 +197,7 @@ export const useTabs = (): TabsModel => {
     made: (projectId) => {
       store.change(arrived(projectId, { kind: 'project' }))
       drafts.change(projectId, (now) => ({ ...now, made: true }))
-      leaving(projectId, navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } }))
+      leaving(projectId, navigate({ to: '/projects/$projectId', params: { projectId } }))
     },
     closeNew,
     visit: store.visit,
