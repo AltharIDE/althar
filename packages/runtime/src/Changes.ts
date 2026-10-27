@@ -861,6 +861,16 @@ export class Changes extends Context.Service<
           return null
         }).pipe(Effect.orElseSucceed(() => null))
 
+      /** The product of a connection at one of the remotes' hosts that needs signing in again, if there is one. */
+      const signInLostAt = (remotes: ReadonlyArray<string>): Effect.Effect<string | null, never, Store> =>
+        Effect.gen(function* () {
+          for (const remote of remotes) {
+            const place = yield* connections.placeOf(remote)
+            if (place?.connection?.state === 'reauth_required') return place.connection.product
+          }
+          return null
+        }).pipe(Effect.orElseSucceed(() => null))
+
       const publish = (input: PublishInput): Effect.Effect<Published, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1050,6 +1060,10 @@ export class Changes extends Context.Service<
           if (found === null) {
             const known = yield* hostOfRemotes(remotes)
             if (known === null && ofSeveral) return { kind: 'branch', left: [] } as const
+            // Connected there, but the sign-in stopped working (or the keychain lost it): that is signing in again, not connecting.
+            const lost = yield* signInLostAt(remotes)
+            if (lost !== null)
+              return yield* new ConnectorFailed({ product: lost, reason: 'unauthorized', message: 'The sign-in needs signing in again' })
             return yield* new NotConnected({ product: known?.product ?? 'github', what: remotes[0] ?? 'the repository' })
           }
           const { host } = found

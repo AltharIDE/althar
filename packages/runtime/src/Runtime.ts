@@ -18,6 +18,7 @@ import { Issues } from './Issues'
 import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
+import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
 import { PermissionJudge } from './PermissionJudge'
@@ -85,7 +86,7 @@ export const layer = (options: RuntimeLayerOptions) => {
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
   const connected = Connectivity.layer.pipe(Layer.provideMerge(base))
-  const able = Layer.mergeAll(Limits.layer, Models.layer).pipe(
+  const able = Layer.mergeAll(Limits.layer, Models.layer, PlanUsage.layer).pipe(
     Layer.provideMerge(
       SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(connected)))))),
     ),

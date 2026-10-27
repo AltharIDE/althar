@@ -10,6 +10,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import s from './ModelPick.module.css'
+import { type ModelRoom, type ModelRoomText, RoomNote, RoomSaid } from './room'
 
 export interface ModelPickText {
   /** The popover's name. */
@@ -74,6 +75,9 @@ export interface ModelPickProps {
   placement?: 'above' | 'below'
   /** A word beside a model in the list, such as that picking it hands the conversation to another agent. */
   note?: (model: ModelInfo) => string | undefined
+  /** How much room a model has where work on it would start, at its row's end; null where its plan is read by nothing, undefined where there is nothing to say. Once the model in use is nearly out, the chip says so beside itself. */
+  room?: (model: ModelInfo) => ModelRoom | null | undefined
+  roomText?: Partial<ModelRoomText>
   /** What picking a model would do that needs a yes first, in a sentence. Picking such a model asks, in the list, before `onChange`. */
   confirm?: (model: ModelInfo) => string | undefined
   /** The model waiting on that yes: one picked here, or elsewhere, like the consumer's browser. */
@@ -106,6 +110,8 @@ export function ModelPick({
   variant = 'quiet',
   placement = 'above',
   note,
+  room,
+  roomText,
   confirm,
   asking: askingProp,
   defaultAsking = null,
@@ -139,126 +145,131 @@ export function ModelPick({
   const level = model.efforts.length > 0 ? effort : null
 
   return (
-    <Popover
-      label={t.label(owner)}
-      placement={placement}
-      // Wide enough for the six efforts Claude Code offers, each on its own.
-      width={328}
-      padded={false}
-      open={isOpen}
-      onOpenChange={setOpen}
-      className={s.pop}
-      trigger={
-        <button type="button" className={cx(s.button, s[variant])} aria-label={t.current(owner, model.short, level)}>
-          <Model model={model} short className={s.name} />
-          {level !== null && <span className={s.effort}>{level}</span>}
-          <Icon name="chevronD" size={10} className={s.chev} />
-        </button>
-      }
-    >
-      <div className={s.head}>{owner}</div>
-      {/* one of them is in use: a radio group, so arrows move between them and a screen reader hears which is checked */}
-      <RadioGroup.Root
-        className={s.list}
-        aria-label={t.pinned}
-        value={model.id}
-        onValueChange={(id) => {
-          const x = list.find((candidate) => candidate.id === id)
-          if (x !== undefined && id !== model.id) pick(x)
-        }}
-        loop
+    <>
+      <Popover
+        label={t.label(owner)}
+        placement={placement}
+        // Wide enough for the six efforts Claude Code offers, each on its own.
+        width={328}
+        padded={false}
+        open={isOpen}
+        onOpenChange={setOpen}
+        className={s.pop}
+        trigger={
+          <button type="button" className={cx(s.button, s[variant])} aria-label={t.current(owner, model.short, level)}>
+            <Model model={model} short className={s.name} />
+            {level !== null && <span className={s.effort}>{level}</span>}
+            <Icon name="chevronD" size={10} className={s.chev} />
+          </button>
+        }
       >
-        {list.map((x) => {
-          const said = note?.(x)
-          return (
-            <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
-              <Model model={x} />
-              {!isPinned(x) && <span className={s.unpinned}>{t.notPinned}</span>}
-              {said !== undefined && <span className={s.note}>{said}</span>}
-              <Icon name="check" size={11} className={s.check} />
-            </RadioGroup.Item>
-          )
-        })}
-      </RadioGroup.Root>
+        <div className={s.head}>{owner}</div>
+        {/* one of them is in use: a radio group, so arrows move between them and a screen reader hears which is checked */}
+        <RadioGroup.Root
+          className={s.list}
+          aria-label={t.pinned}
+          value={model.id}
+          onValueChange={(id) => {
+            const x = list.find((candidate) => candidate.id === id)
+            if (x !== undefined && id !== model.id) pick(x)
+          }}
+          loop
+        >
+          {list.map((x) => {
+            const said = note?.(x)
+            const left = room?.(x)
+            return (
+              <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
+                <Model model={x} />
+                {!isPinned(x) && <span className={s.unpinned}>{t.notPinned}</span>}
+                {said !== undefined && <span className={s.note}>{said}</span>}
+                {left !== undefined && <RoomNote room={left} text={roomText} className={s.room} />}
+                <Icon name="check" size={11} className={s.check} />
+              </RadioGroup.Item>
+            )
+          })}
+        </RadioGroup.Root>
 
-      {asking !== null && question !== undefined && (
-        <div className={s.ask} role="group" aria-label={question}>
-          <p className={s.question}>{question}</p>
-          <div className={s.answers}>
-            <Button
-              ref={proceed}
-              size="small"
-              variant="signal"
-              onClick={() => {
-                setAsking(null)
-                onChange(asking.id)
-              }}
-            >
-              {t.proceed}
-            </Button>
-            <Button size="small" variant="quiet" onClick={() => setAsking(null)}>
-              {t.cancel}
-            </Button>
+        {asking !== null && question !== undefined && (
+          <div className={s.ask} role="group" aria-label={question}>
+            <p className={s.question}>{question}</p>
+            <div className={s.answers}>
+              <Button
+                ref={proceed}
+                size="small"
+                variant="signal"
+                onClick={() => {
+                  setAsking(null)
+                  onChange(asking.id)
+                }}
+              >
+                {t.proceed}
+              </Button>
+              <Button size="small" variant="quiet" onClick={() => setAsking(null)}>
+                {t.cancel}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {level !== null && (
-        <div className={s.section}>
-          <div className={s.sectionTop}>
-            <span className={s.sectionKey} aria-hidden="true">
-              {t.effort}
-            </span>
-            {level === defaultEffort ? (
-              <span className={s.sectionNote}>{t.isDefault(model.short)}</span>
-            ) : (
-              <span className={s.sectionNote}>
-                {defaultEffort && t.otherDefault(defaultEffort)}
-                {onMakeDefault && (
-                  <>
-                    {defaultEffort && ' · '}
-                    <LinkButton onClick={() => onMakeDefault(level)}>{t.makeDefault}</LinkButton>
-                  </>
-                )}
+        {level !== null && (
+          <div className={s.section}>
+            <div className={s.sectionTop}>
+              <span className={s.sectionKey} aria-hidden="true">
+                {t.effort}
               </span>
-            )}
+              {level === defaultEffort ? (
+                <span className={s.sectionNote}>{t.isDefault(model.short)}</span>
+              ) : (
+                <span className={s.sectionNote}>
+                  {defaultEffort && t.otherDefault(defaultEffort)}
+                  {onMakeDefault && (
+                    <>
+                      {defaultEffort && ' · '}
+                      <LinkButton onClick={() => onMakeDefault(level)}>{t.makeDefault}</LinkButton>
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
+            <Segmented
+              label={t.effort}
+              options={model.efforts.map((l) => ({ value: l, label: l }))}
+              value={level}
+              onChange={onEffort}
+              className={s.efforts}
+            />
           </div>
-          <Segmented
-            label={t.effort}
-            options={model.efforts.map((l) => ({ value: l, label: l }))}
-            value={level}
-            onChange={onEffort}
-            className={s.efforts}
-          />
-        </div>
-      )}
+        )}
 
-      {onBrowse && (
-        <button
-          type="button"
-          className={s.all}
-          onClick={() => {
-            setOpen(false)
-            onBrowse()
-          }}
-        >
-          {t.all}
-          {count !== undefined && <span className={s.count}>{count}</span>}
-          <Icon name="chevron" size={10} />
-        </button>
-      )}
-      {onRemove && (
-        <button
-          type="button"
-          className={cx(s.all, s.remove)}
-          onClick={() => {
-            setOpen(false)
-            onRemove()
-          }}
-        >
-          {t.remove}
-        </button>
-      )}
-    </Popover>
+        {onBrowse && (
+          <button
+            type="button"
+            className={s.all}
+            onClick={() => {
+              setOpen(false)
+              onBrowse()
+            }}
+          >
+            {t.all}
+            {count !== undefined && <span className={s.count}>{count}</span>}
+            <Icon name="chevron" size={10} />
+          </button>
+        )}
+        {onRemove && (
+          <button
+            type="button"
+            className={cx(s.all, s.remove)}
+            onClick={() => {
+              setOpen(false)
+              onRemove()
+            }}
+          >
+            {t.remove}
+          </button>
+        )}
+      </Popover>
+      <RoomSaid room={room?.(model)} text={roomText} />
+    </>
   )
 }

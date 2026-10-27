@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { AutomationCard } from '../../coordinator/AutomationCard/AutomationCard'
 import { REVIEW_RUNS } from '../../fixtures/automations'
@@ -104,6 +104,59 @@ function Page(props: Partial<AutomationPageProps> & { review?: boolean }) {
       limits={limits}
       runs={REVIEW_RUNS}
       onOpenRun={fn()}
+      {...rest}
+      name={name}
+      onNameChange={setName}
+    />
+  )
+}
+
+/** A new one, as a consumer keeps it: its name and prompt typed in, and what it lacks said under its field. */
+function NewPage(props: Partial<AutomationPageProps> & { prompt?: string }) {
+  const { prompt: start = '', ...rest } = props
+  const limits = useLimits(true)
+  const [name, setName] = useState(rest.name ?? '')
+  const [prompt, setPrompt] = useState(start)
+  const [missing, setMissing] = useState(false)
+  return (
+    <AutomationPage
+      making
+      status="Off until you turn it on"
+      statusTone="off"
+      tone="quiet"
+      paused={false}
+      proposed
+      on={false}
+      onSave={fn()}
+      onTurnOn={fn()}
+      check={() => {
+        setMissing(prompt.trim() === '')
+        return prompt.trim() !== ''
+      }}
+      onBack={fn()}
+      card={
+        <AutomationCard
+          name={name}
+          project={PROJECT}
+          prompt={prompt}
+          stage="kept"
+          writing
+          promptMissing={missing}
+          onPromptChange={(next) => {
+            setPrompt(next)
+            if (next.trim() !== '') setMissing(false)
+          }}
+          when={WHEN}
+          whenValue="weekdays"
+          onWhenChange={() => {}}
+          next="tomorrow at 9:00"
+          picker={() => 'Claude Opus 5'}
+          ends={ENDS}
+          endsValue="none"
+          onEndsChange={() => {}}
+        />
+      }
+      limits={limits}
       {...rest}
       name={name}
       onNameChange={setName}
@@ -225,7 +278,7 @@ export const PausedItself: Story = {
   },
 }
 
-/** Made, not turned on yet: try it once, or turn it on. */
+/** Saved, not turned on yet: try it once, or turn it on. */
 export const Proposed: Story = {
   args: { proposed: true, on: false, status: 'Off until you turn it on', statusTone: 'off', onTryOnce: fn(), onTurnOn: fn(), runs: [] },
   play: async ({ canvasElement, args }) => {
@@ -238,32 +291,54 @@ export const Proposed: Story = {
   },
 }
 
-/** A new one: its name a field, which it needs before it is made; no runs yet to show. */
+/** A new one, not saved: Save keeps it off, Turn on saves it on. Nothing to try, rename or delete until it is saved; no runs yet to show. */
 export const New: Story = {
-  render: () => (
-    <Page
-      name=""
-      making
-      proposed
-      on={false}
-      status="Off until you turn it on"
-      statusTone="off"
-      onTurnOn={fn()}
-      onTryOnce={fn()}
-      runs={undefined}
-      review={false}
-    />
-  ),
+  render: () => <NewPage name="Weekly polish" prompt="Tidy the changelog, and say what you changed." onSave={fn()} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByRole('heading', { name: 'Runs' })).toBeNull()
     await expect(c.getByText('Say it as you would to the coordinator.')).toBeInTheDocument()
-    await userEvent.click(c.getByRole('button', { name: 'Turn on' }))
-    await expect(c.getByText('Give it a name first')).toBeInTheDocument()
-    await expect(c.getByRole('textbox', { name: 'Name' })).toHaveFocus()
-    await userEvent.type(c.getByRole('textbox', { name: 'Name' }), 'Weekly polish')
-    await expect(c.queryByText('Give it a name first')).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Try it once now' })).toBeNull()
+    await expect(c.queryByRole('switch', { name: 'On' })).toBeNull()
     await expect(c.queryByRole('button', { name: 'More' })).toBeNull()
+    await expect(c.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Turn on' })).toBeInTheDocument()
+  },
+}
+
+/** Save with nothing typed: each field says what it lacks under itself, pointed at by it, and the first of them takes focus; filled in, it goes. */
+export const InvalidPrompt: Story = {
+  render: () => <NewPage />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const name = c.getByRole('textbox', { name: 'Name' })
+    const prompt = c.getByRole('textbox', { name: 'What each run is asked' })
+    await userEvent.click(c.getByRole('button', { name: 'Save' }))
+    await expect(name).toHaveAttribute('aria-invalid', 'true')
+    await expect(name).toHaveAccessibleDescription('Give it a name first')
+    await expect(prompt).toHaveAttribute('aria-invalid', 'true')
+    await expect(prompt).toHaveAccessibleDescription('Say what each run should do first.')
+    await waitFor(() => expect(name).toHaveFocus())
+    await userEvent.type(name, 'Weekly polish')
+    await expect(c.queryByText('Give it a name first')).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Turn on' }))
+    await waitFor(() => expect(prompt).toHaveFocus())
+    await expect(c.getByText('Say what each run should do first.')).toBeInTheDocument()
+  },
+}
+
+/** A long form, scrolled: the bar with the way back, Save and Turn on stays at the top, a line under it as the page passes beneath. */
+export const LongFormScrolled: Story = {
+  render: () => <NewPage id="automation-page" name="Weekly polish" prompt="Tidy the changelog, and say what you changed." />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = canvasElement.querySelector<HTMLElement>('#automation-page')
+    const bar = page?.querySelector('[data-scrolled]') ?? null
+    await expect(bar).toBeNull()
+    if (page !== null) fireEvent.scroll(page, { target: { scrollTop: 10_000 } })
+    await waitFor(() => expect(page?.querySelector('[data-scrolled]')).not.toBeNull())
+    await expect(c.getByRole('button', { name: 'Turn on' })).toBeVisible()
+    await expect(c.getByRole('button', { name: 'Save' })).toBeVisible()
   },
 }
 
@@ -294,7 +369,21 @@ export const AllStates: Story = {
           state: 'proposed',
           node: <AutomationPage {...args} proposed status="Off until you turn it on" statusTone="off" onTurnOn={() => {}} />,
         },
-        { state: 'new', node: <AutomationPage {...args} name="" making proposed status="Off until you turn it on" statusTone="off" /> },
+        {
+          state: 'new',
+          node: (
+            <AutomationPage
+              {...args}
+              name=""
+              making
+              proposed
+              status="Off until you turn it on"
+              statusTone="off"
+              onSave={() => {}}
+              onTurnOn={() => {}}
+            />
+          ),
+        },
         { state: 'busy', node: <AutomationPage {...args} proposed onTurnOn={() => {}} busy /> },
       ]}
     />
