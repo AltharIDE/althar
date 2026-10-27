@@ -21,8 +21,8 @@ export const keys = {
   board: (projectId: string) => ['board', projectId] as const,
   coordinator: (projectId: string) => ['coordinator', projectId] as const,
   thread: (threadId: string) => ['thread', threadId] as const,
-  /** A task's head alone, as the board stood at `version`: what the dock shows of a ready task. */
-  head: (threadId: string, version: number) => ['head', threadId, version] as const,
+  /** A task's head alone, as the board stood at `version` (`headVersion`): what the dock shows of a ready task. */
+  head: (threadId: string, version: string) => ['head', threadId, version] as const,
   rules: (projectId: string) => ['rules', projectId] as const,
   /** A project's notes, as its coordinator keeps them. */
   notes: (projectId: string) => ['notes', projectId] as const,
@@ -121,7 +121,7 @@ export const reads = (client: Client) => ({
         continued(cache.getQueryData<ThreadSnapshot>(keys.thread(threadId)), await client.getThread(threadId)),
       gcTime: 10 * 60_000,
     }),
-  head: (threadId: string, version: number) =>
+  head: (threadId: string, version: string) =>
     queryOptions({ queryKey: keys.head(threadId, version), queryFn: () => client.getThread(threadId, { limit: 0 }), gcTime: 60_000 }),
   rules: (projectId: string) => queryOptions({ queryKey: keys.rules(projectId), queryFn: () => client.getProjectRules(projectId) }),
   notes: (projectId: string) => queryOptions({ queryKey: keys.notes(projectId), queryFn: () => client.getProjectNotes(projectId) }),
