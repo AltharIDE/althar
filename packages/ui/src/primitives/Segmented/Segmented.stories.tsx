@@ -56,6 +56,40 @@ export const ChoosingByKeyboard: Story = {
   },
 }
 
+function Uneven() {
+  const [v, setV] = useState('a')
+  return (
+    <div style={{ width: 420 }}>
+      <Segmented
+        label="Room"
+        options={[
+          { value: 'a', label: 'Talk' },
+          { value: 'b', label: 'Automations', dot: 'yours', dotLabel: 'waiting on you' },
+          { value: 'c', label: 'Board', kbd: '⌘2' },
+          { value: 'd', label: 'A much longer choice' },
+        ]}
+        value={v}
+        onChange={setV}
+      />
+    </div>
+  )
+}
+
+/** Choices of very different widths: the selection changes width as it moves. */
+export const UnevenWidths: Story = { render: () => <Uneven /> }
+
+function Narrow() {
+  const [v, setV] = useState<Effort>('medium')
+  return (
+    <div style={{ width: 160 }}>
+      <Segmented label="Effort" options={OPTIONS} value={v} onChange={setV} />
+    </div>
+  )
+}
+
+/** A container too narrow for the labels: they shrink and the selection follows. */
+export const NarrowContainer: Story = { render: () => <Narrow /> }
+
 /** An option the model does not offer is skipped by the arrows. */
 export const WithDisabled: Story = {
   render: () => <Example options={OPTIONS.map((o) => (o.value === 'max' ? { ...o, disabled: true } : o))} />,
