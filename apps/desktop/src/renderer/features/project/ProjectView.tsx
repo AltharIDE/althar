@@ -158,7 +158,7 @@ export function ProjectView({
   connections,
   onTask,
   settings,
-  room: opening = Room.Talk,
+  room: opening = Room.Both,
   onRoomChange,
   automation: openingAutomation = null,
   onAutomationChange,
