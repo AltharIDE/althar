@@ -1702,6 +1702,22 @@ describe('a ready card’s next step, done from the card', () => {
     await userEvent.click(screen.getByRole('button', { name: 'In conflict' }))
     expect(onOpen).toHaveBeenCalledWith('th-s4')
   })
+
+  it('says why a conflict wasn’t asked of its lead, and Resolve now asks it from the card', async () => {
+    const why = 'You stopped it, so Althar doesn’t start its lead for a conflict.'
+    tasks = [{ ...ready('s9', 'Stopped in conflict', { conflicts: true, target: 'main' }), conflictUnsent: why }]
+    const onOpen = vi.fn()
+    const resolveConflictsNow = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
+    const card = await cardOf('Stopped in conflict')
+    // One line: a merge conflict, and why its lead wasn't asked, in place of the next step.
+    expect(card.getByText('Merge conflict')).toBeTruthy()
+    expect(card.getByText(why)).toBeTruthy()
+    expect(card.queryByText(/Ask the lead to resolve it/)).toBeNull()
+    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
+    expect(resolveConflictsNow).toHaveBeenCalledWith('s9')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
 })
 
 describe('the bar and the dock, on the rest of the board', () => {

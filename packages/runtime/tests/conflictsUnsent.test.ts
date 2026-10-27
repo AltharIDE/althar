@@ -1,0 +1,268 @@
+import { randomBytes } from 'node:crypto'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { makeFakeService } from '@althar/connectors/testing'
+import { assert, describe, it } from '@effect/vitest'
+import { Duration, Effect, Layer } from 'effect'
+import { SqlClient } from 'effect/sql'
+
+import { Changes } from '../src/Changes'
+import type { Conflict } from '../src/conflicts'
+import { Instance } from '../src/Instance'
+import { Policies } from '../src/Policies'
+import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
+import * as Runtime from '../src/Runtime'
+import { hosted, notices, repository, runtime, until } from './support'
+import {
+  asked,
+  ask,
+  cards,
+  git,
+  hostOf,
+  moveHostMainOn,
+  moveMainOn,
+  opened,
+  PASSED,
+  rounds,
+  runtimeWith,
+  titled,
+  worktreeOf,
+} from './conflictsSupport'
+
+/*
+ * A conflict is never skipped without a word (ADR-030): found here as the
+ * default branch moves, whatever the pull request's host says; asked of the
+ * lead though its run ended otherwise than succeeded; tried again once the
+ * branch moves after a round the lead couldn't resolve, and after Althar
+ * stopped mid-round; and where it isn't asked, its card says why, beside
+ * Resolve now, which asks anyway.
+ */
+
+/** A GitHub that never says the pull request conflicts: `false` as from before main moved, or nothing, as while it works it out. */
+const silentHost = (bare: string, says: false | undefined) => {
+  const github = makeFakeService({
+    pushUrl: () => bare,
+    headOf: () => {
+      try {
+        return git(bare, 'rev-parse', 'althar/add-a-retry')
+      } catch {
+        return null
+      }
+    },
+    conflictsOf: () => says,
+    checksFor: () => PASSED,
+  })
+  github.addRepository(['meridian', 'api'])
+  return github
+}
+
+/** The task's card: why its conflict wasn't asked of its lead, if it says. */
+const unsentOf = (projectId: string) => Effect.map(cards(projectId), ([card]) => card?.conflictUnsent ?? null)
+
+const runIs = (taskId: string, state: string) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) => sql`UPDATE runs SET state = ${state} WHERE task_id = ${taskId}`)
+
+describe('a pull request whose default branch moved while it didn’t', () => {
+  for (const [says, how] of [
+    [false, 'its host still says it merges cleanly'],
+    [undefined, 'its host hasn’t worked out whether it conflicts'],
+  ] as const)
+    it.live(`is found to conflict here, and resolved by the lead, though ${how}`, () => {
+      const { working, bare } = hosted()
+      const github = silentHost(bare, says)
+      return Effect.gen(function* () {
+        const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
+        const pushed = git(bare, 'rev-parse', 'althar/add-a-retry')
+        moveHostMainOn(working, bare)
+        // Nothing was pushed to the pull request: only main moved.
+        assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), pushed)
+        yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+        assert.strictEqual((yield* asked(threadId)).length, 1)
+        assert.strictEqual((yield* rounds(taskId))[0]?.url, 'https://github.com/meridian/api/pull/1')
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    })
+})
+
+describe('a conflicting task whose run didn’t succeed', () => {
+  it.live('is asked of its lead where the run failed, as its lead is idle', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      yield* runIs(taskId, 'failed')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      assert.strictEqual((yield* rounds(taskId)).length, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('says why where the person stopped it, and Resolve now asks its lead anyway', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      yield* runIs(taskId, 'suspended')
+      moveHostMainOn(working, bare)
+      const [why] = yield* until(
+        Effect.map(unsentOf(projectId), (one) => [one]),
+        ([one]) => one !== null,
+        Duration.seconds(20),
+      )
+      assert.strictEqual(why, 'You stopped it, so Althar doesn’t start its lead for a conflict.')
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+      assert.deepStrictEqual(yield* asked(threadId), [])
+      // Resolve now: asked, and the card says nothing more of why not.
+      yield* (yield* Changes).resolveNow({ taskId }, true)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      assert.isNull(yield* unsentOf(projectId))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a conflicting task Althar can’t merge here', () => {
+  it.live('says its folder isn’t on this computer, where its host says it conflicts', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId } = yield* opened(working, '[lead:resolve]')
+      yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+      moveHostMainOn(working, bare)
+      const [why] = yield* until(
+        Effect.map(unsentOf(projectId), (one) => [one]),
+        ([one]) => one !== null,
+        Duration.seconds(20),
+      )
+      assert.strictEqual(why, 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a conflict its lead couldn’t resolve', () => {
+  it.live('stays the person’s while main stays, and is the lead’s again once main moves on', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { projectId, taskId } = yield* opened(working, '[lead:resolve-fails]')
+      moveHostMainOn(working, bare)
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'failed', Duration.seconds(30))
+      yield* until(cards(projectId), (all) => all[0]?.handedBack != null, Duration.seconds(20))
+      // Looked at a few turns over, it stays the person's: nothing new to try.
+      yield* Effect.sleep('1500 millis')
+      assert.strictEqual((yield* rounds(taskId)).length, 1)
+      moveHostMainOn(working, bare, 'rate limits, again\n')
+      const all = yield* until(rounds(taskId), (now) => now.length === 2, Duration.seconds(20))
+      assert.strictEqual(all[0]?.state, 'failed')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('a branch merging here, with no pull request', () => {
+  it.live('is resolved by the lead once main moves here, without the person pressing Merge', () => {
+    const working = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
+        true,
+      )
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      moveMainOn(working)
+      yield* titled(task?.threadId ?? '', 'The lead resolved the conflict with main, in change.txt')
+      assert.deepStrictEqual(
+        (yield* rounds(task?.taskId ?? '')).map((round) => [round.state, round.url]),
+        [['resolved', null]],
+      )
+    }).pipe(Effect.provide(runtimeWith()))
+  })
+
+  it.live('is left alone where the rules don’t say to resolve conflicts', () => {
+    const working = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
+        false,
+      )
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      moveMainOn(working)
+      yield* Effect.sleep('1500 millis')
+      assert.deepStrictEqual(yield* rounds(task?.taskId ?? ''), [])
+      assert.isNull(yield* unsentOf(projectId))
+      // Turned on, it is looked at at once.
+      yield* (yield* Policies).set(projectId as never, { resolveConflicts: true }, (yield* Instance).personId)
+      yield* (yield* Changes).resolveNow({ projectId })
+      yield* titled(task?.threadId ?? '', 'The lead resolved the conflict with main, in change.txt')
+    }).pipe(Effect.provide(runtimeWith()))
+  })
+})
+
+describe('a round an earlier launch left under way', () => {
+  it.live('is asked of the lead again where its branch still conflicts, not handed to the person', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-conflicts-')), 'althar.sqlite')
+    const launch = () => Queries.layer.pipe(Layer.provideMerge(runtime(file)))
+    const root = repository()
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* Effect.gen(function* () {
+        const projects = yield* Projects
+        const sql = yield* SqlClient.SqlClient
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+        const task = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: project.projectId,
+          title: 'Retry',
+        })
+        yield* until(
+          sql<{ state: string }>`SELECT state FROM workspaces WHERE task_id = ${task.taskId}`,
+          (rows) => rows[0]?.state === 'ready',
+        )
+        const { slug, path } = yield* worktreeOf(task.taskId)
+        // The task's branch and main each changed the same file: they conflict, and the lead hadn't resolved it when Althar stopped.
+        writeFileSync(join(path, 'change.txt'), 'a retry\n')
+        git(path, 'add', '.')
+        git(path, 'commit', '-q', '-m', 'Retry')
+        moveMainOn(root)
+        const conflict: Conflict = {
+          repository: slug,
+          name: slug,
+          branch: 'main',
+          ref: 'main',
+          target: git(root, 'rev-parse', 'main'),
+          from: git(path, 'rev-parse', 'HEAD'),
+          files: ['change.txt'],
+        }
+        const at = new Date().toISOString()
+        yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+          id: `cres_${randomBytes(16).toString('hex')}`,
+          projectId: project.projectId,
+          taskId: task.taskId,
+          pullRequestUrl: null,
+          conflicts: JSON.stringify([conflict]),
+          attempt: 1,
+          state: 'resolving',
+          createdAt: at,
+          updatedAt: at,
+        })}`
+        const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'task'`
+        return { taskId: task.taskId, threadId: thread?.id ?? '' }
+      }).pipe(Effect.provide(launch()))
+
+      yield* Effect.gen(function* () {
+        // Said in the thread, and its lead asked again: this task has none to start, which is what ends it.
+        yield* titled(threadId, 'Althar stopped while the lead was resolving the conflict with main')
+        const [said] = (yield* notices(threadId)).filter((one) => one.title?.startsWith('Althar stopped') === true)
+        assert.strictEqual(said?.description, 'Althar asks the lead again once an agent is free on this computer.')
+        const sql = yield* SqlClient.SqlClient
+        const [ended] = yield* until(
+          sql<{ state: string; failure: string | null }>`SELECT state, failure FROM conflict_resolutions WHERE task_id = ${taskId}`,
+          (rows) => rows.every((row) => row.state !== 'resolving'),
+        )
+        assert.notInclude(ended?.failure ?? '', 'Althar stopped while the lead was resolving it.')
+      }).pipe(Effect.provide(launch()))
+    })
+  })
+})
