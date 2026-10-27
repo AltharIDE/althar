@@ -38,7 +38,7 @@ import {
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
-import { touchCard } from './cards'
+import { touchCard, touchTask } from './cards'
 import { logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
@@ -781,6 +781,8 @@ export class Changes extends Context.Service<
       })
       /* The last reason logged for each task's conflict not sent to its lead: each is logged once. */
       const logged = new Map<string, string>()
+      /* Tasks the person pressed Resolve now on: why it went nowhere stays, though the rules leave it to them, until it is answered. */
+      const pressed = new Set<string>()
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const decodeSnapshot = Schema.decodeUnknownEffect(Schema.fromJsonString(Snapshot))
 
@@ -3579,21 +3581,28 @@ export class Changes extends Context.Service<
           if (shown ? was?.why === why && was.checked === checked : was === undefined) return
           if (shown) unsent.set(taskId, { why, checked })
           else unsent.delete(taskId)
-          yield* touchCard(taskId)
+          // Its board card and its task say it too, not only its card in the conversation.
+          yield* touchTask(taskId)
         })
 
       /** Nothing to say of a task's conflict any more: asked of its lead, or it conflicts no more. */
       const forgetUnsent = (taskId: string) =>
         Effect.gen(function* () {
           logged.delete(taskId)
-          if (unsent.delete(taskId)) yield* touchCard(taskId)
+          pressed.delete(taskId)
+          if (unsent.delete(taskId)) yield* touchTask(taskId)
         })
 
       /** What `askable` said, done: the lead asked, or why not kept; whether to ask it. */
       const sayingWhy = (taskId: string, asked: Askable) =>
         Effect.gen(function* () {
           if (asked === 'yes') return true
-          if (asked === 'off' || asked === 'handed') yield* forgetUnsent(taskId)
+          // Off, the rules leave it to the person, unless they pressed Resolve now: why that went nowhere stays.
+          if (asked === 'off') {
+            if (!pressed.has(taskId)) yield* forgetUnsent(taskId)
+            return false
+          }
+          if (asked === 'handed') yield* forgetUnsent(taskId)
           else if (asked !== 'resolving') yield* notSent(taskId, asked.why, asked.shown)
           return false
         })
@@ -3694,6 +3703,7 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           unsent.delete(task.taskId)
+          pressed.delete(task.taskId)
           const id = yield* newId(Ids.conflictResolution)
           const place = yield* placeOf(task.taskId, url)
           const body = noteFor(conflicts, place, null)
@@ -4073,7 +4083,7 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const first = yield* askable(link.taskId, seen.url, { force: how.force })
-          if (first === 'off') return yield* forgetUnsent(link.taskId)
+          if (first === 'off') return pressed.has(link.taskId) ? undefined : yield* forgetUnsent(link.taskId)
           if (first === 'resolving') return
           const says = now.conflicts === true
           // Where it can't be looked at here, that is said whatever its host says: a host saying it merges cleanly may be out of date.
@@ -4588,6 +4598,7 @@ export class Changes extends Context.Service<
       /** Each open task, of the project or the one task, looked at now for what already conflicts. */
       const resolveNow = (where: { readonly projectId: string } | { readonly taskId: string }, force = false) =>
         Effect.gen(function* () {
+          if (force && 'taskId' in where) pressed.add(where.taskId)
           for (const task of yield* openHere(where))
             yield* conflictsNow(task, force && 'taskId' in where).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not look for a conflict to resolve', cause)),

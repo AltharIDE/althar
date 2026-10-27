@@ -419,10 +419,15 @@ for the person, as above.
 - **Never skipped without a word.** A task that conflicts and isn't asked
   of its lead says why on its card and over its composer, in one line, with
   Resolve now: the person stopped it, it has no lead yet, its folder isn't
-  on this computer, or its target couldn't be fetched or merged here. Each
-  reason is logged once. Resolve now looks again, its target fetched anew,
-  and asks the lead whatever the rules, a stop, or a round handed back say;
-  only a run still going, or a round under way, holds it.
+  on this computer, or its target couldn't be fetched or merged here. A
+  round the lead couldn't resolve offers Resolve now too. Where Althar
+  couldn't look here at all (no folder, a fetch that failed, git that
+  couldn't merge), that is said whatever the host says, as the host's
+  "merges cleanly" may be out of date, with Look again, and the card keeps
+  its next step. Each reason is logged once. Resolve now looks again, its
+  target fetched anew, at a task without a folder here too, and asks the
+  lead whatever the rules, a stop, or a round handed back say; only a run
+  still going, or a round under way, holds it.
 - **Althar looks at the branch, not at what the lead said,** once the lead
   is done: its turn over, and nothing it left running in the background
   still going (the full tests, say) or at work after, as Claude Code starts
