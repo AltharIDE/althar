@@ -157,10 +157,11 @@ export function ProjectView({
   connections,
   onTask,
   settings,
-  room: opening = Room.Both,
+  room: asked,
   onRoomChange,
   automation: openingAutomation = null,
   onAutomationChange,
+  visit,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -176,12 +177,22 @@ export function ProjectView({
   automation?: string | null
   /** The automation open, each time it changes, to be opened on again. */
   onAutomationChange?: (automation: string | null) => void
+  /** Counts the times its address asked for it, the screen kept in between: each time, it goes to the view, automation or section asked. */
+  visit?: number
 }) {
-  const [room, setRoom] = useState<Room>(opening)
+  const [room, setRoom] = useState<Room>(asked ?? Room.Both)
   const [automation, setAutomation] = useState<string | null>(openingAutomation)
   useEffect(() => onAutomationChange?.(automation), [automation, onAutomationChange])
   // The section its settings show, kept while the person is on another view.
   const [section, setSection] = useState<ProjectSection>(settings.section ?? FIRST_PROJECT_SECTION)
+  // Asked for again, kept while the person was elsewhere: what the address asks, it goes to; the rest stays as they left it.
+  const [visited, setVisited] = useState(visit)
+  if (visit !== visited) {
+    setVisited(visit)
+    if (asked !== undefined) setRoom(asked)
+    if (openingAutomation !== null) setAutomation(openingAutomation)
+    if (settings.section !== undefined) setSection(settings.section)
+  }
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
   // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread.
