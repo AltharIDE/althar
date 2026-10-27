@@ -587,7 +587,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           taskId: text(content, 'taskId') || null,
           runnableId: text(content, 'runnableId') || null,
           where: text(content, 'where'),
-          // A branch's or a pull request's run (ADR-062): what it is at a glance, and what was asked for, to run it again.
+          // A branch's or a pull request's run (ADR-063): what it is at a glance, and what was asked for, to run it again.
           branch: text(content, 'branch') || null,
           ref: kind === 'branch' || kind === 'pull_request' ? { kind, which: text(ref, 'which') } : null,
           command: text(content, 'command'),
@@ -1961,12 +1961,14 @@ export class Queries extends Context.Service<
         const account = field(output, 'account')
         const why = field(output, 'why')
         const choices = field(output, 'choices')
+        const left = field(output, 'left')
         return {
           agentId,
           until,
           ...(typeof account === 'string' ? { accountId: account } : {}),
           ...(why === 'waits' || why === 'nothing_free' || why === 'asked' ? { why } : {}),
           ...(Array.isArray(choices) ? { choices: choices.flatMap(choiceOf) } : {}),
+          ...(typeof left === 'number' ? { left } : {}),
         }
       }
 

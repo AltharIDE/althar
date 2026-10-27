@@ -56,6 +56,7 @@ import {
 } from './errors'
 import { Instance } from './Instance'
 import { Limits, type PlanOnly } from './Limits'
+import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
 import type { Policies } from './Policies'
@@ -379,6 +380,7 @@ type Store =
   | RuntimeConfig
   | Accounts
   | Limits
+  | PlanUsage
   | Models
   | Setups
   | Policies
@@ -740,6 +742,18 @@ export class Sessions extends Context.Service<
       const failures = yield* Failures
       const accounts = yield* Accounts
       const limits = yield* Limits
+      const planUsage = yield* PlanUsage
+      /*
+       * Claude Code's adapter says a plan window with the usage it streams:
+       * kept for the account the session runs on, in a fiber of its own, so
+       * the stream never waits on the store or the view.
+       */
+      const heardPlan = (running: Running, event: SessionEvent) => {
+        const window = event._tag === 'PlanWindow' ? event.window : event._tag === 'ContextUsage' ? event.planWindow : undefined
+        return window === undefined
+          ? Effect.void
+          : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, window), sessionsScope))
+      }
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
@@ -1437,6 +1451,7 @@ export class Sessions extends Context.Service<
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
               if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
               heardContext(running, event)
+              yield* heardPlan(running, event)
               yield* record(event)
               yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
@@ -1889,6 +1904,7 @@ export class Sessions extends Context.Service<
                 transport,
                 onPermission: (request) => permissions.decide(requestContext, request),
                 permissions: definition.permissions,
+                ...(definition.failsInText === undefined ? {} : { failsInText: definition.failsInText }),
                 // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
                 ...(thread.role === 'reviewer'
                   ? {}
@@ -2056,7 +2072,10 @@ export class Sessions extends Context.Service<
                   Effect.andThen(
                     Effect.andThen(
                       Effect.andThen(
-                        Effect.sync(() => heardContext(running, event)),
+                        Effect.andThen(
+                          Effect.sync(() => heardContext(running, event)),
+                          heardPlan(running, event),
+                        ),
                         heard.record(event),
                       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
                       Effect.andThen(heardWork(running, event), heardBackground(running, event)),
@@ -2159,6 +2178,7 @@ export class Sessions extends Context.Service<
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(input.model === undefined ? {} : { model: input.model }),
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
@@ -2605,7 +2625,7 @@ export class Sessions extends Context.Service<
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it, and the more things it keeps to run beside it, such as Storybook. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command; if you add something worth running by hand, keep it with keep_run.',
             // What a lead would otherwise do around its sandbox, Althar does outside it: install, run, and draw a page.
             "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of a page served on this computer, drawn by Althar, so you needn't start a browser. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
-            // A lead carries no sign-in to the code host (ADR-011): Althar fetches for it (ADR-062).
+            // A lead carries no sign-in to the code host (ADR-011): Althar fetches for it (ADR-063).
             "You carry no sign-in to the code host, so a `git fetch` or `git pull` that needs one fails, in your sandbox or out of it. When you need a branch, a tag or a pull request you don't have, or a fresher one, call fetch_from_remote: Althar fetches it with its own sign-in, so origin/<branch> is current, and says the commit it got. When a fetch fails for credentials, use it rather than retrying outside your sandbox or asking the person to fetch. To work on such a branch, `git switch -c <branch> origin/<branch> --no-track`.",
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
@@ -2744,6 +2764,7 @@ export class Sessions extends Context.Service<
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(input.model === undefined ? {} : { model: input.model }),
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)

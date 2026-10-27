@@ -19,6 +19,7 @@ import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
+import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
 import { PermissionJudge } from './PermissionJudge'
@@ -86,14 +87,14 @@ export const layer = (options: RuntimeLayerOptions) => {
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
   const connected = Connectivity.layer.pipe(Layer.provideMerge(base))
-  const able = Layer.mergeAll(Limits.layer, Models.layer).pipe(
+  const able = Layer.mergeAll(Limits.layer, Models.layer, PlanUsage.layer).pipe(
     Layer.provideMerge(
       SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(connected)))))),
     ),
   )
   const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
   // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
-  // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-062).
+  // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-063).
   const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
     Layer.provideMerge(Fetches.layer),
     Layer.provideMerge(

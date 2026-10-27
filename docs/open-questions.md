@@ -501,8 +501,39 @@ never under running work.
   session's life, so this is handled, but should Althar also warn when the
   user's Claude Code defaults to bypass, since their own use of it skips every
   check?
-- [ ] **Usage limits in ACP itself.** Propose a rate-limit extension to ACP,
-  rather than keep a side channel per agent?
+- [ ] **Usage limits in ACP itself.** Researched 15 October 2026
+  ([plan](plans/plan-usage.md#decision)). ACP has no plan windows yet: a
+  quotas RFD is open as [PR #2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316),
+  and ACP v2 is a Draft that leaves usage unchanged. Settled with the person:
+  usage data is required for every agent and every subscription account.
+  The rule: ACP, then an adapter extension, then the agent's own channel,
+  then the provider's usage endpoint (read-only, under a narrow exception to
+  architecture 03 rule 3), errors only as the floor. Claude is the exception
+  to the endpoint step (Anthropic's terms). Don't write our own ACP proposal
+  unless #2316 is declined. Open until #2316 is accepted or declined.
+- [ ] **Amend rule 3 for a usage read.** Agreed in outline on 15 October
+  2026 with the person: a narrow exception, an account's token in memory for
+  one call to a per-provider allowlisted usage URL, never written,
+  refreshed, logged or sent elsewhere, no Claude endpoint. Taken out of
+  #218 on review, since no source could run it yet; open until a spike shows
+  a real one ([#221](https://github.com/AltharIDE/althar/issues/221); the
+  draft is in [the plan](plans/plan-usage.md#the-exception-to-rule-3)).
+- [ ] **OpenCode 2.x usage.** Its credentials moved into `opencode.db` and
+  `auth list` says "can't tell", so an OpenCode 2.x account has no usage
+  source and shows a fault until OpenCode documents a way to read one
+  account's credential or usage, and the registry reads
+  `auth list --standalone --format json`
+  ([research](plans/plan-usage.md#the-exception-to-rule-3)).
+- [ ] **Claude accounts with no session.** Can the Agent SDK's
+  `usage_EXPERIMENTAL…()` or a probe session read them within Anthropic's
+  terms? If not, they stay uncovered until Anthropic allows a read.
+- [x] **Usage warnings and the usage tab.** Settled on a prototype (22
+  October 2026): no warnings at thresholds, no notices and no tab, but a plan
+  gauge in the bar after CPU and memory that says who is nearly out beside
+  it, its peek on Ctrl/Cmd+U, and each model's room in the pickers
+  ([plan](plans/plan-usage.md#where-the-window-shows-it)). The coordinator
+  sees each model's room in `list_models`. Still open: an operating-system
+  notification, and the 1-month window (no source yet for Claude or Codex).
 - [x] **Agent settings that approve before Althar sees.** Settled: every
   session gets settings that make the agent ask, and they win over the user's
   and the repository's own. Claude gets ask rules per session (ask beats allow

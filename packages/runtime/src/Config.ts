@@ -11,6 +11,7 @@ import type { Machine } from './atOnce'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
+import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
@@ -118,6 +119,8 @@ export interface RuntimeOptions {
   readonly agentStderr?: AgentStderr
   /** How this computer's load is read, and how often at most (`MachineLoad.ts`). */
   readonly load?: LoadOptions
+  /** How plan usage is read from each agent, and how often on its own (`PlanUsage.ts`). */
+  readonly usage?: PlanUsageOptions
   /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
   readonly setups?: SetupOptions
   /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't (`leftRunning.ts`, `conflicts.ts`). */
@@ -321,7 +324,7 @@ export class Agents extends Context.Service<
  * sign-ins to code hosts. And a branch it makes from a remote's follows
  * nothing: git would write that to the repository's `.git/config`, which an
  * agent's sandbox refuses, so `git switch -c x origin/x` failed halfway,
- * leaving the worktree where it was (ADR-062).
+ * leaving the worktree where it was (ADR-063).
  */
 export const withoutSignIns = (signedOut: string): Readonly<Record<string, string>> => ({
   GH_CONFIG_DIR: signedOut,

@@ -446,6 +446,8 @@ describe('the API', () => {
                   shares: null,
                   history: [{ cpu: 0.4, work: 0.1 }],
                 }),
+              GetPlanUsage: () => Effect.succeed({ accounts: [] }),
+              GetModelRooms: () => Effect.succeed([]),
               InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),

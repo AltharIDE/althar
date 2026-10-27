@@ -19,7 +19,7 @@ import { connect } from './conflictsSupport'
 import { callTool, fakeConnectors, HOST, repository, runtime, until } from './support'
 
 /*
- * Running a branch or a pull request (ADR-062) where the remote is on a
+ * Running a branch or a pull request (ADR-063) where the remote is on a
  * connected code host: Althar lists what the host has and fetches with the
  * connection's own sign-in, a header git sends, which the remote here
  * refuses to answer without, as a private repository's does. The origin the

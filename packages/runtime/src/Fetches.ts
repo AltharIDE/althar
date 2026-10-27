@@ -9,7 +9,7 @@ import { Instance } from './Instance'
 import { type Tool, ToolRefused, ToolServer } from './ToolServer'
 
 /*
- * Fetching from the code host, which only Althar reaches (ADR-011, ADR-062):
+ * Fetching from the code host, which only Althar reaches (ADR-011, ADR-063):
  * a branch, a tag or a pull request, into the person's repository, with
  * Althar's sign-in. Through the connection to the repository's host where
  * there is one, its header going to git through the environment, else

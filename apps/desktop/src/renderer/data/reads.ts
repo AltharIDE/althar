@@ -1,4 +1,4 @@
-import { QueryClient, queryOptions } from '@tanstack/react-query'
+import { type EnsureQueryDataOptions, QueryClient, queryOptions } from '@tanstack/react-query'
 
 import type { CoordinatorSnapshot, ThreadSnapshot } from '@althar/contracts'
 
@@ -35,6 +35,10 @@ export const keys = {
   /** Where issues can be filed on a tracker connected: its teams. */
   containers: (connectionId: string) => ['containers', connectionId] as const,
   settings: ['settings'] as const,
+  /** Every account's plan usage: kept whole as the runtime sends it. */
+  planUsage: ['planUsage'] as const,
+  /** Each model's room where work on it would start, in a project or (null) anywhere: read again as plan usage changes. */
+  modelRooms: (projectId: string | null) => ['modelRooms', projectId] as const,
   /** A project's automations, for its Automations tab and the dot on it. */
   automations: (projectId: string) => ['automations', projectId] as const,
   /** One automation, for its own page. */
@@ -132,6 +136,15 @@ export const reads = (client: Client) => ({
   containers: (connectionId: string) =>
     queryOptions({ queryKey: keys.containers(connectionId), queryFn: () => client.listContainers(connectionId), staleTime: 60_000 }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  // The runtime sends it whole on the feed whenever it changes, so it is read once a window, and again only by asking.
+  planUsage: () => queryOptions({ queryKey: keys.planUsage, queryFn: () => client.getPlanUsage() }),
+  // Shared by every picker in the window, and read again as the feed says plan usage changed.
+  modelRooms: (projectId: string | null) =>
+    queryOptions({
+      queryKey: keys.modelRooms(projectId),
+      queryFn: () => client.getModelRooms(projectId),
+      staleTime: 30_000,
+    }),
   automations: (projectId: string) =>
     queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
   automation: (automationId: string) =>
@@ -172,3 +185,35 @@ export const recheckStatus = (client: Client, cache: QueryClient) =>
 
 /** Waits for what a screen shows to be read before it shows; a read that fails lets it open anyway, to say so. */
 export const readFirst = (...reading: ReadonlyArray<Promise<unknown>>): Promise<void> => Promise.allSettled(reading).then(() => undefined)
+
+/**
+ * What the window holds of a read, at once, or, never read, the read itself:
+ * what a route waits on before its screen shows. What the window holds and
+ * the feed has said is out of date is read again behind it, and the screen
+ * takes the new one as it lands, so a place the person has been never waits
+ * on the runtime, however busy it is.
+ */
+export const held = (cache: QueryClient, options: Read): Promise<unknown> => cache.ensureQueryData({ ...options, revalidateIfStale: true })
+
+/** A read, whatever it reads, as a place's are listed. */
+export type Read = EnsureQueryDataOptions<any, any, any, any>
+
+/** Every read a project's screen shows: its route waits on those never read, and its tab keeps them all. */
+export const projectReads = (read: Reads, projectId: string): ReadonlyArray<Read> => [
+  read.projects(),
+  read.coordinator(projectId),
+  read.board(projectId),
+  read.rules(projectId),
+  read.repositories(projectId),
+  read.status(),
+  read.connections(),
+  read.automations(projectId),
+]
+
+/** Every read a task's screen shows first: its thread and the agents. */
+export const threadReads = (read: Reads, threadId: string): ReadonlyArray<Read> => [read.thread(threadId), read.status()]
+
+/** Reads what a place shows that the window doesn't hold, or holds out of date, without waiting: as a tab is pointed at, or the window starts. */
+export const readAhead = (cache: QueryClient, reading: ReadonlyArray<Read>) => {
+  for (const options of reading) void cache.prefetchQuery(options)
+}

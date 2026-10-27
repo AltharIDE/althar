@@ -63,6 +63,91 @@ export const AccountStatus = Schema.Struct({
 })
 export type AccountStatus = typeof AccountStatus.Type
 
+/** A plan's window by its length: five hours, a week, a month; anything else, with the agent's name for it. */
+export const UsageWindowKind = Schema.Literals(['five_hour', 'weekly', 'monthly', 'other'])
+export type UsageWindowKind = typeof UsageWindowKind.Type
+
+/** How much of one window of a plan is used, and when it resets. */
+export const UsageWindow = Schema.Struct({
+  kind: UsageWindowKind,
+  /** The agent's name for it where it gave one: a model's window, or extra usage. */
+  label: Schema.NullOr(Schema.String),
+  /** 0 to 100. */
+  usedPercent: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.String),
+})
+export type UsageWindow = typeof UsageWindow.Type
+
+/**
+ * Why an account's usage is missing or old, a fault to fix (docs/plans/plan-usage.md):
+ * it is signed out, its sign-in has expired (the agent renews it when it next
+ * runs), the provider answered in another shape or can't be reached, the
+ * source isn't allowed, the agent has not been read yet, or its sign-ins
+ * can't be told plan from key. An agent that reports no usage anyone can
+ * read is not a fault: it says so in `noReading`.
+ */
+export const UsageFaultKind = Schema.Literals([
+  'sign_in_again',
+  'expired',
+  'source_changed',
+  'unreachable',
+  'no_source',
+  'no_data_yet',
+  'cannot_classify',
+])
+export type UsageFaultKind = typeof UsageFaultKind.Type
+
+/** One account's plan usage: its windows as last read, from where, and how old; or the fault. */
+export const AccountUsage = Schema.Struct({
+  agentId: Schema.String,
+  agentName: Schema.String,
+  accountId: Schema.String,
+  accountName: Schema.String,
+  paidBy: Schema.Literals(['plan', 'key', 'unknown']),
+  /** Where the windows came from: ACP, an adapter's extension, the agent's own channel, or the provider's endpoint; null before any. */
+  source: Schema.NullOr(Schema.Literals(['acp', 'acp_extension', 'agent', 'endpoint'])),
+  /** When Althar last saw these numbers; null before any. */
+  observedAt: Schema.NullOr(Schema.String),
+  /** The plan as the agent names it: plus, pro, max. */
+  plan: Schema.NullOr(Schema.String),
+  windows: Schema.Array(UsageWindow),
+  /** Why the numbers are missing or old, where they are; the windows shown are the last ones then. */
+  fault: Schema.NullOr(Schema.Struct({ kind: UsageFaultKind, message: Schema.String })),
+  /** Why Althar reads no usage for it, where the agent reports none anyone can read: shown calmly, not as a fault. */
+  noReading: Schema.NullOr(Schema.String),
+})
+export type AccountUsage = typeof AccountUsage.Type
+
+/** Every account's plan usage. */
+export const PlanUsage = Schema.Struct({ accounts: Schema.Array(AccountUsage) })
+export type PlanUsage = typeof PlanUsage.Type
+
+/**
+ * How much room a model has where work on it would start: on the account
+ * the runtime picks for it (the most room first, as the project moves work
+ * through an agent's accounts), that account's tightest window as last read,
+ * a model's own window (Opus's week) counted. Only a model on a plan whose
+ * usage is read has one.
+ */
+export const ModelRoom = Schema.Struct({
+  agentId: Schema.String,
+  /** The model's id at the agent. */
+  model: Schema.String,
+  accountId: Schema.String,
+  accountName: Schema.String,
+  /** The agent has more than one account here, so the account is worth naming. */
+  several: Schema.Boolean,
+  /** 0 to 100. */
+  leftPercent: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.String),
+  kind: UsageWindowKind,
+  label: Schema.NullOr(Schema.String),
+})
+export type ModelRoom = typeof ModelRoom.Type
+
+/** The percent of a plan left at which a warning is told. */
+export const USAGE_WARN_AT = [50, 25, 10, 5] as const
+
 export const AgentStatus = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -1364,6 +1449,8 @@ export const HeldForLimit = Schema.Struct({
   accountId: Schema.optional(Schema.NullOr(Schema.String)),
   why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
   choices: Schema.optional(Schema.Array(LimitChoice)),
+  /** Held before it ran out, as a new step on an agent nearly out: the share of its tightest limit left, 0 to 100. */
+  left: Schema.optional(Schema.Number),
 })
 export type HeldForLimit = typeof HeldForLimit.Type
 
@@ -1501,7 +1588,7 @@ export const RunItem = Schema.Struct({
     runnableId: Schema.optional(Schema.NullOr(Schema.String)),
     /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
     where: Schema.String,
-    /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-062); absent or null for the default branch or a task's. */
+    /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-063); absent or null for the default branch or a task's. */
     branch: Schema.optional(Schema.NullOr(Schema.String)),
     ref: Schema.optional(Schema.NullOr(Schema.Struct({ kind: Schema.Literals(['branch', 'pull_request']), which: Schema.String }))),
     command: Schema.String,
@@ -1801,7 +1888,7 @@ export type ContextUse = typeof ContextUse.Type
  * The project as Althar runs it itself, with no agent (docs/decisions/022):
  * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
  * the default branch, or of a branch or pull request Althar fetched for it
- * (ADR-062). It runs until the person stops it, or Althar quits.
+ * (ADR-063). It runs until the person stops it, or Althar quits.
  */
 export const Launch = Schema.Struct({
   ...BackgroundCommand.fields,
@@ -1838,7 +1925,7 @@ export const Runnable = Schema.Struct({
 })
 export type Runnable = typeof Runnable.Type
 
-/** An open pull request the Run menu offers to run (ADR-062). */
+/** An open pull request the Run menu offers to run (ADR-063). */
 export const OfferedPullRequest = Schema.Struct({
   number: Schema.Number,
   /** As its host writes it: PR #12, MR !12. */
@@ -1921,6 +2008,8 @@ export const LimitCall = Schema.Struct({
   accountId: Schema.NullOr(Schema.String),
   resetsAt: Schema.NullOr(Schema.String),
   choices: Schema.Array(LimitChoice),
+  /** Asked before it ran out, as a new step on an agent nearly out: the share of its tightest limit left, 0 to 100. */
+  left: Schema.optional(Schema.Number),
 })
 export type LimitCall = typeof LimitCall.Type
 
@@ -2417,6 +2506,8 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
   /** What Althar runs of a project itself, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
+  /** Every account's plan usage, whole each time it changes. */
+  Schema.Struct({ _tag: Schema.Literal('PlanUsage'), usage: PlanUsage }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -3234,6 +3325,10 @@ export const Api = RpcGroup.make(
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
   /** How hard this computer works now, and Althar's work's part, for the window's bar while it shows it. */
   call('GetLoad', {}, Load),
+  /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
+  call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
+  /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
+  call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */
@@ -3304,7 +3399,7 @@ export const Api = RpcGroup.make(
    * Runs one of the project's runnables with no agent, its default without
    * one: what the task built, in its worktree, or, with no task, a copy of the
    * default branch, or of the branch or pull request named, which Althar
-   * fetches first (ADR-062). One already running there is the one returned.
+   * fetches first (ADR-063). One already running there is the one returned.
    */
   command(
     'RunProject',
