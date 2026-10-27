@@ -1,3 +1,4 @@
+import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import type { ShownLaunch } from './Launches'
@@ -28,6 +29,8 @@ export type LiveEvent =
   | { readonly _tag: 'Background'; readonly threadId: string; readonly background: ReadonlyArray<ShownLeftRunning> }
   /** What Althar runs of a project itself, whole each time it changes (Launches.ts). */
   | { readonly _tag: 'Launches'; readonly projectId: string; readonly launches: ReadonlyArray<ShownLaunch> }
+  /** Every account's plan usage and the warnings not yet seen, whole each time either changes (PlanUsage.ts). */
+  | { readonly _tag: 'PlanUsage'; readonly usage: PlanUsageView }
   | {
       readonly _tag: 'SessionStarted'
       readonly threadId: string

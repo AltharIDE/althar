@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
+import type { EndpointRead } from '@althar/provider-adapters'
 import { backupsIn, connection, Connectivity, databaseIn, Failures, Folders, Nudges, Secrets, services, UsageData } from '@althar/runtime'
 import { Cause, Context, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
@@ -37,6 +38,22 @@ type Port = Parameters<typeof emitterPort>[0]
 interface ParentMessage {
   readonly data: unknown
   readonly ports: ReadonlyArray<Port>
+}
+
+/** What a fake usage endpoint answers: nothing, or one five-hour window at the share used a test names. */
+const fakePlan = (used: string | undefined): EndpointRead => {
+  const usedPercent = Number(used)
+  if (used === undefined || used === '' || !Number.isFinite(usedPercent)) return { kind: 'none' }
+  const now = Date.now()
+  return {
+    kind: 'usage',
+    stale: false,
+    usage: {
+      source: 'endpoint',
+      observedAt: new Date(now).toISOString(),
+      windows: [{ kind: 'five_hour', minutes: 300, usedPercent, resetsAt: new Date(now + 2 * 3_600_000).toISOString() }],
+    },
+  }
 }
 
 const parent = (
@@ -205,6 +222,9 @@ const program = Effect.gen(function* () {
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
+          // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
+          // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
+          usage: { readEndpoint: () => Promise.resolve(fakePlan(process.env.ALTHAR_FAKE_PLAN)) },
         }
       : undefined
   const context = yield* Layer.build(
@@ -314,6 +334,7 @@ parent.on('message', (message) => {
     readonly value?: string
     readonly error?: string
     readonly keyring?: boolean
+    readonly unreadable?: boolean
     readonly threadId?: string
     readonly shot?: unknown
     readonly online?: boolean

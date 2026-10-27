@@ -1956,12 +1956,14 @@ export class Queries extends Context.Service<
         const account = field(output, 'account')
         const why = field(output, 'why')
         const choices = field(output, 'choices')
+        const left = field(output, 'left')
         return {
           agentId,
           until,
           ...(typeof account === 'string' ? { accountId: account } : {}),
           ...(why === 'waits' || why === 'nothing_free' || why === 'asked' ? { why } : {}),
           ...(Array.isArray(choices) ? { choices: choices.flatMap(choiceOf) } : {}),
+          ...(typeof left === 'number' ? { left } : {}),
         }
       }
 

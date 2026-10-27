@@ -196,6 +196,8 @@ export interface ComposerProps {
   suggestion?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
+  /** A line on the same edge, just under what is in `above` and nearest the field: who takes over when you send, what is missing. It wraps with the composer and never covers `above`. Put links in it; they stay clickable. */
+  notice?: ReactNode
   /** Dictation carried from another thread (a DictationPill): centred over the composer, above all that floats on its edge, so it covers none of it. */
   carried?: ReactNode
   /** What is joined to the composer's top edge, in the flow: a DictationTray. The field stays usable under it. */
@@ -247,6 +249,7 @@ export function Composer({
   hint,
   suggestion,
   above,
+  notice,
   carried,
   tray,
   images = [],
@@ -270,6 +273,23 @@ export function Composer({
   /* While words arrive or are written down, the field is the dictation's: typing would land where they are about to. */
   const dictating = elapsed !== null || dictation?.busy === true
   const overlay = useRef<HTMLDivElement>(null)
+  const edge = useRef<HTMLDivElement>(null)
+  const edgeShown = Boolean(above || notice || carried)
+  /* What floats takes no room, so it says how tall it is, on the nearest [data-floats-host] (a thread's face), which keeps the end of the thread clear of it. */
+  useLayoutEffect(() => {
+    const el = edge.current
+    const host = el?.closest<HTMLElement>('[data-floats-host]')
+    if (!el || !host) return
+    const tell = () => host.style.setProperty('--composer-floats', `${el.offsetHeight}px`)
+    tell()
+    if (typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(tell)
+    watch.observe(el)
+    return () => {
+      watch.disconnect()
+      host.style.removeProperty('--composer-floats')
+    }
+  }, [edgeShown])
   /* Whether the arriving words are followed to the end: until the person scrolls up to read, then again once they are back at the end. */
   const following = useRef(true)
   const arriving = useRef<HTMLSpanElement>(null)
@@ -366,10 +386,11 @@ export function Composer({
   /* One shape whether or not a tray shows, so the field is never rebuilt under the cursor as one comes and goes. What floats sits above the tray, not over it. */
   return (
     <div className={s.stack} data-tray-host="" {...drop.handlers}>
-      {(above || carried) && (
-        <div className={s.floats}>
+      {edgeShown && (
+        <div ref={edge} className={s.floats}>
           {carried && <div className={s.carried}>{carried}</div>}
           {above && <div className={s.above}>{above}</div>}
+          {notice && <div className={s.notice}>{notice}</div>}
         </div>
       )}
       {tray != null && <div className={s.tray}>{tray}</div>}
