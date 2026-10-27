@@ -26,7 +26,7 @@ export type BranchChoice =
   | {
       readonly kind: 'pull'
       readonly number: number
-      /** As its host writes it: #12, !12. */
+      /** As its host writes it: PR #12, MR !12. */
       readonly name: string
       readonly title: string
       readonly branch?: string
@@ -133,7 +133,11 @@ export function RunBranch({
   const ids = useId()
   const [opener] = useState(() => (typeof document === 'undefined' ? null : document.activeElement))
   const typed = words.trim() !== ''
-  const rows = choices === null ? [] : found(choices, words, t)
+  const matched = choices === null ? [] : found(choices, words, t)
+  const pulls = matched.filter((choice) => choice.kind === 'pull')
+  const branches = matched.filter((choice) => choice.kind === 'branch')
+  // Numbered as they show: pull requests, then branches.
+  const rows = [...pulls, ...branches]
   const at = Math.min(active, Math.max(rows.length - 1, 0))
   const optionId = (index: number) => `${ids}-${index}`
   const busy = starting !== null
@@ -210,9 +214,6 @@ export function RunBranch({
       </div>
     )
   }
-
-  const pulls = rows.filter((choice) => choice.kind === 'pull')
-  const branches = rows.filter((choice) => choice.kind === 'branch')
 
   return (
     <Dialog.Root

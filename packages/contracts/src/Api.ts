@@ -1499,8 +1499,11 @@ export const RunItem = Schema.Struct({
     taskId: Schema.NullOr(Schema.String),
     /** Which of the project's runnables it runs (ADR-044), for running it again; absent on a card from before there were several. */
     runnableId: Schema.optional(Schema.NullOr(Schema.String)),
-    /** Where it runs, in words: the task's title, or the default branch. */
+    /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
     where: Schema.String,
+    /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-062); absent or null for the default branch or a task's. */
+    branch: Schema.optional(Schema.NullOr(Schema.String)),
+    ref: Schema.optional(Schema.NullOr(Schema.Struct({ kind: Schema.Literals(['branch', 'pull_request']), which: Schema.String }))),
     command: Schema.String,
     url: Schema.NullOr(Schema.String),
     startedAt: Schema.String,

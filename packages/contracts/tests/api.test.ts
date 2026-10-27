@@ -583,6 +583,7 @@ describe('the API', () => {
               DropRunnable: () => Effect.void,
               OrderRunnables: () => Effect.void,
               GetRepositoryScripts: () => Effect.succeed([]),
+              GetRunnableRefs: () => Effect.succeed([]),
               StopLaunch: () => Effect.void,
               ClearLaunch: () => Effect.void,
               Watch: ({ since }) =>

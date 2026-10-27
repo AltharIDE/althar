@@ -64,6 +64,7 @@ import {
   type TrackerContainer,
   type WatchEvent,
   type Launch,
+  type OfferedRefs,
   type RepositoryScript,
 } from '@althar/contracts'
 import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
@@ -440,8 +441,14 @@ export interface Client {
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (threadId: string, id: string) => Promise<void>
-  /** Runs one of the project's runnables with no agent, its default without one: what the task built, or with none, a copy of the default branch. */
-  readonly runProject: (projectId: string, taskId: string | null, threadId: string | null, runnableId?: string) => Promise<Launch>
+  /** Runs one of the project's runnables with no agent, its default without one: what the task built, or with none, a copy of the default branch, or of the branch or pull request named, which Althar fetches first. */
+  readonly runProject: (
+    projectId: string,
+    taskId: string | null,
+    threadId: string | null,
+    runnableId?: string,
+    ref?: RunRef,
+  ) => Promise<Launch>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Keeps something for the project to run: a new one, or, by id, a change to one; a null command is its repository's own way. */
@@ -458,6 +465,8 @@ export interface Client {
   readonly orderRunnables: (projectId: string, ids: ReadonlyArray<string>) => Promise<void>
   /** The scripts in the project's package.json files, to pick something to run from. */
   readonly getRepositoryScripts: (projectId: string) => Promise<ReadonlyArray<RepositoryScript>>
+  /** What the project's repositories offer to run besides their default branch, asked of their remotes now. */
+  readonly getRunnableRefs: (projectId: string) => Promise<ReadonlyArray<OfferedRefs>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
@@ -495,6 +504,11 @@ export type StuckAnswer =
   | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string; readonly model?: string }
   | { readonly kind: 'wait' }
   | { readonly kind: 'abandon' }
+
+/** A branch or a pull request to run, in a copy of its own (ADR-062); in a project of several repositories, which one's. */
+export type RunRef =
+  | { readonly branch: string; readonly repository?: string }
+  | { readonly pullRequest: string; readonly repository?: string }
 
 /** What went wrong with a call, in words a view can show. */
 export const messageOf = (error: unknown): string =>
@@ -724,14 +738,15 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     closePullRequest: (input) => command((commandId) => api.ClosePullRequest({ commandId, ...input })),
     stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
     clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),
-    runProject: (projectId, taskId, threadId, runnableId) =>
+    runProject: (projectId, taskId, threadId, runnableId, ref) =>
       command((commandId) =>
-        api.RunProject({ commandId, projectId, taskId, threadId, ...(runnableId === undefined ? {} : { runnableId }) }),
+        api.RunProject({ commandId, projectId, taskId, threadId, ...(runnableId === undefined ? {} : { runnableId }), ...ref }),
       ),
     keepRunnable: (input) => command((commandId) => api.KeepRunnable({ commandId, ...input })),
     dropRunnable: (projectId, id) => command((commandId) => api.DropRunnable({ commandId, projectId, id })),
     orderRunnables: (projectId, ids) => command((commandId) => api.OrderRunnables({ commandId, projectId, ids })),
     getRepositoryScripts: (projectId) => settle(api.GetRepositoryScripts({ projectId })),
+    getRunnableRefs: (projectId) => settle(api.GetRunnableRefs({ projectId })),
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),

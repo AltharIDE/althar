@@ -76,6 +76,9 @@ export interface ShownRunnable {
   readonly from: 'repository' | 'person' | 'coordinator' | 'agent'
 }
 
+/** A branch or a pull request a run was asked for, as its card keeps it to run it again. */
+type Ref = { readonly kind: 'branch' | 'pull_request'; readonly which: string }
+
 interface Launch {
   readonly id: string
   readonly projectId: string
@@ -86,6 +89,8 @@ interface Launch {
   /** The branch or pull request it runs, at a glance, and the commit Althar fetched of it; null for the default branch or a task's. */
   readonly branch: string | null
   readonly commit: string | null
+  /** What was asked for, to run it again: the branch, or the pull request by its number. */
+  readonly ref: Ref | null
   readonly bindingId: string
   readonly command: string
   readonly startedAt: string
@@ -387,6 +392,7 @@ export class Launches extends Context.Service<
         launchId: launch.id,
         taskId: launch.taskId,
         branch: launch.branch,
+        ref: launch.ref,
         runnableId: launch.runnableId,
         where: launch.where,
         command: launch.command,
@@ -587,7 +593,7 @@ export class Launches extends Context.Service<
         readonly run: RunCommand
         readonly folder: string
         readonly where: string
-        readonly branch: { readonly label: string; readonly commit: string } | null
+        readonly branch: { readonly label: string; readonly commit: string; readonly ref: Ref } | null
         /** The run's own copy, removed as it ends or is stopped. */
         readonly copy: string | null
       }) =>
@@ -643,6 +649,7 @@ export class Launches extends Context.Service<
               where: input.where,
               branch: input.branch?.label ?? null,
               commit: input.branch?.commit ?? null,
+              ref: input.branch?.ref ?? null,
               bindingId: binding.id,
               command: run.command,
               startedAt: yield* timestamp,
@@ -772,7 +779,15 @@ export class Launches extends Context.Service<
                     run,
                     folder: within(binding, copy),
                     where: fetched.label,
-                    branch: { label: fetched.label, commit: fetched.commit },
+                    branch: {
+                      label: fetched.label,
+                      commit: fetched.commit,
+                      // Run again, it fetches afresh what was asked for: the branch, or the pull request, whatever its branch is by then.
+                      ref:
+                        fetched.pullRequest === null
+                          ? { kind: 'branch', which: fetched.branch ?? fetched.label }
+                          : { kind: 'pull_request', which: String(fetched.pullRequest.number) },
+                    },
                     copy,
                   })
                 }).pipe(Effect.onError(() => removeCopy(copy)))
