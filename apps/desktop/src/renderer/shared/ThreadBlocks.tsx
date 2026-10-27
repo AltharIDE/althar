@@ -36,6 +36,7 @@ import { issuePriority, issueStatus, productBrand, productName } from './product
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
 import type {
   ArrivalContent,
+  AutomationCardContent,
   Block,
   IssueChangesContent,
   IssueDraftContent,
@@ -175,6 +176,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
       verb={part.verb}
       target={part.target}
       state={part.state}
+      {...(part.why === undefined ? {} : { why: part.why })}
       {...(part.command === null ? {} : { copy: part.command })}
       {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}
       open={open}
@@ -396,6 +398,7 @@ export function ThreadBlocks({
   changes,
   push,
   review,
+  automation,
   queued,
   onTryAgain,
   onPassOn,
@@ -432,6 +435,8 @@ export function ThreadBlocks({
   push?: (request: PushRequestContent, at: string) => ReactNode
   /** Draws a review the lead drafted of someone else's pull request, in a review task's thread. */
   review?: (review: ReviewDraftContent) => ReactNode
+  /** Draws an automation's card in the coordinator's thread, by its item, which turning it on, undoing and answering it name. */
+  automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
   /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
@@ -502,6 +507,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
       case 'review':
         return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
+      case 'automation':
+        return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'waiting':
         return (
           <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>

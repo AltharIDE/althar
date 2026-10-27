@@ -17,6 +17,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   Agents,
   type AgentEntry,
+  type AutomationOptions,
   type BusyOptions,
   Connectors,
   type IdleOptions,
@@ -91,6 +92,8 @@ export const definition = (
   perUse: ReadonlyArray<string> = [],
   /** Agents whose sign-in every folder shares, which have their one account. */
   oneAccount: ReadonlyArray<string> = [],
+  /** Agents whose status can't tell a plan from a key, as Mistral Vibe's can't. */
+  unsure: ReadonlyArray<string> = [],
 ): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
@@ -105,8 +108,8 @@ export const definition = (
   signIn: {
     status: () => ({ command: 'sh', args: ['-c', 'printf %s "$FAKE_HOME"'] }),
     read: (output) => !signedOut.includes(id) && !signedOut.includes(output.trim()),
-    // On a plan, unless the test says it is paid per use.
-    paidBy: (output) => (perUse.includes(id) || perUse.includes(output.trim()) ? 'key' : 'plan'),
+    // On a plan, unless the test says it is paid per use, or that its status can't tell.
+    paidBy: (output) => (unsure.includes(id) ? undefined : perUse.includes(id) || perUse.includes(output.trim()) ? 'key' : 'plan'),
     login: `fake-login ${id}`,
     // Says which home it signed out of, in the file the test names.
     logout: {
@@ -154,9 +157,10 @@ export const fakeAgents = (
   each: Readonly<Record<string, FakeAgentOptions>> = {},
   perUse: ReadonlyArray<string> = [],
   oneAccount: ReadonlyArray<string> = [],
+  unsure: ReadonlyArray<string> = [],
 ) => {
   const entry = (agentId: string): AgentEntry => ({
-    definition: definition(agentId, signedOut, perUse, oneAccount),
+    definition: definition(agentId, signedOut, perUse, oneAccount, unsure),
     transport: (cwd, env = {}, session) => {
       launches.push({ agentId, cwd, env, options: session })
       return agentId === 'process'
@@ -247,8 +251,10 @@ export const runtime = (
     /** How long a change's checks may run before it is the person's; 45 minutes unless a test says. */
     readonly checksStuck?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
-    /** Agents signed in on a key, paid per use, rather than a plan. */
+    /** Agents signed in on a key, paid per use, rather than a plan: by id, or by an account's home. */
     readonly perUse?: ReadonlyArray<string>
+    /** Agents whose status can't tell a plan from a key. */
+    readonly unsure?: ReadonlyArray<string>
     /** Agents whose sign-in every folder shares, which have their one account. */
     readonly oneAccount?: ReadonlyArray<string>
     readonly stalls?: StallOptions
@@ -276,6 +282,8 @@ export const runtime = (
     readonly keychain?: Map<string, string>
     /** How a screenshot is taken, where a test takes one; without, none can be. */
     readonly screenshot?: RuntimeOptions['screenshot']
+    /** The clock and zone automations are read by, and how often they are looked at. */
+    readonly automations?: AutomationOptions
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
     /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
@@ -291,7 +299,7 @@ export const runtime = (
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',
     deviceName: 'Test Mac',
-    agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount),
+    agents: more.agents ?? fakeAgents(options, more.signedOut, more.each, more.perUse, more.oneAccount, more.unsure),
     countdown: more.countdown ?? Duration.millis(300),
     secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
@@ -311,6 +319,7 @@ export const runtime = (
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     busy: { machine: ROOMY, ...more.busy },
+    ...(more.automations === undefined ? {} : { automations: more.automations }),
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },

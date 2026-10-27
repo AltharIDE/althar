@@ -317,6 +317,7 @@ export const searchOf = (path: ReadonlyArray<string>, query: ChangeQuery): strin
     author === undefined || author === '' ? '' : `author:${author.endsWith('[bot]') ? `app/${author.slice(0, -'[bot]'.length)}` : author}`,
     query.reviewRequested === true ? 'review-requested:@me' : '',
     query.draft === undefined ? '' : `draft:${query.draft}`,
+    query.updatedUntil === undefined ? '' : `updated:<=${query.updatedUntil.replace(/\.\d+Z$/, 'Z')}`,
     ...words.map((word) => `"${word}"`),
     words.length === 0 ? '' : 'in:title',
     'sort:updated-desc',

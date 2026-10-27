@@ -1,4 +1,6 @@
 export * from './Api'
+export * from './automations'
+export * from './schedules'
 export * from './inks'
 export * from './models'
 export * from './transport'

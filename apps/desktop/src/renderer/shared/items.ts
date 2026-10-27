@@ -78,8 +78,8 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
  * An item that can't change any more: a tool call that completed or failed,
  * a message delivered (or never queued), a plan with every entry done, a
  * task settled, a question answered or withdrawn, a run or a setup ended, an issue
- * draft filed or discarded, changes to issues applied or discarded, a review draft posted or discarded, a push the lead asked for pushed, asked again
- * or closed. What an agent
+ * draft filed or discarded, changes to issues applied or discarded, a review draft posted or discarded, a push the lead
+ * asked for pushed, asked again or closed, an automation deleted or its ask answered. What an agent
  * said, a notice, a step's result and what arrived from outside are settled
  * once written.
  */
@@ -106,6 +106,8 @@ export const settled = (item: ThreadItem): boolean => {
       return item.content.state === 'posted' || item.content.state === 'discarded'
     case 'push_request':
       return item.content.state !== 'open'
+    case 'automation':
+      return item.content.state === 'deleted' || item.content.ask?.done === true
     case 'agent_message':
     case 'agent_thought':
     case 'notice':

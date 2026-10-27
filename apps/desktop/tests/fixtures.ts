@@ -2,6 +2,12 @@ import type {
   AccountSignInState,
   AgentModels,
   AgentStatus,
+  AutomationCard,
+  AutomationDefinition,
+  AutomationRun,
+  AutomationsSnapshot,
+  AutomationSummary,
+  AutomationView,
   ChangeSummary,
   ConnectGuide,
   ConnectionCheck,
@@ -626,7 +632,84 @@ export const items = {
       ...content,
     },
   }),
+  /** An automation's card in the coordinator's thread: proposed, as the coordinator made it, by default. */
+  automation: (content: Partial<AutomationCard> = {}, id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId: null,
+    kind: 'automation',
+    content: {
+      automationId: 'auto1',
+      definition: definition(),
+      was: null,
+      ask: null,
+      state: 'proposed',
+      nextAt: null,
+      ...content,
+    },
+  }),
 }
+
+/** What an automation is: the morning review, of each new pull request, every weekday at 9:00, led by Claude Code. */
+export const definition = (overrides: Partial<AutomationDefinition> = {}): AutomationDefinition => ({
+  name: 'Morning review',
+  prompt: 'Review the pull requests opened since yesterday by anyone but me.',
+  schedule: { every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' },
+  zone: 'Europe/London',
+  lead: { agentId: 'claude-code', model: null, effort: null },
+  work: { kind: 'review' },
+  allowEverything: true,
+  minutes: 45,
+  late: 'once',
+  ...overrides,
+})
+
+/** One of its runs: one that made a review, today at 9:00, by default. */
+export const automationRun = (overrides: Partial<AutomationRun> = {}): AutomationRun => ({
+  id: 'occ1',
+  cause: 'schedule',
+  state: 'made',
+  dueAt: '2026-09-29T09:00:00.000Z',
+  at: '2026-09-29T09:02:00.000Z',
+  subject: 'Review #264',
+  reason: null,
+  task: { id: 't9', threadId: 'th9', title: 'Review #264' },
+  ...overrides,
+})
+
+/** The morning review as the Automations tab lists it: on, next tomorrow at 9:00. */
+export const automationSummary = (overrides: Partial<AutomationSummary> = {}): AutomationSummary => ({
+  id: 'auto1',
+  projectId: 'p1',
+  name: 'Morning review',
+  prompt: 'Review the pull requests opened since yesterday by anyone but me.',
+  schedule: { every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' },
+  work: 'review',
+  state: 'on',
+  pausedBy: null,
+  pauseReason: null,
+  nextAt: '2026-09-30T09:00:00.000Z',
+  latest: [automationRun()],
+  ...overrides,
+})
+
+/** A project's automations, for its tab: the morning review alone, by default. */
+export const automationsSnapshot = (overrides: Partial<AutomationsSnapshot> = {}): AutomationsSnapshot => ({
+  cursor: 6,
+  automations: [automationSummary()],
+  allPaused: false,
+  ...overrides,
+})
+
+/** The morning review as its page shows it. */
+export const automationView = (overrides: Partial<AutomationView> = {}): AutomationView => ({
+  ...automationSummary(),
+  definition: definition(),
+  postsReviews: false,
+  runs: [automationRun()],
+  allPaused: false,
+  ...overrides,
+})
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 
@@ -937,10 +1020,22 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
       postTeamReviews: false,
+      automationsPaused: false,
       folderWait: 'smart' as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),
+    getAutomation: vi.fn(async () => ({ cursor: 6, automation: automationView() })),
+    makeAutomation: vi.fn(async () => 'auto2'),
+    changeAutomation: vi.fn(async () => {}),
+    turnOnAutomation: vi.fn(async () => {}),
+    pauseAutomation: vi.fn(async () => {}),
+    runAutomationNow: vi.fn(async () => {}),
+    deleteAutomation: vi.fn(async () => {}),
+    undoAutomationChange: vi.fn(async () => {}),
+    setAutomationPostsReviews: vi.fn(async () => {}),
+    setAutomationsPaused: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
     setFolderWait: vi.fn(async () => {}),
     getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),

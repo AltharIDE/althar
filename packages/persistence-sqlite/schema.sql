@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable, machine_busy
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -56,6 +56,10 @@
 -- review_draft_state: pending, posting, posted, failed, uncertain, discarded
 -- review_verdict: approve, changes, comment
 -- issue_change_state: pending, applying, applied, failed, discarded
+-- automation_state: proposed, on, paused, deleted
+-- automation_paused_by: person, itself
+-- automation_occurrence_cause: schedule, now
+-- automation_occurrence_state: starting, running, made, nothing, failed, missed, skipped
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -1198,6 +1202,72 @@ CREATE INDEX issue_changes_by_project ON issue_changes (project_id);
 CREATE INDEX issue_changes_by_thread ON issue_changes (thread_id, state);
 
 CREATE UNIQUE INDEX one_connection_per_account ON connections (device_id, product, web_url, account_id, coalesce(workspace_key, '')) WHERE state <> 'removed';
+
+CREATE TABLE automations (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'auto_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  device_id TEXT NOT NULL REFERENCES devices (id),
+  state TEXT NOT NULL REFERENCES vocab_automation_state (word),
+  paused_by TEXT REFERENCES vocab_automation_paused_by (word),
+  pause_reason TEXT,
+  definition INTEGER NOT NULL CHECK (definition >= 1),
+  posts_reviews INTEGER NOT NULL DEFAULT 0 CHECK (posts_reviews IN (0, 1)),
+  since TEXT CHECK (since GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  made_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  UNIQUE (id, project_id),
+  CHECK ((state = 'paused') = (paused_by IS NOT NULL)),
+  CHECK (state = 'paused' OR pause_reason IS NULL),
+  CHECK (state <> 'on' OR since IS NOT NULL)
+) STRICT;
+
+CREATE INDEX automations_by_project ON automations (project_id);
+
+CREATE TABLE automation_definitions (
+  automation_id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  number INTEGER NOT NULL CHECK (number >= 1),
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  parts TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(parts)),
+  made_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  made_at TEXT NOT NULL CHECK (made_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (automation_id, number),
+  FOREIGN KEY (automation_id, project_id) REFERENCES automations (id, project_id)
+) STRICT;
+
+CREATE TABLE automation_occurrences (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'occ_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  automation_id TEXT NOT NULL,
+  definition INTEGER NOT NULL,
+  cause TEXT NOT NULL REFERENCES vocab_automation_occurrence_cause (word),
+  slot TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  subject_title TEXT,
+  state TEXT NOT NULL REFERENCES vocab_automation_occurrence_state (word),
+  reason TEXT,
+  task_id TEXT,
+  due_at TEXT NOT NULL CHECK (due_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  fired_at TEXT NOT NULL CHECK (fired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  UNIQUE (id, project_id),
+  FOREIGN KEY (automation_id, project_id) REFERENCES automations (id, project_id),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
+  FOREIGN KEY (automation_id, definition) REFERENCES automation_definitions (automation_id, number),
+  UNIQUE (automation_id, slot, subject),
+  CHECK (state <> 'running' OR task_id IS NOT NULL),
+  CHECK ((state IN ('made', 'nothing', 'failed', 'missed', 'skipped')) = (ended_at IS NOT NULL))
+) STRICT;
+
+CREATE INDEX automation_occurrences_by_automation ON automation_occurrences (automation_id, fired_at);
+
+CREATE INDEX automation_occurrences_by_task ON automation_occurrences (task_id) WHERE task_id IS NOT NULL;
+
+CREATE INDEX automation_occurrences_by_project ON automation_occurrences (project_id);
 
 CREATE TABLE plan_usage_readings (
   account_id TEXT NOT NULL REFERENCES agent_accounts (id),

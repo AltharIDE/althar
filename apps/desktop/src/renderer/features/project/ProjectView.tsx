@@ -28,6 +28,7 @@ import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
+import { usualLead } from '../automations/lead'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
@@ -36,6 +37,9 @@ import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { outgoingOf, takesImages, useImages } from '../../shared/useImages'
+import { AutomationInThread } from '../automations/AutomationInThread'
+import { AutomationsView } from '../automations/AutomationsView'
+import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
@@ -59,9 +63,10 @@ import type { ProjectModel } from './useProject'
 /*
  * A project: its front page across the top, then the conversation with its
  * coordinator, the board of its work, or both side by side, the conversation
- * as wide as the person drags it (b steps through them); or its settings in
- * their place, a violet dot on Settings in the bar where a connection waits
- * on the person. The front page says how the project stands (what needs you:
+ * as wide as the person drags it (b steps through them); or its automations,
+ * or its settings, in their place, a violet dot in the bar on Automations
+ * where one paused itself, and on Settings where a connection waits on the
+ * person. The front page says how the project stands (what needs you:
  * pointed at, what it is; clicked, the first of it) and what it is made of.
  * The coordinator answers questions itself and turns changes into tasks:
  * there is no task to start without it. What you open from the board opens
@@ -154,6 +159,8 @@ export function ProjectView({
   settings,
   room: opening = Room.Talk,
   onRoomChange,
+  automation: openingAutomation = null,
+  onAutomationChange,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -165,8 +172,14 @@ export function ProjectView({
   room?: Room
   /** The view it is on, each time it changes, to be opened on again. */
   onRoomChange?: (room: Room) => void
+  /** The automation open as its own page in Automations, `new` for a new one; null for the tab. */
+  automation?: string | null
+  /** The automation open, each time it changes, to be opened on again. */
+  onAutomationChange?: (automation: string | null) => void
 }) {
   const [room, setRoom] = useState<Room>(opening)
+  const [automation, setAutomation] = useState<string | null>(openingAutomation)
+  useEffect(() => onAutomationChange?.(automation), [automation, onAutomationChange])
   // The section its settings show, kept while the person is on another view.
   const [section, setSection] = useState<ProjectSection>(settings.section ?? FIRST_PROJECT_SECTION)
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
@@ -404,6 +417,14 @@ export function ProjectView({
   const kept = settings.model
   const trackers = lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list)
   const settingsNeedYou = connectionsNeedYou(model.repositories, trackers, connections.list)
+  // Its automations: a dot on their view where one paused itself; and what its cards in the conversation do.
+  const automations = useAutomations(projectId)
+  const automationActions = useAutomationActions(projectId)
+  /** An automation, opened as its own page in Automations. */
+  const openAutomation = (id: string) => {
+    setAutomation(id)
+    setRoom(Room.Automations)
+  }
   const front = (
     <Front
       lanes={lanes}
@@ -442,9 +463,19 @@ export function ProjectView({
 
   return (
     <div className={s.window}>
-      <ProjectBar room={room} onRoom={setRoom} settingsNeedYou={settingsNeedYou} />
+      <ProjectBar room={room} onRoom={setRoom} settingsNeedYou={settingsNeedYou} automationsNeedYou={automations.needsYou} />
       {front}
-      {room === Room.Settings ? (
+      {room === Room.Automations ? (
+        <AutomationsView
+          projectId={projectId}
+          project={kept.name ?? name}
+          agents={model.agents}
+          lead={usualLead(coordinator?.items ?? [], model.agents)}
+          open={automation}
+          onOpen={setAutomation}
+          onTask={onTask}
+        />
+      ) : room === Room.Settings ? (
         <div className={s.settings}>
           <ProjectSettingsPage
             projectId={projectId}
@@ -516,6 +547,16 @@ export function ProjectView({
                         {...(busy ? {} : { onTryAgain: () => void model.tryAgain() })}
                         card={(card) => <Card card={card} actions={actions} />}
                         draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
+                        automation={(card, itemId) => (
+                          <AutomationInThread
+                            card={card}
+                            itemId={itemId}
+                            project={kept.name ?? name}
+                            agents={model.agents}
+                            actions={automationActions}
+                            onOpen={openAutomation}
+                          />
+                        )}
                         changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
                         run={(run) => (
                           <RunOf

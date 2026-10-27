@@ -1,4 +1,5 @@
 import { createRoute, useNavigate } from '@tanstack/react-router'
+import { useCallback } from 'react'
 
 import { Room } from '@althar/ui'
 
@@ -15,10 +16,36 @@ import { useProject } from './useProject'
 
 function Project() {
   const { projectId } = projectRoute.useParams()
-  const { room, section } = projectRoute.useSearch()
+  const { room, section, automation } = projectRoute.useSearch()
   const navigate = useNavigate()
+  /** The address, changed in place: what a reload opens on. */
+  const address = useCallback(
+    (change: (was: ProjectSearch) => ProjectSearch) =>
+      void navigate({ to: '/projects/$projectId', params: { projectId }, search: change, replace: true }),
+    [navigate, projectId],
+  )
+  // The automation open in Automations is the address's, so it is open again after a reload; back on the tab, the view last on says.
+  const keepAutomation = useCallback(
+    (open: string | null) => {
+      if (open === (automation ?? null)) return
+      address(({ automation: _automation, room: was, ...rest }) =>
+        open === null
+          ? { ...rest, ...(was === undefined || was === Room.Automations ? {} : { room: was }) }
+          : { ...rest, room: Room.Automations, automation: open },
+      )
+    },
+    [address, automation],
+  )
   // The view it was last on, unless a task's bar, or a way to one of its settings, asked for one.
-  const [last, keepRoom] = useLastRoom(projectId)
+  const [last, keepView] = useLastRoom(projectId)
+  // Left for another view, Automations is no longer what the address opens on.
+  const keepRoom = useCallback(
+    (next: Room) => {
+      keepView(next)
+      if (room === Room.Automations && next !== Room.Automations) address(({ room: _room, ...rest }) => rest)
+    },
+    [keepView, room, address],
+  )
   const opening = room ?? last
   // Removed, the project is gone: back to the home.
   const settings = useProjectSettings(projectId, () => void navigate({ to: '/' }))
@@ -26,6 +53,8 @@ function Project() {
     <ProjectView
       {...(opening === null ? {} : { room: opening })}
       onRoomChange={keepRoom}
+      {...(automation === undefined ? {} : { automation })}
+      onAutomationChange={keepAutomation}
       model={useProject(projectId)}
       board={useBoard(projectId)}
       connections={useConnections()}
@@ -39,10 +68,11 @@ function Project() {
   )
 }
 
-/** What a project opens on, when something asks: a view, and of its settings, a section. */
+/** What a project opens on, when something asks: a view, of its settings a section, and of its automations the one open, or `new`. */
 interface ProjectSearch {
   readonly room?: Room
   readonly section?: ProjectSection
+  readonly automation?: string
 }
 
 /** The view an address names, if it names one. */
@@ -66,6 +96,7 @@ export const projectRoute = createRoute({
       cache.fetchQuery(read.repositories(projectId)),
       cache.fetchQuery(read.status()),
       cache.fetchQuery(read.connections()),
+      cache.fetchQuery(read.automations(projectId)),
     )
   },
   validateSearch: (search: Record<string, unknown>): ProjectSearch => {
@@ -73,6 +104,7 @@ export const projectRoute = createRoute({
     return {
       ...(room === undefined ? {} : { room }),
       ...(isProjectSection(search.section) ? { section: search.section } : {}),
+      ...(typeof search.automation === 'string' && search.automation !== '' ? { automation: search.automation } : {}),
     }
   },
 })

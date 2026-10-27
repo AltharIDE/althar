@@ -5,7 +5,19 @@ import type { ProjectList, ThreadSnapshot } from '@althar/contracts'
 
 import { follow, GATHER } from '../src/renderer/data/feed'
 import { continued, homeSince, keys, makeQueryClient, readFirst, reads, recheckStatus } from '../src/renderer/data/reads'
-import { changed, coordinatorSnapshot, fakeClient, items, planUsage, project, snapshot, status, streamed, usageAccount } from './fixtures'
+import {
+  automationView,
+  changed,
+  coordinatorSnapshot,
+  fakeClient,
+  items,
+  planUsage,
+  project,
+  snapshot,
+  status,
+  streamed,
+  usageAccount,
+} from './fixtures'
 
 /*
  * The window's cache and its one watch: what a change ends, read again
@@ -221,6 +233,45 @@ describe('the window’s watch', () => {
     await settle()
     expect(client.getProjectRules).toHaveBeenCalledTimes(2)
     expect(cache.getQueryState(keys.rules('p1'))?.isInvalidated).toBe(true)
+  })
+
+  it('reads a project’s automations again as one changes or runs, and the page of the one it is, only while they show', async () => {
+    const { client, cache, emit, read } = opened()
+    vi.mocked(client.getAutomation).mockImplementation(async (automationId: string) => ({
+      cursor: 6,
+      automation: automationView({ id: automationId, projectId: automationId === 'auto9' ? 'p2' : 'p1' }),
+    }))
+    await cache.fetchQuery(read.automations('p1'))
+    await cache.fetchQuery(read.automation('auto1'))
+    await cache.fetchQuery(read.automation('auto2'))
+    await cache.fetchQuery(read.automation('auto9'))
+    await cache.fetchQuery(read.coordinator('p1'))
+    const showing = [
+      new QueryObserver(cache, read.automations('p1')),
+      new QueryObserver(cache, read.automation('auto1')),
+      new QueryObserver(cache, read.automation('auto2')),
+      new QueryObserver(cache, read.automation('auto9')),
+    ].map((observer) => observer.subscribe(() => undefined))
+    const pages = () => vi.mocked(client.getAutomation).mock.calls.map(([id]) => id)
+    // One changed: the tab, and its own page.
+    emit(changed('automation', 'auto1', null, 'p1'))
+    await settle()
+    expect(client.getAutomations).toHaveBeenCalledTimes(2)
+    expect(pages()).toEqual(['auto1', 'auto2', 'auto9', 'auto1'])
+    // The coordinator's cards of it say where it stands.
+    expect(cache.getQueryState(keys.coordinator('p1'))?.isInvalidated).toBe(true)
+    // One ran: the tab, and every page of the project's, as a run is said by its occurrence.
+    emit(changed('automation_occurrence', 'occ1', null, 'p1'))
+    await settle()
+    expect(client.getAutomations).toHaveBeenCalledTimes(3)
+    expect(pages().slice(4).toSorted()).toEqual(['auto1', 'auto2'])
+    for (const stop of showing) stop()
+    // Off screen, only marked for the next visit.
+    emit(changed('automation', 'auto1', null, 'p1'))
+    await settle()
+    expect(client.getAutomations).toHaveBeenCalledTimes(3)
+    expect(cache.getQueryState(keys.automations('p1'))?.isInvalidated).toBe(true)
+    expect(cache.getQueryState(keys.automation('auto1'))?.isInvalidated).toBe(true)
   })
 
   it('marks a project’s threads when its rules change, by whose switch its tasks allow everything', async () => {
