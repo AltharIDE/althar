@@ -63,7 +63,6 @@ describe('the thread recorder', () => {
         ['agent_message', 'Looking'],
         ['plan', [{ content: 'Write it', status: 'completed' }]],
         ['notice', 'The agent moved to its plan mode.'],
-        ['notice', 'Resumed after a rejection.'],
         ['notice', 'Context is filling up'],
         ['notice', 'Rate limited'],
       ])

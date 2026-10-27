@@ -8,19 +8,37 @@ import {
   type ThreadSource,
   planStateOf,
   type Streamed,
+  declinedWords,
   targetOf,
   toolKindOf,
   toolStateOf,
   verbFor,
   verbs,
 } from '../src/renderer/shared/thread'
-import { sending } from '../src/renderer/shared/items'
+import { sending, settled } from '../src/renderer/shared/items'
 import { card, items, NOW } from './fixtures'
 
 const at = () => 'just now'
 
 /** A thread's items, with its agent idle, in the fixtures' worktree. */
 const source = (thread: ReadonlyArray<ThreadItem>, turnRunning = false) => ({ items: thread, turnRunning, worktree: '/w/meridian' })
+
+describe('an automation’s card in a thread', () => {
+  it('stands as a block of its own, between turns, by its item', () => {
+    const card = items.automation({}, 'ia1')
+    const blocks = blocksOf(source([items.says('Here it is.'), card, items.says('Turn it on when you like.')]), new Map(), at)
+    expect(blocks.map((block) => block.kind)).toEqual(['turn', 'automation', 'turn'])
+    expect(blocks[1]).toMatchObject({ kind: 'automation', id: 'ia1', automation: { automationId: 'auto1', state: 'proposed' } })
+  })
+
+  it('is settled once deleted or its ask answered, and not while it stands for an automation that may still change', () => {
+    expect(settled(items.automation())).toBe(false)
+    expect(settled(items.automation({ state: 'on' }))).toBe(false)
+    expect(settled(items.automation({ ask: { what: 'run', done: false } }))).toBe(false)
+    expect(settled(items.automation({ ask: { what: 'run', done: true } }))).toBe(true)
+    expect(settled(items.automation({ state: 'deleted' }))).toBe(true)
+  })
+})
 
 describe('a thread as blocks', () => {
   it('groups what one agent does in a row into one turn, and marks changes of scene', () => {
@@ -376,6 +394,19 @@ describe('tool calls', () => {
         verbFor(ToolKind.Run, state),
       ),
     ).toEqual(['Running', 'Ran', 'Run', 'Run', 'Run'])
+  })
+
+  it('says on a refused call who refused it and why, and nothing where the person did', () => {
+    expect(declinedWords('rules', '`git pull` changes the repository; this role only reads.')).toBe(
+      'Althar’s rules: git pull changes the repository; this role only reads',
+    )
+    expect(declinedWords('coordinator', 'Outside the task.')).toBe('The coordinator: Outside the task')
+    expect(declinedWords('rules')).toBe('Althar’s rules')
+    expect(declinedWords('person', 'Not today')).toBeUndefined()
+    const refused = items.tool({ toolKind: 'execute', declined: true, command: 'git pull', declinedBy: 'rules', declinedWhy: 'No writes.' })
+    const [turn] = blocksOf(source([refused]), new Map(), at)
+    const tool = turn?.kind === 'turn' ? turn.parts.find((part) => part.kind === 'tool') : undefined
+    expect(tool).toMatchObject({ state: ToolState.Declined, why: 'Althar’s rules: No writes' })
   })
 
   it('says what it acted on: the file, the command, or its title', () => {

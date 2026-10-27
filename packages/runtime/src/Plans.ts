@@ -47,7 +47,8 @@ export class Plans extends Context.Service<
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
      * waits for a place among the agents at work on this machine (`waiting`);
-     * null where it no longer stood to start.
+     * null where it no longer stood to start. One accepted whose run was never
+     * made, as when Althar stopped in between, runs now.
      */
     start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
     /** Holds a proposed plan until someone starts it. */
@@ -182,7 +183,9 @@ export class Plans extends Context.Service<
             'task_plan.accepted',
             actorId,
           )
-          return accepted ? yield* runs.run(planId) : null
+          if (accepted) return yield* runs.run(planId)
+          // Accepted, but Althar stopped before its run was made: it runs now, once.
+          return !due && (yield* load(planId)).state === 'accepted' ? yield* runs.run(planId) : null
         })
 
       /** Plans that couldn't start when their time came, each waiting a while before it is tried again. */

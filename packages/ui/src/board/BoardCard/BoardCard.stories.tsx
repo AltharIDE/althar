@@ -187,6 +187,16 @@ export const NothingOpensIt: Story = {
   },
 }
 
+/** A task an automation's run started: which one, quietly, at its foot. Still nothing to press but the card. */
+export const FromAnAutomation: Story = {
+  args: { ...REVIEW_RUNNING, from: 'Morning review' },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('From Morning review')).toBeInTheDocument()
+    await expect(card.getAllByRole('button')).toHaveLength(1)
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn(cardStates),
   render: (args) => (
@@ -196,6 +206,7 @@ export const AllStates: Story = {
         ...KIND_CARDS.map(({ id, card }) => ({ state: id, node: <BoardCard {...card} onOpen={args.onOpen} /> })),
         { state: 'done', node: <BoardCard {...args} status={TaskStatus.Done} word="Done" /> },
         { state: 'current', node: <BoardCard {...args} current /> },
+        { state: 'from an automation', node: <BoardCard {...args} from="Nightly bump" /> },
         { state: 'nothing opens it', node: <BoardCard {...args} onOpen={undefined} /> },
         { state: 'hover', node: <BoardCard {...args} /> },
         { state: 'focus', node: <BoardCard {...args} /> },

@@ -29,6 +29,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
   'chrome/ProjectFront/ProjectFront.tsx': 'a repository’s or tracker’s mark and name, which opens it',
   'thread/StepGraph/StepGraph.tsx': 'a step’s card, the whole of which opens its report; a round’s marker, a pill over the lanes',
+  'screens/Automations/Automations.tsx': 'an automation’s name, stretched over its card, which opens its page',
+  'screens/Automations/AutomationPage.tsx': 'a run’s row, which opens its task',
   'setup/TaskFolders/TaskFolders.tsx':
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   /* opens and closes what is below it */
@@ -63,6 +65,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/You/You.tsx': 'an attachment’s chip',
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',
   'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
+  'coordinator/AutomationCard/AutomationCard.tsx': 'a day of the week, toggled in a row of seven',
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
   'composer/Behind/Behind.tsx': 'the chip over a task’s composer, its parts parted by hairlines, which opens all of it',
   'composer/DictationPill/DictationPill.tsx': 'the words carried in the pill, stretched across it, which open it',

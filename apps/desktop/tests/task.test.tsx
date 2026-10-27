@@ -485,6 +485,39 @@ describe('a task', () => {
     expect(screen.queryByLabelText('What this review’s lead can reach')).toBeNull()
   })
 
+  it('offers an automation’s first review to post with its next ones posting themselves, and only that first time', async () => {
+    const base = snapshot()
+    const review = { outside: false, fork: false, suggested: 'comment' as const, verdict: 'comment' as const, drafter: null, account: null }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.review({ ...review, automation: { id: 'auto1', name: 'Morning review', postsReviews: false } }),
+            items.review({ ...review, draftId: 'rdr_2', automation: { id: 'auto1', name: 'Morning review', postsReviews: true } }),
+            items.review({
+              ...review,
+              draftId: 'rdr_3',
+              state: 'failed',
+              error: 'GitHub didn’t answer.',
+              automation: { id: 'auto2', name: 'Night', postsReviews: false },
+            }),
+          ],
+          task: { ...base.task, request: null },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const fromNow = await screen.findAllByRole('button', { name: 'Post this automation’s reviews from now on' })
+    // Once its reviews post themselves, or once one is on its way or failed, only Post is offered.
+    expect(fromNow).toHaveLength(1)
+    await userEvent.click(fromNow[0] as HTMLElement)
+    await waitFor(() => expect(client.postReviewDraft).toHaveBeenCalledWith('rdr_1'))
+    expect(client.setAutomationPostsReviews).toHaveBeenCalledWith('auto1', true)
+    expect(vi.mocked(client.setAutomationPostsReviews).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(client.postReviewDraft).mock.invocationCallOrder[0] ?? 0,
+    )
+  })
+
   it('starts a stopped task on its last lead and model, and not on an agent signed out since', async () => {
     const base = snapshot()
     const stopped = thread({

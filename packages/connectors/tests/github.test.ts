@@ -818,6 +818,11 @@ describe('GitHub listing pull requests', () => {
       searchOf(['meridian', 'api'], { state: 'merged', author: 'dependabot[bot]', limit: 5 }),
       'repo:meridian/api is:pr is:merged author:app/dependabot sort:updated-desc',
     )
+    // Reading on past a listing: those updated at or before the last it gave, to the second, as search reads times.
+    assert.strictEqual(
+      searchOf(['meridian', 'api'], { state: 'open', draft: false, updatedUntil: '2026-10-21T08:00:05.123Z', limit: 100 }),
+      'repo:meridian/api is:pr is:open draft:false updated:<=2026-10-21T08:00:05Z sort:updated-desc',
+    )
     // A qualifier in the words is only a word.
     assert.strictEqual(
       searchOf(['meridian', 'api'], { state: 'all', text: 'repo:other/x', limit: 5 }),

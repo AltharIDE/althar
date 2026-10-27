@@ -1,0 +1,26 @@
+/* The Automations room in the views' place: its page scrolls under the front page. */
+.room {
+  flex: 1;
+  min-height: 0;
+}
+
+.pending {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 36px 40px;
+}
+
+.failure {
+  max-width: 880px;
+  margin: 36px auto 0;
+  padding: 0 40px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* what couldn't be done to a card in the coordinator's thread, under it */
+.cardFailure {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 12.5px;
+}
