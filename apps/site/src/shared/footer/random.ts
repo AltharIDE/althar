@@ -1,7 +1,5 @@
 /*
- * The engraving's randomness: the same small unevenness every time. Apart
- * from the footer's React parts, so the worker that draws the landscape
- * can load it alone.
+ * The engraving's randomness: the same small unevenness every time.
  */
 
 /** The same small unevenness every time: a seeded random, 0 to 1. */
