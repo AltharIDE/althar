@@ -16,6 +16,7 @@ import type {
   CoordinatorSnapshot,
   HomeSnapshot,
   Load,
+  PlanUsage,
   Picture,
   ProjectNote,
   ProjectTracker,
@@ -988,6 +989,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     getLoad: vi.fn(async () => load),
+    getPlanUsage: vi.fn(async () => ({ accounts: [] })),
+    getModelRooms: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
     openCode: vi.fn(async () => true),
     // Names no code, unless a test says what they name.
@@ -1221,6 +1224,25 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   clipboardToken: vi.fn(async () => null),
   ...overrides,
 })
+
+/** An account's plan usage as the runtime reads it: a Codex account on its plan, its 5-hour window 60% used. */
+export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}): PlanUsage['accounts'][number] => ({
+  agentId: 'codex',
+  agentName: 'Codex',
+  accountId: 'acc_codex_work',
+  accountName: 'work',
+  paidBy: 'plan',
+  source: 'agent',
+  observedAt: '2026-10-15T10:00:00.000Z',
+  plan: 'pro',
+  windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  fault: null,
+  noReading: null,
+  ...over,
+})
+
+/** The usage feed carries, whole. */
+export const planUsage = (accounts: PlanUsage['accounts'] = [usageAccount()]): PlanUsage => ({ accounts })
 
 /** A change the runtime's feed reports. */
 export const changed = (

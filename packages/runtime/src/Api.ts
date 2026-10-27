@@ -41,6 +41,8 @@ import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
 import { MachineLoad } from './MachineLoad'
+import { modelRooms } from './modelRooms'
+import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
@@ -148,6 +150,7 @@ export const handlers = Api.toLayer(
     const sessions = yield* Sessions
     const launches = yield* Launches
     const machine = yield* MachineLoad
+    const planUsage = yield* PlanUsage
     const permissions = yield* Permissions
     const questions = yield* Questions
     const queries = yield* Queries
@@ -497,7 +500,9 @@ export const handlers = Api.toLayer(
                     ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
                     : event._tag === 'Launches'
                       ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
-                      : Stream.empty,
+                      : event._tag === 'PlanUsage'
+                        ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
+                        : Stream.empty,
           ),
         ),
       ),
@@ -1343,6 +1348,18 @@ export const handlers = Api.toLayer(
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
+      GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
+      GetModelRooms: ({ projectId }) =>
+        api(
+          modelRooms(projectId).pipe(
+            Effect.provideService(Agents, agents),
+            Effect.provideService(Models, models),
+            Effect.provideService(SignIns, signIns),
+            Effect.provideService(Installs, installs),
+            Effect.provideService(Limits, limits),
+            Effect.provideService(Accounts, accounts),
+          ),
+        ),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(

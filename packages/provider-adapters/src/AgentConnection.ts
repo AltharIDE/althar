@@ -253,6 +253,8 @@ export interface ConnectOptions {
   readonly onPermission: (request: PermissionRequest) => Effect.Effect<PermissionDecision>
   /** What the agent's permission options mean: the registry's `permissions`. */
   readonly permissions?: PermissionMeanings
+  /** The words that open a failure it says as a message rather than an error: the registry's `failsInText`. */
+  readonly failsInText?: string
   /**
    * Answers a question the agent asks the person. Without it the agent is
    * offered no way to ask (no form elicitation), so it asks in what it says
@@ -811,7 +813,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           Effect.gen(function* () {
             const event = normalize(update)
             const events: Array<SessionEvent> = [event]
-            if (event._tag === 'OptionsChanged') {
+            const failsInText = options.failsInText
+            if (event._tag === 'AgentMessage' && failsInText !== undefined && event.text.startsWith(failsInText)) {
+              // A failure it says as a message, its turn ending as if done: the turn fails with it, as with an error.
+              const classified = classify(event.text.slice(failsInText.length), yield* DateTime.nowAsDate)
+              const turn = yield* Ref.get(state.current)
+              if (Option.isSome(turn) && classified.failure !== 'unknown') turn.value.failure = classified
+            } else if (event._tag === 'OptionsChanged') {
               yield* Ref.set(current, event.options)
               // A held option the agent moved goes back before anything else it says is read, for as long as an agent
               // that answers one request at a time may take; nothing Althar answers waits on this reader meanwhile.

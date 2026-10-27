@@ -184,7 +184,8 @@ export const statusOf = (
         : text.issueChanges,
     }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
+  if (waits !== null)
+    return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step, waits.left) }
   // Held for the connection, it carries on by itself once it is back (ADR-060).
   if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
@@ -810,6 +811,7 @@ export function TaskView({
             <ModelChoice
               owner={text.lead}
               agents={model.agents}
+              projectId={snapshot.project.id}
               value={choice}
               onChange={choose}
               // Another agent's model hands the task over, once the person says something.

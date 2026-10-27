@@ -16,6 +16,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
+import { whenWords } from '../src/Limits'
 import { describeModels, type Route, routeTo } from '../src/usableModels'
 import { callTool, repository, runtime, until } from './support'
 
@@ -100,6 +101,7 @@ describe('the models as the coordinator reads them', () => {
     efforts: [],
     effort: null,
     defaultEffort: null,
+    room: null,
     ...over,
   })
 
@@ -134,6 +136,25 @@ describe('the models as the coordinator reads them', () => {
     )
     assert.include(said, "\nOthers\n- Mystery: no scores known; on a plan; effort high (its own: high; the person's default: high)\n")
     assert.match(said, /\n- Nobody: no scores known; per use; no effort to set$/)
+  })
+
+  it('says how much of its plan’s tightest limit each has left, and when it resets, as last read', () => {
+    const resetsAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+    const room = (leftPercent: number) =>
+      ({ agentId: 'codex', accountId: 'a', leftPercent, resetsAt, kind: 'five_hour', label: null }) as const
+    const said = describeModels([
+      { name: 'Roomy', maker: null, fact: null, routes: [route({ model: 'roomy', plan: true, room: room(62.4) })] },
+      { name: 'Tight', maker: null, fact: null, routes: [route({ model: 'tight', plan: true, room: room(3) })] },
+    ])
+    assert.include(said, 'A step on a plan with under 5% left goes elsewhere or waits')
+    assert.include(
+      said,
+      `- Roomy: no scores known; on a plan, 62% of its five-hour limit left, until ${whenWords(resetsAt)}; no effort to set`,
+    )
+    assert.include(
+      said,
+      `- Tight: no scores known; on a plan, nearly out, 3% of its five-hour limit left, until ${whenWords(resetsAt)}; no effort to set`,
+    )
   })
 
   it('takes a model the way the agent named goes, else the best way, and nothing where it has none', () => {

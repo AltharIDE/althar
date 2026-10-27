@@ -267,6 +267,7 @@ export function ProjectView({
 
   const actions: CardActions = {
     project: name,
+    ...(about === null ? {} : { projectId: about }),
     agents: model.agents,
     agentName,
     onStart: (planId) => void model.startPlan(planId),
@@ -401,6 +402,7 @@ export function ProjectView({
             <ModelChoice
               owner={text.coordinator}
               agents={model.agents}
+              {...(about === null ? {} : { projectId: about })}
               value={chosen}
               onChange={choose}
               // Another agent's model hands the conversation over, once the person says something.

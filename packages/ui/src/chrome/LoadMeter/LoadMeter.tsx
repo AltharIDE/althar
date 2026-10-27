@@ -46,7 +46,8 @@ const useSteps = (share: number) => {
   return steps
 }
 
-function Gauge({ name, lit, ours, full }: { name: string; lit: number; ours: number; full: boolean }) {
+/** One meter: its short name and five steps, Althar's part lit in cobalt, the rest in ink; in full ink when `full`. The plan gauge draws with it too. */
+export function Gauge({ name, lit, ours, full }: { name: string; lit: number; ours: number; full: boolean }) {
   return (
     <span className={cx(s.gauge, full && s.full)}>
       <span className={s.name}>{name}</span>
