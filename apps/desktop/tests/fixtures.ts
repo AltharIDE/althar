@@ -412,6 +412,13 @@ export const items = {
       ...content,
     },
   }),
+  /** Pictures the lead showed the person (show_pictures), each with its caption. */
+  shows: (pictures: Extract<ThreadItem, { kind: 'pictures' }>['content']['pictures'], agentId = 'claude-code'): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'pictures',
+    content: { pictures },
+  }),
   plan: (entries: ReadonlyArray<{ content: string; status: string }>, agentId = 'claude-code'): ThreadItem => ({
     ...next(),
     agentId,
