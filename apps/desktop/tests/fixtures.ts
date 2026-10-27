@@ -298,7 +298,7 @@ export const task: TaskSummary = {
 const GiB = 1024 ** 3
 const MiB = 1024 ** 2
 
-/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, and its default branch running. */
+/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, its default branch running, and Althar itself. */
 export const load: Load = {
   cpu: 0.42,
   memoryUsed: 12.5 * GiB,
@@ -342,6 +342,7 @@ export const load: Load = {
       processes: 3,
     },
   ],
+  althar: { cpu: 0.015, memory: 700 * MiB, processes: 9 },
   history: [
     { cpu: 0.2, work: 0.1 },
     { cpu: 0.42, work: 0.33 },

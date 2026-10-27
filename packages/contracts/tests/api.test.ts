@@ -351,7 +351,7 @@ describe('the API', () => {
   })
 
   it('takes a load only as parts of the whole and bytes', () => {
-    const load = { cpu: 0.5, memoryUsed: 8e9, memoryTotal: 16e9, pressure: null, shares: [], history: [] }
+    const load = { cpu: 0.5, memoryUsed: 8e9, memoryTotal: 16e9, pressure: null, shares: [], althar: null, history: [] }
     const share = {
       kind: 'task',
       projectId: 'p1',
@@ -370,6 +370,13 @@ describe('the API', () => {
     assert.throws(() => decode({ ...load, pressure: 'high' }))
     // A share has at least the one process it is.
     assert.throws(() => decode({ ...load, shares: [{ ...share, agent: null, processes: 0 }] }))
+    // Althar itself, as its own part.
+    assert.deepStrictEqual(decode({ ...load, althar: { cpu: 0.03, memory: 1e9, processes: 9 } }).althar, {
+      cpu: 0.03,
+      memory: 1e9,
+      processes: 9,
+    })
+    assert.throws(() => decode({ ...load, althar: { cpu: 1.5, memory: 1e9, processes: 9 } }))
   })
 
   it('takes images sent with a message as bytes or a digest, as many as a message carries', () => {
@@ -444,6 +451,7 @@ describe('the API', () => {
                   memoryTotal: 16e9,
                   pressure: 'normal' as const,
                   shares: null,
+                  althar: null,
                   history: [{ cpu: 0.4, work: 0.1 }],
                 }),
               InstallAgent: () => Effect.die('unused'),

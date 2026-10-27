@@ -92,6 +92,7 @@ import {
   uncoloured,
   WAKE_FOR,
 } from './leftRunning'
+import { WORK, workOf } from './machine'
 import { holding, portFor, portsBelow } from './ports'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
@@ -1819,7 +1820,17 @@ export class Sessions extends Context.Service<
           }
           // In the account's home: its sign-in, not the agent's usual one (ADR-012), with what it shares brought up to date.
           yield* accounts.prepare(account)
-          const transport = entry.transport(cwdOf(thread), accounts.env(account), untrusted ? { untrusted } : undefined)
+          // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
+          const work = workOf({
+            kind: thread.role === 'coordinator' ? 'coordinator' : 'task',
+            projectId: thread.projectId,
+            taskId: thread.role === 'coordinator' ? null : thread.taskId,
+          })
+          const transport = entry.transport(
+            cwdOf(thread),
+            { ...accounts.env(account), [WORK]: work },
+            untrusted ? { untrusted } : undefined,
+          )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.

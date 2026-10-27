@@ -2556,6 +2556,14 @@ export const LoadShare = Schema.Struct({
 })
 export type LoadShare = typeof LoadShare.Type
 
+/** Althar itself and its part of this computer: the app, its windows and the runtime, without the work they started. */
+export const LoadOwn = Schema.Struct({
+  cpu: Part,
+  memory: Bytes,
+  processes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+})
+export type LoadOwn = typeof LoadOwn.Type
+
 /** A reading of how hard this computer works: the whole of it, and Althar's work's part. */
 export const LoadPoint = Schema.Struct({ cpu: Part, work: Part })
 export type LoadPoint = typeof LoadPoint.Type
@@ -2575,6 +2583,8 @@ export const Load = Schema.Struct({
   pressure: Schema.NullOr(MemoryPressure),
   /** Althar's work, most CPU first; null where its processes can't be read, as on Windows. */
   shares: Schema.NullOr(Schema.Array(LoadShare)),
+  /** Althar itself, part of Althar's work as the bar counts it; null where its processes can't be read. */
+  althar: Schema.NullOr(LoadOwn),
   /** The readings of the last two minutes, oldest first, the last of them this one's. A gap of more than a few readings starts them afresh. */
   history: Schema.Array(LoadPoint),
 })

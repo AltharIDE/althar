@@ -142,6 +142,8 @@ const options = {
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
   ...(agents === null ? {} : { agentStderr: agents.stderr }),
+  // Althar itself, on the load meter, is the app's main process and what it started: its windows, its GPU and this runtime.
+  load: { app: process.ppid },
 }
 
 /** The machine the end-to-end tests name in `ALTHAR_MACHINE`, as `cores,GB`; without one, a large one: 64 cores and 256 GB. */
