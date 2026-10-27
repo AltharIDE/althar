@@ -40,7 +40,7 @@ import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../share
 import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import { doingWords, doneHere, factsOf, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
+import { doingWords, doneHere, factsOf, isBlocked, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -96,6 +96,8 @@ export const text = {
   reviewDrafted: 'Review drafted',
   /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
   mergeConflict: 'Merge conflict',
+  /** A pull request with a conflict or a failed check in its way: not yet ready to accept. */
+  blocked: 'Not ready to accept',
   /** A running change's checks; a ready one's say what stands (shared/standing). */
   checks: {
     passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
@@ -410,7 +412,13 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet.
         word:
-          work.handedBack != null ? text.mergeConflict : change === null && work.unshipped != null ? kindWords.unshipped : kindWords.ready,
+          work.handedBack != null
+            ? text.mergeConflict
+            : change === null && work.unshipped != null
+              ? kindWords.unshipped
+              : change?.state === 'open' && isBlocked(standingOf(change))
+                ? text.blocked
+                : kindWords.ready,
         ...(object === null ? {} : { object }),
         ...(work.handedBack != null
           ? {
@@ -467,8 +475,8 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
   const here = actions !== undefined && next !== null && doneHere(next) ? next : null
   const failure = actions?.failed[work.taskId]
   const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
-  const facts = factsOf(change, standing).map((one, i) => (
-    <Fact key={one.words} {...(i === 0 && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+  const facts = factsOf(change, standing).map((one) => (
+    <Fact key={one.words} {...(one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
       {one.words}
     </Fact>
   ))

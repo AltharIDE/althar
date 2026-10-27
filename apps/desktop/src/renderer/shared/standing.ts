@@ -41,6 +41,9 @@ export const standingText = {
   commits: (n: number) => (n === 1 ? '1 commit' : `${n} commits`),
   parted: (short: string) => `Branch and ${short} have parted`,
   unpushed: (n: number, short: string) => `${standingText.commits(n)} not on the ${short}`,
+  /** Commits to push that bring the branch up to date with the one the pull request conflicts with: pushing them clears the conflict. */
+  pushResolves: (n: number, target: string | null) =>
+    `${standingText.commits(n)} to push, which should resolve the conflict${target === null ? '' : ` with ${target}`}`,
   conflict: (target: string | null) => (target === null ? 'Has a merge conflict' : `Conflicts with ${target}`),
   failed: (failing: ReadonlyArray<string>, failed: number) =>
     failing.length === 1 ? `${failing[0]} failed` : failed === 1 ? '1 check failed' : `${failed} checks failed`,
@@ -144,9 +147,47 @@ export const clearOf = (change: Pick<ChangeSummary, 'checks'>): Said => {
     : { words: standingText.soFar(checks.passed, checks.total), tone: 'quiet' }
 }
 
-/** What stands, as facts: each thing in the way, or how its checks went where nothing is. */
-export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(change)): ReadonlyArray<Said> =>
-  standing.blockers.length === 0 ? [clearOf(change)] : standing.blockers.map((one) => saidOf(one, change))
+/**
+ * Whether pushing the commits here is what clears the conflict: the lead
+ * brings the branch it conflicts with into its own, and that merge is among
+ * the commits not on the pull request yet, so the host's word on the
+ * conflict is out of date until they are. Althar can't see the commits'
+ * content from here, so any commits beside a conflict are taken to be that.
+ */
+export const pushResolves = (standing: Standing): boolean =>
+  standing.blockers.some((one) => one.kind === 'conflict') && standing.blockers.some((one) => one.kind === 'unpushed')
+
+/** Whether the change is not ready to accept as it stands, and pushing won't make it so: a conflict nothing here resolves, a failed or cancelled check, a branch that parted. */
+export const isBlocked = (standing: Standing): boolean =>
+  standing.blockers.some((one) => (one.kind === 'conflict' ? !pushResolves(standing) : one.kind !== 'unpushed' && one.kind !== 'running'))
+
+/** How facts read, top to bottom: what blocks, then what to do, then what is fine or on its way. */
+const readOrder: Record<Blocker['kind'], number> = { parted: 0, conflict: 0, failed: 0, cancelled: 0, unpushed: 1, running: 2 }
+
+/**
+ * What stands, as facts: what blocks first (a conflict, failed checks), then
+ * what to do (commits to push), then checks running, or, where nothing is in
+ * the way, how its checks went. Commits that clear a conflict are said
+ * together with it, as one thing.
+ */
+export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(change)): ReadonlyArray<Said> => {
+  if (standing.blockers.length === 0) return [clearOf(change)]
+  const together = pushResolves(standing)
+  return standing.blockers
+    .filter((one) => !(together && one.kind === 'conflict'))
+    .sort((a, b) => readOrder[a.kind] - readOrder[b.kind])
+    .map((one) => {
+      if (together && one.kind === 'unpushed') {
+        const conflict = standing.blockers.find((other) => other.kind === 'conflict')
+        return {
+          words: standingText.pushResolves(one.commits, conflict?.kind === 'conflict' ? conflict.target : null),
+          icon: 'up',
+          tone: 'warm',
+        }
+      }
+      return saidOf(one, change)
+    })
+}
 
 /** Whether the next thing is the person's own, done from where it is shown: pushing and merging. The others are the lead's, and open the task. */
 export type DoneHere = Extract<Next, { kind: 'merge' | 'push' }>

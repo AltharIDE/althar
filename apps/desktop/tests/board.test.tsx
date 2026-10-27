@@ -1520,7 +1520,7 @@ describe('what stands between a ready change and merging', () => {
         ready('s3', 'Checks still running', { checks: { ...passed, outcome: 'running', passed: 3, running: 2 } }),
         ready('s4', 'In conflict', { conflicts: true, target: 'main' }),
         ready('s5', 'Commits to push', { localHead: 'def456', unpushed: 3 }),
-        // Commits here and a check that failed on what is pushed: the push first, as it runs the checks again.
+        // Commits here and a check that failed on what is pushed: the failure is read first, the push is offered first, as it runs the checks again.
         ready('s6', 'Two at once', { localHead: 'def456', unpushed: 2, checks: change().checks }),
         // Commits counted before the branch's head here is known aren't said.
         ready('s7', 'Head not read yet', { unpushed: 2 }),
@@ -1549,8 +1549,12 @@ describe('what stands between a ready change and merging', () => {
     expect(said('Checks still running')).toContain('Checks running, 3 of 5 passed')
     expect(within(cardOf('Checks still running')).queryByText(/Accept and merge|Push/)).toBeNull()
     expect(said('In conflict')).toMatch(/Conflicts with main\s*Ask the lead to resolve it/)
+    // A conflict or a failed check in the way: not ready to accept.
+    expect(said('In conflict')).toContain('Not ready to accept')
+    expect(said('Two at once')).toContain('Not ready to accept')
+    expect(said('Commits to push')).toContain('Ready to accept')
     expect(said('Commits to push')).toMatch(/3 commits not on the PR\s*Push 3 commits/)
-    expect(said('Two at once')).toMatch(/2 commits not on the PR\s*·\s*test failed\s*Push 2 commits/)
+    expect(said('Two at once')).toMatch(/test failed\s*·\s*2 commits not on the PR\s*Push 2 commits/)
     expect(said('Head not read yet')).toMatch(/All 5 checks passed\s*Accept and merge/)
     // Cancelled: said in place of a pass, and nothing to do from here but open the task.
     expect(said('A check cancelled')).toContain('check 4 cancelled')
