@@ -1551,7 +1551,18 @@ export const TaskCard = Schema.Struct({
    * turn): it is in its project's line, up next.
    */
   inLine: Schema.optional(Schema.Boolean),
-  /** With `inLine`: its place in its project's line, in the order the line starts; 1 starts first. */
+  /**
+   * It is under way and none of its agents is at work, and it goes on by
+   * itself (ADR-063): its next turn waits for a place (`queued`), or its step
+   * is held for a usage limit (`waits`) or the connection (`reconnects`). It
+   * is up next, not running.
+   */
+  continues: Schema.optional(Schema.Boolean),
+  /**
+   * With `inLine`, or `continues` and `queued`: its place in its project's
+   * Up next, in the order it gets one, what continues first, then the line;
+   * 1 gets one first.
+   */
   place: Schema.optional(Schema.Int),
   /** With `inLine`: the line is in an order the person gave it, not the oldest first. */
   reordered: Schema.optional(Schema.Boolean),
@@ -2235,8 +2246,10 @@ export const ThreadSnapshot = Schema.Struct({
     reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
-    /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
+    /** Its place in its project's Up next, waiting for a place, as its card says: 1 gets one first; absent out of it. */
     place: Schema.optional(Schema.Int),
+    /** It waits in its project's line behind another of its tasks, so the person can put it at the line's front. */
+    front: Schema.optional(Schema.Boolean),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
     /** Its rounds of work as its graph had them, oldest first: what its Graph face draws. Absent from a runtime before it. */

@@ -48,8 +48,9 @@ import { Sessions } from './Sessions'
  * carried on after a restart or back from a usage limit, a conflict or check
  * round, what Althar tells an agent); then new work, what waits before any
  * agent has worked on its task (a plan's first step, a review's or a quick
- * task's lead's first turn), which is its project's line, up next on its
- * board. Within each, what waited longest goes first; in the line, unless
+ * task's lead's first turn), which is its project's line. Everything that
+ * waits for a place with none of its task's agents at work is up next on its
+ * board (ADR-063): what is under way first, then the line. Within each, what waited longest goes first; in the line, unless
  * the person put it in an order of their own (`move`), kept on each task
  * (`line_at`), so a restart keeps it and a task that joins later goes to its
  * end. A task never loses its place between its own steps: a step after
@@ -167,8 +168,15 @@ interface Ranked {
   readonly line: boolean
 }
 
-/** A project's line: its tasks in the order they start, and whether that is the person's order rather than the oldest first. */
+/**
+ * A project's work that waits for a place, as its board's Up next shows it
+ * (ADR-063): first its tasks already under way whose next work waits, none of
+ * their agents at work, in the order they get one; then its line, the tasks
+ * no agent has worked on yet, in the order they start, and whether that is
+ * the person's order rather than the oldest first.
+ */
 export interface Line {
+  readonly continuing: ReadonlyArray<string>
   readonly tasks: ReadonlyArray<string>
   readonly reordered: boolean
 }
@@ -210,7 +218,10 @@ export class Busy extends Context.Service<
     ): Effect.Effect<boolean>
     /** Who waits for a place, in the order they start, and whether each is in its project's line. */
     readonly order: Effect.Effect<ReadonlyArray<Agent & { readonly line: boolean }>>
-    /** A project's line: its tasks that wait for a place before any agent has worked on them, in the order they start. */
+    /**
+     * A project's work that waits for a place, in the order it gets one: its tasks under way with none of their agents at
+     * work, then its line, its tasks that wait before any agent has worked on them.
+     */
     line(projectId: string): Effect.Effect<Line>
     /**
      * Puts a task in its project's line at a place, from 0, the rest keeping
@@ -582,11 +593,12 @@ export class Busy extends Context.Service<
           const waits = new Set(left)
           for (const taskId of owed) if (!waits.has(taskId)) owed.delete(taskId)
           for (const taskId of waits) if (holders.some((holder) => holder.taskId === taskId)) owed.add(taskId)
-          // Who holds the places, and whether by what they left running, is on the cards too: read again when that changes.
+          // Who holds the places, and whether by what they left running, is on the cards too, as is each one's place in Up next:
+          // read again when either changes.
           const shown = `${holders
             .map((holder) => `${keyOf(holder.taskId, holder.review)}${holder.kept ? ' kept' : ''}`)
             .toSorted()
-            .join(',')} ${most}`
+            .join(',')} ${most} ${queue.map(({ waiter }) => waiterKey(waiter)).join(',')}`
           if (shown !== said) {
             said = shown
             yield* Effect.forEach(new Set(left), (taskId) => Effect.ignore(provide(touchTask(taskId))), { discard: true })
@@ -774,25 +786,38 @@ export class Busy extends Context.Service<
           yield* wake
         })
 
-      /** A project's line in the order it starts: each task once, with the time it stands at and since when it waits. */
-      const lineOf = (projectId: string) =>
+      /**
+       * A project's work that waits for a place, in the order it gets one, each task once: its tasks under way, none of
+       * whose agents is at work (one with an agent at work is running, and what else of it waits goes on beside that), then
+       * its line, each with the time it stands at and since when it waits.
+       */
+      const standingOf = (projectId: string) =>
         Effect.gen(function* () {
-          const lined = (yield* waiting).filter((entry) => entry.line)
-          if (lined.length === 0) return []
-          const ids = [...new Set(lined.map((entry) => entry.waiter.taskId))]
+          const queue = yield* waiting
+          if (queue.length === 0) return { continuing: [], line: [] }
+          const ids = [...new Set(queue.map((entry) => entry.waiter.taskId))]
           const ours = new Set(
             (yield* sql<{ id: string }>`
               SELECT id FROM tasks WHERE project_id = ${projectId} AND id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`).map(
               (row) => row.id,
             ),
           )
+          const lined = new Set(queue.flatMap((entry) => (entry.line ? [entry.waiter.taskId] : [])))
+          const working = new Set((yield* atWork).holders.flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
+          const continuing = new Set(
+            queue.flatMap(({ waiter: { taskId } }) => (ours.has(taskId) && !lined.has(taskId) && !working.has(taskId) ? [taskId] : [])),
+          )
           const seen = new Set<string>()
-          return lined.flatMap(({ waiter, at }) => {
-            if (!ours.has(waiter.taskId) || seen.has(waiter.taskId)) return []
+          const line = queue.flatMap(({ waiter, at, line: inLine }) => {
+            if (!inLine || !ours.has(waiter.taskId) || seen.has(waiter.taskId)) return []
             seen.add(waiter.taskId)
             return [{ taskId: waiter.taskId, at, since: waiter.since }]
           })
+          return { continuing: [...continuing], line }
         })
+
+      /** A project's line in the order it starts: each task once, with the time it stands at and since when it waits. */
+      const lineOf = (projectId: string) => Effect.map(standingOf(projectId), (standing) => standing.line)
 
       /** The cards of a line's tasks, read again: each one's place in it changed. */
       const touchLine = (line: ReadonlyArray<{ readonly taskId: string }>) =>
@@ -855,12 +880,16 @@ export class Busy extends Context.Service<
         }),
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
         line: (projectId) =>
-          Effect.map(lineOf(projectId), (line): Line => {
+          Effect.map(standingOf(projectId), ({ continuing, line }): Line => {
             const oldest = line.toSorted((a, b) => a.since.localeCompare(b.since))
-            return { tasks: line.map((one) => one.taskId), reordered: line.some((one, i) => one.taskId !== oldest[i]?.taskId) }
+            return {
+              continuing,
+              tasks: line.map((one) => one.taskId),
+              reordered: line.some((one, i) => one.taskId !== oldest[i]?.taskId),
+            }
           }).pipe(
             Effect.catchCause((cause) =>
-              Effect.as(Effect.logWarning('Could not read a project’s line', cause), { tasks: [], reordered: false }),
+              Effect.as(Effect.logWarning('Could not read a project’s line', cause), { continuing: [], tasks: [], reordered: false }),
             ),
           ),
         move,
