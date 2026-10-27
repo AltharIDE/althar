@@ -307,7 +307,7 @@ describe('the home', () => {
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     const line = (title: string) => within(within(needs).getByRole('article', { name: title }))
     expect(line('Good to merge').getByText('api #21 · All 5 checks passed · +12 −3')).toBeTruthy()
-    expect(line('Commits to push').getByText('api #22 · 3 commits not on the PR · +12 −3')).toBeTruthy()
+    expect(line('Commits to push').getByText('api #22 · All 5 checks passed · +12 −3')).toBeTruthy()
     expect(line('In conflict').getByText('api #23 · Conflicts with main · +12 −3')).toBeTruthy()
     expect(line('Checks still running').getByText('api #25 · Checks running, 3 of 5 passed · +12 −3')).toBeTruthy()
 

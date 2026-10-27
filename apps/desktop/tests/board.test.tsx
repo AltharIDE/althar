@@ -1521,7 +1521,9 @@ describe('what stands between a ready change and merging', () => {
         ready('s3', 'Checks still running', { checks: { ...passed, outcome: 'running', passed: 3, running: 2 } }),
         ready('s4', 'In conflict', { conflicts: true, target: 'main' }),
         ready('s5', 'Commits to push', { localHead: 'def456', unpushed: 3 }),
-        // Commits here and a check that failed on what is pushed: the push first, as it runs the checks again.
+        // Commits here and a check that failed on what is pushed: the failure is read first, the push is offered first, as it runs the checks again.
+        // Commits beside a conflict: pushing them is what clears it.
+        ready('s11', 'Push clears it', { localHead: 'def456', unpushed: 5, conflicts: true, target: 'main', checks: passed }),
         ready('s6', 'Two at once', { localHead: 'def456', unpushed: 2, checks: change().checks }),
         // Commits counted before the branch's head here is known aren't said.
         ready('s7', 'Head not read yet', { unpushed: 2 }),
@@ -1550,8 +1552,14 @@ describe('what stands between a ready change and merging', () => {
     expect(said('Checks still running')).toContain('Checks running, 3 of 5 passed')
     expect(within(cardOf('Checks still running')).queryByText(/Accept and merge|Push/)).toBeNull()
     expect(said('In conflict')).toMatch(/Conflicts with main\s*Ask the lead to resolve it/)
-    expect(said('Commits to push')).toMatch(/3 commits not on the PR\s*Push 3 commits/)
-    expect(said('Two at once')).toMatch(/2 commits not on the PR\s*·\s*test failed\s*Push 2 commits/)
+    // A conflict or a failed check in the way: not ready to accept.
+    expect(said('In conflict')).toContain('Not ready to accept')
+    expect(said('Two at once')).toContain('Not ready to accept')
+    expect(said('Commits to push')).toContain('Ready to accept')
+    expect(said('Push clears it')).toContain('Ready once pushed')
+    expect(said('Push clears it')).toContain('The push should resolve the conflict with main')
+    expect(said('Commits to push')).toMatch(/checks passed\s*Push 3 commits/)
+    expect(said('Two at once')).toMatch(/test failed\s*Push 2 commits/)
     expect(said('Head not read yet')).toMatch(/All 5 checks passed\s*Accept and merge/)
     // Cancelled: said in place of a pass, and nothing to do from here but open the task.
     expect(said('A check cancelled')).toContain('check 4 cancelled')
@@ -1633,9 +1641,9 @@ describe('a ready card’s next step, done from the card', () => {
     })
     withServices(<Board onOpen={vi.fn()} />, client)
     const card = await cardOf('Commits to push')
-    expect(card.getByText(/3 commits not on the PR/)).toBeTruthy()
+    expect(card.getByRole('button', { name: 'Push 3 commits to #12' })).toBeTruthy()
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
-    await waitFor(() => expect(card.queryByText(/not on the PR/)).toBeNull())
+    await waitFor(() => expect(card.queryByRole('button', { name: /^Push/ })).toBeNull())
     expect(card.getByText(/\+20/)).toBeTruthy()
     // It was pushed and nothing is left to push: what is next is to merge, at the new head.
     expect(card.queryByRole('button', { name: /^Push/ })).toBeNull()
@@ -1674,7 +1682,7 @@ describe('a ready card’s next step, done from the card', () => {
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
     expect((await card.findByRole('alert')).textContent).toContain('Push failed: GitHub says: the branch is protected')
     // The commits are still not on it, and the button now tries again.
-    expect(card.getByText(/3 commits not on the PR/)).toBeTruthy()
+    expect(card.getByRole('button', { name: 'Try pushing 3 commits to #12 again' })).toBeTruthy()
     // Another card pushes, and goes through: the first still says why it failed.
     await userEvent.click((await cardOf('More commits to push')).getByRole('button', { name: 'Push 2 commits to #12' }))
     await waitFor(() => expect(push).toHaveBeenCalledTimes(2))

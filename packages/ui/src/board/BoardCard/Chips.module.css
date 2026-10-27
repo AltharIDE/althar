@@ -153,13 +153,16 @@
   color: var(--t-2);
 }
 
-/* facts as one line, a middot between them; it wraps between facts, never inside one's glyph and words */
+/*
+ * Facts as one line, a middot between them, only the first with its glyph; or, where they don't fit, a list, one to a
+ * line, each glyph in a column of its own and no middot (data-stacked, set by FactLine).
+ */
 .factLine {
   display: inline-flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 2px 6px;
   min-width: 0;
+  white-space: nowrap;
 }
 .factLinePart {
   display: inline-flex;
@@ -168,6 +171,40 @@
 }
 .dot {
   color: var(--t-4);
+}
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.glyph:empty {
+  display: none;
+}
+.factLinePart + .factLinePart .glyph {
+  display: none;
+}
+.factLine[data-stacked] {
+  flex-direction: column;
+  align-items: flex-start;
+  flex-basis: 100%;
+  gap: 4px;
+  white-space: normal;
+}
+.factLine[data-stacked] .factLinePart {
+  align-items: baseline;
+}
+.factLine[data-stacked] .factLinePart .glyph {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  /* the glyph sits on the first line's middle, not the block's */
+  align-self: flex-start;
+  height: 1.45em;
+}
+.factLine[data-stacked] .fact {
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.45;
 }
 
 .findings {
@@ -187,6 +224,8 @@
 /* A next step that is a button of its own, at the foot's end: above the card's, whose title is stretched over it. */
 .act {
   position: relative;
-  margin-left: auto;
   display: inline-flex;
+}
+.act button:focus:not(:focus-visible) {
+  outline: none;
 }
