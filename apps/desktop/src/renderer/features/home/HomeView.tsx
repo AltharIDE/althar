@@ -1,4 +1,4 @@
-import { type DragEvent, useState } from 'react'
+import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
 import { type IconName, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
@@ -119,6 +119,8 @@ export function HomeView({
   const now = useNow(true)
   // Calls answered here: each stays its line, quiet, where it was, until the person leaves.
   const [answered, setAnswered] = useState<ReadonlyArray<AnsweredCall>>([])
+  // The home's screen is kept while the person is elsewhere: leaving is when those lines go.
+  useEffect(() => () => setAnswered([]), [])
   const agents = start.status?.agents ?? []
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''

@@ -16,7 +16,9 @@ import { type WorkActions, useWorkActions } from '../board/useWorkActions'
  * changes, in any project (`HOME`, in the window's feed). What the loop did
  * is read from one moment for as long as the home is open, so nothing the
  * person hasn't seen goes while they look; on leaving, the runtime is told,
- * and the home is read again from then, ready for the next visit.
+ * and the home is read again from then, ready for the next visit. Its
+ * screen stays while the person is elsewhere (`KeptScreens`), hidden and
+ * doing nothing: hiding is leaving, and showing again is opening.
  */
 
 export interface HomeModel extends WorkActions {
@@ -31,10 +33,12 @@ export const useHome = (): HomeModel => {
   const read = useQuery(reads(client).home())
   const home = read.data ?? null
 
-  // What the loop did is read from where the read the home opened on started, as long as it is open.
+  // What the loop did is read from where the read the home opened on started, as long as it is open. Shown again while
+  // the home is read anew from when the person left, from where that read starts.
+  const fetching = read.isFetching
   useEffect(() => {
-    if (home !== null) homeSince(client).since ??= home.since
-  }, [client, home])
+    if (home !== null && !fetching) homeSince(client).since ??= home.since
+  }, [client, home, fetching])
 
   // Leaving the home, or the window going, is when the person last looked.
   useEffect(() => {

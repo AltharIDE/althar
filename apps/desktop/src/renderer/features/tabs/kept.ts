@@ -6,18 +6,19 @@ import type { ProjectSearch } from '../project/search'
 
 /*
  * The screens the window keeps, so going back to a place is instant: the
- * last few projects' and tasks' screens the person was on, each as they left
- * it (scrolled where it was, the view it was on, what it was reading).
+ * home's, and the last few projects' and tasks' screens the person was on,
+ * each as they left it (scrolled where it was, the view it was on, what it was reading).
  * The route of the place on show says so; the others stay mounted and
  * hidden (`KeptScreens`), doing nothing, until the person goes back to one or it
  * falls out: past the last `KEEP` of its kind, or once its project has no tab.
  */
 
 /** How many screens of each kind are kept, the one on show among them. */
-export const KEEP = { project: 4, thread: 3 } as const
+export const KEEP = { home: 1, project: 4, thread: 3 } as const
 
-/** A place whose screen is kept: a project, with what its address last asked of it, or a task's thread. */
+/** A place whose screen is kept: the home, a project, with what its address last asked of it, or a task's thread. */
 export type KeptPlace =
+  | { readonly kind: 'home' }
   | { readonly kind: 'project'; readonly projectId: string; readonly search: ProjectSearch }
   | { readonly kind: 'thread'; readonly threadId: string }
 
@@ -46,7 +47,8 @@ export interface KeptStore {
   readonly keepOnly: (keeps: (place: KeptPlace) => boolean) => void
 }
 
-export const keyOf = (place: KeptPlace) => (place.kind === 'project' ? `project:${place.projectId}` : `thread:${place.threadId}`)
+export const keyOf = (place: KeptPlace) =>
+  place.kind === 'home' ? 'home:' : place.kind === 'project' ? `project:${place.projectId}` : `thread:${place.threadId}`
 
 const make = (): KeptStore => {
   let state: KeptState = { screens: [], shown: null }
