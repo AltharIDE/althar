@@ -451,7 +451,7 @@ export function ProjectView({
       seed={projectId}
       ink={kitInk(kept.ink ?? model.project?.ink ?? 'clay')}
       yours={yours}
-      {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.running.length })}
+      {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.atWork })}
       onYours={openYours}
       parts={partsOf({
         repositories: model.repositories,

@@ -1666,8 +1666,10 @@ export class Queries extends Context.Service<
         })
 
       /**
-       * A waiting task's place in its project's line, the tasks that wait for a place before any agent has worked on them, in
-       * the order they start (1 first), and whether the line is in the person's order; null where it isn't in the line.
+       * A waiting task's place in its project's Up next (ADR-065), in the order it gets one (1 first): its tasks under way,
+       * none of whose agents is at work, which continue, then its line, the tasks no agent has worked on yet; whether it
+       * stands behind another in the line, and whether the line is in the person's order. Null where it is in neither: an
+       * agent of its is at work.
        */
       const placeOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -1675,8 +1677,10 @@ export class Queries extends Context.Service<
           const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
           if (task === undefined) return null
           const line = yield* lineIn(task.projectId)
+          const ahead = line.continuing.indexOf(taskId)
+          if (ahead >= 0) return { place: ahead + 1, continues: true, behind: false, reordered: false }
           const at = line.tasks.indexOf(taskId)
-          return at < 0 ? null : { place: at + 1, reordered: line.reordered }
+          return at < 0 ? null : { place: line.continuing.length + at + 1, continues: false, behind: at > 0, reordered: line.reordered }
         })
 
       /*
@@ -1833,8 +1837,11 @@ export class Queries extends Context.Service<
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
-          // Waiting so before any agent has worked on it, whatever its kind: in its project's line, up next.
+          // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
+          // has worked on it, whatever its kind, it is in its project's line.
           const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
+          // Held for a usage limit or the connection, none of its agents in a turn, it goes on by itself: up next too.
+          const paused = !queued && !busy && (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable')
           const unshipped =
             after.length === 0
               ? null
@@ -1964,7 +1971,13 @@ export class Queries extends Context.Service<
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
-            ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
+            ...(line === null
+              ? paused
+                ? { continues: true }
+                : {}
+              : line.continues
+                ? { continues: true, place: line.place }
+                : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
             // Conflicting, and not asked of its lead: why, beside Resolve now (ADR-030).
             ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
@@ -2513,7 +2526,7 @@ export class Queries extends Context.Service<
           // Where it stands, from its card, which shows its links too: the header reads those with git, below.
           // Its links are read first and given to it: its kind, and where it opens, depend on its pull requests.
           const links = yield* linksOf(head.taskId)
-          const card = yield* cardFor(head.taskId, links)
+          const card: TaskCard | undefined = yield* cardFor(head.taskId, links)
           const session = yield* sessionOf(threadId)
           // Who leads it when no lead runs: the last on its thread, else its plan's.
           const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
@@ -2562,7 +2575,9 @@ export class Queries extends Context.Service<
               waits: card?.waits ?? null,
               ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),
               queued: card?.queued ?? null,
-              ...(card?.inLine === true && card.place !== undefined ? { place: card.place } : {}),
+              ...(card?.place === undefined ? {} : { place: card.place }),
+              // In the line behind another of its tasks, the person can put it first from here.
+              ...(card?.inLine === true && (yield* placeOf(head.taskId))?.behind === true ? { front: true } : {}),
               steps: card?.plan?.steps ?? [],
               // Its graph is a part of its own: one that can't be read leaves the face out, not the thread.
               ...Option.match(graph, { onNone: () => ({}), onSome: (rounds) => ({ graph: rounds }) }),
