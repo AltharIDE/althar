@@ -28,7 +28,7 @@ import { type RunsModel, useRuns } from './useRuns'
  * the Run button, whose one press runs the default and whose list starts and
  * stops the rest, here (in the task's worktree, or a copy of the default
  * branch); on the project, running a branch or a pull request, picked from
- * what its remote has now, in a copy of its own (ADR-065); and, opened from
+ * what its remote has now, in a copy of its own (ADR-066); and, opened from
  * it or from the project's settings, adding
  * something to run, the whole list, and changing one. Running and stopping
  * are the screen's, which says what went wrong over its composer; each

@@ -1602,7 +1602,18 @@ export const TaskCard = Schema.Struct({
    * turn): it is in its project's line, up next.
    */
   inLine: Schema.optional(Schema.Boolean),
-  /** With `inLine`: its place in its project's line, in the order the line starts; 1 starts first. */
+  /**
+   * It is under way and none of its agents is at work, and it goes on by
+   * itself (ADR-065): its next turn waits for a place (`queued`), or its step
+   * is held for a usage limit (`waits`) or the connection (`reconnects`). It
+   * is up next, not running.
+   */
+  continues: Schema.optional(Schema.Boolean),
+  /**
+   * With `inLine`, or `continues` and `queued`: its place in its project's
+   * Up next, in the order it gets one, what continues first, then the line;
+   * 1 gets one first.
+   */
   place: Schema.optional(Schema.Int),
   /** With `inLine`: the line is in an order the person gave it, not the oldest first. */
   reordered: Schema.optional(Schema.Boolean),
@@ -1639,7 +1650,7 @@ export const RunItem = Schema.Struct({
     runnableId: Schema.optional(Schema.NullOr(Schema.String)),
     /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
     where: Schema.String,
-    /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-065); absent or null for the default branch or a task's. */
+    /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-066); absent or null for the default branch or a task's. */
     branch: Schema.optional(Schema.NullOr(Schema.String)),
     ref: Schema.optional(Schema.NullOr(Schema.Struct({ kind: Schema.Literals(['branch', 'pull_request']), which: Schema.String }))),
     command: Schema.String,
@@ -1939,7 +1950,7 @@ export type ContextUse = typeof ContextUse.Type
  * The project as Althar runs it itself, with no agent (docs/decisions/022):
  * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
  * the default branch, or of a branch or pull request Althar fetched for it
- * (ADR-065). It runs until the person stops it, or Althar quits.
+ * (ADR-066). It runs until the person stops it, or Althar quits.
  */
 export const Launch = Schema.Struct({
   ...BackgroundCommand.fields,
@@ -1976,7 +1987,7 @@ export const Runnable = Schema.Struct({
 })
 export type Runnable = typeof Runnable.Type
 
-/** An open pull request the Run menu offers to run (ADR-065). */
+/** An open pull request the Run menu offers to run (ADR-066). */
 export const OfferedPullRequest = Schema.Struct({
   number: Schema.Number,
   /** As its host writes it: PR #12, MR !12. */
@@ -2323,8 +2334,10 @@ export const ThreadSnapshot = Schema.Struct({
     reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
-    /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
+    /** Its place in its project's Up next, waiting for a place, as its card says: 1 gets one first; absent out of it. */
     place: Schema.optional(Schema.Int),
+    /** It waits in its project's line behind another of its tasks, so the person can put it at the line's front. */
+    front: Schema.optional(Schema.Boolean),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
     /** Its rounds of work as its graph had them, oldest first: what its Graph face draws. Absent from a runtime before it. */
@@ -3476,7 +3489,7 @@ export const Api = RpcGroup.make(
    * Runs one of the project's runnables with no agent, its default without
    * one: what the task built, in its worktree, or, with no task, a copy of the
    * default branch, or of the branch or pull request named, which Althar
-   * fetches first (ADR-065). One already running there is the one returned.
+   * fetches first (ADR-066). One already running there is the one returned.
    */
   command(
     'RunProject',

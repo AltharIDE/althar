@@ -22,3 +22,7 @@
 .you {
   color: var(--signal);
 }
+/* under way already: a word stronger than the rest of the line, as its work is half done */
+.continues {
+  color: var(--t-2);
+}

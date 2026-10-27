@@ -523,7 +523,7 @@ export type StuckAnswer =
   | { readonly kind: 'wait' }
   | { readonly kind: 'abandon' }
 
-/** A branch or a pull request to run, in a copy of its own (ADR-065); in a project of several repositories, which one's. */
+/** A branch or a pull request to run, in a copy of its own (ADR-066); in a project of several repositories, which one's. */
 export type RunRef =
   | { readonly branch: string; readonly repository?: string }
   | { readonly pullRequest: string; readonly repository?: string }

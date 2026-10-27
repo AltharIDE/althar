@@ -94,7 +94,7 @@ export const layer = (options: RuntimeLayerOptions) => {
   )
   const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
   // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
-  // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-065).
+  // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-066).
   const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
     Layer.provideMerge(Fetches.layer),
     Layer.provideMerge(
