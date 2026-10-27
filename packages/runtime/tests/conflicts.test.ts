@@ -596,13 +596,13 @@ describe('a round’s words, and what git says of its branch', () => {
     }),
   )
 
-  it.effect('finds what conflicts merging here without moving anything, and nothing where it can’t tell', () =>
+  it.effect('finds what conflicts merging here without moving anything, and says where it can’t tell', () =>
     Effect.gen(function* () {
       const { root, conflict } = split()
       assert.deepStrictEqual(yield* conflictsOf(root, 'main', conflict.from), ['a.txt', 'b.txt'])
       assert.strictEqual(git(root, 'rev-parse', 'main'), conflict.target)
-      assert.deepStrictEqual(yield* conflictsOf(root, 'develop', conflict.from), [])
-      assert.deepStrictEqual(yield* conflictsOf(root, 'main', 'f'.repeat(40)), [])
+      assert.isNull(yield* conflictsOf(root, 'develop', conflict.from))
+      assert.isNull(yield* conflictsOf(root, 'main', 'f'.repeat(40)))
       assert.deepStrictEqual(yield* conflictsOf(root, 'main', conflict.target), [])
     }),
   )

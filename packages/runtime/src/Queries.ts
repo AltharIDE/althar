@@ -1931,6 +1931,10 @@ export class Queries extends Context.Service<
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
             ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
+            // Conflicting, and not asked of its lead: why, beside Resolve now (ADR-030).
+            ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
+            // Not looked at for a conflict, whatever its host says: why, beside Look again.
+            ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
             automation: yield* fromAutomation(taskId),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
@@ -2517,6 +2521,8 @@ export class Queries extends Context.Service<
               phase: card?.phase ?? null,
               kind: card?.kind,
               handedBack: card?.handedBack ?? null,
+              conflictUnsent: card?.conflictUnsent ?? null,
+              conflictUnchecked: card?.conflictUnchecked ?? null,
               madeChangeAt: head.madeChangeAt,
               waits: card?.waits ?? null,
               ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),

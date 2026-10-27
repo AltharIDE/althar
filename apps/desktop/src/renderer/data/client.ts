@@ -223,6 +223,10 @@ export interface Client {
   readonly stopTask: (taskId: string) => Promise<void>
   /** Whether a task's lead resolves conflicts on its own otherwise than its project says; null goes back to the project. */
   readonly setTaskResolveConflicts: (input: { readonly taskId: string; readonly resolveConflicts: boolean | null }) => Promise<void>
+  /** Resolve now: a task's conflict with its default branch asked of its lead, whatever kept it from being asked. */
+  readonly resolveConflictsNow: (taskId: string) => Promise<void>
+  /** Each open task of a project looked at now for a conflict with its default branch, under the project's rules. */
+  readonly lookForConflicts: (projectId: string) => Promise<void>
   /** Allows everything its agents ask on one task, short of what its project never allows, or takes it back. */
   readonly setTaskAllowEverything: (input: { readonly taskId: string; readonly allowEverything: boolean }) => Promise<void>
   /** Carries a stopped task on from the step it was on: with its last lead, or the agent picked. */
@@ -633,6 +637,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
+    resolveConflictsNow: (taskId) => command((commandId) => api.ResolveConflictsNow({ commandId, taskId })),
+    lookForConflicts: (projectId) => command((commandId) => api.LookForConflicts({ commandId, projectId })),
     setTaskAllowEverything: (input) => command((commandId) => api.SetTaskAllowEverything({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
     leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),

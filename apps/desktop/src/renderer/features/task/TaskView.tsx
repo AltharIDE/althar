@@ -121,6 +121,12 @@ export const text = {
   handsOver: (agent: string) => `hands the task to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
+  /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
+  conflictUnsent: (why: string) => `It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`,
+  resolveNow: 'Resolve now',
+  /** Althar couldn't look for a conflict here, whatever its host says, and why; the button looks again, fetching anew. */
+  conflictUnchecked: (why: string) => `Althar couldn’t look for a conflict with its default branch. ${why}`,
+  lookAgain: 'Look again',
   keep: (from: string) => `Keep ${from}`,
   /** What the lead is asked when merging its branch here conflicts: in each repository, the branch it merges into and where. */
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
@@ -731,6 +737,16 @@ export function TaskView({
     </>
   )
 
+  // A conflict that is the person's (its lead couldn't resolve it, or wasn't asked), or one Althar couldn't look for: why, and what asks again.
+  const conflict =
+    snapshot.task.handedBack != null
+      ? { words: snapshot.task.handedBack, act: text.resolveNow }
+      : snapshot.task.conflictUnsent != null
+        ? { words: text.conflictUnsent(snapshot.task.conflictUnsent), act: text.resolveNow }
+        : snapshot.task.conflictUnchecked != null
+          ? { words: text.conflictUnchecked(snapshot.task.conflictUnchecked), act: text.lookAgain }
+          : null
+
   const line: ReactNode =
     waiting !== null ? (
       <>
@@ -755,11 +771,16 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || line !== null ? (
+          model.error !== null || conflict !== null || line !== null ? (
             <>
               {model.error !== null && (
                 <div className={s.failure} role="alert">
                   {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                </div>
+              )}
+              {conflict !== null && (
+                <div>
+                  {conflict.words} <LinkButton onClick={() => void model.resolveConflictsNow()}>{conflict.act}</LinkButton>
                 </div>
               )}
               {line !== null && <div>{line}</div>}
