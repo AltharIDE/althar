@@ -196,6 +196,8 @@ export interface ComposerProps {
   suggestion?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
+  /** A line on the same edge, just under what is in `above` and nearest the field: who takes over when you send, what is missing. It wraps with the composer and never covers `above`. Put links in it; they stay clickable. */
+  notice?: ReactNode
   /** Dictation carried from another thread (a DictationPill): centred over the composer, above all that floats on its edge, so it covers none of it. */
   carried?: ReactNode
   /** What is joined to the composer's top edge, in the flow: a DictationTray. The field stays usable under it. */
@@ -247,6 +249,7 @@ export function Composer({
   hint,
   suggestion,
   above,
+  notice,
   carried,
   tray,
   images = [],
@@ -366,10 +369,11 @@ export function Composer({
   /* One shape whether or not a tray shows, so the field is never rebuilt under the cursor as one comes and goes. What floats sits above the tray, not over it. */
   return (
     <div className={s.stack} data-tray-host="" {...drop.handlers}>
-      {(above || carried) && (
+      {(above || notice || carried) && (
         <div className={s.floats}>
           {carried && <div className={s.carried}>{carried}</div>}
           {above && <div className={s.above}>{above}</div>}
+          {notice && <div className={s.notice}>{notice}</div>}
         </div>
       )}
       {tray != null && <div className={s.tray}>{tray}</div>}
