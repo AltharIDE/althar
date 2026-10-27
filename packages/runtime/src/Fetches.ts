@@ -67,6 +67,8 @@ export interface Offered {
   readonly branches: ReadonlyArray<string>
   /** Why it lists less than it might: its remote couldn't be reached, or no connection lists its pull requests; null where it lists all. */
   readonly note: string | null
+  /** The host has more open pull requests than it listed: words find them, searched there. */
+  readonly more: boolean
 }
 
 /** Why Althar couldn't fetch what was asked, in words for the person or an agent. */
@@ -104,13 +106,23 @@ const numberOf = (which: string) => {
 
 const sameRepository = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
 
+/** A host by its name, the hosts' own SSH names read as the host they are. */
+const hostName = (host: string) =>
+  ({ 'ssh.github.com': 'github.com', 'altssh.gitlab.com': 'gitlab.com' })[host.toLowerCase()] ?? host.toLowerCase()
+
 export class Fetches extends Context.Service<
   Fetches,
   {
     /** Fetches what is asked for into the repository, signed in as Althar: what it got, or why not. */
     fetch(repository: string, wanted: Wanted): Effect.Effect<Fetched, FetchRefused>
-    /** What each of the project's repositories here offers to run: its open pull requests and its branches, asked of its remote now. */
-    offered(projectId: string): Effect.Effect<ReadonlyArray<Offered>, unknown>
+    /**
+     * What each of the project's repositories here offers to run: its open
+     * pull requests and its branches, asked of its remote now. With words,
+     * only the open pull requests whose titles have them, searched on the
+     * host, for those past the first listing; no branches, which are all
+     * listed already.
+     */
+    offered(projectId: string, text?: string): Effect.Effect<ReadonlyArray<Offered>, unknown>
   }
 >()('@althar/runtime/Fetches') {
   static readonly layer: Layer.Layer<Fetches, never, SqlClient.SqlClient | Instance | Connections | ToolServer> = Layer.effect(
@@ -239,9 +251,16 @@ export class Fetches extends Context.Service<
             const resolved = yield* connections.resolve(asked).pipe(Effect.orElseSucceed(() => null))
             const ref = resolved?.ref ?? parseLink(asked)
             if (ref?.kind !== 'change') return yield* new FetchRefused({ message: 'That link isn’t to a pull request.' })
+            // Its host and its repository both the remote's: a link elsewhere with the same number is another change.
             const here = parseRemote(reach.url)
-            if (here !== null && !sameRepository(here.path, ref.path))
-              return yield* new FetchRefused({ message: `That pull request is on ${ref.path.join('/')}, not ${here.path.join('/')}.` })
+            if (here === null)
+              return yield* new FetchRefused({
+                message: `That link is to ${ref.host}, and ${remote} isn't on a code host Althar can tell. Give the pull request's number.`,
+              })
+            if (hostName(here.host) !== hostName(ref.host) || !sameRepository(here.path, ref.path))
+              return yield* new FetchRefused({
+                message: `That pull request is on ${ref.host}/${ref.path.join('/')}, not ${here.host}/${here.path.join('/')}.`,
+              })
             number = ref.number
           }
           if (number === null) return yield* new FetchRefused({ message: 'Give the pull request’s number, as #12, or its link.' })
@@ -318,7 +337,10 @@ export class Fetches extends Context.Service<
           ),
         )
 
-      const offered = (projectId: string) =>
+      /** How many open pull requests a listing reads, newest first. */
+      const LISTED = 50
+
+      const offered = (projectId: string, text?: string) =>
         Effect.gen(function* () {
           const bindings = yield* sqlClient<{ name: string; base: string | null; repository: string }>`
             SELECT b.display_name AS name, b.default_base_ref AS base, l.path AS repository
@@ -330,9 +352,10 @@ export class Fetches extends Context.Service<
             bindings,
             (binding) =>
               Effect.gen(function* () {
+                const words = text?.trim() ?? ''
                 const remotes = yield* namedRemotes(binding.repository).pipe(Effect.orElseSucceed(() => []))
                 const origin = yield* reachOf(binding.repository, 'origin')
-                const heads = origin === null ? null : yield* headsOf(binding.repository, origin)
+                const heads = origin === null ? null : words !== '' ? [] : yield* headsOf(binding.repository, origin)
                 const base = binding.base ?? 'main'
                 const branches = (heads ?? [])
                   .map((head) => head.name)
@@ -342,13 +365,12 @@ export class Fetches extends Context.Service<
                 const listed =
                   signed === null
                     ? null
-                    : yield* signed.host.listChanges(signed.repository, { state: 'open', limit: 50 }).pipe(
-                        Effect.map((list) => list.changes),
-                        Effect.orElseSucceed(() => null),
-                      )
+                    : yield* signed.host
+                        .listChanges(signed.repository, { state: 'open', limit: LISTED, ...(words === '' ? {} : { text: words }) })
+                        .pipe(Effect.orElseSucceed(() => null))
                 return {
                   repository: binding.name,
-                  pullRequests: (listed ?? []).map((change) => ({
+                  pullRequests: (listed?.changes ?? []).map((change) => ({
                     number: change.number,
                     name: `${signed?.host.words.short ?? 'PR'} ${signed?.host.words.prefix ?? '#'}${change.number}`,
                     title: change.title,
@@ -364,6 +386,7 @@ export class Fetches extends Context.Service<
                       : listed === null
                         ? 'Connect its host in Settings to see its pull requests here. A number, as #12, runs one still.'
                         : null,
+                  more: listed?.more ?? false,
                 } satisfies Offered
               }),
             { concurrency: 4 },
@@ -452,7 +475,7 @@ export class Fetches extends Context.Service<
 
       return Fetches.of({
         fetch,
-        offered: (projectId) => offered(projectId),
+        offered: (projectId, text) => offered(projectId, text),
       })
     }),
   )

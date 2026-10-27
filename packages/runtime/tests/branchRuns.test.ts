@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,6 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig, withoutSignIns } from '../src/Config'
 import { Coordinator } from '../src/Coordinator'
+import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -183,6 +184,36 @@ describe('running a branch or a pull request', () => {
         launches.start({ projectId, taskId: null, threadId: null, ref: { kind: 'pull_request', which: '99' } }),
       )
       assert.include((none as { message: string }).message, 'origin has no pull request #99')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('runs it in the repository of the project’s first runnable, in the person’s order, not the first repository', () =>
+    Effect.gen(function* () {
+      const launches = yield* Launches
+      const instance = yield* Instance
+      // Two repositories: api, with no such branch, and web, whose remote has it.
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      for (const name of ['api', 'web']) {
+        const path = join(folder, name)
+        mkdirSync(path)
+        git(path, 'init', '-q', '-b', 'main')
+        writeFileSync(join(path, 'package.json'), JSON.stringify({ name, scripts: { dev: `node -e "console.log('${name}')"` } }))
+        git(path, 'add', '.')
+        git(path, 'commit', '-q', '-m', 'Start')
+        const remote = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        git(remote, 'init', '-q', '--bare', '-b', 'main')
+        git(path, 'remote', 'add', 'origin', remote)
+        git(path, 'push', '-q', 'origin', 'main')
+        if (name === 'web') git(path, 'push', '-q', 'origin', 'main:feature/x')
+      }
+      const { projectId } = yield* open(folder)
+      const [api, web] = yield* launches.runnables(projectId, null)
+      assert.deepStrictEqual([api?.repository, web?.repository], ['api', 'web'])
+      // The person put web's first.
+      yield* launches.orderRunnables({ projectId, ids: [web?.id ?? '', api?.id ?? ''], actorId: instance.personId })
+      const started = yield* launches.start({ projectId, taskId: null, threadId: null, ref: { kind: 'branch', name: 'feature/x' } })
+      assert.deepInclude(started, { branch: 'feature/x', runnableId: web?.id ?? null })
+      yield* launches.stop(started.id)
     }).pipe(Effect.provide(withQueries())),
   )
 

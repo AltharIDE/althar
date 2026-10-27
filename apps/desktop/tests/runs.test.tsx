@@ -204,24 +204,31 @@ describe('what the project runs, from its front', () => {
   })
 
   it('runs a branch or a pull request from the list, picked from what the remote has now, and says in the picker what went wrong', async () => {
-    const getRunnableRefs = vi.fn(async () => [
-      {
-        repository: 'meridian-api',
-        pullRequests: [
-          {
-            number: 41,
-            name: 'PR #41',
-            title: 'Add a services directory',
-            branch: 'feature/find-a-pro',
-            author: 'mira',
-            draft: false,
-            fork: false,
-          },
-        ],
-        branches: ['main', 'feature/find-a-pro'],
-        note: null,
-      },
-    ])
+    // The host has more open than it listed: words are searched there.
+    const older = { number: 12, name: 'PR #12', title: 'An older pull request', branch: 'older', author: 'sam', draft: false, fork: true }
+    const getRunnableRefs = vi.fn(async (_projectId: string, text?: string) =>
+      text === undefined
+        ? [
+            {
+              repository: 'meridian-api',
+              pullRequests: [
+                {
+                  number: 41,
+                  name: 'PR #41',
+                  title: 'Add a services directory',
+                  branch: 'feature/find-a-pro',
+                  author: 'mira',
+                  draft: false,
+                  fork: false,
+                },
+              ],
+              branches: ['main', 'feature/find-a-pro'],
+              note: null,
+              more: true,
+            },
+          ]
+        : [{ repository: 'meridian-api', pullRequests: text === 'older' ? [older] : [], branches: [], note: null, more: false }],
+    )
     const runProject = vi
       .fn()
       .mockRejectedValueOnce(new ApiError({ reason: 'LaunchRefused', message: 'origin has no branch feature/gone.' }))
@@ -237,6 +244,11 @@ describe('what the project runs, from its front', () => {
       'main',
       'feature/find-a-pro',
     ])
+    // One past the listing, found on the host by its words.
+    await userEvent.type(picker.getByRole('combobox'), 'older')
+    expect(await picker.findByRole('option', { name: /An older pull request/ })).toBeTruthy()
+    expect(getRunnableRefs).toHaveBeenCalledWith('p1', 'older')
+    await userEvent.clear(picker.getByRole('combobox'))
     // Refused, it says why and stays open.
     await userEvent.type(picker.getByRole('combobox'), 'main')
     await userEvent.keyboard('{Enter}')
@@ -261,7 +273,7 @@ describe('what the project runs, from its front', () => {
         ],
       }),
     )
-    expect((await screen.findByRole('button', { name: /Running/ })).textContent).toContain('PR #41 · feature/find-a-pro')
+    expect((await screen.findByRole('button', { name: /^Running/ })).textContent).toContain('PR #41 · feature/find-a-pro')
     expect(screen.getByRole('button', { name: /^Run$/ })).toBeTruthy()
   })
 

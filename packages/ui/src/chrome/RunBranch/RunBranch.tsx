@@ -17,7 +17,8 @@ import s from './RunBranch.module.css'
  * pulled. Picking one runs it in a copy of its own, with no task: Althar
  * fetches it, and the row says so until it runs, then the dialog closes; what
  * went wrong stays in it. A number typed that the list doesn't have runs that
- * pull request still. A modal the consumer mounts to open, keyed as the
+ * pull request still; where the host has more open than it listed, what is
+ * typed is searched there too, and the list says so until it answers. A modal the consumer mounts to open, keyed as the
  * finder is: you arrive typing, the arrows move, Enter runs, Escape closes.
  */
 
@@ -49,6 +50,8 @@ export interface RunBranchText {
   pulls: string
   branches: string
   loading: string
+  /** Searching the host's other open pull requests for what is typed. */
+  searching: string
   none: (query: string) => string
   count: (n: number) => string
   /** A number typed that the list doesn't have. */
@@ -67,6 +70,7 @@ export const runBranchText: RunBranchText = {
   pulls: 'Pull requests',
   branches: 'Branches',
   loading: 'Asking the remote…',
+  searching: 'Searching its other pull requests…',
   none: (query) => `Nothing on the remote matches “${query}”`,
   count: (n) => (n === 1 ? '1 to run' : `${n} to run`),
   typed: (number) => `Pull request #${number}`,
@@ -83,6 +87,8 @@ export interface RunBranchProps {
   choices: readonly BranchChoice[] | null
   /** Why it lists less than it might: the remote out of reach, or no connection to list pull requests. */
   note?: string
+  /** What is typed is being searched on the host, past the pull requests listed. */
+  searching?: boolean
   /** The one Althar is fetching to run, by its key (`choiceKey`). */
   starting?: string | null
   /** What went wrong running the last one picked. */
@@ -116,6 +122,7 @@ export const found = (choices: readonly BranchChoice[], query: string, t: Pick<R
 export function RunBranch({
   choices,
   note,
+  searching = false,
   starting = null,
   error,
   query,
@@ -294,7 +301,13 @@ export function RunBranch({
                 )}
               </div>
             )}
-            {typed && choices !== null && rows.length === 0 && <p className={s.quiet}>{t.none(words.trim())}</p>}
+            {typed && choices !== null && searching && (
+              <p className={s.quiet}>
+                <Spinner size="small" />
+                {t.searching}
+              </p>
+            )}
+            {typed && choices !== null && !searching && rows.length === 0 && <p className={s.quiet}>{t.none(words.trim())}</p>}
           </div>
           {error !== undefined && (
             <p className={s.error} role="alert">

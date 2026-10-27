@@ -24,14 +24,18 @@
     copy of its own, detached at the commit it got, as the default branch's
     copy is made (`copyAt`), under the project's folder in `.runs/<run>`, and
     runs the runnable asked for there, or the first of that repository's
-    that says how it runs. There is no task, no agent and no local branch,
+    that says how it runs. Its repository, in a project of several, is that
+    of the runnable asked for, else of the first in the person's order, as
+    the default branch's run picks. There is no task, no agent and no local branch,
     and the person's checkout is untouched. The copy goes as the run does:
     stopped, ended by itself, or left by an earlier launch, removed as
     Althar starts. One already running is the one returned.
   - **A pull request** is fetched by its own branch where it is the
     repository's, into `origin/<branch>`, and otherwise, as a fork's is, from
     the host's ref for it (`refs/pull/N/head`, `refs/merge-requests/N/head`)
-    into `refs/althar/pull/N`. A fork's repository asks `upstream`.
+    into `refs/althar/pull/N`. A fork's repository asks `upstream`. One
+    given by its link is fetched only where the link's host and repository
+    are the remote's: the same number elsewhere is another change.
   - **An unknown branch is refused** with the names like it; the run says the
     commit it got, and its pill and card name the branch (`PR #12 ·
     feature/x`). Run again from its card, it fetches what was asked for
@@ -39,7 +43,9 @@
   - **The Run menu has "Run a branch or pull request…"** on the project:
     a picker of the remote's open pull requests (first, by title and number)
     and its branches, asked of the remote as it opens. A number typed that
-    the list doesn't have runs that pull request still.
+    the list doesn't have runs that pull request still. The list has the
+    newest fifty open; where the host has more, what is typed is searched
+    there too (`GetRunnableRefs` with `text`).
   - **A lead asks Althar to fetch** (`fetch_from_remote`: a branch, a tag or
     a pull request) into its task's repository, whose refs its worktree
     shares. Althar says the commit it got. It never pushes, never moves a

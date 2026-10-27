@@ -1436,7 +1436,7 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      GetRunnableRefs: ({ projectId }) => api(fetches.offered(projectId)),
+      GetRunnableRefs: ({ projectId, text }) => api(fetches.offered(projectId, text)),
       KeepRunnable: ({ commandId, projectId, id, name, command, repository }) =>
         once(
           commandId,

@@ -465,8 +465,8 @@ export interface Client {
   readonly orderRunnables: (projectId: string, ids: ReadonlyArray<string>) => Promise<void>
   /** The scripts in the project's package.json files, to pick something to run from. */
   readonly getRepositoryScripts: (projectId: string) => Promise<ReadonlyArray<RepositoryScript>>
-  /** What the project's repositories offer to run besides their default branch, asked of their remotes now. */
-  readonly getRunnableRefs: (projectId: string) => Promise<ReadonlyArray<OfferedRefs>>
+  /** What the project's repositories offer to run besides their default branch, asked of their remotes now; with words, the open pull requests their hosts find by them. */
+  readonly getRunnableRefs: (projectId: string, text?: string) => Promise<ReadonlyArray<OfferedRefs>>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
@@ -746,7 +746,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     dropRunnable: (projectId, id) => command((commandId) => api.DropRunnable({ commandId, projectId, id })),
     orderRunnables: (projectId, ids) => command((commandId) => api.OrderRunnables({ commandId, projectId, ids })),
     getRepositoryScripts: (projectId) => settle(api.GetRepositoryScripts({ projectId })),
-    getRunnableRefs: (projectId) => settle(api.GetRunnableRefs({ projectId })),
+    getRunnableRefs: (projectId, text) => settle(api.GetRunnableRefs({ projectId, ...(text === undefined ? {} : { text }) })),
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),

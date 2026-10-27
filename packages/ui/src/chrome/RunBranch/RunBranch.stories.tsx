@@ -123,6 +123,16 @@ export const NoMatch: Story = {
   },
 }
 
+/** The host has more open than it listed: what is typed is searched there, and until it answers, the list says so rather than “nothing”. */
+export const SearchingTheHost: Story = {
+  args: { defaultQuery: 'pelican', searching: true },
+  play: async () => {
+    const body = within(document.body)
+    await expect(body.getByText('Searching its other pull requests…', { selector: 'p' })).toBeVisible()
+    await expect(body.queryByText('Nothing on the remote matches “pelican”', { selector: 'p' })).toBeNull()
+  },
+}
+
 /** No connection to the code host: its branches still, and why there are no pull requests. */
 export const NoPullRequests: Story = {
   args: {

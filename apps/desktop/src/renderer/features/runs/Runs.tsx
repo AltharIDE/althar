@@ -14,7 +14,7 @@ import {
   type RunTargetRun,
 } from '@althar/ui'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { messageOf, type RunRef } from '../../data/client'
 import { reads } from '../../data/reads'
@@ -244,10 +244,15 @@ const refOf = (choice: BranchChoice): RunRef => ({
   ...(choice.repository === undefined ? {} : { repository: choice.repository }),
 })
 
+/** Words worth searching the host for: a few letters, not a number, which runs that pull request as it is. */
+const searchable = (words: string) => words.length >= 2 && !/^[#!]?\d+$/.test(words)
+
 /**
  * The picker of a branch or a pull request to run: what the remotes have,
- * asked as it opens, so it's fresh; the one picked fetching until it runs,
- * then closed; what went wrong said in it.
+ * asked as it opens, so it's fresh; where a host has more open pull requests
+ * than it listed, what is typed searched there a moment after, and those it
+ * finds added; the one picked fetching until it runs, then closed; what went
+ * wrong said in it.
  */
 function RunABranch({
   projectId,
@@ -267,12 +272,35 @@ function RunABranch({
     gcTime: 0,
     refetchOnWindowFocus: false,
   })
+  const [query, setQuery] = useState('')
+  const [words, setWords] = useState('')
+  useEffect(() => {
+    const later = setTimeout(() => setWords(query.trim()), 250)
+    return () => clearTimeout(later)
+  }, [query])
+  const more = offered.data?.some((one) => one.more) ?? false
+  const searched = useQuery({
+    queryKey: ['runnable-refs', projectId, words],
+    queryFn: () => client.getRunnableRefs(projectId, words),
+    enabled: more && searchable(words),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  })
+  const searching = more && searchable(query.trim()) && (query.trim() !== words || searched.isFetching)
   const [starting, setStarting] = useState<string | null>(null)
   const [error, setError] = useState<string>()
   const note = offered.isError ? messageOf(offered.error) : offered.data?.find((one) => one.note !== null)?.note
+  const listed = offered.data === undefined ? [] : choicesOf(offered.data)
+  const found = more && searchable(words) && searched.data !== undefined ? choicesOf(searched.data) : []
+  const keys = new Set(listed.map(choiceKey))
   return (
     <RunBranch
-      choices={offered.isError ? [] : offered.data === undefined ? null : choicesOf(offered.data)}
+      choices={
+        offered.isError ? [] : offered.data === undefined ? null : [...listed, ...found.filter((choice) => !keys.has(choiceKey(choice)))]
+      }
+      query={query}
+      onQueryChange={setQuery}
+      searching={searching}
       {...(note == null ? {} : { note })}
       starting={starting}
       {...(error === undefined ? {} : { error })}

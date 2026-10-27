@@ -727,11 +727,12 @@ export class Launches extends Context.Service<
             const asked = input.runnableId === undefined ? undefined : kept.find((one) => one.id === input.runnableId)
             if (input.runnableId !== undefined && asked === undefined)
               return yield* new LaunchRefused({ why: 'which', message: 'The project has nothing like that to run any more.' })
-            // Its repository: that of what it runs, where that was asked for, else the one named, else the first that runs something.
+            // Its repository: that of what it runs, where that was asked for; else, of those here (the one named, where one was), the repository of the first kept in the person's order, as a run of the default branch picks; else the first.
             const place =
               asked !== undefined
                 ? places.find(({ binding }) => binding.id === asked.bindingId)
-                : (places.find(({ binding }) => kept.some((one) => one.bindingId === binding.id)) ?? places[0])
+                : (kept.map((one) => places.find(({ binding }) => binding.id === one.bindingId)).find((one) => one !== undefined) ??
+                  places[0])
             if (place === undefined)
               return yield* new LaunchRefused({ why: 'elsewhere', message: 'Its repository has no copy on this computer to run it in.' })
             const { binding } = place

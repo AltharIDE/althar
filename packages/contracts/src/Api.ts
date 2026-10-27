@@ -1860,6 +1860,8 @@ export const OfferedRefs = Schema.Struct({
   branches: Schema.Array(Schema.String),
   /** Why it lists less than it might, in words; null where it lists all. */
   note: Schema.NullOr(Schema.String),
+  /** Its host has more open pull requests than it listed: asked again with words, it searches them there. */
+  more: Schema.Boolean,
 })
 export type OfferedRefs = typeof OfferedRefs.Type
 
@@ -3320,8 +3322,13 @@ export const Api = RpcGroup.make(
     },
     Launch,
   ),
-  /** What the project's repositories offer to run besides their default branch, asked of their remotes now: open pull requests, then branches. */
-  call('GetRunnableRefs', { projectId: Schema.String }, Schema.Array(OfferedRefs)),
+  /**
+   * What the project's repositories offer to run besides their default
+   * branch, asked of their remotes now: open pull requests, then branches.
+   * With words, only the open pull requests whose titles have them, searched
+   * on the host, for one past those a first listing had room for.
+   */
+  call('GetRunnableRefs', { projectId: Schema.String, text: Schema.optional(Schema.String) }, Schema.Array(OfferedRefs)),
   /**
    * Keeps something for the project to run (ADR-044): a new one, at the end
    * of the list, or, by id, a change to one. A null command is the
