@@ -1,82 +1,20 @@
-import { createRoute, useNavigate } from '@tanstack/react-router'
-import { useCallback } from 'react'
+import { createRoute } from '@tanstack/react-router'
 
-import { Room } from '@althar/ui'
-
-import { readFirst, reads } from '../../data/reads'
+import { held, projectReads, readFirst, reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { ThreadPending } from '../../shared/Pending'
-import { useBoard } from '../board/useBoard'
-import { useLastRoom } from '../tabs/TabsFrame'
-import { useConnections } from '../connections/useConnections'
-import { isProjectSection, type ProjectSection } from '../projectSettings/sections'
-import { useProjectSettings } from '../projectSettings/useProjectSettings'
-import { ProjectView } from './ProjectView'
-import { useProject } from './useProject'
+import { useShown } from '../tabs/kept'
+import { projectSearchOf } from './search'
 
+/**
+ * The project on show: its screen is the window's own, kept while the
+ * person is elsewhere and shown again as they come back (`KeptScreens`), as they left it.
+ */
 function Project() {
   const { projectId } = projectRoute.useParams()
-  const { room, section, automation } = projectRoute.useSearch()
-  const navigate = useNavigate()
-  /** The address, changed in place: what a reload opens on. */
-  const address = useCallback(
-    (change: (was: ProjectSearch) => ProjectSearch) =>
-      void navigate({ to: '/projects/$projectId', params: { projectId }, search: change, replace: true }),
-    [navigate, projectId],
-  )
-  // The automation open in Automations is the address's, so it is open again after a reload; back on the tab, the view last on says.
-  const keepAutomation = useCallback(
-    (open: string | null) => {
-      if (open === (automation ?? null)) return
-      address(({ automation: _automation, room: was, ...rest }) =>
-        open === null
-          ? { ...rest, ...(was === undefined || was === Room.Automations ? {} : { room: was }) }
-          : { ...rest, room: Room.Automations, automation: open },
-      )
-    },
-    [address, automation],
-  )
-  // The view it was last on, unless a task's bar, or a way to one of its settings, asked for one.
-  const [last, keepView] = useLastRoom(projectId)
-  // Left for another view, Automations is no longer what the address opens on.
-  const keepRoom = useCallback(
-    (next: Room) => {
-      keepView(next)
-      if (room === Room.Automations && next !== Room.Automations) address(({ room: _room, ...rest }) => rest)
-    },
-    [keepView, room, address],
-  )
-  const opening = room ?? last
-  // Removed, the project is gone: back to the home.
-  const settings = useProjectSettings(projectId, () => void navigate({ to: '/' }))
-  return (
-    <ProjectView
-      {...(opening === null ? {} : { room: opening })}
-      onRoomChange={keepRoom}
-      {...(automation === undefined ? {} : { automation })}
-      onAutomationChange={keepAutomation}
-      model={useProject(projectId)}
-      board={useBoard(projectId)}
-      connections={useConnections()}
-      onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
-      settings={{
-        model: settings,
-        ...(section === undefined ? {} : { section }),
-        onConnections: () => void navigate({ to: '/settings/$section', params: { section: 'code-hosts' } }),
-      }}
-    />
-  )
+  useShown({ kind: 'project', projectId, search: projectRoute.useSearch() })
+  return null
 }
-
-/** What a project opens on, when something asks: a view, of its settings a section, and of its automations the one open, or `new`. */
-interface ProjectSearch {
-  readonly room?: Room
-  readonly section?: ProjectSection
-  readonly automation?: string
-}
-
-/** The view an address names, if it names one. */
-const roomOf = (value: unknown): Room | undefined => Object.values(Room).find((room) => room === value)
 
 /** A project: the conversation with its coordinator, the board of its work, and its settings. */
 export const projectRoute = createRoute({
@@ -84,30 +22,8 @@ export const projectRoute = createRoute({
   path: '/projects/$projectId',
   component: Project,
   pendingComponent: ThreadPending,
-  // Another project is another screen, with nothing of this one's kept: what was typed, what was open.
-  remountDeps: ({ params }) => params.projectId,
-  loader: ({ context: { client, cache }, params: { projectId } }) => {
-    const read = reads(client)
-    return readFirst(
-      cache.fetchQuery(read.projects()),
-      cache.fetchQuery(read.coordinator(projectId)),
-      cache.fetchQuery(read.board(projectId)),
-      cache.fetchQuery(read.rules(projectId)),
-      cache.fetchQuery(read.repositories(projectId)),
-      cache.fetchQuery(read.status()),
-      cache.fetchQuery(read.connections()),
-      cache.fetchQuery(read.automations(projectId)),
-    )
-  },
-  validateSearch: (search: Record<string, unknown>): ProjectSearch => {
-    const room = roomOf(search.room)
-    return {
-      ...(room === undefined ? {} : { room }),
-      ...(isProjectSection(search.section) ? { section: search.section } : {}),
-      ...(typeof search.automation === 'string' && search.automation !== '' ? { automation: search.automation } : {}),
-    }
-  },
+  // Only what the window has never read waits: a project the person has been in shows at once, and what changed since is read behind it.
+  loader: ({ context: { client, cache }, params: { projectId } }) =>
+    readFirst(...projectReads(reads(client), projectId).map((options) => held(cache, options))),
+  validateSearch: projectSearchOf,
 })
-
-/** Where one of a project's settings is: its Settings view, at a section. */
-export const settingsSearch = (section: ProjectSection): ProjectSearch => ({ room: Room.Settings, section })
