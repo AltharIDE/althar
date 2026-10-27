@@ -10,10 +10,11 @@ import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
 import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
-import { useBoard } from '../src/renderer/features/board/useBoard'
+import { readHeadsAhead, useBoard } from '../src/renderer/features/board/useBoard'
 import { useClosePullRequests } from '../src/renderer/features/board/useClosePullRequests'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
+import { makeQueryClient } from '../src/renderer/data/reads'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
 import { useSettingsOf, withServices } from './render'
@@ -1806,5 +1807,35 @@ describe('collapsing lanes', () => {
     expect(stays.getAttribute('aria-disabled')).toBe('true')
     await userEvent.click(stays)
     expect(within(work).getByRole('button', { name: 'Ship it' })).toBeTruthy()
+  })
+})
+
+describe('a ready task’s head, read ahead', () => {
+  it('is read again when its task changes, not when another on the board does', async () => {
+    const getThread = vi.fn(async () => snapshot())
+    const { client } = fakeClient({ getThread })
+    const cache = makeQueryClient()
+    const first = board()
+    readHeadsAhead(client, cache, first)
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(1))
+    expect(getThread).toHaveBeenLastCalledWith('th4', { limit: 0 })
+    // Another task starts: the board moves on, but the ready task's head is as it was.
+    const moved = board({ cursor: 4, tasks: first.tasks.map((one) => (one.taskId === 't1' ? { ...one, phase: 'running' } : one)) })
+    readHeadsAhead(client, cache, moved)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(getThread).toHaveBeenCalledTimes(1)
+    // A call now waits in the ready task: its head is read again.
+    const called = board({ cursor: 5, tasks: moved.tasks, calls: [{ ...first.calls[0]!, id: 'a9', taskId: 't4', threadId: 'th4' }] })
+    readHeadsAhead(client, cache, called)
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(2))
+    // Its pull request moves on: read again.
+    readHeadsAhead(client, cache, {
+      ...called,
+      cursor: 6,
+      tasks: called.tasks.map((one) =>
+        one.taskId === 't4' && one.change !== null ? { ...one, change: { ...one.change, head: 'def456' } } : one,
+      ),
+    })
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(3))
   })
 })
