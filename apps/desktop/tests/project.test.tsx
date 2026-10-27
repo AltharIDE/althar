@@ -162,8 +162,10 @@ describe('the project’s bar', () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)
     const checked = () => screen.getAllByRole('radio').find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent
-    await waitFor(() => expect(checked()).toMatch(/^Conversation/))
+    await waitFor(() => expect(checked()).toMatch(/^Home/))
     ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('b')
+    expect(checked()).toMatch(/^Conversation/)
     await userEvent.keyboard('b')
     expect(checked()).toMatch(/^Board/)
     await userEvent.keyboard('b')
@@ -175,6 +177,13 @@ describe('the project’s bar', () => {
     // A task starts by telling the coordinator; nothing else starts one.
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     view.unmount()
+  })
+
+  it('opens on Home where no view was named or kept', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project />, client)
+    const views = await screen.findByRole('radiogroup', { name: 'View' })
+    expect(within(views).getByRole('radio', { checked: true }).textContent).toMatch(/^Home/)
   })
 
   it('says which view it is on, to open on it again, and has only its views, its automations and its settings to choose from', async () => {
@@ -201,7 +210,7 @@ describe('the Talk room', () => {
   it("shows the coordinator's thread with each task's card, folds its finished work, and opens a task", async () => {
     const onTask = vi.fn()
     const { client, watching } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
-    withServices(<Project onTask={onTask} />, client)
+    withServices(<Project room={Room.Talk} onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'meridian', level: 1 })
     // Its front page says what it is made of, never where it is on this Mac.
     const made = await screen.findByRole('list', { name: 'Made of' })
@@ -251,7 +260,7 @@ describe('the Talk room', () => {
         }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('Added the retry.')).toBeTruthy()
     expect(screen.getByText('Ready')).toBeTruthy()
     expect(screen.getByText('Needs you')).toBeTruthy()
@@ -283,7 +292,7 @@ describe('the Talk room', () => {
         }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const pending = (await screen.findByRole('heading', { name: 'Refunds skip the rate limiter' })).closest('article')
     expect(pending).toBeTruthy()
     const card = within(pending as HTMLElement)
@@ -324,7 +333,7 @@ describe('the Talk room', () => {
         coordinatorSnapshot({ items: [items.changes(), items.changes({ changesId: 'ich_2', state: 'applied' })] }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const card = within(await screen.findByRole('article', { name: 'Issue changes · Linear' }))
     expect(
       card.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === 'Status Done' && node.childElementCount > 0),
@@ -341,7 +350,7 @@ describe('the Talk room', () => {
 
   it('holds, changes and starts a plan before it starts on its own', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card())] })) })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     // Each step's agent, model and effort.
     await userEvent.click(await screen.findByRole('button', { name: 'Review: gpt-5.2-codex Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
@@ -386,7 +395,7 @@ describe('the Talk room', () => {
   it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
     // Nothing to start or hold: it starts on its own once an agent is free.
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
@@ -407,7 +416,7 @@ describe('the Talk room', () => {
   it('keeps a card’s steps while a later step waits for a free agent, saying it waits and not that it runs', async () => {
     const waitingCard = card({ phase: 'running', step: 'review', queued: { busy: 4, atOnce: 4 }, branch: 'althar/midway' })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
     const track = screen.getByRole('list', { name: 'Steps' })
     expect(track.getAttribute('data-status')).toBe('queued')
@@ -424,7 +433,7 @@ describe('the Talk room', () => {
       ],
     }
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card({ plan }))] })) })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     // The lead at the coordinator's effort; the review, which it left out, at the model's own.
     expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
@@ -467,7 +476,7 @@ describe('the Talk room', () => {
         }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const running = await screen.findByRole('article', { name: 'Add a retry' })
     expect(within(running).getByText('Claude Opus')).toBeTruthy()
     expect(within(running).getByText('High')).toBeTruthy()
@@ -478,7 +487,7 @@ describe('the Talk room', () => {
 
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, held: false } })) })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('Ask the coordinator about meridian, or say what should change.')).toBeTruthy()
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
@@ -509,7 +518,7 @@ describe('the Talk room', () => {
         : offered,
     )
     const { client } = fakeClient({ getModels: vi.fn(async () => sonnetLowOrMedium) })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const use = async (from: string, model: string) => {
       await userEvent.click(await screen.findByRole('button', { name: from }))
       await userEvent.click(screen.getByRole('button', { name: /All models/ }))
@@ -528,7 +537,7 @@ describe('the Talk room', () => {
 
   it('sends images dropped on its composer with what the person says to it', async () => {
     const { client } = fakeClient()
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     const png = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
@@ -550,7 +559,7 @@ describe('the Talk room', () => {
   it('puts what the person said, and its images, back in its composer when Althar didn’t take it', async () => {
     const { client } = fakeClient()
     vi.mocked(client.send).mockRejectedValueOnce(new Error('Althar is restarting.'))
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     const png = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
@@ -559,14 +568,14 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('img', { name: 'bug.png' })).toBeTruthy()
     await userEvent.type(box, 'This is the bug{Enter}')
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('This is the bug'))
-    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: '1 attachment to send' })).toBeTruthy()
     expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
   })
 
   it('keeps the note unsent when the coordinator cannot start, and accepts one already starting', async () => {
     const { client } = fakeClient()
     vi.mocked(client.startSession).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Plan it{Enter}')
     expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
@@ -588,7 +597,7 @@ describe('the Talk room', () => {
         coordinatorSnapshot({ suggested: { agentId: 'opencode', agentName: 'OpenCode', model: null, effort: null, available: false } }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText("OpenCode isn't signed in, so the coordinator starts on Claude Code.")).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' }))
@@ -609,7 +618,7 @@ describe('the Talk room', () => {
         }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const thinking = await screen.findByText('Thinking')
     expect(thinking.closest('article')).toBe(screen.getAllByRole('article').at(-1))
     // The reply before it is over: its work folded under how long it took, not at work again.
@@ -627,7 +636,7 @@ describe('the Talk room', () => {
         }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('And the docs?')).toBeTruthy()
     expect(screen.queryByText('Thinking')).toBeNull()
     expect(screen.getByRole('textbox', { name: /^Tell the coordinator/ })).toBeTruthy()
@@ -642,7 +651,7 @@ describe('the Talk room', () => {
         }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
     expect(screen.getByText('Queued; the coordinator reads it next')).toBeTruthy()
     // While it works, its work folds too, under how long it has worked so far and what it is doing now.
@@ -681,7 +690,7 @@ describe('the Talk room', () => {
           : undefined,
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
     // Behind a running turn, waiting messages are in the composer's queue rather than the thread.
     expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
@@ -711,7 +720,7 @@ describe('the Talk room', () => {
           itemId === queued.id ? { ...queued, input: { state: 'delivered' as const, interrupting: false } } : items.says('Read again'),
         ),
       })
-      withServices(<Project />, client)
+      withServices(<Project room={Room.Talk} />, client)
       await screen.findByText('Queued · the coordinator reads it next')
       act(() => emit(streamed('live', 'Thinking it over', 'thc')))
       expect(await screen.findByText('Thinking it over')).toBeTruthy()
@@ -755,7 +764,7 @@ describe('the Talk room', () => {
           .mockResolvedValueOnce(coordinatorSnapshot({ session, items: [sent] })),
         getThreadItem: vi.fn(() => new Promise<ThreadItem>((resolve) => (delivered = resolve))),
       })
-      withServices(<Project />, client)
+      withServices(<Project room={Room.Talk} />, client)
       // Read before the runtime gave it to the coordinator, idle, it is being read: the coordinator thinks; then the turn on it starts.
       expect(await screen.findByText('Thinking')).toBeTruthy()
       expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
@@ -788,7 +797,7 @@ describe('the Talk room', () => {
         ),
         getThreadItem,
       })
-      withServices(<Project />, client)
+      withServices(<Project room={Room.Talk} />, client)
       await screen.findByText('Implementing')
       act(() => emit(changed('thread_item', 'c1', 'thc')))
       await vi.advanceTimersByTimeAsync(50)
@@ -812,7 +821,7 @@ describe('the Talk room', () => {
           : coordinatorSnapshot({ items: [items.says('The oldest.')], earlier: false }),
       ),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Show' }))
     expect(await screen.findByText('The oldest.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Show' })).toBeNull()
@@ -824,7 +833,7 @@ describe('what can go wrong', () => {
     const { client } = fakeClient({
       status: vi.fn(async () => ({ ...status, agents: agents.map((agent) => ({ ...agent, signIn: 'signed_out' as const })) })),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('No agent is signed in. Sign one in from Settings, then come back.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Coordinator:/ })).toBeNull()
   })
@@ -836,7 +845,7 @@ describe('what can go wrong', () => {
       ),
       status: vi.fn(async () => Promise.reject(new Error('The port closed'))),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText(/That project isn't there any more\.|runtime didn't answer/)).toBeTruthy()
     // The projects were read, so it is still named.
     expect(screen.getByRole('heading', { name: 'meridian', level: 1 })).toBeTruthy()
@@ -851,7 +860,7 @@ describe('what can go wrong', () => {
       ),
       holdPlan: vi.fn(async () => Promise.reject(new ApiError({ reason: 'NotFound', message: "That plan isn't there any more." }))),
     })
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Hold' }))
     expect(await screen.findByText("That plan isn't there any more.")).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Show' }))
@@ -863,7 +872,7 @@ describe('a send to the coordinator that fails', () => {
   it('takes its copy out of the conversation again, says why, and puts what was said back in the composer', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     vi.mocked(client.send).mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'The project went away.' }))
-    withServices(<Project />, client)
+    withServices(<Project room={Room.Talk} />, client)
     const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Plan it{Enter}')
     expect(await screen.findByText('The project went away.')).toBeTruthy()

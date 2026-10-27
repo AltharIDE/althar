@@ -39,6 +39,25 @@ export const WithAttachments: Story = {
     onOpenAttachment: fn(),
   },
 }
+/** Sent with a PDF, a log and a folder beside a screenshot: each file a chip with its size, still, as Althar copied it for the lead. */
+export const WithFilesAndFolder: Story = {
+  args: {
+    children: 'Here is the spec, the failing run and the fixtures it used.',
+    attach: [
+      {
+        id: 'shot',
+        kind: AttachmentKind.Image,
+        name: 'checkout-error.png',
+        src: SHOT_BEFORE.src,
+        thumb: SHOT_BEFORE.src,
+        meta: '1440 × 900 · 212 KB',
+      },
+      { id: 'pdf', kind: AttachmentKind.File, name: 'refund-spec.pdf', meta: '1.2 MB' },
+      { id: 'log', kind: AttachmentKind.File, name: 'checkout-errors.log', meta: '48 KB' },
+      { id: 'dir', kind: AttachmentKind.Folder, name: 'fixtures', meta: '14 files · 320 KB' },
+    ],
+  },
+}
 const IMAGES = [
   {
     id: 'before',

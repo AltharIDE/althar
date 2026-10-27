@@ -1,9 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber, Ref, Stream } from 'effect'
 
-import { answerFor, connect, type PermissionOption } from '../src/AgentConnection'
+import { answerFor, connect, type PermissionOption, type PromptFile, promptBlocks } from '../src/AgentConnection'
 import { type Question, type QuestionAnswer, questionContent } from '../src/questions'
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
 import { changeOf, type SessionEvent } from '../src/events'
@@ -172,6 +175,7 @@ describe('AgentConnection', () => {
           mcp: { http: true, sse: false },
           authMethods: [],
           images: true,
+          embeddedContext: false,
         })
         assert.isUndefined(connection.process)
       }),
@@ -825,6 +829,28 @@ describe('AgentConnection', () => {
   })
 
   describe('failures the agent reports', () => {
+    it.live('a usage limit said as a message, as Copilot says it: the turn fails with it, and when it resets', () =>
+      Effect.gen(function* () {
+        const before = Date.now()
+        const said = (failsInText?: string) =>
+          withConnection({ ...fake, ...(failsInText === undefined ? {} : { failsInText }) }, (connection) =>
+            Effect.gen(function* () {
+              const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+              return yield* Stream.runCollect(session.prompt(scenarios.limitInText))
+            }),
+          )
+        const ended = (yield* said('Error: ')).at(-1)
+        const failure = ended?._tag === 'TurnEnded' ? ended.failure : undefined
+        assert.strictEqual(failure?.failure, 'usage_limit')
+        assert.match(failure?.message ?? '', /^You've hit your rate limit\./)
+        const resets = Date.parse(failure?.resetsAt ?? '') - before
+        assert.isTrue(resets >= 3 * 3_600_000 + 20 * 60_000 - 1000 && resets <= 3 * 3_600_000 + 20 * 60_000 + 60_000)
+        // An agent that says its failures as errors has its words read as words.
+        const plain = (yield* said()).at(-1)
+        assert.deepStrictEqual(plain, { _tag: 'TurnEnded', stopReason: 'end_turn' })
+      }),
+    )
+
     it.live('an exhausted quota, and when it resets', () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.quota)
@@ -1073,6 +1099,43 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live(
+      'links files and folders after the text, which the agent opens by their paths; a small text file’s words go to one that takes them',
+      () =>
+        Effect.gen(function* () {
+          const folder = mkdtempSync(join(tmpdir(), 'althar-files-'))
+          yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(folder, { recursive: true, force: true })))
+          writeFileSync(join(folder, 'build.log'), 'error: the build broke\nat line 2\n')
+          mkdirSync(join(folder, 'logs'))
+          writeFileSync(join(folder, 'logs', 'a.log'), 'a')
+          writeFileSync(join(folder, 'logs', 'b.log'), 'b')
+          const log: PromptFile = {
+            path: join(folder, 'build.log'),
+            name: 'build.log',
+            mimeType: 'text/plain',
+            bytes: 31,
+            folder: false,
+            text: 'error: the build broke\nat line 2\n',
+          }
+          const logs: PromptFile = { path: join(folder, 'logs'), name: 'logs', mimeType: null, bytes: 2, folder: true }
+          const said = (subject: ContractSubject) =>
+            withConnection(subject, (connection) =>
+              Effect.gen(function* () {
+                const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+                return text(yield* Stream.runCollect(session.prompt('read these', [log, logs])))
+              }),
+            )
+          assert.strictEqual(
+            yield* said(fake),
+            'saw files: build.log (linked, text/plain, 31 B): error: the build broke; logs (linked folder): a.log, b.log\n\necho: read these',
+          )
+          assert.strictEqual(
+            yield* said(variant({ embeddedContext: true })),
+            'saw files: build.log (embedded): error: the build broke; logs (linked folder): a.log, b.log\n\necho: read these',
+          )
+        }).pipe(Effect.scoped),
+    )
+
     it.live('fills in what a bare agent leaves out', () =>
       withConnection(variant({ bare: true }), (connection) =>
         Effect.sync(() => {
@@ -1085,6 +1148,7 @@ describe('AgentConnection', () => {
             mcp: { http: false, sse: false },
             authMethods: [],
             images: false,
+            embeddedContext: false,
           })
         }),
       ),
@@ -1139,5 +1203,54 @@ describe('answerFor', () => {
       scope: null,
       stopsTurn: true,
     })
+  })
+})
+
+describe('promptBlocks', () => {
+  const image = { data: SCREENSHOT_PNG, mimeType: 'image/png' }
+  const pdf: PromptFile = {
+    path: '/w/t/.althar/attachments/in_1/Q3 report.pdf',
+    name: 'Q3 report.pdf',
+    mimeType: 'application/pdf',
+    bytes: 48_000,
+    folder: false,
+  }
+  const log: PromptFile = {
+    path: '/w/t/.althar/attachments/in_1/run.log',
+    name: 'run.log',
+    mimeType: 'text/plain',
+    bytes: 12,
+    folder: false,
+    text: 'it failed\n',
+  }
+  const folder: PromptFile = {
+    path: '/w/t/.althar/attachments/in_1/specs',
+    name: 'specs',
+    mimeType: null,
+    bytes: 900,
+    folder: true,
+    text: 'never',
+  }
+  const parts = [image, pdf, log, folder]
+
+  it('links every file and folder, by its file address, to an agent that takes nothing but text', () => {
+    assert.deepStrictEqual(promptBlocks('look', parts, { images: false, embeddedContext: false }), [
+      { type: 'text', text: 'look' },
+      { type: 'resource_link', uri: pathToFileURL(pdf.path).href, name: 'Q3 report.pdf', mimeType: 'application/pdf', size: 48_000 },
+      { type: 'resource_link', uri: pathToFileURL(log.path).href, name: 'run.log', mimeType: 'text/plain', size: 12 },
+      { type: 'resource_link', uri: pathToFileURL(folder.path).href, name: 'specs', mimeType: 'inode/directory' },
+    ])
+    // A name with a space is escaped in its address, which a file address reads back as the path.
+    assert.include(pathToFileURL(pdf.path).href, 'Q3%20report.pdf')
+  })
+
+  it('sends images to an agent that takes them, and a small text file’s words to one that takes embedded context; never a folder’s', () => {
+    assert.deepStrictEqual(promptBlocks('look', parts, { images: true, embeddedContext: true }), [
+      { type: 'text', text: 'look' },
+      { type: 'image', data: SCREENSHOT_PNG, mimeType: 'image/png' },
+      { type: 'resource_link', uri: pathToFileURL(pdf.path).href, name: 'Q3 report.pdf', mimeType: 'application/pdf', size: 48_000 },
+      { type: 'resource', resource: { uri: pathToFileURL(log.path).href, text: 'it failed\n', mimeType: 'text/plain' } },
+      { type: 'resource_link', uri: pathToFileURL(folder.path).href, name: 'specs', mimeType: 'inode/directory' },
+    ])
   })
 })

@@ -11,7 +11,7 @@ import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
 import { together, useDictation } from '../src/renderer/shared/dictation/useDictation'
 import { draftOf, forgetDrafts, setDraftDictated, setDraftText, useDraft } from '../src/renderer/shared/drafts'
-import { sentWith } from '../src/renderer/shared/useImages'
+import { sentWith } from '../src/renderer/shared/useAttachments'
 import { fakeClient, fakeHost } from './fixtures'
 import { withServices } from './render'
 
@@ -244,8 +244,8 @@ describe('dictating with the model here', () => {
     await userEvent.type(field(), ' and the docs')
     expect(draftOf('thread:th1')).toMatchObject({ dictated: true })
     // What goes with it when it is sent says so; a typed one carries nothing.
-    expect(sentWith({ sent: [], pictures: [], dictated: true })).toEqual({ dictated: true })
-    expect(sentWith({ sent: [], pictures: [] })).toEqual({})
+    expect(sentWith({ sent: [], pictures: [], files: [], attached: [], dictated: true })).toEqual({ dictated: true })
+    expect(sentWith({ sent: [], pictures: [], files: [], attached: [] })).toEqual({})
     // Sent, the composer is empty again, and the next message starts typed.
     setDraftText('thread:th1', '')
     expect(draftOf('thread:th1').dictated).toBe(false)

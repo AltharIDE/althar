@@ -16,6 +16,7 @@ import type {
   CoordinatorSnapshot,
   HomeSnapshot,
   Load,
+  PlanUsage,
   Picture,
   ProjectNote,
   ProjectTracker,
@@ -298,7 +299,7 @@ export const task: TaskSummary = {
 const GiB = 1024 ** 3
 const MiB = 1024 ** 2
 
-/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, and its default branch running. */
+/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, its default branch running, and Althar itself. */
 export const load: Load = {
   cpu: 0.42,
   memoryUsed: 12.5 * GiB,
@@ -342,6 +343,7 @@ export const load: Load = {
       processes: 3,
     },
   ],
+  althar: { cpu: 0.015, memory: 700 * MiB, processes: 9 },
   history: [
     { cpu: 0.2, work: 0.1 },
     { cpu: 0.42, work: 0.33 },
@@ -365,7 +367,7 @@ export const items = {
     ...next(),
     agentId: null,
     kind: 'user_message',
-    content: { text, links, pictures },
+    content: { text, links, pictures, files: [] },
     input,
   }),
   says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({
@@ -988,6 +990,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     getLoad: vi.fn(async () => load),
+    getPlanUsage: vi.fn(async () => ({ accounts: [] })),
+    getModelRooms: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
     openCode: vi.fn(async () => true),
     // Names no code, unless a test says what they name.
@@ -1045,6 +1049,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
+    resolveConflictsNow: vi.fn(async () => {}),
+    lookForConflicts: vi.fn(async () => {}),
     setTaskAllowEverything: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     leaveOutCommits: vi.fn(async () => {}),
@@ -1204,6 +1210,15 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   pickFolder: vi.fn(async () => 'grant_picked'),
   pickFolders: vi.fn(async (): Promise<ReadonlyArray<string>> => ['grant_picked']),
   grantDropped: vi.fn(async () => 'grant_dropped'),
+  attach: vi.fn(async (file: File) => ({
+    ok: true as const,
+    grant: `grant_${file.name}`,
+    name: file.name,
+    kind: file.type === '' && !file.name.includes('.') ? ('folder' as const) : ('file' as const),
+    bytes: file.size,
+    entries: file.type === '' && !file.name.includes('.') ? 3 : null,
+  })),
+  attachPasted: vi.fn(async () => []),
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
@@ -1221,6 +1236,25 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   clipboardToken: vi.fn(async () => null),
   ...overrides,
 })
+
+/** An account's plan usage as the runtime reads it: a Codex account on its plan, its 5-hour window 60% used. */
+export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}): PlanUsage['accounts'][number] => ({
+  agentId: 'codex',
+  agentName: 'Codex',
+  accountId: 'acc_codex_work',
+  accountName: 'work',
+  paidBy: 'plan',
+  source: 'agent',
+  observedAt: '2026-10-15T10:00:00.000Z',
+  plan: 'pro',
+  windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  fault: null,
+  noReading: null,
+  ...over,
+})
+
+/** The usage feed carries, whole. */
+export const planUsage = (accounts: PlanUsage['accounts'] = [usageAccount()]): PlanUsage => ({ accounts })
 
 /** A change the runtime's feed reports. */
 export const changed = (

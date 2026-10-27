@@ -120,9 +120,6 @@
   border: 1px dashed var(--line-3);
   border-radius: 3px;
 }
-.quiet {
-  color: var(--t-3);
-}
 
 /* ---- its folders ---- */
 .side {
@@ -148,24 +145,13 @@
   font-weight: 620;
   letter-spacing: -0.018em;
 }
+/* Folders held over the page: the box takes them. */
 .empty {
-  display: grid;
-  place-items: center;
   height: 92px;
   margin: 16px 0 12px;
-  border: 1px dashed var(--line-3);
+  border: 1px dashed var(--t-2);
   border-radius: var(--r-lg);
-  color: var(--t-3);
-  font-size: 12.5px;
-  transition:
-    border-color var(--fast) var(--ease),
-    background var(--fast) var(--ease);
-}
-/* Folders held over the page: the box says to let go. */
-.dropping {
-  border-color: var(--t-2);
   background: var(--sunk);
-  color: var(--t-1);
 }
 .folders {
   display: grid;
@@ -358,8 +344,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .who,
-  .name,
-  .empty {
+  .name {
     transition: none;
   }
   .mark {

@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 import {
   Composer,
@@ -20,6 +20,7 @@ import {
 import { contextMeter } from '../../shared/ContextMeter'
 import { platform } from '../../shared/device'
 import { useModels } from '../../data/models'
+import { useServices } from '../../data/services'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
@@ -36,7 +37,7 @@ import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
-import { outgoingOf, takesImages, useImages } from '../../shared/useImages'
+import { outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
@@ -157,10 +158,11 @@ export function ProjectView({
   connections,
   onTask,
   settings,
-  room: opening = Room.Talk,
+  room: asked,
   onRoomChange,
   automation: openingAutomation = null,
   onAutomationChange,
+  visit,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -176,12 +178,22 @@ export function ProjectView({
   automation?: string | null
   /** The automation open, each time it changes, to be opened on again. */
   onAutomationChange?: (automation: string | null) => void
+  /** Counts the times its address asked for it, the screen kept in between: each time, it goes to the view, automation or section asked. */
+  visit?: number
 }) {
-  const [room, setRoom] = useState<Room>(opening)
+  const [room, setRoom] = useState<Room>(asked ?? Room.Both)
   const [automation, setAutomation] = useState<string | null>(openingAutomation)
   useEffect(() => onAutomationChange?.(automation), [automation, onAutomationChange])
   // The section its settings show, kept while the person is on another view.
   const [section, setSection] = useState<ProjectSection>(settings.section ?? FIRST_PROJECT_SECTION)
+  // Asked for again, kept while the person was elsewhere: what the address asks, it goes to; the rest stays as they left it.
+  const [visited, setVisited] = useState(visit)
+  if (visit !== visited) {
+    setVisited(visit)
+    if (asked !== undefined) setRoom(asked)
+    if (openingAutomation !== null) setAutomation(openingAutomation)
+    if (settings.section !== undefined) setSection(settings.section)
+  }
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
   // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread.
@@ -228,8 +240,8 @@ export function ProjectView({
             take: text.carriedTake,
           },
   })
-  // Images to send with what the person says, and which agents take them.
-  const images = useImages(draftOf)
+  // Images and files to send with what the person says, and which agents take images.
+  const images = useAttachments(draftOf, useServices().host)
   const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
@@ -267,6 +279,7 @@ export function ProjectView({
 
   const actions: CardActions = {
     project: name,
+    ...(about === null ? {} : { projectId: about }),
     agents: model.agents,
     agentName,
     onStart: (planId) => void model.startPlan(planId),
@@ -316,11 +329,11 @@ export function ProjectView({
   const edit = async (id: string) => {
     const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
     // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
-    if (said === undefined || !images.fits(said.pictures)) return
+    if (said === undefined || !images.fits(said)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(draftOf, true)
-      images.restore(said.pictures)
+      images.restore(said)
     }
   }
 
@@ -332,26 +345,23 @@ export function ProjectView({
     // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
     setDraft((current) => withQueued(current, said.text))
     if (said.dictated === true) setDraftDictated(draftOf, true)
-    images.restore(said.pictures)
+    images.restore(said)
   }
+
+  const line: ReactNode =
+    waiting !== null && session !== null ? (
+      <>
+        {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
+        <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
+      </>
+    ) : (session === null || !session.held) && model.agents.length === 0 ? (
+      text.needsAgent
+    ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
+      text.signedOut(suggested.agentName, agentName(chosen.agentId))
+    ) : null
 
   const composer = (
     <div className={s.composer}>
-      {model.error !== null && (
-        <p className={s.failure} role="alert">
-          {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-        </p>
-      )}
-      {waiting !== null && session !== null && (
-        <p className={s.handover}>
-          {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
-          <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
-        </p>
-      )}
-      {(session === null || !session.held) && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
-      {(session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null && (
-        <p className={s.quiet}>{text.signedOut(suggested.agentName, agentName(chosen.agentId))}</p>
-      )}
       <Composer
         value={draft}
         onChange={setDraft}
@@ -359,6 +369,19 @@ export function ProjectView({
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={draftOf} />}
+        // The lines about who answers go on the composer's edge, so a running launch's chip and they never overlap.
+        notice={
+          model.error !== null || line !== null ? (
+            <>
+              {model.error !== null && (
+                <div className={s.failure} role="alert">
+                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                </div>
+              )}
+              {line !== null && <div>{line}</div>}
+            </>
+          ) : null
+        }
         above={
           launches.length > 0 && (
             <Running
@@ -391,6 +414,7 @@ export function ProjectView({
             <ModelChoice
               owner={text.coordinator}
               agents={model.agents}
+              {...(about === null ? {} : { projectId: about })}
               value={chosen}
               onChange={choose}
               // Another agent's model hands the conversation over, once the person says something.

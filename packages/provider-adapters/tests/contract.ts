@@ -27,6 +27,8 @@ export interface ContractSubject {
   /** Options held at a value for the session's life (the registry's `options.held`). */
   readonly held?: Readonly<Record<string, string>>
   readonly permissions?: PermissionMeanings
+  /** The words that open a failure it says as a message (the registry's `failsInText`). */
+  readonly failsInText?: string
   readonly model: { readonly optionId: string; readonly switchTo: string }
   readonly prompts: { readonly short: string; readonly long: string; readonly command: string; readonly question: string }
   /** How it asks the person something: in a form Althar answers, or in its own words, as a reply. */
@@ -54,6 +56,7 @@ export const withConnection = <A, E>(
             () => decide(request),
           ),
         ...(subject.permissions === undefined ? {} : { permissions: subject.permissions }),
+        ...(subject.failsInText === undefined ? {} : { failsInText: subject.failsInText }),
         ...(onQuestion === undefined ? {} : { onQuestion }),
       })
       return yield* use(connection, permissions)

@@ -1,12 +1,11 @@
 import { useId } from 'react'
 
 import { BrandMark } from '../../foundations/Marks/Marks'
-import { MemoryPressure } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { below, Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Switch } from '../../primitives/Switch/Switch'
-import { type LoadGlance, LoadLevel, levelOf, type LoadPoint, type LoadRow, percent, strained } from './load'
+import { type LoadGlance, type LoadPoint, type LoadRow, percent } from './load'
 import s from './LoadPeek.module.css'
 
 /*
@@ -22,16 +21,12 @@ import s from './LoadPeek.module.css'
 export interface LoadPeekText {
   /** The computer, as the peek titles it. */
   machine: string
-  level: Record<LoadLevel, string>
   cpu: string
   memory: string
   percent: (percent: number) => string
   memoryFigure: (used: string, total: string) => string
   /** Althar's work's part, under a bar. */
   work: (percent: number) => string
-  /** What macOS says of memory, in a few words; under strain, said in full too. */
-  pressure: Record<MemoryPressure, string>
-  pressureNote: Record<MemoryPressure.Warning | MemoryPressure.Critical, string>
   running: string
   processes: (n: number) => string
   otherApps: string
@@ -45,21 +40,11 @@ export interface LoadPeekText {
 
 export const loadPeekText: LoadPeekText = {
   machine: 'This Mac',
-  level: { [LoadLevel.Quiet]: 'Quiet', [LoadLevel.Busy]: 'Busy', [LoadLevel.Full]: 'Full' },
   cpu: 'CPU',
   memory: 'Memory',
   percent: (p) => `${p}%`,
   memoryFigure: (used, total) => `${used} of ${total}`,
   work: (p) => `Althar’s work ${p}%`,
-  pressure: {
-    [MemoryPressure.Normal]: 'Memory pressure normal',
-    [MemoryPressure.Warning]: 'Memory is tight',
-    [MemoryPressure.Critical]: 'Memory is short',
-  },
-  pressureNote: {
-    [MemoryPressure.Warning]: 'macOS is compressing memory to make room. A little more and it starts using the disk.',
-    [MemoryPressure.Critical]: 'macOS is moving memory to disk. Everything, agents included, runs slower.',
-  },
   running: 'Running',
   processes: (n) => (n === 1 ? '1 process' : `${n} processes`),
   otherApps: 'Other apps',
@@ -158,14 +143,13 @@ export type LoadPeekProps = RootProps<
 export function LoadPeek({ load, onOpen, onHide, slots, headingLevel = 2, text, className, ...rest }: LoadPeekProps) {
   const t = { ...loadPeekText, ...text }
   const id = useId()
-  const { pressure, rows } = load
+  const { rows } = load
   return (
     <div className={cx(s.peek, className)} {...rest}>
       <span className={s.head}>
         <Heading level={headingLevel} className={s.heading}>
           {t.machine}
         </Heading>
-        <span className={s.level}>{t.level[levelOf(load)]}</span>
       </span>
       <div className={s.trace}>
         <Trace points={load.history} slots={slots ?? load.history.length} width={276} height={40} />
@@ -189,14 +173,6 @@ export function LoadPeek({ load, onOpen, onHide, slots, headingLevel = 2, text, 
           ours={load.workMemory}
           work={t.work(percent(load.workMemory ?? 0))}
         />
-        {pressure !== null &&
-          (strained(pressure) ? (
-            <p className={cx(s.state, s.strained)}>
-              <b>{t.pressure[pressure]}.</b> {t.pressureNote[pressure]}
-            </p>
-          ) : (
-            <p className={s.state}>{t.pressure[pressure]}</p>
-          ))}
       </div>
       {rows !== null && (
         <section className={s.rows}>
@@ -212,7 +188,7 @@ export function LoadPeek({ load, onOpen, onHide, slots, headingLevel = 2, text, 
             <ul className={s.list}>
               {rows.map((row) => (
                 <li key={row.id}>
-                  {onOpen === undefined ? (
+                  {onOpen === undefined || row.opens === false ? (
                     <div className={s.share}>
                       <Row row={row} t={t} />
                     </div>

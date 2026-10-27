@@ -151,7 +151,7 @@ describe('the Talk room’s model, once the thread is read', () => {
     vi.mocked(client.send).mockImplementation(() => new Promise<void>((resolve) => (delivered = resolve)))
     await waitFor(() => expect(result.current.coordinator).not.toBeNull())
     let said: Promise<boolean> = Promise.resolve(false)
-    act(() => void (said = result.current.say('Spoken words', null, { sent: [], pictures: [], dictated: true })))
+    act(() => void (said = result.current.say('Spoken words', null, { sent: [], pictures: [], files: [], attached: [], dictated: true })))
     const shown = result.current.coordinator?.items.at(-1)
     expect(shown).toMatchObject({ kind: 'user_message', content: { text: 'Spoken words' }, input: { dictated: true } })
     expect(await act(async () => result.current.takeBack(shown?.id ?? ''))).toBe(false)

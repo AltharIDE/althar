@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { AUTOMATIONS, MORNING_REVIEW, NIGHTLY_BUMP, WEEKLY_E2E } from '../../fixtures/automations'
+import { ALL_PAUSED, AUTOMATIONS, MORNING_REVIEW, NIGHTLY_BUMP, STARTERS, WEEKLY_E2E } from '../../fixtures/automations'
 import { States } from '../../storybook/States'
 import { Automations } from './Automations'
 
@@ -18,7 +18,7 @@ const meta = {
       </div>
     ),
   ],
-  args: { automations: AUTOMATIONS, onOpen: fn(), onNew: fn(), onPauseAll: fn() },
+  args: { automations: AUTOMATIONS, onOpen: fn(), onNew: fn(), onPauseAll: fn(), starters: STARTERS },
 } satisfies Meta<typeof Automations>
 export default meta
 type Story = StoryObj<typeof meta>
@@ -59,10 +59,18 @@ export const ItsRuns: Story = {
 /** A few runs leave the rest of the strip empty, the newest on the right. */
 export const AFewRuns: Story = { args: { automations: [NIGHTLY_BUMP] } }
 
-/** Pause them all from the menu; once paused, one calm line says so, with Resume. */
+/** Pause them all from the menu; once paused, a band under the head says so, with Resume all, and every card goes quiet. */
 function Pausing() {
   const [paused, setPaused] = useState(false)
-  return <Automations automations={AUTOMATIONS} onOpen={() => {}} onNew={() => {}} allPaused={paused} onPauseAll={setPaused} />
+  return (
+    <Automations
+      automations={paused ? ALL_PAUSED : AUTOMATIONS}
+      onOpen={() => {}}
+      onNew={() => {}}
+      allPaused={paused}
+      onPauseAll={setPaused}
+    />
+  )
 }
 
 export const PausingAll: Story = {
@@ -71,12 +79,25 @@ export const PausingAll: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'More' }))
     await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Pause all automations' }))
-    await expect(c.getByText('Every automation is paused. None starts until you resume them.')).toBeInTheDocument()
+    const band = c.getByRole('status', { name: 'Every automation is paused' })
+    await expect(within(band).getByText('None starts until you resume them. Runs under way finish.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'More' }))
-    await expect(await within(document.body).findByRole('menuitem', { name: 'Resume all automations' })).toBeInTheDocument()
+    await expect(await within(document.body).findByRole('menuitem', { name: 'Resume all' })).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
-    await userEvent.click(c.getByRole('button', { name: 'Resume' }))
-    await expect(c.queryByText(/Every automation is paused/)).toBeNull()
+    await userEvent.click(within(band).getByRole('button', { name: 'Resume all' }))
+    await expect(c.queryByRole('status', { name: 'Every automation is paused' })).toBeNull()
+  },
+}
+
+/** All paused: the band, with its pause mark and Resume all; every card lies flat and faded, but the one that paused itself, which still waits on you. */
+export const AllPaused: Story = {
+  args: { automations: ALL_PAUSED, allPaused: true },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    const band = c.getByRole('status', { name: 'Every automation is paused' })
+    await userEvent.click(within(band).getByRole('button', { name: 'Resume all' }))
+    await expect(args.onPauseAll).toHaveBeenCalledWith(false)
+    await expect(c.getAllByText('Paused').length).toBeGreaterThan(0)
   },
 }
 
@@ -91,14 +112,27 @@ export const WhereTheyRun: Story = {
   },
 }
 
-/** None yet: what to say to the coordinator, or New automation. Nothing is said about where they run until there is one. */
+/**
+ * None yet: what they are for, three to start from, each opening a new one
+ * filled in, and New automation for a blank one, or what to say to the
+ * coordinator. Nothing is said about where they run until there is one, and
+ * there is nothing to pause.
+ */
 export const NoneYet: Story = {
   args: { automations: [], where: true, onOpenAtLogin: fn() },
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const c = within(canvasElement)
-    await expect(c.getByText(/None yet\. Ask the coordinator/)).toBeInTheDocument()
+    await expect(c.getByRole('heading', { name: 'Nothing runs by itself yet' })).toBeInTheDocument()
+    await expect(c.getByRole('heading', { name: 'Start from one of these' })).toBeInTheDocument()
+    await expect(c.getByText('“every weekday at 9, review the new pull requests”')).toBeInTheDocument()
     await expect(c.queryByText(/They run on this Mac/)).toBeNull()
     await expect(c.queryByRole('heading', { name: /On a schedule/ })).toBeNull()
+    await expect(c.queryByRole('button', { name: 'More' })).toBeNull()
+    await expect(c.getAllByRole('button', { name: 'New automation' })).toHaveLength(1)
+    await userEvent.click(c.getByRole('button', { name: /^Weekly pull request review/ }))
+    await expect(args.onNew).toHaveBeenLastCalledWith('pullRequests')
+    await userEvent.click(c.getByRole('button', { name: 'New automation' }))
+    await expect(args.onNew).toHaveBeenLastCalledWith()
   },
 }
 
@@ -115,7 +149,7 @@ export const AllStates: Story = {
       cells={[
         { state: 'a good morning', node: <Automations {...args} /> },
         { state: 'paused itself', node: <Automations {...args} automations={[WEEKLY_E2E]} /> },
-        { state: 'all paused', node: <Automations {...args} automations={[MORNING_REVIEW]} allPaused /> },
+        { state: 'all paused', node: <Automations {...args} automations={ALL_PAUSED.slice(0, 3)} allPaused /> },
         { state: 'where they run', node: <Automations {...args} automations={[MORNING_REVIEW]} where onOpenAtLogin={() => {}} /> },
         { state: 'none yet', node: <Automations {...args} automations={[]} /> },
       ]}

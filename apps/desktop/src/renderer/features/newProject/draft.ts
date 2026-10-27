@@ -27,7 +27,6 @@ export interface DraftFolder {
   readonly name: string
   /** Where it is, as the person knows the place. */
   readonly where: string
-  readonly branch: string | null
   /** Its first remote, without any password in it. */
   readonly remote: string | null
   /** The project whose folder it is already, as reading it said. */
@@ -168,7 +167,6 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
         name: found.name,
         // One main found is where main said it is, as the person knows the place.
         where: alone && shown.where !== undefined ? shown.where : shortFolder(found.path),
-        branch: found.branch,
         remote: found.remote,
         project: known,
         found: alone ? (shown.found ?? null) : null,

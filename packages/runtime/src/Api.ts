@@ -14,6 +14,7 @@ import {
   serverProtocol,
   type WatchEvent,
   type ProjectRulesView,
+  type SentFile,
   type SentImage,
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
@@ -41,6 +42,8 @@ import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
 import { MachineLoad } from './MachineLoad'
+import { modelRooms } from './modelRooms'
+import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
@@ -80,6 +83,7 @@ import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
+import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
@@ -148,6 +152,7 @@ export const handlers = Api.toLayer(
     const sessions = yield* Sessions
     const launches = yield* Launches
     const machine = yield* MachineLoad
+    const planUsage = yield* PlanUsage
     const permissions = yield* Permissions
     const questions = yield* Questions
     const queries = yield* Queries
@@ -211,6 +216,18 @@ export const handlers = Api.toLayer(
       }).pipe(Effect.provideService(Artifacts, artifacts), Effect.provideService(SqlClient.SqlClient, sql))
     /** What a message's command says of its images: their digests, in order, where it has any; nothing where it has none, as before images. */
     const imagesSaid = (kept: ReadonlyArray<InputImage>) => (kept.length === 0 ? {} : { images: kept.map((image) => image.sha256) })
+    /** The files sent with a message to a thread, measured and copied where its agent reads, in order. */
+    const filesFor = (threadId: string, files: ReadonlyArray<SentFile> | undefined) =>
+      files === undefined || files.length === 0
+        ? Effect.succeed([])
+        : keepFiles(threadId, files).pipe(
+            Effect.provideService(Folders, folders),
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.provideService(RuntimeConfig, config),
+            Effect.provideService(Instance, instance),
+          )
+    /** What a message's command says of its files: how many, never their names or paths; nothing where it has none. */
+    const filesSaid = (kept: ReadonlyArray<InputFile>) => (kept.length === 0 ? {} : { files: kept.length })
 
     const failures = yield* Failures
     /** The call being answered, by the name the RPC server gives its span: `Status`, `ListProjects`. */
@@ -497,7 +514,9 @@ export const handlers = Api.toLayer(
                     ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
                     : event._tag === 'Launches'
                       ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
-                      : Stream.empty,
+                      : event._tag === 'PlanUsage'
+                        ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
+                        : Stream.empty,
           ),
         ),
       ),
@@ -733,13 +752,14 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, dictated }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              // Its images are read and kept first, outside any transaction; one that can't be sent refuses the switch.
+              // Its images and files are read and kept first, outside any transaction; one that can't be sent refuses the switch.
               const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
+              const copied = body === undefined ? [] : yield* filesFor(threadId, files)
               // What the person said with it is said to the thread, under a command of its own.
               const message =
                 body === undefined
@@ -748,11 +768,19 @@ export const handlers = Api.toLayer(
                       // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
                       envelope: yield* envelope(
                         'thread.send',
-                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
+                        {
+                          threadId,
+                          body,
+                          disposition: 'after_current',
+                          ...imagesSaid(kept),
+                          ...filesSaid(copied),
+                          ...(dictated === true ? { dictated } : {}),
+                        },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
                       ...(kept.length === 0 ? {} : { images: kept }),
+                      ...(copied.length === 0 ? {} : { files: copied }),
                       ...(dictated === true ? { dictated: true } : {}),
                     }
               // Written to again with the switch, a task kept for later is back, as when it is sent on its own.
@@ -869,6 +897,9 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
+      // The person's Resolve now: asked of its lead whatever stood in the way (ADR-030).
+      ResolveConflictsNow: ({ commandId, taskId }) => once(commandId, api(pullRequests.resolveNow({ taskId }, true))),
+      LookForConflicts: ({ commandId, projectId }) => once(commandId, api(pullRequests.resolveNow({ projectId }))),
       SetTaskAllowEverything: ({ commandId, taskId, allowEverything }) =>
         once(
           commandId,
@@ -941,22 +972,24 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images, dictated }) =>
+      Send: ({ commandId, threadId, body, disposition, images, files, dictated }) =>
         api(
           Effect.gen(function* () {
-            // Its images are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
+            // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
             const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
+            const copied = yield* filesFor(threadId, files)
             const message = {
-              // The command says its images by their digests, never their bytes.
+              // The command says its images by their digests, never their bytes, and how many files, never their paths.
               envelope: yield* envelope(
                 'thread.send',
-                { threadId, body, disposition, ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
+                { threadId, body, disposition, ...imagesSaid(kept), ...filesSaid(copied), ...(dictated === true ? { dictated } : {}) },
                 commandId,
               ),
               threadId,
               body,
               disposition,
               ...(kept.length === 0 ? {} : { images: kept }),
+              ...(copied.length === 0 ? {} : { files: copied }),
               ...(dictated === true ? { dictated } : {}),
             }
             // What the person says to the coordinator starts it, if it isn't running.
@@ -1345,6 +1378,18 @@ export const handlers = Api.toLayer(
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
+      GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
+      GetModelRooms: ({ projectId }) =>
+        api(
+          modelRooms(projectId).pipe(
+            Effect.provideService(Agents, agents),
+            Effect.provideService(Models, models),
+            Effect.provideService(SignIns, signIns),
+            Effect.provideService(Installs, installs),
+            Effect.provideService(Limits, limits),
+            Effect.provideService(Accounts, accounts),
+          ),
+        ),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(

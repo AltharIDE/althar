@@ -39,6 +39,8 @@ import {
   type FolderWait,
   type IssueList,
   type Load,
+  type ModelRoom,
+  type PlanUsage,
   type OutputText,
   type Product,
   type ChangeTarget,
@@ -54,6 +56,7 @@ import {
   type SignInStart,
   type SignInState,
   type Status,
+  type SentFile,
   type SentImage,
   type TaskEnd,
   type TaskFolders,
@@ -155,7 +158,12 @@ export interface Client {
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
   readonly switchAgent: (
-    input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage>; readonly dictated?: boolean },
+    input: Start & {
+      readonly body?: string
+      readonly images?: ReadonlyArray<SentImage>
+      readonly files?: ReadonlyArray<SentFile>
+      readonly dictated?: boolean
+    },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
@@ -221,6 +229,10 @@ export interface Client {
   readonly stopTask: (taskId: string) => Promise<void>
   /** Whether a task's lead resolves conflicts on its own otherwise than its project says; null goes back to the project. */
   readonly setTaskResolveConflicts: (input: { readonly taskId: string; readonly resolveConflicts: boolean | null }) => Promise<void>
+  /** Resolve now: a task's conflict with its default branch asked of its lead, whatever kept it from being asked. */
+  readonly resolveConflictsNow: (taskId: string) => Promise<void>
+  /** Each open task of a project looked at now for a conflict with its default branch, under the project's rules. */
+  readonly lookForConflicts: (projectId: string) => Promise<void>
   /** Allows everything its agents ask on one task, short of what its project never allows, or takes it back. */
   readonly setTaskAllowEverything: (input: { readonly taskId: string; readonly allowEverything: boolean }) => Promise<void>
   /** Carries a stopped task on from the step it was on: with its last lead, or the agent picked. */
@@ -248,6 +260,8 @@ export interface Client {
     readonly disposition: 'after_current' | 'interrupt_and_continue'
     /** Images sent with it, in order. */
     readonly images?: ReadonlyArray<SentImage>
+    /** Files and folders sent with it, in order, by their grants or kept copies. */
+    readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
   }) => Promise<void>
@@ -401,6 +415,10 @@ export interface Client {
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
   /** How hard this computer works now, and Althar's work's part, for the bar while it shows it. */
   readonly getLoad: () => Promise<Load>
+  /** Every account's plan usage; with `refresh`, each account is read again first rather than as kept. */
+  readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
+  /** Each model's room where work on it would start, in a project (its rule for moving work through accounts) or anywhere. */
+  readonly getModelRooms: (projectId: string | null) => Promise<ReadonlyArray<ModelRoom>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -627,6 +645,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
+    resolveConflictsNow: (taskId) => command((commandId) => api.ResolveConflictsNow({ commandId, taskId })),
+    lookForConflicts: (projectId) => command((commandId) => api.LookForConflicts({ commandId, projectId })),
     setTaskAllowEverything: (input) => command((commandId) => api.SetTaskAllowEverything({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
     leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
@@ -709,6 +729,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
     getLoad: () => settle(api.GetLoad({})),
+    getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
+    getModelRooms: (projectId) => settle(api.GetModelRooms(projectId === null ? {} : { projectId })),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),

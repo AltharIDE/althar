@@ -46,6 +46,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Code/CodeLines.tsx': 'a gap in a file’s lines, stretched across them, which shows more of them in place',
   'thread/Evidence/Evidence.tsx': 'the row of a run or a response, which folds what it printed',
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
+  'chrome/PlanGauge/PlanPeek.tsx': 'an agent’s row, which folds its accounts; the line of agents with no reading, which folds why',
   /* an option in a list or a rail */
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
@@ -56,6 +57,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
+  'chrome/PlanGauge/PlanGauge.tsx': 'the plan gauge, drawn in steps as the load meters are',
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
   'thread/Gallery/Gallery.tsx': 'a screenshot, large, which opens full size',

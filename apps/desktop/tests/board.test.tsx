@@ -10,10 +10,11 @@ import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
 import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
-import { useBoard } from '../src/renderer/features/board/useBoard'
+import { readHeadsAhead, useBoard } from '../src/renderer/features/board/useBoard'
 import { useClosePullRequests } from '../src/renderer/features/board/useClosePullRequests'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
+import { makeQueryClient } from '../src/renderer/data/reads'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
 import { useSettingsOf, withServices } from './render'
@@ -1702,6 +1703,53 @@ describe('a ready card’s next step, done from the card', () => {
     await userEvent.click(screen.getByRole('button', { name: 'In conflict' }))
     expect(onOpen).toHaveBeenCalledWith('th-s4')
   })
+
+  it('says why a conflict wasn’t asked of its lead, and Resolve now asks it from the card', async () => {
+    const why = 'You stopped it, so Althar doesn’t start its lead for a conflict.'
+    // Stopped, it is among the running work, not ready: its card says it there.
+    tasks = [
+      {
+        ...ready('s9', 'Stopped in conflict', { conflicts: true, target: 'main' }),
+        phase: 'stopped' as const,
+        startedAt: '2026-10-01T07:30:00.000Z',
+        conflictUnsent: why,
+      },
+    ]
+    const onOpen = vi.fn()
+    const resolveConflictsNow = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
+    const card = await cardOf('Stopped in conflict')
+    // Still stopped, with why its lead wasn't asked in one line, in place of its foot.
+    expect(card.getByText('Stopped')).toBeTruthy()
+    expect(card.getByText(why)).toBeTruthy()
+    expect(card.queryByText(/Ask the lead to resolve it/)).toBeNull()
+    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
+    expect(resolveConflictsNow).toHaveBeenCalledWith('s9')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('offers Resolve now where the lead couldn’t resolve a conflict, though neither branch moved', async () => {
+    const why = 'The lead couldn’t resolve the conflict with main. change.txt still conflicts.'
+    tasks = [{ ...ready('s10', 'Handed back', { conflicts: true, target: 'main' }), handedBack: why }]
+    const resolveConflictsNow = vi.fn(async () => {})
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
+    const card = await cardOf('Handed back')
+    expect(card.getByText('Merge conflict')).toBeTruthy()
+    expect(card.getByText(why)).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
+    expect(resolveConflictsNow).toHaveBeenCalledWith('s10')
+  })
+
+  it('says where Althar couldn’t look for a conflict, and keeps its next step', async () => {
+    const why = 'Its folder isn’t on this computer, so Althar can’t merge main into it here.'
+    tasks = [{ ...ready('s12', 'Not looked at', {}), conflictUnchecked: why }]
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ getBoard: getBoard() }).client)
+    const card = await cardOf('Not looked at')
+    expect(card.getByText(why)).toBeTruthy()
+    // Not said to conflict: Althar doesn't know.
+    expect(card.queryByText('Merge conflict')).toBeNull()
+    expect(card.getByRole('button', { name: 'Accept and merge #12' })).toBeTruthy()
+  })
 })
 
 describe('the bar and the dock, on the rest of the board', () => {
@@ -1806,5 +1854,35 @@ describe('collapsing lanes', () => {
     expect(stays.getAttribute('aria-disabled')).toBe('true')
     await userEvent.click(stays)
     expect(within(work).getByRole('button', { name: 'Ship it' })).toBeTruthy()
+  })
+})
+
+describe('a ready task’s head, read ahead', () => {
+  it('is read again when its task changes, not when another on the board does', async () => {
+    const getThread = vi.fn(async () => snapshot())
+    const { client } = fakeClient({ getThread })
+    const cache = makeQueryClient()
+    const first = board()
+    readHeadsAhead(client, cache, first)
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(1))
+    expect(getThread).toHaveBeenLastCalledWith('th4', { limit: 0 })
+    // Another task starts: the board moves on, but the ready task's head is as it was.
+    const moved = board({ cursor: 4, tasks: first.tasks.map((one) => (one.taskId === 't1' ? { ...one, phase: 'running' } : one)) })
+    readHeadsAhead(client, cache, moved)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(getThread).toHaveBeenCalledTimes(1)
+    // A call now waits in the ready task: its head is read again.
+    const called = board({ cursor: 5, tasks: moved.tasks, calls: [{ ...first.calls[0]!, id: 'a9', taskId: 't4', threadId: 'th4' }] })
+    readHeadsAhead(client, cache, called)
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(2))
+    // Its pull request moves on: read again.
+    readHeadsAhead(client, cache, {
+      ...called,
+      cursor: 6,
+      tasks: called.tasks.map((one) =>
+        one.taskId === 't4' && one.change !== null ? { ...one, change: { ...one.change, head: 'def456' } } : one,
+      ),
+    })
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(3))
   })
 })

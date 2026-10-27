@@ -56,6 +56,7 @@ import {
 } from './errors'
 import { Instance } from './Instance'
 import { Limits, type PlanOnly } from './Limits'
+import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
 import type { Policies } from './Policies'
@@ -71,7 +72,9 @@ import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
+import { filesForTurn, type InputFile, keptId } from './sentFiles'
 import type { InputImage } from './sentImages'
+import { alsoPlanned, siblingsOf } from './siblings'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
 import { quickIn } from './kinds'
@@ -93,6 +96,7 @@ import {
   uncoloured,
   WAKE_FOR,
 } from './leftRunning'
+import { WORK, workOf } from './machine'
 import { holding, portFor, portsBelow } from './ports'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
@@ -251,6 +255,9 @@ const askedFor = (thread: { readonly title: string; readonly description: string
     ? []
     : [`What the person asked for, in their words:\n\n${thread.request}`]
 
+/** The other tasks planned from the message a task came from, for its lead's brief (siblings.ts). */
+const alongside = (taskId: string) => siblingsOf(taskId).pipe(Effect.map((others) => (others.length === 0 ? [] : [alsoPlanned(others)])))
+
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
 
@@ -380,6 +387,7 @@ type Store =
   | RuntimeConfig
   | Accounts
   | Limits
+  | PlanUsage
   | Models
   | Setups
   | Policies
@@ -471,6 +479,8 @@ export const promptFor = (
     readonly cutShort?: string
     /** Images the person sent with it that the agent doesn't get: it doesn't take images, or they aren't kept any more. */
     readonly withheld?: number
+    /** Files the person sent with it whose copies aren't there any more, as when the task's folder was removed and brought back. */
+    readonly filesGone?: number
     /** Some of it was dictated (1), so the agent is told it may have been misheard. */
     readonly dictated?: number
   }>,
@@ -481,10 +491,18 @@ export const promptFor = (
   const parts = inputs.map((input) => {
     // Images it doesn't get are said, so it knows they were there and can ask what they show.
     const withheld = input.withheld ?? 0
-    const noted =
-      withheld === 0
-        ? input.body
-        : `${input.body}${input.body === '' ? '' : '\n\n'}(The person sent ${withheld === 1 ? 'an image' : `${withheld} images`} with this, which Althar couldn't pass on to you.)`
+    const filesGone = input.filesGone ?? 0
+    const notes = [
+      ...(withheld === 0
+        ? []
+        : [`(The person sent ${withheld === 1 ? 'an image' : `${withheld} images`} with this, which Althar couldn't pass on to you.)`]),
+      ...(filesGone === 0
+        ? []
+        : [
+            `(The person sent ${filesGone === 1 ? 'a file' : `${filesGone} files`} with this whose copy isn't there any more. Ask for it if you need it.)`,
+          ]),
+    ]
+    const noted = [...(input.body === '' ? [] : [input.body]), ...notes].join('\n\n')
     // Dictated words are said to be, once, after them: the thread shows the person's words as they are.
     const body = input.dictated === 1 && input.body !== '' ? `${noted}\n\n${DICTATED}` : noted
     const said =
@@ -565,6 +583,8 @@ export class Sessions extends Context.Service<
       readonly disposition?: Disposition
       /** Images the person sent with it, in the store already (`keepSent`): sent with its words in every turn that delivers it. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Files and folders the person sent with it, copied where the agent reads already (`keepFiles`): linked in every turn that delivers it. */
+      readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: every turn that delivers it says so, so the agent reads past what was misheard. */
       readonly dictated?: boolean
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
@@ -598,11 +618,12 @@ export class Sessions extends Context.Service<
       readonly said?: string
       /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
       readonly about?: 'limit' | 'stall'
-      /** What the person said with it, and any images: the new agent's first turn, after its brief, and never the old one's. */
+      /** What the person said with it, and any images and files: the new agent's first turn, after its brief, and never the old one's. */
       readonly message?: {
         readonly envelope: CommandEnvelope
         readonly body: string
         readonly images?: ReadonlyArray<InputImage>
+        readonly files?: ReadonlyArray<InputFile>
         /** Some of it was dictated. */
         readonly dictated?: boolean
       }
@@ -741,6 +762,18 @@ export class Sessions extends Context.Service<
       const failures = yield* Failures
       const accounts = yield* Accounts
       const limits = yield* Limits
+      const planUsage = yield* PlanUsage
+      /*
+       * Claude Code's adapter says a plan window with the usage it streams:
+       * kept for the account the session runs on, in a fiber of its own, so
+       * the stream never waits on the store or the view.
+       */
+      const heardPlan = (running: Running, event: SessionEvent) => {
+        const window = event._tag === 'PlanWindow' ? event.window : event._tag === 'ContextUsage' ? event.planWindow : undefined
+        return window === undefined
+          ? Effect.void
+          : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, window), sessionsScope))
+      }
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
@@ -1193,12 +1226,20 @@ export class Sessions extends Context.Service<
             queued.map((input) => input.id),
             running.connection.info.images,
           )
+          // And the files, linked where their copies are.
+          const linked = yield* filesForTurn(queued.map((input) => input.id))
           // What an agent out of usage was given goes on with word of that, by the name of the agent it went to.
           const agents = yield* Agents
           const all = queued.map(({ cutBy, ...input }) => {
             const by = cutBy === null ? undefined : (agents.list.find((entry) => entry.definition.id === cutBy)?.definition.name ?? cutBy)
             const withheld = sent.withheld.get(input.id) ?? 0
-            return { ...input, ...(by === undefined ? {} : { cutShort: by }), ...(withheld === 0 ? {} : { withheld }) }
+            const filesGone = linked.gone.get(input.id) ?? 0
+            return {
+              ...input,
+              ...(by === undefined ? {} : { cutShort: by }),
+              ...(withheld === 0 ? {} : { withheld }),
+              ...(filesGone === 0 ? {} : { filesGone }),
+            }
           })
           // Compacting the agent's context is a turn of its own, said bare as the agent's own command: what was said before it goes
           // first, and what after, next. A brief not yet read waits for the turn after, so nothing is left behind it.
@@ -1430,14 +1471,16 @@ export class Sessions extends Context.Service<
               ),
             )
           })
-          const images = inputs.flatMap((input) => sent.images.get(input.id) ?? [])
+          // Each input's images, then its files, in the order the inputs are said.
+          const parts = inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])])
           yield* notingListening(running)
-          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, images, started), (event) =>
+          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
               if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
               heardContext(running, event)
+              yield* heardPlan(running, event)
               yield* record(event)
               yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
@@ -1840,7 +1883,17 @@ export class Sessions extends Context.Service<
           }
           // In the account's home: its sign-in, not the agent's usual one (ADR-012), with what it shares brought up to date.
           yield* accounts.prepare(account)
-          const transport = entry.transport(cwdOf(thread), accounts.env(account), untrusted ? { untrusted } : undefined)
+          // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
+          const work = workOf({
+            kind: thread.role === 'coordinator' ? 'coordinator' : 'task',
+            projectId: thread.projectId,
+            taskId: thread.role === 'coordinator' ? null : thread.taskId,
+          })
+          const transport = entry.transport(
+            cwdOf(thread),
+            { ...accounts.env(account), [WORK]: work },
+            untrusted ? { untrusted } : undefined,
+          )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
@@ -1910,6 +1963,7 @@ export class Sessions extends Context.Service<
                 transport,
                 onPermission: (request) => permissions.decide(requestContext, request),
                 permissions: definition.permissions,
+                ...(definition.failsInText === undefined ? {} : { failsInText: definition.failsInText }),
                 // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
                 ...(thread.role === 'reviewer'
                   ? {}
@@ -2123,7 +2177,10 @@ export class Sessions extends Context.Service<
                   Effect.andThen(
                     Effect.andThen(
                       Effect.andThen(
-                        Effect.sync(() => heardContext(running, event)),
+                        Effect.andThen(
+                          Effect.sync(() => heardContext(running, event)),
+                          heardPlan(running, event),
+                        ),
                         heard.record(event),
                       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
                       Effect.andThen(heardWork(running, event), heardBackground(running, event)),
@@ -2231,6 +2288,7 @@ export class Sessions extends Context.Service<
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(input.model === undefined ? {} : { model: input.model }),
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
@@ -2288,6 +2346,7 @@ export class Sessions extends Context.Service<
         readonly body: string
         readonly disposition?: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
@@ -2296,6 +2355,7 @@ export class Sessions extends Context.Service<
           const commands = yield* Commands
           const artifacts = yield* Artifacts
           const images = input.images ?? []
+          const files = input.files ?? []
           const disposition = input.disposition ?? 'after_current'
           const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
           if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: input.threadId })
@@ -2342,6 +2402,19 @@ export class Sessions extends Context.Service<
                   return { artifact, picture: { artifactId, ...image, bytes: image.size } }
                 }),
               )
+              // Its files, in order, each by where its copy is; the copies are there already.
+              for (const [index, file] of files.entries())
+                yield* sql`INSERT INTO user_input_files ${sql.insert({
+                  projectId: thread.projectId,
+                  userInputId: inputId,
+                  position: index + 1,
+                  name: file.name,
+                  kind: file.kind,
+                  mediaType: file.mediaType,
+                  bytes: file.bytes,
+                  entries: file.entries,
+                  path: file.path,
+                })}`
               if (input.quiet !== true) {
                 const itemId = yield* addItem(
                   { projectId: thread.projectId, threadId: input.threadId },
@@ -2362,6 +2435,7 @@ export class Sessions extends Context.Service<
                             name: picture.name,
                           })),
                         }),
+                    ...(files.length === 0 ? {} : { files: files.map((file, index) => ({ id: keptId(inputId, index + 1), ...file })) }),
                   },
                   { userInputId: inputId },
                 )
@@ -2375,7 +2449,12 @@ export class Sessions extends Context.Service<
                 aggregateId: inputId,
                 revision: 1,
                 type: disposition === 'interrupt_and_continue' ? 'user_input.interrupt_requested' : 'user_input.accepted',
-                payload: { disposition, sequence, ...(images.length === 0 ? {} : { images: images.map((image) => image.sha256) }) },
+                payload: {
+                  disposition,
+                  sequence,
+                  ...(images.length === 0 ? {} : { images: images.map((image) => image.sha256) }),
+                  ...(files.length === 0 ? {} : { files: files.length }),
+                },
                 actorId: input.envelope.actorId,
                 commandId: input.envelope.commandId,
               })
@@ -2621,6 +2700,7 @@ export class Sessions extends Context.Service<
                 : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             ...askedFor(thread),
+            ...(yield* alongside(thread.taskId)),
             several
               ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
               : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
@@ -2660,7 +2740,7 @@ export class Sessions extends Context.Service<
             // Althar reaches the code host for the task (ADR-011).
             `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request; rerun_check runs a check that may have failed by chance again. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // A lead tracks what is not its task's on the person's trackers, and the person files it (Coordinator.ts, IssueDrafts.ts).
-            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
+            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person's one message can start several. When a task covers it, say so in your report instead of drafting. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
             // A lead keeps its own issue up to date; what changes where the issue stands waits on the person's card (IssueChanges.ts).
             "If this task came from an issue, keep that issue up to date: comment_on_issue comments on it at once, such as what you found or what changed for whoever follows it; link_pull_request links the task's pull request to it where Althar hasn't; and change_issue proposes a change to it, such as its status (In Review), its priority, labels, assignee or title, which waits on the person's card unless the project lets changes through. Only that issue: for any other, tell the person what it needs. Set a drafted issue's priority and labels with draft_issue, never in its description.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
@@ -2798,6 +2878,7 @@ export class Sessions extends Context.Service<
           readonly envelope: CommandEnvelope
           readonly body: string
           readonly images?: ReadonlyArray<InputImage>
+          readonly files?: ReadonlyArray<InputFile>
           readonly dictated?: boolean
         }
         readonly byPerson?: boolean
@@ -2815,6 +2896,7 @@ export class Sessions extends Context.Service<
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(input.model === undefined ? {} : { model: input.model }),
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
@@ -2834,6 +2916,7 @@ export class Sessions extends Context.Service<
                   threadId: input.threadId,
                   body: input.message.body,
                   ...(input.message.images === undefined ? {} : { images: input.message.images }),
+                  ...(input.message.files === undefined ? {} : { files: input.message.files }),
                   ...(input.message.dictated === true ? { dictated: true } : {}),
                 })
               return yield* briefFor(thread, { kind: 'takeover', from })

@@ -1,4 +1,4 @@
-import type { AllowedBy, FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -82,6 +82,8 @@ export type Block =
       readonly links: ReadonlyArray<Unfurl>
       /** The images the person sent with it. */
       readonly pictures: ReadonlyArray<Picture>
+      /** The files and folders the person sent with it. */
+      readonly files: ReadonlyArray<AttachedFile>
     }
   | {
       readonly kind: 'turn'
@@ -471,6 +473,7 @@ export const blocksOf = (
           delivery,
           links: item.content.links,
           pictures: item.content.pictures,
+          files: item.content.files,
         })
         if (delivery === Delivery.Delivered) {
           asked = item
