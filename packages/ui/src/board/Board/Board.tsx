@@ -426,7 +426,11 @@ export function BoardList({ children }: { children: ReactNode }) {
 export function BoardDivider({ children, end }: { children: ReactNode; end?: ReactNode }) {
   return (
     <p className={s.divider}>
-      {children}
+      <span className={s.dividerLead}>
+        <span className={s.dividerLabel} {...(typeof children === 'string' ? { title: children } : {})}>
+          {children}
+        </span>
+      </span>
       {end !== undefined && end !== null && <span className={s.dividerEnd}>{end}</span>}
     </p>
   )

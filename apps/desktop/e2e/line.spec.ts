@@ -84,7 +84,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(rows.nth(0)).toContainText('Next in line')
     await expect(rows.nth(3)).toContainText('4th in line')
     await expect(running.getByRole('article')).toHaveCount(0)
-    await expect(next.getByText('Drag to change the order')).toBeVisible()
+    await expect(next.getByText('Drag to change the order')).toHaveCount(0)
     await page.mouse.move(1400, 880)
     await page.waitForTimeout(400)
     await work.screenshot({ path: 'test-results/line-board.png', scale: 'css', animations: 'disabled' })
