@@ -9,7 +9,7 @@ import { Fact, FactLine } from '../src/board/BoardCard/Chips'
  */
 
 describe('FactLine', () => {
-  const sizes = { line: { scroll: 300, client: 200 }, room: 200 }
+  const sizes = { scroll: 300, room: 200 }
   let notify: () => void = () => {}
   afterEach(() => vi.unstubAllGlobals())
 
@@ -24,13 +24,9 @@ describe('FactLine', () => {
         disconnect() {}
       },
     )
-    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => sizes.line.scroll })
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-      configurable: true,
-      get(this: HTMLElement) {
-        return this.parentElement?.tagName === 'DIV' && this.dataset.room === undefined ? sizes.line.client : sizes.room
-      },
-    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => sizes.scroll })
+    // The line fills the room it is in, as a block does.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => sizes.room })
   }
 
   it('becomes a list where its facts overflow, and a line again once there is room', () => {
