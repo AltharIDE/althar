@@ -121,6 +121,9 @@ export const text = {
   handsOver: (agent: string) => `hands the task to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
+  /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
+  conflictUnsent: (why: string) => `It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`,
+  resolveNow: 'Resolve now',
   keep: (from: string) => `Keep ${from}`,
   /** What the lead is asked when merging its branch here conflicts: in each repository, the branch it merges into and where. */
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
@@ -739,6 +742,12 @@ export function TaskView({
       )}
       {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
         <p className={s.handover}>{text.needsAgent}</p>
+      )}
+      {snapshot.task.conflictUnsent != null && (
+        <p className={s.handover}>
+          {text.conflictUnsent(snapshot.task.conflictUnsent)}{' '}
+          <LinkButton onClick={() => void model.resolveConflictsNow()}>{text.resolveNow}</LinkButton>
+        </p>
       )}
       {waiting !== null && (
         <p className={s.handover}>

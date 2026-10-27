@@ -96,6 +96,9 @@ export const text = {
   reviewDrafted: 'Review drafted',
   /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
   mergeConflict: 'Merge conflict',
+  /** A conflict Althar didn't ask its lead to resolve, though the rules say to: asks it anyway (ADR-030). */
+  resolveNow: 'Resolve now',
+  resolvingNow: 'Asking the lead',
   /** A running change's checks; a ready one's say what stands (shared/standing). */
   checks: {
     passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
@@ -410,7 +413,11 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet.
         word:
-          work.handedBack != null ? text.mergeConflict : change === null && work.unshipped != null ? kindWords.unshipped : kindWords.ready,
+          work.handedBack != null || work.conflictUnsent != null
+            ? text.mergeConflict
+            : change === null && work.unshipped != null
+              ? kindWords.unshipped
+              : kindWords.ready,
         ...(object === null ? {} : { object }),
         ...(work.handedBack != null
           ? {
@@ -420,10 +427,12 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
                 </Fact>
               ),
             }
-          : // One merged or closed has nothing in its way, and nothing to do to it.
-            change === null || change.state !== 'open'
-            ? {}
-            : { foot: readyFoot(work, change, actions) }),
+          : work.conflictUnsent != null
+            ? { foot: unsentFoot(work, work.conflictUnsent, actions) }
+            : // One merged or closed has nothing in its way, and nothing to do to it.
+              change === null || change.state !== 'open'
+              ? {}
+              : { foot: readyFoot(work, change, actions) }),
       }
     }
     default:
@@ -433,7 +442,31 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
 
 /** What a ready card does without opening its task: push, and merge, mark done or keep for later, and how they stand. */
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
-  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling'>>
+  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving'>>
+
+/** A conflict Althar didn't ask its lead to resolve: why, in one line, and Resolve now, which asks it anyway. */
+const unsentFoot = (work: BoardTask, why: string, actions: CardActions | undefined): ReactNode => {
+  const resolveNow = actions?.resolveNow
+  return (
+    <>
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          {why}
+        </Fact>
+      </FactLine>
+      {resolveNow !== undefined && (
+        <NextStep
+          signal
+          busy={actions?.resolving?.has(work.taskId) ?? false}
+          doing={text.resolvingNow}
+          onPress={() => void resolveNow(work.taskId)}
+        >
+          {text.resolveNow}
+        </NextStep>
+      )}
+    </>
+  )
+}
 
 /**
  * A finished task's Done and Keep for later, for its card's corner, where it

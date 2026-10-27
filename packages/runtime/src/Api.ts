@@ -867,6 +867,9 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
+      // The person's Resolve now: asked of its lead whatever stood in the way (ADR-030).
+      ResolveConflictsNow: ({ commandId, taskId }) => once(commandId, api(pullRequests.resolveNow({ taskId }, true))),
+      LookForConflicts: ({ commandId, projectId }) => once(commandId, api(pullRequests.resolveNow({ projectId }))),
       SetTaskAllowEverything: ({ commandId, taskId, allowEverything }) =>
         once(
           commandId,

@@ -1045,6 +1045,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
+    resolveConflictsNow: vi.fn(async () => {}),
+    lookForConflicts: vi.fn(async () => {}),
     setTaskAllowEverything: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     leaveOutCommits: vi.fn(async () => {}),
