@@ -288,6 +288,9 @@
   color: var(--t-2);
   overflow-wrap: anywhere;
 }
+.notice > * + * {
+  margin-top: 4px;
+}
 
 .bar {
   display: flex;

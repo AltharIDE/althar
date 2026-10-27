@@ -37,7 +37,7 @@ export function TaskFace({ children, composer, panel, panelWidth, unseen, text, 
   const sized = panel != null && panelWidth !== undefined ? ({ ...style, '--panel-width': `${panelWidth}px` } as CSSProperties) : style
   return (
     <div className={cx(s.face, panel != null && s.hasPanel, className)} style={sized} {...rest}>
-      <div className={s.main}>
+      <div className={s.main} data-floats-host="">
         <div className={s.scrollArea}>
           <div ref={scroll} className={s.scroll}>
             <ThreadMeasure>{children}</ThreadMeasure>

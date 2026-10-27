@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 import {
   Composer,
@@ -335,13 +335,20 @@ export function ProjectView({
     images.restore(said.pictures)
   }
 
+  const line: ReactNode =
+    waiting !== null && session !== null ? (
+      <>
+        {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
+        <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
+      </>
+    ) : (session === null || !session.held) && model.agents.length === 0 ? (
+      text.needsAgent
+    ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
+      text.signedOut(suggested.agentName, agentName(chosen.agentId))
+    ) : null
+
   const composer = (
     <div className={s.composer}>
-      {model.error !== null && (
-        <p className={s.failure} role="alert">
-          {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-        </p>
-      )}
       <Composer
         value={draft}
         onChange={setDraft}
@@ -351,15 +358,15 @@ export function ProjectView({
         carried={<CarriedOver here={draftOf} />}
         // The lines about who answers go on the composer's edge, so a running launch's chip and they never overlap.
         notice={
-          waiting !== null && session !== null ? (
+          model.error !== null || line !== null ? (
             <>
-              {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
-              <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
+              {model.error !== null && (
+                <div className={s.failure} role="alert">
+                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                </div>
+              )}
+              {line !== null && <div>{line}</div>}
             </>
-          ) : (session === null || !session.held) && model.agents.length === 0 ? (
-            text.needsAgent
-          ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
-            text.signedOut(suggested.agentName, agentName(chosen.agentId))
           ) : null
         }
         above={
