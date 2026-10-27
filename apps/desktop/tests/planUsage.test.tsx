@@ -17,8 +17,7 @@ import { agents, changed, fakeClient, fakeHost, planUsage, project, usageAccount
 import { withServices } from './render'
 
 /*
- * Plan usage in the window: the gauge after CPU and memory, which says who
- * and until when once an agent is nearly out, and its peek, opened by a
+ * Plan usage in the window: the gauge after CPU and memory, and its peek, opened by a
  * click or Ctrl or ⌘ U; each model's room in the pickers; and what a step
  * held before its agent ran out says it waits for.
  */
@@ -78,8 +77,8 @@ describe('what the window says of a plan', () => {
     expect(limitWords({ kind: 'five_hour', label: null })).toBe('five-hour limit')
   })
 
-  it('gives an agent the room of its account with the most, least room first, and the agents with no reading apart', () => {
-    const { agents: read, silent } = planOf(planUsage([codexWork, codexSide, claude, copilot]), NOW)
+  it('gives an agent the room of its account with the most, least room first', () => {
+    const { agents: read } = planOf(planUsage([codexWork, codexSide, claude, copilot]), NOW)
     expect(read.map((agent) => [agent.name, agent.left, agent.account])).toEqual([
       ['Claude Code', 3, null],
       // Work has 40% of its five hours, Side 50% of its week: work goes to Side.
@@ -93,7 +92,6 @@ describe('what the window says of a plan', () => {
       ['5 hours', 3],
       ['Opus week', 1],
     ])
-    expect(silent).toEqual([{ name: 'GitHub Copilot', why: 'Copilot shares no plan usage with other apps.' }])
   })
 
   it('gives an agent the room of an account that can run, keeping one signed out with its last numbers in the detail', () => {
@@ -219,14 +217,16 @@ const peek = () => screen.queryByRole('dialog', { name: 'Plan usage' })
 const gauge = () => screen.findByRole('button', { name: /^Plan usage: / })
 
 describe('the plan gauge in the bar', () => {
-  it('shows the agent with least room, and says who and until when beside it once under a tenth, from the feed too', async () => {
+  it('shows the agent with least room in its label, from the feed too', async () => {
     const { emit } = windowAt('/', planUsage([codexWork]))
     expect((await gauge()).getAttribute('aria-label')).toBe(`Plan usage: Codex has 40% left, until ${clock(RESET)}`)
     expect(screen.queryByText(/Codex 40%/)).toBeNull()
     act(() => emit({ _tag: 'PlanUsage', usage: planUsage([codexWork, claude]) }))
-    // Said in an output beside the gauge, as the load meter says memory running short in its own.
-    const said = () => [...document.querySelectorAll('output')].map((output) => output.textContent)
-    await waitFor(() => expect(said()).toContain(`Claude Code 3% · ${clock(RESET)}`))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Plan usage: / }).getAttribute('aria-label')).toBe(
+        `Plan usage: Claude Code has 3% left, until ${clock(RESET)}`,
+      ),
+    )
   })
 
   it('isn’t there while nothing is read, nor for agents that share nothing', async () => {
@@ -261,7 +261,7 @@ describe('the plan gauge in the bar', () => {
     await screen.findByRole('dialog', { name: 'Plan usage' })
   })
 
-  it('reads every account again as it opens, a row per agent opening in place, the ones with no reading at the foot', async () => {
+  it('reads every account again as it opens, a row per agent opening in place', async () => {
     const { client } = windowAt('/', planUsage([codexWork, codexSide, claude, copilot]))
     await userEvent.click(await gauge())
     const opened = await screen.findByRole('dialog', { name: 'Plan usage' })
@@ -272,8 +272,7 @@ describe('the plan gauge in the bar', () => {
     expect(second?.textContent).toContain(`side · Weekly limit · until ${clock('2026-10-19T09:00:00.000Z')}`)
     await userEvent.click(second!)
     expect(within(opened).getByText('work')).toBeTruthy()
-    await userEvent.click(within(opened).getByRole('button', { name: 'No reading for GitHub Copilot' }))
-    expect(within(opened).getByText('Copilot shares no plan usage with other apps.')).toBeTruthy()
+    expect(within(opened).queryByText(/No reading for/)).toBeNull()
   })
 })
 

@@ -328,6 +328,9 @@ const issueRef = /^(.+\/[^/#\s]+)#(\d+)$/
 /** How many pages of a merge request's threads are read: a hundred threads each. */
 const THREAD_PAGES = 10
 
+/** How many merge requests' sizes are kept: more than are open at once, in any project Althar follows. */
+const SIZES_KEPT = 1_000
+
 export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'gitlab' as const
   const api = options.apiUrl.replace(/\/+$/, '')
@@ -370,7 +373,11 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         ),
     )
 
-  /** Each merge request's size at the head it was counted at: counted again only when the head moves. */
+  /**
+   * Each merge request's size at the head it was counted at: counted again
+   * only when the head moves. The ones read least lately go past
+   * `SIZES_KEPT`, as merge requests are merged and closed.
+   */
   const sizes = new Map<
     string,
     { readonly sha: string | null; readonly additions: number; readonly deletions: number; readonly files: number }
@@ -378,7 +385,11 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   const sizeOf = (repository: Repository, request: MergeAnswer) => {
     const key = `${repository.id}!${request.iid}`
     const known = sizes.get(key)
-    if (known !== undefined && known.sha === (request.sha ?? null)) return Effect.succeed(known)
+    if (known !== undefined && known.sha === (request.sha ?? null)) {
+      sizes.delete(key)
+      sizes.set(key, known)
+      return Effect.succeed(known)
+    }
     return http
       .graphql(
         SizeAnswer,
@@ -391,7 +402,12 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           const stats = answer.project?.mergeRequest?.diffStatsSummary
           if (stats == null) return null
           const size = { sha: request.sha ?? null, additions: stats.additions, deletions: stats.deletions, files: stats.fileCount }
+          sizes.delete(key)
           sizes.set(key, size)
+          for (const oldest of sizes.keys()) {
+            if (sizes.size <= SIZES_KEPT) break
+            sizes.delete(oldest)
+          }
           return size
         }),
         // A server too old to say, or a query it refuses: the size stays unknown, and the merge request reads as before.

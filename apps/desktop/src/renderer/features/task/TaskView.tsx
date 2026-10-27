@@ -82,7 +82,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
-import { chosenFaces } from './chosenFaces'
+import { chooseFace, chosenFaces } from './chosenFaces'
 import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
@@ -118,7 +118,6 @@ export const text = {
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
   needsAgent: 'No agent is signed in, so nothing can pick this up. Sign one in from Settings; what you send waits for it.',
-  handsOver: (agent: string) => `hands the task to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
   /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
@@ -368,7 +367,7 @@ export function TaskView({
   const taskId = model.snapshot?.task.id
   const setFace = useCallback(
     (value: Face) => {
-      if (taskId !== undefined) chosenFaces.set(taskId, value)
+      if (taskId !== undefined) chooseFace(taskId, value)
       showFace(value)
     },
     [taskId],
@@ -830,15 +829,7 @@ export function TaskView({
         picker={
           model.agents.length > 0 &&
           choice !== null && (
-            <ModelChoice
-              owner={text.lead}
-              agents={model.agents}
-              projectId={snapshot.project.id}
-              value={choice}
-              onChange={choose}
-              // Another agent's model hands the task over, once the person says something.
-              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
-            />
+            <ModelChoice owner={text.lead} agents={model.agents} projectId={snapshot.project.id} value={choice} onChange={choose} />
           )
         }
       />

@@ -652,6 +652,8 @@ export const handlers = Api.toLayer(
               const threads = yield* projects.remove(projectId, said.commandId)
               // Its runs are over, so no step answers an agent going: each one still on it stops, the coordinator too.
               yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
+              // And what it runs stops, with no project left to stop it from.
+              yield* launches.stopAll(projectId)
             }),
           ),
         ),

@@ -15,7 +15,7 @@ export const usePlanUsage = (): PlanUsage | null => {
   return useQuery(reads(client).planUsage()).data ?? null
 }
 
-/** Every agent read, least room first, and the ones with nothing to read, as the bar's gauge shows them. */
+/** Every agent read, least room first, as the bar's gauge shows them. */
 export const usePlan = () => {
   const usage = usePlanUsage()
   // The reset times say today's time or a day's, and the ages minutes: written again each minute.

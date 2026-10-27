@@ -114,6 +114,29 @@ const told = () => {
 
 export const sessionOf = (key: string): Session => sessions.get(key) ?? IDLE
 
+/** Whether a thread's dictation is as it was before any: nothing said, kept, carried or on its way. */
+const settled = (session: Session) =>
+  session.phase === 'idle' &&
+  session.interim === '' &&
+  session.failed === null &&
+  session.arrived === null &&
+  session.away === null &&
+  session.sending === null
+
+/** Whether nothing of a thread's dictation is under way, nor its composer shown. */
+const unheld = (held: Handles | undefined) =>
+  held === undefined || (held.shown === 0 && held.recording === null && held.writer === null && held.clock === null)
+
+/**
+ * Forgets a thread's dictation once it holds nothing and no composer of the
+ * thread shows: kept, there would be one for every thread ever dictated in.
+ */
+export const letGoIfIdle = (key: string) => {
+  if (!settled(sessionOf(key)) || !unheld(handles.get(key))) return
+  sessions.delete(key)
+  handles.delete(key)
+}
+
 export const handlesOf = (key: string): Handles => {
   const held = handles.get(key)
   if (held !== undefined) return held
@@ -127,7 +150,11 @@ export const changeSession = (key: string, change: Partial<Session> | ((now: Ses
   const was = sessionOf(key)
   const next = { ...was, ...(typeof change === 'function' ? change(was) : change) }
   if ((Object.keys(next) as Array<keyof Session>).every((field) => next[field] === was[field])) return
-  sessions.set(key, next)
+  // Back to nothing with no composer of its own showing, it is forgotten rather than kept.
+  if (settled(next) && unheld(handles.get(key))) {
+    sessions.delete(key)
+    handles.delete(key)
+  } else sessions.set(key, next)
   listeners.get(key)?.forEach((listener) => listener())
   told()
 }
@@ -192,6 +219,9 @@ export const useSession = (key: string): Session =>
     useCallback((listener: () => void) => subscribe(key, listener), [key]),
     () => sessionOf(key),
   )
+
+/** How many threads' dictation is kept, for tests. */
+export const dictationsKept = () => new Set([...sessions.keys(), ...handles.keys()]).size
 
 /** Forgets every thread's dictation, as each test starts. */
 export const forgetSessions = () => {

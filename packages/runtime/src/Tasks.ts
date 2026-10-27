@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 
 import { type CommandEnvelope, type ProjectId, RunState, runLifecycle, TaskState, taskLifecycle, transition } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from 'effect'
+import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
@@ -13,7 +13,9 @@ import { makeScratch } from './firstWrite'
 import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
 import { bringBack as bringFoldersBack } from './bringBack'
 import { Instance } from './Instance'
+import { makeKeyedLock } from './keyedLock'
 import { answeredIn, issueCardsWaiting, quickIn } from './kinds'
+import { Launches } from './Launches'
 import { Plans } from './Plans'
 import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
@@ -209,7 +211,7 @@ export class Tasks extends Context.Service<
     inTurn<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
   }
 >()('@althar/runtime/Tasks') {
-  static readonly layer: Layer.Layer<Tasks, never, Store> = Layer.effect(
+  static readonly layer: Layer.Layer<Tasks, never, Store | Launches> = Layer.effect(
     Tasks,
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
@@ -219,19 +221,14 @@ export class Tasks extends Context.Service<
       const plans = yield* Plans
       const setups = yield* Setups
       const changes = yield* Changes
+      const launches = yield* Launches
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /*
        * A task's course changes one at a time, through stopping its agents
        * and starting them: a resume pressed while a stop still waits for its
        * agents to go runs once they have.
        */
-      const locks = new Map<string, Semaphore.Semaphore>()
-      const inTurn = <A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>) =>
-        Effect.suspend(() => {
-          const lock = locks.get(taskId) ?? Semaphore.makeUnsafe(1)
-          locks.set(taskId, lock)
-          return lock.withPermits(1)(effect)
-        })
+      const inTurn = makeKeyedLock().withLock
       const oneAtATime = <A, E>(taskId: string, effect: Effect.Effect<A, E, Store>) => provide(inTurn(taskId, effect))
 
       /**
@@ -404,8 +401,9 @@ export class Tasks extends Context.Service<
             }),
           )
           if (!abandoned) return
-          // Its run is suspended, so no step answers an agent going: each one on it stops.
+          // Its run is suspended, so no step answers an agent going: each one on it stops, and what it runs with them.
           yield* stopAgents(input.taskId)
+          yield* launches.stopAll(standing.projectId, input.taskId)
           yield* touchCard(input.taskId)
         })
 
@@ -617,7 +615,8 @@ export class Tasks extends Context.Service<
       const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          if ((yield* doneable(input.taskId)) === undefined) return false
+          const ready = yield* doneable(input.taskId)
+          if (ready === undefined) return false
           // What it left running stops first: one that wouldn't stays up, and the task isn't done, for the person to try again.
           if (!(yield* stopLeftRunning(input.taskId))) return yield* new TaskRefused({ taskId: input.taskId, why: 'left_running' })
           const at = yield* timestamp
@@ -642,6 +641,8 @@ export class Tasks extends Context.Service<
             }),
           )
           if (!settled) return false
+          // What it runs stops too: nothing is left to stop it from.
+          yield* launches.stopAll(ready.projectId, input.taskId)
           yield* touchCard(input.taskId)
           return true
         })

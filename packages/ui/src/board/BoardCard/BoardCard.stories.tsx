@@ -26,7 +26,8 @@ import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
-import { Fact, FactLine, NextStep } from './Chips'
+import { Fact, FactLine, NextStep, PullChip } from './Chips'
+import { GITHUB } from '../../fixtures/outputs'
 
 const resolveNow = fn()
 
@@ -71,6 +72,142 @@ export const ReadyToAccept: Story = {
     await expect(card.getByText('#1187')).toBeInTheDocument()
     await expect(card.getByText('All 8 checks passed')).toBeInTheDocument()
     await expect(card.queryByText(/Review/)).not.toBeInTheDocument()
+  },
+}
+/*
+ * A ready change's foot, as the board says it: what blocks first, then what to do, then what is fine. Where the facts
+ * don't fit on one line they are a list, a glyph column and no middots; the next step sits under them, with them.
+ */
+const readyFoot = (
+  width: number,
+  stacked: boolean,
+  facts: ReadonlyArray<{ words: string; icon?: 'up' | 'branch' | 'close' | 'check'; tone: 'warm' | 'danger' | 'live' | 'ok' }>,
+  step?: string,
+) => ({
+  render: () => (
+    <div style={{ width }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word="Ready to accept"
+        kind={TaskKind.Change}
+        at="31m"
+        title="Drop any file or folder onto the composer"
+        object={<PullChip host={GITHUB} repo="althar" number={344} add={412} del={37} />}
+        foot={
+          <>
+            <FactLine stacked={stacked}>
+              {facts.map((one) => (
+                <Fact key={one.words} {...(one.icon === undefined ? {} : { icon: one.icon })} tone={one.tone}>
+                  {one.words}
+                </Fact>
+              ))}
+            </FactLine>
+            {step !== undefined && (
+              <NextStep signal onPress={fn()} label={`${step} to #344`}>
+                {step}
+              </NextStep>
+            )}
+          </>
+        }
+      />
+    </div>
+  ),
+})
+/** No line of facts starts with a middot, wherever it wraps. */
+const noStrayDots = async (canvasElement: HTMLElement) => {
+  for (const part of canvasElement.querySelectorAll('[class*="factLinePart"]'))
+    await expect((part.textContent ?? '').trimStart().startsWith('·')).toBe(false)
+}
+const THE_FACTS = [
+  { words: 'The push should resolve the conflict with main', icon: 'up', tone: 'warm' },
+  { words: 'Checks running, 11 of 12 passed', tone: 'live' },
+] as const
+/** The card that was ugly: commits to push that resolve a conflict, checks running, on a narrow card. A list, not a wrapped line. */
+export const ReadyPushResolvesConflictNarrow: Story = {
+  ...readyFoot(260, true, THE_FACTS, 'Push 5 commits'),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getAllByRole('listitem')).toHaveLength(2)
+    await expect(card.queryByText('·')).not.toBeInTheDocument()
+    await noStrayDots(canvasElement)
+    await expect(card.queryByText(/^Conflicts with main/)).not.toBeInTheDocument()
+    const button = card.getByRole('button', { name: 'Push 5 commits to #344' })
+    await userEvent.click(button)
+    // Pressed with the mouse, it shows no focus ring.
+    await expect(button.matches(':focus-visible')).toBe(false)
+    await expect(getComputedStyle(button).outlineStyle).not.toBe('solid')
+  },
+}
+/** Left to itself, on a narrow card the facts become a list; its width is measured, so the story is laid out in a browser. */
+export const ReadyFactsMeasuredNarrow: Story = {
+  render: () => (
+    <div style={{ width: 260 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word="Ready once pushed"
+        kind={TaskKind.Change}
+        at="31m"
+        title="Drop any file or folder onto the composer"
+        foot={
+          <FactLine>
+            {THE_FACTS.map((one) => (
+              <Fact key={one.words} {...('icon' in one ? { icon: one.icon } : {})} tone={one.tone}>
+                {one.words}
+              </Fact>
+            ))}
+          </FactLine>
+        }
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const line = canvasElement.querySelector('[class*="factLine"]')
+    // jsdom has no layout to measure; a browser does.
+    if (line !== null && line.scrollWidth > 0) await expect(line).toHaveAttribute('data-stacked')
+  },
+}
+/** Failed checks block, so they come before what is still running. */
+export const ReadyChecksFailedNarrow: Story = {
+  ...readyFoot(
+    260,
+    true,
+    [
+      { words: 'harness / verify failed', icon: 'close', tone: 'danger' },
+      { words: 'Checks running, 3 of 4 passed', tone: 'live' },
+    ],
+    'Push 2 commits',
+  ),
+  play: async ({ canvasElement }) => {
+    const items = within(canvasElement).getAllByRole('listitem')
+    await expect(items.map((item) => item.textContent)).toEqual(['harness / verify failed', 'Checks running, 3 of 4 passed'])
+    await noStrayDots(canvasElement)
+  },
+}
+/** Everything fine: one fact, green, nothing to push. */
+export const ReadyAllGreen: Story = {
+  ...readyFoot(260, true, [{ words: 'All 12 checks passed', icon: 'check', tone: 'ok' }], 'Accept and merge'),
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('All 12 checks passed')).toBeInTheDocument()
+    await noStrayDots(canvasElement)
+  },
+}
+/** Two short facts on a wide card stay on one line, a middot between them and none before the first. */
+export const ReadyFactsOnOneLine: Story = {
+  ...readyFoot(
+    420,
+    false,
+    [
+      { words: 'test failed', icon: 'close', tone: 'danger' },
+      { words: 'Checks running, 3 of 4 passed', tone: 'live' },
+    ],
+    'Push 2 commits',
+  ),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.queryAllByRole('listitem')).toHaveLength(0)
+    await expect(card.getAllByText('·')).toHaveLength(1)
+    // On one line a middot sits between facts, never before the first.
+    await expect((canvasElement.querySelector('[class*="factLinePart"]')?.textContent ?? '').startsWith('·')).toBe(false)
   },
 }
 /** A conflict its lead couldn't resolve: warm, with a glyph, and why under the title. */

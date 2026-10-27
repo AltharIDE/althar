@@ -40,7 +40,17 @@ import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../share
 import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import { doingWords, doneHere, factsOf, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
+import {
+  doingWords,
+  doneHere,
+  factsOf,
+  isBlocked,
+  labelWords,
+  nextWords,
+  pushResolves,
+  standingOf,
+  standingText,
+} from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -96,6 +106,10 @@ export const text = {
   reviewDrafted: 'Review drafted',
   /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
   mergeConflict: 'Merge conflict',
+  /** A pull request with a conflict or a failed check in its way: not yet ready to accept. */
+  blocked: 'Not ready to accept',
+  /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
+  readyOnPush: 'Ready once pushed',
   /** A conflict Althar didn't ask its lead to resolve, though the rules say to: asks it anyway (ADR-030). */
   resolveNow: 'Resolve now',
   resolvingNow: 'Asking the lead',
@@ -425,7 +439,11 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
             ? text.mergeConflict
             : change === null && work.unshipped != null
               ? kindWords.unshipped
-              : kindWords.ready,
+              : change?.state === 'open' && isBlocked(standingOf(change))
+                ? text.blocked
+                : change?.state === 'open' && pushResolves(standingOf(change))
+                  ? text.readyOnPush
+                  : kindWords.ready,
         ...(object === null ? {} : { object }),
         // Its conflict the person's, handed back or not asked of its lead: why, and Resolve now, which asks the lead anyway.
         ...(work.handedBack != null || work.conflictUnsent != null
@@ -506,7 +524,7 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
   // Not looked at for a conflict here, whatever its host says: why, first, as the host's word may be out of date.
   const unchecked = work.conflictUnchecked ?? null
   const facts = factsOf(change, standing).map((one, i) => (
-    <Fact key={one.words} {...(i === 0 && unchecked === null && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+    <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
       {one.words}
     </Fact>
   ))

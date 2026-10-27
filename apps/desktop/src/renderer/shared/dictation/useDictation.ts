@@ -15,6 +15,7 @@ import {
   type Destination,
   type Handles,
   handlesOf,
+  letGoIfIdle,
   listeningIn,
   type Said,
   sessionOf,
@@ -459,10 +460,10 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     return () => window.removeEventListener('keydown', onKey, true)
   }, [listening, showing])
 
-  // Whose it is, for the pill that carries it once the person leaves.
+  // Whose it is, for the pill that carries it once the person leaves; said again as its composer shows, its dictation forgotten meanwhile.
   useEffect(() => {
-    handlesOf(key).to = to
-  }, [key, to])
+    if (showing) handlesOf(key).to = to
+  }, [key, to, showing])
 
   // The thread's composer shows: what is written down lands at its cursor, and nothing is carried. Leaving it, for another view or another face of this one, goes on listening, or writing down, carried with the person.
   useEffect(() => {
@@ -477,6 +478,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       if (held.field === inputRef) held.field = null
       composerShown(key, false)
       if (held.shown === 0 && sessionOf(key).phase !== 'idle') changeSession(key, { away: Date.now() })
+      letGoIfIdle(key)
     }
   }, [key, showing, inputRef])
 

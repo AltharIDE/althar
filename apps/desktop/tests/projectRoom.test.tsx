@@ -267,7 +267,7 @@ describe('the Talk room’s composer when Althar doesn’t take what was said', 
     withServices(<Project />, client)
     const composer = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the coordinator' })
     await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
-    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codex, via Codexhands the conversation to Codex/ }))
+    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codex, via Codex/ }))
     await userEvent.keyboard('{Escape}')
     await userEvent.type(composer, 'Plan it{Enter}')
     await waitFor(() => expect(client.switchAgent).toHaveBeenCalledTimes(1))

@@ -1,5 +1,5 @@
 import type { AccountUsage, ModelRoom as Room, PlanUsage, UsageWindow } from '@althar/contracts'
-import type { ModelInfo, ModelRoom, PlanAccount, PlanAgent, PlanSilent, PlanWindow } from '@althar/ui'
+import type { ModelInfo, ModelRoom, PlanAccount, PlanAgent, PlanWindow } from '@althar/ui'
 
 import { brandOf } from '../../shared/agents'
 import { choiceOf } from '../../shared/models'
@@ -67,10 +67,9 @@ const accountOf = (account: AccountUsage, several: boolean, now: Date): PlanAcco
   })),
 })
 
-/** Every agent read, least room first, and the agents with nothing to read, with why. */
-export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: PlanAgent[]; readonly silent: PlanSilent[] } => {
+/** Every agent read, least room first. */
+export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: PlanAgent[] } => {
   const agents: PlanAgent[] = []
-  const silent: PlanSilent[] = []
   const byAgent = new Map<string, AccountUsage[]>()
   for (const account of usage?.accounts ?? []) byAgent.set(account.agentId, [...(byAgent.get(account.agentId) ?? []), account])
   for (const [agentId, accounts] of byAgent) {
@@ -80,14 +79,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
     })
     const [first] = accounts
     if (first === undefined) continue
-    if (read.length === 0) {
-      // Nothing to show for it: why, as the runtime says it, or why the read failed.
-      const why =
-        accounts.find((account) => account.noReading !== null)?.noReading ??
-        accounts.find((account) => account.fault !== null)?.fault?.message
-      if (why !== undefined) silent.push({ name: first.agentName, why })
-      continue
-    }
+    if (read.length === 0) continue
     const several = accounts.length > 1
     const brand = brandOf(agentId)
     const each = read.toSorted((a, b) => leftOf(a.window) - leftOf(b.window)).map(({ account }) => accountOf(account, several, now))
@@ -122,7 +114,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
   }
   // Least room first, an agent that can't run after every one that can.
   const stopped = (agent: PlanAgent) => (agent.stopped === undefined ? 0 : 1)
-  return { agents: agents.toSorted((a, b) => stopped(a) - stopped(b) || a.left - b.left), silent }
+  return { agents: agents.toSorted((a, b) => stopped(a) - stopped(b) || a.left - b.left) }
 }
 
 /**

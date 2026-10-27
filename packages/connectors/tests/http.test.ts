@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Schema } from 'effect'
 
 import { ConnectorFailed } from '../src/errors'
-import { failureOf, makeHttp } from '../src/http'
+import { ETAG_TEXT_KEPT, ETAGS_KEPT, failureOf, makeHttp } from '../src/http'
 import type { Product } from '../src/model'
 import { stubFetch } from './stub'
 
@@ -60,6 +60,60 @@ describe('a call to a service', () => {
       assert.deepStrictEqual(
         sent.map((request) => request.headers['if-none-match']),
         [undefined, '"v1"'],
+      )
+    }),
+  )
+
+  it.effect('keeps the answers asked for most lately, so a URL no longer asked for stops being kept', () =>
+    Effect.gen(function* () {
+      const { fetch, sent } = stubFetch([
+        [
+          'GET',
+          /^https:\/\/api\.test\/commits\//,
+          (request) =>
+            request.headers['if-none-match'] === `"${request.url}"`
+              ? { status: 304 }
+              : { json: { name: request.url }, headers: { etag: `"${request.url}"` } },
+        ],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      const url = (i: number) => `https://api.test/commits/${i}/checks`
+      for (let i = 0; i < ETAGS_KEPT; i++) yield* http.cached(Thing, url(i))
+      // The first is asked for again, so it is the second that goes when one more comes.
+      yield* http.cached(Thing, url(0))
+      yield* http.cached(Thing, url(ETAGS_KEPT))
+      sent.length = 0
+      yield* http.cached(Thing, url(0))
+      yield* http.cached(Thing, url(1))
+      assert.deepStrictEqual(
+        sent.map((request) => request.headers['if-none-match']),
+        [`"${url(0)}"`, undefined],
+      )
+    }),
+  )
+
+  it.effect('keeps no more of the answers’ text than its bound', () =>
+    Effect.gen(function* () {
+      const big = 'x'.repeat(ETAG_TEXT_KEPT / 2)
+      const { fetch, sent } = stubFetch([
+        [
+          'GET',
+          /^https:\/\/api\.test\/big\//,
+          (request) =>
+            request.headers['if-none-match'] === `"${request.url}"`
+              ? { status: 304 }
+              : { json: { name: big }, headers: { etag: `"${request.url}"` } },
+        ],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      yield* http.cached(Thing, 'https://api.test/big/1')
+      yield* http.cached(Thing, 'https://api.test/big/2')
+      sent.length = 0
+      assert.deepStrictEqual(yield* http.cached(Thing, 'https://api.test/big/2'), { name: big })
+      yield* http.cached(Thing, 'https://api.test/big/1')
+      assert.deepStrictEqual(
+        sent.map((request) => request.headers['if-none-match']),
+        ['"https://api.test/big/2"', undefined],
       )
     }),
   )

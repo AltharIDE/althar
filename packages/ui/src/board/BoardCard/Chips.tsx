@@ -1,4 +1,4 @@
-import { Children, isValidElement, type ReactNode } from 'react'
+import { Children, isValidElement, type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
@@ -213,26 +213,74 @@ export type FactProps = RootProps<
 export function Fact({ icon, tone = 'quiet', children, className, ...rest }: FactProps) {
   return (
     <span className={cx(s.fact, s[tone], className)} {...rest}>
-      {tone === 'live' ? <LiveDot /> : icon !== undefined && <Icon name={icon} size={11} />}
+      <span className={s.glyph} aria-hidden="true">
+        {tone === 'live' ? <LiveDot /> : icon !== undefined && <Icon name={icon} size={11} />}
+      </span>
       {children}
     </span>
   )
 }
 
-export type FactLineProps = RootProps<'span', { children: ReactNode }>
+export type FactLineProps = RootProps<
+  'span',
+  {
+    children: ReactNode
+    /** Forces the list (true) or the one line (false); left out, it is whichever the facts fit in, measured. */
+    stacked?: boolean
+  }
+>
 
 /**
  * Facts said as one line, a middot between them, the most pressing first:
- * “2 commits not on the PR · harness failed”. Where the card is narrow, it
- * wraps between them.
+ * “2 commits not on the PR · harness failed”, only the first with its glyph.
+ * Where they don't fit on one line they are a short list instead, one to a
+ * line, each with its glyph in a column of its own and no middot, so no line
+ * starts with a stray one and the words line up.
  */
-export function FactLine({ children, className, ...rest }: FactLineProps) {
+export function FactLine({ children, className, stacked: forced, ...rest }: FactLineProps) {
   const facts = Children.toArray(children)
+  const line = useRef<HTMLSpanElement>(null)
+  // The width the facts take on one line, as last measured, to know when they fit again.
+  const need = useRef(0)
+  const [measured, setMeasured] = useState(false)
+  const stacked = forced ?? measured
+  const key = facts.map((fact, i) => (isValidElement(fact) && fact.key !== null ? fact.key : i)).join('|')
+  useLayoutEffect(() => {
+    need.current = 0
+    setMeasured(false)
+  }, [key])
+  useLayoutEffect(() => {
+    const room = line.current?.parentElement
+    if (forced !== undefined || line.current === null || room == null) return
+    const fit = () => {
+      const el = line.current
+      if (el === null) return
+      if (!stacked) {
+        need.current = el.scrollWidth
+        if (el.scrollWidth > el.clientWidth + 1) setMeasured(true)
+      } else if (room.clientWidth >= need.current) setMeasured(false)
+    }
+    fit()
+    if (typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(fit)
+    watch.observe(room)
+    return () => watch.disconnect()
+  }, [key, stacked, forced])
   return (
-    <span className={cx(s.factLine, className)} {...rest}>
+    <span
+      ref={line}
+      className={cx(s.factLine, className)}
+      {...(stacked ? { 'data-stacked': '' } : {})}
+      role={stacked ? 'list' : undefined}
+      {...rest}
+    >
       {facts.map((fact, i) => (
-        <span key={isValidElement(fact) && fact.key !== null ? fact.key : i} className={s.factLinePart}>
-          {i > 0 && (
+        <span
+          key={isValidElement(fact) && fact.key !== null ? fact.key : i}
+          className={s.factLinePart}
+          role={stacked ? 'listitem' : undefined}
+        >
+          {i > 0 && !stacked && (
             <span className={s.dot} aria-hidden="true">
               ·
             </span>

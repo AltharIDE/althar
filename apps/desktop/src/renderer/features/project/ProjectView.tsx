@@ -84,7 +84,6 @@ export const text = {
   coordinator: 'Coordinator',
   empty: (project: string) => `Ask the coordinator about ${project}, or say what should change.`,
   placeholder: 'Tell the coordinator something',
-  handsOver: (agent: string) => `hands the conversation to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
   keep: (from: string) => `Keep ${from}`,
@@ -417,8 +416,6 @@ export function ProjectView({
               {...(about === null ? {} : { projectId: about })}
               value={chosen}
               onChange={choose}
-              // Another agent's model hands the conversation over, once the person says something.
-              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
             />
           )
         }

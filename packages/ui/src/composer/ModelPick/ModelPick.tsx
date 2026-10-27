@@ -73,8 +73,6 @@ export interface ModelPickProps {
   variant?: 'quiet' | 'field'
   /** Where the list opens: above in a composer, below in a plan. */
   placement?: 'above' | 'below'
-  /** A word beside a model in the list, such as that picking it hands the conversation to another agent. */
-  note?: (model: ModelInfo) => string | undefined
   /** How much room a model has where work on it would start, at its row's end; null where its plan is read by nothing, undefined where there is nothing to say. Once the model in use is nearly out, the chip says so beside itself. */
   room?: (model: ModelInfo) => ModelRoom | null | undefined
   roomText?: Partial<ModelRoomText>
@@ -109,7 +107,6 @@ export function ModelPick({
   owner,
   variant = 'quiet',
   placement = 'above',
-  note,
   room,
   roomText,
   confirm,
@@ -176,13 +173,11 @@ export function ModelPick({
           loop
         >
           {list.map((x) => {
-            const said = note?.(x)
             const left = room?.(x)
             return (
               <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
                 <Model model={x} />
                 {!isPinned(x) && <span className={s.unpinned}>{t.notPinned}</span>}
-                {said !== undefined && <span className={s.note}>{said}</span>}
                 {left !== undefined && <RoomNote room={left} text={roomText} className={s.room} />}
                 <Icon name="check" size={11} className={s.check} />
               </RadioGroup.Item>

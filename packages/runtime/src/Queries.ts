@@ -1684,8 +1684,14 @@ export class Queries extends Context.Service<
           return at < 0 ? null : { place: at + 1, reordered: line.reordered }
         })
 
-      /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
-      const settledKinds = new Map<string, TaskCard['kind']>()
+      /*
+       * A settled task's kind, by the task, with when it settled: it is read
+       * from git once, not each time its card is. One entry a task, for the
+       * tasks whose cards were read last: settling again replaces it, and
+       * one long unread is read from git again.
+       */
+      const settledKinds = new Map<string, { readonly as: string; readonly kind: TaskCard['kind'] }>()
+      const SETTLED_KEPT = 1_000
 
       /** Whether a task has made something on its branch: commits, or changes not committed yet, its evidence aside. */
       const madeOf = (taskId: string) =>
@@ -1896,9 +1902,12 @@ export class Queries extends Context.Service<
           const reads = reviewing !== null && changes.length === 0
           // By its plan too: a quick task made a change in a round that was given up settles again at the same time, a change now.
           const settledAs = task.state === 'done' || task.state === 'abandoned' ? `${taskId}:${task.settledAt}:${quick}` : null
-          const kept = settledAs === null ? undefined : settledKinds.get(settledAs)
+          const known = settledKinds.get(taskId)
+          const kept = settledAs !== null && known?.as === settledAs ? known.kind : undefined
           const kind = kept ?? kindOf({ reviewing, end, changes: changes.length, quick, made: reads ? yield* madeOf(taskId) : false })
-          if (settledAs !== null) settledKinds.set(settledAs, kind)
+          settledKinds.delete(taskId)
+          if (settledAs !== null) settledKinds.set(taskId, { as: settledAs, kind })
+          for (const oldest of settledKinds.keys()) if (settledKinds.size > SETTLED_KEPT) settledKinds.delete(oldest)
           return {
             taskId,
             threadId: task.threadId,
