@@ -1,6 +1,6 @@
 # ADR-023: Althar runs the project itself, with no agent
 
-- **Status:** Accepted; one way per repository widened to a list per project by [ADR-044](044-a-project-runs-many-things.md)
+- **Status:** Accepted; one way per repository widened to a list per project by [ADR-044](044-a-project-runs-many-things.md); run on any branch or pull request, fetched by Althar, by [ADR-062](062-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md)
 - **Date:** 2026-10-11
 - **Owner:** Repository maintainers
 - **Context:** To see the project running, the person asked an agent: the
