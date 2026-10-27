@@ -41,6 +41,13 @@ const cards = (projectId: string) =>
 const notices = (threadId: string) =>
   Effect.map(items(threadId), (all) => all.flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : [])))
 
+/**
+ * How long checks may run before they make the change the person's, where the person opens it while they run: two
+ * seconds, not less, as they open it once its card is seen running, which on a slow runner is more than a moment, and
+ * checks that ran too long before then are said, rightly.
+ */
+const STUCK = Duration.seconds(2)
+
 describe('checks Althar sees through, that its host won’t show', () => {
   it.live('make the change the person’s, said once however often the host refuses them', () => {
     const { working, bare } = hosted()
@@ -125,8 +132,9 @@ describe('checks Althar sees through, that its host won’t show', () => {
       // The person opens it while its checks run: it is theirs from here.
       yield* (yield* Tasks).see({ taskId: running?.taskId ?? '' })
       const asked = () => github.calls.filter((call) => call === 'checks').length
-      const before = asked()
       // Well past how long checks may run, they are looked at again, and nothing is said of it.
+      yield* Effect.sleep(STUCK)
+      const before = asked()
       yield* until(
         Effect.sync(() => [asked()]),
         ([calls = 0]) => calls >= before + 5,
@@ -136,11 +144,7 @@ describe('checks Althar sees through, that its host won’t show', () => {
       Effect.provide(
         Queries.layer.pipe(
           Layer.provideMerge(
-            runtime(
-              ':memory:',
-              {},
-              { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100), checksStuck: Duration.millis(200) },
-            ),
+            runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100), checksStuck: STUCK }),
           ),
         ),
       ),

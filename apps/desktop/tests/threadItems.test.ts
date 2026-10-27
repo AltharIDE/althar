@@ -57,7 +57,7 @@ describe('what the person sent', () => {
     const sent = sending([items.says('Ready.')], { text: 'Use the helper', queued: true, interrupting: false, dictated: true })
     const copy = sent.items.at(-1)
     expect(copy?.kind === 'user_message' && copy.input).toEqual({ state: 'queued', interrupting: false, dictated: true })
-    expect(queuedOf(sent.items, true)).toEqual([{ id: sent.id, text: 'Use the helper', pictures: [], dictated: true }])
+    expect(queuedOf(sent.items, true)).toEqual([{ id: sent.id, text: 'Use the helper', pictures: [], files: [], dictated: true }])
     // Typed, it says nothing of it.
     const typed = sending([], { text: 'Typed', queued: true, interrupting: false })
     expect(queuedOf(typed.items, true)[0]).not.toHaveProperty('dictated')

@@ -458,8 +458,8 @@ describe('accounts', () => {
         ['codex', usual?.id],
         ['codex', work.id],
       ])
-      // Codex's last launch, its second account's session, is in that account's home.
-      assert.deepStrictEqual(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env, { FAKE_HOME: workFolder })
+      // Codex's last launch, its second account's session, is in that account's home (with whose work it is beside it).
+      assert.strictEqual(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env.FAKE_HOME, workFolder)
       // The usual account is out until its reset; the agent isn't, while work can run.
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'None')
 
