@@ -1,0 +1,32 @@
+diff --git a/dist/acp-agent.js b/dist/acp-agent.js
+index 1371c2c9a009bfa5a43a265238d20a1cc615524e..0213cc94e63d90f295e21fac8273ad2248b2d896 100644
+--- a/dist/acp-agent.js
++++ b/dist/acp-agent.js
+@@ -6128,17 +6128,16 @@ export class ClaudeAcpAgent {
+                         break;
+                     }
+                     case "rate_limit_event": {
+-                        if (lastAssistantTotalUsage !== null) {
+-                            await sendUpdate({
+-                                sessionId: params.sessionId,
+-                                update: attachUsageModel({
+-                                    sessionUpdate: "usage_update",
+-                                    used: lastAssistantTotalUsage,
+-                                    size: session.contextWindowSize,
+-                                    _meta: { "_claude/rateLimit": message.rate_limit_info },
+-                                }),
+-                            });
+-                        }
++                        // Althar: the event is sent even before this turn's first usage figure (claude-agent-acp #1127), with the context as last known, since the CLI repeats it only when the limits change.
++                        await sendUpdate({
++                            sessionId: params.sessionId,
++                            update: attachUsageModel({
++                                sessionUpdate: "usage_update",
++                                used: lastAssistantTotalUsage ?? session.contextUsedTokens ?? 0,
++                                size: session.contextWindowSize,
++                                _meta: { "_claude/rateLimit": message.rate_limit_info },
++                            }),
++                        });
+                         break;
+                     }
+                     case "conversation_reset": {

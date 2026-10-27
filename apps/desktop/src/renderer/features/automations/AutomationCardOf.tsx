@@ -39,7 +39,7 @@ export const reviewerFor = (lead: AutomationStep, agents: ReadonlyArray<AgentSta
 
 export interface AutomationCardOfProps extends Pick<
   AutomationCardProps,
-  'stage' | 'holds' | 'writing' | 'onTryOnce' | 'onTurnOn' | 'onUndo' | 'onOpen' | 'busy' | 'className'
+  'stage' | 'holds' | 'writing' | 'promptMissing' | 'onTryOnce' | 'onTurnOn' | 'onUndo' | 'onOpen' | 'busy' | 'className'
 > {
   definition: AutomationDefinition
   /** What the coordinator changed it from. */

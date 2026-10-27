@@ -272,7 +272,7 @@ describe('the window’s tabs', () => {
     expect(drafts.get()).toBeNull()
   })
 
-  it('make the new project’s tab the project’s own, open on its conversation', async () => {
+  it('make the new project’s tab the project’s own, open on Home', async () => {
     const { client, emit, router } = windowAt('/', [project, halyard, tessera])
     const drafts = draftsOf(client)
     // With other projects to open, New project is the + menu's last.
@@ -287,7 +287,8 @@ describe('the window’s tabs', () => {
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
     await userEvent.click(screen.getByRole('button', { name: 'Made' }))
     await waitFor(() => expect(where()).toBe(`/projects/${id}`))
-    expect(router.state.location.search).toEqual({ room: Room.Talk })
+    // No view is named: a project with none kept opens on Home.
+    expect(router.state.location.search).toEqual({})
     expect(drafts.get()).toBeNull()
     expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you', 'Northwind'])
     expect(tab('Northwind').getAttribute('aria-current')).toBe('page')

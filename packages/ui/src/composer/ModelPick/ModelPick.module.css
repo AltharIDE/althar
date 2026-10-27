@@ -95,6 +95,13 @@
   margin-left: auto;
   visibility: hidden;
 }
+/* a model's room keeps the row's right edge, before the check */
+.room {
+  margin-left: auto;
+}
+.room + .check {
+  margin-left: 0;
+}
 
 /* A pick that asks first: what it would do, and the answer. */
 .ask {

@@ -326,8 +326,8 @@ export const useTask = (threadId: string): TaskModel => {
   }, [readHead, readItems])
 
   useWatch((event) => {
-    // A command's output as far as it has come is useOutputs'.
-    if (event._tag === 'Output') return
+    // A command's output as far as it has come is useOutputs'; plan usage is the plan gauge's and the pickers'.
+    if (event._tag === 'Output' || event._tag === 'PlanUsage') return
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>

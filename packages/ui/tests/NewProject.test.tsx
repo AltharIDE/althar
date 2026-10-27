@@ -16,7 +16,6 @@ const APP: NewProjectFolder = {
   id: 'app',
   name: 'northwind-app',
   where: '~/code/northwind/app',
-  branch: 'main',
   host: GITHUB,
   remote: 'northwind-co/app',
 }
@@ -24,7 +23,6 @@ const OPS: NewProjectFolder = {
   id: 'ops',
   name: 'northwind-ops',
   where: '~/code/northwind/ops',
-  branch: 'main',
   host: FORGE,
   remote: 'northwind/ops',
 }
@@ -97,7 +95,7 @@ describe('what it is made of, and what reading it found', () => {
 
   it('offers what else is on this Mac a press away when nothing is named like the project', () => {
     tab({
-      found: { like: null, first: [], more: [{ id: 'dotfiles', name: 'dotfiles', where: '~/dotfiles', facts: 'main · yesterday' }] },
+      found: { like: null, first: [], more: [{ id: 'dotfiles', name: 'dotfiles', where: '~/dotfiles' }] },
     })
     expect(screen.getByRole('heading', { name: 'On this Mac' })).toBeInTheDocument()
     expect(screen.queryByText('dotfiles')).not.toBeInTheDocument()

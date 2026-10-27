@@ -601,6 +601,47 @@ export const BehindAll: Story = {
     />
   ),
 }
+const handingOver = (
+  <>
+    GPT-6.1 Sol takes over from Claude Opus 5 when you send. <button type="button">Keep Claude Opus 5</button>
+  </>
+)
+const behindMuch = (
+  <Behind
+    wait={{ place: '2nd in Up next', holders: [{ id: 't2', title: 'Prototype the board' }] }}
+    sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]}
+    processes={[{ id: 'dev', name: 'Site dev server', command: 'bun dev', url: 'localhost:5173', since: '12m' }]}
+  />
+)
+/** The chip and the notice share the edge: the chip over the line, never on it, and the link in it still works. */
+const apart: Story['play'] = async ({ canvasElement }) => {
+  const c = within(canvasElement)
+  const chip = canvasElement.querySelector('button[aria-expanded]')!.getBoundingClientRect()
+  const line = c.getByText(/takes over from/).getBoundingClientRect()
+  const keep = c.getByRole('button', { name: /^Keep/ })
+  // Boxes are drawn only in a browser (Storybook); under the unit tests' jsdom they are all zero, and the stacking is what is asserted.
+  const chipEl = canvasElement.querySelector('button[aria-expanded]')!
+  await expect(chipEl.closest('[class*="above"]')).not.toBe(keep.closest('[class*="notice"]'))
+  await expect(keep.closest('[class*="notice"]')).not.toBeNull()
+  if (line.width > 0) await expect(chip.bottom <= line.top || line.bottom <= chip.top).toBe(true)
+  if (line.width === 0) return
+  const at = keep.getBoundingClientRect()
+  await expect(document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2)).toBe(keep)
+}
+/** The Behind chip and a notice line (who takes over) float on the edge together, stacked. */
+export const BehindAndNotice: Story = {
+  render: () => <Example busy above={behindMuch} notice={handingOver} />,
+  play: apart,
+}
+/** Narrow, both wrap: nothing overlaps. */
+export const BehindAndNoticeNarrow: Story = {
+  render: () => (
+    <div style={{ width: 300 }}>
+      <Example busy above={behindMuch} notice={handingOver} />
+    </div>
+  ),
+  play: apart,
+}
 /** Nothing in the lower row but send: no picker, no meter, no dictation. */
 export const Minimal: Story = { render: () => <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> }
 

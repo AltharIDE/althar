@@ -5,7 +5,19 @@ import type { ProjectList, ThreadSnapshot } from '@althar/contracts'
 
 import { follow, GATHER } from '../src/renderer/data/feed'
 import { continued, homeSince, keys, makeQueryClient, readFirst, reads, recheckStatus } from '../src/renderer/data/reads'
-import { automationView, changed, coordinatorSnapshot, fakeClient, items, project, snapshot, status, streamed } from './fixtures'
+import {
+  automationView,
+  changed,
+  coordinatorSnapshot,
+  fakeClient,
+  items,
+  planUsage,
+  project,
+  snapshot,
+  status,
+  streamed,
+  usageAccount,
+} from './fixtures'
 
 /*
  * The window's cache and its one watch: what a change ends, read again
@@ -47,6 +59,33 @@ describe('the window’s watch', () => {
     stop()
     emit(changed('task', 't2'))
     expect(heard).toEqual(['t1', 'i1'])
+  })
+
+  it('puts plan usage in the cache as it comes, whole, tells whoever listens, and marks each model’s room to read again', async () => {
+    const { client, cache, feed, emit, read } = opened()
+    const heard: Array<string> = []
+    feed.listen((event) => heard.push(event._tag))
+    await cache.fetchQuery(read.modelRooms('p1'))
+    const usage = planUsage([usageAccount({ accountName: 'side' })])
+    emit({ _tag: 'PlanUsage', usage })
+    expect(cache.getQueryState(keys.modelRooms('p1'))?.isInvalidated).toBe(true)
+    expect(cache.getQueryData(keys.planUsage)).toEqual(usage)
+    emit({ _tag: 'PlanUsage', usage: planUsage() })
+    expect(cache.getQueryData(keys.planUsage)).toEqual(planUsage())
+    expect(heard).toEqual(['PlanUsage', 'PlanUsage'])
+    // Nothing is read: what it carries is all there is.
+    expect(client.getPlanUsage).not.toHaveBeenCalled()
+  })
+
+  it('reads plan usage again when the watch starts listening again, not the first time', async () => {
+    const { client, cache, rewatch, read } = opened()
+    await cache.fetchQuery(read.planUsage())
+    expect(client.getPlanUsage).toHaveBeenCalledTimes(1)
+    rewatch()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(client.getPlanUsage).toHaveBeenCalledTimes(1)
+    // Off screen it is only marked, for its next visit.
+    expect(cache.getQueryState(keys.planUsage)?.isInvalidated).toBe(true)
   })
 
   it('reads again what a change ends, gathered, on screen or not; and nothing else', async () => {

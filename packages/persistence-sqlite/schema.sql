@@ -1269,6 +1269,16 @@ CREATE INDEX automation_occurrences_by_task ON automation_occurrences (task_id) 
 
 CREATE INDEX automation_occurrences_by_project ON automation_occurrences (project_id);
 
+CREATE TABLE plan_usage_readings (
+  account_id TEXT NOT NULL REFERENCES agent_accounts (id),
+  agent_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  plan TEXT,
+  windows TEXT NOT NULL CHECK (json_valid(windows)),
+  observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (account_id)
+) STRICT;
+
 CREATE INDEX permission_requests_by_tool_call ON permission_requests (provider_session_id, tool_call_id);
 
 CREATE INDEX thread_items_questions ON thread_items (thread_id, provider_session_id, json_extract(content, '$.toolCallId')) WHERE kind = 'question';

@@ -9,12 +9,40 @@
   display: grid;
   max-width: 880px;
   margin: 0 auto;
-  padding: 36px 40px 96px;
+  padding: 14px 40px 96px;
+}
+
+/* ——— The bar: back to the list, and what can be done to it, kept in reach as the page scrolls ——— */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--n-2);
+  transition: box-shadow var(--fast) var(--ease);
+}
+
+/* a line under it only once the page scrolls beneath it */
+.bar[data-scrolled] {
+  box-shadow:
+    0 1px 0 var(--line-2),
+    0 8px 16px -14px var(--shadow);
+}
+
+.barInner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 880px;
+  min-height: 56px;
+  margin: 0 auto;
+  padding: 10px 40px;
+  box-sizing: border-box;
 }
 
 .crumb {
-  justify-self: start;
-  margin: -6px 0 18px -10px;
+  margin-left: -10px;
   color: var(--t-3);
 }
 
@@ -22,7 +50,7 @@
 
 .head {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
 }
@@ -267,5 +295,11 @@ button.run:focus-visible {
   .limit {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    transition: none;
   }
 }
