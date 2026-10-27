@@ -110,6 +110,8 @@ export type ProjectTabsProps = RootProps<
     current: string | null
     /** A tab was pressed: a project's id, or null for the home. */
     onSelect: (id: string | null) => void
+    /** A project's tab was pointed at or reached by keyboard, before it is pressed: what it shows can be read ahead. */
+    onPreview?: (id: string) => void
     onClose: (id: string) => void
     /** A project's tab was moved: `id` goes before `beforeId`, or to the end where that is null. The home's tab and the settings' stay first. Without it, tabs stay where they are. */
     onReorder?: (id: string, beforeId: string | null) => void
@@ -160,6 +162,7 @@ export function ProjectTabs({
   tabs,
   current: route,
   onSelect,
+  onPreview,
   onClose,
   onReorder,
   yours = 0,
@@ -273,6 +276,8 @@ export function ProjectTabs({
                 className={s.select}
                 aria-current={tab.id === current ? 'page' : undefined}
                 onClick={() => onSelect(tab.id)}
+                onPointerEnter={() => onPreview?.(tab.id)}
+                onFocus={() => onPreview?.(tab.id)}
                 {...bind(tab.id)}
               >
                 {/* The dot after its name says what waits; the mark says only that work runs. */}

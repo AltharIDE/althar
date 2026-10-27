@@ -1279,6 +1279,14 @@ CREATE TABLE plan_usage_readings (
   PRIMARY KEY (account_id)
 ) STRICT;
 
+CREATE INDEX permission_requests_by_tool_call ON permission_requests (provider_session_id, tool_call_id);
+
+CREATE INDEX thread_items_questions ON thread_items (thread_id, provider_session_id, json_extract(content, '$.toolCallId')) WHERE kind = 'question';
+
+CREATE INDEX threads_by_task ON threads (task_id);
+
+CREATE INDEX turn_deliveries_by_thread ON turn_deliveries (thread_id);
+
 CREATE TABLE user_input_files (
   project_id TEXT NOT NULL REFERENCES projects (id),
   user_input_id TEXT NOT NULL,

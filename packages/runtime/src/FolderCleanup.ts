@@ -212,7 +212,7 @@ const keep = (checkout: string, ref: string) =>
 /**
  * Removes a folder once nothing is left in it: the task's own, beside its
  * repositories' worktrees. What Althar keeps there of its own, the files the
- * person sent its lead (`.althar/attachments`, ADR-063), goes with it.
+ * person sent its lead (`.althar/attachments`, ADR-064), goes with it.
  */
 const eraseEmpty = (path: string) =>
   Effect.sync(() => {

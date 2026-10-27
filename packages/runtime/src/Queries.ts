@@ -41,10 +41,10 @@ import {
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
-import { Context, Effect, Layer, Option, Schema } from 'effect'
+import { Context, Deferred, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { Busy } from './Busy'
+import { Busy, type Line } from './Busy'
 import { PlanParameters, planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
@@ -673,6 +673,11 @@ export interface ThreadChange {
 
 type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches | Busy
 
+/** The lines of what waits one read has read, by project: a board of queued cards reads its line once, not once a card. */
+const LinesRead = Context.Reference<Map<string, Deferred.Deferred<Line>> | null>('@althar/runtime/Queries/LinesRead', {
+  defaultValue: () => null,
+})
+
 export class Queries extends Context.Service<
   Queries,
   {
@@ -731,7 +736,12 @@ export class Queries extends Context.Service<
       const instance = yield* Instance
       const config = yield* RuntimeConfig
       const launches = yield* Launches
-      const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+      // Each read reads a project's line once, however many of its cards wait in it.
+      const run = <A, E>(effect: Effect.Effect<A, E, Store>) =>
+        Effect.provideContext(
+          Effect.suspend(() => Effect.provideService(effect, LinesRead, new Map())),
+          context,
+        )
       const live = LIVE.map((state) => `'${state}'`).join(', ')
 
       const cursor = Effect.gen(function* () {
@@ -1642,6 +1652,19 @@ export class Queries extends Context.Service<
           }
         })
 
+      /** A project's line, read once in a read: the cards that read it at once share it. */
+      const lineIn = (projectId: string) =>
+        Effect.gen(function* () {
+          const busy = yield* Busy
+          const read = yield* LinesRead
+          if (read === null) return yield* busy.line(projectId)
+          const known = read.get(projectId)
+          if (known !== undefined) return yield* Deferred.await(known)
+          const line = Deferred.makeUnsafe<Line>()
+          read.set(projectId, line)
+          return yield* busy.line(projectId).pipe(Effect.onExit((exit) => Deferred.done(line, exit)))
+        })
+
       /**
        * A waiting task's place in its project's line, the tasks that wait for a place before any agent has worked on them, in
        * the order they start (1 first), and whether the line is in the person's order; null where it isn't in the line.
@@ -1651,7 +1674,7 @@ export class Queries extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
           if (task === undefined) return null
-          const line = yield* (yield* Busy).line(task.projectId)
+          const line = yield* lineIn(task.projectId)
           const at = line.tasks.indexOf(taskId)
           return at < 0 ? null : { place: at + 1, reordered: line.reordered }
         })
@@ -1934,6 +1957,10 @@ export class Queries extends Context.Service<
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
             ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
+            // Conflicting, and not asked of its lead: why, beside Resolve now (ADR-030).
+            ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
+            // Not looked at for a conflict, whatever its host says: why, beside Look again.
+            ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
             automation: yield* fromAutomation(taskId),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
@@ -2520,6 +2547,8 @@ export class Queries extends Context.Service<
               phase: card?.phase ?? null,
               kind: card?.kind,
               handedBack: card?.handedBack ?? null,
+              conflictUnsent: card?.conflictUnsent ?? null,
+              conflictUnchecked: card?.conflictUnchecked ?? null,
               madeChangeAt: head.madeChangeAt,
               waits: card?.waits ?? null,
               ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),

@@ -126,6 +126,7 @@ function TabsBar({
         ? { settings: { current: tabs.settings.current, onSelect: () => tabs.openSettings(), onClose: tabs.closeSettings } }
         : {})}
       onSelect={select}
+      onPreview={tabs.preview}
       onClose={tabs.close}
       onReorder={tabs.reorder}
       onOpen={tabs.open}

@@ -1578,6 +1578,18 @@ export const TaskCard = Schema.Struct({
    * so it's the person's: why, in a sentence. Without it, nothing is.
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Its branch conflicts with its default branch, and Althar didn't ask its
+   * lead to resolve it though the rules say it resolves conflicts: why, in a
+   * sentence, beside Resolve now (ADR-030). Without it, nothing is unsaid.
+   */
+  conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Althar couldn't look here for whether its branch conflicts with its
+   * default branch, and its host doesn't say it does, where the rules say it
+   * resolves conflicts: why, in a sentence, beside Look again (ADR-030).
+   */
+  conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
   /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
@@ -2266,6 +2278,10 @@ export const ThreadSnapshot = Schema.Struct({
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why its conflict with its default branch wasn't asked of its lead, as its card says, beside Resolve now. */
+    conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why Althar couldn't look for a conflict with its default branch, as its card says, beside Look again. */
+    conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
     /** When its lead made it a change, where it began as a quick task: what it showed before was a prototype's, not the change's. */
     madeChangeAt: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
@@ -2686,6 +2702,14 @@ export const LoadShare = Schema.Struct({
 })
 export type LoadShare = typeof LoadShare.Type
 
+/** Althar itself and its part of this computer: the app, its windows and the runtime, without the work they started. */
+export const LoadOwn = Schema.Struct({
+  cpu: Part,
+  memory: Bytes,
+  processes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+})
+export type LoadOwn = typeof LoadOwn.Type
+
 /** A reading of how hard this computer works: the whole of it, and Althar's work's part. */
 export const LoadPoint = Schema.Struct({ cpu: Part, work: Part })
 export type LoadPoint = typeof LoadPoint.Type
@@ -2705,6 +2729,8 @@ export const Load = Schema.Struct({
   pressure: Schema.NullOr(MemoryPressure),
   /** Althar's work, most CPU first; null where its processes can't be read, as on Windows. */
   shares: Schema.NullOr(Schema.Array(LoadShare)),
+  /** Althar itself, part of Althar's work as the bar counts it; null where its processes can't be read. */
+  althar: Schema.NullOr(LoadOwn),
   /** The readings of the last two minutes, oldest first, the last of them this one's. A gap of more than a few readings starts them afresh. */
   history: Schema.Array(LoadPoint),
 })
@@ -3064,6 +3090,15 @@ export const Api = RpcGroup.make(
    * conflict.
    */
   command('SetTaskResolveConflicts', { taskId: Schema.String, resolveConflicts: Schema.NullOr(Schema.Boolean) }, Schema.Void),
+  /**
+   * Resolve now: the task is merged with its default branch here, fetched
+   * again, and what conflicts is asked of its lead, though the rules leave
+   * it to the person, they stopped it, or its last round was handed back.
+   * Done apart.
+   */
+  command('ResolveConflictsNow', { taskId: Schema.String }, Schema.Void),
+  /** Each open task of the project looked at now for a conflict with its default branch, fetched again, under its rules. Done apart. */
+  command('LookForConflicts', { projectId: Schema.String }, Schema.Void),
   /** Allows everything its agents ask on one task, short of what its project never allows; turned on, what waits on the person is decided again. */
   command('SetTaskAllowEverything', { taskId: Schema.String, allowEverything: Schema.Boolean }, Schema.Void),
   /**

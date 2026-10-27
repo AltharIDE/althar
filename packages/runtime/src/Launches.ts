@@ -12,6 +12,7 @@ import { freshCopy } from './coordinatorFolder'
 import { bringBackThen } from './bringBack'
 import { Instance } from './Instance'
 import { printedMore, servingAt, uncoloured } from './leftRunning'
+import { WORK, workOf } from './machine'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
@@ -505,11 +506,13 @@ export class Launches extends Context.Service<
                     message: `Althar can't tell how ${binding.name} runs: it has no dev, start or serve script, Procfile or Makefile target. Ask the coordinator to keep how it runs.`,
                   })
                 const line = lineOf(run)
+                // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
+                const env = { [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) }
                 const spec =
                   process.platform === 'win32'
                     ? // The line as it is: cmd.exe takes off the outer quotes (/s).
-                      { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true as const }
-                    : { command: '/bin/sh', args: ['-c', line] }
+                      { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true as const, env }
+                    : { command: '/bin/sh', args: ['-c', line], env }
                 const id = yield* newId(Ids.process)
                 // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
                 yield* sql`INSERT INTO processes ${sql.insert({

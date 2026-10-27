@@ -1385,6 +1385,33 @@ describe('a task', () => {
     await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
   })
 
+  it('says why its conflict wasn’t asked of its lead, over the composer, and Resolve now asks it', async () => {
+    const why = 'Its folder isn’t on this computer, so Althar can’t merge main into it here.'
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, conflictUnsent: why } })) })
+    withServices(<Task />, client)
+    expect(
+      await screen.findByText(`It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`, { exact: false }),
+    ).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Resolve now' }))
+    await waitFor(() => expect(client.resolveConflictsNow).toHaveBeenCalledWith('t1'))
+  })
+
+  it('offers Resolve now where its lead couldn’t resolve its conflict, and Look again where Althar couldn’t look', async () => {
+    const handed = 'The lead couldn’t resolve the conflict with main. change.txt still conflicts.'
+    const first = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, handedBack: handed } })) })
+    const view = withServices(<Task />, first.client)
+    expect(await screen.findByText(handed, { exact: false })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Resolve now' }))
+    await waitFor(() => expect(first.client.resolveConflictsNow).toHaveBeenCalledWith('t1'))
+    view.unmount()
+    const why = 'Althar couldn’t fetch main to merge it with the branch here.'
+    const second = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, conflictUnchecked: why } })) })
+    withServices(<Task />, second.client)
+    expect(await screen.findByText(`Althar couldn’t look for a conflict with its default branch. ${why}`, { exact: false })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Look again' }))
+    await waitFor(() => expect(second.client.resolveConflictsNow).toHaveBeenCalledWith('t1'))
+  })
+
   it('offers how its conflicts go, as its project says or otherwise, and nothing on the menu’s button while it goes by the project', async () => {
     const { client } = await taskMenu({ resolveConflicts: { task: null, project: true } })
     const choices = within(screen.getByRole('group', { name: 'Resolve conflicts automatically' }))

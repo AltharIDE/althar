@@ -26,6 +26,9 @@ import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
+import { Fact, FactLine, NextStep } from './Chips'
+
+const resolveNow = fn()
 
 const meta = {
   title: 'Board/BoardCard',
@@ -72,6 +75,36 @@ export const ReadyToAccept: Story = {
 }
 /** A conflict its lead couldn't resolve: warm, with a glyph, and why under the title. */
 export const MergeConflict: Story = { args: CHANGE_CONFLICT }
+/**
+ * A conflict Althar didn't ask its lead to resolve, though its rules say to:
+ * why, in one line, and Resolve now, which asks the lead anyway (ADR-030).
+ */
+export const MergeConflictNotAsked: Story = {
+  args: {
+    ...CHANGE_CONFLICT,
+    why: undefined,
+    foot: (
+      <>
+        <FactLine>
+          <Fact icon="branch" tone="warm">
+            You stopped it, so Althar doesn’t start its lead for a conflict.
+          </Fact>
+        </FactLine>
+        <NextStep signal onPress={resolveNow}>
+          Resolve now
+        </NextStep>
+      </>
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Merge conflict')).toBeInTheDocument()
+    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
+    await expect(resolveNow).toHaveBeenCalledOnce()
+    // Its own button: the card doesn't open.
+    await expect(args.onOpen).not.toHaveBeenCalled()
+  },
+}
 export const Permission: Story = {
   args: CHANGE_PERMISSION,
   play: async ({ canvasElement }) => {
