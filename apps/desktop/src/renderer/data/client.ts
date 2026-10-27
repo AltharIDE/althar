@@ -56,6 +56,7 @@ import {
   type SignInStart,
   type SignInState,
   type Status,
+  type SentFile,
   type SentImage,
   type TaskEnd,
   type TaskFolders,
@@ -157,7 +158,12 @@ export interface Client {
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
   readonly switchAgent: (
-    input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage>; readonly dictated?: boolean },
+    input: Start & {
+      readonly body?: string
+      readonly images?: ReadonlyArray<SentImage>
+      readonly files?: ReadonlyArray<SentFile>
+      readonly dictated?: boolean
+    },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
@@ -223,6 +229,10 @@ export interface Client {
   readonly stopTask: (taskId: string) => Promise<void>
   /** Whether a task's lead resolves conflicts on its own otherwise than its project says; null goes back to the project. */
   readonly setTaskResolveConflicts: (input: { readonly taskId: string; readonly resolveConflicts: boolean | null }) => Promise<void>
+  /** Resolve now: a task's conflict with its default branch asked of its lead, whatever kept it from being asked. */
+  readonly resolveConflictsNow: (taskId: string) => Promise<void>
+  /** Each open task of a project looked at now for a conflict with its default branch, under the project's rules. */
+  readonly lookForConflicts: (projectId: string) => Promise<void>
   /** Allows everything its agents ask on one task, short of what its project never allows, or takes it back. */
   readonly setTaskAllowEverything: (input: { readonly taskId: string; readonly allowEverything: boolean }) => Promise<void>
   /** Carries a stopped task on from the step it was on: with its last lead, or the agent picked. */
@@ -250,6 +260,8 @@ export interface Client {
     readonly disposition: 'after_current' | 'interrupt_and_continue'
     /** Images sent with it, in order. */
     readonly images?: ReadonlyArray<SentImage>
+    /** Files and folders sent with it, in order, by their grants or kept copies. */
+    readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
   }) => Promise<void>
@@ -633,6 +645,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
+    resolveConflictsNow: (taskId) => command((commandId) => api.ResolveConflictsNow({ commandId, taskId })),
+    lookForConflicts: (projectId) => command((commandId) => api.LookForConflicts({ commandId, projectId })),
     setTaskAllowEverything: (input) => command((commandId) => api.SetTaskAllowEverything({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
     leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),

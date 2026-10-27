@@ -110,6 +110,9 @@ export const text = {
   blocked: 'Not ready to accept',
   /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
   readyOnPush: 'Ready once pushed',
+  /** A conflict Althar didn't ask its lead to resolve, though the rules say to: asks it anyway (ADR-030). */
+  resolveNow: 'Resolve now',
+  resolvingNow: 'Asking the lead',
   /** A running change's checks; a ready one's say what stands (shared/standing). */
   checks: {
     passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
@@ -263,7 +266,15 @@ type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 const fromOf = (work: BoardTask): Pick<Card, 'from'> => (work.automation == null ? {} : { from: work.automation.name })
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
-export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
+export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
+  const card = runningCard(work, now, name)
+  // Stopped, or its lead not yet started, with a conflict not asked of it: why, and Resolve now, in place of its foot.
+  if (work.conflictUnsent != null) return { ...card, foot: unsentFoot(work, work.conflictUnsent, actions) }
+  if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
+  return card
+}
+
+const runningCard = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
   // Waiting for a free agent, held for a usage limit, or stopped, it says so rather than that it runs.
   const still: Pick<Card, 'status' | 'word' | 'why'> | null =
     work.queued !== null
@@ -424,7 +435,7 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet.
         word:
-          work.handedBack != null
+          work.handedBack != null || work.conflictUnsent != null
             ? text.mergeConflict
             : change === null && work.unshipped != null
               ? kindWords.unshipped
@@ -434,17 +445,14 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
                   ? text.readyOnPush
                   : kindWords.ready,
         ...(object === null ? {} : { object }),
-        ...(work.handedBack != null
-          ? {
-              foot: (
-                <Fact icon="branch" tone="warm">
-                  {work.handedBack}
-                </Fact>
-              ),
-            }
+        // Its conflict the person's, handed back or not asked of its lead: why, and Resolve now, which asks the lead anyway.
+        ...(work.handedBack != null || work.conflictUnsent != null
+          ? { foot: unsentFoot(work, work.handedBack ?? work.conflictUnsent ?? '', actions) }
           : // One merged or closed has nothing in its way, and nothing to do to it.
             change === null || change.state !== 'open'
-            ? {}
+            ? work.conflictUnchecked == null
+              ? {}
+              : { foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
             : { foot: readyFoot(work, change, actions) }),
       }
     }
@@ -455,7 +463,31 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
 
 /** What a ready card does without opening its task: push, and merge, mark done or keep for later, and how they stand. */
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
-  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling'>>
+  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving'>>
+
+/** A conflict that is the person's, handed back or not asked of its lead: why, in one line, and Resolve now, which asks the lead anyway. */
+const unsentFoot = (work: BoardTask, why: string, actions: CardActions | undefined): ReactNode => {
+  const resolveNow = actions?.resolveNow
+  return (
+    <>
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          {why}
+        </Fact>
+      </FactLine>
+      {resolveNow !== undefined && (
+        <NextStep
+          signal
+          busy={actions?.resolving?.has(work.taskId) ?? false}
+          doing={text.resolvingNow}
+          onPress={() => void resolveNow(work.taskId)}
+        >
+          {text.resolveNow}
+        </NextStep>
+      )}
+    </>
+  )
+}
 
 /**
  * A finished task's Done and Keep for later, for its card's corner, where it
@@ -489,8 +521,10 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
   const here = actions !== undefined && next !== null && doneHere(next) ? next : null
   const failure = actions?.failed[work.taskId]
   const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
-  const facts = factsOf(change, standing).map((one) => (
-    <Fact key={one.words} {...(one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+  // Not looked at for a conflict here, whatever its host says: why, first, as the host's word may be out of date.
+  const unchecked = work.conflictUnchecked ?? null
+  const facts = factsOf(change, standing).map((one, i) => (
+    <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
       {one.words}
     </Fact>
   ))
@@ -500,6 +534,11 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
         {failed !== null && here !== null && (
           <Fact key="failed" icon="close" tone="danger" role="alert">
             {standingText.nextFailed[here.kind](failed)}
+          </Fact>
+        )}
+        {unchecked !== null && (
+          <Fact key="unchecked" icon="branch" tone="warm">
+            {unchecked}
           </Fact>
         )}
         {facts}
@@ -632,7 +671,7 @@ export function BoardView({
 
       <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
         {lanes.running.map((work) => (
-          <BoardCard key={work.taskId} {...runningCardOf(work, now, name)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...runningCardOf(work, now, name, actions)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 

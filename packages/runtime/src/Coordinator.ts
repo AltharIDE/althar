@@ -42,8 +42,10 @@ import { fact } from './records'
 import { type PlanStep, Runs } from './Runs'
 import { type Disposition, passedOn, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
+import type { InputFile } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
+import { alsoPlanned, siblingsOf } from './siblings'
 import { Tasks } from './Tasks'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -236,6 +238,8 @@ export class Coordinator extends Context.Service<
       readonly disposition: Disposition
       /** Images the person sent with it, in the store already: sent to the coordinator with its words. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Files and folders the person sent with it, copied into the coordinator's folder already: linked with its words. */
+      readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: the coordinator is told it may have been misheard. */
       readonly dictated?: boolean
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
@@ -288,6 +292,7 @@ export class Coordinator extends Context.Service<
         readonly body: string
         readonly disposition: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
@@ -559,6 +564,9 @@ export class Coordinator extends Context.Service<
           const request = said.length === 0 ? undefined : said.map((input) => input.body).join('\n\n')
           // The same title from the same session is the same command: an agent that calls again, unsure the first worked, gets the first task.
           const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000${title.trim().toLowerCase()}`).digest('hex').slice(0, 32)}`
+          // Called again, it makes no task and tells nobody of one.
+          const [again] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM command_receipts WHERE actor_id = ${instance.coordinatorId} AND command_id = ${commandId}`
           const created = yield* projects
             .createTask({
               envelope: yield* envelope('task.create', { title: title.trim().toLowerCase() }, commandId, instance.coordinatorId),
@@ -586,6 +594,21 @@ export class Coordinator extends Context.Service<
             )
           if (issue !== undefined && from !== undefined)
             yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
+          // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
+          if (again === undefined && request !== undefined) {
+            const task = yield* taskOf(access, created.taskId)
+            const body = alsoPlanned([task], true)
+            for (const other of yield* siblingsOf(created.taskId)) {
+              if (other.heard === 0 || other.state !== 'open') continue
+              yield* sessions.send({
+                envelope: yield* envelope('thread.send', { threadId: other.threadId, body }, undefined, instance.coordinatorId),
+                threadId: other.threadId,
+                body: passedOn(body),
+                disposition: 'after_current',
+                quiet: true,
+              })
+            }
+          }
           return { created, issue }
         })
 
@@ -1426,26 +1449,36 @@ export class Coordinator extends Context.Service<
         draftIssue,
       )
 
+      const listTasksTool = tool(
+        'list_tasks',
+        "The project's tasks, newest first: what each is, where it stands, who leads it, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
+        nothing,
+        (access) => list(access),
+      )
+      const findTasksTool = tool(
+        'find_tasks',
+        "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands, its pull request and its id, and the words that matched. For a task asked about by what it did rather than its name.",
+        {
+          type: 'object',
+          properties: { text: { type: 'string', description: 'What to look for, in a few words.' } },
+          required: ['text'],
+        },
+        find,
+      )
+
+      // A lead sees the project's tasks as the coordinator does, read-only (a review's lead is refused them with every tool not marked
+      // for a review), and checks them before it drafts: work the person asked for may be another task's already.
+      const leadDraftIssueTool: Tool = {
+        ...draftIssueTool,
+        description: `${draftIssueTool.description} Before drafting an issue for something the person asked for that is outside your brief, check find_tasks: when a task covers it, say so in your report instead of drafting.`,
+      }
+
       yield* toolServer.serve('coordinator', [
         tool('project_overview', 'The project: its repositories, how many tasks it has, its rules, and its notes.', nothing, (access) =>
           overview(access),
         ),
-        tool(
-          'list_tasks',
-          "The project's tasks, newest first: what each is, where it stands, who leads it, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
-          nothing,
-          (access) => list(access),
-        ),
-        tool(
-          'find_tasks',
-          "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands, its pull request and its id, and the words that matched. For a task asked about by what it did rather than its name.",
-          {
-            type: 'object',
-            properties: { text: { type: 'string', description: 'What to look for, in a few words.' } },
-            required: ['text'],
-          },
-          find,
-        ),
+        listTasksTool,
+        findTasksTool,
         tool(
           'read_task',
           "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
@@ -1741,8 +1774,10 @@ export class Coordinator extends Context.Service<
       // A quick task's lead makes it a change when the person asks: the one lead tool that plans, as the coordinator's do. Offered
       // only on a quick task not made one yet; refused, with why, on any other.
       yield* toolServer.serve('lead', [
+        listTasksTool,
+        findTasksTool,
         findIssuesTool,
-        draftIssueTool,
+        leadDraftIssueTool,
         tool(
           'make_it_a_change',
           `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request.`,

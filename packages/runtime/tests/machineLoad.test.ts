@@ -16,18 +16,22 @@ import { Sessions } from '../src/Sessions'
 import { repository, runtime, task } from './support'
 
 /*
- * How hard this computer works, and Althar's work's part (MachineLoad.ts):
- * read only when asked and at most once a moment however often; each task's
- * agents, a project's coordinator and its runs, each with what they started;
- * and the last readings, started afresh after a gap. This computer is a
- * stand-in, read as each test says, around the real processes the store
- * records.
+ * How hard this computer works, and Althar's part (MachineLoad.ts): read only
+ * when asked and at most once a moment however often; each task's agents, a
+ * project's coordinator and its runs, each with what they started, however
+ * it has left their trees, and what ended between two readings; work an
+ * earlier launch left running; Althar itself; and the last readings, started
+ * afresh after a gap. This computer is a stand-in, read as each test says,
+ * with the environments it says, around the real processes the store records.
  */
 
 const MB = 1024 * 1024
 
-/** A stand-in computer: four cores, a quarter of them busy; and the processes the test lists, each reading `n` having used `n` times its share. */
-const machine = (listed: (n: number) => ReadonlyArray<readonly [number, Listed]> | null) => {
+/**
+ * A stand-in computer: four cores, a quarter of them busy; and the processes the test lists, each reading `n` having used `n`
+ * times its share; `reaped`, each one's time counting its reaped children's, as on a Mac with its reader and on Linux.
+ */
+const machine = (listed: (n: number) => ReadonlyArray<readonly [number, Listed]> | null, reaped = false) => {
   let reads = 0
   const read = Effect.sync((): Reading => {
     reads += 1
@@ -38,6 +42,7 @@ const machine = (listed: (n: number) => ReadonlyArray<readonly [number, Listed]>
       memory: { used: 8_000 * MB, total: 16_000 * MB },
       pressure: 'normal',
       processes: listing === null ? null : new Map(listing),
+      reaped,
     }
   })
   return { read, reads: () => reads }
@@ -221,5 +226,104 @@ describe('this computer’s load', () => {
       yield* Effect.sleep(Duration.millis(60))
       assert.deepInclude((yield* machineLoad.now).shares?.[0], { taskId: created.taskId, cpu: 0.05 })
     }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, every: Duration.millis(50), settle: Duration.millis(1) } })))
+  })
+
+  it.live('counts as a task’s a server its lead left in the background, and what ended between two readings', () => {
+    const world = { lead: 0, taskId: '' }
+    const asked: Array<number> = []
+    const stand = machine(
+      (n) => [
+        [1, { parent: 0, cpu: n * 9_000, memory: 10 * MB, started: 0 }],
+        // The lead: at the second reading its time counts its test run's, which ended in between, and a check's that
+        // started and ended in between: 600 its own, 300 and 900 the run's, 1,500 the check's.
+        [world.lead, { parent: 1, cpu: n === 1 ? 600 : 1_200 + 300 + 900 + 1_500, memory: 100 * MB, started: 1 }],
+        ...(n === 1 ? [[900_001, { parent: world.lead, cpu: 300, memory: 50 * MB, started: 2 }] as const] : []),
+        // The dev server it started in the background, left to launchd once its shell ended.
+        [900_002, { parent: 1, cpu: n * 300, memory: 40 * MB, started: 3 }],
+        // Someone else's, and another Althar's.
+        [900_003, { parent: 1, cpu: n * 3_000, memory: 500 * MB, started: 4 }],
+        [900_004, { parent: 1, cpu: n * 3_000, memory: 500 * MB, started: 5 }],
+      ],
+      true,
+    )
+    const marks = (pids: ReadonlyArray<number>) =>
+      Effect.sync(() => {
+        asked.push(...pids)
+        const named = new Map<number, string>([
+          [900_002, `task:${world.taskId}`],
+          [900_004, 'task:another-althars'],
+        ])
+        return new Map(pids.flatMap((pid) => (named.has(pid) ? [[pid, named.get(pid) ?? '']] : [])))
+      })
+    return Effect.gen(function* () {
+      const machineLoad = yield* MachineLoad
+      const { task: created } = yield* task()
+      world.taskId = created.taskId
+      yield* (yield* Sessions).start({ threadId: created.threadId, agentId: 'process' })
+      world.lead = yield* pidOf(created.threadId)
+      const load = yield* machineLoad.now
+      // Its lead's work since, its run's and the check's, and its server's: 3,300 ms of 12,000.
+      assert.deepStrictEqual(
+        load.shares?.map(({ taskId, cpu, memory, processes }) => ({ taskId, cpu, memory, processes })),
+        [{ taskId: created.taskId, cpu: 0.275, memory: 140 * MB, processes: 2 }],
+      )
+      // Each process no tree reaches has its environment read once, however many readings there are.
+      yield* Effect.sleep(Duration.millis(60))
+      yield* machineLoad.now
+      assert.strictEqual(asked.filter((pid) => pid === 900_002).length, 1)
+      assert.notInclude(asked, world.lead)
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {}, { load: { read: stand.read, marks, every: Duration.millis(50), settle: Duration.millis(1) } }),
+      ),
+    )
+  })
+
+  it.live('counts what an earlier launch’s agent left running as its task’s, as the store knows the task', () => {
+    const world = { taskId: '' }
+    const stand = machine((n) => [[700, { parent: 1, cpu: n * 1_200, memory: 30 * MB }]])
+    const marks = (pids: ReadonlyArray<number>) => Effect.succeed(new Map(pids.includes(700) ? [[700, `task:${world.taskId}`]] : []))
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { project, task: created } = yield* task()
+      world.taskId = created.taskId
+      yield* (yield* Sessions).start({ threadId: created.threadId, agentId: 'process' })
+      // Its agent is no longer this launch's, as after a restart: what it started still runs.
+      yield* sql`UPDATE processes SET state = 'exited'`
+      const load = yield* (yield* MachineLoad).now
+      assert.deepStrictEqual(load.shares, [
+        {
+          kind: 'task',
+          projectId: project.projectId,
+          project: project.name,
+          taskId: created.taskId,
+          threadId: created.threadId,
+          title: 'Retry checkout',
+          agent: { id: 'process', name: 'Fake process' },
+          cpu: 0.1,
+          memory: 30 * MB,
+          processes: 1,
+        },
+      ])
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, marks, settle: Duration.millis(1) } })))
+  })
+
+  it.live('counts Althar itself, the app and what it started that is no work’s, in Althar’s part', () => {
+    const world = { lead: 0 }
+    const stand = machine((n) => [
+      [50, { parent: 1, cpu: n * 900, memory: 200 * MB }],
+      // Its runtime, which started the lead.
+      [51, { parent: 50, cpu: n * 300, memory: 100 * MB }],
+      [world.lead, { parent: 51, cpu: n * 600, memory: 80 * MB }],
+    ])
+    return Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* (yield* Sessions).start({ threadId: created.threadId, agentId: 'process' })
+      world.lead = yield* pidOf(created.threadId)
+      const load = yield* (yield* MachineLoad).now
+      assert.deepStrictEqual(load.althar, { cpu: 0.1, memory: 300 * MB, processes: 2 })
+      assert.deepInclude(load.shares?.[0], { taskId: created.taskId, cpu: 0.05, memory: 80 * MB, processes: 1 })
+      assert.closeTo(load.history.at(-1)?.work ?? 0, 0.15, 1e-9)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, app: 50, settle: Duration.millis(1) } })))
   })
 })

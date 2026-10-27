@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
 
@@ -1012,12 +1013,50 @@ export type SentImage = typeof SentImage.Type
 /** The images sent with one message, in the order they show: at most `MESSAGE_IMAGES.count`. */
 export const SentImages = Schema.Array(SentImage).check(Schema.isMaxLength(MESSAGE_IMAGES.count))
 
+/**
+ * A file or folder the person sends with a message: by the grant the app
+ * gave for it as it was dropped, pasted or picked, the window never naming a
+ * path; or one Althar keeps a copy of already, by that copy's id, as when a
+ * message waiting its turn is taken back to change and sent again. Each is
+ * copied where the thread's agent reads, and the prompt links the copy.
+ */
+export const SentFile = Schema.Union([Schema.Struct({ grant: Schema.String }), Schema.Struct({ kept: Schema.String })])
+export type SentFile = typeof SentFile.Type
+
+/** The files and folders sent with one message, in the order they show: at most `MESSAGE_FILES.count`. */
+export const SentFiles = Schema.Array(SentFile).check(Schema.isMaxLength(MESSAGE_FILES.count))
+
+/**
+ * A file or folder the person sent with a message, as Althar copied it for
+ * the agent: its name, what it is, how large (a folder, all its files, and
+ * how many), and where the copy is, which the agent was sent a link to.
+ */
+export const AttachedFile = Schema.Struct({
+  /** The copy's id, by which it is sent again (`SentFile`'s `kept`). */
+  id: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['file', 'folder']),
+  /** What it is, as its name says; null for a folder, or a name that says nothing. */
+  mediaType: Schema.NullOr(Schema.String),
+  bytes: Schema.Number,
+  /** A folder's files, at every depth; null for a file. */
+  entries: Schema.NullOr(Schema.Number),
+  /** Where its copy is, in the thread's folder, for the agent to read. */
+  path: Schema.String,
+})
+export type AttachedFile = typeof AttachedFile.Type
+
 /** What the person said, and where it stands with the lead. */
 export const UserMessageItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('user_message'),
-  /** What they said, the links in it Althar could unfurl, and the images they sent with it. */
-  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl), pictures: Schema.Array(Picture) }),
+  /** What they said, the links in it Althar could unfurl, and the images, files and folders they sent with it. */
+  content: Schema.Struct({
+    text: Schema.String,
+    links: Schema.Array(Unfurl),
+    pictures: Schema.Array(Picture),
+    files: Schema.Array(AttachedFile),
+  }),
   input: Schema.NullOr(
     Schema.Struct({
       state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']),
@@ -1539,6 +1578,18 @@ export const TaskCard = Schema.Struct({
    * so it's the person's: why, in a sentence. Without it, nothing is.
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Its branch conflicts with its default branch, and Althar didn't ask its
+   * lead to resolve it though the rules say it resolves conflicts: why, in a
+   * sentence, beside Resolve now (ADR-030). Without it, nothing is unsaid.
+   */
+  conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Althar couldn't look here for whether its branch conflicts with its
+   * default branch, and its host doesn't say it does, where the rules say it
+   * resolves conflicts: why, in a sentence, beside Look again (ADR-030).
+   */
+  conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
   /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
@@ -2227,6 +2278,10 @@ export const ThreadSnapshot = Schema.Struct({
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why its conflict with its default branch wasn't asked of its lead, as its card says, beside Resolve now. */
+    conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why Althar couldn't look for a conflict with its default branch, as its card says, beside Look again. */
+    conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
     /** When its lead made it a change, where it began as a quick task: what it showed before was a prototype's, not the change's. */
     madeChangeAt: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
@@ -2647,6 +2702,14 @@ export const LoadShare = Schema.Struct({
 })
 export type LoadShare = typeof LoadShare.Type
 
+/** Althar itself and its part of this computer: the app, its windows and the runtime, without the work they started. */
+export const LoadOwn = Schema.Struct({
+  cpu: Part,
+  memory: Bytes,
+  processes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+})
+export type LoadOwn = typeof LoadOwn.Type
+
 /** A reading of how hard this computer works: the whole of it, and Althar's work's part. */
 export const LoadPoint = Schema.Struct({ cpu: Part, work: Part })
 export type LoadPoint = typeof LoadPoint.Type
@@ -2666,6 +2729,8 @@ export const Load = Schema.Struct({
   pressure: Schema.NullOr(MemoryPressure),
   /** Althar's work, most CPU first; null where its processes can't be read, as on Windows. */
   shares: Schema.NullOr(Schema.Array(LoadShare)),
+  /** Althar itself, part of Althar's work as the bar counts it; null where its processes can't be read. */
+  althar: Schema.NullOr(LoadOwn),
   /** The readings of the last two minutes, oldest first, the last of them this one's. A gap of more than a few readings starts them afresh. */
   history: Schema.Array(LoadPoint),
 })
@@ -2928,6 +2993,8 @@ export const Api = RpcGroup.make(
       body: Schema.optional(Schema.String),
       /** Images sent with what the person said. */
       images: Schema.optional(SentImages),
+      /** Files and folders sent with what the person said. */
+      files: Schema.optional(SentFiles),
       /** Any of what the person said came from dictation. */
       dictated: Schema.optional(Schema.Boolean),
     },
@@ -3023,6 +3090,15 @@ export const Api = RpcGroup.make(
    * conflict.
    */
   command('SetTaskResolveConflicts', { taskId: Schema.String, resolveConflicts: Schema.NullOr(Schema.Boolean) }, Schema.Void),
+  /**
+   * Resolve now: the task is merged with its default branch here, fetched
+   * again, and what conflicts is asked of its lead, though the rules leave
+   * it to the person, they stopped it, or its last round was handed back.
+   * Done apart.
+   */
+  command('ResolveConflictsNow', { taskId: Schema.String }, Schema.Void),
+  /** Each open task of the project looked at now for a conflict with its default branch, fetched again, under its rules. Done apart. */
+  command('LookForConflicts', { projectId: Schema.String }, Schema.Void),
   /** Allows everything its agents ask on one task, short of what its project never allows; turned on, what waits on the person is decided again. */
   command('SetTaskAllowEverything', { taskId: Schema.String, allowEverything: Schema.Boolean }, Schema.Void),
   /**
@@ -3064,7 +3140,7 @@ export const Api = RpcGroup.make(
   command('RenameTask', { taskId: Schema.String, title: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
   command('ReopenTask', { taskId: Schema.String }, Schema.Void),
-  /** Says something to a thread's agent, with any images: empty words with images are a message too. */
+  /** Says something to a thread's agent, with any images, files and folders: empty words with any of them are a message too. */
   command(
     'Send',
     {
@@ -3072,6 +3148,7 @@ export const Api = RpcGroup.make(
       body: Schema.String,
       disposition: Disposition,
       images: Schema.optional(SentImages),
+      files: Schema.optional(SentFiles),
       /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
       dictated: Schema.optional(Schema.Boolean),
     },

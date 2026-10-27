@@ -12,8 +12,9 @@ import { launch, openFirstProject, say, startTask, toConversation } from './supp
  * Images dropped on a composer, in a real window with the fake agents: shown
  * small before they go, sent with what the person says, and read by the
  * agent as image blocks (the fake says what it was sent: `saw images: …`).
- * A picture wider than the window sends is drawn smaller first; a file that
- * isn't a picture is refused with a word of why. The coordinator's composer
+ * A picture wider than the window sends is drawn smaller first; a file with
+ * nothing on disk behind it is refused with a word of why (files.spec.ts
+ * sends files that are). The coordinator's composer
  * takes them as a task's does.
  */
 
@@ -60,9 +61,9 @@ const drop = async (
     files.map((file) => ({ name: file.name, type: file.type, base64: file.bytes.toString('base64') })),
   )
   await target.dispatchEvent('dragenter', { dataTransfer })
-  await expect(page.getByText('Drop to add them to your message')).toBeVisible()
+  await expect(page.getByText('Drop to add to your message')).toBeVisible()
   await target.dispatchEvent('drop', { dataTransfer })
-  await expect(page.getByText('Drop to add them to your message')).toHaveCount(0)
+  await expect(page.getByText('Drop to add to your message')).toHaveCount(0)
 }
 
 const composer = (page: Page) => page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
@@ -76,14 +77,14 @@ test('sends images dropped on a composer to the coordinator and to a lead, which
     await openFirstProject(electronApp, page, repository(projects))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
-    // The coordinator: a screenshot, and a file that isn't a picture, refused with why.
+    // The coordinator: a screenshot, and a file the window made, with nothing behind it to send as a file, refused with why.
     await composer(page).click()
     await drop(page, composer(page), [
       { name: 'refunds.png', type: 'image/png', bytes: png(640, 400) },
       { name: 'notes.txt', type: 'text/plain', bytes: Buffer.from('Refunds share the partner budget.') },
     ])
-    await expect(page.getByText('notes.txt isn’t a PNG, JPEG, GIF or WebP image, so it can’t be sent.')).toBeVisible()
-    await expect(page.getByRole('list', { name: '1 image to send' }).getByRole('img', { name: 'refunds.png' })).toBeVisible()
+    await expect(page.getByText('Althar couldn’t read notes.txt.')).toBeVisible()
+    await expect(page.getByRole('list', { name: '1 attachment to send' }).getByRole('img', { name: 'refunds.png' })).toBeVisible()
     await page.screenshot({ path: 'test-results/images-coordinator-composer.png' })
     await startTask(page, 'Fix the refunds layout')
     await expect(page.getByText(/saw images: image\/png \d+ B/).first()).toBeVisible()
@@ -96,7 +97,7 @@ test('sends images dropped on a composer to the coordinator and to a lead, which
     await toConversation(page)
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
     await drop(page, composer(page), [{ name: 'wide.png', type: 'image/png', bytes: png(3000, 1500) }])
-    await expect(page.getByRole('list', { name: '1 image to send' }).getByRole('img', { name: 'wide.png' })).toBeVisible()
+    await expect(page.getByRole('list', { name: '1 attachment to send' }).getByRole('img', { name: 'wide.png' })).toBeVisible()
     await page.screenshot({ path: 'test-results/images-task-composer.png' })
     await say(page, 'What is off here?')
     // What the lead was sent: the picture as drawn smaller, in its thread alone.
