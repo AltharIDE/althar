@@ -81,6 +81,20 @@ describe('failures kept to where they belong', () => {
     }),
   )
 
+  it.effect('forgets an item not tried again long after its wait, as one the loop no longer has', () =>
+    Effect.gen(function* () {
+      const tries = backoff(Duration.seconds(10), Duration.seconds(30))
+      const busy = Effect.fail(new StoreBusy({ table: 'task_plans' }))
+      yield* tries.attempt('gone', 'Plans.start', busy)
+      yield* TestClock.adjust(Duration.seconds(30))
+      yield* tries.attempt('other', 'Plans.start', busy)
+      assert.strictEqual(tries.until('gone'), 10_000, 'not while it may still come back')
+      yield* TestClock.adjust(Duration.seconds(11))
+      yield* tries.attempt('other', 'Plans.start', busy)
+      assert.strictEqual(tries.until('gone'), 0)
+    }),
+  )
+
   it.effect('keeps a loop going after a round of it fails, a while after', () =>
     Effect.gen(function* () {
       let rounds = 0

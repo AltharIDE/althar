@@ -14,7 +14,7 @@ import {
   transition,
 } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore, Stream } from 'effect'
+import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy, type Order } from './Busy'
@@ -29,6 +29,7 @@ import { backoff, contained, keptGoing } from './Failures'
 import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
+import { makeKeyedLock } from './keyedLock'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
@@ -1698,13 +1699,8 @@ export class Runs extends Context.Service<
         })
 
       /* One round opens at a time on a task: the person's turn and its lead's finish_step don't open two. */
-      const roundLocks = new Map<string, Semaphore.Semaphore>()
-      const oneRound = <A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>) =>
-        Effect.suspend(() => {
-          const lock = roundLocks.get(taskId) ?? Semaphore.makeUnsafe(1)
-          roundLocks.set(taskId, lock)
-          return lock.withPermits(1)(effect)
-        })
+      const roundLocks = makeKeyedLock()
+      const oneRound = roundLocks.withLock
 
       /**
        * Opens a round of work on a task whose latest run is over, as what the
@@ -2825,9 +2821,11 @@ export class Runs extends Context.Service<
       /**
        * Descriptions the lead gave for a step Althar sent back, by thread:
        * kept, so a task of several can give them one by one. Kept for the
-       * launch; after a restart, the lead is asked again.
+       * launch, for the last few threads sent back; after a restart, or for
+       * one long left, the lead is asked again.
        */
       const givenBefore = new Map<string, Readonly<Record<string, string>>>()
+      const GIVEN_KEPT = 64
 
       /** The descriptions the lead gave, by the slug of the repository each is for; refused where it names none of the task's. */
       const descriptionsOf = (
@@ -3006,7 +3004,9 @@ export class Runs extends Context.Service<
             )
             const undescribed = yield* undescribedOf(access.threadId, worktrees, kept, since)
             if (undescribed.length > 0) {
+              givenBefore.delete(access.threadId)
               givenBefore.set(access.threadId, kept)
+              for (const oldest of givenBefore.keys()) if (givenBefore.size > GIVEN_KEPT) givenBefore.delete(oldest)
               return yield* new ToolRefused({ message: descriptionAsk(undescribed, worktrees.length > 1) })
             }
           }
@@ -4286,6 +4286,9 @@ export class Runs extends Context.Service<
               ),
             })
           }
+          // A turn given back that no longer waits, its thread's latest turn now another, never waits again.
+          const waitingTurns = new Set(messages.map((message) => message.turnId))
+          for (const turnId of given) if (!waitingTurns.has(turnId)) given.delete(turnId)
           const next = due.map((one) => ({ ...one, at: Math.max(one.at, tries.until(one.key)) })).toSorted((a, b) => a.at - b.at)[0]
           if (next === undefined) {
             yield* Queue.take(holdsChanged)

@@ -79,6 +79,7 @@ import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
 import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
+import { makeKeyedLock } from './keyedLock'
 import { addItem, betweenTurns, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
   addressOf,
@@ -1716,14 +1717,21 @@ export class Sessions extends Context.Service<
           }),
         )
 
-      /** Ends a session: closes it and its process, and records how both ended. */
-      const supervise = (running: Running) =>
-        Effect.gen(function* () {
+      /**
+       * Ends a session: closes it and its process, and records how both ended.
+       * However recording it goes, its process is closed, the thread hears it
+       * ended and whoever waits on it stops waiting: nothing is left holding
+       * the session, nor stopping it, for ever.
+       */
+      const supervise = (running: Running) => {
+        let ended: string | undefined
+        return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const outcome = yield* Effect.raceFirst(
             Effect.map(running.connection.closed, () => undefined),
             Deferred.await(running.stopRequest),
           )
+          ended = outcome === undefined ? 'lost' : outcome.state
           running.stopping = true
           threads.delete(running.thread.threadId)
           yield* running.revokeTools
@@ -1817,9 +1825,22 @@ export class Sessions extends Context.Service<
           // One that went on its own is reported (ADR-047), by its agent and how its process ended: never what it wrote.
           if (state === 'lost')
             yield* failures.report(Cause.die(agentLost(running.entry.definition.id, exit)), 'agent', running.entry.definition.id)
-          yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
-          yield* Deferred.succeed(running.ended, undefined)
-        })
+        }).pipe(
+          Effect.ensuring(
+            Effect.suspend(() =>
+              Effect.andThen(
+                Effect.andThen(
+                  Scope.close(running.scope, Exit.void),
+                  ended === undefined
+                    ? Effect.void
+                    : live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state: ended }),
+                ),
+                Deferred.succeed(running.ended, undefined),
+              ),
+            ),
+          ),
+        )
+      }
 
       /**
        * Starts the agent and its session, in the mode that asks, and records
@@ -2041,9 +2062,55 @@ export class Sessions extends Context.Service<
           return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, upFront }
         })
 
-      /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
-      const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
+      type Connected = Effect.Success<ReturnType<typeof connectSession>>
+
+      /**
+       * Lets go of a session that started but never took over its thread, as
+       * when its brief couldn't be written: its process stops, its tools are
+       * taken back, and it is recorded as ended, so it holds no place.
+       */
+      const discard = (connected: Connected, cause: Cause.Cause<unknown>) =>
         Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { sessionId, thread, connection, entry } = connected
+          yield* Scope.close(connected.scope, Exit.void)
+          yield* connected.revokeTools
+          const stop = connection.process === undefined ? undefined : yield* connection.process.stopped
+          yield* Effect.logWarning('Agent started but could not take over its thread', cause).pipe(
+            Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, thread: thread.threadId }),
+          )
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const at = yield* timestamp
+              const [process] = yield* sql<{
+                id: string
+              }>`SELECT id FROM processes WHERE provider_session_id = ${sessionId} ORDER BY launched_at DESC LIMIT 1`
+              if (process !== undefined)
+                yield* change('processes', process.id, {
+                  state: stop !== undefined && stop.signal !== 'none' ? 'killed' : 'exited',
+                  endedAt: at,
+                })
+              const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
+              // Recorded as active already, it went; still starting, it failed.
+              const state = session?.state === 'starting' ? 'failed' : session?.state === 'active' ? 'lost' : undefined
+              if (state === undefined) return
+              const revision = yield* moveSession(sessionId, state, { endedAt: at })
+              yield* sessionFact(thread, sessionId, revision, `provider_session.${state}`, { reason: Cause.pretty(cause) })
+            }),
+          )
+        }).pipe(Effect.catchCause((left) => Effect.logWarning('Could not let go of a session that never took over', left)))
+
+      /** Runs what comes between a session starting and its taking over the thread; should it fail, the session is let go. */
+      const beforeTakingOver =
+        (connected: Connected) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.onError(effect, (cause) => discard(connected, cause))
+
+      /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
+      const activate = (connected: Connected, brief: Brief) => {
+        // Once it is supervised, ending it is supervise's: before, a failure lets it go here.
+        let supervised = false
+        return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, upFront } = connected
           const { definition } = entry
@@ -2135,6 +2202,7 @@ export class Sessions extends Context.Service<
             scope,
           )
           yield* Effect.forkIn(run(supervise(running)), sessionsScope)
+          supervised = true
           const model = optionValue(options, definition.options.model)
           yield* live.publish({
             _tag: 'SessionStarted',
@@ -2145,7 +2213,16 @@ export class Sessions extends Context.Service<
           })
           yield* Queue.offer(running.wake, undefined)
           return sessionId
-        })
+        }).pipe(
+          Effect.onError((cause) =>
+            Effect.suspend(() => {
+              if (supervised) return Effect.void
+              if (threads.get(connected.thread.threadId)?.sessionId === connected.sessionId) threads.delete(connected.thread.threadId)
+              return discard(connected, cause)
+            }),
+          ),
+        )
+      }
 
       /**
        * Ends the turn running, then the session. An agent that doesn't end its
@@ -2188,13 +2265,8 @@ export class Sessions extends Context.Service<
         })
 
       /** Start, switch and stop on one thread happen one at a time. */
-      const locks = new Map<string, Semaphore.Semaphore>()
-      const exclusive = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
-        Effect.suspend(() => {
-          const lock = locks.get(threadId) ?? Semaphore.makeUnsafe(1)
-          locks.set(threadId, lock)
-          return lock.withPermits(1)(effect)
-        })
+      const locks = makeKeyedLock()
+      const exclusive = locks.withLock
 
       const start = (input: {
         readonly threadId: string
@@ -2221,8 +2293,9 @@ export class Sessions extends Context.Service<
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             // Every session starts from a brief (ADR-005), even the first on a task.
+            const brief = yield* briefFor(thread, { kind: 'start' }).pipe(beforeTakingOver(connected))
             return yield* activate(connected, {
-              text: yield* briefFor(thread, { kind: 'start' }),
+              text: brief,
               closing: thread.role === 'reviewer' ? 'Review the change.' : 'Start on the task.',
             })
           }),
@@ -2827,25 +2900,27 @@ export class Sessions extends Context.Service<
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
-            if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
-            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
-              source: 'runtime',
-              severity: 'info',
-              title:
-                input.said ??
-                (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
-              ...(input.about === undefined ? {} : { about: input.about }),
-            })
-            if (input.message !== undefined)
-              yield* send({
-                envelope: input.message.envelope,
-                threadId: input.threadId,
-                body: input.message.body,
-                ...(input.message.images === undefined ? {} : { images: input.message.images }),
-                ...(input.message.files === undefined ? {} : { files: input.message.files }),
-                ...(input.message.dictated === true ? { dictated: true } : {}),
+            const brief = yield* Effect.gen(function* () {
+              if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
+              yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title:
+                  input.said ??
+                  (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
+                ...(input.about === undefined ? {} : { about: input.about }),
               })
-            const brief = yield* briefFor(thread, { kind: 'takeover', from })
+              if (input.message !== undefined)
+                yield* send({
+                  envelope: input.message.envelope,
+                  threadId: input.threadId,
+                  body: input.message.body,
+                  ...(input.message.images === undefined ? {} : { images: input.message.images }),
+                  ...(input.message.files === undefined ? {} : { files: input.message.files }),
+                  ...(input.message.dictated === true ? { dictated: true } : {}),
+                })
+              return yield* briefFor(thread, { kind: 'takeover', from })
+            }).pipe(beforeTakingOver(connected))
             return yield* activate(connected, {
               text: brief,
               closing: 'Carry on with the task from where it stands.',
@@ -2898,17 +2973,19 @@ export class Sessions extends Context.Service<
             }
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
-            yield* stopRunning(previous, { state: 'superseded', by: sessionId })
-            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
-              source: 'runtime',
-              severity: 'info',
-              title:
-                brief.open === null
-                  ? `Started ${previous.entry.definition.name} afresh, briefed from the task, to keep its context small.`
-                  : brief.open === 0
-                    ? 'Started a fresh session.'
-                    : `Started a fresh session; picked up ${brief.open} open ${brief.open === 1 ? 'task' : 'tasks'}.`,
-            })
+            yield* Effect.andThen(
+              stopRunning(previous, { state: 'superseded', by: sessionId }),
+              addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title:
+                  brief.open === null
+                    ? `Started ${previous.entry.definition.name} afresh, briefed from the task, to keep its context small.`
+                    : brief.open === 0
+                      ? 'Started a fresh session.'
+                      : `Started a fresh session; picked up ${brief.open} open ${brief.open === 1 ? 'task' : 'tasks'}.`,
+              }),
+            ).pipe(beforeTakingOver(connected))
             yield* activate(connected, {
               text: brief.text,
               closing:

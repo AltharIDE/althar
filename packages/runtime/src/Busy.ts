@@ -694,30 +694,35 @@ export class Busy extends Context.Service<
       })
       sources.push(restored)
 
+      // A place held is let go by what it holds it for, attached with nothing between the two: no interruption loses it.
       const enter = <A, E, R>(taskId: string, then: (room: boolean) => Effect.Effect<A, E, R>, how: Entering<A> = {}) =>
-        Effect.gen(function* () {
-          const key = keyOf(taskId, how.review)
-          const decided = yield* lock.withPermits(1)(
-            Effect.gen(function* () {
-              const work = yield* atWork
-              // The agent it follows, at work and done with its step, hands this one its place, ahead of whatever waits: a
-              // task never loses its place between its own steps. What that agent left running goes on in it, counted once.
-              const before = how.after === undefined ? undefined : keyOf(taskId, how.after === 'review')
-              const handed = before !== undefined && before !== key && work.at.has(before)
-              const room =
-                handed ||
-                (yield* roomFor({ taskId, review: how.review }, work, how.order ?? (how.after === undefined ? 'new' : 'underway')))
-              const done = yield* then(room)
-              // Held from here, so nothing takes the place before what starts it is under way.
-              if (room && how.next !== undefined) hold(key)
-              return { room, done }
-            }),
-          )
-          // Waiting, it may yet start now: what waits before it may not be able to.
-          if (!decided.room) yield* wake
-          else if (how.next !== undefined) yield* how.next(decided.done).pipe(Effect.ensuring(release(key)))
-          return decided.done
-        })
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const key = keyOf(taskId, how.review)
+            const decided = yield* restore(
+              lock.withPermits(1)(
+                Effect.gen(function* () {
+                  const work = yield* atWork
+                  // The agent it follows, at work and done with its step, hands this one its place, ahead of whatever waits: a
+                  // task never loses its place between its own steps. What that agent left running goes on in it, counted once.
+                  const before = how.after === undefined ? undefined : keyOf(taskId, how.after === 'review')
+                  const handed = before !== undefined && before !== key && work.at.has(before)
+                  const room =
+                    handed ||
+                    (yield* roomFor({ taskId, review: how.review }, work, how.order ?? (how.after === undefined ? 'new' : 'underway')))
+                  const done = yield* then(room)
+                  // Held from here, so nothing takes the place before what starts it is under way.
+                  if (room && how.next !== undefined) hold(key)
+                  return { room, done }
+                }),
+              ),
+            )
+            // Waiting, it may yet start now: what waits before it may not be able to.
+            if (!decided.room) yield* wake
+            else if (how.next !== undefined) yield* restore(how.next(decided.done)).pipe(Effect.ensuring(release(key)))
+            return decided.done
+          }),
+        )
 
       const turn = (
         agent: Agent & { readonly threadId: string; readonly sessionId: string; readonly byPerson?: boolean },
@@ -733,30 +738,36 @@ export class Busy extends Context.Service<
               : agent.review !== true && (yield* untouched(agent.taskId))
                 ? 'new'
                 : 'underway'
-          const room = yield* lock.withPermits(1)(
+          return yield* Effect.uninterruptibleMask((restore) =>
             Effect.gen(function* () {
-              const room = yield* roomFor(agent, yield* atWork, order)
-              if (room) {
-                hold(key)
-                turns.delete(agent.threadId)
-                yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${agent.threadId} AND waits_for_place IS NOT NULL`
-                return true
+              const room = yield* restore(
+                lock.withPermits(1)(
+                  Effect.gen(function* () {
+                    const room = yield* roomFor(agent, yield* atWork, order)
+                    if (room) {
+                      turns.delete(agent.threadId)
+                      yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${agent.threadId} AND waits_for_place IS NOT NULL`
+                      // Held last, so nothing that fails after leaves it held; let go by the turn, attached with nothing between.
+                      hold(key)
+                      return true
+                    }
+                    // Since when it waits, kept where it was first said: a turn asked again keeps its place in the queue.
+                    yield* sql`UPDATE threads SET waits_for_place = coalesce(waits_for_place, ${yield* timestamp}) WHERE id = ${agent.threadId}`
+                    const [kept] = yield* sql<{ since: string }>`SELECT waits_for_place AS since FROM threads WHERE id = ${agent.threadId}`
+                    turns.set(agent.threadId, { ...agent, order, since: kept?.since ?? (yield* timestamp), start: work })
+                    return false
+                  }),
+                ),
+              )
+              if (!room) {
+                yield* restore(Effect.andThen(Effect.ignore(provide(touchTask(agent.taskId))), wake))
+                return false
               }
-              // Since when it waits, kept where it was first said: a turn asked again keeps its place in the queue.
-              yield* sql`UPDATE threads SET waits_for_place = coalesce(waits_for_place, ${yield* timestamp}) WHERE id = ${agent.threadId}`
-              const [kept] = yield* sql<{ since: string }>`SELECT waits_for_place AS since FROM threads WHERE id = ${agent.threadId}`
-              turns.set(agent.threadId, { ...agent, order, since: kept?.since ?? (yield* timestamp), start: work })
-              return false
+              const done = releaseOnce(key)
+              yield* restore(work(done)).pipe(Effect.ensuring(done))
+              return true
             }),
           )
-          if (!room) {
-            yield* Effect.ignore(provide(touchTask(agent.taskId)))
-            yield* wake
-            return false
-          }
-          const done = releaseOnce(key)
-          yield* work(done).pipe(Effect.ensuring(done))
-          return true
         }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not ask for a place for a turn', cause), true)))
 
       // Every turn of a lead or a reviewer asks for a place first.

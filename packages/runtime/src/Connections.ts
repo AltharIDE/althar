@@ -253,6 +253,8 @@ const RENEW_BEFORE = Duration.minutes(5)
 const CLI_AGAIN = Duration.seconds(1)
 /** A browser sign-in waits this long for the person. */
 const BROWSER_WAIT = Duration.minutes(10)
+/** How long a sign-in that ended is kept for its window to read. */
+const FLOW_KEPT = Duration.minutes(10)
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Secrets | Connectors
 
@@ -915,9 +917,16 @@ export class Connections extends Context.Service<
           return toInfo(yield* rowOf(id))
         })
 
-      /* Sign-ins under way, by flow id. They live as long as the runtime; one that ends is kept for its window to read. */
-      const flows = new Map<string, { state: SignInState; fiber?: Fiber.Fiber<unknown, unknown> }>()
+      /*
+       * Sign-ins under way, by flow id. One that ends is kept a while for its
+       * window to read, then let go: a window closed meanwhile never cancels it.
+       */
+      const flows = new Map<string, { state: SignInState; fiber?: Fiber.Fiber<unknown, unknown>; endedAt?: number }>()
       const flowScope = yield* Effect.scope
+      const sweepFlows = Effect.map(Clock.currentTimeMillis, (now) => {
+        for (const [flowId, flow] of flows)
+          if (flow.endedAt !== undefined && now - flow.endedAt > Duration.toMillis(FLOW_KEPT)) flows.delete(flowId)
+      })
 
       const ended = (flowId: string, error: unknown) => {
         const flow = flows.get(flowId)
@@ -943,9 +952,10 @@ export class Connections extends Context.Service<
           const fiber = yield* Effect.forkIn(
             provide(effect).pipe(
               Effect.onExit((exit) =>
-                Effect.sync(() => {
+                Effect.map(Clock.currentTimeMillis, (now) => {
                   const flow = flows.get(flowId)
                   if (flow === undefined) return
+                  flow.endedAt = now
                   if (exit._tag === 'Success') flow.state = { state: 'done', connectionId: exit.value.id }
                   else if (!Cause.hasInterruptsOnly(exit.cause)) ended(flowId, Option.getOrUndefined(Cause.findErrorOption(exit.cause)))
                 }),
@@ -953,6 +963,7 @@ export class Connections extends Context.Service<
             ),
             flowScope,
           )
+          yield* sweepFlows
           flows.set(flowId, { state: { state: 'waiting' }, fiber })
         })
 

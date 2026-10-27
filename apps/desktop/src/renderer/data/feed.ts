@@ -86,6 +86,8 @@ export interface Feed {
    * to those listening, such as a command's output, may have been missed.
    */
   readonly rewatched: (listener: () => void) => () => void
+  /** How many reads it remembers changes and beginnings for: only those the cache still holds. */
+  readonly remembered: () => number
   readonly stop: () => void
 }
 
@@ -207,8 +209,13 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
       void cache.invalidateQueries({ queryKey: key, exact: true, refetchType: offScreen ? 'all' : 'active' })
   }
 
-  // A read under way when a change touched it is read once more; one begun after the change holds it.
+  // A read under way when a change touched it is read once more; one begun after the change holds it. A read the cache let go is forgotten.
   const unsubscribe = cache.getQueryCache().subscribe((event) => {
+    if (event.type === 'removed') {
+      touched.delete(event.query.queryHash)
+      begun.delete(event.query.queryHash)
+      return
+    }
     if (event.type !== 'updated') return
     const { queryHash, queryKey } = event.query
     if (event.action.type === 'fetch') return void begun.set(queryHash, heardSoFar)
@@ -227,7 +234,8 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
       heardSoFar += 1
       for (const read of wholeReads(cache, event)) {
         const hash = hashKey(read.key)
-        touched.set(hash, heardSoFar)
+        // Only a read the cache holds can be under way, and needs its change remembered.
+        if (cache.getQueryCache().get(hash) !== undefined) touched.set(hash, heardSoFar)
         // Off screen if any change gathered with it says so.
         due.set(hash, { key: read.key, offScreen: read.offScreen || (due.get(hash)?.offScreen ?? false) })
       }
@@ -267,6 +275,7 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
       rewatching.add(listener)
       return () => void rewatching.delete(listener)
     },
+    remembered: () => new Set([...touched.keys(), ...begun.keys()]).size,
     stop: () => {
       unwatch()
       unsubscribe()

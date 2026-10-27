@@ -160,6 +160,21 @@ describe('a turn that stalls', () => {
     assert.deepStrictEqual(tags(looks(720, 1_320)), ['GiveUp'])
   })
 
+  it('lets a thread go once it has been quiet with no turn for a whole budget of work, but not one waiting on the person', () => {
+    const { watch, looks } = watching()
+    watch.observe(started('u1'), 0)
+    watch.observe(ended('u1'), 10)
+    watch.observe({ _tag: 'SessionEnded', threadId: T, sessionId: 's1', state: 'completed' }, 20)
+    watch.observe({ _tag: 'AttentionNeeded', threadId: 't2', attentionId: 'q1', title: 'Which database?', reason: 'The agent asks.' }, 20)
+    looks(30, 6_000)
+    assert.strictEqual(watch.size(), 2)
+    looks(6_030, 6_030)
+    assert.strictEqual(watch.size(), 1)
+    // Heard from again, it is watched afresh.
+    watch.observe(started('u2'), 6_100)
+    assert.deepStrictEqual(watch.turning(), [T])
+  })
+
   it('looks only at turns running', () => {
     const { watch, looks } = watching()
     watch.observe(started('u1'), 0)
@@ -182,6 +197,14 @@ describe('an agent going round in circles', () => {
     watch.observe(started('u2'), 30)
     const again = [...failing('d'), ...failing('e'), ...failing('f')].flatMap((event) => watch.observe(event, 40))
     assert.deepStrictEqual(again, [{ _tag: 'GiveUp', threadId: T, why: 'looping', detail: 'npm test', tried: ['redirected'] }])
+  })
+
+  it('compares what calls gave back by their first 4,000 characters', () => {
+    const { watch } = watching()
+    watch.observe(started('u1'), 0)
+    const long = (id: string, tail: string) => [command(id, 'npm test'), done(id, 'failed', `${'x'.repeat(4_000)}${tail}`)]
+    const actions = [...long('a', '1'), ...long('b', '2'), ...long('c', '3')].flatMap((event) => watch.observe(event, 10))
+    assert.deepStrictEqual(tags(actions), ['Redirect'])
   })
 
   it('is given its patience back when the person says something', () => {
