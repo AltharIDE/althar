@@ -44,6 +44,7 @@ import { type Disposition, passedOn, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
 import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
+import { alsoPlanned, siblingsOf } from './siblings'
 import { Tasks } from './Tasks'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -559,6 +560,9 @@ export class Coordinator extends Context.Service<
           const request = said.length === 0 ? undefined : said.map((input) => input.body).join('\n\n')
           // The same title from the same session is the same command: an agent that calls again, unsure the first worked, gets the first task.
           const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000${title.trim().toLowerCase()}`).digest('hex').slice(0, 32)}`
+          // Called again, it makes no task and tells nobody of one.
+          const [again] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM command_receipts WHERE actor_id = ${instance.coordinatorId} AND command_id = ${commandId}`
           const created = yield* projects
             .createTask({
               envelope: yield* envelope('task.create', { title: title.trim().toLowerCase() }, commandId, instance.coordinatorId),
@@ -586,6 +590,21 @@ export class Coordinator extends Context.Service<
             )
           if (issue !== undefined && from !== undefined)
             yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
+          // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
+          if (again === undefined && request !== undefined) {
+            const task = yield* taskOf(access, created.taskId)
+            const body = alsoPlanned([task], true)
+            for (const other of yield* siblingsOf(created.taskId)) {
+              if (other.heard === 0 || other.state !== 'open') continue
+              yield* sessions.send({
+                envelope: yield* envelope('thread.send', { threadId: other.threadId, body }, undefined, instance.coordinatorId),
+                threadId: other.threadId,
+                body: passedOn(body),
+                disposition: 'after_current',
+                quiet: true,
+              })
+            }
+          }
           return { created, issue }
         })
 

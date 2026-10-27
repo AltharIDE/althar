@@ -72,6 +72,7 @@ import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './review
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
 import type { InputImage } from './sentImages'
+import { alsoPlanned, siblingsOf } from './siblings'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
 import { quickIn } from './kinds'
@@ -250,24 +251,8 @@ const askedFor = (thread: { readonly title: string; readonly description: string
     ? []
     : [`What the person asked for, in their words:\n\n${thread.request}`]
 
-/**
- * What else was planned from the message a task came from, for its lead's brief: the project's other tasks made from the same words
- * of the person's, drafted within half an hour of it (the coordinator's turn, however long, and the plan's countdown), so the lead can
- * tell work that went elsewhere from work nobody has.
- */
-const alongside = (taskId: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const others = yield* sql<{ slug: string; title: string }>`
-      SELECT o.slug, o.title FROM tasks k JOIN tasks o ON o.project_id = k.project_id AND o.id <> k.id AND o.request = k.request
-      WHERE k.id = ${taskId} AND k.request IS NOT NULL AND abs(julianday(o.created_at) - julianday(k.created_at)) < 1.0 / 48
-      ORDER BY o.created_at, o.rowid`
-    return others.length === 0
-      ? []
-      : [
-          `Also planned from this message, by other tasks: ${others.map((other) => `${other.title} (${other.slug})`).join('; ')}. find_tasks shows how they stand; what they cover isn't yours, so don't draft an issue for it.`,
-        ]
-  })
+/** The other tasks planned from the message a task came from, for its lead's brief (siblings.ts). */
+const alongside = (taskId: string) => siblingsOf(taskId).pipe(Effect.map((others) => (others.length === 0 ? [] : [alsoPlanned(others)])))
 
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
