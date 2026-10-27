@@ -44,13 +44,6 @@
   white-space: pre-line;
 }
 
-/* Another agent picked, waiting for what the person says next. */
-.handover {
-  margin: 0;
-  color: var(--t-2);
-  font-size: 12.5px;
-}
-
 /* What a review's lead can reach, a sentence under the header. */
 .reach {
   flex: none;

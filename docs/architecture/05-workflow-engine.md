@@ -627,6 +627,24 @@ so it pauses every node running on that account at once: the lead, any steps,
 and their sub-agents. The agent's other accounts carry on. How Althar
 detects a limit is in [03](03-agent-runtime-and-auth.md), Usage limits.
 
+**Before a limit is reached, new work steers by the plans' windows** as last
+read ([03](03-agent-runtime-and-auth.md), Usage limits). Work starts on the
+account with the most room where the project rotates through an agent's
+accounts, room for the model it runs where that model has a window of its own
+(Opus's week), and a conversation keeps its account unless it is nearly out
+(under 5% of its tightest window): a session kept for a new step, as the lead
+for its fixes or the reviewer for a later round, goes on on another of its
+agent's accounts that has room. A new step whose agent is nearly out on
+every account it could run on goes by the project's rule as if it were out,
+the lead's fixes after a review and a review that waited for a place
+included: moved
+to an agent with room (or, with none, started on what is left), held until
+the reset, or asked about, with the agent itself among the ways on; the
+thread says why ("Codex has 3% of its five-hour limit left, until 14:00, so
+Claude Code takes the review instead, on Sonnet 5.5"). A step already running
+is never stopped for it. The coordinator's `list_models` says each model's
+room, so it plans with it.
+
 Under the default project rule, the paused work moves on, in this order:
 1. the same agent's next account that the project allows;
 2. the next free agent.

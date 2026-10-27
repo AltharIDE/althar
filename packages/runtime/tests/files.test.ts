@@ -35,7 +35,7 @@ import { fakeAgents, fakeConnectors, repository } from './support'
 
 /*
  * Files and folders the person sends with a message, through the API as the
- * window sends them (ADR-062): by the grant main gave for each, copied into
+ * window sends them (ADR-063): by the grant main gave for each, copied into
  * the thread's folder under `.althar/attachments`, which git ignores, named
  * on the message, and linked in the prompt of the turn that delivers it, for
  * the agent to open by its path; a small text file's words go too, to an

@@ -31,9 +31,11 @@ export interface ChromeButtonProps extends Omit<ComponentProps<'button'>, 'child
    * button, said under its name in the tooltip and as its description.
    */
   mark?: string
+  /** A small count after the label, such as what waits: it is for the eye, so the button's aria-label must say it too. */
+  count?: number
 }
 
-export function ChromeButton({ icon, label, expanded, compact, kbd, mark, className, type = 'button', ...rest }: ChromeButtonProps) {
+export function ChromeButton({ icon, label, expanded, compact, kbd, mark, count, className, type = 'button', ...rest }: ChromeButtonProps) {
   const markId = useId()
   const button = (
     <button
@@ -46,6 +48,11 @@ export function ChromeButton({ icon, label, expanded, compact, kbd, mark, classN
     >
       <Icon name={icon} size={13} />
       {!compact && <span>{label}</span>}
+      {count !== undefined && count > 0 && (
+        <span className={s.count} aria-hidden="true">
+          {count}
+        </span>
+      )}
       {mark !== undefined && <VisuallyHidden id={markId}>{mark}</VisuallyHidden>}
     </button>
   )

@@ -829,6 +829,28 @@ describe('AgentConnection', () => {
   })
 
   describe('failures the agent reports', () => {
+    it.live('a usage limit said as a message, as Copilot says it: the turn fails with it, and when it resets', () =>
+      Effect.gen(function* () {
+        const before = Date.now()
+        const said = (failsInText?: string) =>
+          withConnection({ ...fake, ...(failsInText === undefined ? {} : { failsInText }) }, (connection) =>
+            Effect.gen(function* () {
+              const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+              return yield* Stream.runCollect(session.prompt(scenarios.limitInText))
+            }),
+          )
+        const ended = (yield* said('Error: ')).at(-1)
+        const failure = ended?._tag === 'TurnEnded' ? ended.failure : undefined
+        assert.strictEqual(failure?.failure, 'usage_limit')
+        assert.match(failure?.message ?? '', /^You've hit your rate limit\./)
+        const resets = Date.parse(failure?.resetsAt ?? '') - before
+        assert.isTrue(resets >= 3 * 3_600_000 + 20 * 60_000 - 1000 && resets <= 3 * 3_600_000 + 20 * 60_000 + 60_000)
+        // An agent that says its failures as errors has its words read as words.
+        const plain = (yield* said()).at(-1)
+        assert.deepStrictEqual(plain, { _tag: 'TurnEnded', stopReason: 'end_turn' })
+      }),
+    )
+
     it.live('an exhausted quota, and when it resets', () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.quota)

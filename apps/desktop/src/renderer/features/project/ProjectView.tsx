@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 import {
   Composer,
@@ -268,6 +268,7 @@ export function ProjectView({
 
   const actions: CardActions = {
     project: name,
+    ...(about === null ? {} : { projectId: about }),
     agents: model.agents,
     agentName,
     onStart: (planId) => void model.startPlan(planId),
@@ -336,23 +337,20 @@ export function ProjectView({
     images.restore(said)
   }
 
+  const line: ReactNode =
+    waiting !== null && session !== null ? (
+      <>
+        {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
+        <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
+      </>
+    ) : (session === null || !session.held) && model.agents.length === 0 ? (
+      text.needsAgent
+    ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
+      text.signedOut(suggested.agentName, agentName(chosen.agentId))
+    ) : null
+
   const composer = (
     <div className={s.composer}>
-      {model.error !== null && (
-        <p className={s.failure} role="alert">
-          {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-        </p>
-      )}
-      {waiting !== null && session !== null && (
-        <p className={s.handover}>
-          {text.handingOver(named(waiting.agentId, waiting.model).name, named(session.agentId, session.model).name)}{' '}
-          <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
-        </p>
-      )}
-      {(session === null || !session.held) && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
-      {(session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null && (
-        <p className={s.quiet}>{text.signedOut(suggested.agentName, agentName(chosen.agentId))}</p>
-      )}
       <Composer
         value={draft}
         onChange={setDraft}
@@ -360,6 +358,19 @@ export function ProjectView({
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={draftOf} />}
+        // The lines about who answers go on the composer's edge, so a running launch's chip and they never overlap.
+        notice={
+          model.error !== null || line !== null ? (
+            <>
+              {model.error !== null && (
+                <div className={s.failure} role="alert">
+                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                </div>
+              )}
+              {line !== null && <div>{line}</div>}
+            </>
+          ) : null
+        }
         above={
           launches.length > 0 && (
             <Running
@@ -392,6 +403,7 @@ export function ProjectView({
             <ModelChoice
               owner={text.coordinator}
               agents={model.agents}
+              {...(about === null ? {} : { projectId: about })}
               value={chosen}
               onChange={choose}
               // Another agent's model hands the conversation over, once the person says something.

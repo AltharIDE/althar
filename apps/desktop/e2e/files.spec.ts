@@ -10,7 +10,7 @@ import { launch, openFirstProject, startTask, toConversation } from './support'
 
 /*
  * Files and folders added to a message, in a real window with the fake
- * agents (ADR-062): picked with Add files, dropped, or copied in the file
+ * agents (ADR-063): picked with Add files, dropped, or copied in the file
  * manager and pasted; shown as chips with their sizes before they go, sent
  * with what the person says, copied where the agent reads, and opened by the
  * agent from the link in its prompt (the fake opens each by its path, as an

@@ -352,3 +352,41 @@ export const limitWords = (definition: AutomationDefinition): ReadonlyArray<read
   [text.fails, text.failsWords],
   ...(endsInPullRequest(definition.work) ? [[text.pullRequests, text.pullRequestsWords] as const] : []),
 ]
+
+/* ---- to start from ------------------------------------------------------------------------ */
+
+/** One the tab offers while there are none: a new automation, filled in, for the person to change or keep. */
+export interface Starter {
+  readonly id: string
+  readonly name: string
+  readonly prompt: string
+  readonly schedule: Schedule
+  readonly work: AutomationWork
+}
+
+export const STARTERS: ReadonlyArray<Starter> = [
+  {
+    id: 'dependencies',
+    name: 'Nightly dependency check',
+    prompt:
+      'Check the dependencies for new releases and security advisories. Where an update is safe, make it and run the tests; if they pass, open a draft pull request, and say what you left and why.',
+    schedule: { every: 'week', days: EVERY_DAY, at: '02:00' },
+    work: { kind: 'task', review: null, end: 'draft' },
+  },
+  {
+    id: 'pullRequests',
+    name: 'Weekly pull request review',
+    prompt:
+      'Go through the open pull requests: say which are ready to merge, which wait on someone and on whom, and which have gone stale.',
+    schedule: { every: 'week', days: [1], at: '09:00' },
+    work: { kind: 'task', review: null, end: null },
+  },
+  {
+    id: 'issues',
+    name: 'Triage new issues',
+    prompt:
+      'Read the issues opened since the last run. For each, say what it is about, how big it looks and where in the code it lands, and flag any that need me today.',
+    schedule: { every: 'week', days: WEEKDAYS, at: '09:00' },
+    work: { kind: 'task', review: null, end: null },
+  },
+]

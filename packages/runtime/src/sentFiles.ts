@@ -15,7 +15,7 @@ import { Folders } from './Folders'
 import { Instance } from './Instance'
 
 /*
- * The files and folders the person sends with a message (ADR-062): each by
+ * The files and folders the person sends with a message (ADR-063): each by
  * the grant the app's main process gave for it as it was dropped, pasted or
  * picked, so the window never names a path; or one Althar copied before, as
  * when a message waiting its turn is taken back and sent again. Each is

@@ -14,6 +14,12 @@ import type { AgentDefinition } from './registry'
 /** The first version number in what a CLI printed. */
 export const versionIn = (output: string): string | null => /\d+\.\d+(?:\.\d+)?/.exec(output)?.[0] ?? null
 
+/** A version's major number: 2 for `2.0.29`; null where it isn't a version. */
+export const majorOf = (version: string): number | null => {
+  const major = /^(\d+)\./.exec(version)?.[1]
+  return major === undefined ? null : Number(major)
+}
+
 export const agentVersion = (agent: AgentDefinition, node: string = adapterNode()): Effect.Effect<string | null> => {
   const spec = agent.version?.(node)
   if (spec === undefined) return Effect.succeed(null)

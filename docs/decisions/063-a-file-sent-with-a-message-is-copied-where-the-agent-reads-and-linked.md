@@ -1,4 +1,4 @@
-# ADR-062: A file sent with a message is copied where the agent reads, and linked
+# ADR-063: A file sent with a message is copied where the agent reads, and linked
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
@@ -59,7 +59,7 @@
     agent that takes embedded context, so it needn't open it. No file goes
     as a `blob`. A copy that is gone by then is said in the prompt, so the
     agent can ask for it.
-  - **Recorded with the message** (`user_input_files`, migration 0043: its
+  - **Recorded with the message** (`user_input_files`, migration 0044: its
     name, kind, type, size, a folder's files, and its copy's path), and on
     the message's item, so the thread shows them after a restart, a
     message taken back from the queue goes again with the same copies, and

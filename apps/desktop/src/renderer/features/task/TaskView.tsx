@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
@@ -184,7 +184,8 @@ export const statusOf = (
         : text.issueChanges,
     }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
+  if (waits !== null)
+    return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step, waits.left) }
   // Held for the connection, it carries on by itself once it is back (ADR-060).
   if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
@@ -731,22 +732,18 @@ export function TaskView({
     </>
   )
 
+  const line: ReactNode =
+    waiting !== null ? (
+      <>
+        {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
+        <LinkButton onClick={() => setHandover(null)}>{text.keep(lead.name)}</LinkButton>
+      </>
+    ) : (session === null || !session.held) && model.agentsKnown && model.agents.length === 0 ? (
+      text.needsAgent
+    ) : null
+
   const composer = (
     <div className={s.composer}>
-      {model.error !== null && (
-        <p className={s.failure} role="alert">
-          {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-        </p>
-      )}
-      {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
-        <p className={s.handover}>{text.needsAgent}</p>
-      )}
-      {waiting !== null && (
-        <p className={s.handover}>
-          {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
-          <LinkButton onClick={() => setHandover(null)}>{text.keep(lead.name)}</LinkButton>
-        </p>
-      )}
       <Composer
         value={draft}
         onChange={setDraft}
@@ -757,6 +754,19 @@ export function TaskView({
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={kept} />}
+        // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
+        notice={
+          model.error !== null || line !== null ? (
+            <>
+              {model.error !== null && (
+                <div className={s.failure} role="alert">
+                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                </div>
+              )}
+              {line !== null && <div>{line}</div>}
+            </>
+          ) : null
+        }
         text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
         // What goes on outside the conversation, as one chip over its end: why it waits, what its lead left running, the pull requests it listens to.
         above={
@@ -802,6 +812,7 @@ export function TaskView({
             <ModelChoice
               owner={text.lead}
               agents={model.agents}
+              projectId={snapshot.project.id}
               value={choice}
               onChange={choose}
               // Another agent's model hands the task over, once the person says something.
