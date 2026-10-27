@@ -1,6 +1,6 @@
 import { AutomationRunState } from '../foundations/vocabulary'
 import type { AutomationRunRow } from '../screens/Automations/AutomationPage'
-import type { AutomationTile } from '../screens/Automations/Automations'
+import type { AutomationStarter, AutomationTile } from '../screens/Automations/Automations'
 
 /* Meridian's automations, as the Automations tab and their pages show them: a good morning, and one that paused itself. */
 
@@ -80,6 +80,36 @@ export const PROPOSED: AutomationTile = {
 }
 
 export const AUTOMATIONS: readonly AutomationTile[] = [WEEKLY_E2E, MORNING_REVIEW, NIGHTLY_BUMP, CHANGELOG, PROPOSED]
+
+/** Every one of them, once all are paused: each quiet, but the one that paused itself, which still waits on you. */
+export const ALL_PAUSED: readonly AutomationTile[] = AUTOMATIONS.map((one) =>
+  one.tone === 'yours' || one.standing === 'Off until you turn it on' ? one : { ...one, tone: 'paused', paused: true, standing: 'Paused' },
+)
+
+/** The few the tab offers while there are none, as the desktop app does. */
+export const STARTERS: readonly AutomationStarter[] = [
+  {
+    id: 'dependencies',
+    name: 'Nightly dependency check',
+    when: 'Every night at 2:00',
+    prompt:
+      'Check the dependencies for new releases and security advisories. Where an update is safe, make it and run the tests; if they pass, open a draft pull request, and say what you left and why.',
+  },
+  {
+    id: 'pullRequests',
+    name: 'Weekly pull request review',
+    when: 'Every Monday at 9:00',
+    prompt:
+      'Go through the open pull requests: say which are ready to merge, which wait on someone and on whom, and which have gone stale.',
+  },
+  {
+    id: 'issues',
+    name: 'Triage new issues',
+    when: 'Every weekday at 9:00',
+    prompt:
+      'Read the issues opened since the last run. For each, say what it is about, how big it looks and where in the code it lands, and flag any that need me today.',
+  },
+]
 
 /** The morning review's runs, as its page lists them: each with a task opens it. */
 export const REVIEW_RUNS: readonly AutomationRunRow[] = [

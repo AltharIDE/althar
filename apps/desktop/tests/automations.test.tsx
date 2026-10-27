@@ -94,16 +94,18 @@ describe('the Automations tab', () => {
     expect(opened()).toBe('auto1')
   })
 
-  it('pauses every automation from its menu, says so in one line, and resumes them', async () => {
+  it('pauses every automation from its menu, says so in a band, and resumes them from it', async () => {
     const { client } = fakeClient({ getAutomations: vi.fn(async () => automationsSnapshot()) })
     withServices(<Room />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'More' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Pause all automations' }))
     expect(client.setAutomationsPaused).toHaveBeenCalledWith(true)
-    expect(await screen.findByText(/Every automation is paused/)).toBeTruthy()
+    const band = await screen.findByRole('status', { name: 'Every automation is paused' })
+    expect(within(band).getByText('Every automation is paused')).toBeTruthy()
+    expect(within(band).getByText('None starts until you resume them. Runs under way finish.')).toBeTruthy()
     // Every one of them stands paused, at once.
     expect(screen.getByText('Paused')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Resume' }))
+    await userEvent.click(within(band).getByRole('button', { name: 'Resume all' }))
     expect(client.setAutomationsPaused).toHaveBeenLastCalledWith(false)
     await waitFor(() => expect(screen.queryByText(/Every automation is paused/)).toBeNull())
   })
@@ -143,14 +145,47 @@ describe('the Automations tab', () => {
     expect(screen.queryByText(/They run on this Mac/)).toBeNull()
   })
 
-  it('has none yet: what to say to the coordinator, or New automation, which opens a blank page', async () => {
+  it('has none yet: what they are for, a few to start from, and New automation, which opens a blank page', async () => {
     const { client } = fakeClient()
     withServices(<Room />, client)
-    expect(await screen.findByText(/None yet\. Ask the coordinator/)).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Nothing runs by itself yet' })).toBeTruthy()
     expect(screen.getByText('“every weekday at 9, review the new pull requests”')).toBeTruthy()
+    // Nothing to pause yet.
+    expect(screen.queryByRole('button', { name: 'More' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'New automation' }))
     expect(opened()).toBe('new')
-    expect(await screen.findByRole('textbox', { name: 'Name' })).toBeTruthy()
+    expect((await screen.findByRole('textbox', { name: 'Name' })).getAttribute('value')).toBe('')
+  })
+
+  it('opens a new one filled in from a starter: its name, prompt, schedule and what it ends in', async () => {
+    const { client } = fakeClient()
+    withServices(<Room />, client)
+    const starters = await screen.findByRole('list')
+    expect(
+      within(starters)
+        .getAllByRole('button')
+        .map((one) => one.querySelector('span')?.textContent),
+    ).toEqual(['Nightly dependency check', 'Weekly pull request review', 'Triage new issues'])
+    expect(within(starters).getByText('Every night at 2:00')).toBeTruthy()
+    await userEvent.click(within(starters).getByRole('button', { name: /^Nightly dependency check/ }))
+    expect(opened()).toBe('new')
+    expect((await screen.findByRole('textbox', { name: 'Name' })).getAttribute('value')).toBe('Nightly dependency check')
+    expect((screen.getByRole('textbox', { name: 'What each run is asked' }) as HTMLTextAreaElement).value).toMatch(
+      /^Check the dependencies/,
+    )
+    expect(screen.getByRole('button', { name: /Every night at 2:00/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Open a draft pull request/ })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(client.makeAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        definition: expect.objectContaining({
+          name: 'Nightly dependency check',
+          schedule: { every: 'week', days: [1, 2, 3, 4, 5, 6, 7], at: '02:00' },
+          work: { kind: 'task', review: null, end: 'draft' },
+        }),
+        on: false,
+      }),
+    )
   })
 
   it('says so where they can’t be read', async () => {
@@ -419,7 +454,7 @@ describe('an automation’s page', () => {
 })
 
 describe('a new automation', () => {
-  it('opens blank, its prompt ready to type, and asks for its prompt and name before it is made', async () => {
+  it('opens blank, its prompt ready to type, and says under each field what it needs before it is made', async () => {
     const { client } = fakeClient()
     withServices(<Room opening="new" />, client)
     const prompt = await screen.findByRole('textbox', { name: 'What each run is asked' })
@@ -428,19 +463,31 @@ describe('a new automation', () => {
     expect(screen.getByRole('button', { name: /Every weekday at 9:00/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Nothing leaves this Mac/ })).toBeTruthy()
     expect(screen.getByText('None')).toBeTruthy()
-    // No runs, and nothing to rename or delete yet.
+    // No runs, nothing to rename or delete, and nothing to try until it is saved.
     expect(screen.queryByRole('heading', { name: 'Runs' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'More' })).toBeNull()
-    // Its name first, beside its field, which takes focus; then its prompt.
+    expect(screen.queryByRole('button', { name: 'Try it once now' })).toBeNull()
+    // Each field says what it lacks under itself, and the first of them takes focus.
+    const name = screen.getByRole('textbox', { name: 'Name' })
     await userEvent.click(screen.getByRole('button', { name: 'Turn on' }))
-    expect(await screen.findByText('Give it a name first')).toBeTruthy()
-    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Name' }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), ' Weekly polish ')
+    const nameError = await screen.findByText('Give it a name first')
+    const promptError = screen.getByText('Say what each run should do first.')
+    expect(name.getAttribute('aria-invalid')).toBe('true')
+    expect(name.getAttribute('aria-describedby')).toBe(nameError.id)
+    expect(prompt.getAttribute('aria-invalid')).toBe('true')
+    expect(prompt.getAttribute('aria-describedby')).toBe(promptError.id)
+    await waitFor(() => expect(document.activeElement).toBe(name))
+    await userEvent.type(name, ' Weekly polish ')
     await waitFor(() => expect(screen.queryByText('Give it a name first')).toBeNull())
-    await userEvent.click(screen.getByRole('button', { name: 'Turn on' }))
-    expect((await screen.findByRole('alert')).textContent).toBe('Say what each run should do first.')
+    // Named, its prompt is the first that lacks something: Save says so too, under it, and focus goes there.
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(document.activeElement).toBe(prompt))
+    expect(screen.getByText('Say what each run should do first.')).toBeTruthy()
+    // Nothing is said at the top of the page: the alerts are the field's own.
+    expect(screen.getAllByRole('alert').map((alert) => alert.textContent)).toEqual(['Say what each run should do first.'])
     await userEvent.type(prompt, 'Tidy the changelog.')
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(prompt.getAttribute('aria-invalid')).toBeNull()
     expect(client.makeAutomation).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('switch', { name: 'Allow everything' }))
     await userEvent.click(screen.getByRole('button', { name: 'Turn on' }))
@@ -463,15 +510,27 @@ describe('a new automation', () => {
     await waitFor(() => expect(opened()).toBe('auto2'))
   })
 
-  it('tries it once now: made, not on, and run once', async () => {
-    const { client } = fakeClient()
+  it('saves it, off, then tries it once from its page', async () => {
+    const { client } = fakeClient({
+      getAutomation: vi.fn(async () => ({
+        cursor: 6,
+        automation: automationView({ id: 'auto2', name: 'Flaky sweep', state: 'proposed', nextAt: null, runs: [] }),
+      })),
+    })
     withServices(<Room opening="new" />, client)
     await userEvent.type(await screen.findByRole('textbox', { name: 'What each run is asked' }), 'Sweep the flaky tests.')
     await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Flaky sweep')
-    await userEvent.click(screen.getByRole('button', { name: 'Try it once now' }))
-    await waitFor(() => expect(client.runAutomationNow).toHaveBeenCalledWith('auto2'))
+    expect(screen.queryByRole('button', { name: 'Try it once now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(client.makeAutomation).toHaveBeenCalledWith(expect.objectContaining({ on: false }))
+    // Saved, it doesn't run: its page opens, off, and can be tried once now.
     await waitFor(() => expect(opened()).toBe('auto2'))
+    expect(client.runAutomationNow).not.toHaveBeenCalled()
+    expect(await screen.findByText('Off until you turn it on')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Try it once now' }))
+    expect(client.runAutomationNow).toHaveBeenCalledWith('auto2')
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Turn on' })).toBeTruthy()
   })
 
   it('says why it couldn’t be made, and stays to try again', async () => {

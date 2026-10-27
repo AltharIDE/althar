@@ -437,10 +437,19 @@ export class Connections extends Context.Service<
           )
         })
 
-      /** The token the keychain keeps for a connection: none there, or none Althar can read, is no token. */
+      /**
+       * The token the keychain keeps for a connection: none there, or none Althar can read, is no token. A token sealed with a key
+       * the keychain no longer holds is one of those, not the keychain being away: nothing will open it, so the sign-in is lost.
+       */
       const stored = (row: Row) =>
         Effect.gen(function* () {
-          const raw = yield* secrets.get(row.credentialRef)
+          const raw = yield* secrets
+            .get(row.credentialRef)
+            .pipe(
+              Effect.mapError((error) =>
+                error.unreadable === true ? new NoToken({ message: 'The keychain can no longer open the token' }) : error,
+              ),
+            )
           if (raw === null) return yield* new NoToken({ message: 'No token in the keychain' })
           return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Stored))(raw).pipe(
             Effect.mapError(() => new NoToken({ message: 'The keychain’s token is unreadable' })),

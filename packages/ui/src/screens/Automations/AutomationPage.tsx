@@ -17,14 +17,17 @@ import { AutomationChip, type AutomationRunMark, type AutomationTone, RunMark } 
 import p from './AutomationPage.module.css'
 
 /*
- * An automation's own page, in the Automations tab: back to the list; its
- * name and where it stands, with a dot; what can be done to it at the top
- * (Run now, an on/off switch, Rename and Delete); a violet band when it
- * paused itself, saying why and what to do; then what it does (its card,
- * the same as in the conversation, which is how it is changed), its limits,
- * and its runs, each opening its task where it has one. A new one is this
- * page blank: its name a field, its prompt ready to type, and its actions
- * make it, to try once or to turn on.
+ * An automation's own page, in the Automations tab: a bar that stays at the
+ * top as the page scrolls, with the way back to the list and what can be
+ * done to it (Run now, an on/off switch, Rename and Delete), drawing a line
+ * under itself once the page scrolls beneath it; its name and where it
+ * stands, with a dot; a violet band when it paused itself, saying why and
+ * what to do; then what it does (its card, the same as in the conversation,
+ * which is how it is changed), its limits, and its runs, each opening its
+ * task where it has one. A new one is this page blank: its name a field,
+ * its prompt ready to type, and Save, which keeps it off, or Turn on; once
+ * saved it can be tried once. What a new one is missing is said under its
+ * field, and the first such field takes focus.
  */
 
 export interface AutomationPageText {
@@ -34,6 +37,8 @@ export interface AutomationPageText {
   nameMissing: string
   runNow: string
   tryOnce: string
+  /** Keeps a new one, off. */
+  save: string
   turnOn: string
   /** The on/off switch's name. */
   on: string
@@ -65,6 +70,7 @@ export const automationPageText: AutomationPageText = {
   nameMissing: 'Give it a name first',
   runNow: 'Run now',
   tryOnce: 'Try it once now',
+  save: 'Save',
   turnOn: 'Turn on',
   on: 'On',
   more: 'More',
@@ -110,7 +116,7 @@ export type AutomationPageProps = RootProps<
   'div',
   {
     name: string
-    /** A new one, not made yet: its name is a field, and Try it once now and Turn on make it. */
+    /** A new one, not made yet: its name is a field, and Save and Turn on make it. */
     making?: boolean
     onNameChange?: (name: string) => void
     /** Where it stands, in words, after a dot: Runs next tomorrow at 9:00, Paused, Off until you turn it on. */
@@ -119,13 +125,21 @@ export type AutomationPageProps = RootProps<
     statusTone: 'on' | 'off' | 'yours'
     tone: AutomationTone
     paused: boolean
-    /** Not turned on yet: Try it once now and Turn on, in place of Run now and the switch. */
+    /** Not turned on yet: Try it once now (once it is made) and Turn on, in place of Run now and the switch. */
     proposed: boolean
     on: boolean
     onSwitch?: (on: boolean) => void
     onRunNow?: () => void
     onTryOnce?: () => void
+    /** Makes a new one, off: it can be tried once from its page, and turned on. */
+    onSave?: () => void
     onTurnOn?: () => void
+    /**
+     * Whether the rest of a new one is ready to be made, beside its name: where
+     * it isn't, the consumer marks what is missing under its own field, and the
+     * page takes focus to the first field marked invalid.
+     */
+    check?: () => boolean
     onRename?: (name: string) => void
     onDelete?: () => void
     onBack: () => void
@@ -280,7 +294,6 @@ function Name({
           aria-describedby={missing ? errorId : undefined}
           onChange={(event) => onNameChange?.(event.target.value)}
           className={p.nameField}
-          data-name=""
         />
         {missing && <FieldError id={errorId}>{t.nameMissing}</FieldError>}
       </>
@@ -306,7 +319,9 @@ export function AutomationPage({
   onSwitch,
   onRunNow,
   onTryOnce,
+  onSave,
   onTurnOn,
+  check,
   onRename,
   onDelete,
   onBack,
@@ -326,75 +341,84 @@ export function AutomationPage({
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [missing, setMissing] = useState(false)
-  const head = useRef<HTMLDivElement>(null)
+  // Which of a new one's actions was asked, so only it shows it is on its way.
+  const [asked, setAsked] = useState<'save' | 'on' | null>(null)
+  // Each time making it was refused, focus goes to the first field that says why.
+  const [refused, setRefused] = useState(0)
+  const [scrolled, setScrolled] = useState(false)
+  const view = useRef<HTMLDivElement>(null)
   // Rename takes focus on to the field, not back to the menu's button.
   const away = useRef(false)
   const inner = below(headingLevel)
   if (missing && name.trim() !== '') setMissing(false)
-  /** A new one needs its name before it is made: said beside the field, and focus goes there. */
-  const named = (then: () => void) => () => {
-    if (making && name.trim() === '') {
-      setMissing(true)
-      head.current?.querySelector<HTMLInputElement>('[data-name]')?.focus()
+  useEffect(() => {
+    if (refused === 0) return
+    const first = view.current?.querySelector<HTMLElement>('[aria-invalid="true"]')
+    if (first === null || first === undefined) return
+    first.focus({ preventScroll: true })
+    first.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  }, [refused])
+  /** A new one is made only once it has its name and what else it needs; what it lacks is said under each field. */
+  const ready = (action: 'save' | 'on', then: () => void) => () => {
+    const named = !making || name.trim() !== ''
+    if (!named) setMissing(true)
+    const rest = check?.() ?? true
+    if (!named || !rest) {
+      setRefused((n) => n + 1)
       return
     }
+    setAsked(action)
     then()
   }
-  return (
-    <div className={cx(p.view, className)} {...rest}>
-      <div className={p.column}>
-        <Button variant="quiet" size="small" icon="chevronL" className={p.crumb} onClick={onBack}>
-          {t.back}
+  const actions = making ? (
+    <>
+      {onSave !== undefined && (
+        <Button variant="quiet" onClick={ready('save', onSave)} disabled={busy && asked !== 'save'} busy={busy && asked === 'save'}>
+          {t.save}
         </Button>
-        <header className={p.head}>
-          <AutomationChip tone={tone} paused={paused} size={44} />
-          <div className={p.headWords} ref={head}>
-            <Name
-              name={name}
-              making={making}
-              renaming={renaming}
-              missing={missing}
-              level={headingLevel}
-              t={t}
-              {...(onNameChange === undefined ? {} : { onNameChange })}
-              onRenamed={(renamed) => {
-                setRenaming(false)
-                if (renamed !== null) onRename?.(renamed)
-              }}
-            />
-            <p className={p.status}>
-              <span className={cx(p.dot, statusTone === 'off' && p.dotOff, statusTone === 'yours' && p.dotYours)} aria-hidden="true" />
-              {status}
-            </p>
-          </div>
+      )}
+      {onTurnOn !== undefined && (
+        <Button onClick={ready('on', onTurnOn)} disabled={busy && asked === 'save'} busy={busy && asked !== 'save'}>
+          {t.turnOn}
+        </Button>
+      )}
+    </>
+  ) : proposed ? (
+    <>
+      {onTryOnce !== undefined && (
+        <Button variant="quiet" icon="play" onClick={onTryOnce} disabled={busy}>
+          {t.tryOnce}
+        </Button>
+      )}
+      {onTurnOn !== undefined && (
+        <Button onClick={onTurnOn} busy={busy}>
+          {t.turnOn}
+        </Button>
+      )}
+    </>
+  ) : (
+    <>
+      {onRunNow !== undefined && (
+        <Button variant="quiet" icon="play" onClick={onRunNow} disabled={busy}>
+          {t.runNow}
+        </Button>
+      )}
+      {onSwitch !== undefined && (
+        <span className={p.switch}>
+          <Switch checked={on} onChange={onSwitch} label={t.on} />
+        </span>
+      )}
+    </>
+  )
+  return (
+    <div className={cx(p.view, className)} ref={view} onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)} {...rest}>
+      <div className={p.bar} data-scrolled={scrolled || undefined}>
+        <div className={p.barInner}>
+          <Button variant="quiet" size="small" icon="chevronL" className={p.crumb} onClick={onBack}>
+            {t.back}
+          </Button>
           <div className={p.actions}>
-            {proposed ? (
-              <>
-                {onTryOnce !== undefined && (
-                  <Button variant="quiet" onClick={named(onTryOnce)} disabled={busy}>
-                    {t.tryOnce}
-                  </Button>
-                )}
-                {onTurnOn !== undefined && (
-                  <Button onClick={named(onTurnOn)} busy={busy}>
-                    {t.turnOn}
-                  </Button>
-                )}
-              </>
-            ) : (
-              <>
-                {onRunNow !== undefined && (
-                  <Button variant="quiet" icon="play" onClick={onRunNow} disabled={busy}>
-                    {t.runNow}
-                  </Button>
-                )}
-                {onSwitch !== undefined && (
-                  <span className={p.switch}>
-                    <Switch checked={on} onChange={onSwitch} label={t.on} />
-                  </span>
-                )}
-              </>
-            )}
+            {actions}
             {!making && (onRename !== undefined || onDelete !== undefined) && (
               <Menu
                 label={t.more}
@@ -425,6 +449,30 @@ export function AutomationPage({
                 )}
               </Menu>
             )}
+          </div>
+        </div>
+      </div>
+      <div className={p.column}>
+        <header className={p.head}>
+          <AutomationChip tone={tone} paused={paused} size={44} />
+          <div className={p.headWords}>
+            <Name
+              name={name}
+              making={making}
+              renaming={renaming}
+              missing={missing}
+              level={headingLevel}
+              t={t}
+              {...(onNameChange === undefined ? {} : { onNameChange })}
+              onRenamed={(renamed) => {
+                setRenaming(false)
+                if (renamed !== null) onRename?.(renamed)
+              }}
+            />
+            <p className={p.status}>
+              <span className={cx(p.dot, statusTone === 'off' && p.dotOff, statusTone === 'yours' && p.dotYours)} aria-hidden="true" />
+              {status}
+            </p>
           </div>
         </header>
         {error !== undefined && (

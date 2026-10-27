@@ -52,17 +52,6 @@ export interface LoadGlance {
   history: readonly LoadPoint[]
 }
 
-/** How loaded it is in a word, for the peek's head. */
-export enum LoadLevel {
-  Quiet = 'quiet',
-  Busy = 'busy',
-  Full = 'full',
-}
-
-/** From here the CPU counts as full; from BUSY, as busy. */
-const FULL = 0.9
-const BUSY = 0.45
-
 const clamp = (n: number) => Math.min(1, Math.max(0, n))
 
 /** Whether memory is short enough to say: a Mac compressing it or moving it to disk. */
@@ -77,11 +66,6 @@ export const strained = (pressure: MemoryPressure | null): pressure is MemoryPre
     default:
       return unreachable(pressure)
   }
-}
-
-export const levelOf = (load: Pick<LoadGlance, 'cpu' | 'pressure'>): LoadLevel => {
-  if (load.cpu >= FULL || strained(load.pressure)) return LoadLevel.Full
-  return load.cpu >= BUSY ? LoadLevel.Busy : LoadLevel.Quiet
 }
 
 /** A share, 0 to 1, as a whole percent. */
