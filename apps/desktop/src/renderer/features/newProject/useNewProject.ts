@@ -7,7 +7,7 @@ import type { NewProjectFinding, NewProjectFolder, NewProjectFound, NewProjectSu
 
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { factsOf, useFound } from '../../shared/found'
+import { useFound } from '../../shared/found'
 import { contractInk, kitInk } from '../../shared/inks'
 import { productBrand } from '../../shared/products'
 import { changesOn, codeHostOf, remoteOf } from '../../shared/remotes'
@@ -67,7 +67,6 @@ const folderOf = (folder: DraftFolder, list: ConnectionList | null): NewProjectF
     id: folder.path,
     name: folder.name,
     where: folder.where,
-    branch: folder.branch,
     host: host === null ? null : { name: host.name, ...(host.product === null ? {} : { brand: productBrand(host.product) }) },
     remote: ref?.path ?? null,
   }
@@ -159,7 +158,6 @@ export const useNewProject = (): NewProjectModel => {
           })),
         ]
 
-  const now = new Date()
   const offered = (() => {
     if (draft === null) return null
     if (found.isError) return { like: null, first: [], more: [] }
@@ -178,7 +176,6 @@ export const useNewProject = (): NewProjectModel => {
         id: repository.id,
         name: repository.name,
         where: repository.where,
-        facts: factsOf(repository.branch, repository.worked, now),
         ...(project === undefined ? {} : { in: project }),
       }
     }
