@@ -13,6 +13,7 @@ import { bringBackThen } from './bringBack'
 import { Fetches, type Wanted } from './Fetches'
 import { Instance } from './Instance'
 import { printedMore, servingAt, uncoloured } from './leftRunning'
+import { WORK, workOf } from './machine'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
@@ -39,7 +40,7 @@ import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServe
  * at once, one of each in a place; runs of the default branch share their
  * repository's copy, made fresh only where nothing of it runs there.
  *
- * A branch or a pull request runs too (ADR-063), with no task: Althar
+ * A branch or a pull request runs too (ADR-064), with no task: Althar
  * fetches it itself, with its own sign-in (Fetches.ts), into a copy of its
  * own, made as the default branch's is and detached at what it fetched. The
  * copy is the run's alone and goes as the run does, stopped or ended by
@@ -602,11 +603,13 @@ export class Launches extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const { id, run, folder, binding } = input
             const line = lineOf(run)
+            // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
+            const env = { [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) }
             const spec =
               process.platform === 'win32'
                 ? // The line as it is: cmd.exe takes off the outer quotes (/s).
-                  { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true as const }
-                : { command: '/bin/sh', args: ['-c', line] }
+                  { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], verbatim: true as const, env }
+                : { command: '/bin/sh', args: ['-c', line], env }
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
             yield* sql`INSERT INTO processes ${sql.insert({
               id,
@@ -705,7 +708,7 @@ export class Launches extends Context.Service<
         )
 
       /**
-       * Runs a branch or a pull request (ADR-063): fetched by Althar into the
+       * Runs a branch or a pull request (ADR-064): fetched by Althar into the
        * person's repository, then run in a copy of its own detached at what it
        * got, the runnable asked for, else the first of its repository's that
        * says how it runs there. One of it already running is the one there is.

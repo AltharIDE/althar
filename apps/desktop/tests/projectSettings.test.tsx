@@ -220,6 +220,10 @@ describe('a project’s settings', () => {
     // On at once, and kept as a revision of the rules, with nothing else in it.
     expect(conflicts.getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', resolveConflicts: true }))
+    // On, every open task can be looked at now, rather than as each default branch moves.
+    await userEvent.click(tasks.getByRole('button', { name: 'Look for conflicts now' }))
+    expect(client.lookForConflicts).toHaveBeenCalledWith('p1')
+    expect(descriptionOf(conflicts)).toContain('Looking at each open task now.')
     await userEvent.click(conflicts)
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', resolveConflicts: false }))
     expect(conflicts.getAttribute('aria-checked')).toBe('false')

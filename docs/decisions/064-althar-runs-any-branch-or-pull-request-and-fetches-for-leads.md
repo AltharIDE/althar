@@ -1,4 +1,4 @@
-# ADR-063: Althar runs any branch or pull request, and fetches for leads
+# ADR-064: Althar runs any branch or pull request, and fetches for leads
 
 - **Status:** Accepted
 - **Date:** 2026-10-27

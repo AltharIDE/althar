@@ -39,6 +39,16 @@ const row = (id: string, title: string, project: string, cpu: number, memory: st
   processes,
 })
 
+/** Althar itself: the app, its windows and the runtime. */
+const althar = (cpu: number, memory: string, processes: number): LoadRow => ({
+  id: 'althar',
+  title: 'Althar',
+  opens: false,
+  cpu,
+  memory,
+  processes,
+})
+
 const at = (cpu: number, work: number): LoadPoint => ({ cpu, work })
 
 const calm = { pressure: MemoryPressure.Normal, memoryTotal: '32 GB' } as const
@@ -83,17 +93,18 @@ export const LOAD_ONE_TASK: LoadGlance = {
 export const LOAD_BUSY: LoadGlance = {
   ...calm,
   cpu: 0.63,
-  work: 0.51,
+  work: 0.54,
   memory: 0.61,
-  workMemory: 0.18,
+  workMemory: 0.21,
   memoryUsed: '19.5 GB',
   rows: [
     row('task 419', 'Migrate billing webhooks to the v2 endpoint', 'Meridian', 0.22, '2.8 GB', 18),
     row('task 418', 'Repair token refresh on privilege change', 'Meridian', 0.14, '2.1 GB', 14),
     row('task h12', 'Cache upstream health checks', 'Halyard', 0.1, '1.2 GB', 9, true),
     row('coordinator meridian', 'Coordinator', 'Meridian', 0.05, '0.8 GB', 4),
+    althar(0.03, '1.1 GB', 9),
   ],
-  history: history(at(0.3, 0.2), at(0.63, 0.51), 0.35, 0.06),
+  history: history(at(0.3, 0.2), at(0.63, 0.54), 0.35, 0.06),
 }
 
 /** Five tasks, two of them running integration suites, and the default branch running: every core busy, and memory tight. */
@@ -101,9 +112,9 @@ export const LOAD_NEAR_MAX: LoadGlance = {
   pressure: MemoryPressure.Warning,
   memoryTotal: '32 GB',
   cpu: 0.96,
-  work: 0.84,
+  work: 0.88,
   memory: 0.91,
-  workMemory: 0.46,
+  workMemory: 0.5,
   memoryUsed: '29.1 GB',
   rows: [
     row('task 419', 'Migrate billing webhooks to the v2 endpoint', 'Meridian', 0.31, '6.4 GB', 31),
@@ -112,8 +123,9 @@ export const LOAD_NEAR_MAX: LoadGlance = {
     row('task t7', 'Name the limits better', 'Tessera', 0.11, '1.6 GB', 9, true),
     row('task 424', 'Find a shape for webhook queue sharding', 'Meridian', 0.05, '0.9 GB', 4),
     { id: 'run meridian', title: 'Default branch', project: 'Meridian', cpu: 0.02, memory: '0.4 GB', processes: 2 },
+    althar(0.04, '1.3 GB', 11),
   ],
-  history: history(at(0.62, 0.5), at(0.96, 0.84), 0.25, 0.05),
+  history: history(at(0.62, 0.5), at(0.96, 0.88), 0.25, 0.05),
 }
 
 /** Busy, and macOS moving memory to disk: the one strain the meter says in a word. */

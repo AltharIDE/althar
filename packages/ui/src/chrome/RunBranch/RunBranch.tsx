@@ -10,7 +10,7 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './RunBranch.module.css'
 
 /*
- * Running a branch or a pull request, from the Run button's list (ADR-063):
+ * Running a branch or a pull request, from the Run button's list (ADR-064):
  * a field, and what the remote has to run as it is typed in, its open pull
  * requests first, each by its title and number, then its branches. Althar
  * asks the remote as it opens, so the list is fresh, even of what nobody has

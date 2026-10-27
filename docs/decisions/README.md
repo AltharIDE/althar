@@ -70,4 +70,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [060](060-a-lost-connection-is-waited-out-and-a-failing-service-tried-again.md) | A lost connection is waited out, and a failing service tried again, as a usage limit is held |
 | [061](061-automations-start-ordinary-tasks-on-a-schedule.md) | Automations start ordinary tasks on a schedule: a kept request, and an occurrence for each time it was due, on this computer while Althar runs |
 | [062](062-a-usage-read-may-use-an-account-s-own-sign-in-once.md) | A usage read may use an account's own sign-in, once, for one call to its provider's usage URL, Anthropic's included |
-| [063](063-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md) | Althar runs any branch or pull request in a copy of its own, fetched with its sign-in, and fetches for leads, which carry none |
+| [063](063-althar-s-part-is-all-its-work-started-and-itself.md) | Althar's part of the load is everything its work started, however it runs, and Althar itself |
+| [064](064-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md) | Althar runs any branch or pull request in a copy of its own, fetched with its sign-in, and fetches for leads, which carry none |

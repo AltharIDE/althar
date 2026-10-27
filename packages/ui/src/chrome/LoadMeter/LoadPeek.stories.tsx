@@ -42,9 +42,13 @@ export const ReadsItsNumbers: Story = {
     const peek = within(canvasElement)
     await expect(peek.getByText('63%')).toBeInTheDocument()
     await expect(peek.getByText('19.5 GB of 32 GB')).toBeInTheDocument()
-    await expect(peek.getByText('Althar’s work 51%')).toBeInTheDocument()
+    await expect(peek.getByText('Althar’s work 54%')).toBeInTheDocument()
     await expect(peek.getByRole('heading', { name: 'Running' })).toBeInTheDocument()
     await expect(peek.getByRole('button', { name: /Coordinator.*Meridian · Claude Code · 4 processes.*5%.*0\.8 GB/ })).toBeInTheDocument()
+    // Althar itself, in its part, with nothing to open.
+    await expect(peek.getByText('Althar')).toBeInTheDocument()
+    await expect(peek.getByText('9 processes')).toBeInTheDocument()
+    await expect(peek.queryByRole('button', { name: /^Althar/ })).toBeNull()
   },
 }
 
