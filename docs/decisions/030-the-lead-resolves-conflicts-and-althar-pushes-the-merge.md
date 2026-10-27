@@ -2,6 +2,17 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-12
+- **Amended:** 2026-10-27: a conflict is never skipped without a word. A
+  pull request's host works out whether it conflicts lazily and needn't say
+  so again when only its base moved, so Althar merges each open task's
+  branch with its fetched default branch here every few minutes, and at once
+  when it sees a pull request merge, rather than waiting for the host to say
+  so. A run that failed or was cancelled no longer keeps its idle lead from
+  being asked; a round the lead couldn't resolve is tried again once the
+  default branch moves on; a round under way when Althar stopped is asked
+  again rather than handed to the person. Where a conflict isn't asked of
+  the lead, its card and task say why in one line, with Resolve now, which
+  asks anyway; project settings can look at every open task now.
 - **Owner:** Repository maintainers
 - **Context:** A task's branch that conflicts with its default branch waited
   for the person. Merging here, a conflict offered a button that sent the
@@ -27,8 +38,20 @@
     going on, or a task's say where its lead wasn't resolving conflicts, has
     Althar look at once at each open task with a branch: a branch merging
     here is merged with its default branch without anything moving, and a
-    listened pull request is asked about now. What conflicts starts a round
-    as a conflict found later would, under the same rules.
+    listened pull request is asked about now, its target fetched and merged
+    here. What conflicts starts a round as a conflict found later would,
+    under the same rules. While on, "Look for conflicts now" beside the
+    switch does the same at any time.
+  - **A conflict is found here, as the default branch moves,** not only when
+    the host says so: every few listening turns, and at once when Althar sees
+    a pull request merge, each open task's branch is merged with its default
+    branch, fetched at most that often, without anything moving. A host
+    that hasn't worked it out yet is asked again soon, not taken for a no.
+  - **Never skipped without a word.** Where a conflicting task isn't asked
+    of its lead (the person stopped it, it has no lead, its folder isn't on
+    this computer, its target couldn't be fetched), its card and task say
+    why in one line, with Resolve now, which asks its lead regardless of the
+    rules, a stop, or a round handed back. Each reason is logged.
   - **On, a conflict is the lead's to resolve, unasked,** whether a merge
     here found it or the pull request's host said so. Althar sends the note
     the person's press sends, in the same words; for a pull request, the
@@ -75,9 +98,10 @@
     pushed in turn; anything after it waits for the person's Push. That fix
     is the lead's one more try: checks that fail again are the person's, in
     Needs you.
-  - **Only once the task's run has succeeded, and only until the person
-    stops it.** A task the person stopped isn't started again for a
-    conflict, and stopping or interrupting the lead, or stopping the task,
+  - **Only once the task's lead is idle, and only until the person stops
+    it.** A run that succeeded, failed or was cancelled leaves it idle; one
+    still going waits. A task the person stopped isn't started again for a
+    conflict, unless they press Resolve now, and stopping or interrupting the lead, or stopping the task,
     mid-round makes the round theirs: nothing more is pushed, and failed
     checks don't ask the lead again.
     Stopping listening to the pull request ends its round as well.
@@ -106,8 +130,10 @@
   - **A lead may settle a conflict in a way the person wouldn't,** and it
     goes up without them looking. The checks, and the pull request's own
     review on the host, are what stand between it and the default branch.
-  - **A host that doesn't say a pull request conflicts** (Bitbucket Cloud)
-    gets no help until the person merges here or asks.
+  - **Looking for conflicts here costs a fetch** of each repository's
+    default branch every couple of minutes while it has open pull requests,
+    and a merge without a working tree per task. It is what finds a conflict
+    when the host is slow or silent, Bitbucket Cloud included.
   - **Turning it on over a whole project may start several leads at once,**
     one per task that conflicts. That is what the person asked for, and each
     is a task already done, waiting to merge.
