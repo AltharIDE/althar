@@ -25,7 +25,7 @@ import {
  * Who runs a conversation, as the kit's model picker: the person's pinned
  * models, every model of every agent one step away, and how hard it thinks.
  * A model of another agent is that agent taking over: where something runs,
- * the picker says so on those models, and asks first while a turn is under
+ * the picker asks first while a turn is under
  * way. Each model says how much room its plan has where work on it would
  * start, in the project where given. What the consumer does with the choice
  * is its own.
@@ -33,8 +33,6 @@ import {
 
 /** What picking another agent's model does to a conversation that runs. */
 export interface Handover {
-  /** A word on another agent's model: that picking it hands the conversation over. */
-  readonly note: (agent: string) => string
   /** While a turn runs, what handing over would do, to ask first; null when nothing runs. */
   readonly ask: ((to: string, from: string) => string) | null
 }
@@ -105,9 +103,6 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, projectI
         {...(choiceOf(current.id).model === null ? {} : { onMakeDefault: (name: string) => makeDefault(current.id, name) })}
         onBrowse={() => setBrowsing(true)}
         {...(onRemove === undefined ? {} : { onRemove })}
-        {...(handover === undefined
-          ? {}
-          : { note: (info: ModelInfo) => (another(info) ? handover.note(agentName(info.runtime)) : undefined) })}
         {...(confirm === undefined ? {} : { confirm })}
         room={room}
         asking={asking}

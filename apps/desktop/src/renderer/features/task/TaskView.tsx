@@ -118,7 +118,6 @@ export const text = {
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
   needsAgent: 'No agent is signed in, so nothing can pick this up. Sign one in from Settings; what you send waits for it.',
-  handsOver: (agent: string) => `hands the task to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
   /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
@@ -830,15 +829,7 @@ export function TaskView({
         picker={
           model.agents.length > 0 &&
           choice !== null && (
-            <ModelChoice
-              owner={text.lead}
-              agents={model.agents}
-              projectId={snapshot.project.id}
-              value={choice}
-              onChange={choose}
-              // Another agent's model hands the task over, once the person says something.
-              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
-            />
+            <ModelChoice owner={text.lead} agents={model.agents} projectId={snapshot.project.id} value={choice} onChange={choose} />
           )
         }
       />

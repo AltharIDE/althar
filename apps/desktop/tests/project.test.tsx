@@ -665,7 +665,7 @@ describe('the Talk room', () => {
     await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
     await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'thc', effort: 'high' }))
     // At work, another agent takes over only with what the person says next.
-    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codex, via Codexhands the conversation to Codex/ }))
+    await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codex, via Codex/ }))
     await userEvent.keyboard('{Escape}')
     expect(await screen.findByText(/gpt-5\.2-codex takes over from Claude Code default when you send\./)).toBeTruthy()
     expect(client.switchAgent).not.toHaveBeenCalled()
