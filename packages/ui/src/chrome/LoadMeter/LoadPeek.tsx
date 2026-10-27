@@ -188,7 +188,7 @@ export function LoadPeek({ load, onOpen, onHide, slots, headingLevel = 2, text, 
             <ul className={s.list}>
               {rows.map((row) => (
                 <li key={row.id}>
-                  {onOpen === undefined ? (
+                  {onOpen === undefined || row.opens === false ? (
                     <div className={s.share}>
                       <Row row={row} t={t} />
                     </div>

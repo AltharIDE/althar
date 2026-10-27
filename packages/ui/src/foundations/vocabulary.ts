@@ -382,6 +382,7 @@ export enum PlanState {
 export enum AttachmentKind {
   Image = 'image',
   File = 'file',
+  Folder = 'folder',
   Paste = 'paste',
 }
 

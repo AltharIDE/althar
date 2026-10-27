@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
 import type { Load, LoadShare } from '@althar/contracts'
-import { type LoadGlance, type LoadMeterText, MemoryPressure, Room } from '@althar/ui'
+import { type LoadGlance, type LoadMeterText, type LoadRow, MemoryPressure, Room } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { brandOf } from '../../shared/agents'
@@ -26,6 +26,7 @@ export const EVERY = 3_000
 export const SLOTS = 40
 
 export const text = {
+  althar: 'Althar',
   coordinator: 'Coordinator',
   defaultBranch: 'Default branch',
   meter: { machine: device.This, peek: `${device.This}’s load` } satisfies Partial<LoadMeterText>,
@@ -58,11 +59,32 @@ const titleOf = (share: LoadShare) => share.title ?? (share.kind === 'coordinato
 
 /** The runtime's reading, as the meter draws it. */
 export const glanceOf = (load: Load): LoadGlance => {
-  const shares = load.shares
+  const { shares, althar } = load
   const memory = load.memoryTotal > 0 ? Math.min(1, load.memoryUsed / load.memoryTotal) : 0
-  const sum = (part: (share: LoadShare) => number) => (shares === null ? null : shares.reduce((all, share) => all + part(share), 0))
+  const sum = (part: (share: { cpu: number; memory: number }) => number) =>
+    shares === null ? null : shares.reduce((all, share) => all + part(share), althar === null ? 0 : part(althar))
   const work = sum((share) => share.cpu)
   const held = sum((share) => share.memory)
+  const own: LoadRow | null =
+    althar === null
+      ? null
+      : { id: 'althar', title: text.althar, opens: false, cpu: althar.cpu, memory: memoryOf(althar.memory), processes: althar.processes }
+  const rows =
+    shares?.map((share): LoadRow => {
+      const mark = share.agent === null ? undefined : brandOf(share.agent.id)
+      return {
+        id: idOf(share),
+        title: titleOf(share),
+        project: share.project,
+        ...(share.agent === null ? {} : { agent: share.agent.name }),
+        ...(mark === undefined ? {} : { mark }),
+        cpu: share.cpu,
+        memory: memoryOf(share.memory),
+        processes: share.processes,
+      }
+    }) ?? null
+  // Althar's own row among its work's, by its CPU, as the runtime orders them.
+  const at = own === null || rows === null ? -1 : rows.findIndex((row) => row.cpu < own.cpu)
   return {
     cpu: load.cpu,
     work: work === null ? null : Math.min(load.cpu, work),
@@ -71,20 +93,7 @@ export const glanceOf = (load: Load): LoadGlance => {
     memoryUsed: memoryOf(load.memoryUsed),
     memoryTotal: memoryOf(load.memoryTotal),
     pressure: pressureOf(load.pressure),
-    rows:
-      shares?.map((share) => {
-        const mark = share.agent === null ? undefined : brandOf(share.agent.id)
-        return {
-          id: idOf(share),
-          title: titleOf(share),
-          project: share.project,
-          ...(share.agent === null ? {} : { agent: share.agent.name }),
-          ...(mark === undefined ? {} : { mark }),
-          cpu: share.cpu,
-          memory: memoryOf(share.memory),
-          processes: share.processes,
-        }
-      }) ?? null,
+    rows: own === null || rows === null ? rows : at < 0 ? [...rows, own] : [...rows.slice(0, at), own, ...rows.slice(at)],
     history: load.history,
   }
 }

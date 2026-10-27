@@ -8,13 +8,19 @@ import { MemoryPressure, unreachable } from '../../foundations/vocabulary'
  * changes.
  */
 
-/** One piece of Althar's work, and its share of this computer: a task's agents and runs, a project's coordinator, or a run of its default branch. */
+/**
+ * One piece of Althar's work, and its share of this computer: a task's agents
+ * and runs, a project's coordinator, a run of its default branch, or Althar
+ * itself.
+ */
 export interface LoadRow {
   id: string
-  /** What it is, as the person knows it: the task's title, or the project's coordinator. */
+  /** What it is, as the person knows it: the task's title, the project's coordinator, or Althar. */
   title: string
-  /** The project it is in. */
-  project: string
+  /** The project it is in; none for Althar itself. */
+  project?: string
+  /** Whether the row opens its work: Althar itself has none to open. */
+  opens?: boolean
   /** The agent leading it, by name; none for a run. */
   agent?: string
   mark?: Brand

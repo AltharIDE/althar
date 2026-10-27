@@ -680,7 +680,8 @@ describe('a merge here, worked out', () => {
       const head = commit(root, 'retry.ts', 'retry\n')
       git(root, 'checkout', '-q', 'main')
       assert.deepStrictEqual(yield* planMerge(root, 'nope', head, 'Merge'), { kind: 'missing' })
-      assert.deepStrictEqual(yield* conflictsOf(root, 'nope', head), [])
+      // Whether it would conflict can't be told.
+      assert.isNull(yield* conflictsOf(root, 'nope', head))
       assert.isNull(yield* checkedOut(root, 'nope'))
       // Once main has it, merging it again is nothing to do.
       git(root, 'merge', '-q', '--ff-only', 'task')

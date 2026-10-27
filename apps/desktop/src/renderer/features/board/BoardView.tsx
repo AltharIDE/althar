@@ -40,19 +40,32 @@ import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../share
 import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import { doingWords, doneHere, factsOf, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
+import {
+  doingWords,
+  doneHere,
+  factsOf,
+  isBlocked,
+  labelWords,
+  nextWords,
+  pushResolves,
+  standingOf,
+  standingText,
+} from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Board.module.css'
-import { type Lanes, type Waiting } from './lanes'
+import { type Held, heldOf, holding, type Lanes, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
 /*
  * The project's work, as the kit's board lays it out: up next, running,
  * needs you, settled, each lane collapsed to a rail where the person
- * collapsed it or the board has no room for it. A card has little to press: the whole of it opens
+ * collapsed it or the board has no room for it. Up next lists what goes on
+ * by itself, in the order it will (ADR-065): what continues, saying with
+ * what and why it waits, then the line the person orders, then what is
+ * paused, then plans. A card has little to press: the whole of it opens
  * its task, where a call is answered, work is accepted and the lead is told
  * what's next. The exception is a ready change's Push and Accept and merge,
  * which do it right there. Its top line says where the task stands in a word, then its
@@ -70,6 +83,8 @@ export const text = {
   /** At the divider's end, while the line is the oldest first; once the person changed it, the way back. */
   reorder: 'Drag to change the order',
   oldestFirst: 'Back to oldest first',
+  /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
+  paused: 'Paused',
   planned: 'Planned',
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
@@ -96,6 +111,13 @@ export const text = {
   reviewDrafted: 'Review drafted',
   /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
   mergeConflict: 'Merge conflict',
+  /** A pull request with a conflict or a failed check in its way: not yet ready to accept. */
+  blocked: 'Not ready to accept',
+  /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
+  readyOnPush: 'Ready once pushed',
+  /** A conflict Althar didn't ask its lead to resolve, though the rules say to: asks it anyway (ADR-030). */
+  resolveNow: 'Resolve now',
+  resolvingNow: 'Asking the lead',
   /** A running change's checks; a ready one's say what stands (shared/standing). */
   checks: {
     passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
@@ -249,7 +271,15 @@ type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 const fromOf = (work: BoardTask): Pick<Card, 'from'> => (work.automation == null ? {} : { from: work.automation.name })
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
-export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
+export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
+  const card = runningCard(work, now, name)
+  // Stopped, or its lead not yet started, with a conflict not asked of it: why, and Resolve now, in place of its foot.
+  if (work.conflictUnsent != null) return { ...card, foot: unsentFoot(work, work.conflictUnsent, actions) }
+  if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
+  return card
+}
+
+const runningCard = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
   // Waiting for a free agent, held for a usage limit, or stopped, it says so rather than that it runs.
   const still: Pick<Card, 'status' | 'word' | 'why'> | null =
     work.queued !== null
@@ -410,19 +440,24 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet.
         word:
-          work.handedBack != null ? text.mergeConflict : change === null && work.unshipped != null ? kindWords.unshipped : kindWords.ready,
+          work.handedBack != null || work.conflictUnsent != null
+            ? text.mergeConflict
+            : change === null && work.unshipped != null
+              ? kindWords.unshipped
+              : change?.state === 'open' && isBlocked(standingOf(change))
+                ? text.blocked
+                : change?.state === 'open' && pushResolves(standingOf(change))
+                  ? text.readyOnPush
+                  : kindWords.ready,
         ...(object === null ? {} : { object }),
-        ...(work.handedBack != null
-          ? {
-              foot: (
-                <Fact icon="branch" tone="warm">
-                  {work.handedBack}
-                </Fact>
-              ),
-            }
+        // Its conflict the person's, handed back or not asked of its lead: why, and Resolve now, which asks the lead anyway.
+        ...(work.handedBack != null || work.conflictUnsent != null
+          ? { foot: unsentFoot(work, work.handedBack ?? work.conflictUnsent ?? '', actions) }
           : // One merged or closed has nothing in its way, and nothing to do to it.
             change === null || change.state !== 'open'
-            ? {}
+            ? work.conflictUnchecked == null
+              ? {}
+              : { foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
             : { foot: readyFoot(work, change, actions) }),
       }
     }
@@ -433,7 +468,31 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
 
 /** What a ready card does without opening its task: push, and merge, mark done or keep for later, and how they stand. */
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
-  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling'>>
+  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving'>>
+
+/** A conflict that is the person's, handed back or not asked of its lead: why, in one line, and Resolve now, which asks the lead anyway. */
+const unsentFoot = (work: BoardTask, why: string, actions: CardActions | undefined): ReactNode => {
+  const resolveNow = actions?.resolveNow
+  return (
+    <>
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          {why}
+        </Fact>
+      </FactLine>
+      {resolveNow !== undefined && (
+        <NextStep
+          signal
+          busy={actions?.resolving?.has(work.taskId) ?? false}
+          doing={text.resolvingNow}
+          onPress={() => void resolveNow(work.taskId)}
+        >
+          {text.resolveNow}
+        </NextStep>
+      )}
+    </>
+  )
+}
 
 /**
  * A finished task's Done and Keep for later, for its card's corner, where it
@@ -467,8 +526,10 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
   const here = actions !== undefined && next !== null && doneHere(next) ? next : null
   const failure = actions?.failed[work.taskId]
   const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
+  // Not looked at for a conflict here, whatever its host says: why, first, as the host's word may be out of date.
+  const unchecked = work.conflictUnchecked ?? null
   const facts = factsOf(change, standing).map((one, i) => (
-    <Fact key={one.words} {...(i === 0 && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+    <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
       {one.words}
     </Fact>
   ))
@@ -478,6 +539,11 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
         {failed !== null && here !== null && (
           <Fact key="failed" icon="close" tone="danger" role="alert">
             {standingText.nextFailed[here.kind](failed)}
+          </Fact>
+        )}
+        {unchecked !== null && (
+          <Fact key="unchecked" icon="branch" tone="warm">
+            {unchecked}
           </Fact>
         )}
         {facts}
@@ -545,25 +611,46 @@ export function BoardView({
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 
+  // While the person points at Up next or Running, or drags in the line, what would move between them stays where it was.
+  const [held, setHeld] = useState<Held | null>(null)
+  const shown = held === null ? lanes : holding(lanes, held)
+  const { continuing, free, paused } = shown
+  const pointed = (lane: BoardLane | null) =>
+    setHeld((was) => (lane === BoardLane.Next || lane === BoardLane.Running ? (was ?? heldOf(lanes)) : null))
+
   const nextRow = (work: BoardTask, index: number) => {
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
-    const free = index < lanes.free && work.queued !== null
+    // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
+    const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused)
+    const reason =
+      index < continuing
+        ? work.queued === null
+          ? text.startsIn(0)
+          : busyWords(work.queued)
+        : index < continuing + free
+          ? work.queued === null
+            ? text.startsIn(0)
+            : inLineWords(index + 1)
+          : index < continuing + free + paused
+            ? work.waits !== null
+              ? waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left)
+              : work.reconnects != null
+                ? reconnectsWords(work.reconnects, clock)
+                : text.startsIn(0)
+            : startsAt === null
+              ? text.held
+              : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
     return (
       <NextRow
         key={work.taskId}
         place={index + 1}
         task={work.slug}
         {...(kind === undefined ? {} : { kind })}
+        {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
         title={work.title}
-        wait={free || startsAt !== null ? Wait.Workers : Wait.You}
-        reason={
-          free
-            ? inLineWords(index + 1)
-            : startsAt === null
-              ? text.held
-              : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
-        }
+        wait={index < continuing + free + paused || startsAt !== null ? Wait.Workers : Wait.You}
+        reason={reason}
         onOpen={() => onOpen(work.threadId)}
         text={{ task: unnamed }}
       />
@@ -571,12 +658,18 @@ export function BoardView({
   }
 
   return (
-    <Board label={text.label} {...(folds === undefined ? {} : { folds })} {...(onFoldsChange === undefined ? {} : { onFoldsChange })}>
-      <BoardColumn lane={BoardLane.Next} count={lanes.next.length}>
-        {lanes.free > 0 && (
+    <Board
+      label={text.label}
+      {...(folds === undefined ? {} : { folds })}
+      {...(onFoldsChange === undefined ? {} : { onFoldsChange })}
+      onPointerLane={pointed}
+    >
+      <BoardColumn lane={BoardLane.Next} count={shown.upNext} filled={shown.next.length > 0}>
+        {continuing > 0 && <BoardList>{shown.next.slice(0, continuing).map(nextRow)}</BoardList>}
+        {free > 0 && (
           <BoardDivider
             end={
-              line === undefined || lanes.free < 2 ? undefined : lanes.reordered ? (
+              line === undefined || free < 2 ? undefined : shown.reordered ? (
                 <LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>
               ) : (
                 text.reorder
@@ -591,26 +684,34 @@ export function BoardView({
             {line.failed}
           </p>
         )}
-        {lanes.free > 0 && (
+        {free > 0 && (
           <NextLine
-            rows={lanes.next.slice(0, lanes.free).map((work) => ({ id: work.taskId, title: work.title }))}
-            // While a row is dragged, each says the place it would take.
+            rows={shown.next.slice(continuing, continuing + free).map((work) => ({ id: work.taskId, title: work.title }))}
+            // While a row is dragged, each says the place it would take, after what continues.
             render={(id, place) => {
-              const work = lanes.next.find((one) => one.taskId === id)
-              return work === undefined ? null : nextRow(work, place - 1)
+              const work = shown.next.find((one) => one.taskId === id)
+              return work === undefined ? null : nextRow(work, continuing + place - 1)
             }}
             {...(line === undefined ? {} : { onMove: line.move })}
           />
         )}
-        {lanes.free > 0 && lanes.free < lanes.next.length && <BoardDivider>{text.planned}</BoardDivider>}
-        {lanes.free < lanes.next.length && (
-          <BoardList>{lanes.next.slice(lanes.free).map((work, index) => nextRow(work, lanes.free + index))}</BoardList>
+        {paused > 0 && <BoardDivider>{text.paused}</BoardDivider>}
+        {paused > 0 && (
+          <BoardList>
+            {shown.next.slice(continuing + free, continuing + free + paused).map((work, index) => nextRow(work, continuing + free + index))}
+          </BoardList>
+        )}
+        {continuing + free + paused > 0 && continuing + free + paused < shown.next.length && <BoardDivider>{text.planned}</BoardDivider>}
+        {continuing + free + paused < shown.next.length && (
+          <BoardList>
+            {shown.next.slice(continuing + free + paused).map((work, index) => nextRow(work, continuing + free + paused + index))}
+          </BoardList>
         )}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
-        {lanes.running.map((work) => (
-          <BoardCard key={work.taskId} {...runningCardOf(work, now, name)} onOpen={() => onOpen(work.threadId)} />
+      <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
+        {shown.running.map((work) => (
+          <BoardCard key={work.taskId} {...runningCardOf(work, now, name, actions)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 

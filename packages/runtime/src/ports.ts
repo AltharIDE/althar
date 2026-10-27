@@ -139,9 +139,11 @@ export const holding = (path: string): Effect.Effect<ReadonlyArray<number>> =>
 export const portsBelow = (roots: ReadonlyArray<number>): Effect.Effect<ReadonlyArray<number>> =>
   Effect.gen(function* () {
     if (roots.length === 0) return []
-    const tree = treeOf(yield* processes(), roots)
+    // The two listings don't depend on each other, and every agent turn waits on them: read them side by side.
+    const [parents, listening] = yield* Effect.all([processes(), listeners()], { concurrency: 'unbounded' })
+    const tree = treeOf(parents, roots)
     const ports: Array<number> = []
-    for (const { pid, port } of yield* listeners()) if (tree.has(pid) && !ports.includes(port)) ports.push(port)
+    for (const { pid, port } of listening) if (tree.has(pid) && !ports.includes(port)) ports.push(port)
     return ports
   })
 

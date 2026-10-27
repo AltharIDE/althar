@@ -145,7 +145,17 @@ export const factsAsker = (type: 'facts' | 'names' = 'facts') => {
 
 export const startReports = (options: ReportsOptions) => {
   const address = reportAddress(options.address)
-  const open = new Map<string, Promise<Gathered>>()
+  /*
+   * Reports open, by id, with the window each is for. One a window at most:
+   * a window reloaded, or its runtime restarted, while its dialog was open
+   * never closes it, so the next one it opens takes its place, and a window
+   * that goes takes its own with it.
+   */
+  const open = new Map<string, { readonly gathering: Promise<Gathered>; readonly from: number }>()
+  const watched = new Set<number>()
+  const closeFrom = (from: number) => {
+    for (const [reportId, report] of open) if (report.from === from) open.delete(reportId)
+  }
 
   const gather = async (context: ReportContext, screenshot: Picture | null): Promise<Gathered> => {
     const [id, asked] = await Promise.all([options.installId(), factsFrom(() => options.askRuntime(context.threadId))])
@@ -192,7 +202,16 @@ export const startReports = (options: ReportsOptions) => {
     const gathering = gather(contextIn(context), goes)
     // Nothing waits on it yet; a failure is said when something does.
     gathering.catch(() => undefined)
-    open.set(reportId, gathering)
+    const from = event.sender.id
+    closeFrom(from)
+    if (!watched.has(from)) {
+      watched.add(from)
+      event.sender.once('destroyed', () => {
+        watched.delete(from)
+        closeFrom(from)
+      })
+    }
+    open.set(reportId, { gathering, from })
     const kept = (await readPreferences(options.profile())).reportEmail
     return {
       reportId,
@@ -204,13 +223,13 @@ export const startReports = (options: ReportsOptions) => {
   })
 
   ipcMain.handle('althar:report-preview', async (_event, reportId: unknown) => {
-    const gathering = typeof reportId === 'string' ? open.get(reportId) : undefined
+    const gathering = typeof reportId === 'string' ? open.get(reportId)?.gathering : undefined
     if (gathering === undefined) throw new Error('That report isn’t open.')
     return preview(await gathering)
   })
 
   ipcMain.handle('althar:report-send', async (_event, reportId: unknown, given: unknown): Promise<Sent> => {
-    const gathering = typeof reportId === 'string' ? open.get(reportId) : undefined
+    const gathering = typeof reportId === 'string' ? open.get(reportId)?.gathering : undefined
     if (gathering === undefined) return { kind: 'failed', reason: 'That report isn’t open any more.' }
     const choices = choicesIn(given)
     if (typeof choices === 'string') return { kind: 'failed', reason: choices }

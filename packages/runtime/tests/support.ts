@@ -452,6 +452,24 @@ export const listTools = (access: ToolAccess) =>
     })
   })
 
+/** The tools an agent with this access is offered, each with the description it reads. */
+export const toolDescriptions = (access: ToolAccess) =>
+  Effect.gen(function* () {
+    const granted = yield* (yield* ToolServer).grant(access)
+    const server = granted.server
+    if (server.type !== 'http') return {} as Record<string, string>
+    return yield* Effect.promise(async () => {
+      const client = new Client({ name: 'test', version: '1.0.0' })
+      const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
+      await client.connect(transport as Parameters<typeof client.connect>[0])
+      try {
+        return Object.fromEntries((await client.listTools()).tools.map((tool) => [tool.name, tool.description ?? '']))
+      } finally {
+        await client.close()
+      }
+    })
+  })
+
 /** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
   Effect.map(callToolAtOnce(access, name, [args]), (said) => said[0] ?? '')

@@ -10,7 +10,7 @@ import { ContextRing } from '../ContextRing/ContextRing'
 import { DictationTray, type DictationState } from '../DictationTray/DictationTray'
 import { Behind } from '../Behind/Behind'
 import { ModelPick } from '../ModelPick/ModelPick'
-import { Composer, type ComposerImage, type ComposerProps, type DictationInput } from './Composer'
+import { Composer, type ComposerFile, type ComposerImage, type ComposerProps, type DictationInput } from './Composer'
 import { States, statesOn } from '../../storybook/States'
 
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
@@ -57,7 +57,18 @@ const SHOTS: ComposerImage[] = [
 ]
 
 /* What the host says of a file that isn't a picture it can send. */
-const refusedNote = (name: string) => `${name} isn’t a PNG, JPEG, GIF or WebP image, so it can’t be sent.`
+const refusedNote = (name: string) => `${name} is larger than 50 MB, so it can’t be sent.`
+
+/* What the host shows for a file it adds, as the desktop does: its size, or a folder's files and size. */
+const DOCUMENTS: ComposerFile[] = [
+  { id: 'f1', name: 'refund-spec.pdf', meta: '1.2 MB' },
+  { id: 'f2', name: 'checkout-errors.log', meta: '48 KB' },
+  { id: 'f3', name: 'fixtures', meta: '14 files · 320 KB', folder: true },
+]
+
+/* The kinds the host draws as images; anything else is a file, and one with no kind and no extension a folder, as a drop gives it. */
+const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const sizeOf = (bytes: number) => (bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`)
 
 function Example(
   props: Partial<ComposerProps> & {
@@ -73,8 +84,10 @@ function Example(
     inputs?: readonly DictationInput[]
     /** Images already added. */
     pictures?: ComposerImage[]
-    /** Takes images: what is dropped, pasted or picked is read as the host would, and anything that isn't an image refused. */
-    takesImages?: boolean
+    /** Files and folders already added. */
+    documents?: ComposerFile[]
+    /** Takes files: what is dropped, pasted or picked is added as the host would, an image drawn small and anything else as a chip; one called huge… refused. */
+    takesFiles?: boolean
   },
 ) {
   const {
@@ -87,13 +100,15 @@ function Example(
     at,
     inputs = INPUTS,
     pictures = [],
-    takesImages = false,
+    documents = [],
+    takesFiles = false,
     onSendNow = () => {},
     ...rest
   } = props
   const [value, setValue] = useState(initial)
   const [input, setInput] = useState<string | null>(null)
   const [images, setImages] = useState(pictures)
+  const [files, setFiles] = useState(documents)
   const [note, setNote] = useState<string | undefined>(undefined)
   const [queue, setQueue] = useState(waiting.map((said, i) => ({ id: `q${i}`, ...(typeof said === 'string' ? { text: said } : said) })))
   const [seconds, setSeconds] = useState<number | null>(recording ? 4 : null)
@@ -119,25 +134,41 @@ function Example(
           if (rest.busy)
             setQueue([
               ...queue,
-              { id: `q${queue.length}-${text.length}`, text, ...(images.length > 0 ? { attached: `${images.length} images` } : {}) },
+              {
+                id: `q${queue.length}-${text.length}`,
+                text,
+                ...(images.length + files.length > 0 ? { attached: `${images.length + files.length} attachments` } : {}),
+              },
             ])
           setValue('')
           setImages([])
+          setFiles([])
         }}
         images={images}
-        {...(takesImages
+        files={files}
+        {...(takesFiles
           ? {
-              onAddImages: (files: readonly File[]) => {
-                const refused = files.find((file) => !file.type.startsWith('image/'))
+              onAddFiles: (added: readonly File[]) => {
+                const refused = added.find((file) => file.name.startsWith('huge'))
                 setNote(refused === undefined ? undefined : refusedNote(refused.name))
-                const added = files.filter((file) => file.type.startsWith('image/'))
+                const taken = added.filter((file) => file !== refused)
+                const pictured = taken.filter((file) => PICTURE_TYPES.includes(file.type))
+                const others = taken.filter((file) => !PICTURE_TYPES.includes(file.type))
                 setImages((now) => [
                   ...now,
-                  ...added.map((file, i) => ({ id: `added-${now.length + i}`, name: file.name, src: SHOT_BEFORE.src })),
+                  ...pictured.map((file, i) => ({ id: `added-${now.length + i}`, name: file.name, src: SHOT_BEFORE.src })),
+                ])
+                setFiles((now) => [
+                  ...now,
+                  ...others.map((file, i) => {
+                    const folder = file.type === '' && !file.name.includes('.')
+                    return { id: `file-${now.length + i}`, name: file.name, meta: folder ? '3 files · 2 KB' : sizeOf(file.size), folder }
+                  }),
                 ])
               },
               onRemoveImage: (id: string) => setImages((now) => now.filter((image) => image.id !== id)),
-              imageNote: note,
+              onRemoveFile: (id: string) => setFiles((now) => now.filter((file) => file.id !== id)),
+              fileNote: note,
             }
           : {})}
         placeholder="Tell the lead"
@@ -292,11 +323,11 @@ export const NarrowFoot: Story = {
       {[300, 420, 560, 720, 900].map((w) => (
         <div key={w} style={{ width: w }} data-testid={`foot-${w}`}>
           <p style={{ margin: '0 0 6px', font: '11px var(--mono)' }}>{w}px: idle, typing, dictating, transcribing, lead working</p>
-          <Example takesImages />
-          <Example takesImages initial="Two things: keep the limiter" />
-          <Example takesImages recording />
-          <Example takesImages dictation={{ elapsed: null, busy: true, onStart: () => {}, onStop: () => {} }} />
-          <Example busy takesImages recording initial="Two things: keep the limiter" />
+          <Example takesFiles />
+          <Example takesFiles initial="Two things: keep the limiter" />
+          <Example takesFiles recording />
+          <Example takesFiles dictation={{ elapsed: null, busy: true, onStart: () => {}, onStop: () => {} }} />
+          <Example busy takesFiles recording initial="Two things: keep the limiter" />
         </div>
       ))}
     </div>
@@ -652,12 +683,12 @@ export const ContextDetail: Story = {
 
 /** Images to send with what you write, drawn small above the field, each with a way off. */
 export const WithImages: Story = {
-  render: () => <Example takesImages pictures={SHOTS} initial="The refund button moved; put it back where it was." />,
+  render: () => <Example takesFiles pictures={SHOTS} initial="The refund button moved; put it back where it was." />,
 }
 /** Images alone are something to send: the button shows, and Enter sends them with nothing written. */
 export const ImagesOnly: Story = {
   args: { onSubmit: fn() },
-  render: (args) => <Example takesImages pictures={SHOTS.slice(0, 1)} onSubmit={args.onSubmit} />,
+  render: (args) => <Example takesFiles pictures={SHOTS.slice(0, 1)} onSubmit={args.onSubmit} />,
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('button', { name: 'Send' })).toBeInTheDocument()
@@ -666,54 +697,93 @@ export const ImagesOnly: Story = {
     await expect(args.onSubmit).toHaveBeenCalledWith('')
   },
 }
-/** Dropped on it, pasted into it or picked with Add images: each goes to the host, which adds it, and takes it off again. */
-export const AddingImages: Story = {
-  render: () => <Example takesImages />,
+/** Images and files waiting together: the images drawn small, then a chip for each file and folder, with its size. */
+export const WithFilesAndImages: Story = {
+  render: () => (
+    <Example
+      takesFiles
+      pictures={SHOTS.slice(0, 1)}
+      documents={DOCUMENTS}
+      initial="The spec, the errors and the fixtures; see the shot too."
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('list', { name: '4 attachments to send' })).toBeInTheDocument()
+    await expect(c.getByText('refund-spec.pdf')).toBeInTheDocument()
+    await expect(c.getByText('14 files · 320 KB')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Remove checkout-errors.log' }))
+    await expect(c.getByRole('list', { name: '3 attachments to send' })).toBeInTheDocument()
+    await expect(c.queryByText('checkout-errors.log')).toBeNull()
+  },
+}
+/** Files alone are something to send, as images are. */
+export const FilesOnly: Story = {
+  args: { onSubmit: fn() },
+  render: (args) => <Example takesFiles documents={DOCUMENTS.slice(0, 1)} onSubmit={args.onSubmit} />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('textbox', { name: 'Tell the lead' }))
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSubmit).toHaveBeenCalledWith('')
+  },
+}
+/** Dropped on it, pasted into it or picked with Add files: each goes to the host, which adds it, and takes it off again. */
+export const AddingFiles: Story = {
+  render: () => <Example takesFiles />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     const field = c.getByRole('textbox', { name: 'Tell the lead' })
     const shot = new File(['png'], 'shot.png', { type: 'image/png' })
     // Held over it, it says what dropping does; carried away, it doesn't.
     await fireEvent.dragEnter(field, { dataTransfer: { types: ['Files'], files: [shot] } })
-    await expect(c.getByText('Drop to add them to your message')).toBeInTheDocument()
+    await expect(c.getByText('Drop to add to your message')).toBeInTheDocument()
     await fireEvent.dragLeave(field, { dataTransfer: { types: ['Files'], files: [shot] } })
-    await expect(c.queryByText('Drop to add them to your message')).toBeNull()
+    await expect(c.queryByText('Drop to add to your message')).toBeNull()
     await fireEvent.dragEnter(field, { dataTransfer: { types: ['Files'], files: [shot] } })
     await fireEvent.drop(field, { dataTransfer: { types: ['Files'], files: [shot] } })
-    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
+    await expect(c.getByRole('list', { name: '1 attachment to send' })).toBeInTheDocument()
     await expect(c.getByRole('img', { name: 'shot.png' })).toBeInTheDocument()
-    // A picture on the clipboard is added, not pasted as words.
+    // Any file, and a folder, dropped with it: each a chip.
+    const pdf = new File(['%PDF'], 'spec.pdf', { type: 'application/pdf' })
+    const folder = new File([], 'fixtures')
+    await fireEvent.drop(field, { dataTransfer: { types: ['Files'], files: [pdf, folder] } })
+    await expect(c.getByRole('list', { name: '3 attachments to send' })).toBeInTheDocument()
+    await expect(c.getByText('spec.pdf')).toBeInTheDocument()
+    await expect(c.getByText('fixtures')).toBeInTheDocument()
+    // A picture or a file on the clipboard is added, not pasted as words.
     await fireEvent.paste(field, { clipboardData: { files: [new File(['jpg'], 'photo.jpg', { type: 'image/jpeg' })], types: ['Files'] } })
-    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
+    await expect(c.getByRole('list', { name: '4 attachments to send' })).toBeInTheDocument()
     await expect(field).toHaveValue('')
     // Words on the clipboard paste as words.
     await fireEvent.paste(field, { clipboardData: { files: [], types: ['text/plain'] } })
-    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
+    await expect(c.getByRole('list', { name: '4 attachments to send' })).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Remove shot.png' }))
-    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
-    // Picked with the button, from the file input it opens.
+    await userEvent.click(c.getByRole('button', { name: 'Remove spec.pdf' }))
+    await expect(c.getByRole('list', { name: '2 attachments to send' })).toBeInTheDocument()
+    // Picked with the button, from the file input it opens: any kind.
     const input = canvasElement.querySelector<HTMLInputElement>('input[type="file"]')
-    await expect(input).toHaveAttribute('accept', 'image/png,image/jpeg,image/gif,image/webp')
-    if (input !== null) await userEvent.upload(input, new File(['gif'], 'loop.gif', { type: 'image/gif' }))
-    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
-    await expect(c.getByRole('button', { name: 'Add images' })).toBeInTheDocument()
+    await expect(input).not.toHaveAttribute('accept')
+    if (input !== null) await userEvent.upload(input, new File(['a,b'], 'rows.csv', { type: 'text/csv' }))
+    await expect(c.getByRole('list', { name: '3 attachments to send' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Add files' })).toBeInTheDocument()
   },
 }
 /** A file the host won't send: it says why in a line over the field, and the rest are added. */
-export const ImageRefused: Story = {
-  render: () => <Example takesImages />,
+export const FileRefused: Story = {
+  render: () => <Example takesFiles />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    const files = [new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' }), new File(['png'], 'shot.png', { type: 'image/png' })]
+    const files = [new File(['zip'], 'huge-export.zip', { type: 'application/zip' }), new File(['png'], 'shot.png', { type: 'image/png' })]
     await fireEvent.drop(c.getByRole('textbox', { name: 'Tell the lead' }), { dataTransfer: { types: ['Files'], files } })
-    await expect(c.getByRole('status')).toHaveTextContent(refusedNote('notes.pdf'))
-    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
+    await expect(c.getByRole('status')).toHaveTextContent(refusedNote('huge-export.zip'))
+    await expect(c.getByRole('list', { name: '1 attachment to send' })).toBeInTheDocument()
   },
 }
 /** One still being read or made smaller turns until it is ready. */
 export const ReadingImage: Story = {
   render: () => (
-    <Example takesImages pictures={[SHOTS[0] ?? { id: 'i1', name: 'refunds-before.png' }, { id: 'i3', name: 'huge.png', reading: true }]} />
+    <Example takesFiles pictures={[SHOTS[0] ?? { id: 'i1', name: 'refunds-before.png' }, { id: 'i3', name: 'huge.png', reading: true }]} />
   ),
   play: async ({ canvasElement }) => {
     // Said as a status, in place of its picture.
@@ -725,20 +795,20 @@ export const ReadingImage: Story = {
 export const AgentTakesNoImages: Story = {
   render: () => (
     <Example
-      takesImages
+      takesFiles
       pictures={SHOTS}
-      imageNote="Codex doesn’t take images. Remove them to send this, or pick an agent that does."
+      fileNote="Codex doesn’t take images. Remove them to send this, or pick an agent that does."
       initial="Why does it look like this?"
     />
   ),
 }
-/** Without an image the placeholder stands in its place; without onAddImages there is no button, and nothing is taken. */
+/** Without an image the placeholder stands in its place; without onAddFiles there is no button, and nothing is taken. */
 export const NoImageSource: Story = {
   render: () => <Example pictures={[{ id: 'i1', name: 'refunds-before.png' }]} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('img', { name: 'refunds-before.png' })).toBeInTheDocument()
-    await expect(c.queryByRole('button', { name: 'Add images' })).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Add files' })).toBeNull()
     await expect(c.queryByRole('button', { name: /^Remove/ })).toBeNull()
   },
 }
@@ -841,19 +911,20 @@ export const AllStates: Story = {
         { state: 'dictating', node: <Example recording /> },
         { state: 'dictating, word by word', node: <Example recording streaming initial="Keep the limiter where it is." /> },
         { state: 'minimal', node: <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> },
-        { state: 'images', node: <Example takesImages pictures={SHOTS} initial="Put the button back." /> },
-        { state: 'images only', node: <Example takesImages pictures={SHOTS.slice(0, 1)} /> },
+        { state: 'images', node: <Example takesFiles pictures={SHOTS} initial="Put the button back." /> },
+        { state: 'images only', node: <Example takesFiles pictures={SHOTS.slice(0, 1)} /> },
+        { state: 'files and images', node: <Example takesFiles pictures={SHOTS.slice(0, 1)} documents={DOCUMENTS} /> },
         {
           state: 'reading an image',
-          node: <Example takesImages pictures={[{ id: 'i3', name: 'huge.png', reading: true }]} />,
+          node: <Example takesFiles pictures={[{ id: 'i3', name: 'huge.png', reading: true }]} />,
         },
         {
           state: 'agent takes no images',
           node: (
             <Example
-              takesImages
+              takesFiles
               pictures={SHOTS}
-              imageNote="Codex doesn’t take images. Remove them to send this, or pick an agent that does."
+              fileNote="Codex doesn’t take images. Remove them to send this, or pick an agent that does."
             />
           ),
         },

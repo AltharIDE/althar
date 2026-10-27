@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, rmdirSync, rmSync } from 'node:fs'
 import { statfs } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
@@ -214,10 +214,16 @@ const keep = (checkout: string, ref: string) =>
     yield* git(checkout, 'update-ref', ref, head)
   })
 
-/** Removes a folder once nothing is left in it: the task's own, beside its repositories' worktrees. */
+/**
+ * Removes a folder once nothing is left in it: the task's own, beside its
+ * repositories' worktrees. What Althar keeps there of its own, the files the
+ * person sent its lead (`.althar/attachments`, ADR-064), goes with it.
+ */
 const eraseEmpty = (path: string) =>
   Effect.sync(() => {
     try {
+      const own = join(path, '.althar')
+      if (existsSync(own) && readdirSync(path).length === 1) rmSync(own, { recursive: true, force: true })
       if (existsSync(path) && readdirSync(path).length === 0) rmdirSync(path)
     } catch {
       // Something else is in it, or it went already: it stays.

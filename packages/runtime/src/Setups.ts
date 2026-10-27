@@ -3,10 +3,11 @@ import { basename, isAbsolute, join } from 'node:path'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { type LaunchSpec, spawnOwned } from '@althar/provider-adapters'
-import { Cause, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Semaphore } from 'effect'
+import { Cause, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
+import { makeKeyedLock } from './keyedLock'
 import { Instance } from './Instance'
 import { printedMore, uncoloured } from './leftRunning'
 import { change, fact, timestamp } from './records'
@@ -286,13 +287,8 @@ export class Setups extends Context.Service<
        * One worktree is set up at a time: a second asking waits for the first,
        * then finds it set up. What isn't set up is read under the lock.
        */
-      const locks = new Map<string, Semaphore.Semaphore>()
-      const locked = <A, E, R>(workspaceId: string, effect: Effect.Effect<A, E, R>) =>
-        Effect.suspend(() => {
-          const lock = locks.get(workspaceId) ?? Semaphore.makeUnsafe(1)
-          locks.set(workspaceId, lock)
-          return lock.withPermits(1)(effect)
-        })
+      const locks = makeKeyedLock()
+      const locked = locks.withLock
       const settle = (workspaceId: string) =>
         locked(
           workspaceId,

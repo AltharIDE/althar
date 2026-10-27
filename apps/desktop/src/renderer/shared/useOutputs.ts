@@ -15,6 +15,9 @@ import { type OutputSoFar, outputsCaughtUp, withOutput } from './handed'
  * read from what was kept, by its tool call, so it goes from here.
  */
 
+/* Nothing streamed: what a thread shows the moment another replaces it. */
+const NONE: ReadonlyMap<string, OutputSoFar> = new Map()
+
 /** A tool call that runs a command now: one the store hasn't seen end, on a thread whose turn runs. */
 const runningCommands = (items: ReadonlyArray<ThreadItem>, turnRunning: boolean): ReadonlyArray<string> =>
   turnRunning
@@ -65,9 +68,22 @@ export const useOutputs = (
     if (event._tag !== 'Output' || event.threadId !== threadId) return
     clock.current.now += 1
     clock.current.heard.set(event.itemId, clock.current.now)
+    // Only what runs is read again: what was heard of the rest goes.
+    const runs = new Set(running.split(' '))
+    for (const itemId of clock.current.heard.keys()) if (itemId !== event.itemId && !runs.has(itemId)) clock.current.heard.delete(itemId)
     setOutputs((current) => withOutput(current, event))
   })
 
-  // A command the store has seen end shows what was kept.
-  return useMemo(() => outputsCaughtUp(outputs, items), [outputs, items])
+  // Another thread's commands aren't this one's.
+  const [shownFor, setShownFor] = useState(threadId)
+  const another = shownFor !== threadId
+  if (another) {
+    setShownFor(threadId)
+    setOutputs(new Map())
+  }
+
+  // A command the store has seen end shows what was kept; what streamed of it goes, so a screen left open doesn't keep every command's output.
+  const shown = useMemo(() => outputsCaughtUp(outputs, items), [outputs, items])
+  if (!another && shown !== outputs) setOutputs(shown)
+  return another ? NONE : shown
 }

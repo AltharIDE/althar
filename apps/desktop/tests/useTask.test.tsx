@@ -189,7 +189,10 @@ describe('what the person does on a task', () => {
     vi.mocked(client.send).mockImplementation(() => new Promise<void>((resolve) => (delivered = resolve)))
     await waitFor(() => expect(result.current.snapshot).not.toBeNull())
     let sent: Promise<boolean> = Promise.resolve(false)
-    act(() => void (sent = result.current.send('Use the helper', undefined, { sent: [], pictures: [], dictated: true })))
+    act(
+      () =>
+        void (sent = result.current.send('Use the helper', undefined, { sent: [], pictures: [], files: [], attached: [], dictated: true })),
+    )
     const copy = result.current.snapshot?.items.at(-1)
     expect(copy?.kind === 'user_message' && [copy.content.text, copy.input?.dictated]).toEqual(['Use the helper', true])
     expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Use the helper', disposition: 'after_current', dictated: true })

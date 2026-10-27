@@ -16,7 +16,7 @@ import { usePlan } from './usePlan'
 export function PlanBar({ open, onOpenChange }: { readonly open: boolean; readonly onOpenChange: (open: boolean) => void }) {
   const { client } = useServices()
   const cache = useQueryClient()
-  const { agents, silent } = usePlan()
+  const { agents } = usePlan()
   useEffect(() => {
     if (!open) return
     client.getPlanUsage({ refresh: true }).then(
@@ -31,5 +31,5 @@ export function PlanBar({ open, onOpenChange }: { readonly open: boolean; readon
     if (none && open) onOpenChange(false)
   }, [none, open, onOpenChange])
   if (none) return null
-  return <PlanGauge agents={agents} silent={silent} open={open} onOpenChange={onOpenChange} />
+  return <PlanGauge agents={agents} open={open} onOpenChange={onOpenChange} />
 }

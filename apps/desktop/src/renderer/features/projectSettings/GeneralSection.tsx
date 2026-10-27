@@ -1,5 +1,6 @@
 import type { ProjectInk as Inks } from '@althar/contracts'
-import { ProjectIdentity, type ProjectInk, SettingGroup, SettingList, SettingSwitch } from '@althar/ui'
+import type { ReactNode } from 'react'
+import { LinkButton, ProjectIdentity, type ProjectInk, SettingGroup, SettingList, SettingSwitch } from '@althar/ui'
 
 import { contractInk, kitInk } from '../../shared/inks'
 import s from './ProjectSettings.module.css'
@@ -18,6 +19,9 @@ export const text = {
   conflicts: {
     title: 'Resolve merge conflicts automatically',
     line: 'When a task’s branch stops merging cleanly, its lead fixes it and runs the checks again.',
+    /** Looks at every open task now, rather than as each default branch moves. */
+    look: 'Look for conflicts now',
+    looking: 'Looking at each open task now.',
   },
   moveIssues: {
     title: 'Move issues along with their tasks',
@@ -29,11 +33,12 @@ export const text = {
   },
 }
 
-/** A switch's note: when it acts, and why it didn't hold where it didn't. */
-function SwitchNote({ line, failed }: { line: string; failed: string | null }) {
+/** A switch's note: when it acts, what it does now where it can, and why it didn't hold where it didn't. */
+function SwitchNote({ line, now, failed }: { line: string; now?: ReactNode; failed: string | null }) {
   return (
     <>
       {line}
+      {now !== undefined && <> {now}</>}
       {failed !== null && (
         <span className={s.failedLine} role="alert">
           {failed}
@@ -41,6 +46,12 @@ function SwitchNote({ line, failed }: { line: string; failed: string | null }) {
       )}
     </>
   )
+}
+
+/** Turned on, conflicts are looked for as default branches move; this looks at every open task now. */
+function LookNow({ model }: { model: ProjectSettingsModel }) {
+  if (model.looked === 'asked') return <>{text.conflicts.looking}</>
+  return <LinkButton onClick={model.lookForConflicts}>{text.conflicts.look}</LinkButton>
 }
 
 /** A switch, in the order they are shown: its rule, its words, and how it stands. */
@@ -84,7 +95,19 @@ export function GeneralSection({ model, seed }: { model: ProjectSettingsModel; s
               <SettingSwitch
                 key={one.rule}
                 title={one.words.title}
-                note={<SwitchNote line={one.words.line} failed={model.ruleFailed?.rule === one.rule ? model.ruleFailed.message : null} />}
+                note={
+                  <SwitchNote
+                    line={one.words.line}
+                    {...(one.rule === 'resolveConflicts' && one.on ? { now: <LookNow model={model} /> } : {})}
+                    failed={
+                      model.ruleFailed?.rule === one.rule
+                        ? model.ruleFailed.message
+                        : one.rule === 'resolveConflicts' && model.looked !== null && model.looked !== 'asked'
+                          ? model.looked.failed
+                          : null
+                    }
+                  />
+                }
                 checked={one.on}
                 onChange={one.set}
               />

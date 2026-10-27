@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { attachmentsIn } from '../src/attachments'
 import { bringBack, folderOf, KEPT } from '../src/bringBack'
 import { FolderCleanup, goneWords, sizeWords, waitDays } from '../src/FolderCleanup'
 import { Instance } from '../src/Instance'
@@ -112,8 +113,12 @@ describe('finished tasks’ folders', () => {
   it.live('removes a merged task’s folder once its wait is up, keeping its branch and its last commit, and says so', () =>
     Effect.gen(function* () {
       const task = yield* finished('done', 4)
+      // Files the person sent its lead go with it: in its worktree, and in the folder that holds a task's several.
+      attachmentsIn(task.worktree)
+      writeFileSync(join(attachmentsIn(dirname(task.worktree)), 'spec.pdf'), '%PDF')
       yield* (yield* FolderCleanup).sweep
       assert.isFalse(existsSync(task.worktree))
+      assert.isFalse(existsSync(dirname(task.worktree)))
       assert.strictEqual((yield* stateOf(task.workspaceId))?.state, 'cleaned')
       assert.strictEqual(git(task.root, 'rev-parse', `refs/heads/${task.branch}`), task.head)
       assert.strictEqual(git(task.root, 'rev-parse', `${KEPT}${task.workspaceId}`), task.head)

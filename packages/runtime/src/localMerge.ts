@@ -142,22 +142,23 @@ export const planMerge = (root: string, branch: string, head: string, message: s
 
 /**
  * The files that conflict merging `head` into `branch` in the repository at
- * `root`: none where it merges cleanly, has it already, or there's no such
- * branch. Whatever the working tree that has the branch holds, since nothing
- * moves, and no commit is made.
+ * `root`: none where it merges cleanly or has it already, and `null` where
+ * it can't be told, as there's no such branch or git couldn't merge them.
+ * Whatever the working tree that has the branch holds, since nothing moves,
+ * and no commit is made.
  */
 export const conflictsOf = (root: string, branch: string, head: string) =>
   Effect.gen(function* () {
     const tip = yield* commitOf(root, `refs/heads/${branch}`).pipe(Effect.orElseSucceed(() => ''))
-    if (tip === '') return []
+    if (tip === '') return null
     const merged = yield* gitOutcome(root, 'merge-tree', '--write-tree', '--name-only', '--no-messages', tip, head)
-    // 1 is git's word for a merge that conflicts; anything else, a merge it couldn't work out, says nothing of one.
-    return merged.code === 1
-      ? merged.stdout
-          .split('\n')
-          .slice(1)
-          .filter((line) => line !== '')
-      : []
+    // 0 is git's word for a clean merge, 1 for one that conflicts, or for a commit it can't find, which names no file.
+    if (merged.code === 0) return []
+    const files = merged.stdout
+      .split('\n')
+      .slice(1)
+      .filter((line) => line !== '')
+    return merged.code === 1 && files.length > 0 ? files : null
   })
 
 /** `head` merged onto `tip`: a fast-forward to it, or a merge commit made without a working tree; or the files that conflict. */
