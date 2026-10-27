@@ -136,6 +136,34 @@ export const ReadyPushResolvesConflictNarrow: Story = {
     await expect(getComputedStyle(button).outlineStyle).not.toBe('solid')
   },
 }
+/** Left to itself, on a narrow card the facts become a list; its width is measured, so the story is laid out in a browser. */
+export const ReadyFactsMeasuredNarrow: Story = {
+  render: () => (
+    <div style={{ width: 260 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word="Ready once pushed"
+        kind={TaskKind.Change}
+        at="31m"
+        title="Drop any file or folder onto the composer"
+        foot={
+          <FactLine>
+            {THE_FACTS.map((one) => (
+              <Fact key={one.words} {...('icon' in one ? { icon: one.icon } : {})} tone={one.tone}>
+                {one.words}
+              </Fact>
+            ))}
+          </FactLine>
+        }
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const line = canvasElement.querySelector('[class*="factLine"]')
+    // jsdom has no layout to measure; a browser does.
+    if (line !== null && line.scrollWidth > 0) await expect(line).toHaveAttribute('data-stacked')
+  },
+}
 /** Failed checks block, so they come before what is still running. */
 export const ReadyChecksFailedNarrow: Story = {
   ...readyFoot(

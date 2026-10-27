@@ -40,7 +40,17 @@ import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../share
 import { callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import { doingWords, doneHere, factsOf, isBlocked, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
+import {
+  doingWords,
+  doneHere,
+  factsOf,
+  isBlocked,
+  labelWords,
+  nextWords,
+  pushResolves,
+  standingOf,
+  standingText,
+} from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -98,6 +108,8 @@ export const text = {
   mergeConflict: 'Merge conflict',
   /** A pull request with a conflict or a failed check in its way: not yet ready to accept. */
   blocked: 'Not ready to accept',
+  /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
+  readyOnPush: 'Ready once pushed',
   /** A running change's checks; a ready one's say what stands (shared/standing). */
   checks: {
     passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
@@ -418,7 +430,9 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
               ? kindWords.unshipped
               : change?.state === 'open' && isBlocked(standingOf(change))
                 ? text.blocked
-                : kindWords.ready,
+                : change?.state === 'open' && pushResolves(standingOf(change))
+                  ? text.readyOnPush
+                  : kindWords.ready,
         ...(object === null ? {} : { object }),
         ...(work.handedBack != null
           ? {

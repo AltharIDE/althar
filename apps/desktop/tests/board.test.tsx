@@ -1521,6 +1521,8 @@ describe('what stands between a ready change and merging', () => {
         ready('s4', 'In conflict', { conflicts: true, target: 'main' }),
         ready('s5', 'Commits to push', { localHead: 'def456', unpushed: 3 }),
         // Commits here and a check that failed on what is pushed: the failure is read first, the push is offered first, as it runs the checks again.
+        // Commits beside a conflict: pushing them is what clears it.
+        ready('s11', 'Push clears it', { localHead: 'def456', unpushed: 5, conflicts: true, target: 'main', checks: passed }),
         ready('s6', 'Two at once', { localHead: 'def456', unpushed: 2, checks: change().checks }),
         // Commits counted before the branch's head here is known aren't said.
         ready('s7', 'Head not read yet', { unpushed: 2 }),
@@ -1553,6 +1555,8 @@ describe('what stands between a ready change and merging', () => {
     expect(said('In conflict')).toContain('Not ready to accept')
     expect(said('Two at once')).toContain('Not ready to accept')
     expect(said('Commits to push')).toContain('Ready to accept')
+    expect(said('Push clears it')).toContain('Ready once pushed')
+    expect(said('Push clears it')).toContain('The push should resolve the conflict with main')
     expect(said('Commits to push')).toMatch(/checks passed\s*Push 3 commits/)
     expect(said('Two at once')).toMatch(/test failed\s*Push 2 commits/)
     expect(said('Head not read yet')).toMatch(/All 5 checks passed\s*Accept and merge/)
