@@ -52,8 +52,8 @@
     this computer, its target couldn't be fetched), its card and task say
     why in one line, with Resolve now, which asks its lead regardless of the
     rules, a stop, or a round handed back; one handed back offers it too.
-    Where Althar couldn't look here at all, that is said whatever the host
-    says, with Look again. Each reason is logged.
+    Where Althar couldn't look here at all, with a pull request or not,
+    that is said whatever the host says, with Look again. Each reason is logged.
   - **On, a conflict is the lead's to resolve, unasked,** whether a merge
     here found it or the pull request's host said so. Althar sends the note
     the person's press sends, in the same words; for a pull request, the

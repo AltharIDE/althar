@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -324,6 +324,61 @@ describe('a branch merging here, with no pull request', () => {
       yield* (yield* Policies).set(projectId as never, { resolveConflicts: true }, (yield* Instance).personId)
       yield* (yield* Changes).resolveNow({ projectId })
       yield* titled(task?.threadId ?? '', 'The lead resolved the conflict with main, in change.txt')
+    }).pipe(Effect.provide(runtimeWith()))
+  })
+
+  it.live('says its folder isn’t on this computer once it is gone, where it said why its conflict wasn’t asked', () => {
+    const working = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
+        true,
+      )
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const taskId = task?.taskId ?? ''
+      yield* runIs(taskId, 'suspended')
+      moveMainOn(working)
+      yield* until(
+        Effect.map(unsentOf(projectId), (one) => [one]),
+        ([one]) => one === 'You stopped it, so Althar doesn’t start its lead for a conflict.',
+        Duration.seconds(20),
+      )
+      // Its folder gone, Resolve now can't merge anything: it says so, and no longer that it conflicts.
+      rmSync((yield* worktreeOf(taskId)).path, { recursive: true, force: true })
+      yield* (yield* Changes).resolveNow({ taskId }, true)
+      assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
+      assert.isNull(yield* unsentOf(projectId))
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+    }).pipe(Effect.provide(runtimeWith()))
+  })
+
+  it.live('says so where its folder was already gone as main moves, and where git can’t merge it', () => {
+    const working = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
+        true,
+      )
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const taskId = task?.taskId ?? ''
+      const { path } = yield* worktreeOf(taskId)
+      const kept = join(mkdtempSync(join(tmpdir(), 'althar-kept-')), 'folder')
+      git(working, 'worktree', 'move', path, kept)
+      moveMainOn(working)
+      assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+      // Back, but with main gone from here: git has nothing to merge it with.
+      git(working, 'worktree', 'move', kept, path)
+      git(working, 'branch', '-m', 'main', 'elsewhere')
+      yield* (yield* Changes).resolveNow({ taskId }, true)
+      yield* until(
+        Effect.map(cards(projectId), ([card]) => [card?.conflictUnchecked ?? null]),
+        ([one]) => one === 'Git couldn’t merge main with the branch here.',
+        Duration.seconds(20),
+      )
+      assert.deepStrictEqual(yield* rounds(taskId), [])
     }).pipe(Effect.provide(runtimeWith()))
   })
 })

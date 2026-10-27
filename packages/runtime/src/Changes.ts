@@ -4536,7 +4536,8 @@ export class Changes extends Context.Service<
        * (`askable`): its repositories without a pull request are merged with
        * their default branches here without anything moving, and those that
        * conflict start a round, as pressing Merge would. Where the lead isn't
-       * asked, why not is kept for its card.
+       * asked, or a branch can't be looked at here, why not is kept for its
+       * card.
        */
       const lookHere = (task: { readonly taskId: string; readonly projectId: ProjectId; readonly threadId: string }, force: boolean) =>
         locked(task.taskId)(
@@ -4544,16 +4545,27 @@ export class Changes extends Context.Service<
             const first = yield* askable(task.taskId, null, { force })
             if (first === 'off' || first === 'resolving') return
             const found: Array<Conflict> = []
+            // Why a branch couldn't be looked at here: no conflict found isn't none there.
+            let couldnt: string | null = null
             for (const repository of yield* repositoriesHere(task.taskId)) {
               if (repository.opened !== 0) continue
-              // A branch git can't read says nothing conflicts.
-              const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+              const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => null))
+              if (head === null) {
+                couldnt ??= existsSync(repository.worktree)
+                  ? 'Althar couldn’t read the branch here.'
+                  : `Its folder isn’t on this computer, so Althar can’t merge ${repository.base} into it here.`
+                continue
+              }
               const files = yield* conflictsOf(repository.root, repository.base, head)
-              if (files.length > 0) found.push(yield* conflictHere(repository, files))
+              if (files === null) couldnt ??= `Git couldn’t merge ${repository.base} with the branch here.`
+              else if (files.length > 0) found.push(yield* conflictHere(repository, files))
             }
             if (found.length === 0) {
-              // A task with a pull request too is said of as that is looked at.
-              if (!(yield* linksOf(task.taskId)).some((link) => link.listening === 1)) yield* forgetUnsent(task.taskId)
+              // A task with a pull request too is said of as that is looked at, unless a branch here couldn't be: that, where it says no conflict.
+              const listened = (yield* linksOf(task.taskId)).some((link) => link.listening === 1)
+              if (couldnt !== null && !(listened && unsent.get(task.taskId)?.checked === true))
+                yield* notSent(task.taskId, couldnt, true, false)
+              else if (couldnt === null && !listened) yield* forgetUnsent(task.taskId)
               return
             }
             const asked = yield* askable(task.taskId, null, { force, targets: found.map((one) => one.target) })

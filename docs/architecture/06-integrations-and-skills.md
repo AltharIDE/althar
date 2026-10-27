@@ -422,9 +422,9 @@ for the person, as above.
   on this computer, or its target couldn't be fetched or merged here. A
   round the lead couldn't resolve offers Resolve now too. Where Althar
   couldn't look here at all (no folder, a fetch that failed, git that
-  couldn't merge), that is said whatever the host says, as the host's
-  "merges cleanly" may be out of date, with Look again, and the card keeps
-  its next step. Each reason is logged once. Resolve now looks again, its
+  couldn't merge), for a pull request or a branch merging here, that is
+  said whatever the host says, as the host's "merges cleanly" may be out
+  of date, with Look again, and the card keeps its next step. Each reason is logged once. Resolve now looks again, its
   target fetched anew, at a task without a folder here too, and asks the
   lead whatever the rules, a stop, or a round handed back say; only a run
   still going, or a round under way, holds it.
