@@ -215,7 +215,7 @@ span.url {
 }
 /* the branch a run is a copy of, as git names it */
 .branch {
-  max-width: 28ch;
+  max-width: 40ch;
   white-space: nowrap;
   font-family: var(--mono);
   font-size: 0.94em;
