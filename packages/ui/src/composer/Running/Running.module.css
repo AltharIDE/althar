@@ -213,3 +213,14 @@ span.url {
   white-space: nowrap;
   vertical-align: bottom;
 }
+/* the branch a run is a copy of, as git names it */
+.branch {
+  max-width: 28ch;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.94em;
+}
+.branchGlyph {
+  margin-right: 3px;
+  vertical-align: -1px;
+}

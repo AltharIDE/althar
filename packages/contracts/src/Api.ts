@@ -1797,15 +1797,18 @@ export type ContextUse = typeof ContextUse.Type
 /**
  * The project as Althar runs it itself, with no agent (docs/decisions/022):
  * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
- * the default branch. It runs until the person stops it, or Althar quits.
+ * the default branch, or of a branch or pull request Althar fetched for it
+ * (ADR-062). It runs until the person stops it, or Althar quits.
  */
 export const Launch = Schema.Struct({
   ...BackgroundCommand.fields,
   taskId: Schema.NullOr(Schema.String),
   /** Which of the project's runnables it runs (ADR-044). */
   runnableId: Schema.NullOr(Schema.String),
-  /** Where it runs, in words: the task's title, or the default branch. */
+  /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
   where: Schema.String,
+  /** The branch or pull request it runs a copy of, at a glance (feature/x, PR #12 · feature/x); none for the default branch or a task's. */
+  branch: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type Launch = typeof Launch.Type
 
@@ -1831,6 +1834,31 @@ export const Runnable = Schema.Struct({
   from: Schema.Literals(['repository', 'person', 'coordinator', 'agent']),
 })
 export type Runnable = typeof Runnable.Type
+
+/** An open pull request the Run menu offers to run (ADR-062). */
+export const OfferedPullRequest = Schema.Struct({
+  number: Schema.Number,
+  /** As its host writes it: PR #12, MR !12. */
+  name: Schema.String,
+  title: Schema.String,
+  branch: Schema.String,
+  author: Schema.NullOr(Schema.String),
+  draft: Schema.Boolean,
+  /** Its branch is on a fork. */
+  fork: Schema.Boolean,
+})
+export type OfferedPullRequest = typeof OfferedPullRequest.Type
+
+/** What one of a project's repositories offers to run, as its remote has it now: its open pull requests, then its branches. */
+export const OfferedRefs = Schema.Struct({
+  repository: Schema.String,
+  pullRequests: Schema.Array(OfferedPullRequest),
+  /** By name, its default first. */
+  branches: Schema.Array(Schema.String),
+  /** Why it lists less than it might, in words; null where it lists all. */
+  note: Schema.NullOr(Schema.String),
+})
+export type OfferedRefs = typeof OfferedRefs.Type
 
 /** A script in one of a project's package.json files, as Althar would run it from its repository's root. */
 export const RepositoryScript = Schema.Struct({
@@ -3270,7 +3298,8 @@ export const Api = RpcGroup.make(
   /**
    * Runs one of the project's runnables with no agent, its default without
    * one: what the task built, in its worktree, or, with no task, a copy of the
-   * default branch. One already running there is the one returned.
+   * default branch, or of the branch or pull request named, which Althar
+   * fetches first (ADR-062). One already running there is the one returned.
    */
   command(
     'RunProject',
@@ -3280,9 +3309,16 @@ export const Api = RpcGroup.make(
       /** The thread it was asked for in, where its card goes; null for none. */
       threadId: Schema.NullOr(Schema.String),
       runnableId: Schema.optional(Schema.String),
+      /** A branch on the repository's remote, by name. */
+      branch: Schema.optional(Schema.String),
+      /** A pull request, by its number or link. */
+      pullRequest: Schema.optional(Schema.String),
+      repository: Schema.optional(Schema.String),
     },
     Launch,
   ),
+  /** What the project's repositories offer to run besides their default branch, asked of their remotes now: open pull requests, then branches. */
+  call('GetRunnableRefs', { projectId: Schema.String }, Schema.Array(OfferedRefs)),
   /**
    * Keeps something for the project to run (ADR-044): a new one, at the end
    * of the list, or, by id, a change to one. A null command is the

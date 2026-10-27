@@ -39,6 +39,7 @@ import { Folders } from './Folders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
@@ -147,6 +148,7 @@ export const handlers = Api.toLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const fetches = yield* Fetches
     const machine = yield* MachineLoad
     const permissions = yield* Permissions
     const questions = yield* Questions
@@ -1416,8 +1418,25 @@ export const handlers = Api.toLayer(
       StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
       ReadBackgroundOutput: ({ threadId, id }) => api(sessions.backgroundOutput(threadId, id)),
       ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
-      RunProject: ({ commandId, projectId, taskId, threadId, runnableId }) =>
-        once(commandId, api(launches.start({ projectId, taskId, threadId, ...(runnableId === undefined ? {} : { runnableId }) }))),
+      RunProject: ({ commandId, projectId, taskId, threadId, runnableId, branch, pullRequest, repository }) =>
+        once(
+          commandId,
+          api(
+            launches.start({
+              projectId,
+              taskId,
+              threadId,
+              ...(runnableId === undefined ? {} : { runnableId }),
+              ...(repository === undefined ? {} : { repository }),
+              ...(branch !== undefined
+                ? { ref: { kind: 'branch' as const, name: branch } }
+                : pullRequest !== undefined
+                  ? { ref: { kind: 'pull_request' as const, which: pullRequest } }
+                  : {}),
+            }),
+          ),
+        ),
+      GetRunnableRefs: ({ projectId }) => api(fetches.offered(projectId)),
       KeepRunnable: ({ commandId, projectId, id, name, command, repository }) =>
         once(
           commandId,
