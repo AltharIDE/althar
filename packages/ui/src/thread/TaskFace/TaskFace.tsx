@@ -41,6 +41,8 @@ export function TaskFace({ children, composer, panel, panelWidth, unseen, text, 
         <div className={s.scrollArea}>
           <div ref={scroll} className={s.scroll}>
             <ThreadMeasure>{children}</ThreadMeasure>
+            {/* room for what floats on the composer's edge; a child of the scroller, so growing it is followed like the thread growing */}
+            <div className={s.clear} aria-hidden="true" />
           </div>
           {!atBottom && <JumpToLatest count={unseen} onJump={toBottom} className={s.jump} text={text?.jump} />}
         </div>
