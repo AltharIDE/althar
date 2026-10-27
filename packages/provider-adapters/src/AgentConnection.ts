@@ -498,6 +498,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
      * What each tool call said about itself, by session and call. Codex asks
      * permission for an MCP tool with no title or input of its own; the call
      * it asks about said both when it began, so the request takes them from it.
+     * A call is kept until it ends, or its session does: what it said, the
+     * whole file of a write among it, is asked about only while it runs.
      */
     const calls = new Map<string, { title?: string; kind?: string; rawInput?: unknown }>()
     /**
@@ -519,6 +521,10 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     const remember = (sessionId: string, update: acp.SessionUpdate) => {
       if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return
       const key = `${sessionId}\u0000${update.toolCallId}`
+      if (update.status === 'completed' || update.status === 'failed') {
+        calls.delete(key)
+        return
+      }
       const known = calls.get(key) ?? {}
       calls.set(key, {
         ...known,
@@ -604,7 +610,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         return yield* new AgentRequestFailed({ method, ...classified })
       })
 
-    const call = <A>(method: string, run: () => Promise<A>): Effect.Effect<A, Failure> =>
+    /*
+     * `run` is given a signal that aborts when the call is cut off, as by a
+     * timeout: a request sent with it as its `cancellationSignal` asks the
+     * agent to drop it, and its answer to that lets the request go.
+     */
+    const call = <A>(method: string, run: (signal: AbortSignal) => Promise<A>): Effect.Effect<A, Failure> =>
       Effect.tryPromise({ try: run, catch: (cause) => new RawFailure({ cause }) }).pipe(
         Effect.catchTag('RawFailure', (raw) => failure(method, raw.cause)),
       )
@@ -647,8 +658,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     /** Asks the agent to stop a command a session left running; whether it did. */
     const stopBackground = (sessionId: string, id: string) =>
       Effect.map(
-        call(stopBackgroundMethod, () =>
-          connection.agent.request<StopBackgroundResponse>(stopBackgroundMethod, { sessionId, asyncTaskId: id }),
+        call(stopBackgroundMethod, (signal) =>
+          connection.agent.request<StopBackgroundResponse>(
+            stopBackgroundMethod,
+            { sessionId, asyncTaskId: id },
+            { cancellationSignal: signal },
+          ),
         ),
         (response) => response.stopped === true,
       )
@@ -695,6 +710,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               leftRunning.delete(response.sessionId)
               sessions.delete(response.sessionId)
               waiting.delete(response.sessionId)
+              said.delete(response.sessionId)
+              for (const key of calls.keys()) if (key.startsWith(`${response.sessionId}\u0000`)) calls.delete(key)
               yield* Queue.shutdown(state.inbox)
               if (info.closeSession && !connection.signal.aborted) {
                 yield* Effect.ignore(
@@ -719,8 +736,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             if (option === undefined || (option.type === 'select' && !option.values.includes(value))) {
               return yield* new OptionUnavailable({ configId, value, available: option?.values ?? [] })
             }
-            const response = yield* call('session/set_config_option', () =>
-              connection.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId, value }),
+            const response = yield* call('session/set_config_option', (signal) =>
+              connection.agent.request(
+                acp.methods.agent.session.setConfigOption,
+                { sessionId, configId, value },
+                { cancellationSignal: signal },
+              ),
             )
             const updated = normalizeOptions(response.configOptions)
             yield* Ref.set(current, updated)
@@ -754,7 +775,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         } else if (legacy !== null && legacy !== undefined) {
           const modeId = sessionOptions.mode
           if (!legacyIds.includes(modeId)) return yield* new OptionUnavailable({ configId: 'mode', value: modeId, available: legacyIds })
-          yield* call('session/set_mode', () => connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId }))
+          yield* call('session/set_mode', (signal) =>
+            connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId }, { cancellationSignal: signal }),
+          )
           yield* Ref.set(mode, modeId)
         } else {
           return yield* new OptionUnavailable({ configId: 'mode', value: sessionOptions.mode, available: [] })
@@ -834,8 +857,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               if (event.modeId === (yield* Ref.get(mode))) return []
               if (heldMode !== undefined && event.modeId !== heldMode) {
                 const restored = yield* Effect.exit(
-                  call('session/set_mode', () =>
-                    connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId: heldMode }),
+                  call('session/set_mode', (signal) =>
+                    connection.agent.request(
+                      acp.methods.agent.session.setMode,
+                      { sessionId, modeId: heldMode },
+                      { cancellationSignal: signal },
+                    ),
                   ).pipe(Effect.timeout(Duration.seconds(10))),
                 )
                 if (Exit.isSuccess(restored)) {
