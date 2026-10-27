@@ -1553,8 +1553,8 @@ describe('what stands between a ready change and merging', () => {
     expect(said('In conflict')).toContain('Not ready to accept')
     expect(said('Two at once')).toContain('Not ready to accept')
     expect(said('Commits to push')).toContain('Ready to accept')
-    expect(said('Commits to push')).toMatch(/3 commits not on the PR\s*Push 3 commits/)
-    expect(said('Two at once')).toMatch(/test failed\s*·\s*2 commits not on the PR\s*Push 2 commits/)
+    expect(said('Commits to push')).toMatch(/checks passed\s*Push 3 commits/)
+    expect(said('Two at once')).toMatch(/test failed\s*Push 2 commits/)
     expect(said('Head not read yet')).toMatch(/All 5 checks passed\s*Accept and merge/)
     // Cancelled: said in place of a pass, and nothing to do from here but open the task.
     expect(said('A check cancelled')).toContain('check 4 cancelled')
@@ -1636,9 +1636,9 @@ describe('a ready card’s next step, done from the card', () => {
     })
     withServices(<Board onOpen={vi.fn()} />, client)
     const card = await cardOf('Commits to push')
-    expect(card.getByText(/3 commits not on the PR/)).toBeTruthy()
+    expect(card.getByRole('button', { name: 'Push 3 commits to #12' })).toBeTruthy()
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
-    await waitFor(() => expect(card.queryByText(/not on the PR/)).toBeNull())
+    await waitFor(() => expect(card.queryByRole('button', { name: /^Push/ })).toBeNull())
     expect(card.getByText(/\+20/)).toBeTruthy()
     // It was pushed and nothing is left to push: what is next is to merge, at the new head.
     expect(card.queryByRole('button', { name: /^Push/ })).toBeNull()
@@ -1677,7 +1677,7 @@ describe('a ready card’s next step, done from the card', () => {
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
     expect((await card.findByRole('alert')).textContent).toContain('Push failed: GitHub says: the branch is protected')
     // The commits are still not on it, and the button now tries again.
-    expect(card.getByText(/3 commits not on the PR/)).toBeTruthy()
+    expect(card.getByRole('button', { name: 'Try pushing 3 commits to #12 again' })).toBeTruthy()
     // Another card pushes, and goes through: the first still says why it failed.
     await userEvent.click((await cardOf('More commits to push')).getByRole('button', { name: 'Push 2 commits to #12' }))
     await waitFor(() => expect(push).toHaveBeenCalledTimes(2))

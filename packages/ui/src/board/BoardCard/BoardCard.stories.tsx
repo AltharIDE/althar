@@ -117,7 +117,7 @@ const noStrayDots = async (canvasElement: HTMLElement) => {
     await expect((part.textContent ?? '').trimStart().startsWith('·')).toBe(false)
 }
 const THE_FACTS = [
-  { words: '5 commits to push, which should resolve the conflict with main', icon: 'up', tone: 'warm' },
+  { words: 'The push should resolve the conflict with main', icon: 'up', tone: 'warm' },
   { words: 'Checks running, 11 of 12 passed', tone: 'live' },
 ] as const
 /** The card that was ugly: commits to push that resolve a conflict, checks running, on a narrow card. A list, not a wrapped line. */
@@ -136,20 +136,20 @@ export const ReadyPushResolvesConflictNarrow: Story = {
     await expect(getComputedStyle(button).outlineStyle).not.toBe('solid')
   },
 }
-/** Failed checks block, so they come before what to do. */
+/** Failed checks block, so they come before what is still running. */
 export const ReadyChecksFailedNarrow: Story = {
   ...readyFoot(
     260,
     true,
     [
       { words: 'harness / verify failed', icon: 'close', tone: 'danger' },
-      { words: '2 commits not on the PR', icon: 'up', tone: 'warm' },
+      { words: 'Checks running, 3 of 4 passed', tone: 'live' },
     ],
     'Push 2 commits',
   ),
   play: async ({ canvasElement }) => {
     const items = within(canvasElement).getAllByRole('listitem')
-    await expect(items.map((item) => item.textContent)).toEqual(['harness / verify failed', '2 commits not on the PR'])
+    await expect(items.map((item) => item.textContent)).toEqual(['harness / verify failed', 'Checks running, 3 of 4 passed'])
     await noStrayDots(canvasElement)
   },
 }
@@ -168,7 +168,7 @@ export const ReadyFactsOnOneLine: Story = {
     false,
     [
       { words: 'test failed', icon: 'close', tone: 'danger' },
-      { words: '2 commits not on the PR', icon: 'up', tone: 'warm' },
+      { words: 'Checks running, 3 of 4 passed', tone: 'live' },
     ],
     'Push 2 commits',
   ),

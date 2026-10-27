@@ -45,8 +45,8 @@ describe('what stands in a change’s way', () => {
 
   it('counts commits not on the pull request only once the branch’s head here is known', () => {
     expect(standingOf(change({ localHead: null, unpushed: 3, checks: checks() })).blockers).toEqual([])
-    expect(said({ localHead: 'def456', unpushed: 1, checks: checks() })).toEqual([['1 commit not on the PR', 'warm']])
-    expect(said({ localHead: 'def456', unpushed: 4, checks: checks() })).toEqual([['4 commits not on the PR', 'warm']])
+    expect(said({ localHead: 'def456', unpushed: 1, checks: checks() })).toEqual([['All 2 checks passed', 'ok']])
+    expect(said({ localHead: 'def456', unpushed: 4, checks: checks() })).toEqual([['All 2 checks passed', 'ok']])
     expect(standingOf(change({ localHead: 'def456', unpushed: 4, checks: checks() })).next).toEqual({ kind: 'push', commits: 4 })
   })
 
@@ -87,14 +87,11 @@ describe('what stands in a change’s way', () => {
 
   it('reads what blocks first, then what to do, and offers the push first, as it runs the checks again', () => {
     const many = change({ localHead: 'def456', unpushed: 2, conflicts: true, target: 'main' })
-    // Commits beside a conflict are the merge that clears it, said as one thing.
-    expect(factsOf(many).map((fact) => fact.words)).toEqual([
-      'test failed',
-      '2 commits to push, which should resolve the conflict with main',
-    ])
+    // The commits are the button's to say; beside a conflict, only that pushing clears it is.
+    expect(factsOf(many).map((fact) => fact.words)).toEqual(['The push should resolve the conflict with main', 'test failed'])
     expect(standingOf(many).next).toEqual({ kind: 'push', commits: 2 })
     const running = change({ localHead: 'def456', unpushed: 3, checks: checks({ outcome: 'running', passed: 1, running: 1, total: 3 }) })
-    expect(factsOf(running).map((fact) => fact.words)).toEqual(['3 commits not on the PR', 'Checks running, 1 of 3 passed'])
+    expect(factsOf(running).map((fact) => fact.words)).toEqual(['Checks running, 1 of 3 passed'])
   })
 
   it('is blocked by a conflict or failed checks, unless pushing is what clears the conflict', () => {

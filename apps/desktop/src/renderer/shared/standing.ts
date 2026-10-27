@@ -42,8 +42,7 @@ export const standingText = {
   parted: (short: string) => `Branch and ${short} have parted`,
   unpushed: (n: number, short: string) => `${standingText.commits(n)} not on the ${short}`,
   /** Commits to push that bring the branch up to date with the one the pull request conflicts with: pushing them clears the conflict. */
-  pushResolves: (n: number, target: string | null) =>
-    `${standingText.commits(n)} to push, which should resolve the conflict${target === null ? '' : ` with ${target}`}`,
+  pushResolves: (target: string | null) => `The push should resolve the conflict${target === null ? '' : ` with ${target}`}`,
   conflict: (target: string | null) => (target === null ? 'Has a merge conflict' : `Conflicts with ${target}`),
   failed: (failing: ReadonlyArray<string>, failed: number) =>
     failing.length === 1 ? `${failing[0]} failed` : failed === 1 ? '1 check failed' : `${failed} checks failed`,
@@ -166,27 +165,21 @@ const readOrder: Record<Blocker['kind'], number> = { parted: 0, conflict: 0, fai
 
 /**
  * What stands, as facts: what blocks first (a conflict, failed checks), then
- * what to do (commits to push), then checks running, or, where nothing is in
- * the way, how its checks went. Commits that clear a conflict are said
- * together with it, as one thing.
+ * checks running, or, where nothing is in the way, how its checks went.
+ * Commits to push aren't a fact of their own, as the button that pushes them
+ * says their count; only that pushing clears a conflict is said, in place of
+ * it. Where they were all that was in the way, how the checks went stands.
  */
 export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(change)): ReadonlyArray<Said> => {
-  if (standing.blockers.length === 0) return [clearOf(change)]
   const together = pushResolves(standing)
-  return standing.blockers
-    .filter((one) => !(together && one.kind === 'conflict'))
+  const facts = standing.blockers
+    .filter((one) => one.kind !== 'unpushed')
     .sort((a, b) => readOrder[a.kind] - readOrder[b.kind])
-    .map((one) => {
-      if (together && one.kind === 'unpushed') {
-        const conflict = standing.blockers.find((other) => other.kind === 'conflict')
-        return {
-          words: standingText.pushResolves(one.commits, conflict?.kind === 'conflict' ? conflict.target : null),
-          icon: 'up',
-          tone: 'warm',
-        }
-      }
+    .map((one): Said => {
+      if (together && one.kind === 'conflict') return { words: standingText.pushResolves(one.target), icon: 'up', tone: 'warm' }
       return saidOf(one, change)
     })
+  return facts.length === 0 ? [clearOf(change)] : facts
 }
 
 /** Whether the next thing is the person's own, done from where it is shown: pushing and merging. The others are the lead's, and open the task. */
