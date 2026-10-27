@@ -168,7 +168,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Check for Updates… | `checkNow` | In the app menu: looks now, and says in a dialog what it found. |
 | What's new | a release's notes | In the quick settings' foot and Settings' About Althar, beside the version: that version's GitHub Release, in the browser. |
 | Light or dark: Light, Dark, Match the system | the `appearance` preference, `light`, `dark` or `system` (ADR-055) | In Settings › Appearance: Althar light, dark, or turning with the system, said in each system's words: Match the Mac, Match the PC (Windows), Match the computer (Linux). It starts light; Match the system is for whoever picks it. |
-| CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
+| CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses, and Althar itself. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
 
 ## Words the interface doesn't use
 

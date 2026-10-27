@@ -1,6 +1,6 @@
 # ADR-029: How hard the computer works is read by the runtime, only while a window shows it
 
-- **Status:** Accepted
+- **Status:** Accepted; how Althar's part is counted, superseded by [ADR-063](063-althar-s-part-is-all-its-work-started-and-itself.md)
 - **Date:** 2026-10-11
 - **Owner:** Repository maintainers
 - **Context:** Agents run test suites, builds and dev servers on the person's
