@@ -1,10 +1,9 @@
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { heldSteps, LoadLevel, levelOf, percent } from '../src/chrome/LoadMeter/load'
+import { heldSteps, percent } from '../src/chrome/LoadMeter/load'
 import { LoadMeter } from '../src/chrome/LoadMeter/LoadMeter'
 import { LOAD_IDLE } from '../src/fixtures/load'
-import { MemoryPressure } from '../src/foundations/vocabulary'
 
 /* How many of the CPU meter's steps are lit, Althar's part and the rest. */
 const lit = (container: HTMLElement) => {
@@ -40,11 +39,7 @@ describe('the load meter', () => {
     expect(lit(meter.container)).toBe(0)
   })
 
-  it('says how loaded in a word: full when the CPU is, or memory is short', () => {
-    expect(levelOf({ cpu: 0.2, pressure: null })).toBe(LoadLevel.Quiet)
-    expect(levelOf({ cpu: 0.5, pressure: MemoryPressure.Normal })).toBe(LoadLevel.Busy)
-    expect(levelOf({ cpu: 0.92, pressure: MemoryPressure.Normal })).toBe(LoadLevel.Full)
-    expect(levelOf({ cpu: 0.2, pressure: MemoryPressure.Warning })).toBe(LoadLevel.Full)
+  it('rounds a share to a whole percent, within 0 to 100', () => {
     expect([percent(-0.1), percent(0.555), percent(2)]).toEqual([0, 56, 100])
   })
 })

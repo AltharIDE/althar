@@ -25,13 +25,13 @@ type Story = StoryObj<typeof meta>
 
 /** Four pieces of work, most CPU first, and what the Mac's other apps use. */
 export const Busy: Story = {}
-/** Every core busy and memory tight: the line under the figures says what macOS does about it. */
+/** Every core busy and memory tight. */
 export const NearMax: Story = { args: { load: LOAD_NEAR_MAX } }
 export const MemoryShort: Story = { args: { load: LOAD_MEMORY_SHORT } }
 export const NothingRunning: Story = { args: { load: LOAD_NOTHING_RUNNING } }
-/** Just opened: one reading, and no line yet. */
+/** Just opened: one reading. */
 export const FirstReading: Story = { args: { load: LOAD_FIRST_READING } }
-/** Where Althar's part can't be known, as on Windows: the Mac's figures alone, and nothing said of memory pressure. */
+/** Where Althar's part can't be known, as on Windows: the Mac's figures alone. */
 export const WorkUnknown: Story = { args: { load: LOAD_UNKNOWN_WORK } }
 /** Without ways in or out: the rows say, and there is no switch. */
 export const WithoutWays: Story = { args: { onOpen: undefined, onHide: undefined } }
@@ -43,7 +43,6 @@ export const ReadsItsNumbers: Story = {
     await expect(peek.getByText('63%')).toBeInTheDocument()
     await expect(peek.getByText('19.5 GB of 32 GB')).toBeInTheDocument()
     await expect(peek.getByText('Althar’s work 51%')).toBeInTheDocument()
-    await expect(peek.getByText('Memory pressure normal')).toBeInTheDocument()
     await expect(peek.getByRole('heading', { name: 'Running' })).toBeInTheDocument()
     await expect(peek.getByRole('button', { name: /Coordinator.*Meridian · Claude Code · 4 processes.*5%.*0\.8 GB/ })).toBeInTheDocument()
   },
