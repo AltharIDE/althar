@@ -457,6 +457,10 @@ export const toolsOf = (access: ToolAccess) =>
     })
   })
 
+/** The tools an agent with this access is offered, each with the description it reads. */
+export const toolDescriptions = (access: ToolAccess) =>
+  Effect.map(toolsOf(access), (tools): Record<string, string> => Object.fromEntries(tools.map((tool) => [tool.name, tool.description])))
+
 /** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
   Effect.map(callToolAtOnce(access, name, [args]), (said) => said[0] ?? '')
