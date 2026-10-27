@@ -53,6 +53,19 @@ describe('Segmented indicator', () => {
     vi.unstubAllGlobals()
   })
 
+  it('follows the chosen option when the options are reordered under the same value', () => {
+    layout()
+    const swap = [OPTIONS[1], OPTIONS[0], OPTIONS[2]]
+    const { container, rerender } = render(<Segmented label="Pick" options={OPTIONS} value="a" onChange={() => {}} />)
+    expect(indicator(container)).toHaveStyle({ transform: 'translateX(2px)' })
+    const lefts: Record<string, number> = { Two: 2, One: 80, Three: 140 }
+    vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (this: HTMLElement) {
+      return lefts[this.textContent ?? ''] ?? 0
+    })
+    rerender(<Segmented label="Pick" options={swap} value="a" onChange={() => {}} />)
+    expect(indicator(container)).toHaveStyle({ transform: 'translateX(80px)' })
+  })
+
   it('has no indicator without a value', () => {
     layout()
     const { container } = render(<Example initial={null} />)

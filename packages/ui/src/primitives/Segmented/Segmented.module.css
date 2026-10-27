@@ -48,8 +48,8 @@
     width var(--slide) var(--ease-slide);
 }
 @media (prefers-reduced-motion: reduce) {
-  .sliding .indicator,
-  .sliding .option {
+  .group .indicator,
+  .group .option {
     transition: none;
   }
 }

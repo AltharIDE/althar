@@ -102,8 +102,10 @@ function useIndicator(value: string | null) {
     const animate = chosen.current && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     chosen.current = false
     setSliding(animate)
-    measure()
-  }, [value, measure])
+  }, [value])
+
+  /* every render: options reordered or replaced move the chosen one without resizing anything watched */
+  useLayoutEffect(measure)
 
   useLayoutEffect(() => {
     const group = ref.current
@@ -112,7 +114,7 @@ function useIndicator(value: string | null) {
     watch.observe(group)
     for (const o of group.querySelectorAll('[role="radio"]')) watch.observe(o)
     return () => watch.disconnect()
-  }, [measure])
+  })
 
   return { ref, spot, sliding, chose: () => (chosen.current = true), landed: () => setSliding(false) }
 }
