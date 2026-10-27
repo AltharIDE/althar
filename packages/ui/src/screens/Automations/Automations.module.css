@@ -83,7 +83,7 @@
   height: 30px;
   border-radius: 50%;
   color: var(--t-2);
-  background: var(--n-3);
+  box-shadow: inset 0 0 0 1px var(--line-3);
 }
 
 .bandWords {

@@ -189,7 +189,7 @@ function Paused({ onResume, t }: { onResume?: () => void; t: AutomationsText }) 
         <span className={s.bandNote}>{t.allPausedNote}</span>
       </div>
       {onResume !== undefined && (
-        <Button variant="quiet" icon="play" onClick={onResume}>
+        <Button icon="play" onClick={onResume}>
           {t.resumeAll}
         </Button>
       )}
