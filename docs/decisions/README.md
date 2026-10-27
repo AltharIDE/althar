@@ -69,3 +69,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [059](059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md) | A tracker's workspaces are connected side by side, and a project may be bound to one |
 | [060](060-a-lost-connection-is-waited-out-and-a-failing-service-tried-again.md) | A lost connection is waited out, and a failing service tried again, as a usage limit is held |
 | [061](061-automations-start-ordinary-tasks-on-a-schedule.md) | Automations start ordinary tasks on a schedule: a kept request, and an occurrence for each time it was due, on this computer while Althar runs |
+| [063](063-althar-s-part-is-all-its-work-started-and-itself.md) | Althar's part of the load is everything its work started, however it runs, and Althar itself |
