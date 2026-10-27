@@ -34,6 +34,10 @@ export interface WorkActions {
   readonly pushing: ReadonlySet<string>
   /** The tasks being marked done or kept for later. */
   readonly settling: ReadonlySet<string>
+  /** The tasks whose conflict the lead is being asked to resolve, by the person's Resolve now. */
+  readonly resolving: ReadonlySet<string>
+  /** Resolve now: a task's conflict asked of its lead, whatever kept it from being asked; whether it went through. */
+  readonly resolveNow: (taskId: string) => Promise<boolean>
   /** Settles a finished task that isn't a change as Done; whether it went through. */
   readonly markDone: (taskId: string) => Promise<boolean>
   /** Takes a finished task that isn't a change out of Needs you, kept for later; whether it went through. */
@@ -65,6 +69,7 @@ export const useWorkActions = (): WorkActions => {
   const [opening, setOpening] = useState<ReadonlySet<string>>(new Set())
   const [pushing, setPushing] = useState<ReadonlySet<string>>(new Set())
   const [settling, setSettling] = useState<ReadonlySet<string>>(new Set())
+  const [resolving, setResolving] = useState<ReadonlySet<string>>(new Set())
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
   /** Runs an action, marking the task busy with it meanwhile (each task on its own, so cards act side by side); whether it went through. */
@@ -107,6 +112,8 @@ export const useWorkActions = (): WorkActions => {
     opening,
     pushing,
     settling,
+    resolving,
+    resolveNow: useCallback((taskId) => busy(setResolving, taskId, () => client.resolveConflictsNow(taskId)), [busy, client]),
     markDone: useCallback((taskId) => busy(setSettling, taskId, () => client.markTaskDone(taskId)), [busy, client]),
     keep: useCallback((taskId) => busy(setSettling, taskId, () => client.keepTaskForLater(taskId)), [busy, client]),
     mergeHere: useCallback(

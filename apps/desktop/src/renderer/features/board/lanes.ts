@@ -3,7 +3,7 @@ import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
 import { readyOf, standingCalls } from '../../shared/calls'
 
 /*
- * Which lane of the board each task and call goes in (ADR-063). Up next:
+ * Which lane of the board each task and call goes in (ADR-065). Up next:
  * what goes on by itself with no agent at work on it now, in the order it
  * will. First a task under way whose next turn waits for a free agent, which
  * continues; then a task started that waits for one before any agent has

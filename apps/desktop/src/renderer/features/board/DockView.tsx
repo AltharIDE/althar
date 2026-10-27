@@ -18,7 +18,7 @@ import { StuckCall } from '../task/StuckCall'
 import { text as boardText, type DockTarget, trackOf } from './BoardView'
 import s from './Board.module.css'
 import { startsWhenFree, waitsUpNext } from './lanes'
-import type { BoardModel } from './useBoard'
+import { type BoardModel, headVersion } from './useBoard'
 
 /*
  * The dock beside the board: what you opened from it, to answer or accept
@@ -60,12 +60,12 @@ const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
 }
 
 /**
- * A task's head as the board stood (`version`): its files, for accepting.
+ * A task's head as the board stood (`headVersion`): its files, for accepting.
  * Read ahead with the board (`useBoard`), so the dock opens with it; until a
  * newer one is read, the last one shows, or the thread as the window last
  * read it.
  */
-export const useHead = (threadId: string | null, version: number) => {
+export const useHead = (threadId: string | null, version: string) => {
   const { client, cache } = useServices()
   const read = useQuery({
     ...reads(client).head(threadId ?? '', version),
@@ -110,7 +110,10 @@ export function DockView({
   const board = model.board
   const call = target.kind === 'call' ? board?.calls.find((candidate) => candidate.id === target.id) : undefined
   const task = target.kind === 'task' ? board?.tasks.find((candidate) => candidate.taskId === target.id) : undefined
-  const head = useHead(task?.phase === 'ready' && task.change?.state === 'open' ? task.threadId : null, board?.cursor ?? 0)
+  const head = useHead(
+    task?.phase === 'ready' && task.change?.state === 'open' ? task.threadId : null,
+    board === null || task === undefined ? '' : headVersion(board, task),
+  )
   useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''

@@ -1,4 +1,5 @@
 export * from './Api'
+export * from './files'
 export * from './automations'
 export * from './schedules'
 export * from './inks'

@@ -529,7 +529,7 @@ describe('Agents at once', () => {
       yield* tell(first.threadId, 'The checks failed.')
       yield* queuedOn(projectId, first.taskId)
       assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
-      // Its lead has worked on it: it continues up next, first, ahead of any line, and the person can't move it (ADR-063).
+      // Its lead has worked on it: it continues up next, first, ahead of any line, and the person can't move it (ADR-065).
       assert.isUndefined((yield* cardOf(projectId, first.taskId))?.inLine)
       assert.isTrue((yield* cardOf(projectId, first.taskId))?.continues)
       assert.strictEqual((yield* cardOf(projectId, first.taskId))?.place, 1)

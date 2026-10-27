@@ -50,7 +50,7 @@ import { Sessions } from './Sessions'
  * agent has worked on its task (a plan's first step, a review's or a quick
  * task's lead's first turn), which is its project's line. Everything that
  * waits for a place with none of its task's agents at work is up next on its
- * board (ADR-063): what is under way first, then the line. Within each, what waited longest goes first; in the line, unless
+ * board (ADR-065): what is under way first, then the line. Within each, what waited longest goes first; in the line, unless
  * the person put it in an order of their own (`move`), kept on each task
  * (`line_at`), so a restart keeps it and a task that joins later goes to its
  * end. A task never loses its place between its own steps: a step after
@@ -170,7 +170,7 @@ interface Ranked {
 
 /**
  * A project's work that waits for a place, as its board's Up next shows it
- * (ADR-063): first its tasks already under way whose next work waits, none of
+ * (ADR-065): first its tasks already under way whose next work waits, none of
  * their agents at work, in the order they get one; then its line, the tasks
  * no agent has worked on yet, in the order they start, and whether that is
  * the person's order rather than the oldest first.

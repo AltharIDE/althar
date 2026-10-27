@@ -48,6 +48,8 @@ export const BOARD = new Set([
   'attention_request',
   'external_link',
   'workspace',
+  // A conflict round started, ended or handed back: its card's word and why.
+  'conflict_resolution',
 ])
 
 /** What changes the home: what changes a board, the projects themselves, and a permission the rules answered. */

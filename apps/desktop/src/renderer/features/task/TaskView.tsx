@@ -58,7 +58,7 @@ import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { roundsOf } from '../../shared/rounds'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
-import { type Outgoing, outgoingOf, takesImages, useImages } from '../../shared/useImages'
+import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
@@ -121,6 +121,12 @@ export const text = {
   handsOver: (agent: string) => `hands the task to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
+  /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
+  conflictUnsent: (why: string) => `It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`,
+  resolveNow: 'Resolve now',
+  /** Althar couldn't look for a conflict here, whatever its host says, and why; the button looks again, fetching anew. */
+  conflictUnchecked: (why: string) => `Althar couldn’t look for a conflict with its default branch. ${why}`,
+  lookAgain: 'Look again',
   keep: (from: string) => `Keep ${from}`,
   /** What the lead is asked when merging its branch here conflicts: in each repository, the branch it merges into and where. */
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
@@ -329,8 +335,8 @@ export function TaskView({
             take: text.carriedTake,
           },
   })
-  // Images to send with what the person says, and which agents take them.
-  const images = useImages(kept)
+  // Images and files to send with what the person says, and which agents take images.
+  const images = useAttachments(kept, useServices().host)
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
@@ -518,6 +524,7 @@ export function TaskView({
             // A review's thread opens with the pull request it reviews, under what the person asked.
             links: snapshot.task.review == null ? [] : [reviewedUnfurl(snapshot.task.review)],
             pictures: [],
+            files: [],
           },
         ]),
     // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).
@@ -604,12 +611,12 @@ export function TaskView({
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
     const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
-    // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
-    if (said === undefined || !images.fits(said.pictures)) return
+    // One whose images or files wouldn't fit beside those waiting stays in the queue, and the composer says why.
+    if (said === undefined || !images.fits(said)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(kept, true)
-      images.restore(said.pictures)
+      images.restore(said)
     }
   }
 
@@ -621,7 +628,7 @@ export function TaskView({
     // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
     setDraft((current) => withQueued(current, said.text))
     if (said.dictated === true) setDraftDictated(kept, true)
-    images.restore(said.pictures)
+    images.restore(said)
   }
 
   const issue = snapshot.task.issue
@@ -731,6 +738,16 @@ export function TaskView({
     </>
   )
 
+  // A conflict that is the person's (its lead couldn't resolve it, or wasn't asked), or one Althar couldn't look for: why, and what asks again.
+  const conflict =
+    snapshot.task.handedBack != null
+      ? { words: snapshot.task.handedBack, act: text.resolveNow }
+      : snapshot.task.conflictUnsent != null
+        ? { words: text.conflictUnsent(snapshot.task.conflictUnsent), act: text.resolveNow }
+        : snapshot.task.conflictUnchecked != null
+          ? { words: text.conflictUnchecked(snapshot.task.conflictUnchecked), act: text.lookAgain }
+          : null
+
   const line: ReactNode =
     waiting !== null ? (
       <>
@@ -755,11 +772,16 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || line !== null ? (
+          model.error !== null || conflict !== null || line !== null ? (
             <>
               {model.error !== null && (
                 <div className={s.failure} role="alert">
                   {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                </div>
+              )}
+              {conflict !== null && (
+                <div>
+                  {conflict.words} <LinkButton onClick={() => void model.resolveConflictsNow()}>{conflict.act}</LinkButton>
                 </div>
               )}
               {line !== null && <div>{line}</div>}
@@ -776,7 +798,7 @@ export function TaskView({
               const holder = snapshot.task.queued?.holders?.find((one) => one.taskId === taskId)
               if (holder?.threadId != null) for (const command of holder.running) void model.stopHolding(holder.threadId, command.id)
             }}
-            // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-063).
+            // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-065).
             {...(snapshot.task.front === true ? { onFront: () => void model.moveToFront() } : {})}
             processes={leftRunning}
             onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}

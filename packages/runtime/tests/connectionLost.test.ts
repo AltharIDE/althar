@@ -131,7 +131,7 @@ describe('a step whose connection is lost', () => {
         const held = yield* implementOf(task.taskId, heldForConnection)
         assert.include(JSON.parse(held.output ?? '{}'), { heldFor: 'claude-code', offline: true, tries: 0, service: 'Anthropic' })
         yield* connectivity.set(false)
-        // Under way with no agent at work, it continues by itself: up next, not running (ADR-063).
+        // Under way with no agent at work, it continues by itself: up next, not running (ADR-065).
         const [card] = yield* until(
           Effect.map(cardOf(task.projectId, task.taskId), (one) => (one === undefined ? [] : [one])),
           ([one]) => one?.continues === true,

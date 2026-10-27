@@ -27,7 +27,7 @@ import { items, repository, runtime, until } from './support'
  * busy.test.ts and placesKept.test.ts don't go: a turn Althar's word to an
  * idle lead waits for, as the person switches that lead to another agent,
  * two such that wait together, and one that waited as Althar stopped; a task
- * under way whose turn waits, up next ahead of new work (ADR-063); the
+ * under way whose turn waits, up next ahead of new work (ADR-065); the
  * line where two tasks waited since the same moment; an answer kept for a place whose lead has gone since; and a review that
  * waits for a place of its own, skipped.
  */

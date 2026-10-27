@@ -17,10 +17,23 @@ import { type WorkActions, useWorkActions } from './useWorkActions'
  * lead with a note.
  */
 
+/**
+ * Which of a task's heads the board stands at: its card and the calls it
+ * waits on, as the board read them. A change elsewhere on the board leaves
+ * it, so its head isn't read again; one to the task moves it.
+ */
+export const headVersion = (board: BoardSnapshot, task: BoardTask) => {
+  const said = JSON.stringify([task, board.calls.filter((call) => call.taskId === task.taskId)])
+  let hash = 0x811c9dc5
+  for (let i = 0; i < said.length; i++) hash = Math.imul(hash ^ said.charCodeAt(i), 0x01000193)
+  return (hash >>> 0).toString(36)
+}
+
 /** Reads ahead the head of every ready task with a pull request, as the board stands, so its dock opens with its files. */
 export const readHeadsAhead = (client: Client, cache: QueryClient, board: BoardSnapshot | null) => {
   for (const task of board?.tasks ?? [])
-    if (task.phase === 'ready' && task.change !== null) void cache.prefetchQuery(reads(client).head(task.threadId, board?.cursor ?? 0))
+    if (board !== null && task.phase === 'ready' && task.change !== null)
+      void cache.prefetchQuery(reads(client).head(task.threadId, headVersion(board, task)))
 }
 
 export interface BoardModel extends WorkActions {

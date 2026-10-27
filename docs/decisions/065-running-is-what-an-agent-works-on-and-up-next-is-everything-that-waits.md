@@ -1,4 +1,4 @@
-# ADR-063: Running is what an agent works on now, and Up next is everything that waits, in the order it goes on
+# ADR-065: Running is what an agent works on now, and Up next is everything that waits, in the order it goes on
 
 - **Status:** Accepted
 - **Date:** 2026-10-27

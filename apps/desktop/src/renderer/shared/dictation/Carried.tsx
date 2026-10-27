@@ -138,7 +138,7 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
         changeSession(thread, { failed: null })
         void writeIn(thread, failed, null)
       }}
-      {...(target !== null && draft.images.length === 0
+      {...(target !== null && draft.images.length === 0 && draft.files.length === 0
         ? { send: { label: to.send, busy: sending !== null, onSend: () => send(target) } }
         : {})}
       {...(there !== null && here !== null && sending === null ? { move: { label: there.take, onMove: move } } : {})}

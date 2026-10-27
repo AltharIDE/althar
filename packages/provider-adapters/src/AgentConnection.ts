@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url'
+
 import * as acp from '@agentclientprotocol/sdk'
 import type { ToolKind } from '@althar/domain'
 import { Cause, Data, DateTime, Deferred, Duration, Effect, Exit, Option, PubSub, Queue, Ref, Scope, Stream } from 'effect'
@@ -150,6 +152,8 @@ export interface AgentInfo {
   readonly authMethods: ReadonlyArray<string>
   /** It takes images in a prompt (ACP's `promptCapabilities.image`); without it, a prompt is text only. */
   readonly images: boolean
+  /** It takes a file's words in a prompt (ACP's `promptCapabilities.embeddedContext`); without it, a file goes as a link alone. */
+  readonly embeddedContext: boolean
 }
 
 /** An image sent in a prompt, after its text: its bytes in base64, and what they are. */
@@ -157,6 +161,63 @@ export interface PromptImage {
   readonly data: string
   readonly mimeType: string
 }
+
+/**
+ * A file or folder sent in a prompt, after its text, by its path on this
+ * computer: the agent opens it with its own tools. A text file's words, where
+ * the caller read them, go in the prompt too, to an agent that takes them.
+ */
+export interface PromptFile {
+  readonly path: string
+  readonly name: string
+  readonly mimeType: string | null
+  readonly bytes: number
+  readonly folder: boolean
+  /** Its words, for a small text file. */
+  readonly text?: string
+}
+
+/** What goes after a prompt's text, in order. */
+export type PromptPart = PromptImage | PromptFile
+
+/** A folder's media type, as a link to it says. */
+const FOLDER_TYPE = 'inode/directory'
+
+/**
+ * A prompt's blocks: its text, then what goes with it, in order. An image
+ * goes only to an agent that takes images (ACP's baseline is text), and the
+ * caller says what became of it otherwise. A file or folder goes to every
+ * agent as a `resource_link` to its `file://` address, which ACP has every
+ * agent take, for it to open: Claude Code and Codex both show it to the model
+ * as `[@name](file:///…)`. A small text file goes as a `resource` with its
+ * words instead, to an agent that takes them: Claude Code puts the words at
+ * the end of the message, and Codex under the link, each as a `<context>`
+ * with the address. Never a file's bytes as a `blob`: Claude Code drops one,
+ * and Codex pastes it in as base64.
+ */
+export const promptBlocks = (
+  text: string,
+  parts: ReadonlyArray<PromptPart>,
+  takes: Pick<AgentInfo, 'images' | 'embeddedContext'>,
+): Array<acp.ContentBlock> => [
+  { type: 'text', text },
+  ...parts.flatMap((part): ReadonlyArray<acp.ContentBlock> => {
+    if (!('path' in part)) return takes.images ? [{ type: 'image', data: part.data, mimeType: part.mimeType }] : []
+    const uri = pathToFileURL(part.path).href
+    const mimeType = part.folder ? FOLDER_TYPE : (part.mimeType ?? undefined)
+    if (part.text !== undefined && !part.folder && takes.embeddedContext)
+      return [{ type: 'resource', resource: { uri, text: part.text, ...(mimeType === undefined ? {} : { mimeType }) } }]
+    return [
+      {
+        type: 'resource_link',
+        uri,
+        name: part.name,
+        ...(mimeType === undefined ? {} : { mimeType }),
+        ...(part.folder ? {} : { size: part.bytes }),
+      },
+    ]
+  }),
+]
 
 /** An MCP server a session may use. Althar gives every session its own tools this way. */
 export type McpServer =
@@ -206,15 +267,15 @@ export interface AgentSession {
    * Sends a prompt and streams the turn, ending with `TurnEnded`. One turn
    * runs at a time: a prompt while one is running fails with
    * `TurnInProgress`. A turn reads to its own end even if the stream is
-   * stopped early, so nothing it says reaches a later turn. Images go after
-   * the text, in their order, only to an agent that takes them
-   * (`AgentInfo.images`): the caller says what became of any it can't.
-   * `started` runs once the prompt is sent and the turn can be interrupted,
-   * so what it sets off may stop the turn at once.
+   * stopped early, so nothing it says reaches a later turn. Images, files
+   * and folders go after the text, in their order (`promptBlocks`); an image
+   * only to an agent that takes them (`AgentInfo.images`): the caller says
+   * what became of any it can't. `started` runs once the prompt is sent and
+   * the turn can be interrupted, so what it sets off may stop the turn at once.
    */
   prompt(
     text: string,
-    images?: ReadonlyArray<PromptImage>,
+    parts?: ReadonlyArray<PromptPart>,
     started?: Effect.Effect<void>,
   ): Stream.Stream<SessionEvent, Failure | TurnInProgress>
   /** Updates that arrive between turns, such as the agent changing its own mode. */
@@ -644,6 +705,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       mcp: { http: capabilities.mcpCapabilities?.http === true, sse: capabilities.mcpCapabilities?.sse === true },
       authMethods: (init.authMethods ?? []).map((method) => method.id),
       images: capabilities.promptCapabilities?.image === true,
+      embeddedContext: capabilities.promptCapabilities?.embeddedContext === true,
     }
 
     /** Asks the agent to stop a command a session left running; whether it did. */
@@ -884,15 +946,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           })
 
         /** Sends a prompt; how it ends arrives in the inbox, after every update it produced. */
-        const send = (text: string, images: ReadonlyArray<PromptImage> = []) =>
+        const send = (text: string, parts: ReadonlyArray<PromptPart> = []) =>
           Effect.sync(() => {
-            const prompt: Array<acp.ContentBlock> = [
-              { type: 'text', text },
-              // An agent that doesn't say it takes images is never sent one: ACP's baseline is text.
-              ...(info.images
-                ? images.map((image): acp.ContentBlock => ({ type: 'image', data: image.data, mimeType: image.mimeType }))
-                : []),
-            ]
+            const prompt = promptBlocks(text, parts, info)
             connection.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt }).then(
               (response) => receive(sessionId, { _tag: 'Stopped', response }),
               (cause: unknown) => receive(sessionId, { _tag: 'PromptFailed', cause }),
@@ -960,7 +1016,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
 
         const prompt = (
           text: string,
-          images?: ReadonlyArray<PromptImage>,
+          parts?: ReadonlyArray<PromptPart>,
           started: Effect.Effect<void> = Effect.void,
         ): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
           Stream.unwrap(
@@ -985,7 +1041,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               if (!idle) return yield* new TurnInProgress({ sessionId })
               // A new turn: what it says before a question is of this turn only.
               said.delete(sessionId)
-              yield* send(text, images)
+              yield* send(text, parts)
               yield* started
               return Stream.fromQueue(turn.queue)
             }),

@@ -4,6 +4,7 @@ import { isAbsolute, join, sep } from 'node:path'
 
 import {
   AllowedBy,
+  AttachedFile,
   AttentionRequest,
   AutomationCard,
   type BoardSnapshot,
@@ -40,10 +41,10 @@ import {
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
-import { Context, Effect, Layer, Option, Schema } from 'effect'
+import { Context, Deferred, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { Busy } from './Busy'
+import { Busy, type Line } from './Busy'
 import { PlanParameters, planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
@@ -383,6 +384,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
+const decodeAttached = Schema.decodeUnknownOption(Schema.Array(AttachedFile))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
 const decodeIssueChanges = Schema.decodeUnknownOption(IssueChangesCard)
 const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
@@ -410,6 +412,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           text: text(content, 'text'),
           links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
           pictures: picturesOf(field(content, 'pictures')),
+          files: Option.getOrElse(decodeAttached(field(content, 'files') ?? []), () => []),
         },
         input:
           row.inputState === null
@@ -670,6 +673,11 @@ export interface ThreadChange {
 
 type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches | Busy
 
+/** The lines of what waits one read has read, by project: a board of queued cards reads its line once, not once a card. */
+const LinesRead = Context.Reference<Map<string, Deferred.Deferred<Line>> | null>('@althar/runtime/Queries/LinesRead', {
+  defaultValue: () => null,
+})
+
 export class Queries extends Context.Service<
   Queries,
   {
@@ -728,7 +736,12 @@ export class Queries extends Context.Service<
       const instance = yield* Instance
       const config = yield* RuntimeConfig
       const launches = yield* Launches
-      const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+      // Each read reads a project's line once, however many of its cards wait in it.
+      const run = <A, E>(effect: Effect.Effect<A, E, Store>) =>
+        Effect.provideContext(
+          Effect.suspend(() => Effect.provideService(effect, LinesRead, new Map())),
+          context,
+        )
       const live = LIVE.map((state) => `'${state}'`).join(', ')
 
       const cursor = Effect.gen(function* () {
@@ -1639,8 +1652,21 @@ export class Queries extends Context.Service<
           }
         })
 
+      /** A project's line, read once in a read: the cards that read it at once share it. */
+      const lineIn = (projectId: string) =>
+        Effect.gen(function* () {
+          const busy = yield* Busy
+          const read = yield* LinesRead
+          if (read === null) return yield* busy.line(projectId)
+          const known = read.get(projectId)
+          if (known !== undefined) return yield* Deferred.await(known)
+          const line = Deferred.makeUnsafe<Line>()
+          read.set(projectId, line)
+          return yield* busy.line(projectId).pipe(Effect.onExit((exit) => Deferred.done(line, exit)))
+        })
+
       /**
-       * A waiting task's place in its project's Up next (ADR-063), in the order it gets one (1 first): its tasks under way,
+       * A waiting task's place in its project's Up next (ADR-065), in the order it gets one (1 first): its tasks under way,
        * none of whose agents is at work, which continue, then its line, the tasks no agent has worked on yet; whether it
        * stands behind another in the line, and whether the line is in the person's order. Null where it is in neither: an
        * agent of its is at work.
@@ -1650,7 +1676,7 @@ export class Queries extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
           if (task === undefined) return null
-          const line = yield* (yield* Busy).line(task.projectId)
+          const line = yield* lineIn(task.projectId)
           const ahead = line.continuing.indexOf(taskId)
           if (ahead >= 0) return { place: ahead + 1, continues: true, behind: false, reordered: false }
           const at = line.tasks.indexOf(taskId)
@@ -1805,7 +1831,7 @@ export class Queries extends Context.Service<
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
-          // Waiting so with none of its agents at work, it is up next (ADR-063): under way, it continues first; before any agent
+          // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
           // has worked on it, whatever its kind, it is in its project's line.
           const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
           // Held for a usage limit or the connection, none of its agents in a turn, it goes on by itself: up next too.
@@ -1944,6 +1970,10 @@ export class Queries extends Context.Service<
                 ? { continues: true, place: line.place }
                 : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
+            // Conflicting, and not asked of its lead: why, beside Resolve now (ADR-030).
+            ...(round?.state === 'unsent' ? { conflictUnsent: round.why } : {}),
+            // Not looked at for a conflict, whatever its host says: why, beside Look again.
+            ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
             automation: yield* fromAutomation(taskId),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
@@ -2530,6 +2560,8 @@ export class Queries extends Context.Service<
               phase: card?.phase ?? null,
               kind: card?.kind,
               handedBack: card?.handedBack ?? null,
+              conflictUnsent: card?.conflictUnsent ?? null,
+              conflictUnchecked: card?.conflictUnchecked ?? null,
               madeChangeAt: head.madeChangeAt,
               waits: card?.waits ?? null,
               ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),
