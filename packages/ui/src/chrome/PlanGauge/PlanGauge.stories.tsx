@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, within } from 'storybook/test'
 
-import { CLAUDE_PLENTY, CLAUDE_TWO, CODEX_NEARLY, CODEX_PLENTY, CODEX_SIGNED_OUT, SILENT } from '../../fixtures/plan'
+import { CLAUDE_PLENTY, CLAUDE_TWO, CODEX_NEARLY, CODEX_PLENTY, CODEX_SIGNED_OUT } from '../../fixtures/plan'
 import { LOAD_BUSY, LOAD_SLOTS } from '../../fixtures/load'
 import { LoadMeter } from '../LoadMeter/LoadMeter'
 import { PlanGauge } from './PlanGauge'
@@ -23,28 +23,26 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** What the bar says beside the gauge: the load meter beside it has its own. */
-const said = (gauge: HTMLElement) => gauge.parentElement?.querySelector('output') ?? null
-
-/** Every plan well over half: two steps lit, nothing said. */
+/** Every plan well over half: two steps lit. */
 export const Plenty: Story = {
   play: async ({ canvasElement }) => {
-    const gauge = within(canvasElement).getByRole('button', { name: 'Plan usage: Claude Code has 62% left, until 17:00' })
-    await expect(said(gauge)).toBeEmptyDOMElement()
+    await expect(
+      within(canvasElement).getByRole('button', { name: 'Plan usage: Claude Code has 62% left, until 17:00' }),
+    ).toBeInTheDocument()
   },
 }
 
-/** Codex's five hours at 3%: the gauge in full ink, and who and until when beside it. */
+/** Codex's five hours at 3%: the gauge in full ink, its label saying the figure that counts. */
 export const NearlyOut: Story = {
   args: { agents: [CODEX_NEARLY, CLAUDE_PLENTY] },
   play: async ({ canvasElement }) => {
-    await expect(said(within(canvasElement).getByRole('button', { name: /^Plan usage/ }))).toHaveTextContent('Codex 3% · 14:00')
+    await expect(within(canvasElement).getByRole('button', { name: /^Plan usage: Codex has 3% left/ })).toBeInTheDocument()
   },
 }
 
-/** Opened: the level, a row per agent least room first, and the agents with no reading at the foot. */
+/** Opened: the level and a row per agent, least room first. */
 export const Open: Story = {
-  args: { agents: [CODEX_NEARLY, CLAUDE_TWO], silent: SILENT, defaultOpen: true },
+  args: { agents: [CODEX_NEARLY, CLAUDE_TWO], defaultOpen: true },
   play: async () => {
     const page = within(document.body)
     await expect(page.getByText('Codex is nearly out')).toBeInTheDocument()
@@ -53,9 +51,6 @@ export const Open: Story = {
     await userEvent.click(page.getByRole('button', { name: /Claude Code/ }))
     await expect(page.getByText('read 2 hours ago')).toBeInTheDocument()
     await expect(page.getByText('Work')).toBeInTheDocument()
-    // The agents with no reading, in a line that opens to why.
-    await userEvent.click(page.getByRole('button', { name: 'No reading for GitHub Copilot, Junie and Mistral Vibe' }))
-    await expect(page.getByText('Copilot shares no plan usage with other apps.')).toBeVisible()
   },
 }
 
@@ -76,20 +71,19 @@ export const SignedOut: Story = {
   },
 }
 
-/** Every agent read signed out: the gauge unlit, saying nothing beside it, and the peek says no work can start. */
+/** Every agent read signed out: the gauge unlit, and the peek says no work can start. */
 export const AllSignedOut: Story = {
   args: { agents: [CODEX_SIGNED_OUT], defaultOpen: true },
   play: async ({ canvasElement }) => {
-    const gauge = within(canvasElement).getByRole('button', { name: 'Plan usage: Codex can’t start work' })
-    await expect(said(gauge)).toBeEmptyDOMElement()
+    await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Codex can’t start work' })).toBeInTheDocument()
     await expect(within(document.body).getByText('Codex can’t start work')).toBeInTheDocument()
     await expect(within(document.body).queryByText('Plenty left')).toBeNull()
   },
 }
 
-/** Nothing read yet, only agents that share nothing: the gauge unlit, and the peek says so. */
+/** Nothing read yet: the gauge unlit, and the peek says so. */
 export const NothingRead: Story = {
-  args: { agents: [], silent: SILENT, defaultOpen: true },
+  args: { agents: [], defaultOpen: true },
   play: async () => {
     await expect(within(document.body).getByText('Nothing read yet')).toBeInTheDocument()
   },

@@ -55,13 +55,7 @@ export interface PlanAgent {
 /** The agent with least room that work can start on: the figure that counts. */
 export const firstRunning = (agents: readonly PlanAgent[]): PlanAgent | undefined => agents.find((agent) => agent.stopped === undefined)
 
-/** An agent Althar reads no usage for, and why, in the runtime's words. */
-export interface PlanSilent {
-  name: string
-  why: string
-}
-
-/** Under this share left, the bar says who and until when beside the gauge, as the load meter says memory running short. */
+/** Under this share left, the gauge is in full ink. */
 export const SAY_UNDER = 10
 
 /** How many of the gauge's five steps a share left lights: the share used, a step lit as soon as it is begun. */
