@@ -250,6 +250,25 @@ const askedFor = (thread: { readonly title: string; readonly description: string
     ? []
     : [`What the person asked for, in their words:\n\n${thread.request}`]
 
+/**
+ * What else was planned from the message a task came from, for its lead's brief: the project's other tasks made from the same words
+ * of the person's, drafted within half an hour of it (the coordinator's turn, however long, and the plan's countdown), so the lead can
+ * tell work that went elsewhere from work nobody has.
+ */
+const alongside = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const others = yield* sql<{ slug: string; title: string }>`
+      SELECT o.slug, o.title FROM tasks k JOIN tasks o ON o.project_id = k.project_id AND o.id <> k.id AND o.request = k.request
+      WHERE k.id = ${taskId} AND k.request IS NOT NULL AND abs(julianday(o.created_at) - julianday(k.created_at)) < 1.0 / 48
+      ORDER BY o.created_at, o.rowid`
+    return others.length === 0
+      ? []
+      : [
+          `Also planned from this message, by other tasks: ${others.map((other) => `${other.title} (${other.slug})`).join('; ')}. find_tasks shows how they stand; what they cover isn't yours, so don't draft an issue for it.`,
+        ]
+  })
+
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
 
@@ -2548,6 +2567,7 @@ export class Sessions extends Context.Service<
                 : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             ...askedFor(thread),
+            ...(yield* alongside(thread.taskId)),
             several
               ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
               : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
@@ -2587,7 +2607,7 @@ export class Sessions extends Context.Service<
             // Althar reaches the code host for the task (ADR-011).
             `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request; rerun_check runs a check that may have failed by chance again. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // A lead tracks what is not its task's on the person's trackers, and the person files it (Coordinator.ts, IssueDrafts.ts).
-            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
+            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person's one message can start several. When a task covers it, say so in your report instead of drafting. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
             // A lead keeps its own issue up to date; what changes where the issue stands waits on the person's card (IssueChanges.ts).
             "If this task came from an issue, keep that issue up to date: comment_on_issue comments on it at once, such as what you found or what changed for whoever follows it; link_pull_request links the task's pull request to it where Althar hasn't; and change_issue proposes a change to it, such as its status (In Review), its priority, labels, assignee or title, which waits on the person's card unless the project lets changes through. Only that issue: for any other, tell the person what it needs. Set a drafted issue's priority and labels with draft_issue, never in its description.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
