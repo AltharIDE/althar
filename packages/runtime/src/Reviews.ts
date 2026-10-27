@@ -5,7 +5,7 @@ import { ConnectorFailed, fromOutside, parseRemote, type PostedReview, type Prod
 import type { ReviewBrief, ReviewDraftCard } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId, type ReviewDraftState, type ReviewVerdict } from '@althar/domain'
 import { Commands, type Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from 'effect'
+import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
@@ -13,6 +13,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { envelope } from './envelope'
 import { NotFound } from './errors'
+import { makeKeyedLock } from './keyedLock'
 import { commitOf, fetchRefs, gitOutcome } from './git'
 import { Instance } from './Instance'
 import { freeSlug, slugify } from './Projects'
@@ -711,14 +712,11 @@ export class Reviews extends Context.Service<
       const redraftable = (row: Pick<Row, 'state'>) => row.state === 'pending' || row.state === 'failed'
 
       /* One draft at a time on a task: two draft_review calls at once make one draft, never two that both post. */
-      const drafting = new Map<string, Semaphore.Semaphore>()
-      const oneDraftAt = (taskId: string) => {
-        const known = drafting.get(taskId)
-        if (known !== undefined) return known.withPermits(1)
-        const made = Semaphore.makeUnsafe(1)
-        drafting.set(taskId, made)
-        return made.withPermits(1)
-      }
+      const drafting = makeKeyedLock()
+      const oneDraftAt =
+        (taskId: string) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          drafting.withLock(taskId, effect)
       const closed = (row: Row) => new ReviewDraftClosed({ draftId: row.id, state: row.state })
 
       /**

@@ -4,13 +4,14 @@ import { join } from 'node:path'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { spawnOwned } from '@althar/provider-adapters'
-import { Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope, Semaphore } from 'effect'
+import { Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
 import { freshCopy } from './coordinatorFolder'
 import { bringBackThen } from './bringBack'
 import { Instance } from './Instance'
+import { makeKeyedLock } from './keyedLock'
 import { printedMore, servingAt, uncoloured } from './leftRunning'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
@@ -149,6 +150,12 @@ export class Launches extends Context.Service<
     stop(id: string): Effect.Effect<void>
     /** Clears a run that ended by itself from the list. */
     clear(id: string): Effect.Effect<void>
+    /**
+     * Stops every run of the project, or only the task's, and clears those
+     * that ended: the project is removed, or the task settled, and nothing is
+     * left to stop them from.
+     */
+    stopAll(projectId: string, taskId?: string): Effect.Effect<void>
     /** The project's runs, in the order they started. */
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
     /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
@@ -401,13 +408,8 @@ export class Launches extends Context.Service<
        * `launches`, so it neither freshens the copy under it nor starts the
        * same one twice.
        */
-      const startLocks = new Map<string, Semaphore.Semaphore>()
-      const onePlace = <A, E, R>(key: string, effect: Effect.Effect<A, E, R>) =>
-        Effect.suspend(() => {
-          const lock = startLocks.get(key) ?? Semaphore.makeUnsafe(1)
-          startLocks.set(key, lock)
-          return lock.withPermits(1)(effect)
-        })
+      const startLocks = makeKeyedLock()
+      const placeKey = (projectId: string, taskId: string | null) => `${projectId}:${taskId ?? ''}`
 
       /** Tasks something is starting to run from, by how many: their folders stay while it does (ADR-056). */
       const startingFrom = new Map<string, number>()
@@ -444,8 +446,8 @@ export class Launches extends Context.Service<
         readonly threadId: string | null
       }) =>
         provide(
-          onePlace(
-            `${input.projectId}:${input.taskId ?? ''}`,
+          startLocks.withLock(
+            placeKey(input.projectId, input.taskId),
             fromFolder(
               input.taskId,
               Effect.gen(function* () {
@@ -492,6 +494,10 @@ export class Launches extends Context.Service<
                   (launch) => launch.taskId === input.taskId && launch.runnableId === chosen.kept.id && launch.ended === null,
                 )
                 if (running !== undefined) return shown(running)
+                // One that ended there by itself goes as this one starts: this one says how it runs now.
+                for (const ended of launches.values())
+                  if (ended.taskId === input.taskId && ended.runnableId === chosen.kept.id && ended.ended !== null)
+                    launches.delete(ended.id)
                 const { binding } = chosen
                 const at =
                   input.taskId === null
@@ -632,6 +638,17 @@ export class Launches extends Context.Service<
           launches.delete(id)
           yield* told(launch.projectId)
         })
+
+      const stopAll = (projectId: string, taskId?: string) => {
+        const ours = (launch: Launch) => launch.projectId === projectId && (taskId === undefined || launch.taskId === taskId)
+        const stopping = Effect.suspend(() =>
+          Effect.forEach([...launches.values()].filter(ours), (launch) => (launch.ended === null ? stop(launch.id) : clear(launch.id)), {
+            discard: true,
+          }),
+        )
+        // A task's run starting meanwhile is in the list once it has, and goes with the rest.
+        return taskId === undefined ? stopping : startLocks.withLock(placeKey(projectId, taskId), stopping)
+      }
 
       /** The project changes with what it runs, so every screen that offers to run it reads it again; and the change is on the record. */
       const recorded = (projectId: string, actorId: ActorId, type: string, payload: Record<string, unknown>) =>
@@ -1174,6 +1191,7 @@ export class Launches extends Context.Service<
         start,
         stop,
         clear,
+        stopAll,
         ofProject: (projectId) => Effect.sync(() => ofProject(projectId)),
         processes: () =>
           Effect.sync(() =>

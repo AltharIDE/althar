@@ -64,6 +64,7 @@ import { evidencePaths, taskShown } from './evidence'
 import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
+import { makeKeyedLock } from './keyedLock'
 import {
   branchExists,
   commitOf,
@@ -684,14 +685,11 @@ export class Changes extends Context.Service<
       const checksAppear = Duration.toMillis((yield* RuntimeConfig).checksAppear ?? Duration.minutes(1))
       const stuckAfter = (yield* RuntimeConfig).checksStuck ?? STUCK_AFTER
       /* One thing at a time on a task's pull request: a reply's receipt is kept before listening reads the reply back. */
-      const locks = new Map<string, Semaphore.Semaphore>()
-      const locked = (taskId: string) => {
-        const known = locks.get(taskId)
-        if (known !== undefined) return known.withPermits(1)
-        const made = Semaphore.makeUnsafe(1)
-        locks.set(taskId, made)
-        return made.withPermits(1)
-      }
+      const locks = makeKeyedLock()
+      const locked =
+        (taskId: string) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          locks.withLock(taskId, effect)
       /*
        * Default branches move here, by a local merge, and go to their remotes,
        * by a push, one at a time across every task: a push never sends what a
@@ -4290,6 +4288,14 @@ export class Changes extends Context.Service<
             }
             polledAt.set(link.id, now)
             yield* listenTo(link, now)
+          }
+          // A change no longer listened to, merged, closed, its task or project gone, is forgotten: these would keep one for each forever.
+          if (only === null) {
+            const links = new Set(due.map((link) => link.id))
+            const tasks = new Set(due.map((link) => link.taskId))
+            for (const id of polledAt.keys()) if (!links.has(id)) polledAt.delete(id)
+            for (const id of waitUntil.keys()) if (!links.has(id)) waitUntil.delete(id)
+            for (const id of newsAt.keys()) if (!tasks.has(id)) newsAt.delete(id)
           }
         })
 
