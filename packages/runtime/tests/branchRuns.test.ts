@@ -18,7 +18,7 @@ import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, toolsOf, until } from './support'
 
 /*
- * A branch or a pull request run with no task (ADR-064): Althar fetches it
+ * A branch or a pull request run with no task (ADR-065): Althar fetches it
  * itself from the remote, which nobody has pulled from, runs it in a copy of
  * its own, detached at what it got, and removes the copy as the run stops;
  * the person's checkout is untouched. And a lead, which carries no sign-in,

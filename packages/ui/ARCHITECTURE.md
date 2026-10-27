@@ -172,7 +172,7 @@ The helpers, in `src/lib`:
 - `useOnScreen`: a clock that runs only while someone can see it.
 - `useStickToBottom`: a thread that follows new content until you scroll away.
 - `useRefocus`: focus back on the button a form replaced, when the form closes.
-- `useDragOver`: files held over a part of the page and dropped on it: folders, for the first screen, a new project and a project's repositories; images, for the composer.
+- `useDragOver`: files held over a part of the page and dropped on it: folders, for the first screen, a new project and a project's repositories; files and folders, for the composer.
 - `safeHref`: the one test for whether an address becomes a link.
 
 ### Accessibility is part of the component

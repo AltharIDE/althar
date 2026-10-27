@@ -241,6 +241,9 @@ export const copyAt = (repository: string, path: string, commit: string, from = 
     yield* git(path, 'clean', '-fdq')
   })
 
+/** Where a project's coordinator folder is, by the project's slug: its copies are in it, each by its repository's. */
+export const coordinatorFolderAt = (worktreeRoot: string, slug: string) => join(worktreeRoot, slug, '.coordinator')
+
 /** The project's coordinator folder, made if it isn't there, and each repository fresh from its default branch. */
 export const coordinatorFolder = (projectId: string) =>
   Effect.gen(function* () {
@@ -256,7 +259,7 @@ export const coordinatorFolder = (projectId: string) =>
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
       ORDER BY b.created_at, b.rowid`
     const projectFolder = join(config.worktreeRoot, project.slug)
-    const folder = join(projectFolder, '.coordinator')
+    const folder = coordinatorFolderAt(config.worktreeRoot, project.slug)
     // Beside the coordinator's folder, never in it: what its commands may write is only that folder.
     const mirrors = join(projectFolder, '.coordinator-mirrors')
     mkdirSync(folder, { recursive: true })

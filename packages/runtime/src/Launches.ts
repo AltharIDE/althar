@@ -40,7 +40,7 @@ import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServe
  * at once, one of each in a place; runs of the default branch share their
  * repository's copy, made fresh only where nothing of it runs there.
  *
- * A branch or a pull request runs too (ADR-064), with no task: Althar
+ * A branch or a pull request runs too (ADR-065), with no task: Althar
  * fetches it itself, with its own sign-in (Fetches.ts), into a copy of its
  * own, made as the default branch's is and detached at what it fetched. The
  * copy is the run's alone and goes as the run does, stopped or ended by
@@ -708,7 +708,7 @@ export class Launches extends Context.Service<
         )
 
       /**
-       * Runs a branch or a pull request (ADR-064): fetched by Althar into the
+       * Runs a branch or a pull request (ADR-065): fetched by Althar into the
        * person's repository, then run in a copy of its own detached at what it
        * got, the runnable asked for, else the first of its repository's that
        * says how it runs there. One of it already running is the one there is.

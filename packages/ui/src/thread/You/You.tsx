@@ -12,7 +12,7 @@ import s from './You.module.css'
 /** Something you attached to a message. */
 export type MessageAttachment =
   | ({ id: string; kind: AttachmentKind.Image } & ImageRef)
-  | { id: string; kind: AttachmentKind.File | AttachmentKind.Paste; name: string; meta?: string }
+  | { id: string; kind: AttachmentKind.File | AttachmentKind.Folder | AttachmentKind.Paste; name: string; meta?: string }
 
 export interface YouText {
   you: string
@@ -146,12 +146,13 @@ function AttachmentChip({
       )
     }
     case AttachmentKind.File:
+    case AttachmentKind.Folder:
     case AttachmentKind.Paste: {
       const paste = a.kind === AttachmentKind.Paste
       const body = (
         <>
           <span className={s.icon}>
-            <Icon name={paste ? 'list' : 'file'} size={13} />
+            <Icon name={paste ? 'list' : a.kind === AttachmentKind.Folder ? 'folder' : 'file'} size={13} />
           </span>
           <span className={s.main}>
             <span className={s.name}>{a.name}</span>

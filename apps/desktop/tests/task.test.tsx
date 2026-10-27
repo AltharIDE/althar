@@ -1019,6 +1019,52 @@ describe('a task', () => {
     await waitFor(() => expect(client.send).toHaveBeenLastCalledWith({ threadId: 'th1', body: 'And this', disposition: 'after_current' }))
   })
 
+  it('sends a PDF and a folder dropped on its composer as files: chips in the tray, granted by main, and on the message at once', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    const host = fakeHost()
+    withServices(<Task />, client, host)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    const pdf = new File(['%PDF-1.7 the spec'], 'refund-spec.pdf', { type: 'application/pdf' })
+    // A folder, as a drop hands it: no kind, no size of its own.
+    const folder = new File([], 'fixtures')
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [pdf, folder] } })
+    const tray = await screen.findByRole('list', { name: '2 attachments to send' })
+    await waitFor(() => expect(within(tray).getByText('3 files · 0 B')).toBeTruthy())
+    expect(within(tray).getByText('17 B')).toBeTruthy()
+    expect(host.attach).toHaveBeenCalledWith(pdf)
+    expect(host.attach).toHaveBeenCalledWith(folder)
+    await userEvent.type(box, 'Read these{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Read these',
+        disposition: 'after_current',
+        files: [{ grant: 'grant_refund-spec.pdf' }, { grant: 'grant_fixtures' }],
+      }),
+    )
+    // Out of the composer, and on the message in the thread, a chip each.
+    expect(screen.queryByRole('list', { name: /to send/ })).toBeNull()
+    expect(screen.getByText('refund-spec.pdf')).toBeTruthy()
+    expect(screen.getByText('fixtures')).toBeTruthy()
+  })
+
+  it('refuses a folder too large to send in a line over the field, and keeps the rest', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    const host = fakeHost({
+      attach: vi.fn(async (file: File) =>
+        file.name === 'Downloads'
+          ? { ok: false as const, name: 'Downloads', why: 'too_large' as const }
+          : { ok: true as const, grant: 'grant_log', name: file.name, kind: 'file' as const, bytes: 2048, entries: null },
+      ),
+    })
+    withServices(<Task />, client, host)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([], 'Downloads'), new File(['x'], 'run.log')] } })
+    expect(await screen.findByText('Downloads is larger than 50 MB, so it can’t be sent.')).toBeTruthy()
+    expect(await screen.findByRole('list', { name: '1 attachment to send' })).toBeTruthy()
+    expect(screen.getByText('2 KB')).toBeTruthy()
+  })
+
   it('puts a message Althar didn’t take back in the composer, its words and its images, to send again', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     vi.mocked(client.send).mockRejectedValueOnce(
@@ -1031,7 +1077,7 @@ describe('a task', () => {
     await userEvent.type(box, 'Look at this{Enter}')
     expect(await screen.findByRole('alert')).toBeTruthy()
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Look at this'))
-    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: '1 attachment to send' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'View shot.png' })).toBeNull()
     // Sent again, it goes as it was.
     await userEvent.type(box, '{Enter}')
@@ -1114,7 +1160,7 @@ describe('a task', () => {
     ).toBeTruthy()
     expect(client.takeBack).not.toHaveBeenCalled()
     expect(screen.getByRole('region', { name: 'Queued; the lead reads it next' })).toBeTruthy()
-    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: '1 attachment to send' })).toBeTruthy()
   })
 
   it('takes no images for a lead that doesn’t take them, and holds back those added before another was picked', async () => {
@@ -1125,11 +1171,20 @@ describe('a task', () => {
         session: base.session === null ? null : { ...base.session, agentId: 'codex', agentName: 'Codex' },
       })),
     })
-    withServices(<Task />, client)
+    // A picture with no file behind it, as a pasted one: it can't go as a file either.
+    const view = withServices(<Task />, client, fakeHost({ attach: vi.fn(async () => null) }))
     const box = await screen.findByRole('textbox', { name: 'Tell Codex something' })
     await waitFor(() => expect(client.getModels).toHaveBeenCalled())
     fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
     expect(await screen.findByText('Codex doesn’t take images, so they can’t be sent to it.')).toBeTruthy()
+    expect(screen.queryByRole('img', { name: 'shot.png' })).toBeNull()
+    // One with a file behind it goes to it as a file, which it opens by its path.
+    view.unmount()
+    withServices(<Task />, client)
+    const again = await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    await waitFor(() => expect(client.getModels).toHaveBeenCalled())
+    fireEvent.drop(again, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await within(await screen.findByRole('list', { name: '1 attachment to send' })).findByText('shot.png')).toBeTruthy()
     expect(screen.queryByRole('img', { name: 'shot.png' })).toBeNull()
   })
 
@@ -2546,7 +2601,7 @@ describe('a task', () => {
       task: { ...base.task, phase: 'stopped', actions: ['abandon'], lead: { agentId: 'codex', model: 'gpt-5.2-codex', account: null } },
     })
     const { client } = fakeClient({ getThread: vi.fn(async () => stale) })
-    withServices(<Task />, client)
+    withServices(<Task />, client, fakeHost({ attach: vi.fn(async () => null) }))
     await waitFor(() => expect(client.status).toHaveBeenCalled())
     expect(await screen.findByText('Stopped')).toBeTruthy()
     const box = await screen.findByRole('textbox', { name: 'Tell Codex something' })

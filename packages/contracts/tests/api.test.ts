@@ -17,11 +17,13 @@ import {
   PAGE,
   Product,
   type SentImage,
+  SentFiles,
   SentImages,
   TaskCard,
   ThreadItem,
   WatchEvent,
 } from '../src/Api'
+import { MESSAGE_FILES } from '../src/files'
 import { MESSAGE_IMAGES } from '../src/pictures'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
@@ -50,7 +52,7 @@ describe('the API', () => {
       decode({
         ...base,
         kind: 'user_message',
-        content: { text: 'Hi', links: [], pictures: [] },
+        content: { text: 'Hi', links: [], pictures: [], files: [] },
         input: { state: 'queued', interrupting: false },
       }).kind,
       'user_message',
@@ -63,6 +65,7 @@ describe('the API', () => {
         text: '',
         links: [],
         pictures: [{ digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }],
+        files: [],
       },
       input: null,
     })
@@ -209,6 +212,7 @@ describe('the API', () => {
           },
         ],
         pictures: [],
+        files: [],
       },
       input: null,
     })
@@ -392,6 +396,55 @@ describe('the API', () => {
     const one = { data: 'iVBORw0KGgo=', name: null }
     assert.strictEqual(decode(Array.from({ length: MESSAGE_IMAGES.count }, () => one)).length, MESSAGE_IMAGES.count)
     assert.throws(() => decode(Array.from({ length: MESSAGE_IMAGES.count + 1 }, () => one)))
+  })
+
+  it('takes files sent with a message by a grant or a kept copy, as many as a message carries', () => {
+    const decode = Schema.decodeUnknownSync(SentFiles)
+    const sent = [{ grant: 'grant_ab' }, { kept: 'ifile_1' }]
+    assert.deepStrictEqual(decode(sent), sent)
+    // Never a path: the window names what the person dropped by its grant.
+    assert.throws(() => decode([{ path: '/Users/me/Downloads/spec.pdf' }]))
+    assert.strictEqual(decode(Array.from({ length: MESSAGE_FILES.count }, () => ({ grant: 'g' }))).length, MESSAGE_FILES.count)
+    assert.throws(() => decode(Array.from({ length: MESSAGE_FILES.count + 1 }, () => ({ grant: 'g' }))))
+  })
+
+  it('keeps a message’s files and folders on its item, where their copies are', () => {
+    const decode = Schema.decodeUnknownSync(ThreadItem)
+    const item = {
+      id: 'ti1',
+      sequence: 1,
+      agentId: null,
+      createdAt: '2026-10-26T09:00:00.000Z',
+      kind: 'user_message' as const,
+      content: {
+        text: 'Read these',
+        links: [],
+        pictures: [],
+        files: [
+          {
+            id: 'ifile_1',
+            name: 'spec.pdf',
+            kind: 'file' as const,
+            mediaType: 'application/pdf',
+            bytes: 48_000,
+            entries: null,
+            path: '/w/t/.althar/attachments/in_1/spec.pdf',
+          },
+          {
+            id: 'ifile_2',
+            name: 'logs',
+            kind: 'folder' as const,
+            mediaType: null,
+            bytes: 9_000,
+            entries: 3,
+            path: '/w/t/.althar/attachments/in_1/logs',
+          },
+        ],
+      },
+      input: null,
+    }
+    assert.deepStrictEqual(decode(item), item)
+    assert.throws(() => decode({ ...item, content: { ...item.content, files: [{ ...item.content.files[0], kind: 'link' }] } }))
   })
 
   it.live('runs over a port, checking what is sent on the way', () =>

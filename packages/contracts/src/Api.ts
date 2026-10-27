@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
 
@@ -1012,12 +1013,50 @@ export type SentImage = typeof SentImage.Type
 /** The images sent with one message, in the order they show: at most `MESSAGE_IMAGES.count`. */
 export const SentImages = Schema.Array(SentImage).check(Schema.isMaxLength(MESSAGE_IMAGES.count))
 
+/**
+ * A file or folder the person sends with a message: by the grant the app
+ * gave for it as it was dropped, pasted or picked, the window never naming a
+ * path; or one Althar keeps a copy of already, by that copy's id, as when a
+ * message waiting its turn is taken back to change and sent again. Each is
+ * copied where the thread's agent reads, and the prompt links the copy.
+ */
+export const SentFile = Schema.Union([Schema.Struct({ grant: Schema.String }), Schema.Struct({ kept: Schema.String })])
+export type SentFile = typeof SentFile.Type
+
+/** The files and folders sent with one message, in the order they show: at most `MESSAGE_FILES.count`. */
+export const SentFiles = Schema.Array(SentFile).check(Schema.isMaxLength(MESSAGE_FILES.count))
+
+/**
+ * A file or folder the person sent with a message, as Althar copied it for
+ * the agent: its name, what it is, how large (a folder, all its files, and
+ * how many), and where the copy is, which the agent was sent a link to.
+ */
+export const AttachedFile = Schema.Struct({
+  /** The copy's id, by which it is sent again (`SentFile`'s `kept`). */
+  id: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['file', 'folder']),
+  /** What it is, as its name says; null for a folder, or a name that says nothing. */
+  mediaType: Schema.NullOr(Schema.String),
+  bytes: Schema.Number,
+  /** A folder's files, at every depth; null for a file. */
+  entries: Schema.NullOr(Schema.Number),
+  /** Where its copy is, in the thread's folder, for the agent to read. */
+  path: Schema.String,
+})
+export type AttachedFile = typeof AttachedFile.Type
+
 /** What the person said, and where it stands with the lead. */
 export const UserMessageItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('user_message'),
-  /** What they said, the links in it Althar could unfurl, and the images they sent with it. */
-  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl), pictures: Schema.Array(Picture) }),
+  /** What they said, the links in it Althar could unfurl, and the images, files and folders they sent with it. */
+  content: Schema.Struct({
+    text: Schema.String,
+    links: Schema.Array(Unfurl),
+    pictures: Schema.Array(Picture),
+    files: Schema.Array(AttachedFile),
+  }),
   input: Schema.NullOr(
     Schema.Struct({
       state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']),
@@ -1600,7 +1639,7 @@ export const RunItem = Schema.Struct({
     runnableId: Schema.optional(Schema.NullOr(Schema.String)),
     /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
     where: Schema.String,
-    /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-064); absent or null for the default branch or a task's. */
+    /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-065); absent or null for the default branch or a task's. */
     branch: Schema.optional(Schema.NullOr(Schema.String)),
     ref: Schema.optional(Schema.NullOr(Schema.Struct({ kind: Schema.Literals(['branch', 'pull_request']), which: Schema.String }))),
     command: Schema.String,
@@ -1900,7 +1939,7 @@ export type ContextUse = typeof ContextUse.Type
  * The project as Althar runs it itself, with no agent (docs/decisions/022):
  * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
  * the default branch, or of a branch or pull request Althar fetched for it
- * (ADR-064). It runs until the person stops it, or Althar quits.
+ * (ADR-065). It runs until the person stops it, or Althar quits.
  */
 export const Launch = Schema.Struct({
   ...BackgroundCommand.fields,
@@ -1937,7 +1976,7 @@ export const Runnable = Schema.Struct({
 })
 export type Runnable = typeof Runnable.Type
 
-/** An open pull request the Run menu offers to run (ADR-064). */
+/** An open pull request the Run menu offers to run (ADR-065). */
 export const OfferedPullRequest = Schema.Struct({
   number: Schema.Number,
   /** As its host writes it: PR #12, MR !12. */
@@ -2987,6 +3026,8 @@ export const Api = RpcGroup.make(
       body: Schema.optional(Schema.String),
       /** Images sent with what the person said. */
       images: Schema.optional(SentImages),
+      /** Files and folders sent with what the person said. */
+      files: Schema.optional(SentFiles),
       /** Any of what the person said came from dictation. */
       dictated: Schema.optional(Schema.Boolean),
     },
@@ -3132,7 +3173,7 @@ export const Api = RpcGroup.make(
   command('RenameTask', { taskId: Schema.String, title: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
   command('ReopenTask', { taskId: Schema.String }, Schema.Void),
-  /** Says something to a thread's agent, with any images: empty words with images are a message too. */
+  /** Says something to a thread's agent, with any images, files and folders: empty words with any of them are a message too. */
   command(
     'Send',
     {
@@ -3140,6 +3181,7 @@ export const Api = RpcGroup.make(
       body: Schema.String,
       disposition: Disposition,
       images: Schema.optional(SentImages),
+      files: Schema.optional(SentFiles),
       /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
       dictated: Schema.optional(Schema.Boolean),
     },
@@ -3434,7 +3476,7 @@ export const Api = RpcGroup.make(
    * Runs one of the project's runnables with no agent, its default without
    * one: what the task built, in its worktree, or, with no task, a copy of the
    * default branch, or of the branch or pull request named, which Althar
-   * fetches first (ADR-064). One already running there is the one returned.
+   * fetches first (ADR-065). One already running there is the one returned.
    */
   command(
     'RunProject',

@@ -324,7 +324,7 @@ export class Agents extends Context.Service<
  * sign-ins to code hosts. And a branch it makes from a remote's follows
  * nothing: git would write that to the repository's `.git/config`, which an
  * agent's sandbox refuses, so `git switch -c x origin/x` failed halfway,
- * leaving the worktree where it was (ADR-064).
+ * leaving the worktree where it was (ADR-065).
  */
 export const withoutSignIns = (signedOut: string): Readonly<Record<string, string>> => ({
   GH_CONFIG_DIR: signedOut,

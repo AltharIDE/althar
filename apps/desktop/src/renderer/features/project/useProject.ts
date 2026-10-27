@@ -19,7 +19,7 @@ import { AUTOMATIONS, CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
 import type { OutputSoFar } from '../../shared/handed'
-import { type Outgoing, sentWith } from '../../shared/useImages'
+import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import { canPick } from '../../shared/agents'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
@@ -283,7 +283,7 @@ export const useProject = (projectId: string): ProjectModel => {
         queued,
         interrupting: disposition === 'interrupt_and_continue',
         ...(images?.dictated === true ? { dictated: true } : {}),
-        ...(images === undefined ? {} : { pictures: images.pictures }),
+        ...(images === undefined ? {} : { pictures: images.pictures, files: images.attached }),
       })
       id = next.id
       return { ...current, items: next.items }
