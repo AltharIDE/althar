@@ -44,6 +44,7 @@ import { statements as taskOpened } from './0039_task_opened'
 import { statements as issueChanges } from './0040_issue_changes'
 import { statements as trackerWorkspaces } from './0041_tracker_workspaces'
 import { statements as automations } from './0042_automations'
+import { statements as lookupIndexes } from './0043_lookup_indexes'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -105,6 +106,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0040_issue_changes', statements: issueChanges },
   { key: '0041_tracker_workspaces', statements: trackerWorkspaces },
   { key: '0042_automations', statements: automations },
+  { key: '0043_lookup_indexes', statements: lookupIndexes },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

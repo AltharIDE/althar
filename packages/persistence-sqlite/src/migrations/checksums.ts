@@ -46,4 +46,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0040_issue_changes': '10b3b0d987850e7aea12819dcdb92b1c235da78911e4f0284ed88cc1d30cb622',
   '0041_tracker_workspaces': '00b0ace1f9a258a095ee5adb58c183d7d882be0fd53d49e367f93bef4f323b66',
   '0042_automations': '207a84892700ff0f764cf6adeb1bd6d438d117cb59b2892cba7062747db4f0e8',
+  '0043_lookup_indexes': 'a8e9b710f3111c3d2edb6dcf891ae327f1ae9e3eb4ee8def1e2cae253a1643df',
 }

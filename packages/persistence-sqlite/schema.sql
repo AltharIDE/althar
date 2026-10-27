@@ -1268,3 +1268,11 @@ CREATE INDEX automation_occurrences_by_automation ON automation_occurrences (aut
 CREATE INDEX automation_occurrences_by_task ON automation_occurrences (task_id) WHERE task_id IS NOT NULL;
 
 CREATE INDEX automation_occurrences_by_project ON automation_occurrences (project_id);
+
+CREATE INDEX permission_requests_by_tool_call ON permission_requests (provider_session_id, tool_call_id);
+
+CREATE INDEX thread_items_questions ON thread_items (thread_id, provider_session_id, json_extract(content, '$.toolCallId')) WHERE kind = 'question';
+
+CREATE INDEX threads_by_task ON threads (task_id);
+
+CREATE INDEX turn_deliveries_by_thread ON turn_deliveries (thread_id);
