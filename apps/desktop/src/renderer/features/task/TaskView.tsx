@@ -124,6 +124,9 @@ export const text = {
   /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
   conflictUnsent: (why: string) => `It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`,
   resolveNow: 'Resolve now',
+  /** Althar couldn't look for a conflict here, whatever its host says, and why; the button looks again, fetching anew. */
+  conflictUnchecked: (why: string) => `Althar couldn’t look for a conflict with its default branch. ${why}`,
+  lookAgain: 'Look again',
   keep: (from: string) => `Keep ${from}`,
   /** What the lead is asked when merging its branch here conflicts: in each repository, the branch it merges into and where. */
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
@@ -733,6 +736,16 @@ export function TaskView({
     </>
   )
 
+  // A conflict that is the person's (its lead couldn't resolve it, or wasn't asked), or one Althar couldn't look for: why, and what asks again.
+  const conflict =
+    snapshot.task.handedBack != null
+      ? { words: snapshot.task.handedBack, act: text.resolveNow }
+      : snapshot.task.conflictUnsent != null
+        ? { words: text.conflictUnsent(snapshot.task.conflictUnsent), act: text.resolveNow }
+        : snapshot.task.conflictUnchecked != null
+          ? { words: text.conflictUnchecked(snapshot.task.conflictUnchecked), act: text.lookAgain }
+          : null
+
   const composer = (
     <div className={s.composer}>
       {model.error !== null && (
@@ -743,10 +756,9 @@ export function TaskView({
       {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
         <p className={s.handover}>{text.needsAgent}</p>
       )}
-      {snapshot.task.conflictUnsent != null && (
+      {conflict !== null && (
         <p className={s.handover}>
-          {text.conflictUnsent(snapshot.task.conflictUnsent)}{' '}
-          <LinkButton onClick={() => void model.resolveConflictsNow()}>{text.resolveNow}</LinkButton>
+          {conflict.words} <LinkButton onClick={() => void model.resolveConflictsNow()}>{conflict.act}</LinkButton>
         </p>
       )}
       {waiting !== null && (

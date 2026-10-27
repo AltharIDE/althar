@@ -433,6 +433,8 @@ export type ConflictStanding =
   | { readonly state: 'handed_back'; readonly why: string }
   /** It conflicts, and its lead wasn't asked to resolve it: why, for its card, with Resolve now beside it. */
   | { readonly state: 'unsent'; readonly why: string }
+  /** Althar couldn't look here for whether it conflicts, and its host doesn't say it does: why, with Look again beside it. */
+  | { readonly state: 'unchecked'; readonly why: string }
 
 /**
  * Whether a task's conflict is its lead's to resolve now (`askable`): yes;
@@ -759,8 +761,11 @@ export class Changes extends Context.Service<
       const newsAt = new Map<string, number>()
       const polledAt = new Map<string, number>()
       const news = (taskId: string) => Effect.map(Clock.currentTimeMillis, (now) => void newsAt.set(taskId, now))
-      /* Why each task whose branch conflicts wasn't asked of its lead: its card says so until it is, or conflicts no more. */
-      const unsent = new Map<string, string>()
+      /*
+       * Why each task whose branch conflicts wasn't asked of its lead, or couldn't be looked at for one (`checked` false): its card
+       * says so until it is, or conflicts no more.
+       */
+      const unsent = new Map<string, { readonly why: string; readonly checked: boolean }>()
       /* Where each repository's default branch was when last fetched to look for conflicts, and when, by binding and ref. */
       const fetchedAt = new Map<string, { readonly at: number; readonly tip: string }>()
       /* How often a default branch is fetched at most to look for conflicts with what goes into it: a few listening turns. */
@@ -3557,15 +3562,22 @@ export class Changes extends Context.Service<
           return 'yes'
         })
 
-      /** A task that conflicts wasn't asked of its lead: why, logged, and on its card where the person is to see it. */
-      const notSent = (taskId: string, why: string, shown = true) =>
+      /**
+       * A task that conflicts wasn't asked of its lead, or one Althar couldn't
+       * look at for a conflict (`checked` false), whatever its host says: why,
+       * logged, and on its card where the person is to see it.
+       */
+      const notSent = (taskId: string, why: string, shown = true, checked = true) =>
         Effect.gen(function* () {
           if (logged.get(taskId) !== why) {
             logged.set(taskId, why)
-            yield* Effect.logInfo(`A conflict wasn’t sent to its lead: ${why}`).pipe(Effect.annotateLogs({ taskId }))
+            yield* Effect.logInfo(
+              checked ? `A conflict wasn’t sent to its lead: ${why}` : `A task couldn’t be looked at for a conflict: ${why}`,
+            ).pipe(Effect.annotateLogs({ taskId }))
           }
-          if ((unsent.get(taskId) ?? null) === (shown ? why : null)) return
-          if (shown) unsent.set(taskId, why)
+          const was = unsent.get(taskId)
+          if (shown ? was?.why === why && was.checked === checked : was === undefined) return
+          if (shown) unsent.set(taskId, { why, checked })
           else unsent.delete(taskId)
           yield* touchCard(taskId)
         })
@@ -3594,8 +3606,8 @@ export class Changes extends Context.Service<
             SELECT id FROM conflict_resolutions WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
           const round = latest === undefined ? undefined : yield* roundOf({ id: latest.id })
           if (round?.state === 'resolving') return { state: 'resolving', checks: round.pushedHead !== null }
-          const why = unsent.get(taskId)
-          if (why !== undefined) return { state: 'unsent', why }
+          const said = unsent.get(taskId)
+          if (said !== undefined) return { state: said.checked ? 'unsent' : 'unchecked', why: said.why }
           if (round === undefined) return null
           if (round.state !== 'failed' || round.ended === null || round.failure === null) return null
           // Still the person's while the branches are as the lead left them, as `askable` reads it.
@@ -4064,18 +4076,18 @@ export class Changes extends Context.Service<
           if (first === 'off') return yield* forgetUnsent(link.taskId)
           if (first === 'resolving') return
           const says = now.conflicts === true
+          // Where it can't be looked at here, that is said whatever its host says: a host saying it merges cleanly may be out of date.
+          const couldnt = (why: string) => notSent(link.taskId, why, true, says)
           const [workspace] = yield* sql<{ path: string; binding: string; slug: string; name: string; threadId: string }>`
             SELECT w.path, b.id AS binding, b.slug, b.display_name AS name, t.id AS thread_id FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-            WHERE w.task_id = ${link.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            WHERE w.task_id = ${link.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state <> 'cleaned'
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${seen.url} LIMIT 1) DESC,
               b.created_at, b.rowid
             LIMIT 1`
-          // Without its folder here, nothing can be merged: where its host says it conflicts, the card says why nothing happens.
+          // Without its folder here, nothing can be merged: the card says why nothing happens.
           if (workspace === undefined)
-            return says
-              ? yield* notSent(link.taskId, `Its folder isn’t on this computer, so Althar can’t merge ${now.target} into it here.`)
-              : undefined
+            return yield* couldnt(`Its folder isn’t on this computer, so Althar can’t merge ${now.target} into it here.`)
           // Into the repository a fork came from, its branch is upstream's; otherwise origin's, as `git fetch` names them.
           const fork = yield* namedRemotes(workspace.path).pipe(
             Effect.map(forkOf),
@@ -4087,19 +4099,15 @@ export class Changes extends Context.Service<
           const target = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says)
           const from = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
           if (target === null || from === null)
-            return says
-              ? yield* notSent(
-                  link.taskId,
-                  target === null
-                    ? `Althar couldn’t fetch ${now.target} to merge it with the branch here.`
-                    : 'Althar couldn’t read the branch here.',
-                )
-              : undefined
+            return yield* couldnt(
+              target === null
+                ? `Althar couldn’t fetch ${now.target} to merge it with the branch here.`
+                : 'Althar couldn’t read the branch here.',
+            )
           const merged = yield* gitOutcome(workspace.path, 'merge-tree', '--write-tree', '--name-only', '--no-messages', target, from)
           if (merged.code === 0) return yield* forgetUnsent(link.taskId)
           // 1 is git's word for a merge that conflicts; anything else, one it couldn't work out.
-          if (merged.code !== 1)
-            return says ? yield* notSent(link.taskId, `Git couldn’t merge ${now.target} with the branch here.`) : undefined
+          if (merged.code !== 1) return yield* couldnt(`Git couldn’t merge ${now.target} with the branch here.`)
           if (!(yield* sayingWhy(link.taskId, yield* askable(link.taskId, seen.url, { force: how.force, targets: [target] })))) return
           const [sent] = yield* sql<{ head: string | null }>`
             SELECT head_commit AS head FROM repository_changes WHERE pull_request_url = ${seen.url} AND project_id = ${link.projectId} LIMIT 1`
@@ -4556,7 +4564,11 @@ export class Changes extends Context.Service<
           for (const link of yield* linksOf(task.taskId)) if (link.listening === 1) yield* listenTo(link, now, { force, fresh: true })
         })
 
-      /** The open tasks with a branch here, of the project, of the one task, or of every project not archived. */
+      /**
+       * The open tasks of the project, of the one task, or of every project
+       * not archived: those without a folder here too, whose pull requests
+       * are looked at all the same, to say why nothing can be merged here.
+       */
       const openHere = (where: { readonly projectId: string } | { readonly taskId: string } | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -4570,11 +4582,10 @@ export class Changes extends Context.Service<
                     ? sql`k.id = ${where.taskId}`
                     : sql`k.project_id = ${where.projectId}`
               }
-              AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.access = 'write')
             ORDER BY k.created_at, k.rowid`
         })
 
-      /** Each open task with a branch here, of the project or the one task, looked at now for what already conflicts. */
+      /** Each open task, of the project or the one task, looked at now for what already conflicts. */
       const resolveNow = (where: { readonly projectId: string } | { readonly taskId: string }, force = false) =>
         Effect.gen(function* () {
           for (const task of yield* openHere(where))

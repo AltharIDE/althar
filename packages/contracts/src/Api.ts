@@ -1458,6 +1458,12 @@ export const TaskCard = Schema.Struct({
    * sentence, beside Resolve now (ADR-030). Without it, nothing is unsaid.
    */
   conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Althar couldn't look here for whether its branch conflicts with its
+   * default branch, and its host doesn't say it does, where the rules say it
+   * resolves conflicts: why, in a sentence, beside Look again (ADR-030).
+   */
+  conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
   /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
@@ -2146,6 +2152,8 @@ export const ThreadSnapshot = Schema.Struct({
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Why its conflict with its default branch wasn't asked of its lead, as its card says, beside Resolve now. */
     conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why Althar couldn't look for a conflict with its default branch, as its card says, beside Look again. */
+    conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
     /** When its lead made it a change, where it began as a quick task: what it showed before was a prototype's, not the change's. */
     madeChangeAt: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */

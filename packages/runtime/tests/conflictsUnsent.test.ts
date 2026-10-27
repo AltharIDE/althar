@@ -42,10 +42,14 @@ import {
  * Resolve now, which asks anyway.
  */
 
-/** A GitHub that never says the pull request conflicts: `false` as from before main moved, or nothing, as while it works it out. */
-const silentHost = (bare: string, says: false | undefined) => {
+/**
+ * A GitHub that never says the pull request conflicts: `false` as from
+ * before main moved, or nothing, as while it works it out. Where `url` says,
+ * it is fetched from there instead, as from a host that can't be reached.
+ */
+const silentHost = (bare: string, says: false | undefined, url: () => string = () => bare) => {
   const github = makeFakeService({
-    pushUrl: () => bare,
+    pushUrl: url,
     headOf: () => {
       try {
         return git(bare, 'rev-parse', 'althar/add-a-retry')
@@ -62,6 +66,14 @@ const silentHost = (bare: string, says: false | undefined) => {
 
 /** The task's card: why its conflict wasn't asked of its lead, if it says. */
 const unsentOf = (projectId: string) => Effect.map(cards(projectId), ([card]) => card?.conflictUnsent ?? null)
+
+/** The task's card: why Althar couldn't look for a conflict, if it says. */
+const uncheckedOf = (projectId: string) =>
+  until(
+    Effect.map(cards(projectId), ([card]) => [card?.conflictUnchecked ?? null]),
+    ([one]) => one !== null,
+    Duration.seconds(20),
+  ).pipe(Effect.map(([one]) => one))
 
 const runIs = (taskId: string, state: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => sql`UPDATE runs SET state = ${state} WHERE task_id = ${taskId}`)
@@ -143,7 +155,75 @@ describe('a conflicting task Althar can’t merge here', () => {
   })
 })
 
+describe('a task Althar can’t look at here, where its host says it merges cleanly', () => {
+  it.live('says its folder isn’t on this computer, though its host’s word may be out of date', () => {
+    const { working, bare } = hosted()
+    const github = silentHost(bare, false)
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId } = yield* opened(working, '[lead:resolve]')
+      yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+      moveHostMainOn(working, bare)
+      assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
+      // Not said to conflict: Althar doesn't know.
+      assert.isNull(yield* unsentOf(projectId))
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('says its default branch couldn’t be fetched, and once it can, the conflict is the lead’s', () => {
+    const { working, bare } = hosted()
+    let url = bare
+    const github = silentHost(bare, false, () => url)
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      url = join(tmpdir(), 'althar-nowhere', randomBytes(4).toString('hex'))
+      moveHostMainOn(working, bare)
+      assert.strictEqual(yield* uncheckedOf(projectId), 'Althar couldn’t fetch main to merge it with the branch here.')
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+      // Back: Look again fetches anew, finds the conflict, and the card says no more of why.
+      url = bare
+      yield* (yield* Changes).resolveNow({ taskId }, true)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* until(cards(projectId), ([card]) => card?.conflictUnchecked == null, Duration.seconds(20))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('is looked at by Resolve now though it has no folder here, and says why nothing can be merged', () => {
+    const { working, bare } = hosted()
+    const github = silentHost(bare, false)
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      // The rules leave conflicts to the person: nothing looks at it but Resolve now.
+      const { projectId, taskId } = yield* opened(working, '[lead:resolve]', false)
+      yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${taskId}`
+      moveHostMainOn(working, bare)
+      yield* Effect.sleep('1500 millis')
+      assert.isNull((yield* cards(projectId))[0]?.conflictUnchecked ?? null)
+      yield* (yield* Changes).resolveNow({ taskId }, true)
+      assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
 describe('a conflict its lead couldn’t resolve', () => {
+  it.live('is the lead’s again by Resolve now, though neither branch moved', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { projectId, taskId } = yield* opened(working, '[lead:resolve-fails]')
+      moveHostMainOn(working, bare)
+      yield* until(rounds(taskId), (all) => all[0]?.state === 'failed', Duration.seconds(30))
+      yield* until(cards(projectId), (all) => all[0]?.handedBack != null, Duration.seconds(20))
+      yield* (yield* Changes).resolveNow({ taskId }, true)
+      const all = yield* until(rounds(taskId), (now) => now.length === 2, Duration.seconds(20))
+      // The same conflict, against the same main, asked again.
+      assert.strictEqual(all[0]?.state, 'failed')
+      assert.strictEqual(all[1]?.attempt, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('stays the person’s while main stays, and is the lead’s again once main moves on', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, () => PASSED)
