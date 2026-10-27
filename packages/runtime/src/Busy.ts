@@ -5,6 +5,7 @@ import { Cause, Clock, Context, Duration, Effect, Layer, Queue, Semaphore, Strea
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type AtOnceDefault, atOnceFor, clamp } from './atOnce'
+import { automatedTasks } from './automated'
 import { touchTask } from './cards'
 import { RuntimeConfig } from './Config'
 import { Connectivity } from './Connectivity'
@@ -91,11 +92,19 @@ export interface AtOnce {
 
 /**
  * Where work that waits for a place stands (ADR-037): what the person did,
- * which starts at once; the work of a task already under way; new work.
+ * which starts at once; the work of a task already under way; new work; and
+ * last, an automation's run, every step of it (ADR-061).
  */
-export type Order = 'person' | 'underway' | 'new'
+export type Order = 'person' | 'underway' | 'new' | 'automation'
 
-const RANK: Readonly<Record<Order, number>> = { person: 0, underway: 1, new: 2 }
+const RANK: Readonly<Record<Order, number>> = { person: 0, underway: 1, new: 2, automation: 3 }
+
+/** How many automations' tasks may be at work at once, unless a test says: one, so nothing of the person's waits behind them. */
+const AUTOMATIONS_AT_ONCE = 1
+
+/** Where work stands, as its task makes it: an automation's run's waits last, unless the person did it. */
+export const orderIn = (order: Order, taskId: string, automated: ReadonlySet<string>): Order =>
+  order === 'person' ? 'person' : automated.has(taskId) ? 'automation' : order
 
 /** Which of a task's agents: its lead, or its reviewer. */
 export interface Agent {
@@ -231,6 +240,16 @@ export class Busy extends Context.Service<
       const sampleEvery = options.sample ?? Duration.seconds(2)
       const quiet = Duration.toMillis(options.quiet ?? Duration.seconds(30))
       const askGrace = Duration.toMillis(options.askGrace ?? Duration.minutes(5))
+      const automationsAtOnce = options.automations ?? AUTOMATIONS_AT_ONCE
+      /** The tasks automations' runs started that are under way; none where they can't be read, so nothing waits for that. */
+      const automated = provide(automatedTasks).pipe(
+        Effect.catchCause((cause) =>
+          Effect.as(Effect.logWarning('Could not read which tasks are automations’ runs', cause), new Set<string>() as ReadonlySet<string>),
+        ),
+      )
+      /** How many automations' tasks are at work, of those at work. */
+      const automationsAt = (at: ReadonlySet<string>, tasks: ReadonlySet<string>) =>
+        new Set([...at].map((key) => key.replace(/ review$/, '')).filter((taskId) => tasks.has(taskId))).size
       const cpuOf =
         options.cpuOf ??
         ((agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>) =>
@@ -431,14 +450,24 @@ export class Busy extends Context.Service<
                 Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read the line of what waits', cause), [])),
               )
         const line = new Map(lined.map((row) => [row.id, row.lineAt]))
+        const tasks = yield* automated
         return all
           .map((waiter): Ranked => {
             const inLine = waiter.order !== 'person' && waiter.review !== true && line.has(waiter.taskId)
+            // An automation's run waits after everything else, in the line or not (ADR-061).
+            const order = orderIn(waiter.order, waiter.taskId, tasks)
             return {
               waiter,
               line: inLine,
-              // Owed its task's place, it stands before all but what the person did.
-              rank: waiter.order !== 'person' && owed.has(waiter.taskId) ? RANK.person + 0.5 : inLine ? RANK.new : RANK[waiter.order],
+              // Owed its task's place, it stands before all but what the person did; an automation's run, else, after all.
+              rank:
+                waiter.order !== 'person' && owed.has(waiter.taskId)
+                  ? RANK.person + 0.5
+                  : order === 'automation'
+                    ? RANK.automation
+                    : inLine
+                      ? RANK.new
+                      : RANK[waiter.order],
               at: (inLine ? line.get(waiter.taskId) : null) ?? waiter.since,
             }
           })
@@ -453,15 +482,19 @@ export class Busy extends Context.Service<
       const roomFor = (
         agent: Agent,
         { at, holders }: { readonly at: ReadonlySet<string>; readonly holders: ReadonlyArray<Holder> },
-        order: Order,
+        asked: Order,
       ) =>
         Effect.gen(function* () {
           const key = keyOf(agent.taskId, agent.review)
+          const tasks = yield* automated
+          const order = orderIn(asked, agent.taskId, tasks)
           if (order === 'person' || at.has(key)) return true
           // Offline, it waits for the computer to be back rather than start into a dead connection.
           if (!(yield* connectivity.online)) return false
           if (keptPlace(agent.taskId, holders) !== undefined) return true
           if (at.size >= (yield* atOnce).count) return false
+          // An automation's run takes a place only while fewer automations than it may have are at work.
+          if (order === 'automation' && automationsAt(at, tasks) >= automationsAtOnce) return false
           // Work waiting for a place of its own, standing where this does or before it, goes first; what waits on an agent at
           // work, or is on its way, takes none.
           return !(yield* waiting).some(
@@ -490,11 +523,12 @@ export class Busy extends Context.Service<
           if (queue.length === 0) return false
           const { at: busy, holders } = yield* atWork
           const most = (yield* atOnce).count
+          const tasks = yield* automated
           const online = yield* connectivity.online
           const left: Array<string> = []
           // The tasks whose place kept by what they left running is taken in this look: by one of their work only.
           const taken = new Set<string>()
-          for (const { waiter, line } of queue) {
+          for (const { waiter, line, rank } of queue) {
             const key = waiterKey(waiter)
             // On its way already: it is counted, and not started twice.
             if (starting.has(key)) continue
@@ -506,7 +540,14 @@ export class Busy extends Context.Service<
             const kept = taken.has(waiter.taskId) ? undefined : keptPlace(waiter.taskId, holders)
             // Owed its task's place, which its agent has freed since: it takes that place, though others hold every one.
             const back = owed.has(waiter.taskId) && !holders.some((holder) => holder.taskId === waiter.taskId)
-            if (waiter.order !== 'person' && !busy.has(key) && kept === undefined && !back && busy.size >= most) {
+            // Its task's own place, kept or owed, is no new one: an automation's run takes it beyond how many may be at work.
+            if (
+              waiter.order !== 'person' &&
+              !busy.has(key) &&
+              kept === undefined &&
+              !back &&
+              (busy.size >= most || (rank === RANK.automation && automationsAt(busy, tasks) >= automationsAtOnce))
+            ) {
               left.push(waiter.taskId)
               continue
             }

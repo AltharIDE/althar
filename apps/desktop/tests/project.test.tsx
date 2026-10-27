@@ -177,7 +177,7 @@ describe('the project’s bar', () => {
     view.unmount()
   })
 
-  it('says which view it is on, to open on it again, and has only its views and its settings to choose from', async () => {
+  it('says which view it is on, to open on it again, and has only its views, its automations and its settings to choose from', async () => {
     const onRoomChange = vi.fn()
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     withServices(<Project room={Room.Both} onRoomChange={onRoomChange} />, client)
@@ -187,7 +187,7 @@ describe('the project’s bar', () => {
       within(views)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Home', 'Conversation', 'Board', 'Settings'])
+    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Settings'])
     await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
     expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
     // Its settings are a view too, kept like the others to open on again.

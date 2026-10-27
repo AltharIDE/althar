@@ -68,4 +68,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md) | The coordinator is a trusted reader, in copies of its own, held by a sandbox where it has one |
 | [059](059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md) | A tracker's workspaces are connected side by side, and a project may be bound to one |
 | [060](060-a-lost-connection-is-waited-out-and-a-failing-service-tried-again.md) | A lost connection is waited out, and a failing service tried again, as a usage limit is held |
-| [061](061-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md) | A file or folder sent with a message is copied into the thread's folder, which git ignores, and linked for the agent to open |
+| [061](061-automations-start-ordinary-tasks-on-a-schedule.md) | Automations start ordinary tasks on a schedule: a kept request, and an occurrence for each time it was due, on this computer while Althar runs |
+| [062](062-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md) | A file or folder sent with a message is copied into the thread's folder, which git ignores, and linked for the agent to open |

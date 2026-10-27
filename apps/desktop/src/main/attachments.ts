@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { measure } from '@althar/runtime/attachments'
 
 /*
- * A file or folder the person adds to a message (ADR-061), as the window is
+ * A file or folder the person adds to a message (ADR-062), as the window is
  * told of it: measured here, where the path is, so a folder too large is
  * refused as it is dropped rather than when it is sent, and granted to the
  * runtime, which copies it as the message goes. The window gets its name,

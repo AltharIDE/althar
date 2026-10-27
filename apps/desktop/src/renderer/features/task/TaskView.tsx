@@ -1049,6 +1049,7 @@ export function TaskView({
                     actions={{
                       onChange: model.changeReview,
                       onPost: (draftId) => void model.postReview(draftId),
+                      onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
                       onDiscard: (draftId) => void model.discardReview(draftId),
                     }}
                   />

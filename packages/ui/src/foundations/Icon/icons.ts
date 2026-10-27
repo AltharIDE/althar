@@ -10,6 +10,7 @@ import {
   ChatBubble,
   Check,
   Clock,
+  ClockRotateRight,
   CoffeeCup,
   Community,
   Compress,
@@ -140,7 +141,10 @@ export const ICONS = {
   lock: Lock,
   compress: Compress,
   up: ArrowUp,
+  /** When something happens on a schedule. */
   clock: Clock,
+  /** An automation: work that starts by itself. */
+  automation: ClockRotateRight,
   /** Keeps the Mac awake while work runs. */
   cup: CoffeeCup,
   /** How hard the computer works. */

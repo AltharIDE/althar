@@ -539,8 +539,26 @@ export enum Room {
   Board = 'board',
   /** The conversation and the board side by side. */
   Both = 'both',
+  /** The work that starts by itself, on a schedule: the project's automations, each opening as its own page. */
+  Automations = 'automations',
   /** The project's settings, in place of its work. */
   Settings = 'settings',
+}
+
+/**
+ * One time an automation ran, or didn't, as its mark says it: starting (its
+ * task being made), running, made something, nothing to do, failed, missed
+ * (the Mac slept past its window), or skipped (paused, busy, its last run
+ * still going, too many of its pull requests open).
+ */
+export enum AutomationRunState {
+  Starting = 'starting',
+  Running = 'running',
+  Made = 'made',
+  Nothing = 'nothing',
+  Failed = 'failed',
+  Missed = 'missed',
+  Skipped = 'skipped',
 }
 
 /** Where an agent runtime on this machine stands, as Althar last found it. */

@@ -35,6 +35,10 @@ export const keys = {
   /** Where issues can be filed on a tracker connected: its teams. */
   containers: (connectionId: string) => ['containers', connectionId] as const,
   settings: ['settings'] as const,
+  /** A project's automations, for its Automations tab and the dot on it. */
+  automations: (projectId: string) => ['automations', projectId] as const,
+  /** One automation, for its own page. */
+  automation: (automationId: string) => ['automation', automationId] as const,
   /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
@@ -128,6 +132,10 @@ export const reads = (client: Client) => ({
   containers: (connectionId: string) =>
     queryOptions({ queryKey: keys.containers(connectionId), queryFn: () => client.listContainers(connectionId), staleTime: 60_000 }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  automations: (projectId: string) =>
+    queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
+  automation: (automationId: string) =>
+    queryOptions({ queryKey: keys.automation(automationId), queryFn: () => client.getAutomation(automationId), gcTime: 5 * 60_000 }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.
   folders: () =>
     queryOptions({

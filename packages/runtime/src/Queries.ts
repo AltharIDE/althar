@@ -6,6 +6,7 @@ import {
   AllowedBy,
   AttachedFile,
   AttentionRequest,
+  AutomationCard,
   type BoardSnapshot,
   type ChangeSummary,
   CheckLogShown,
@@ -206,6 +207,9 @@ interface ItemRow {
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
   readonly rule?: string | null
+  /** For a refused tool call: why it was, and who decided: Althar's rules, the lead or the person. */
+  readonly reason?: string | null
+  readonly decidedBy?: 'rules' | 'coordinator' | 'person' | null
   /** For a question: its call's state and payload, where its answer is. */
   readonly questionState?: string | null
   readonly questionPayload?: string | null
@@ -384,6 +388,7 @@ const decodeAttached = Schema.decodeUnknownOption(Schema.Array(AttachedFile))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
 const decodeIssueChanges = Schema.decodeUnknownOption(IssueChangesCard)
 const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
+const decodeAutomation = Schema.decodeUnknownOption(AutomationCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
@@ -446,6 +451,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             return path === '' ? [] : [{ path, ...(typeof line === 'number' ? { line } : {}) }]
           }),
           declined: row.decision === 'reject',
+          ...(row.decision === 'reject' && row.decidedBy ? { declinedBy: row.decidedBy } : {}),
+          ...(row.decision === 'reject' && row.reason ? { declinedWhy: row.reason } : {}),
           ...(row.asks === 1 ? { asks: true } : {}),
           ...(allowedBy === undefined ? {} : { allowedBy }),
           pictures: picturesOf(field(content, 'pictures')),
@@ -472,6 +479,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       const severity = text(content, 'severity')
       const description = text(content, 'description')
       const role = text(content, 'role')
+      // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
+      const title = text(content, 'title')
+      if (title === 'Resumed after a rejection.') return undefined
+      // Likewise the coordinator's receipt of a denial, kept by older threads.
+      if (title?.startsWith('Denied ') && description?.startsWith('By the coordinator:') && text(content, 'about') === 'permission')
+        return undefined
       return {
         ...base,
         kind: 'notice',
@@ -595,6 +608,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeDraft(content), {
         onNone: () => undefined,
         onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
+      })
+    // An automation's card, written whole as the coordinator proposes or changes it, and kept current with where it stands.
+    case 'automation':
+      return Option.match(decodeAutomation(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'automation', content: card }),
       })
     // Changes to issues, written whole with each change, as an issue draft's card is.
     case 'issue_changes':
@@ -846,6 +865,13 @@ export class Queries extends Context.Service<
               (SELECT d.rule FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule,
+              (SELECT d.reason FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
+                WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS reason,
+              (SELECT CASE d.decided_by_actor_id WHEN ${instance.systemId} THEN 'rules' WHEN ${instance.coordinatorId} THEN 'coordinator' ELSE 'person' END
+                FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
+                WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decided_by,
               q.state AS question_state, q.payload AS question_payload,
               -- An agent's tool call that asks the person is the question it asks, which stands in its place.
               (x.tool_call_id IS NOT NULL) AS asks
@@ -1909,7 +1935,19 @@ export class Queries extends Context.Service<
             ...(line === null ? {} : { inLine: true, place: line.place, ...(line.reordered ? { reordered: true } : {}) }),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
+            automation: yield* fromAutomation(taskId),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
+        })
+
+      /** The automation whose run a task is, by its name now; null where none started it. */
+      const fromAutomation = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ id: string; name: string }>`
+            SELECT a.id, d.name FROM automation_occurrences o JOIN automations a ON a.id = o.automation_id
+            JOIN automation_definitions d ON d.automation_id = a.id AND d.number = a.definition
+            WHERE o.task_id = ${taskId} LIMIT 1`
+          return row === undefined ? null : { id: row.id, name: row.name }
         })
 
       /** What a held step waits for: the agent and account out of usage, when it is back, why it waits, and who could take it over now. */

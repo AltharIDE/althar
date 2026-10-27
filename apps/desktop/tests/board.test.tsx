@@ -550,6 +550,37 @@ describe('the board', () => {
     expect(screen.queryByText(/running/)).toBeNull()
   })
 
+  it('says on a task’s card which automation’s run it is, whichever lane it is in, and nothing on one of the person’s own', async () => {
+    const from = { id: 'auto1', name: 'Morning review' }
+    const { client } = fakeClient({
+      getBoard: vi.fn(async () =>
+        board({
+          tasks: [
+            task({ taskId: 't2', threadId: 'th2', title: 'Review #264', slug: 'review-264', phase: 'running', automation: from }),
+            task({ taskId: 't3', threadId: 'th3', title: 'Ship it', slug: 'ship-it', phase: 'waiting', automation: from }),
+            task({
+              taskId: 't4',
+              threadId: 'th4',
+              title: 'Bump zod',
+              slug: 'bump-zod',
+              phase: 'ready',
+              automation: { id: 'auto2', name: 'Nightly bump' },
+            }),
+            task({ taskId: 't5', threadId: 'th5', title: 'Mine', slug: 'mine', phase: 'running', automation: null }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const work = await screen.findByRole('region', { name: 'The project’s work' })
+    const cardOf = (title: string) => within(within(work).getByRole('button', { name: title }).closest('article') as HTMLElement)
+    expect(cardOf('Review #264').getByText('From Morning review')).toBeTruthy()
+    expect(cardOf('Ship it').getByText('From Morning review')).toBeTruthy()
+    expect(cardOf('Bump zod').getByText('From Nightly bump')).toBeTruthy()
+    expect(cardOf('Mine').queryByText(/^From /)).toBeNull()
+  })
+
   it('counts every settled task, loads only the latest, and loads the older ones on request', async () => {
     const settledAt = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString()
     const settledTask = (n: number) =>

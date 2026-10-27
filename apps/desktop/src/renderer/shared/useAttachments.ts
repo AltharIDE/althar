@@ -24,7 +24,7 @@ import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkI
  * other file, a folder, or an image for an agent that says it doesn't take
  * them, goes as a file: main measures it and grants it (`main/attachments`),
  * and the runtime copies it where the agent reads as the message goes
- * (ADR-061). An image with no file behind it, as a pasted screenshot, can't
+ * (ADR-062). An image with no file behind it, as a pasted screenshot, can't
  * go as a file: for an agent that doesn't take images, it is refused, and
  * any added before that agent was picked hold the message back with a word
  * of why, rather than going nowhere. Where the agent hasn't said, images go,

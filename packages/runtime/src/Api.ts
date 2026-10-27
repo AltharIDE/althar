@@ -26,6 +26,7 @@ import { SqlClient } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
+import { Automations } from './Automations'
 import { Changes } from './Changes'
 import { codeRootOf } from './code'
 import { NotFound } from './errors'
@@ -194,6 +195,12 @@ export const handlers = Api.toLayer(
     const issues = yield* Issues
     const pullRequests = yield* Changes
     const busy = yield* Busy
+    const automations = yield* Automations
+    /** Where the change feed stands, read before what a snapshot shows, so a client watching from it misses nothing. */
+    const cursorNow = Effect.map(
+      sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`,
+      ([row]) => row?.cursor ?? 0,
+    )
     const envelope = (type: string, payload: unknown, commandId: string) =>
       Effect.provideContext(Runtime.envelope(type, payload, commandId), context)
     const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
@@ -804,6 +811,7 @@ export const handlers = Api.toLayer(
             return {
               coAuthor: { on, line: coAuthorLine },
               postTeamReviews: yield* postTeamReviews,
+              automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
               agentsAtOnce: {
                 count: atOnce.count,
@@ -823,6 +831,42 @@ export const handlers = Api.toLayer(
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      GetAutomations: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const cursor = yield* cursorNow
+            return { cursor, automations: yield* automations.list(projectId), allPaused: yield* automations.allPaused }
+          }),
+        ),
+      GetAutomation: ({ automationId }) =>
+        api(
+          Effect.gen(function* () {
+            const cursor = yield* cursorNow
+            return { cursor, automation: yield* automations.read(automationId) }
+          }),
+        ),
+      MakeAutomation: ({ commandId, projectId, definition, on }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              automations.make({ projectId, definition, ...(on === undefined ? {} : { on }), actorId: instance.personId }),
+              (automationId) => ({ automationId }),
+            ),
+          ),
+        ),
+      ChangeAutomation: ({ commandId, automationId, definition }) =>
+        once(commandId, api(automations.change(automationId, definition, instance.personId))),
+      TurnOnAutomation: ({ commandId, automationId, itemId }) =>
+        once(commandId, api(automations.turnOn(automationId, instance.personId, itemId))),
+      PauseAutomation: ({ commandId, automationId }) => once(commandId, api(automations.pause(automationId, instance.personId))),
+      RunAutomationNow: ({ commandId, automationId, itemId }) =>
+        once(commandId, api(automations.runNow(automationId, instance.personId, itemId))),
+      DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
+      UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),
+      SetAutomationPostsReviews: ({ commandId, automationId, on }) =>
+        once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),
+      SetAutomationsPaused: ({ commandId, paused }) => once(commandId, api(automations.setAllPaused(paused))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),

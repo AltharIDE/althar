@@ -2146,12 +2146,12 @@ export class Runs extends Context.Service<
       /**
        * Whether work goes on with the agent's next account here: only where
        * the project turned that on (ADR-012), and another of its accounts the
-       * project allows can run.
+       * project allows can run: for an automation's run, one on a plan.
        */
-      const nextAccount = (agentId: string, projectId: ProjectId) =>
+      const nextAccount = (agentId: string, projectId: ProjectId, threadId: string) =>
         Effect.gen(function* () {
           if (!(yield* limits.rotates(projectId))) return false
-          return Option.isNone(yield* limits.out(agentId, projectId))
+          return Option.isNone(yield* limits.out(agentId, projectId, threadId))
         })
 
       /** Says in the task's thread what a usage limit did; the home reads it as the loop's doing. */
@@ -2165,7 +2165,7 @@ export class Runs extends Context.Service<
        */
       const insteadOf = (run: RunRow, planned: PlanStep) =>
         Effect.gen(function* () {
-          const out = yield* limits.out(planned.agentId, run.projectId)
+          const out = yield* limits.out(planned.agentId, run.projectId, run.threadId)
           if (Option.isNone(out) || (yield* usageLimitOfRun(run)) !== 'move') return undefined
           const other = yield* otherStepOf(run, planned.key)
           const next = yield* limits.free([planned.agentId], other === undefined ? [] : [other], run.projectId)
@@ -2247,7 +2247,7 @@ export class Runs extends Context.Service<
           const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
           if (policy === 'move') {
             // The same agent's next account first, on the same model, where the project turned that on; then the next free agent.
-            const next = (yield* nextAccount(agentId, on.run.projectId))
+            const next = (yield* nextAccount(agentId, on.run.projectId, on.run.threadId))
               ? agentId
               : yield* limits.free([agentId], other === undefined ? [] : [other], on.run.projectId)
             if (next !== undefined) {
@@ -2256,7 +2256,8 @@ export class Runs extends Context.Service<
                 projectId: on.run.projectId,
                 ...(planned === undefined ? {} : { planned }),
               })
-              const to = next === agentId ? (yield* limits.pick({ agentId: next, projectId: on.run.projectId })).id : null
+              const to =
+                next === agentId ? (yield* limits.pick({ agentId: next, projectId: on.run.projectId, threadId: on.run.threadId })).id : null
               const said = outWords({
                 from,
                 resetsAt,
@@ -2305,10 +2306,12 @@ export class Runs extends Context.Service<
           const from = (yield* limits.named(agentId, null, accountId)).agent
           if (usageLimitOf((yield* policies.current(thread.projectId)).rules) === 'move') {
             // The same agent's next account first, where the project turned that on; then the next free agent.
-            const next = (yield* nextAccount(agentId, thread.projectId)) ? agentId : yield* limits.free([agentId], [], thread.projectId)
+            const next = (yield* nextAccount(agentId, thread.projectId, threadId))
+              ? agentId
+              : yield* limits.free([agentId], [], thread.projectId)
             if (next !== undefined) {
               const model = yield* limits.modelFor({ agentId: next, projectId: thread.projectId })
-              const to = next === agentId ? (yield* limits.pick({ agentId: next, projectId: thread.projectId })).id : null
+              const to = next === agentId ? (yield* limits.pick({ agentId: next, projectId: thread.projectId, threadId })).id : null
               yield* sessions.switchAgent({
                 threadId,
                 agentId: next,

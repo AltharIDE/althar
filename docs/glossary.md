@@ -100,6 +100,21 @@ say the right. When something new needs a name on screen, add it here first.
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
+## Automations
+
+| On screen | In the model | What it is |
+|---|---|---|
+| Automations | `Room.Automations`, `automations` (ADR-061) | A project's view between Board and Settings: the work that starts by itself on a schedule, on this computer while Althar is open, as cards, the one that paused itself first, with a violet dot on the view's name. A card opens its automation's own page there. |
+| Automation | an automation and its definitions | A kept request and a schedule: what each run is asked, its lead, what it ends in (nothing outside this computer, a draft or ready pull request, or a review of each new pull request), when it runs (days at a time where the computer is, or every hour), and its limits. Made by asking the coordinator, on its card, or with New automation. |
+| Run, Runs, Run now | an automation's occurrence, and the task it started | One time an automation ran, or didn't: made something, nothing to do, failed, missed while the computer slept, or skipped and why. Its page lists them, its card shows the last seven as marks. The one place "run" is said on screen. Run now runs it once, with every limit a run has. |
+| Try it once now | `RunAutomationNow` on a proposed automation | On an automation not turned on yet: one run as it would run. |
+| Turn on, Off until you turn it on | `TurnOnAutomation`, an automation `proposed` | Nothing of an automation runs until the person turns it on. A change the coordinator makes that reaches further than before puts it back to waiting for them. |
+| Paused, Paused itself | `paused_by` the person, or itself | The switch on its page pauses it; nothing of it starts until it is on again, and a run under way finishes. After three failures in a row it pauses itself and says why, violet. |
+| Pause all automations | the `automations_paused` setting | In Settings and the Automations view's menu: nothing of any automation starts until they are resumed; runs under way finish. |
+| Post this automation's reviews from now on | `posts_reviews` | On an automation's first review draft, beside Post: posts it, and lets its next reviews post themselves; on its page, a switch. A pull request from outside the team always waits. |
+| Open Althar at login | the desktop's `openAtLogin` preference | Offered on the Automations view while it is off, and in Settings: Althar opens with no window when the computer starts, so automations run after a restart. |
+| From Althar's morning review | a review or pull request signed with the automation's name | How what an automation's run posts on the code host is signed, by the automation and the agent that wrote it. |
+
 ## Updates
 
 | On screen | In the model | What it is |
@@ -128,7 +143,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Findings | review findings | What a review step found. By default the lead settles them. |
 | Artifacts | artifacts | What a task wrote that is worth keeping and isn't in a repository. |
 | Screenshots, Image | artifact of kind `image` | Pictures an agent hands back, under what it said, full size on a click. One without a name is "Image 1". |
-| Add files, Drop to add to your message | `user_input_images`, artifacts of kind `image`; `user_input_files`, `.althar/attachments` | Images, files and folders you send with a message: dropped on the composer, pasted (a file copied in the file manager too), or picked with Add files; shown above what you write, an image small and anything else as a chip with its size, each with Remove, and above your message once sent. Images are PNG, JPEG, GIF or WebP, up to ten a message; one wider than 2000 pixels or over 5 MB is made smaller first. An agent that doesn't take images gets an image as a file where there is one behind it, else none: the composer says so. One copied with no name is "Pasted image". Files and folders go up to ten a message, each up to 50 MB (a folder, 2,000 files), copied into the task's or the coordinator's folder for the agent to open (ADR-061). |
+| Add files, Drop to add to your message | `user_input_images`, artifacts of kind `image`; `user_input_files`, `.althar/attachments` | Images, files and folders you send with a message: dropped on the composer, pasted (a file copied in the file manager too), or picked with Add files; shown above what you write, an image small and anything else as a chip with its size, each with Remove, and above your message once sent. Images are PNG, JPEG, GIF or WebP, up to ten a message; one wider than 2000 pixels or over 5 MB is made smaller first. An agent that doesn't take images gets an image as a file where there is one behind it, else none: the composer says so. One copied with no name is "Pasted image". Files and folders go up to ten a message, each up to 50 MB (a folder, 2,000 files), copied into the task's or the coordinator's folder for the agent to open (ADR-062). |
 | Document | a markdown file an agent wrote or pointed at | Its card stands under what it said; "Read in the panel" opens it beside the thread, as it is now in the worktree. |
 | Output | artifact of kind `log` | What a command printed, in its tool call: its last lines, "N earlier lines" a click away. |
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |
@@ -157,8 +172,9 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 
 ## Words the interface doesn't use
 
-Worker, session, run, attempt, node, graph patch, compensation, attention
-request, canonical, episodic, binding and failed. Each has an entry above.
+Worker, session, run (but an automation's, above), attempt, node, graph
+patch, compensation, attention request, canonical, episodic, binding and
+failed. Each has an entry above.
 If one of them turns up on screen, treat it as a bug.
 
 ## Still to align
