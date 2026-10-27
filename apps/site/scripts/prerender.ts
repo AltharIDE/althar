@@ -35,6 +35,7 @@ const LAZY: Partial<Record<PagePath, string>> = {
   '/enterprise': 'src/enterprise/Home.tsx',
   '/train': 'src/train/Train.tsx',
   '/orbit': 'src/orbit/Orbit.tsx',
+  '/reentry': 'src/reentry/Reentry.tsx',
 }
 type Manifest = Record<string, { file: string; css?: string[]; imports?: string[] }>
 const manifest = JSON.parse(await readFile(resolve(dist, '.vite/manifest.json'), 'utf8')) as Manifest
