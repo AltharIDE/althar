@@ -81,6 +81,16 @@ export const PAGE_META = {
     image: '/og/home.png',
     index: false,
   },
+  /** Another, seen from a space station as the sun comes up: linked from nowhere, and kept out of search. */
+  '/orbit': {
+    path: '/orbit',
+    name: 'Althar, from orbit',
+    title: 'Althar · building software, from orbit',
+    description:
+      'A concept for Althar’s first screen: the Earth from a space station, the view running into a time-lapse until the sun comes up.',
+    image: '/og/home.png',
+    index: false,
+  },
 } as const satisfies Record<string, PageMeta>
 
 export type PagePath = keyof typeof PAGE_META
