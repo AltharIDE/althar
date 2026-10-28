@@ -928,6 +928,9 @@ describe('a step that needs the person', () => {
       assert.strictEqual(card?.title, 'Long one')
       const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
       assert.strictEqual(run?.state, 'cancelled')
+      // Stopped with no agent on it, the card says what stopped its lead (the turn was cut short) and when.
+      assert.strictEqual(card?.stopped?.by, 'interrupted')
+      assert.isTrue((card?.stopped?.at ?? '') > '')
     }).pipe(Effect.provide(withQueries())),
   )
 
