@@ -40,7 +40,11 @@
     where they stood. The board, Home's calls, the window's tabs and the
     composer's attachments use it. The board's hold (ADR-065) still keeps a
     card in its lane while the pointer is in Up next or Running; it travels
-    once the pointer leaves.
+    once the pointer leaves. A list with an order of its own, Up next's
+    line, has a `ListMotion` of its own that hands its moves to the board's,
+    so a row moved by its menu or by key slides. A drag owns what it drags
+    (`still`): nothing of ours moves a tab or a row while it is held. When a
+    screen goes or hides, what it set moving is put away at once.
   - **What lands in a thread rises into its place** (`useArrivals`): a
     message, a round, a card, a step of a turn. Not as the thread opens,
     not many at once, not a placeholder taken by what it held, and not the

@@ -399,20 +399,29 @@ function MovingBoard() {
       <div style={{ flex: 1, minHeight: 0 }}>
         <Board label="Meridian’s work">
           <BoardColumn lane={BoardLane.Next} count={of(BoardLane.Next).length}>
-            <BoardList>
-              {of(BoardLane.Next).map((one, i) => (
+            {/* Its grip's menu, or ⌥⇧↑ and ⌥⇧↓ on it, moves a row in the line. */}
+            <NextLine
+              rows={of(BoardLane.Next)}
+              render={(id, place) => (
                 <NextRow
-                  key={one.id}
-                  data-move={one.id}
-                  place={i + 1}
+                  data-move={id}
+                  place={place}
                   task=""
                   text={UNNAMED}
-                  title={one.title}
+                  title={tasks.find((one) => one.id === id)?.title ?? ''}
                   wait={Wait.Workers}
                   reason="Starts when an agent is free"
                 />
-              ))}
-            </BoardList>
+              )}
+              onMove={(id, to) =>
+                setTasks((all) => {
+                  const task = all.find((one) => one.id === id)!
+                  const line = of(BoardLane.Next).filter((one) => one !== task)
+                  const rest = all.filter((one) => one.lane !== BoardLane.Next)
+                  return [...line.slice(0, to), task, ...line.slice(to), ...rest]
+                })
+              }
+            />
           </BoardColumn>
           <BoardColumn lane={BoardLane.Running} count={of(BoardLane.Running).length}>
             {of(BoardLane.Running).map((one) => (
@@ -584,12 +593,13 @@ export const AllStates: Story = {
 
 /**
  * What moves, a press each: a card slides to its new place, travels to another
- * lane above the board, comes in and fades out (ListMotion). Nothing is
- * pressed for you here, so each can be watched.
+ * lane above the board, comes in and fades out (ListMotion); up next, a row's
+ * grip moves it in the line. Nothing is pressed for you here, so each can be
+ * watched.
  */
 export const Moving: Story = { render: () => <MovingBoard /> }
 
-/** Merged, a card ends in Settled; one more up next, and it is in the line. */
+/** Merged, a card ends in Settled; one more up next, and it is in the line; moved by key, a row takes its new place. */
 export const MovingByAPress: Story = {
   render: () => <MovingBoard />,
   play: async ({ canvasElement }) => {
@@ -599,5 +609,10 @@ export const MovingByAPress: Story = {
     await expect(within(settled).getByText('Fix the failing CI')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Add one up next' }))
     await expect(c.getByText('A new task, 1')).toBeInTheDocument()
+    // Moved by key on its grip, a row takes its new place in the line.
+    c.getByRole('button', { name: 'Move Shorten long commands in running pills in the line' }).focus()
+    await userEvent.keyboard('{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}')
+    const next = canvasElement.querySelector<HTMLElement>(`[data-lane="${BoardLane.Next}"]`)!
+    await expect([...next.querySelectorAll<HTMLElement>('[data-row]')].map((one) => one.dataset.row)).toEqual(['m2', 'm1', 'm3', 'new0'])
   },
 }

@@ -1,4 +1,4 @@
-import { Component, type ReactNode, type RefObject } from 'react'
+import { Component, type ContextType, createContext, type ReactNode, type RefObject } from 'react'
 
 import { MOTION, reducedMotion, SCALE } from './motion'
 
@@ -24,6 +24,13 @@ import { MOTION, reducedMotion, SCALE } from './motion'
  * did, not the order), or where much of it changed at once: a screen drawn
  * afresh isn't an arrival. With reduced motion nothing travels; what comes
  * and goes only fades.
+ *
+ * A list that changes by state of its own, such as the line up next, is
+ * wrapped in a ListMotion of its own; within another, that one hands its
+ * updates to the outer one, which takes and moves what is in both, once an
+ * update. While `still`, a list's items are someone else's to move (a drag):
+ * nothing of ours does. When a list goes, or hides, what it set moving is
+ * put away at once: nothing of one screen travels over the next.
  */
 
 /** More than this many items coming, or going, at once is a list drawn afresh: they show, or go, at once. */
@@ -36,6 +43,8 @@ export interface ListMotionProps {
   readonly within: RefObject<HTMLElement | null>
   /** How a new item comes in: rises a little into its place (a card, a row), or grows there (a chip, a tab). */
   readonly enter?: ListEnter
+  /** While true, its items are a drag's to move, not ours: what moves them stops, and the update that ends it moves nothing. */
+  readonly still?: boolean
   readonly children?: ReactNode
 }
 
@@ -47,33 +56,92 @@ interface Stood {
   readonly list: Element | null
 }
 
-type Snapshot = ReadonlyMap<string, Stood>
+interface Snapshot {
+  readonly stood: ReadonlyMap<string, Stood>
+  /** The lists within that were still: their items are left as they are. */
+  readonly held: ReadonlyArray<HTMLElement>
+}
+
+/** The outermost ListMotion around, which moves what is in those within it. */
+const Outer = createContext<ListMotion | null>(null)
 
 export class ListMotion extends Component<ListMotionProps> {
-  override getSnapshotBeforeUpdate(): Snapshot | null {
-    const root = this.props.within.current
-    if (root === null || !moves(root)) return null
-    const stood = new Map<string, Stood>()
-    for (const el of itemsIn(root))
-      stood.set(el.dataset.move!, { el, rect: running.get(el)?.shown() ?? el.getBoundingClientRect(), list: listOf(el) })
-    return stood
+  static override contextType = Outer
+  declare context: ContextType<typeof Outer>
+
+  /** Where each item stood before the update under way, taken once for it and those within. */
+  private taken: Snapshot | null = null
+  /** Those within, which hand their updates to this one. */
+  private readonly inner = new Set<ListMotion>()
+  /** Puts away what this one set moving. */
+  private readonly own = new Set<() => void>()
+
+  private get outer(): ListMotion {
+    return this.context ?? this
   }
 
-  override componentDidUpdate(_props: ListMotionProps, _state: unknown, before: Snapshot | null) {
+  override componentDidMount() {
+    this.context?.inner.add(this)
+  }
+
+  override getSnapshotBeforeUpdate(was: ListMotionProps): true | null {
+    if (was.still === true || this.props.still === true) return null
+    return this.outer.take() ? true : null
+  }
+
+  override componentDidUpdate(was: ListMotionProps, _state: unknown, took: true | null) {
+    if (took !== null) this.outer.play()
+    // A drag took hold: what of ours moves its items stops where they are laid out.
+    if (this.props.still === true && was.still !== true) {
+      const root = this.props.within.current
+      if (root !== null) for (const el of itemsIn(root)) running.get(el)?.stop()
+    }
+  }
+
+  override componentWillUnmount() {
+    // Gone, or hidden (React's Activity): nothing it set moving stays.
+    this.context?.inner.delete(this)
+    // Each, put away, leaves the set: one not yet reached is still there.
+    for (const stop of this.own) stop()
+    this.taken = null
+  }
+
+  /** Where each item stands, before the document changes: false where nothing can move. */
+  private take() {
+    if (this.taken !== null) return true
+    const root = this.props.within.current
+    if (root === null || !moves(root)) return false
+    const held = [...this.inner].flatMap((one) =>
+      one.props.still === true && one.props.within.current !== null ? [one.props.within.current] : [],
+    )
+    const stood = new Map<string, Stood>()
+    for (const el of itemsIn(root, held))
+      stood.set(el.dataset.move!, { el, rect: running.get(el)?.shown() ?? el.getBoundingClientRect(), list: listOf(el) })
+    this.taken = { stood, held }
+    return true
+  }
+
+  /** Moves each item from where it stood to where it is now, once an update. */
+  private play() {
+    const before = this.taken
+    this.taken = null
     const root = this.props.within.current
     if (before === null || root === null || !moves(root)) return
-    const items = itemsIn(root)
+    const items = itemsIn(root, before.held)
     // Read everything, then write: where each is laid out now, whatever of ours moves it.
     const to = items.map((el) => running.get(el)?.place() ?? el.getBoundingClientRect())
-    const came = items.filter((el) => !before.has(el.dataset.move!))
+    const came = items.filter((el) => !before.stood.has(el.dataset.move!))
     const keys = new Set(items.map((el) => el.dataset.move!))
-    const went = [...before].filter(([key]) => !keys.has(key)).map(([, was]) => was)
+    const went = [...before.stood].filter(([key]) => !keys.has(key)).map(([, was]) => was)
     const reduced = reducedMotion()
     const goes = items.map((el, i) => {
-      const was = before.get(el.dataset.move!)
+      const was = before.stood.get(el.dataset.move!)
+      if (was === undefined) return null
+      // Drawn again elsewhere mid-journey: the old one's journey ends, and this one sets out from where it showed.
+      if (was.el !== el) running.get(was.el)?.stop()
       const now = running.get(el)
       // On its way to where it is laid out already: it carries on.
-      if (was === undefined || (now !== undefined && same(now.to, to[i]!))) return null
+      if (now !== undefined && same(now.to, to[i]!)) return null
       now?.stop()
       const from = was.rect
       if (reduced || !moved(from, to[i]!) || resized(from, to[i]!) || (offscreen(from) && offscreen(to[i]!))) return null
@@ -82,16 +150,16 @@ export class ListMotion extends Component<ListMotionProps> {
     const furthest = Math.max(0, ...goes.map((one) => one?.far ?? 0))
     for (const one of goes) {
       if (one === null) continue
-      if (one.again) travel(one.el, one.from, one.to)
-      else slide(one.el, one.from, one.to, one.far === furthest)
+      if (one.again) travel(this.own, one.el, one.from, one.to)
+      else slide(this.own, one.el, one.from, one.to, one.far === furthest)
     }
     if (came.length <= FRESH) for (const el of came) enter(el, this.props.enter ?? 'rise', reduced)
     if (went.length <= FRESH)
-      for (const was of went) if (!was.el.isConnected && was.list?.isConnected === true) leave(was.el, was.rect, reduced)
+      for (const was of went) if (!was.el.isConnected && was.list?.isConnected === true) leave(this.own, was.el, was.rect, reduced)
   }
 
   override render() {
-    return this.props.children
+    return <Outer.Provider value={this.outer}>{this.props.children}</Outer.Provider>
   }
 }
 
@@ -100,12 +168,12 @@ export class ListMotion extends Component<ListMotionProps> {
 /** Whether anything can move here: the browser animates, and the list shows. */
 const moves = (root: HTMLElement) => typeof root.animate === 'function' && (root.checkVisibility?.() ?? true)
 
-/** Its items, each key once, the first in the document's order. */
-const itemsIn = (root: HTMLElement) => {
+/** Its items, each key once, the first in the document's order, but those in a list held still. */
+const itemsIn = (root: HTMLElement, held: ReadonlyArray<HTMLElement> = []) => {
   const seen = new Set<string>()
   return [...root.querySelectorAll<HTMLElement>('[data-move]')].filter((el) => {
     const key = el.dataset.move!
-    if (seen.has(key)) return false
+    if (seen.has(key) || held.some((list) => list.contains(el))) return false
     seen.add(key)
     return true
   })
@@ -186,32 +254,36 @@ interface Running {
 /** What of ours is moving each item. */
 const running = new Map<HTMLElement, Running>()
 
-const journey = (el: HTMLElement, one: Animation, ran: Omit<Running, 'stop'>, done: () => void) => {
+/** What a ListMotion set moving, each put away by calling it. */
+type Own = Set<() => void>
+
+const journey = (own: Own, el: HTMLElement, one: Animation, ran: Omit<Running, 'stop'>, done: () => void) => {
+  // Stopped, it puts back what it changed at once: its cancel event comes later, after the next move began.
+  const stop = () => {
+    end()
+    one.cancel()
+  }
   const end = () => {
+    own.delete(stop)
     if (running.get(el)?.to !== ran.to) return
     running.delete(el)
     done()
   }
-  // Stopped, it puts back what it changed at once: its cancel event comes later, after the next move began.
-  running.set(el, {
-    ...ran,
-    stop: () => {
-      end()
-      one.cancel()
-    },
-  })
+  own.add(stop)
+  running.set(el, { ...ran, stop })
   one.addEventListener('finish', end)
   one.addEventListener('cancel', end)
 }
 
 /** Slides from where it stood; the one going furthest rides above the rest, each with what is behind it. */
-const slide = (el: HTMLElement, from: DOMRect, to: DOMRect, above: boolean) => {
+const slide = (own: Own, el: HTMLElement, from: DOMRect, to: DOMRect, above: boolean) => {
   const was = { background: el.style.background, zIndex: el.style.zIndex, position: el.style.position }
   if (clear(getComputedStyle(el).backgroundColor)) el.style.background = backdrop(el)
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative'
   el.style.zIndex = above ? '2' : '1'
   const one = el.animate([{ translate: `${from.left - to.left}px ${from.top - to.top}px` }, { translate: '0px 0px' }], MOTION.move)
   journey(
+    own,
     el,
     one,
     {
@@ -227,13 +299,13 @@ const slide = (el: HTMLElement, from: DOMRect, to: DOMRect, above: boolean) => {
 }
 
 /** Travels from where it stood, as a copy above the page, while it waits unseen in its new place. */
-const travel = (el: HTMLElement, from: DOMRect, to: DOMRect) => {
+const travel = (own: Own, el: HTMLElement, from: DOMRect, to: DOMRect) => {
   const twin = lay(el.cloneNode(true) as HTMLElement, to)
   if (clear(getComputedStyle(el).backgroundColor)) twin.style.background = backdrop(el)
   const hidden = el.style.visibility
   el.style.visibility = 'hidden'
   const one = twin.animate([{ translate: `${from.left - to.left}px ${from.top - to.top}px` }, { translate: '0px 0px' }], MOTION.move)
-  journey(el, one, { to, shown: () => twin.getBoundingClientRect(), place: () => el.getBoundingClientRect() }, () => {
+  journey(own, el, one, { to, shown: () => twin.getBoundingClientRect(), place: () => el.getBoundingClientRect() }, () => {
     twin.remove()
     el.style.visibility = hidden
   })
@@ -246,7 +318,7 @@ const enter = (el: HTMLElement, how: ListEnter, reduced: boolean) => {
 }
 
 /** Fades where it stood: no longer the page's, it is its own copy. */
-const leave = (el: HTMLElement, at: DOMRect, reduced: boolean) => {
+const leave = (own: Own, el: HTMLElement, at: DOMRect, reduced: boolean) => {
   // A move of ours under way puts back what it changed now, not later over the copy.
   running.get(el)?.stop()
   for (const one of el.getAnimations()) one.cancel()
@@ -255,7 +327,11 @@ const leave = (el: HTMLElement, at: DOMRect, reduced: boolean) => {
     reduced ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1 }, { opacity: 0, scale: String(SCALE.pop) }],
     reduced ? { duration: MOTION.exit.duration, easing: 'linear' } : MOTION.exit,
   )
-  const gone = () => el.remove()
+  const gone = () => {
+    own.delete(gone)
+    el.remove()
+  }
+  own.add(gone)
   one.addEventListener('finish', gone)
   one.addEventListener('cancel', gone)
 }

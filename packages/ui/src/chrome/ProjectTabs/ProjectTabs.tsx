@@ -272,8 +272,8 @@ export function ProjectTabs({
             </li>
           )}
         </ul>
-        {/* A tab opened grows in, a closed one fades, and the rest close up; dragged, a tab moves itself. */}
-        <ListMotion within={list} enter="grow">
+        {/* A tab opened grows in, a closed one fades, and the rest close up; dragged, the tabs are the drag's to move. */}
+        <ListMotion within={list} enter="grow" still={dragging !== null}>
           <ul className={cx(s.tabs, dragging !== null && s.sorting, more.before && s.moreBefore, more.after && s.moreAfter)} ref={list}>
             {tabs.map((tab) => (
               <li

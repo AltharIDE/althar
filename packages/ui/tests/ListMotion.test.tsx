@@ -1,5 +1,5 @@
-import { render } from '@testing-library/react'
-import { useRef } from 'react'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { Activity, useRef, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ListMotion } from '../src/lib/ListMotion'
@@ -63,8 +63,12 @@ function stubAnimations() {
   }
 }
 
-/** Where layout puts an item: its list across, its place down (the first narrower, where `narrowFirst`); anything else, nowhere. */
+/** Where layout puts an item: its list across, its place down (the first narrower, where `narrowFirst`); a copy where it is laid; anything else, nowhere. */
 const placed = (el: Element) => {
+  if (el.parentElement !== null && el.parentElement === layer()) {
+    const { left, top, width, height } = (el as HTMLElement).style
+    return new DOMRect(Number.parseFloat(left), Number.parseFloat(top), Number.parseFloat(width), Number.parseFloat(height))
+  }
   const list = el.closest('ol')
   if (list === null || !el.hasAttribute('data-move')) return new DOMRect(0, 0, 0, 0)
   const lists = [...(list.parentElement?.querySelectorAll('ol') ?? [])]
@@ -99,11 +103,11 @@ afterEach(() => {
 })
 
 /** Lists of keys, each a list side by side. */
-function Lists({ lists, enter }: { lists: ReadonlyArray<ReadonlyArray<string>>; enter?: 'rise' | 'grow' }) {
+function Lists({ lists, enter, still = false }: { lists: ReadonlyArray<ReadonlyArray<string>>; enter?: 'rise' | 'grow'; still?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   return (
     <div ref={ref}>
-      <ListMotion within={ref} {...(enter === undefined ? {} : { enter })}>
+      <ListMotion within={ref} still={still} {...(enter === undefined ? {} : { enter })}>
         {lists.map((keys, i) => (
           <ol key={i}>
             {keys.map((key) => (
@@ -113,6 +117,44 @@ function Lists({ lists, enter }: { lists: ReadonlyArray<ReadonlyArray<string>>; 
             ))}
           </ol>
         ))}
+      </ListMotion>
+    </div>
+  )
+}
+
+/* A line with an order of its own, as up next has, the first of the lists, beside one of the board's. */
+function Line({ keys, still }: { keys: ReadonlyArray<string>; still: boolean }) {
+  const ref = useRef<HTMLOListElement>(null)
+  const [order, setOrder] = useState<ReadonlyArray<string> | null>(null)
+  const shown = order ?? keys
+  return (
+    <ListMotion within={ref} still={still}>
+      <ol ref={ref}>
+        {shown.map((key) => (
+          <li key={key} data-move={key}>
+            <button type="button" onClick={() => setOrder([key, ...shown.filter((one) => one !== key)])}>
+              {key}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </ListMotion>
+  )
+}
+
+function Nested({ line, rest, still = false }: { line: ReadonlyArray<string>; rest: ReadonlyArray<string>; still?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null)
+  return (
+    <div ref={ref}>
+      <ListMotion within={ref}>
+        <Line keys={line} still={still} />
+        <ol>
+          {rest.map((key) => (
+            <li key={key} data-move={key}>
+              {key}
+            </li>
+          ))}
+        </ol>
       </ListMotion>
     </div>
   )
@@ -213,6 +255,96 @@ describe('ListMotion', () => {
     expect(c.style.position).toBe('absolute')
     expect(c.style.zIndex).toBe('')
     expect(of(c).at(-1)!.keyframes.at(-1)).toEqual({ opacity: 0, scale: '0.96' })
+  })
+
+  it('ends a journey under way where its item is drawn again elsewhere: one copy travels on, from where the first showed', () => {
+    const { rerender } = render(<Lists lists={[['a', 'b'], [], []]} />)
+    rerender(<Lists lists={[['a'], ['b'], []]} />)
+    const first = played.at(-1)!
+    rerender(<Lists lists={[['a'], [], ['b']]} />)
+    expect(first.cancel).toHaveBeenCalled()
+    expect(first.el.isConnected).toBe(false)
+    expect(layer()!.childElementCount).toBe(1)
+    expect(of(layer()!.firstElementChild!)[0]!.keyframes[0]).toEqual({ translate: '-300px 0px' })
+    expect(item('b').style.visibility).toBe('hidden')
+  })
+
+  it('puts away what it set moving when its list goes: nothing of one screen travels over the next', () => {
+    const { rerender, unmount } = render(
+      <Lists
+        lists={[
+          ['a', 'b'],
+          ['c', 'd'],
+        ]}
+      />,
+    )
+    rerender(<Lists lists={[['a'], ['b', 'c']]} />)
+    // b travels, d fades where it stood.
+    expect(layer()!.childElementCount).toBe(2)
+    unmount()
+    expect(layer()!.childElementCount).toBe(0)
+  })
+
+  it('puts away what it set moving when its screen hides, and shows the item it travelled for', () => {
+    const { rerender } = render(
+      <Activity mode="visible">
+        <Lists lists={[['a', 'b'], ['c']]} />
+      </Activity>,
+    )
+    rerender(
+      <Activity mode="visible">
+        <Lists lists={[['a'], ['b', 'c']]} />
+      </Activity>,
+    )
+    const b = item('b')
+    expect(b.style.visibility).toBe('hidden')
+    rerender(
+      <Activity mode="hidden">
+        <Lists lists={[['a'], ['b', 'c']]} />
+      </Activity>,
+    )
+    expect(layer()!.childElementCount).toBe(0)
+    expect(b.style.visibility).toBe('')
+  })
+
+  it('leaves a list to a drag while it is still: what moved stops, and nothing moves until the drag lets go', () => {
+    const { rerender } = render(<Lists lists={[['a', 'b', 'c']]} />)
+    rerender(<Lists lists={[['c', 'a', 'b']]} />)
+    const slide = of(item('c'))[0]!
+    rerender(<Lists lists={[['c', 'a', 'b']]} still />)
+    expect(slide.cancel).toHaveBeenCalled()
+    played = []
+    rerender(<Lists lists={[['a', 'c', 'b']]} still />)
+    // Let go: the order it lands in is the drag's.
+    rerender(<Lists lists={[['a', 'b', 'c']]} />)
+    expect(played).toEqual([])
+    rerender(<Lists lists={[['c', 'a', 'b']]} />)
+    expect(of(item('c'))).toHaveLength(1)
+  })
+
+  it('moves a list within another, changed by its own state, once, from the outer one', () => {
+    render(<Nested line={['a', 'b', 'c']} rest={['x']} />)
+    fireEvent.click(screen.getByRole('button', { name: 'c' }))
+    expect(of(item('c'))).toHaveLength(1)
+    expect(of(item('c'))[0]!.keyframes[0]).toEqual({ translate: '0px 100px' })
+    expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '0px -50px' })
+  })
+
+  it('carries an item from a list within to the outer one once: no arrival, and no fading where it stood', () => {
+    const { rerender } = render(<Nested line={['a', 'b', 'c']} rest={['x']} />)
+    rerender(<Nested line={['a', 'b']} rest={['c', 'x']} />)
+    expect(layer()!.childElementCount).toBe(1)
+    expect(of(layer()!.firstElementChild!)[0]!.keyframes[0]).toEqual({ translate: '-300px 100px' })
+    expect(of(item('c'))).toEqual([])
+  })
+
+  it('leaves a still list within to its drag, though the outer one moves', () => {
+    const { rerender } = render(<Nested line={['a', 'b']} rest={['x']} />)
+    rerender(<Nested line={['b', 'a']} rest={['y', 'x']} still />)
+    expect(of(item('a'))).toEqual([])
+    expect(of(item('b'))).toEqual([])
+    expect(of(item('x'))[0]!.keyframes[0]).toEqual({ translate: '0px -50px' })
+    expect(of(item('y'))).toHaveLength(1)
   })
 
   it('lets a whole list go at once: its items leave with it', () => {

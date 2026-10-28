@@ -65,7 +65,7 @@ const shift = (name: string) => button(name).closest('li')!.style.transform
 const rect = (left: number, width: number) =>
   ({ left, right: left + width, width, top: 0, bottom: 30, height: 30, x: left, y: 0, toJSON: () => ({}) }) as DOMRect
 
-/* Lays out the tabs' list: `shown` pixels wide, scrolled as far as it is. */
+/* Lays out the tabs' list: `shown` pixels wide, scrolled as far as it is, each tab where a drag has it. */
 const layOut = (shown: number) => {
   const element = list()
   let scroll = 0
@@ -78,7 +78,10 @@ const layOut = (shown: number) => {
   })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this === element) return rect(0, shown)
-    if (this.parentElement === element) return rect(Array.from(element.children).indexOf(this) * STEP - scroll, WIDTH)
+    if (this.parentElement === element) {
+      const by = Number.parseFloat(/translateX\((-?[\d.]+)px\)/.exec(this.style.transform)?.[1] ?? '0')
+      return rect(Array.from(element.children).indexOf(this) * STEP - scroll + by, WIDTH)
+    }
     return rect(0, 0)
   })
 }
@@ -316,6 +319,32 @@ describe('dragging a project’s tab along the bar', () => {
     pointer('pointerMove', 'Meridian', 290, { buttons: 0 })
     act(() => void vi.advanceTimersToNextFrame())
     expect(list().scrollLeft).toBe(0)
+  })
+})
+
+describe('dragging a tab where the browser animates', () => {
+  // The bar's list moves as a whole (ListMotion) once the browser animates: a drag is its own.
+  let animated: Element[]
+  beforeEach(() => {
+    animated = []
+    Element.prototype.animate = function animate(this: Element) {
+      animated.push(this)
+      return { cancel: vi.fn(), addEventListener: vi.fn() } as unknown as Animation
+    }
+  })
+  afterEach(() => void delete (Element.prototype as Partial<Element>).animate)
+
+  it('lets the tab follow the pointer, and lands it, with nothing of the list’s motion pulling it back', () => {
+    render(<Bar initial={FOUR} />)
+    layOut(600)
+    pointer('pointerDown', 'Meridian', 20)
+    pointer('pointerMove', 'Meridian', 100)
+    pointer('pointerMove', 'Meridian', 180)
+    pointer('pointerMove', 'Meridian', 270)
+    expect(shift('Meridian')).toBe('translateX(250px)')
+    pointer('pointerUp', 'Meridian', 270)
+    expect(order()).toEqual(['Halyard', 'Tessera', 'Meridian', 'Ferrous'])
+    expect(animated).toEqual([])
   })
 })
 
