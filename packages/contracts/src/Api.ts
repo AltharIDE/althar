@@ -316,7 +316,7 @@ export const FinishedFolder = Schema.Struct({
   project: Schema.String,
   kind: FolderKind,
   settledAt: Schema.String,
-  /** On disk, in bytes, as `du` counts it, its repositories' folders together; null until measured. */
+  /** What removing it frees, in bytes, its repositories' folders together: what their files hold that nothing outside them shares, not clones or hardlinks of a package manager's store; null until measured. */
   bytes: Schema.NullOr(Schema.Number),
   /** Why it stays; null where nothing holds it. */
   held: Schema.NullOr(FolderHeld),
@@ -334,7 +334,7 @@ export const TaskFolders = Schema.Struct({
 })
 export type TaskFolders = typeof TaskFolders.Type
 
-/** What removing finished tasks' folders freed, measured on the disk after, in bytes; and how many it couldn't remove. */
+/** What removing finished tasks' folders freed, in bytes, as they were measured just before they went; and how many it couldn't remove. */
 export const FoldersFreed = Schema.Struct({ freed: Schema.Number, failed: Schema.Int })
 export type FoldersFreed = typeof FoldersFreed.Type
 
