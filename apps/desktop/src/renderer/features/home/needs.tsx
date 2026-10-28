@@ -147,9 +147,9 @@ export const briefOf = (task: HomeTask): string => {
   return [where, ...factsOf(change).map((one) => one.words), ...size].join(' · ')
 }
 
-/** The one next thing a ready task's open pull request needs, where it has one: none for a review, a plain task, or a conflict handed back. */
+/** The one next thing a ready task's open pull request needs, where it has one: none for a review, a plain task, a conflict handed back, or checks its lead brought to the person. */
 export const nextOf = (task: HomeTask): Next | null =>
-  task.kind !== 'change' || task.handedBack != null || task.change === null || task.change.state !== 'open'
+  task.kind !== 'change' || task.handedBack != null || task.checksBack != null || task.change === null || task.change.state !== 'open'
     ? null
     : standingOf(task.change).next
 

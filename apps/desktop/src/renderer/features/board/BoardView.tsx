@@ -553,7 +553,9 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
         )}
         {facts}
       </FactLine>
+      {/* Its lead's line says what would fix its checks: not asking it again. */}
       {next !== null &&
+        !(next.kind === 'fix' && work.checksBack != null) &&
         (here === null || actions === undefined ? (
           <NextStep>{nextWords(next)}</NextStep>
         ) : (

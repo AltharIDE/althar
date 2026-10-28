@@ -1955,7 +1955,8 @@ describe('a ready card’s next step, done from the card', () => {
     const line = card.getByText(why)
     const failed = card.getByText(/ failed$/)
     expect(line.compareDocumentPosition(failed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // Not a conflict: nothing offers to resolve one.
+    // Not a conflict: nothing offers to resolve one; nor to ask the lead to fix what it said isn't the change's.
+    expect(card.queryByText('Ask the lead to fix it')).toBeNull()
     expect(card.queryByText('Merge conflict')).toBeNull()
     expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
   })
