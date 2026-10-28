@@ -58,6 +58,7 @@ import {
   unverifiedOf,
 } from './evidence'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
@@ -159,6 +160,13 @@ export const PlanParameters = Schema.Struct({
    * (make_it_a_change), which the person asked to end in a pull request.
    */
   publishes: Schema.optional(Schema.Boolean),
+  /**
+   * A review of someone else's pull request (`review_pull_request`): its one
+   * step is the review's lead, which reads a read-only copy, so only an
+   * agent its session holds to reading may take it. It has no run: started,
+   * its lead starts in the task's thread (Reviews.lead).
+   */
+  reads: Schema.optional(Schema.Boolean),
 })
 export type PlanParameters = typeof PlanParameters.Type
 
@@ -304,6 +312,7 @@ type Store =
   | Questions
   | Artifacts
   | Connectivity
+  | LeftBehind
 
 /**
  * Why a step needs the person (docs/architecture/05): its agent didn't report
@@ -541,6 +550,7 @@ export class Runs extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const sessions = yield* Sessions
+      const leftBehind = yield* LeftBehind
       const questions = yield* Questions
       const toolServer = yield* ToolServer
       const live = yield* Live
@@ -1886,6 +1896,8 @@ export class Runs extends Context.Service<
             payload: { round: run.runId, back: true },
             actorId: instance.systemId,
           })
+          // Settled again, its lead stops once its turn ends, with what it left running (LeftBehind.ts).
+          yield* leftBehind.settled(run.taskId)
         })
 
       /**

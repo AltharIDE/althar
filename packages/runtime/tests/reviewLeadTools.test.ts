@@ -96,7 +96,7 @@ describe('a review’s lead', () => {
 })
 
 describe('the coordinator’s review_pull_request', () => {
-  it.live('says the review started but its lead couldn’t, where Althar couldn’t make the copy it reads', () => {
+  it.live('says the review was made but its lead can’t start, where Althar couldn’t make the copy it reads', () => {
     const at = hosted()
     const github = githubWithPull(at)
     return Effect.gen(function* () {
@@ -115,7 +115,7 @@ describe('the coordinator’s review_pull_request', () => {
       })
       assert.match(
         said,
-        /^Started review-1-send-back to review ninemate's pull request #1, "Send back", but its lead couldn't start: its thread says why, and the person starts another there\. Tell them\.$/,
+        /^Made review-1-send-back to review ninemate's pull request #1, "Send back", but Althar couldn't make a copy of its code to read: its thread says so\. Tell the person\.$/,
       )
       const [task] = yield* sql<{ threadId: string }>`
         SELECT t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.slug = 'review-1-send-back'`
@@ -170,7 +170,7 @@ describe('a quick task', () => {
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 
-  it.live('isn’t marked done while what its lead left running won’t stop, and says so', () =>
+  it.live('is marked done even where what its lead left running won’t stop, and its thread says so', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
@@ -209,9 +209,16 @@ describe('a quick task', () => {
       }
       assert.strictEqual(
         yield* callTool(lead, 'settle_task', { how: 'done' }),
-        'Althar couldn’t stop what it left running, such as a page, so it isn’t done: it still waits in Needs you. Tell the person, so they can try Done again or keep it for later.',
+        'Marked it done: it is in Settled, and what it left running, such as a page, stops. Say so in a sentence; writing to you again picks it up.',
       )
-      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'open' }])
+      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'done' }])
+      // What wouldn't stop is said in its thread, in one line.
+      const said = yield* until(
+        Effect.map(notices(task?.threadId ?? ''), (all) => all.filter((one) => one.title?.startsWith('Couldn’t stop'))),
+        (lines) => lines.length > 0,
+        Duration.seconds(20),
+      )
+      assert.lengthOf(said, 1)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { refusesStop: () => true }))))),
   )
 })

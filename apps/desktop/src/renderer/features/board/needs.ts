@@ -43,6 +43,14 @@ export const needsOf = (
       onOpen: () => onTask(call.threadId),
     }
   }),
+  ...lanes.stopped.map((work) => ({
+    id: work.taskId,
+    kind: text.status.stopped,
+    title: work.title,
+    ...(work.stopped?.by == null ? {} : { meta: text.stoppedBy[work.stopped.by] }),
+    ...(work.threadId === here ? { here: true } : {}),
+    onOpen: () => onTask(work.threadId),
+  })),
   ...lanes.ready.map((work) => {
     const change = work.change
     // A review drafted: their pull request; else its own, or its branch.
@@ -68,5 +76,6 @@ export const firstNeedOf = (lanes: Lanes, here: string | null = null): string | 
   [
     ...lanes.waiting.map(({ task }) => task.threadId),
     ...lanes.calls.map((call) => call.threadId),
+    ...lanes.stopped.map((work) => work.threadId),
     ...lanes.ready.map((work) => work.threadId),
   ].find((threadId) => threadId !== here) ?? null

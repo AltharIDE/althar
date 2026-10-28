@@ -22,12 +22,11 @@ test('shows the plan gauge once a plan is read, says who is nearly out, and open
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     const gauge = page.getByRole('button', { name: /^Plan usage: .* has 3% left/ })
     await expect(gauge).toBeVisible()
-    await expect(page.locator('output').filter({ hasText: /3% · / })).toBeVisible()
     await gauge.click()
     const peek = page.getByRole('dialog', { name: 'Plan usage' })
     await expect(peek).toBeVisible()
     await expect(peek.getByText(/is nearly out/)).toBeVisible()
-    // The gauge, what the bar says beside it and the peek under it, at 1×.
+    // The gauge and the peek under it, at 1×.
     const box = (await peek.boundingBox())!
     const at = (await gauge.boundingBox())!
     const left = Math.max(0, Math.min(box.x, at.x) - 120)

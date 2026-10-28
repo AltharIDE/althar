@@ -24,6 +24,7 @@ import { automationOf, linkTask } from './automated'
 import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
 import { indexTask } from './Search'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 
@@ -249,7 +250,7 @@ export interface Started {
   readonly already: boolean
   /** The review asked for is over (posted, or the task closed): asked again as the same request, nothing starts. */
   readonly done?: boolean
-  /** Its lead started; false where it couldn't, which its thread says. */
+  /** Its lead started, or, planned, its copy is ready and its lead waits for its plan; false where it couldn't, which its thread says. */
   readonly leading: boolean
   /** A review of it posts itself once drafted: the person's setting, for their team's pull request. */
   readonly posts: boolean
@@ -266,6 +267,7 @@ type Store =
   | ToolServer
   | RuntimeConfig
   | Agents
+  | LeftBehind
 
 export class Reviews extends Context.Service<
   Reviews,
@@ -284,7 +286,21 @@ export class Reviews extends Context.Service<
       readonly request?: string
       /** The automation's occurrence it is the run of, named in the transaction that makes it. */
       readonly occurrence?: string
+      /** Its lead waits for the task's plan, which the person can hold or change, to start it (`lead`); else it starts at once. */
+      readonly planned?: boolean
     }): Effect.Effect<Started, unknown>
+    /**
+     * Starts a review task's lead, once its plan starts: told to review the
+     * pull request, on the read-only copy made when the task was. Whether it
+     * started; one that couldn't says why in the task's thread.
+     */
+    lead(
+      taskId: string,
+      lead: { readonly agentId: string; readonly model: string | null; readonly effort?: string | null | undefined },
+      actorId: ActorId,
+    ): Effect.Effect<boolean, unknown>
+    /** Refuses, in words for the person, an agent its session can't hold to reading only: it can't lead a review. */
+    canLead(agentId: string): Effect.Effect<void, ReviewRefused>
     /** Changes a draft before it is posted: its verdict, summary, and which comments are kept or what they say. */
     change(
       draftId: string,
@@ -309,6 +325,7 @@ export class Reviews extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const sessions = yield* Sessions
+      const leftBehind = yield* LeftBehind
       const toolServer = yield* ToolServer
       const agents = yield* Agents
       const config = yield* RuntimeConfig
@@ -407,15 +424,7 @@ export class Reviews extends Context.Service<
             const posts = !outside && (automated === undefined ? yield* postTeamReviews : automated.postsReviews === 1)
             const words = { title: pull.title, author, outside, name, posts }
             if (already !== undefined) return { ...already, ...words, already: true, leading: false } satisfies Started
-            // Only an agent its session holds to reading leads a review (the registry's `reviewing`; Sessions.ts refuses any other
-            // there too): one that runs what its sandbox contains without asking could run the pull request's code, a team's too.
-            const leading = yield* agents.get(input.lead.agentId).pipe(Effect.mapError(() => refused('Althar has no such agent.')))
-            if (leading.definition.reviewing?.outside !== true) {
-              const held = agents.list.filter((entry) => entry.definition.reviewing?.outside === true).map((entry) => entry.definition.name)
-              return yield* refused(
-                `${leading.definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this ${name}'s code. Review it with ${held.join(' or ')}.`,
-              )
-            }
+            yield* canLead(input.lead.agentId, name)
 
             // Its head and its target, fetched as a push is signed in, into refs of Althar's own: nothing is a branch here.
             const ref = `refs/althar/reviews/${place.path.join('/')}/${pull.number}`
@@ -583,27 +592,67 @@ export class Reviews extends Context.Service<
               })
               return { ...created, ...words, already: false, leading: false } satisfies Started
             }
-            // Its lead, told to start: its brief says the rest.
-            yield* sessions.send({
-              envelope: yield* envelope('thread.send', { threadId: created.threadId, review: pull.url }, undefined, input.envelope.actorId),
-              threadId: created.threadId,
-              body: `Review ${name}, then draft your review with draft_review.`,
-              disposition: 'after_current',
-              quiet: true,
-            })
-            const started = yield* sessions
-              .start({
-                threadId: created.threadId,
-                agentId: input.lead.agentId,
-                ...(input.lead.model === null ? {} : { model: input.lead.model }),
-                ...(input.lead.effort === undefined ? {} : { effort: input.lead.effort }),
-              })
-              .pipe(
-                Effect.as(true),
-                // A lead that couldn't start says why in the task's thread, and the person starts another there.
-                Effect.catch((error) => Effect.as(Effect.logWarning('A review’s lead could not start', error), false)),
-              )
+            // Planned, its lead waits for the plan to start it; else it starts now.
+            const started =
+              input.planned === true ? true : yield* leadOn(created.threadId, pull.url, name, input.lead, input.envelope.actorId)
             return { ...created, ...words, already: false, leading: started } satisfies Started
+          }),
+        )
+
+      /**
+       * Only an agent its session holds to reading leads a review (the registry's `reviewing`; Sessions.ts refuses any other
+       * there too): one that runs what its sandbox contains without asking could run the pull request's code, a team's too.
+       */
+      const canLead = (agentId: string, name = 'pull request') =>
+        Effect.gen(function* () {
+          const leading = yield* agents.get(agentId).pipe(Effect.mapError(() => refused('Althar has no such agent.')))
+          if (leading.definition.reviewing?.outside === true) return
+          const held = agents.list.filter((entry) => entry.definition.reviewing?.outside === true).map((entry) => entry.definition.name)
+          return yield* refused(
+            `${leading.definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this ${name}'s code. Review it with ${held.join(' or ')}.`,
+          )
+        })
+
+      /** Its lead, told to start: its brief says the rest. */
+      const leadOn = (
+        threadId: string,
+        url: string,
+        name: string,
+        lead: { readonly agentId: string; readonly model: string | null; readonly effort?: string | null | undefined },
+        actorId: ActorId,
+      ) =>
+        Effect.gen(function* () {
+          yield* sessions.send({
+            envelope: yield* envelope('thread.send', { threadId, review: url }, undefined, actorId),
+            threadId,
+            body: `Review ${name}, then draft your review with draft_review.`,
+            disposition: 'after_current',
+            quiet: true,
+          })
+          return yield* sessions
+            .start({
+              threadId,
+              agentId: lead.agentId,
+              ...(lead.model === null ? {} : { model: lead.model }),
+              ...(lead.effort == null ? {} : { effort: lead.effort }),
+            })
+            .pipe(
+              Effect.as(true),
+              // A lead that couldn't start says why in the task's thread, and the person starts another there.
+              Effect.catch((error) => Effect.as(Effect.logWarning('A review’s lead could not start', error), false)),
+            )
+        })
+
+      const lead: Reviews['Service']['lead'] = (taskId, chosen, actorId) =>
+        provide(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+            const reviewed = yield* reviewOf(taskId)
+            if (thread === undefined || reviewed === null) return yield* new NotFound({ kind: 'task', id: taskId })
+            const name = `${reviewed.words.noun} ${reviewed.words.prefix}${reviewed.number}`
+            yield* canLead(chosen.agentId, name)
+            return yield* leadOn(thread.id, reviewed.url, name, chosen, actorId)
           }),
         )
 
@@ -704,6 +753,8 @@ export class Reviews extends Context.Service<
             payload: { reviewed: row.reviewUrl },
             actorId,
           })
+          // Its lead stops once its turn ends, with what it left running (LeftBehind.ts).
+          yield* leftBehind.settled(row.taskId)
         })
 
       /** Whether a draft can still change, or be posted: waiting on the person, not posted the last time, or perhaps posted. */
@@ -1291,7 +1342,7 @@ export class Reviews extends Context.Service<
         },
       ])
 
-      return Reviews.of({ start, change: changeDraft, post, discard })
+      return Reviews.of({ start, lead, canLead: (agentId) => canLead(agentId), change: changeDraft, post, discard })
     }),
   )
 }

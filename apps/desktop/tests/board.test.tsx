@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
+import { Activity, useState } from 'react'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 
@@ -166,6 +166,46 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  describe('a task whose lead stopped, with no agent on it', () => {
+    const NOW = '2026-10-01T10:00:00.000Z'
+    const at = '2026-09-30T14:00:00.000Z'
+    const stopped = (taskId: string, by: 'declined' | 'interrupted' | 'althar' | null, overrides: Partial<BoardTask> = {}) =>
+      task({
+        taskId,
+        threadId: `th-${taskId}`,
+        title: `Stopped ${taskId}`,
+        phase: 'stopped',
+        startedAt: '2026-09-30T13:00:00.000Z',
+        stopped: { by, at },
+        ...overrides,
+      })
+    const working = task({ taskId: 'w', title: 'At work', phase: 'running', step: 'implement', startedAt: '2026-10-01T09:00:00.000Z' })
+    const tasks = [working, stopped('d', 'declined'), stopped('i', 'interrupted'), stopped('n', null)]
+
+    it('is in Needs you, not Running, and Running counts only the work an agent is on', () => {
+      const lanes = lanesOf(board({ tasks, calls: [] }))
+      expect(lanes.running.map((work) => work.taskId)).toEqual(['w'])
+      expect(lanes.atWork).toBe(1)
+      expect(lanes.stopped.map((work) => work.taskId).toSorted()).toEqual(['d', 'i', 'n'])
+      expect(yoursOf(lanes)).toBe(3)
+    })
+
+    it('says what stopped it and when, not a running time, and an automation run still says where it is from', () => {
+      const from = { id: 'a1', name: 'Nightly dependency check' } as unknown as NonNullable<BoardTask['automation']>
+      const lanes = lanesOf(board({ tasks: [...tasks, stopped('r', 'declined', { automation: from })], calls: [] }))
+      withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+      const yours = within(screen.getByRole('region', { name: 'Needs you' }))
+      const card = (title: string) => within(yours.getByRole('button', { name: title }).closest('article') as HTMLElement)
+      expect(card('Stopped d').getByText('Stopped when you declined a command')).toBeTruthy()
+      expect(card('Stopped i').getByText('Stopped when you interrupted it')).toBeTruthy()
+      expect(card('Stopped n').getByText('No agent is working on it')).toBeTruthy()
+      expect(card('Stopped d').getByText('20h ago')).toBeTruthy()
+      expect(card('Stopped d').queryByText('21h')).toBeNull()
+      expect(card('Stopped r').getByText('From Nightly dependency check')).toBeTruthy()
+      expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/^Stopped /)).toBeNull()
+    })
+  })
+
   describe('a task started that waits for a free agent, by lane', () => {
     const NOW = '2026-10-01T10:00:00.000Z'
     const queued = { busy: 4, atOnce: 4 }
@@ -286,6 +326,33 @@ describe('the board’s lanes', () => {
         await userEvent.hover(document.body)
         await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
         expect(region('Up next').queryByText('Going on x')).toBeNull()
+      })
+      it('lets go once its screen hides with the pointer on it, as kept (`KeptScreens`), and moves as it shows again', async () => {
+        const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
+        const after = lanesOf(
+          board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
+        )
+        let change: (lanes: typeof before) => void = () => undefined
+        let hide: (hidden: boolean) => void = () => undefined
+        function Kept() {
+          const [lanes, setLanes] = useState(before)
+          const [hidden, setHidden] = useState(false)
+          change = setLanes
+          hide = setHidden
+          return (
+            <Activity mode={hidden ? 'hidden' : 'visible'}>
+              <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
+            </Activity>
+          )
+        }
+        withServices(<Kept />, fakeClient().client)
+        const region = (name: string) => within(screen.getByRole('region', { name }))
+        // Its card pressed, its task opens: the board hides with the pointer on Up next, and the task starts meanwhile.
+        await userEvent.hover(region('Up next').getByText('Going on x'))
+        act(() => hide(true))
+        act(() => change(after))
+        act(() => hide(false))
+        await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
       })
     })
 
@@ -1186,7 +1253,13 @@ describe('every state the board shows', () => {
       task({ taskId: 'a', title: 'Held plan', phase: 'held', plan: { ...card().plan!, startsAt: null } }),
       task({ taskId: 'b', title: 'Starting plan', phase: 'planned', plan: { ...card().plan!, startsAt: '2026-10-01T09:59:59.000Z' } }),
       task({ taskId: 'c', title: 'Counting down', phase: 'planned', plan: { ...card().plan!, startsAt: '2026-10-01T10:00:20.000Z' } }),
-      task({ taskId: 'd', title: 'Stopped work', phase: 'stopped', startedAt: '2026-10-01T07:30:00.000Z' }),
+      task({
+        taskId: 'd',
+        title: 'Stopped work',
+        phase: 'stopped',
+        startedAt: '2026-10-01T07:30:00.000Z',
+        stopped: { by: 'declined', at: '2026-10-01T08:00:00.000Z' },
+      }),
       task({ taskId: 'e', title: 'A conversation', phase: 'running', plan: null, startedAt: '2026-10-01T09:59:30.000Z' }),
       task({
         taskId: 'w',
@@ -1226,8 +1299,12 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
     expect(screen.getByText('Starting')).toBeTruthy()
     expect(screen.getByText('Starts in 20s')).toBeTruthy()
-    expect(screen.getByText('No agent is working on it')).toBeTruthy()
-    expect(screen.getByText('2h 30m')).toBeTruthy()
+    // Stopped, it waits on the person: it says what stopped it and when, not how long it has run.
+    expect(screen.getByText('Stopped when you declined a command')).toBeTruthy()
+    expect(screen.getByText('2h ago')).toBeTruthy()
+    expect(screen.queryByText('2h 30m')).toBeNull()
+    expect(within(screen.getByRole('region', { name: 'Needs you' })).getByText('Stopped work')).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: 'Running' })).queryByText('Stopped work')).toBeNull()
     expect(screen.getByText('Conversation')).toBeTruthy()
     expect(
       screen.getByText(
@@ -1792,6 +1869,31 @@ describe('a ready card’s next step, done from the card', () => {
   }
   const cardOf = async (title: string) => within((await screen.findByRole('button', { name: title })).closest('article') as HTMLElement)
 
+  it('carries a stopped task on from the card: tells its lead to continue, and starts it again', async () => {
+    tasks = [
+      task({
+        taskId: 'sd',
+        threadId: 'th-sd',
+        title: 'Stopped d',
+        phase: 'stopped',
+        stopped: { by: 'declined', at: '2026-09-30T14:00:00.000Z' },
+      }),
+    ]
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const base = snapshot()
+    const getThread = vi.fn(async () =>
+      snapshot({ session: null, task: { ...base.task, lead: { agentId: 'claude-code', model: null, account: null } } }),
+    )
+    const onOpen = vi.fn()
+    withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, getBoard: getBoard() }).client)
+    const card = await cardOf('Stopped d')
+    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th-sd', body: 'Carry on.', disposition: 'after_current' }))
+    await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th-sd', agentId: 'claude-code' }))
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
   it('pushes right there, and does not open the task', async () => {
     const onOpen = vi.fn()
     let finish = () => {}
@@ -1904,7 +2006,7 @@ describe('a ready card’s next step, done from the card', () => {
 
   it('says why a conflict wasn’t asked of its lead, and Resolve now asks it from the card', async () => {
     const why = 'You stopped it, so Althar doesn’t start its lead for a conflict.'
-    // Stopped, it is among the running work, not ready: its card says it there.
+    // Stopped, it is among what waits on the person, not ready: its card says it there.
     tasks = [
       {
         ...ready('s9', 'Stopped in conflict', { conflicts: true, target: 'main' }),

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Activity } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
@@ -3065,6 +3066,25 @@ describe('the face a task opens on', () => {
   it('opens a quick task that became a change on its outputs from then on', () => {
     expect(of({ kind: 'plain', phase: 'ready', files: [file], commits: 1 })).toBe('talk')
     expect(of({ kind: 'change', phase: 'ready', files: [file], commits: 1 })).toBe('out')
+  })
+
+  it('reads what it changed from git again as its screen shows again from where it was kept (`KeptScreens`)', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot()) })
+    const services = servicesFor(client)
+    const kept = (mode: 'visible' | 'hidden') => (
+      <ServicesProvider value={services}>
+        <Activity mode={mode}>
+          <Task />
+        </Activity>
+      </ServicesProvider>
+    )
+    const view = render(kept('visible'))
+    await waitFor(() => expect(client.getThread).toHaveBeenCalledWith('th1', { limit: 0, fresh: true }))
+    // The person goes elsewhere, commits in its folder by hand, and comes back.
+    view.rerender(kept('hidden'))
+    vi.mocked(client.getThread).mockClear()
+    view.rerender(kept('visible'))
+    await waitFor(() => expect(client.getThread).toHaveBeenCalledWith('th1', { limit: 0, fresh: true }))
   })
 
   it('shows the conversation, not the outputs, for a prototype that is ready', async () => {

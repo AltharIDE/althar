@@ -104,8 +104,11 @@ export const text = {
   width: 'Width of the conversation',
 }
 
-/** How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches. */
-const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480 } as const
+/**
+ * How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches.
+ * `lane` is the least of the board worth leaving beside a file open over it.
+ */
+const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480, lane: 240 } as const
 
 const storedWidth = (): number => {
   try {
@@ -116,7 +119,7 @@ const storedWidth = (): number => {
   }
 }
 
-/** The conversation's width beside the board: dragged, kept once a move ends, and never so wide the board has no room. */
+/** The conversation's width beside the board: dragged, kept once a move ends, and never so wide the board has no room; `room`, the window's. */
 const useBothWidth = () => {
   const [width, setWidth] = useState(storedWidth)
   const [room, setRoom] = useState(() => window.innerWidth)
@@ -134,7 +137,7 @@ const useBothWidth = () => {
       // Not kept; it still holds for this window.
     }
   }
-  return { width: Math.min(width, max), min: WIDTH.min, max, set: setWidth, keep, reset: () => keep(WIDTH.start) }
+  return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
 }
 
 /** The front page, with a clock of its own: what settled last says how long ago, a minute at a time, whatever else runs or doesn't. */
@@ -618,11 +621,15 @@ export function ProjectView({
               )}
             </div>
           )}
-          {/* Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far edge. */}
+          {/*
+           * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
+           * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
+           */}
           {room === Room.Both &&
             talking &&
             shown.workbench(null, {
-              max: Math.max(360, window.innerWidth - both.width - 48),
+              room: both.room - both.width,
+              keep: WIDTH.lane,
               className: s.over,
               style: { left: both.width },
             })}

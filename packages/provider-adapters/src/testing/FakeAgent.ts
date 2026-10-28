@@ -142,6 +142,9 @@ export const scenarios = {
    * where it serves. Some other background work, which isn't a command, too.
    * Stopping it ends it. `[lead:serve]` does the same for a lead, and
    * `[lead:serve-exits]` has it end by itself just after the turn, failing.
+   * `[lead:serve-apart]` runs a real server for it as Claude Code runs one:
+   * under a shell in a process group of its own, which stopping the agent's
+   * group misses, and stopping it ends the shell, not the server.
    */
   background: 'background',
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
@@ -262,6 +265,8 @@ export interface FakeAgentOptions {
   readonly stoppedBackground?: (id: string) => void
   /** Whether to refuse to stop what a session left running, as an agent that can't: asked as each stop is. */
   readonly refusesStop?: () => boolean
+  /** Whether never to answer a stop of what a session left running, as an agent that hangs: asked as each stop is. */
+  readonly ignoresStop?: () => boolean
   /** Called with what the client says it can do, as it initializes. */
   readonly initialized?: (capabilities: acp.ClientCapabilities | undefined) => void
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
@@ -299,10 +304,10 @@ export interface FakeAgentOptions {
   /**
    * How many of each session's first prompts end at once, having said nothing
    * and used no tokens, as Claude Code's do while another of its processes
-   * renews the sign-in they share, or which, by their number from 1. It reads
-   * them all the same.
+   * renews the sign-in they share, or which, by their number from 1, or
+   * those whose words end as a function says. It reads them all the same.
    */
-  readonly blank?: number | ReadonlyArray<number>
+  readonly blank?: number | ReadonlyArray<number> | ((prompt: string) => boolean)
   /** An option that would approve every request while on, as Copilot's `allow_all`, starting at this value. */
   readonly allowAll?: 'on' | 'off'
   /** Once it turns `allow_all` on itself, it won't be turned off again: setting it back fails. */
@@ -354,6 +359,9 @@ interface SessionState {
   unread: string
 }
 
+/** What a lead's brief says where it is started again on a task that settled (the runtime's Sessions.ts). */
+const SETTLED_AGAIN = 'This task is settled:'
+
 /** What `bun dev` prints, coloured as Vite colours it. */
 const SERVING =
   '\n  \u001b[32mVITE\u001b[39m v7.1.0  ready in 312 ms\n\n  ➜  Local:   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m\n  ➜  Network: use --host to expose\n'
@@ -368,7 +376,7 @@ const leaveRunning = async (
   session: SessionState,
   client: acp.AgentContext,
   as: 'claude' | 'codex',
-  options: { readonly exits?: boolean; readonly quiet?: boolean } = {},
+  options: { readonly exits?: boolean; readonly quiet?: boolean; readonly apart?: boolean } = {},
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -404,7 +412,16 @@ const leaveRunning = async (
   const outputPath = join(folder, `${sessionId}-${id}.output`)
   writeFileSync(outputPath, options.quiet === true ? '' : SERVING)
   let server: ChildProcess | undefined
-  if (options.quiet === true) {
+  if (options.apart === true) {
+    // As Claude Code starts one: a shell in a process group of its own, which runs the server; stopping it stops the shell only.
+    const out = openSync(outputPath, 'a')
+    server = spawn('/bin/sh', ['-c', `"${process.execPath}" -e "require('net').createServer().listen(0, '127.0.0.1')" & wait`], {
+      stdio: ['ignore', out, out],
+      detached: true,
+    })
+    server.unref()
+    closeSync(out)
+  } else if (options.quiet === true) {
     // A server whose output says nothing: its own process holds the file open and listens on a port it chose.
     const out = openSync(outputPath, 'a')
     server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: ['ignore', out, out] })
@@ -742,7 +759,7 @@ const leaveTests = async (
 const playRole = async (
   session: SessionState,
   text: string,
-  serve: (exits: boolean) => Promise<void>,
+  serve: (how: { readonly exits: boolean; readonly apart: boolean }) => Promise<void>,
   tests: (plan: {
     readonly lasts?: number
     readonly commits?: () => void
@@ -831,7 +848,7 @@ const playRole = async (
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
-        await serve(text.includes('[lead:serve-exits]'))
+        await serve({ exits: text.includes('[lead:serve-exits]'), apart: text.includes('[lead:serve-apart]') })
       }
       // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
       // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),
@@ -1333,6 +1350,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         const left = session?.background.get(params.asyncTaskId)
         if (session === undefined || left === undefined) return { stopped: false }
         if (options.refusesStop?.() === true) throw new Error('The agent could not stop it.')
+        if (options.ignoresStop?.() === true) await new Promise<never>(() => {})
         session.background.delete(params.asyncTaskId)
         left.process?.kill()
         options.stoppedBackground?.(params.asyncTaskId)
@@ -1359,7 +1377,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
       session.prompts += 1
       const blank = options.blank ?? 0
-      if (typeof blank === 'number' ? session.prompts <= blank : blank.includes(session.prompts)) {
+      if (
+        typeof blank === 'number'
+          ? session.prompts <= blank
+          : typeof blank === 'function'
+            ? blank(prompted)
+            : blank.includes(session.prompts)
+      ) {
         session.unread = `${prompted}\n\n`
         return { stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }
       }
@@ -1368,8 +1392,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
       const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
+      const whole = filled === null ? prompted : prompted.slice(0, filled.index)
+      // Started again on a task that settled, it does what it is asked now, after its brief, as its brief tells it: what the task
+      // first asked, the lead before it did. It plays the role its brief gives it all the same.
+      const again = whole.includes(SETTLED_AGAIN)
+      if (again) for (const marker of whole.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
       // The markers in a linked file's words play as a message's do, for what the person sends with no words.
-      const text = `${filled === null ? prompted : prompted.slice(0, filled.index)}${cuesIn(params.prompt)}`
+      const text = `${again ? whole.slice(whole.lastIndexOf('\n\n') + 2) : whole}${cuesIn(params.prompt)}`
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(
@@ -1396,8 +1425,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
       // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
-      // nothing. Cancelled, it stops.
-      const slowly = /\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/.exec(text)
+      // nothing. Cancelled, it stops. The last one said is the one it goes by: what the person said in a turn that failed comes
+      // again ahead of what they say next, and it answers the newest, as an agent would once its API is back.
+      const slowly = [...text.matchAll(/\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/g)].at(-1)
       if (slowly?.[2] !== undefined) {
         const waitOut = async (ms: number) => {
           for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
@@ -1591,7 +1621,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         const after = await playRole(
           session,
           text,
-          (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+          (how) => leaveRunning(params.sessionId, session, client, 'claude', how),
           (plan) => leaveTests(params.sessionId, session, client, plan),
         )
         if (after !== undefined) await say(after)
@@ -1616,7 +1646,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         : await playRole(
             session,
             text,
-            (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+            (how) => leaveRunning(params.sessionId, session, client, 'claude', how),
             (plan) => leaveTests(params.sessionId, session, client, plan),
           )
       // Stopped while it played its part, the turn was cancelled, as an agent says.

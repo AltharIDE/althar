@@ -44,11 +44,13 @@ export interface ThreadHost {
    * The workbench, with what is open on it: the document `docPanel` draws,
    * and the file open, on top of the document where it was opened from it;
    * nothing where neither is open. Where it opens over something to the
-   * conversation's right, as the board beside it, it is dragged by its end.
+   * conversation's right, as the board beside it, it is dragged by its end,
+   * within the `room` there, leaving `keep` of it; where it would leave less,
+   * as in a small window, it takes the whole room, to the window's edge.
    */
   readonly workbench: (
     docPanel: ReactNode,
-    over?: { readonly max: number; readonly className?: string; readonly style?: CSSProperties },
+    over?: { readonly room: number; readonly keep: number; readonly className?: string; readonly style?: CSSProperties },
   ) => ReactNode | undefined
 }
 
@@ -100,14 +102,16 @@ export const useThreadHost = (
     [documents, coded.shell],
   )
   const workbench: ThreadHost['workbench'] = (docPanel, over) => {
-    const max = over?.max ?? bench.max
-    const width = Math.min(bench.width, max)
+    // Over something, a sliver of it beside the panel is of no use: the panel takes it all, as wide as it can be.
+    const whole = over !== undefined && bench.width > over.room - over.keep
+    const max = over === undefined ? bench.max : whole ? over.room : over.room - over.keep
+    const width = whole ? max : Math.min(bench.width, max)
     const file = coded.panel(width)
     if ((docPanel === null || docPanel === undefined || docPanel === false) && file === null) return undefined
     return (
       <Workbench
         width={width}
-        min={bench.min}
+        min={whole ? max : bench.min}
         max={max}
         onWidth={bench.set}
         onCommit={bench.keep}

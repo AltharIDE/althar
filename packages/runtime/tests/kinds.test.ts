@@ -367,36 +367,70 @@ describe('settling a task that isn’t a change', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('stops what a finished task left running as it is done, and isn’t done while that won’t stop', () => {
-    const stopped: Array<string> = []
-    let refusing = true
-    const agent = { stoppedBackground: (id: string) => void stopped.push(id), refusesStop: () => refusing }
-    return Effect.gen(function* () {
-      const sessions = yield* Sessions
-      const project = yield* open
-      const served = yield* plain(project.projectId, 'Sketch the settings page', 'Serve it. [lead:serve] [lead:finish]')
-      yield* cardOnce(served.taskId, (card) => card.phase === 'ready')
-      const running = () =>
-        Effect.map(sessions.running(served.threadId), (session) =>
-          Option.match(session, { onNone: () => [], onSome: (one) => one.background.filter((left) => left.ended === null) }),
-        )
-      yield* until(running(), (left) => left.length === 1, Duration.seconds(20))
+  it.live(
+    'stops what a finished task left running once it is done, and its agent: one that won’t is said, and it is done all the same',
+    () => {
+      const stopped: Array<string> = []
+      let refusing = false
+      let ignoring = false
+      const agent = { stoppedBackground: (id: string) => void stopped.push(id), refusesStop: () => refusing, ignoresStop: () => ignoring }
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* Sessions
+        const project = yield* open
+        const serving = (title: string) =>
+          Effect.gen(function* () {
+            const served = yield* plain(project.projectId, title, 'Serve it. [lead:serve] [lead:finish]')
+            yield* cardOnce(served.taskId, (card) => card.phase === 'ready')
+            yield* until(
+              Effect.map(sessions.running(served.threadId), (session) =>
+                Option.match(session, { onNone: () => [], onSome: (one) => one.background.filter((left) => left.ended === null) }),
+              ),
+              (left) => left.length === 1,
+              Duration.seconds(20),
+            )
+            return served
+          })
+        const gone = (threadId: string) =>
+          until(
+            Effect.map(sessions.running(threadId), (running) => (Option.isNone(running) ? [true] : [])),
+            (none) => none.length === 1,
+            Duration.seconds(20),
+          )
+        const said = (threadId: string) =>
+          Effect.map(sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice'`, (rows) =>
+            rows
+              .flatMap((one) => (JSON.parse(one.content) as { title?: string }).title ?? [])
+              .filter((title) => title.startsWith('Couldn’t stop')),
+          )
 
-      // Its agent won't stop the page: it isn't done, said so, still in Needs you with its page up, to try again.
-      const refused = yield* Effect.flip(markDone(served.taskId))
-      assert.deepInclude(refused, { _tag: 'TaskRefused', why: 'left_running' })
-      assert.strictEqual((yield* row(served.taskId)).state, 'open')
-      assert.strictEqual((yield* cardOnce(served.taskId, () => true)).phase, 'ready')
-      assert.lengthOf(yield* running(), 1)
+        // Done, its page stops, and then its lead: nothing is said.
+        const served = yield* serving('Sketch the settings page')
+        assert.isTrue(yield* markDone(served.taskId))
+        assert.strictEqual((yield* row(served.taskId)).state, 'done')
+        yield* gone(served.threadId)
+        assert.lengthOf(stopped, 1)
+        assert.deepStrictEqual(yield* said(served.threadId), [])
 
-      // Tried again once it would, the page stops and the task is done.
-      refusing = false
-      assert.isTrue(yield* markDone(served.taskId))
-      assert.lengthOf(stopped, 1)
-      assert.lengthOf(yield* running(), 0)
-      assert.strictEqual((yield* row(served.taskId)).state, 'done')
-    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', agent)))))
-  })
+        // Its agent won't stop the page, or never answers: done at once all the same, its lead stops, and the thread says so.
+        for (const [title, wont] of [
+          ['Sketch the billing page', () => (refusing = true)],
+          ['Sketch the profile page', () => (ignoring = true)],
+        ] as const) {
+          const one = yield* serving(title)
+          wont()
+          assert.isTrue(yield* markDone(one.taskId).pipe(Effect.timeout(Duration.seconds(2))))
+          assert.strictEqual((yield* row(one.taskId)).state, 'done')
+          yield* gone(one.threadId)
+          const line = yield* until(said(one.threadId), (lines) => lines.length > 0, Duration.seconds(5))
+          assert.lengthOf(line, 1)
+          refusing = ignoring = false
+        }
+        assert.lengthOf(stopped, 1)
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', agent)))))
+    },
+    60_000,
+  )
 
   it.live('is its lead’s to do when the person says so: done, kept for later or discarded, never a change', () =>
     Effect.gen(function* () {
@@ -447,15 +481,17 @@ describe('settling a task that isn’t a change', () => {
         const project = yield* open
         const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
         yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
-        // What the window does as the person writes to it.
+        // What the window does as the person writes to it: with no agent on the thread, as once the task is done, it starts its lead.
         const write = (body: string) =>
           Effect.gen(function* () {
             yield* tasks.bringBack(question.taskId)
+            const held = Option.isSome(yield* sessions.running(question.threadId))
             yield* sessions.send({
               envelope: yield* Runtime.envelope('thread.send', { threadId: question.threadId, body }),
               threadId: question.threadId,
               body,
             })
+            if (!held) yield* sessions.startLast(question.threadId)
           })
         const roundsEnded = (n: number) =>
           until(
@@ -468,6 +504,12 @@ describe('settling a task that isn’t a change', () => {
 
         // Done, then written to: it goes back to work as a round, which makes nothing, and it waits in Needs you.
         assert.isTrue(yield* markDone(question.taskId))
+        // Settled, its lead stops.
+        yield* until(
+          Effect.map(sessions.running(question.threadId), (running) => (Option.isNone(running) ? [true] : [])),
+          (gone) => gone.length === 1,
+          Duration.seconds(10),
+        )
         yield* write('And the v2 ones? [lead:slowly]')
         yield* roundsEnded(1)
         yield* cardOnce(question.taskId, (card) => card.phase === 'ready')

@@ -17,6 +17,7 @@ import { Coordinator } from '../src/Coordinator'
 import { git as althar, gitOutcome } from '../src/git'
 import { Instance } from '../src/Instance'
 import { Nudges } from '../src/Nudges'
+import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import {
@@ -61,8 +62,12 @@ import {
  * team's.
  */
 
-const withQueries = (github: FakeService, database = ':memory:') =>
-  Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { connectors: fakeConnectors({ github }) })))
+const withQueries = (github: FakeService, database = ':memory:', countdown?: Duration.Duration) =>
+  Queries.layer.pipe(
+    Layer.provideMerge(
+      runtime(database, {}, { connectors: fakeConnectors({ github }), ...(countdown === undefined ? {} : { countdown }) }),
+    ),
+  )
 
 const git = (cwd: string, ...args: Array<string>) =>
   execFileSync('git', ['-c', 'user.name=Nine', '-c', 'user.email=nine@althar.test', ...args], { cwd })
@@ -170,7 +175,8 @@ describe('reviewing someone else’s pull request', () => {
         pull_request: linkTo(pull.number),
         lead: { agent: 'claude-code', reason: 'Careful.' },
       })
-      assert.match(started, /^Started review-1-send-back-won-t-restart-a-dead-lead: its lead reviews ninemate's pull request #1/)
+      assert.match(started, /^Planned review-1-send-back-won-t-restart-a-dead-lead: its lead will review ninemate's pull request #1/)
+      assert.include(started, 'It starts in 25 seconds unless the person holds or changes it')
       assert.include(started, 'It comes from outside the project, so its lead reads it with no network')
       const { task, workspace } = yield* reviewTask(projectId)
       assert.strictEqual(task?.state, 'open')
@@ -364,6 +370,13 @@ describe('reviewing someone else’s pull request', () => {
         const reviews = yield* Reviews
         const instance = yield* Instance
         const nudges = yield* Nudges
+        // Its lead drafts once its plan has started it, and signs what it drafts.
+        const sessions = yield* Sessions
+        yield* until(
+          Effect.map(sessions.running(threadId), (running) => [running]),
+          ([running]) => running !== undefined && Option.isSome(running),
+          Duration.seconds(20),
+        )
         const told: Array<string> = []
         yield* Effect.forkChild(
           Stream.runForEach(nudges.events, (event) => Effect.sync(() => void (event._tag === 'Nudge' && told.push(event.body)))),
@@ -485,6 +498,9 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual(tagOf(yield* Effect.flip(reviews.post(`rdr_${'0'.repeat(32)}`, instance.personId))), 'NotFound')
 
         // Posted, it goes as it stands: the verdict chosen, the comment kept, of the commit the lead read.
+        const sessions = yield* Sessions
+        if (Option.isNone(yield* sessions.running(threadId))) yield* sessions.startLast(threadId)
+        assert.isTrue(Option.isSome(yield* sessions.running(threadId)))
         const posted = yield* reviews.post(draftId, instance.personId)
         assert.strictEqual(posted.state, 'posted')
         assert.deepStrictEqual(github.reviewsPosted, [
@@ -506,6 +522,12 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
         const [settled] = (yield* Effect.orDie(queries.board(projectId))).tasks.filter((one) => one.taskId === task?.id)
         assert.deepStrictEqual([settled?.phase, settled?.kind], ['settled', 'review'])
+        // Its lead stops, its task settled.
+        yield* until(
+          Effect.map(sessions.running(threadId), (running) => (Option.isNone(running) ? [true] : [])),
+          (gone) => gone.length === 1,
+          Duration.seconds(10),
+        )
         assert.deepInclude(yield* reviewBriefOf(task?.id ?? ''), {
           verdict: 'changes',
           posted: { url: folded?.review?.url ?? '', at: folded?.review?.at ?? '' },
@@ -567,7 +589,8 @@ describe('reviewing someone else’s pull request', () => {
           assert.strictEqual((yield* card()).phase, 'settled')
         })
 
-      // Its lead reads the pull request first, then drafts.
+      // Its lead reads the pull request first, once its plan starts, then drafts.
+      yield* until(said(threadId), (all) => all.length > 0, Duration.seconds(20))
       yield* turnOver
       yield* callTool(access, 'draft_review', { verdict: 'comment', summary: 'Looks fine.' })
       yield* posted()
@@ -1040,7 +1063,7 @@ describe('reviewing someone else’s pull request', () => {
 
       // Asked again in another request, it is a new review: a task, a copy and a lead of its own.
       const again = yield* review({ ...coordinator, sessionId: 'coordinator-session-2' })
-      assert.match(again, /^Started review-1-send-back-won-t-restart-a-dead-lead-2:/)
+      assert.match(again, /^Planned review-1-send-back-won-t-restart-a-dead-lead-2:/)
       const second = yield* reviewTask(projectId)
       assert.notStrictEqual(second.task?.id, first.task?.id)
       assert.deepInclude(second.task, { state: 'open' })
@@ -1614,5 +1637,83 @@ describe('the coordinator reading a pull request', () => {
       const refused = yield* callTool(coordinator, 'read_pull_request', { pull_request: '#1' })
       assert.include(refused, 'isn’t on a host Althar is connected to')
     }).pipe(Effect.provide(withQueries(github)))
+  })
+})
+
+describe('a review’s plan', () => {
+  it.live('waits for its countdown on a card of its one lead, and starts on the model the person changed it to', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const said = yield* callTool(coordinator, 'review_pull_request', {
+        pull_request: linkTo(pull.number),
+        lead: { agent: 'claude-code', reason: 'Strong at reading.' },
+      })
+      assert.include(said, 'It starts in 25 seconds unless the person holds or changes it')
+      const { task, workspace } = yield* reviewTask(projectId)
+      const taskId = task?.id ?? ''
+      const threadId = task?.threadId ?? ''
+      // Its copy is ready to read; its lead waits for the plan.
+      assert.deepInclude(workspace, { access: 'read', state: 'ready' })
+      const queries = yield* Queries
+      const card = yield* Effect.orDie(queries.card(taskId))
+      assert.strictEqual(card.phase, 'planned')
+      assert.isNotNull(card.plan?.startsAt)
+      // Its one lead, with why, and no ending to pick: only the agents held to reading may take it.
+      assert.deepStrictEqual(card.plan?.steps, [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }])
+      assert.strictEqual(card.plan?.reason, 'Strong at reading.')
+      assert.isNull(card.plan?.end)
+      assert.deepStrictEqual(card.plan?.agents, ['claude-code', 'opencode'])
+      const sessions = yield* Sessions
+      assert.isTrue(Option.isNone(yield* sessions.running(threadId)))
+
+      // The person picks another lead, then starts it now.
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const planId = card.plan?.id ?? ''
+      yield* plans.change(planId, [{ key: 'implement', agentId: 'opencode', model: null, skipped: false }], instance.personId)
+      assert.strictEqual(yield* plans.start(planId, instance.personId), 'running')
+      yield* until(
+        Effect.map(sessions.running(threadId), (running) => [running]),
+        ([running]) => running !== undefined && Option.isSome(running),
+        Duration.seconds(20),
+      )
+      assert.strictEqual(Option.getOrNull(Option.map(yield* sessions.running(threadId), (running) => running.agentId)), 'opencode')
+      assert.strictEqual((yield* Effect.orDie(queries.card(taskId))).phase, 'running')
+      // Started, it starts nothing twice.
+      assert.isNull(yield* plans.start(planId, instance.personId))
+    }).pipe(Effect.provide(withQueries(github, ':memory:', Duration.minutes(5))))
+  })
+
+  it.live('held, never starts by itself; and can’t be given an agent that can’t be held to reading only', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const taskId = task?.id ?? ''
+      const queries = yield* Queries
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const planId = (yield* Effect.orDie(queries.card(taskId))).plan?.id ?? ''
+      yield* plans.hold(planId, instance.personId)
+      // Past when it would have started, it waits for the person.
+      yield* Effect.sleep(Duration.seconds(2))
+      assert.strictEqual((yield* Effect.orDie(queries.card(taskId))).phase, 'held')
+      assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task?.threadId ?? '')))
+      // Codex can't lead it: refused, in words the window shows, and the plan stays as it was.
+      const refused = yield* Effect.flip(
+        plans.change(planId, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }], instance.personId),
+      )
+      assert.strictEqual(tagOf(refused), 'ReviewRefused')
+      assert.match(words(refused, (id) => id).message, /^Fake codex can't be held to reading only/)
+      assert.strictEqual((yield* Effect.orDie(queries.card(taskId))).plan?.steps[0]?.agentId, 'claude-code')
+    }).pipe(Effect.provide(withQueries(github, ':memory:', Duration.seconds(1))))
   })
 })
