@@ -26,7 +26,7 @@
 }
 .body {
   padding: 20px 22px 32px;
-  animation: in var(--base) var(--ease);
+  animation: in var(--enter) var(--ease-out);
 }
 @keyframes in {
   from {

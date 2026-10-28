@@ -7,7 +7,17 @@
   font-size: 11.5px;
   color: var(--t-2);
   white-space: nowrap;
+  /* it comes in from the bar's end, where it sits */
+  transform-origin: 100% 50%;
+  animation: arrive var(--enter) var(--ease-out);
 }
 .icon {
   color: var(--t-3);
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateX(6px) scale(var(--scale-pop));
+  }
 }

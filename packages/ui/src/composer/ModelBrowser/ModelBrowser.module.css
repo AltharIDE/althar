@@ -3,7 +3,10 @@
   inset: 0;
   z-index: var(--z-dialog);
   background: var(--scrim);
-  animation: fade var(--fast) var(--ease);
+  animation: fade var(--enter) var(--ease-out);
+}
+.overlay[data-state='closed'] {
+  animation: unfade var(--exit) var(--ease-out) forwards;
 }
 .dialog {
   position: fixed;
@@ -22,7 +25,12 @@
   container-type: inline-size;
   box-shadow: var(--lift-dialog);
   color: var(--t-1);
-  animation: in var(--fast) var(--ease);
+  transform-origin: 50% 50%;
+  animation: in var(--enter) var(--ease-out);
+}
+/* it goes quicker than it came, back to where it grew from */
+.dialog[data-state='closed'] {
+  animation: out var(--exit) var(--ease-out) forwards;
 }
 .dialog:focus {
   outline: none;
@@ -30,11 +38,22 @@
 @keyframes in {
   from {
     opacity: 0;
-    transform: translate(-50%, 4px);
+    transform: translateX(-50%) scale(var(--scale-pop));
+  }
+}
+@keyframes out {
+  to {
+    opacity: 0;
+    transform: translateX(-50%) scale(var(--scale-pop));
   }
 }
 @keyframes fade {
   from {
+    opacity: 0;
+  }
+}
+@keyframes unfade {
+  to {
     opacity: 0;
   }
 }
