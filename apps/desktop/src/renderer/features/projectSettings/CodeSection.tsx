@@ -4,7 +4,7 @@ import { BrandMark, Button, ControlLine, LinkButton, SettingGroup, SettingList, 
 import { productBrand, productName } from '../../shared/products'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
 import { serviceOfProduct } from '../connections/ways'
-import { text as frontText, type Tracker } from '../project/front'
+import { text as frontText, trackerIdOf, type Tracker } from '../project/front'
 import { Repositories } from '../repositories/Repositories'
 import { useRepositories } from '../repositories/useRepositories'
 import s from './ProjectSettings.module.css'
@@ -30,6 +30,7 @@ export const text = {
   connectAnother: 'Connect another',
   /** On a tracker its issues are on, where another is the one drafts go to. */
   draftsElsewhere: 'Its drafts go to the tracker above',
+  issuesOnly: 'Only its issues are here; the bound workspace is above',
   none: 'No tracker yet',
   noneNote: 'Connect one, and the coordinator can start tasks from its issues.',
   /** MER issues · Linear; a tracker whose issues share no key by its name alone: Trello cards. */
@@ -64,11 +65,14 @@ function TrackerRow({
   list,
   onConnect,
   elsewhere,
+  byTeam,
 }: {
   tracker: Tracker
   list: ConnectionList | null
   /** Another tracker is the one bound: drafts don't go to this one. */
   elsewhere: boolean
+  /** The bound one is a team: its drafts go there. Bound to a workspace alone, each draft's team is chosen with it. */
+  byTeam: boolean
   onConnect: (opening: Opening) => void
 }) {
   const standing = standingOf(list, tracker)
@@ -84,21 +88,24 @@ function TrackerRow({
       note={
         <>
           <StandingLine standing={standing} />
-          {elsewhere && <> · {text.draftsElsewhere}</>}
+          {elsewhere && <> · {byTeam ? text.draftsElsewhere : text.issuesOnly}</>}
         </>
       }
       mark={<BrandMark brand={productBrand(tracker.product)} size={18} />}
     >
-      {() =>
-        standing.kind !== 'connected' ? (
-          <Button size="small" variant="signal" onClick={() => onConnect(opening)}>
-            {standing.kind === 'signedOut' ? text.signIn : text.connect}
-          </Button>
-        ) : url === null ? null : (
-          // The window opens web pages in the person's browser.
-          <LinkButton onClick={() => void window.open(url, '_blank')}>{text.openOn(tracker)}</LinkButton>
-        )
-      }
+      {() => (
+        <>
+          {standing.kind !== 'connected' && (
+            <Button size="small" variant="signal" onClick={() => onConnect(opening)}>
+              {standing.kind === 'signedOut' ? text.signIn : text.connect}
+            </Button>
+          )}
+          {/* Signed out, its page is still there to open; the window opens web pages in the person's browser. */}
+          {url !== null && standing.kind !== 'notConnected' && (
+            <LinkButton onClick={() => void window.open(url, '_blank')}>{text.openOn(tracker)}</LinkButton>
+          )}
+        </>
+      )}
     </SettingRow>
   )
 }
@@ -164,11 +171,12 @@ export function CodeSection({
           ) : (
             trackers.map((tracker) => (
               <TrackerRow
-                key={`${tracker.product}:${tracker.at ?? ''}:${tracker.key ?? ''}`}
+                key={trackerIdOf(tracker)}
                 tracker={tracker}
                 list={list}
                 onConnect={onConnect}
                 elsewhere={binding && tracker.bound !== true}
+                byTeam={bound.container !== null}
               />
             ))
           )}

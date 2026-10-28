@@ -79,6 +79,9 @@ export interface Tracker {
   readonly bound?: true
 }
 
+/** What tells a tracker from the rest: its server, its workspace there (in its link) and its team's key. */
+export const trackerIdOf = (tracker: Tracker): string => `${tracker.product}:${tracker.at ?? ''}:${tracker.url ?? ''}:${tracker.key ?? ''}`
+
 /** A key's space on the web, from the link of one of its issues: linear.app/acme/team/MER, acme.atlassian.net/browse/MER. */
 export const trackerUrlOf = (product: Product, key: string | null, issueUrl: string): string | null => {
   try {
@@ -190,7 +193,7 @@ export const partsOf = (input: {
           }
         })),
     ...shown.map((tracker) => ({
-      id: `tracker:${tracker.product}:${tracker.at ?? ''}:${tracker.key ?? ''}`,
+      id: `tracker:${trackerIdOf(tracker)}`,
       name: text.issues(tracker),
       brand: productBrand(tracker.product),
       ...opening(tracker.product, tracker.url),
@@ -279,14 +282,13 @@ export const trackersWithBinding = (
   if (product === undefined) return [...learned]
   const at = hostNameOf(webUrl)
   const space = spaceOf(webUrl, connection?.workspace?.key)
-  // The same only where it is the same workspace and, with a team bound, that team: another team's issues on the same connection are another tracker.
+  // The same only where it is the same workspace and a team is bound, that team: another team's issues on the same connection are another tracker.
   const sameSpace = (tracker: Tracker) =>
     tracker.connections.includes(binding.connectionId) ||
     (tracker.product === product && tracker.at === at && space !== null && (tracker.url ?? '').startsWith(`${space}/`))
-  // With a team bound: only issues on that team's key are it. Those with no key (Trello's cards), or while the key can't be read (pending, failed, or
-  // its connection signed out), can't be told to be on it, so they stay their own tracker, and the drafts' destination is the bound row alone.
-  const sameTeam = (tracker: Tracker) =>
-    binding.container === null || binding.container === undefined || (containerKey !== null && tracker.key === containerKey)
+  // Only issues on the bound team's key are it. Bound to a workspace alone, no team is: its drafts' team is chosen with each, so none learned is the
+  // destination. Issues with no key (Trello's cards), or while the key can't be read (pending, failed, or signed out), can't be told to be on it either.
+  const sameTeam = (tracker: Tracker) => binding.container != null && containerKey !== null && tracker.key === containerKey
   const matched = learned.find((tracker) => sameSpace(tracker) && sameTeam(tracker))
   // Its standing is the bound connection's alone, whatever else its issues were read through.
   const first: Tracker =

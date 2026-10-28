@@ -673,7 +673,23 @@ describe('a project’s trackers, in its settings', () => {
       const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
       expect(await trackers.findByText('Signed out as mate')).toBeTruthy()
       expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+      // Its page is still there to open beside it.
+      expect(trackers.getByRole('button', { name: 'Open on Linear' })).toBeTruthy()
       expect(trackers.queryByText('No tracker yet')).toBeNull()
+    })
+
+    it('bound to a workspace alone, with two teams learned, takes neither for the bound one and does not say drafts go to either', async () => {
+      windowAt(
+        '/projects/p1',
+        withBoard([taskFrom('MER-12', 'conn_fnt'), taskFrom('FNT-3', 'conn_fnt')], fnt, { connectionId: 'conn_fnt', container: null }),
+      )
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('FNT issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('Linear issues')).toBeTruthy()
+      expect(trackers.queryByText(/drafts go to/)).toBeNull()
+      expect(trackers.getAllByText(/the bound workspace is above/)).toHaveLength(2)
     })
 
     it('bound to a signed-out workspace whose team cannot be read, keeps the sign-in prompt and does not take another team for the bound one', async () => {

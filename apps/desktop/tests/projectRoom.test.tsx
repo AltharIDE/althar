@@ -382,7 +382,7 @@ describe('what the front page makes of trackers', () => {
     const trackers = trackersOf([issueTask('MER-1', 'not an address'), issueTask('MER-2', 'not an address')], list)
     expect(trackers).toEqual([{ product: 'linear', at: null, key: 'MER', url: null, connections: [] }])
     const parts = partsOf({ repositories: [], names: [], host: null, trackers, open: vi.fn() })
-    expect(parts).toEqual([expect.objectContaining({ id: 'tracker:linear::MER' })])
+    expect(parts).toEqual([expect.objectContaining({ id: 'tracker:linear:::MER' })])
     expect(parts[0]).not.toHaveProperty('onOpen')
   })
 })

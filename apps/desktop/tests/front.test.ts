@@ -105,7 +105,12 @@ describe('a project’s front page', () => {
       // Not connected there: it opens all the same, from its remote.
       { id: 'web', name: 'meridian-web', brand: Brand.GitHub, openLabel: 'Open on GitHub' },
       { id: 'ops', name: 'meridian-ops' },
-      { id: 'tracker:linear:linear.app:MER', name: 'MER issues', brand: Brand.Linear, openLabel: 'Open on Linear' },
+      {
+        id: 'tracker:linear:linear.app:https://linear.app/acme/team/MER:MER',
+        name: 'MER issues',
+        brand: Brand.Linear,
+        openLabel: 'Open on Linear',
+      },
     ])
     parts[1]?.onOpen?.()
     parts[3]?.onOpen?.()
@@ -194,8 +199,18 @@ describe('a project’s front page', () => {
     expect(trackersWithBinding([], { connectionId: 'conn_b', container: null }, list)).toEqual([
       { product: 'linear', at: 'linear.app', key: null, url: 'https://linear.app/b', connections: ['conn_b'], bound: true },
     ])
-    // Bound to the one its issues are on: once.
-    expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: null }, list)).toEqual([{ ...learned, bound: true }])
+    // Bound to a workspace alone: it stands apart, and no learned team is taken for its drafts' destination, whichever or however many there are.
+    const fnt = { ...learned, key: 'FNT', url: 'https://linear.app/a/team/FNT' }
+    expect(
+      trackersWithBinding([learned, fnt], { connectionId: 'conn_a', container: null }, list, 'MER').map((tracker) => [
+        tracker.key,
+        tracker.bound,
+      ]),
+    ).toEqual([
+      [null, true],
+      ['MER', undefined],
+      ['FNT', undefined],
+    ])
     // Bound to another: the bound first, the learned after, unbound.
     expect(
       trackersWithBinding([learned], { connectionId: 'conn_b', container: null }, list).map((tracker) => [tracker.key, tracker.bound]),
@@ -274,12 +289,15 @@ describe('a project’s front page', () => {
     expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list, 'MER')).toEqual([{ ...learned, bound: true }])
     // Its issues name no connection: the bound keeps its own, and only a link on its workspace is it.
     const bare = { ...learned, key: 'FNT', url: 'https://linear.app/b/team/FNT', connections: [] }
-    expect(trackersWithBinding([bare], { connectionId: 'conn_b', container: null }, list)).toEqual([
+    expect(trackersWithBinding([bare], { connectionId: 'conn_b', container: team }, list, 'FNT')).toEqual([
       { ...bare, connections: ['conn_b'], bound: true },
     ])
     const elsewhere = { ...bare, url: 'https://linear.app/a/team/FNT' }
     expect(
-      trackersWithBinding([elsewhere], { connectionId: 'conn_b', container: null }, list).map((tracker) => [tracker.url, tracker.bound]),
+      trackersWithBinding([elsewhere], { connectionId: 'conn_b', container: team }, list, 'FNT').map((tracker) => [
+        tracker.url,
+        tracker.bound,
+      ]),
     ).toEqual([
       ['https://linear.app/b', true],
       ['https://linear.app/a/team/FNT', undefined],
