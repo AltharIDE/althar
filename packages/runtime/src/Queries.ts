@@ -1864,6 +1864,14 @@ export class Queries extends Context.Service<
               ? []
               : yield* sql<{ id: string }>`
                   SELECT id FROM review_drafts WHERE task_id = ${taskId} AND state IN ('pending', 'failed', 'uncertain') LIMIT 1`
+          // Its lead's last turn was cut short (the person interrupted it, or declined a call) and nothing took it up again: the
+          // session stays attached, but no agent is on it, so it is stopped, not under way.
+          const [lastTurn] =
+            busy || queued || Option.isNone(lead)
+              ? []
+              : yield* sql<{ state: string }>`
+                  SELECT state FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+          const cutShort = lastTurn?.state === 'interrupted' && task.held === null
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
@@ -1879,7 +1887,7 @@ export class Queries extends Context.Service<
             if (task.runState === 'succeeded') return seeing && hands.running ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
-            return working || task.held !== null ? 'running' : 'stopped'
+            return (working && !cutShort) || task.held !== null ? 'running' : 'stopped'
           })()
           // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it.
           const phase: TaskPhase = ready === 'ready' && task.keptAt !== null ? 'kept' : ready

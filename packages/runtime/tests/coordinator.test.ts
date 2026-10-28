@@ -934,6 +934,22 @@ describe('a step that needs the person', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live("is stopped, not running, when the lead's turn is interrupted and its session stays", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { projectId, task } = yield* planned('Cut short', '[lead:wait]', [{ key: 'implement', agentId: 'codex' }])
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'Some' && running.value.turnRunning ? [running] : [])),
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'running')
+      // The window's interrupt: no task.stop, so the session stays attached with its turn over.
+      yield* sessions.interrupt(task.threadId)
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'stopped')
+      assert.strictEqual(card?.stopped?.by, 'interrupted')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live("reminds a reviewer that doesn't report, then needs the person, who tells it to", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
