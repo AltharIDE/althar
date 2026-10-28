@@ -370,6 +370,13 @@ describe('reviewing someone else’s pull request', () => {
         const reviews = yield* Reviews
         const instance = yield* Instance
         const nudges = yield* Nudges
+        // Its lead drafts once its plan has started it, and signs what it drafts.
+        const sessions = yield* Sessions
+        yield* until(
+          Effect.map(sessions.running(threadId), (running) => [running]),
+          ([running]) => running !== undefined && Option.isSome(running),
+          Duration.seconds(20),
+        )
         const told: Array<string> = []
         yield* Effect.forkChild(
           Stream.runForEach(nudges.events, (event) => Effect.sync(() => void (event._tag === 'Nudge' && told.push(event.body)))),
