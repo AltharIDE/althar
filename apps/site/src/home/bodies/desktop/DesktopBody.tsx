@@ -1,7 +1,4 @@
-import { Brand, BrandMark } from '@althar/ui'
 import type { ReactNode } from 'react'
-
-import { LINKS } from '../../../content/facts'
 
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
@@ -15,11 +12,11 @@ import { Flow } from './Flow'
 import { Trio } from './Trio'
 
 /*
- * Desktop: the product, shown, in the positioning's order after the first
- * screen's "fast": open source, made with taste; independent of the labs;
- * and then, last, how it keeps you in flow. One claim a screen, in the
- * first screen's type, each but the first over a large picture of the app
- * drawn by its own components: the board at work on a panel as dark and
+ * Desktop: the product, shown, after the first screen's "fast": first that
+ * it is independent of the labs, then how it keeps you in flow, and at the
+ * end the craft and the freedom of open source, by the download. One claim
+ * a screen, in the first screen's type, each over a large picture of the
+ * app drawn by its own components: the board at work on a panel as dark and
  * warm as the first screen's cabin, then its windows and single pieces up
  * close in Althar's light. Pictures of the app framed as pictures, so
  * nothing looks like it is part of this page.
@@ -63,30 +60,6 @@ function Scene({
 export function DesktopBody() {
   return (
     <main id="main" tabIndex={-1} className={s.body}>
-      <Scene
-        id="open-source"
-        kicker="Open source"
-        title={
-          <>
-            The craft of a paid app.
-            <br />
-            <b>
-              The freedom of
-              <br />
-              open source.
-            </b>
-          </>
-        }
-        lead="Apache 2.0. Every line yours to read, fork and run."
-      >
-        <p className={s.source}>
-          <a href={LINKS.repo}>
-            <BrandMark brand={Brand.GitHub} size={16} />
-            Read the source
-          </a>
-        </p>
-      </Scene>
-
       <Scene
         id="independent"
         tone="cabin"
@@ -152,7 +125,8 @@ export function DesktopBody() {
       <section className={s.end} aria-label="Download Althar">
         <div className={s.endRow}>
           <p className={s.endLine}>
-            An open-source IDE <b>for building with AI agents.</b>
+            The craft of a paid app. <br className={s.phoneBreak} />
+            <b>The freedom of open source.</b>
           </p>
           <Get tone="paper" />
         </div>
