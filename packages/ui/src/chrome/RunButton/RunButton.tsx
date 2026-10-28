@@ -12,9 +12,10 @@ import s from './RunButton.module.css'
  * chevron lists everything it runs, those running first, checked, each with
  * where it answers or how it last ended, and the rest with what it runs,
  * where, and who said how; picking one starts or stops it, and the menu stays
- * open, so several start at once. After them, adding something more to run,
- * and the whole list to change. With nothing known to run, the button offers
- * the ways to say what runs.
+ * open, so several start at once. After them, running a branch or a pull
+ * request, where the consumer offers it (ADR-066), adding something more to
+ * run, and the whole list to change. With nothing known to run, the button
+ * offers the ways to say what runs.
  */
 
 /** Who said how something runs: worked out from its repository, or kept by the person, the coordinator or another agent. */
@@ -72,6 +73,8 @@ export interface RunButtonText {
   failed: (code: number | null, since: string) => string
   stopped: (since: string) => string
   elsewhere: (where: string, url?: string) => string
+  /** Running a branch or a pull request, in a copy of its own. */
+  branch: string
   add: string
   edit: string
   note: string
@@ -106,6 +109,7 @@ export const runButtonText: RunButtonText = {
   failed: (code, since) => `Failed ${since}${code === null ? '' : ` · exit ${code}`}`,
   stopped: (since) => `Stopped ${since}`,
   elsewhere: (where, url) => `Running ${where}${url === undefined ? '' : ` at ${url}`}`,
+  branch: 'Run a branch or pull request…',
   add: 'Add something to run…',
   edit: 'Edit the list…',
   note: 'Checked ones are running. Pick one to start or stop it.',
@@ -132,6 +136,8 @@ export interface RunButtonProps {
   onAdd: (way: AddWay) => void
   /** Opens the whole list, to order, edit and remove. */
   onEdit: () => void
+  /** Opens the picker of the remote's branches and pull requests, to run one; without it, the list doesn't offer it. */
+  onRunBranch?: () => void
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -207,7 +213,19 @@ const endedOf = (run: RunTargetRun, t: RunButtonText) => {
   return run.code === 0 ? t.finished(since) : t.failed(run.code ?? null, since)
 }
 
-export function RunButton({ targets, onRun, onStop, onOpen, onAdd, onEdit, open, defaultOpen, onOpenChange, text }: RunButtonProps) {
+export function RunButton({
+  targets,
+  onRun,
+  onStop,
+  onOpen,
+  onAdd,
+  onEdit,
+  onRunBranch,
+  open,
+  defaultOpen,
+  onOpenChange,
+  text,
+}: RunButtonProps) {
   const t = { ...runButtonText, ...text }
   const [opened, setOpened] = useControlled(open, defaultOpen ?? false, onOpenChange)
   const ways = (
@@ -309,6 +327,11 @@ export function RunButton({ targets, onRun, onStop, onOpen, onAdd, onEdit, open,
           {running.length > 0 && <MenuGroup label={t.running}>{running.map(item)}</MenuGroup>}
           {resting.length > 0 && <MenuGroup label={running.length > 0 ? t.resting : t.all}>{resting.map(item)}</MenuGroup>}
           <MenuSeparator />
+          {onRunBranch !== undefined && (
+            <MenuItem icon="branch" onSelect={onRunBranch}>
+              {t.branch}
+            </MenuItem>
+          )}
           <MenuItem icon="plus" onSelect={() => onAdd('type')}>
             {t.add}
           </MenuItem>

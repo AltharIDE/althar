@@ -580,6 +580,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
     case 'run': {
       const ended = field(content, 'ended')
       const code = field(ended, 'code')
+      const ref = field(content, 'ref')
+      const kind = field(ref, 'kind')
       return {
         ...base,
         kind: 'run',
@@ -588,6 +590,9 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           taskId: text(content, 'taskId') || null,
           runnableId: text(content, 'runnableId') || null,
           where: text(content, 'where'),
+          // A branch's or a pull request's run (ADR-066): what it is at a glance, and what was asked for, to run it again.
+          branch: text(content, 'branch') || null,
+          ref: kind === 'branch' || kind === 'pull_request' ? { kind, which: text(ref, 'which') } : null,
           command: text(content, 'command'),
           url: text(content, 'url') || null,
           startedAt: text(content, 'startedAt'),

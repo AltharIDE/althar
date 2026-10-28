@@ -15,7 +15,7 @@ export const addressOf = (url: string) => url.replace(/^https?:\/\//, '').replac
 
 /** What runs, each with how long it has run, or when it ended by itself and how; with `where`, where each runs. */
 export const runningOf = (
-  background: ReadonlyArray<BackgroundCommand & { readonly where?: string }>,
+  background: ReadonlyArray<BackgroundCommand & { readonly where?: string; readonly branch?: string | null | undefined }>,
   now: string,
   { where = false }: { readonly where?: boolean } = {},
 ): ReadonlyArray<RunningProcess> =>
@@ -25,6 +25,8 @@ export const runningOf = (
     ...(command.name === undefined || command.name === command.command ? {} : { name: command.name }),
     ...(command.label === undefined || command.label === command.command ? {} : { label: command.label }),
     ...(where && command.where !== undefined ? { where: command.where } : {}),
+    // A branch's run names it on the pill, alone or among others.
+    ...(command.branch == null ? {} : { branch: command.branch }),
     ...(command.url === null ? {} : { url: addressOf(command.url) }),
     ...(command.ended === null
       ? { since: running(command.startedAt, now) }

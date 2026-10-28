@@ -485,6 +485,7 @@ export function ProjectView({
                 now={now}
                 onRun={(id) => void model.runProject(null, id)}
                 onStop={(id) => void model.stopLaunch(id)}
+                onRunBranch={model.runBranch}
               />
             ),
           })}
@@ -593,7 +594,7 @@ export function ProjectView({
                             run={run}
                             now={now}
                             onStop={(id) => void model.stopLaunch(id)}
-                            onRunAgain={(taskId, runnableId) => void model.runProject(taskId, runnableId)}
+                            onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
                           />
                         )}
                         queued={text.queued}
