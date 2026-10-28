@@ -57,7 +57,8 @@ import {
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
-import { Limits } from './Limits'
+import { Limits, type PlanOnly } from './Limits'
+import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
 import type { Policies } from './Policies'
@@ -73,11 +74,14 @@ import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
+import { filesForTurn, type InputFile, keptId } from './sentFiles'
 import type { InputImage } from './sentImages'
+import { alsoPlanned, siblingsOf } from './siblings'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
 import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
+import { makeKeyedLock } from './keyedLock'
 import { addItem, betweenTurns, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
   addressOf,
@@ -94,6 +98,7 @@ import {
   uncoloured,
   WAKE_FOR,
 } from './leftRunning'
+import { WORK, workOf } from './machine'
 import { holding, portFor, portsBelow } from './ports'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
@@ -260,6 +265,9 @@ export const onlyReads = (
   thread: { readonly role: 'task'; readonly review: object | null } | { readonly role: Exclude<ThreadContext['role'], 'task'> },
 ) => thread.role !== 'task' || thread.review !== null
 
+/** The other tasks planned from the message a task came from, for its lead's brief (siblings.ts). */
+const alongside = (taskId: string) => siblingsOf(taskId).pipe(Effect.map((others) => (others.length === 0 ? [] : [alsoPlanned(others)])))
+
 /** A role's Althar tools. */
 const toolRoleOf = (thread: ThreadContext) => (thread.role === 'task' ? 'lead' : thread.role)
 
@@ -389,6 +397,7 @@ type Store =
   | RuntimeConfig
   | Accounts
   | Limits
+  | PlanUsage
   | Models
   | Setups
   | Policies
@@ -488,6 +497,8 @@ export const promptFor = (
     readonly cutShort?: string
     /** Images the person sent with it that the agent doesn't get: it doesn't take images, or they aren't kept any more. */
     readonly withheld?: number
+    /** Files the person sent with it whose copies aren't there any more, as when the task's folder was removed and brought back. */
+    readonly filesGone?: number
     /** Some of it was dictated (1), so the agent is told it may have been misheard. */
     readonly dictated?: number
   }>,
@@ -498,10 +509,18 @@ export const promptFor = (
   const parts = inputs.map((input) => {
     // Images it doesn't get are said, so it knows they were there and can ask what they show.
     const withheld = input.withheld ?? 0
-    const noted =
-      withheld === 0
-        ? input.body
-        : `${input.body}${input.body === '' ? '' : '\n\n'}(The person sent ${withheld === 1 ? 'an image' : `${withheld} images`} with this, which Althar couldn't pass on to you.)`
+    const filesGone = input.filesGone ?? 0
+    const notes = [
+      ...(withheld === 0
+        ? []
+        : [`(The person sent ${withheld === 1 ? 'an image' : `${withheld} images`} with this, which Althar couldn't pass on to you.)`]),
+      ...(filesGone === 0
+        ? []
+        : [
+            `(The person sent ${filesGone === 1 ? 'a file' : `${filesGone} files`} with this whose copy isn't there any more. Ask for it if you need it.)`,
+          ]),
+    ]
+    const noted = [...(input.body === '' ? [] : [input.body]), ...notes].join('\n\n')
     // Dictated words are said to be, once, after them: the thread shows the person's words as they are.
     const body = input.dictated === 1 && input.body !== '' ? `${noted}\n\n${DICTATED}` : noted
     const said =
@@ -556,7 +575,7 @@ export class Sessions extends Context.Service<
       readonly effort?: string
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
-    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
+    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
     /**
      * Starts the agent last on the thread again, on the model and effort it
      * had, for what waits in its queue: false, and nothing started, where no
@@ -564,7 +583,7 @@ export class Sessions extends Context.Service<
      */
     startLast(
       threadId: string,
-    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
     /**
      * Tries the thread's last turn again, as the person asked, where it
      * failed (ADR-060): what they said in it goes again, with what waits
@@ -573,7 +592,7 @@ export class Sessions extends Context.Service<
      */
     tryAgain(
       threadId: string,
-    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
@@ -582,6 +601,8 @@ export class Sessions extends Context.Service<
       readonly disposition?: Disposition
       /** Images the person sent with it, in the store already (`keepSent`): sent with its words in every turn that delivers it. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Files and folders the person sent with it, copied where the agent reads already (`keepFiles`): linked in every turn that delivers it. */
+      readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: every turn that delivers it says so, so the agent reads past what was misheard. */
       readonly dictated?: boolean
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
@@ -615,11 +636,12 @@ export class Sessions extends Context.Service<
       readonly said?: string
       /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
       readonly about?: 'limit' | 'stall'
-      /** What the person said with it, and any images: the new agent's first turn, after its brief, and never the old one's. */
+      /** What the person said with it, and any images and files: the new agent's first turn, after its brief, and never the old one's. */
       readonly message?: {
         readonly envelope: CommandEnvelope
         readonly body: string
         readonly images?: ReadonlyArray<InputImage>
+        readonly files?: ReadonlyArray<InputFile>
         /** Some of it was dictated. */
         readonly dictated?: boolean
       }
@@ -627,7 +649,7 @@ export class Sessions extends Context.Service<
       readonly accountId?: string
       /** The person switched, not Althar: the new agent's first turn is theirs, and goes on at once (ADR-037). */
       readonly byPerson?: boolean
-    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
+    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | PlanOnly | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
@@ -758,6 +780,18 @@ export class Sessions extends Context.Service<
       const failures = yield* Failures
       const accounts = yield* Accounts
       const limits = yield* Limits
+      const planUsage = yield* PlanUsage
+      /*
+       * Claude Code's adapter says a plan window with the usage it streams:
+       * kept for the account the session runs on, in a fiber of its own, so
+       * the stream never waits on the store or the view.
+       */
+      const heardPlan = (running: Running, event: SessionEvent) => {
+        const window = event._tag === 'PlanWindow' ? event.window : event._tag === 'ContextUsage' ? event.planWindow : undefined
+        return window === undefined
+          ? Effect.void
+          : Effect.asVoid(Effect.forkIn(planUsage.heard(running.account.id, running.entry.definition.id, window), sessionsScope))
+      }
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const skillsConfig = (yield* RuntimeConfig).skills
@@ -1211,12 +1245,20 @@ export class Sessions extends Context.Service<
             queued.map((input) => input.id),
             running.connection.info.images,
           )
+          // And the files, linked where their copies are.
+          const linked = yield* filesForTurn(queued.map((input) => input.id))
           // What an agent out of usage was given goes on with word of that, by the name of the agent it went to.
           const agents = yield* Agents
           const all = queued.map(({ cutBy, ...input }) => {
             const by = cutBy === null ? undefined : (agents.list.find((entry) => entry.definition.id === cutBy)?.definition.name ?? cutBy)
             const withheld = sent.withheld.get(input.id) ?? 0
-            return { ...input, ...(by === undefined ? {} : { cutShort: by }), ...(withheld === 0 ? {} : { withheld }) }
+            const filesGone = linked.gone.get(input.id) ?? 0
+            return {
+              ...input,
+              ...(by === undefined ? {} : { cutShort: by }),
+              ...(withheld === 0 ? {} : { withheld }),
+              ...(filesGone === 0 ? {} : { filesGone }),
+            }
           })
           // Compacting the agent's context is a turn of its own, said bare as the agent's own command: what was said before it goes
           // first, and what after, next. A brief not yet read waits for the turn after, so nothing is left behind it.
@@ -1448,14 +1490,16 @@ export class Sessions extends Context.Service<
               ),
             )
           })
-          const images = inputs.flatMap((input) => sent.images.get(input.id) ?? [])
+          // Each input's images, then its files, in the order the inputs are said.
+          const parts = inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])])
           yield* notingListening(running)
-          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, images, started), (event) =>
+          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
               if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
               heardContext(running, event)
+              yield* heardPlan(running, event)
               yield* record(event)
               yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
@@ -1692,14 +1736,21 @@ export class Sessions extends Context.Service<
           }),
         )
 
-      /** Ends a session: closes it and its process, and records how both ended. */
-      const supervise = (running: Running) =>
-        Effect.gen(function* () {
+      /**
+       * Ends a session: closes it and its process, and records how both ended.
+       * However recording it goes, its process is closed, the thread hears it
+       * ended and whoever waits on it stops waiting: nothing is left holding
+       * the session, nor stopping it, for ever.
+       */
+      const supervise = (running: Running) => {
+        let ended: string | undefined
+        return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const outcome = yield* Effect.raceFirst(
             Effect.map(running.connection.closed, () => undefined),
             Deferred.await(running.stopRequest),
           )
+          ended = outcome === undefined ? 'lost' : outcome.state
           running.stopping = true
           threads.delete(running.thread.threadId)
           yield* running.revokeTools
@@ -1793,9 +1844,22 @@ export class Sessions extends Context.Service<
           // One that went on its own is reported (ADR-047), by its agent and how its process ended: never what it wrote.
           if (state === 'lost')
             yield* failures.report(Cause.die(agentLost(running.entry.definition.id, exit)), 'agent', running.entry.definition.id)
-          yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
-          yield* Deferred.succeed(running.ended, undefined)
-        })
+        }).pipe(
+          Effect.ensuring(
+            Effect.suspend(() =>
+              Effect.andThen(
+                Effect.andThen(
+                  Scope.close(running.scope, Exit.void),
+                  ended === undefined
+                    ? Effect.void
+                    : live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state: ended }),
+                ),
+                Deferred.succeed(running.ended, undefined),
+              ),
+            ),
+          ),
+        )
+      }
 
       /**
        * Starts the agent and its session, in the mode that asks, and records
@@ -1866,9 +1930,15 @@ export class Sessions extends Context.Service<
             ...(untrusted ? { untrusted } : {}),
             ...(skills === undefined ? {} : { skills: skills.folder }),
           }
+          // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
+          const work = workOf({
+            kind: thread.role === 'coordinator' ? 'coordinator' : 'task',
+            projectId: thread.projectId,
+            taskId: thread.role === 'coordinator' ? null : thread.taskId,
+          })
           const transport = entry.transport(
             cwdOf(thread),
-            accounts.env(account),
+            { ...accounts.env(account), [WORK]: work },
             untrusted || skills !== undefined ? sessionOptions : undefined,
           )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
@@ -1939,6 +2009,7 @@ export class Sessions extends Context.Service<
                 transport,
                 onPermission: (request) => permissions.decide(requestContext, request),
                 permissions: definition.permissions,
+                ...(definition.failsInText === undefined ? {} : { failsInText: definition.failsInText }),
                 // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
                 ...(thread.role === 'reviewer'
                   ? {}
@@ -2061,9 +2132,55 @@ export class Sessions extends Context.Service<
           return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext, skills, upFront }
         })
 
-      /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
-      const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
+      type Connected = Effect.Success<ReturnType<typeof connectSession>>
+
+      /**
+       * Lets go of a session that started but never took over its thread, as
+       * when its brief couldn't be written: its process stops, its tools are
+       * taken back, and it is recorded as ended, so it holds no place.
+       */
+      const discard = (connected: Connected, cause: Cause.Cause<unknown>) =>
         Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { sessionId, thread, connection, entry } = connected
+          yield* Scope.close(connected.scope, Exit.void)
+          yield* connected.revokeTools
+          const stop = connection.process === undefined ? undefined : yield* connection.process.stopped
+          yield* Effect.logWarning('Agent started but could not take over its thread', cause).pipe(
+            Effect.annotateLogs({ agent: entry.definition.id, session: sessionId, thread: thread.threadId }),
+          )
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const at = yield* timestamp
+              const [process] = yield* sql<{
+                id: string
+              }>`SELECT id FROM processes WHERE provider_session_id = ${sessionId} ORDER BY launched_at DESC LIMIT 1`
+              if (process !== undefined)
+                yield* change('processes', process.id, {
+                  state: stop !== undefined && stop.signal !== 'none' ? 'killed' : 'exited',
+                  endedAt: at,
+                })
+              const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
+              // Recorded as active already, it went; still starting, it failed.
+              const state = session?.state === 'starting' ? 'failed' : session?.state === 'active' ? 'lost' : undefined
+              if (state === undefined) return
+              const revision = yield* moveSession(sessionId, state, { endedAt: at })
+              yield* sessionFact(thread, sessionId, revision, `provider_session.${state}`, { reason: Cause.pretty(cause) })
+            }),
+          )
+        }).pipe(Effect.catchCause((left) => Effect.logWarning('Could not let go of a session that never took over', left)))
+
+      /** Runs what comes between a session starting and its taking over the thread; should it fail, the session is let go. */
+      const beforeTakingOver =
+        (connected: Connected) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.onError(effect, (cause) => discard(connected, cause))
+
+      /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
+      const activate = (connected: Connected, brief: Brief) => {
+        // Once it is supervised, ending it is supervise's: before, a failure lets it go here.
+        let supervised = false
+        return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, skills, upFront } = connected
           const { definition } = entry
@@ -2140,7 +2257,10 @@ export class Sessions extends Context.Service<
                   Effect.andThen(
                     Effect.andThen(
                       Effect.andThen(
-                        Effect.sync(() => heardContext(running, event)),
+                        Effect.andThen(
+                          Effect.sync(() => heardContext(running, event)),
+                          heardPlan(running, event),
+                        ),
                         heard.record(event),
                       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
                       Effect.andThen(heardWork(running, event), heardBackground(running, event)),
@@ -2162,6 +2282,7 @@ export class Sessions extends Context.Service<
             scope,
           )
           yield* Effect.forkIn(run(supervise(running)), sessionsScope)
+          supervised = true
           const model = optionValue(options, definition.options.model)
           yield* live.publish({
             _tag: 'SessionStarted',
@@ -2172,7 +2293,16 @@ export class Sessions extends Context.Service<
           })
           yield* Queue.offer(running.wake, undefined)
           return sessionId
-        })
+        }).pipe(
+          Effect.onError((cause) =>
+            Effect.suspend(() => {
+              if (supervised) return Effect.void
+              if (threads.get(connected.thread.threadId)?.sessionId === connected.sessionId) threads.delete(connected.thread.threadId)
+              return discard(connected, cause)
+            }),
+          ),
+        )
+      }
 
       /**
        * Ends the turn running, then the session. An agent that doesn't end its
@@ -2215,13 +2345,8 @@ export class Sessions extends Context.Service<
         })
 
       /** Start, switch and stop on one thread happen one at a time. */
-      const locks = new Map<string, Semaphore.Semaphore>()
-      const exclusive = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
-        Effect.suspend(() => {
-          const lock = locks.get(threadId) ?? Semaphore.makeUnsafe(1)
-          locks.set(threadId, lock)
-          return lock.withPermits(1)(effect)
-        })
+      const locks = makeKeyedLock()
+      const exclusive = locks.withLock
 
       const start = (input: {
         readonly threadId: string
@@ -2243,12 +2368,14 @@ export class Sessions extends Context.Service<
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(input.model === undefined ? {} : { model: input.model }),
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             // Every session starts from a brief (ADR-005), even the first on a task.
+            const brief = yield* briefFor(thread, { kind: 'start' }).pipe(beforeTakingOver(connected))
             return yield* activate(connected, {
-              text: yield* briefFor(thread, { kind: 'start' }),
+              text: brief,
               closing: thread.role === 'reviewer' ? 'Review the change.' : 'Start on the task.',
             })
           }),
@@ -2299,6 +2426,7 @@ export class Sessions extends Context.Service<
         readonly body: string
         readonly disposition?: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
@@ -2307,6 +2435,7 @@ export class Sessions extends Context.Service<
           const commands = yield* Commands
           const artifacts = yield* Artifacts
           const images = input.images ?? []
+          const files = input.files ?? []
           const disposition = input.disposition ?? 'after_current'
           const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
           if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: input.threadId })
@@ -2353,6 +2482,19 @@ export class Sessions extends Context.Service<
                   return { artifact, picture: { artifactId, ...image, bytes: image.size } }
                 }),
               )
+              // Its files, in order, each by where its copy is; the copies are there already.
+              for (const [index, file] of files.entries())
+                yield* sql`INSERT INTO user_input_files ${sql.insert({
+                  projectId: thread.projectId,
+                  userInputId: inputId,
+                  position: index + 1,
+                  name: file.name,
+                  kind: file.kind,
+                  mediaType: file.mediaType,
+                  bytes: file.bytes,
+                  entries: file.entries,
+                  path: file.path,
+                })}`
               if (input.quiet !== true) {
                 const itemId = yield* addItem(
                   { projectId: thread.projectId, threadId: input.threadId },
@@ -2373,6 +2515,7 @@ export class Sessions extends Context.Service<
                             name: picture.name,
                           })),
                         }),
+                    ...(files.length === 0 ? {} : { files: files.map((file, index) => ({ id: keptId(inputId, index + 1), ...file })) }),
                   },
                   { userInputId: inputId },
                 )
@@ -2386,7 +2529,12 @@ export class Sessions extends Context.Service<
                 aggregateId: inputId,
                 revision: 1,
                 type: disposition === 'interrupt_and_continue' ? 'user_input.interrupt_requested' : 'user_input.accepted',
-                payload: { disposition, sequence, ...(images.length === 0 ? {} : { images: images.map((image) => image.sha256) }) },
+                payload: {
+                  disposition,
+                  sequence,
+                  ...(images.length === 0 ? {} : { images: images.map((image) => image.sha256) }),
+                  ...(files.length === 0 ? {} : { files: files.length }),
+                },
                 actorId: input.envelope.actorId,
                 commandId: input.envelope.commandId,
               })
@@ -2632,6 +2780,7 @@ export class Sessions extends Context.Service<
                 : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             ...askedFor(thread),
+            ...(yield* alongside(thread.taskId)),
             several
               ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
               : `The worktree is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
@@ -2671,7 +2820,7 @@ export class Sessions extends Context.Service<
             // Althar reaches the code host for the task (ADR-011).
             `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request; rerun_check runs a check that may have failed by chance again. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // A lead tracks what is not its task's on the person's trackers, and the person files it (Coordinator.ts, IssueDrafts.ts).
-            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
+            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person's one message can start several. When a task covers it, say so in your report instead of drafting. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
             // A lead keeps its own issue up to date; what changes where the issue stands waits on the person's card (IssueChanges.ts).
             "If this task came from an issue, keep that issue up to date: comment_on_issue comments on it at once, such as what you found or what changed for whoever follows it; link_pull_request links the task's pull request to it where Althar hasn't; and change_issue proposes a change to it, such as its status (In Review), its priority, labels, assignee or title, which waits on the person's card unless the project lets changes through. Only that issue: for any other, tell the person what it needs. Set a drafted issue's priority and labels with draft_issue, never in its description.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
@@ -2809,6 +2958,7 @@ export class Sessions extends Context.Service<
           readonly envelope: CommandEnvelope
           readonly body: string
           readonly images?: ReadonlyArray<InputImage>
+          readonly files?: ReadonlyArray<InputFile>
           readonly dictated?: boolean
         }
         readonly byPerson?: boolean
@@ -2826,27 +2976,31 @@ export class Sessions extends Context.Service<
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(input.model === undefined ? {} : { model: input.model }),
             })
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
-            if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
-            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
-              source: 'runtime',
-              severity: 'info',
-              title:
-                input.said ??
-                (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
-              ...(input.about === undefined ? {} : { about: input.about }),
-            })
-            if (input.message !== undefined)
-              yield* send({
-                envelope: input.message.envelope,
-                threadId: input.threadId,
-                body: input.message.body,
-                ...(input.message.images === undefined ? {} : { images: input.message.images }),
-                ...(input.message.dictated === true ? { dictated: true } : {}),
+            const brief = yield* Effect.gen(function* () {
+              if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
+              yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title:
+                  input.said ??
+                  (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
+                ...(input.about === undefined ? {} : { about: input.about }),
               })
-            const brief = yield* briefFor(thread, { kind: 'takeover', from })
+              if (input.message !== undefined)
+                yield* send({
+                  envelope: input.message.envelope,
+                  threadId: input.threadId,
+                  body: input.message.body,
+                  ...(input.message.images === undefined ? {} : { images: input.message.images }),
+                  ...(input.message.files === undefined ? {} : { files: input.message.files }),
+                  ...(input.message.dictated === true ? { dictated: true } : {}),
+                })
+              return yield* briefFor(thread, { kind: 'takeover', from })
+            }).pipe(beforeTakingOver(connected))
             return yield* activate(connected, {
               text: brief,
               closing: 'Carry on with the task from where it stands.',
@@ -2899,17 +3053,19 @@ export class Sessions extends Context.Service<
             }
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
-            yield* stopRunning(previous, { state: 'superseded', by: sessionId })
-            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
-              source: 'runtime',
-              severity: 'info',
-              title:
-                brief.open === null
-                  ? `Started ${previous.entry.definition.name} afresh, briefed from the task, to keep its context small.`
-                  : brief.open === 0
-                    ? 'Started a fresh session.'
-                    : `Started a fresh session; picked up ${brief.open} open ${brief.open === 1 ? 'task' : 'tasks'}.`,
-            })
+            yield* Effect.andThen(
+              stopRunning(previous, { state: 'superseded', by: sessionId }),
+              addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title:
+                  brief.open === null
+                    ? `Started ${previous.entry.definition.name} afresh, briefed from the task, to keep its context small.`
+                    : brief.open === 0
+                      ? 'Started a fresh session.'
+                      : `Started a fresh session; picked up ${brief.open} open ${brief.open === 1 ? 'task' : 'tasks'}.`,
+              }),
+            ).pipe(beforeTakingOver(connected))
             yield* activate(connected, {
               text: brief.text,
               closing:

@@ -5,7 +5,7 @@ import { ConnectorFailed, fromOutside, parseRemote, type PostedReview, type Prod
 import type { ReviewBrief, ReviewDraftCard } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId, type ReviewDraftState, type ReviewVerdict } from '@althar/domain'
 import { Commands, type Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from 'effect'
+import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
@@ -13,12 +13,14 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { envelope } from './envelope'
 import { NotFound } from './errors'
+import { makeKeyedLock } from './keyedLock'
 import { commitOf, fetchRefs, gitOutcome } from './git'
 import { Instance } from './Instance'
 import { freeSlug, slugify } from './Projects'
 import { logForLead, logPage, readLog } from './checkLogs'
 import { checksLine, checksOf, commentLine, nameOf, quoted, reviewLine, signed, standing } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
+import { automationOf, linkTask } from './automated'
 import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
 import { indexTask } from './Search'
 import { Sessions } from './Sessions'
@@ -122,6 +124,10 @@ interface Row {
   readonly error: string | null
   readonly reviewUrl: string | null
   readonly decidedAt: string | null
+  /** The automation whose run drafted it, its name now, and whether its reviews post themselves; null where none did. */
+  readonly automationId: string | null
+  readonly automationName: string | null
+  readonly postsReviews: number | null
 }
 
 /** A draft's card, from its row, and whether its pull request came from a fork. */
@@ -144,6 +150,10 @@ const cardOf = (row: Row, fork: boolean): ReviewDraftCard => ({
   state: row.state,
   error: row.error,
   review: row.state === 'posted' && row.reviewUrl !== null && row.decidedAt !== null ? { url: row.reviewUrl, at: row.decidedAt } : null,
+  automation:
+    row.automationId === null || row.automationName === null
+      ? null
+      : { id: row.automationId, name: row.automationName, postsReviews: row.postsReviews === 1 },
 })
 
 /** What the host calls each verdict a review posts with. */
@@ -272,6 +282,8 @@ export class Reviews extends Context.Service<
       readonly pullRequest: string
       readonly lead: { readonly agentId: string; readonly model: string | null; readonly effort?: string }
       readonly request?: string
+      /** The automation's occurrence it is the run of, named in the transaction that makes it. */
+      readonly occurrence?: string
     }): Effect.Effect<Started, unknown>
     /** Changes a draft before it is posted: its verdict, summary, and which comments are kept or what they say. */
     change(
@@ -385,7 +397,14 @@ export class Reviews extends Context.Service<
               JOIN tasks k ON k.id = x.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
               WHERE x.project_id = ${input.projectId} AND x.kind = 'review' AND x.url = ${pull.url} AND k.state = 'open'
               ORDER BY k.created_at DESC LIMIT 1`
-            const posts = !outside && (yield* postTeamReviews)
+            // An automation's review posts itself where the person let its reviews; anyone else's, where their setting does.
+            const [automated] =
+              input.occurrence === undefined
+                ? []
+                : yield* sql<{ postsReviews: number }>`
+                    SELECT a.posts_reviews FROM automation_occurrences o JOIN automations a ON a.id = o.automation_id
+                    WHERE o.id = ${input.occurrence}`
+            const posts = !outside && (automated === undefined ? yield* postTeamReviews : automated.postsReviews === 1)
             const words = { title: pull.title, author, outside, name, posts }
             if (already !== undefined) return { ...already, ...words, already: true, leading: false } satisfies Started
             // Only an agent its session holds to reading leads a review (the registry's `reviewing`; Sessions.ts refuses any other
@@ -521,6 +540,7 @@ export class Reviews extends Context.Service<
                   actorId: input.envelope.actorId,
                   commandId: input.envelope.commandId,
                 })
+                if (input.occurrence !== undefined) yield* linkTask(input.occurrence, taskId, input.envelope.actorId)
                 yield* postCard(input.projectId, taskId)
                 // Found by the pull request it reviews, as by its title.
                 yield* indexTask(taskId)
@@ -593,9 +613,14 @@ export class Reviews extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<Row>`
-            SELECT id, project_id, task_id, thread_id, connection_id, product, repository, number, url, title, author, outside, head_commit,
-              drafter, account, suggested, verdict, summary, comments, state, error, review_url, decided_at
-            FROM review_drafts WHERE id = ${draftId} AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
+            SELECT r.id, r.project_id, r.task_id, r.thread_id, r.connection_id, r.product, r.repository, r.number, r.url, r.title, r.author,
+              r.outside, r.head_commit, r.drafter, r.account, r.suggested, r.verdict, r.summary, r.comments, r.state, r.error, r.review_url,
+              r.decided_at, a.id AS automation_id, d.name AS automation_name, a.posts_reviews
+            FROM review_drafts r
+            LEFT JOIN automation_occurrences o ON o.task_id = r.task_id
+            LEFT JOIN automations a ON a.id = o.automation_id
+            LEFT JOIN automation_definitions d ON d.automation_id = a.id AND d.number = a.definition
+            WHERE r.id = ${draftId} AND r.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
           return row === undefined ? yield* new NotFound({ kind: 'review draft', id: draftId }) : row
         })
 
@@ -687,14 +712,11 @@ export class Reviews extends Context.Service<
       const redraftable = (row: Pick<Row, 'state'>) => row.state === 'pending' || row.state === 'failed'
 
       /* One draft at a time on a task: two draft_review calls at once make one draft, never two that both post. */
-      const drafting = new Map<string, Semaphore.Semaphore>()
-      const oneDraftAt = (taskId: string) => {
-        const known = drafting.get(taskId)
-        if (known !== undefined) return known.withPermits(1)
-        const made = Semaphore.makeUnsafe(1)
-        drafting.set(taskId, made)
-        return made.withPermits(1)
-      }
+      const drafting = makeKeyedLock()
+      const oneDraftAt =
+        (taskId: string) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          drafting.withLock(taskId, effect)
       const closed = (row: Row) => new ReviewDraftClosed({ draftId: row.id, state: row.state })
 
       /**
@@ -876,8 +898,11 @@ export class Reviews extends Context.Service<
               )
               if ('refused' in kept) return kept
               yield* touchCard(taskId)
-              // The person's own setting posts their team's reviews at once; an outside one always waits for them.
-              if (!review.outside && (yield* postTeamReviews)) return { ...kept, posted: yield* post(kept.draftId, instance.systemId) }
+              // The person's own setting posts their team's reviews at once, an automation's where they let its reviews post; an
+              // outside one always waits for them.
+              const run = yield* automationOf(taskId)
+              const posts = run === null ? yield* postTeamReviews : run.postsReviews
+              if (!review.outside && posts) return { ...kept, posted: yield* post(kept.draftId, instance.systemId) }
               return kept
             }),
           )
@@ -983,7 +1008,7 @@ export class Reviews extends Context.Service<
                 return Effect.flatMap(host.repository(row.repository.split('/')), (repository) =>
                   host.postReview(repository, row.number, {
                     event: EVENTS[verdict],
-                    body: signed(row.summary, row.drafter),
+                    body: signed(row.summary, row.drafter, row.automationName),
                     commit: row.headCommit,
                     comments: kept.map((comment) => ({ path: comment.path, line: comment.line, body: comment.body })),
                   }),

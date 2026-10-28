@@ -1,4 +1,4 @@
-import type { AllowedBy, FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -9,7 +9,8 @@ import { took } from './time'
  * A thread's items as the blocks the kit draws, in order: what the person
  * said, each turn of the agent (its messages, thoughts, tool calls and plan,
  * grouped under one name), what a step reported when it ended, a task's card
- * in the coordinator's thread, and the lines that mark a change of scene.
+ * and an automation's in the coordinator's thread, and the lines that mark a
+ * change of scene.
  * Text still streaming replaces the stored text of its item.
  *
  * A turn's work folds (docs/plans/mvp.md, "Work is collapsed"): its tool
@@ -68,6 +69,7 @@ export type IssueChangesContent = Extract<ThreadItem, { kind: 'issue_changes' }>
 export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
 export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['content']
 export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['content']
+export type AutomationCardContent = Extract<ThreadItem, { kind: 'automation' }>['content']
 
 export type Block =
   | {
@@ -80,6 +82,8 @@ export type Block =
       readonly links: ReadonlyArray<Unfurl>
       /** The images the person sent with it. */
       readonly pictures: ReadonlyArray<Picture>
+      /** The files and folders the person sent with it. */
+      readonly files: ReadonlyArray<AttachedFile>
     }
   | {
       readonly kind: 'turn'
@@ -120,6 +124,8 @@ export type Block =
   | { readonly kind: 'push'; readonly id: string; readonly at: string; readonly request: PushRequestContent }
   /** A review the lead drafted of someone else's pull request, posted only when the person says. */
   | { readonly kind: 'review'; readonly id: string; readonly review: ReviewDraftContent }
+  /** An automation the coordinator proposed or changed, or asks the person to resume or run now: turned on, undone or answered where it is. */
+  | { readonly kind: 'automation'; readonly id: string; readonly automation: AutomationCardContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -467,6 +473,7 @@ export const blocksOf = (
           delivery,
           links: item.content.links,
           pictures: item.content.pictures,
+          files: item.content.files,
         })
         if (delivery === Delivery.Delivered) {
           asked = item
@@ -509,6 +516,9 @@ export const blocksOf = (
         continue
       case 'review_draft':
         blocks.push({ kind: 'review', id: item.id, review: item.content })
+        continue
+      case 'automation':
+        blocks.push({ kind: 'automation', id: item.id, automation: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

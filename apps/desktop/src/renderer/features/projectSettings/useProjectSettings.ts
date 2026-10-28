@@ -48,6 +48,10 @@ export interface ProjectSettingsModel {
   readonly noteFailed: string | null
   /** Turns on or off the project's leads resolving conflicts on their own (ADR-030). */
   readonly setResolveConflicts: (on: boolean) => void
+  /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
+  readonly lookForConflicts: () => void
+  /** Since it was last asked: looking (`asked`), or why it couldn't. */
+  readonly looked: 'asked' | { readonly failed: string } | null
   /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
   readonly setMoveIssues: (on: boolean) => void
   readonly setChangeIssues: (on: boolean) => void
@@ -139,6 +143,11 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     [cache, client, projectId],
   )
   const setResolveConflicts = useCallback((on: boolean) => setRule('resolveConflicts', on), [setRule])
+  const [looked, setLooked] = useState<ProjectSettingsModel['looked']>(null)
+  const lookForConflicts = useCallback(() => {
+    setLooked('asked')
+    client.lookForConflicts(projectId).catch((failure: unknown) => setLooked({ failed: messageOf(failure) }))
+  }, [client, projectId])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
   const setChangeIssues = useCallback((on: boolean) => setRule('changeIssues', on), [setRule])
   // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
@@ -225,6 +234,8 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     editNote,
     noteFailed,
     setResolveConflicts,
+    lookForConflicts,
+    looked,
     setMoveIssues,
     setChangeIssues,
     setRepositoryFile,

@@ -155,6 +155,12 @@ export interface AgentDefinition {
     readonly paidBy?: (output: string) => PaidBy | undefined
     /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
+    /**
+     * What lists its sign-ins one by one with how each is paid for, as JSON
+     * (`usageSources.ts`'s `openCodeCredentials`), where it can. Run in an
+     * account's home, and a plain read: the same output a person sees.
+     */
+    readonly credentials?: (node: string) => LaunchSpec
     /** Its sign-in as Althar runs it, without a terminal (`signInFlow.ts`); without it, `login` in a terminal. */
     readonly inApp?: InAppSignIn
     /**
@@ -168,6 +174,11 @@ export interface AgentDefinition {
       readonly line: string
     }
   }
+  /**
+   * The agent's own control channel for plan usage, run in an account's home
+   * (`usage.ts`). Without one, its usage comes from ACP or not at all.
+   */
+  readonly usage?: { readonly run: (node: string) => LaunchSpec }
   /**
    * Where it keeps a sign-in (ADR-012): the environment variable that points
    * it at a folder of its own, a home, and its usual folder when that isn't
@@ -279,6 +290,13 @@ export interface AgentDefinition {
    * it, the person's commands reach it as they are.
    */
   readonly commands?: 'althar'
+  /**
+   * Where it says a failure as a message rather than an error, ending its
+   * turn as if done (Copilot's usage limits): the words that open it. Such a
+   * message is classified as an error would be (`failures.ts`), so a limit
+   * holds the work as any other agent's does.
+   */
+  readonly failsInText?: string
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
 }
@@ -791,7 +809,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
-      'Usage limits reach the Agent SDK but are not forwarded over ACP; only errors show them.',
+      'The adapter forwards one plan window per event in usage_update `_meta["_claude/rateLimit"]`, and Althar patches the adapter (patches/) so it is not dropped before a turn’s first usage figure (claude-agent-acp #1127).',
       "As the coordinator, its sandbox has to start where Althar asks for it (macOS, and Linux with bubblewrap and socat): where it can't, the coordinator's session fails rather than running commands outside it.",
       "As the coordinator, a command it can't read itself, such as one with `$?`, asks rather than running in its sandbox, and meets Althar's reader rules.",
     ],
@@ -842,6 +860,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       },
       logout: { run: () => ({ command: 'codex', args: ['logout'] }), line: 'codex logout' },
     },
+    // Its app-server answers `account/rateLimits/read` about the account it is run for; nothing is read from the sign-in.
+    usage: { run: () => ({ command: 'codex', args: ['app-server'] }) },
     home: {
       variable: 'CODEX_HOME',
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
@@ -878,7 +898,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
       "A project's known commands and hosts aren't passed to it: its sandbox has no list of commands to run outside it, and no list of hosts in the mode Althar starts it in, so each asks first.",
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
-      'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
+      'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
       "Beside Althar's skills it loads the person's own from the shared `skills` folder and `~/.agents/skills`, as it always does.",
     ],
     cli: {
@@ -925,6 +945,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
       login: 'opencode auth login',
+      // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
+      credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
       // No sign-out: its sign-ins are `opencode/auth.json` in the home, gone with the folder; its own asks which to remove.
     },
     /*
@@ -994,6 +1016,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * and not the person's login-shell environment, which it otherwise gives
      * every command it runs, past Althar's allowlist.
      */
+    /* Its limits and other failures come as a message, `Error: You've hit your rate limit. …`, and the turn ends as if done (1.0.63's session.error). */
+    failsInText: 'Error: ',
     launch: () => ({
       command: 'copilot',
       args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'],

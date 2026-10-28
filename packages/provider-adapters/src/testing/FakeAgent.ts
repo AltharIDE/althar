@@ -1,7 +1,8 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import * as acp from '@agentclientprotocol/sdk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -17,8 +18,27 @@ import { recorded } from './recorded'
  * use. The prompt's text picks a scenario. It starts every session in a bypass
  * mode, so tests show the adapter always moves a session out of it. It takes
  * images in a prompt unless told not to, and says first what images it was
- * sent: `saw images: image/png 68 B, …`.
+ * sent: `saw images: image/png 68 B, …`. Then what files and folders: one
+ * linked it opens by its path, as an agent does with its own tools, and says
+ * its first line, or a folder's files; one whose words came in the prompt it
+ * says so of (`saw files: notes.log (linked, 2 KB): first line …`).
  */
+
+/** What it makes of a file sent in a prompt: a linked one opened by its path, its first line or a folder's files; one embedded, its words. */
+const sawFile = (block: acp.ContentBlock): string => {
+  if (block.type === 'resource') {
+    const words = 'text' in block.resource ? block.resource.text : ''
+    return `${block.resource.uri.split('/').pop() ?? ''} (embedded): ${words.split('\n')[0] ?? ''}`
+  }
+  if (block.type !== 'resource_link') return ''
+  try {
+    const path = fileURLToPath(block.uri)
+    if (statSync(path).isDirectory()) return `${block.name} (linked folder): ${readdirSync(path).sort().join(', ')}`
+    return `${block.name} (linked, ${block.mimeType ?? 'no type'}, ${block.size ?? '?'} B): ${readFileSync(path, 'utf8').split('\n')[0] ?? ''}`
+  } catch {
+    return `${block.name} (linked): couldn't open it`
+  }
+}
 
 export const scenarios = {
   /** Two message chunks, then the turn ends with usage. */
@@ -35,6 +55,8 @@ export const scenarios = {
   bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
   updates: 'updates',
+  /** Usage updates that carry Claude Code's rate-limit event in `_meta`: the five-hour window at 82 percent, then the weekly at 40. */
+  planUsage: 'plan-usage',
   /** One chunk, then waits until cancelled. */
   slow: 'slow',
   /** Fails with Claude Code's usage-limit message. */
@@ -71,6 +93,8 @@ export const scenarios = {
   choice: 'choice',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
+  /** Copilot's usage limit, said as a message, `Error: …`, and the turn ending as if done. */
+  limitInText: 'limit-in-text',
   /** Claude's structured report of a full context. */
   contextFull: 'context-full',
   /** Claude's structured warning of a short rate limit, then a normal reply. */
@@ -257,6 +281,8 @@ export interface FakeAgentOptions {
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
+  /** Whether it says it takes a file's words in a prompt, as Claude Code and Codex do. False unless true. */
+  readonly embeddedContext?: boolean
   /**
    * How many of each session's first prompts end at once, having said nothing
    * and used no tokens, as Claude Code's do while another of its processes
@@ -494,8 +520,9 @@ const playStall = async (
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
  * `[coordinator:review]` starts a review of the pull request whose link the
- * person gave, and `[coordinator:keep-note]` keeps what the person said
- * before it as one of the project's notes; a review's lead, `[lead:review]`, drafts asking for changes with a
+ * person gave, `[coordinator:keep-note]` keeps what the person said
+ * before it as one of the project's notes, and `[coordinator:automate]`
+ * proposes the release notes automation, every Friday at 16:00; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; asked to, `[lead:make-change]` makes its quick task a change
@@ -507,6 +534,7 @@ const playStall = async (
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
+ * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
@@ -729,6 +757,7 @@ const playRole = async (
         for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         return 'Stopped reviewing.'
       }
+      if (session.markers.has('[review:slowly]')) for (let waited = 0; !session.cancelled && waited < 3_000; waited += 10) await pause(10)
       if (session.markers.has('[review:always]'))
         return await call('report_review', {
           verdict: 'changes_requested',
@@ -1006,6 +1035,16 @@ const playRole = async (
       const said = (text.slice(0, text.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
       return await call('keep_note', { note: said.trim() })
     }
+    // Asked for work on a schedule, it proposes an automation: the release notes, every Friday.
+    if (available.has('propose_automation') && text.includes('[coordinator:automate]')) {
+      return await call('propose_automation', {
+        name: 'Release notes',
+        prompt: 'Write release notes from what merged this week.',
+        when: { days: ['friday'], at: '16:00' },
+        lead: { agent: 'claude-code' },
+        ends_in: 'nothing',
+      })
+    }
     // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
     if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
       const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
@@ -1170,7 +1209,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
               loadSession: false,
               mcpCapabilities: { http: true, sse: false },
               sessionCapabilities: { close: {} },
-              promptCapabilities: { image: options.images !== false },
+              promptCapabilities: { image: options.images !== false, embeddedContext: options.embeddedContext === true },
             },
             authMethods: [],
             agentInfo: { name: 'fake-agent', version: '0.0.0' },
@@ -1385,6 +1424,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
       if (images.length > 0)
         await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
+      // What files it was sent, in order: each linked one opened by its path, as an agent reads one with its own tools.
+      const sent = params.prompt.flatMap((block) => (block.type === 'resource_link' || block.type === 'resource' ? [block] : []))
+      if (sent.length > 0) await say(`saw files: ${sent.map(sawFile).join('; ')}\n\n`)
 
       // How many asks wait at once, as several do from `run each`: they share one abort, let go as the last is answered.
       let asking = 0
@@ -1645,6 +1687,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
+        case scenarios.limitInText:
+          await say(
+            "Error: You've hit your rate limit. Please wait for your limit to reset in 3 hours 20 minutes or switch to auto model to continue. Learn More (https://docs.github.com/copilot/concepts/rate-limits).",
+          )
+          return ended()
         case scenarios.quota:
           await update({
             sessionUpdate: 'session_info_update',
@@ -1788,6 +1835,32 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'tool_call', ...described, status: 'pending' })
           const chosen = await ask({ toolCallId: 'call-4' }, permissionOptions(false))
           await say(`chosen=${chosen}`)
+          return ended()
+        }
+        case scenarios.planUsage: {
+          // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
+          const inSeconds = (seconds: number) => Math.floor(Date.now() / 1000) + seconds
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 10,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': {
+                status: 'allowed_warning',
+                rateLimitType: 'five_hour',
+                utilization: 0.82,
+                resetsAt: inSeconds(3 * 3600),
+              },
+            },
+          })
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 20,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: inSeconds(5 * 86_400) },
+            },
+          })
           return ended()
         }
         case scenarios.updates:

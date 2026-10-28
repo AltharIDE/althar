@@ -11,6 +11,7 @@ import type { Machine } from './atOnce'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
+import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
 import type { SkillsConfig } from './Skills'
 
@@ -126,14 +127,34 @@ export interface RuntimeOptions {
   readonly agentStderr?: AgentStderr
   /** How this computer's load is read, and how often at most (`MachineLoad.ts`). */
   readonly load?: LoadOptions
+  /** How plan usage is read from each agent, and how often on its own (`PlanUsage.ts`). */
+  readonly usage?: PlanUsageOptions
   /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
   readonly setups?: SetupOptions
   /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't (`leftRunning.ts`, `conflicts.ts`). */
   readonly idle?: IdleOptions
   /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
   readonly busy?: BusyOptions
+  /** When automations run, and the clock and zone they are read by (`Automations.ts`). */
+  readonly automations?: AutomationOptions
   /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
   readonly connectivity?: ConnectivityOptions
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface AutomationOptions {
+  /** The time now, in epoch milliseconds: the wall clock's. */
+  readonly now?: () => number
+  /** The zone the computer is in now: its clock's. */
+  readonly zone?: () => string
+  /** How often the clock is looked at, besides whenever an automation changes: every 30 seconds. */
+  readonly tick?: Duration.Duration
+  /** How long a run the computer slept through, or Althar was closed for, waits after waking or launching: two minutes. */
+  readonly settle?: Duration.Duration
+  /** Whether each automation starts its few minutes after its time: yes. */
+  readonly stagger?: boolean
+  /** Pull requests a review automation lists at a time, reading back from the latest: 100, as many as GitHub gives at once. */
+  readonly listed?: number
 }
 
 /** Each is the default unless a test says otherwise. */
@@ -171,6 +192,8 @@ export interface BusyOptions {
   readonly quiet?: Duration.Duration
   /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
   readonly askGrace?: Duration.Duration
+  /** How many automations' tasks may be at work at once: one. */
+  readonly automations?: number
   /**
    * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
    * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:

@@ -39,7 +39,7 @@ import {
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
-import { touchCard } from './cards'
+import { touchCard, touchTask } from './cards'
 import { logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
@@ -65,6 +65,7 @@ import { evidencePaths, taskShown } from './evidence'
 import { AttachRefused, CantMerge, ChangedSinceSeen, GitFailed, NoChangeToOpen, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
+import { makeKeyedLock } from './keyedLock'
 import {
   branchExists,
   commitOf,
@@ -324,6 +325,20 @@ const QUIET_AFTER = Duration.minutes(10)
 const QUIET_SLOWER = 10
 
 /**
+ * Every how many listening turns each open task is looked at for a conflict
+ * with its default branch, which is fetched for it at most as often: a
+ * branch that moved is found within minutes, whether or not its pull
+ * request changed (ADR-030).
+ */
+const BASE_TURNS = 4
+
+/** How many turns running a pull request whose host hasn't worked out whether it conflicts is asked again each turn. */
+const UNKNOWN_TURNS = 5
+
+/** Why a round an earlier launch left under way ended, where it couldn't be asked again. */
+const STOPPED_MIDWAY = 'Althar stopped while the lead was resolving it.'
+
+/**
  * Whether a listened change is due to be asked again: every turn while
  * something has happened on it lately, every few turns once it is quiet.
  */
@@ -419,6 +434,18 @@ type Store =
 export type ConflictStanding =
   | { readonly state: 'resolving'; readonly checks: boolean }
   | { readonly state: 'handed_back'; readonly why: string }
+  /** It conflicts, and its lead wasn't asked to resolve it: why, for its card, with Resolve now beside it. */
+  | { readonly state: 'unsent'; readonly why: string }
+  /** Althar couldn't look here for whether it conflicts, and its host doesn't say it does: why, with Look again beside it. */
+  | { readonly state: 'unchecked'; readonly why: string }
+
+/**
+ * Whether a task's conflict is its lead's to resolve now (`askable`): yes;
+ * a round under way; nothing to say, as the rules leave it to the person,
+ * or a round the lead couldn't resolve is theirs already (`handed`); or why
+ * not, said on its card where `shown`, and logged either way.
+ */
+type Askable = 'yes' | 'resolving' | 'off' | 'handed' | { readonly why: string; readonly shown: boolean }
 
 interface RoundRow {
   readonly id: string
@@ -623,9 +650,13 @@ export class Changes extends Context.Service<
      * their own (ADR-030): each of its open tasks is looked at now, rather
      * than at its next conflict, and one that already conflicts starts a
      * round, as any conflict found would. Done apart: this returns before
-     * any is looked at.
+     * any is looked at. Each default branch is fetched again first, and a
+     * pull request is merged with it here, whatever its host says. Forced,
+     * as the person's Resolve now on one task is, its lead is asked though
+     * the rules leave it to the person, they stopped it, or its last round
+     * was handed back to them.
      */
-    resolveNow(where: { readonly projectId: string } | { readonly taskId: string }): Effect.Effect<void>
+    resolveNow(where: { readonly projectId: string } | { readonly taskId: string }, force?: boolean): Effect.Effect<void>
     /**
      * Whether a task's lead resolves a conflict on its own otherwise than its
      * project's rules say, as the person says; null goes back to them. The
@@ -642,7 +673,8 @@ export class Changes extends Context.Service<
      * work on one (`resolving`; `checks` where it is fixing the checks that
      * failed on what Althar pushed rather than the conflict), or handed back
      * to the person, saying why, for as long as the task's branches are as
-     * the lead left them. Null otherwise, such as while Althar waits for the
+     * the lead left them; or conflicting, and not asked of its lead, saying
+     * why (`unsent`). Null otherwise, such as while Althar waits for the
      * checks on what it pushed.
      */
     conflictStanding(taskId: string): Effect.Effect<ConflictStanding | null>
@@ -686,14 +718,11 @@ export class Changes extends Context.Service<
       const checksAppear = Duration.toMillis((yield* RuntimeConfig).checksAppear ?? Duration.minutes(1))
       const stuckAfter = (yield* RuntimeConfig).checksStuck ?? STUCK_AFTER
       /* One thing at a time on a task's pull request: a reply's receipt is kept before listening reads the reply back. */
-      const locks = new Map<string, Semaphore.Semaphore>()
-      const locked = (taskId: string) => {
-        const known = locks.get(taskId)
-        if (known !== undefined) return known.withPermits(1)
-        const made = Semaphore.makeUnsafe(1)
-        locks.set(taskId, made)
-        return made.withPermits(1)
-      }
+      const locks = makeKeyedLock()
+      const locked =
+        (taskId: string) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          locks.withLock(taskId, effect)
       /*
        * Default branches move here, by a local merge, and go to their remotes,
        * by a push, one at a time across every task: a push never sends what a
@@ -732,6 +761,28 @@ export class Changes extends Context.Service<
       const newsAt = new Map<string, number>()
       const polledAt = new Map<string, number>()
       const news = (taskId: string) => Effect.map(Clock.currentTimeMillis, (now) => void newsAt.set(taskId, now))
+      /*
+       * Why each task whose branch conflicts wasn't asked of its lead, or couldn't be looked at for one (`checked` false): its card
+       * says so until it is, or conflicts no more.
+       */
+      const unsent = new Map<string, { readonly why: string; readonly checked: boolean }>()
+      /* Where each repository's default branch was when last fetched to look for conflicts, and when, by binding and ref. */
+      const fetchedAt = new Map<string, { readonly at: number; readonly tip: string }>()
+      /* How often a default branch is fetched at most to look for conflicts with what goes into it: a few listening turns. */
+      const baseEvery = Duration.toMillis(every) * BASE_TURNS
+      /* Pull requests whose host hasn't worked out yet whether they conflict, by how many turns running: asked again next turn. */
+      const unknownFor = new Map<string, number>()
+      /* Wakes the look for conflicts before its time: a default branch moved, as Althar saw. */
+      const sweepWake = yield* Queue.sliding<boolean>(1)
+      /** A default branch moved, as Althar saw: each is fetched again, and every open task looked at for a conflict with it now. */
+      const baseMoved = Effect.sync(() => {
+        fetchedAt.clear()
+        Queue.offerUnsafe(sweepWake, true)
+      })
+      /* The last reason logged for each task's conflict not sent to its lead: each is logged once. */
+      const logged = new Map<string, string>()
+      /* Tasks the person pressed Resolve now on: why it went nowhere stays, though the rules leave it to them, until it is answered. */
+      const pressed = new Set<string>()
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const decodeSnapshot = Schema.decodeUnknownEffect(Schema.fromJsonString(Snapshot))
 
@@ -808,6 +859,11 @@ export class Changes extends Context.Service<
             ORDER BY sequence DESC LIMIT 1`
           // What the task built, where the lead wrote no description: since the last pull request, for a next one (ADR-034).
           const { built } = yield* taskShown(threadId, since)
+          // An automation's run is signed with its name.
+          const [automated] = yield* sql<{ name: string }>`
+            SELECT d.name FROM threads h JOIN automation_occurrences o ON o.task_id = h.task_id
+            JOIN automations a ON a.id = o.automation_id JOIN automation_definitions d ON d.automation_id = a.id AND d.number = a.definition
+            WHERE h.id = ${threadId} LIMIT 1`
           // An agent may sign what it writes as it signs a commit; that stays here too.
           return bodyOf({
             built: built === null ? null : withoutAgentCredit(built, agentNames),
@@ -816,6 +872,7 @@ export class Changes extends Context.Service<
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
             credit: yield* coAuthorOn,
+            automation: automated?.name ?? null,
           })
         })
 
@@ -2142,8 +2199,9 @@ export class Changes extends Context.Service<
           if (after.state !== before.state && settled)
             yield* arrive(link, { kind: after.state, from: null, where: nameOf(before), url: before.url })
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
-          if (after.state === 'merged' && before.state !== 'merged') yield* follow(link.taskId, 'merged', before)
+          if (after.state === 'merged' && before.state !== 'merged') yield* Effect.andThen(follow(link.taskId, 'merged', before), baseMoved)
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
+          if (settled) yield* forgetUnsent(link.taskId)
           return after
         })
 
@@ -2923,7 +2981,7 @@ export class Changes extends Context.Service<
        * what was said since the cursor. Whether anything happened on it, so
        * a quiet one is asked less often.
        */
-      const poll = (link: LinkRow) =>
+      const poll = (link: LinkRow, how: { readonly force: boolean; readonly fresh: boolean } = { force: false, fresh: false }) =>
         Effect.gen(function* () {
           if (link.connectionId === null) return false
           const adapters = yield* connections.adapters(link.connectionId)
@@ -3095,17 +3153,22 @@ export class Changes extends Context.Service<
           })
           // Merged or closed, it takes no more pushes: what the lead asked to push to it is closed.
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
-          if (after.state === 'merged' && before.state !== 'merged') yield* follow(link.taskId, 'merged', before)
+          if (after.state === 'merged' && before.state !== 'merged') yield* Effect.andThen(follow(link.taskId, 'merged', before), baseMoved)
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           // Checks on what Althar pushed to resolve a conflict are the round's; what fails there isn't told the lead twice.
           const theRounds = yield* checked(link, before.url, now, host, repository).pipe(
             Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not hear the checks on a resolved conflict', cause), false)),
           )
           yield* tellLead(link, theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead, alone && !theRounds)
-          if (now.state === 'open' && now.conflicts === true)
-            yield* conflicted(link, before, now, host, repository).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not ask the lead to resolve a conflict', cause)),
+          // Not worked out yet by its host, whether it conflicts is asked again next turn, a few turns running, not taken for a no.
+          const unknown = now.state === 'open' && now.conflicts === undefined ? (unknownFor.get(link.id) ?? 0) + 1 : 0
+          if (unknown === 0) unknownFor.delete(link.id)
+          else unknownFor.set(link.id, unknown)
+          if (now.state === 'open')
+            yield* lookAt(link, before, now, host, repository, how).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not look for a conflict to resolve', cause)),
             )
+          else yield* forgetUnsent(link.taskId)
           return happened
         })
 
@@ -3507,30 +3570,100 @@ export class Changes extends Context.Service<
       /**
        * Whether a conflict is the lead's to resolve now, unasked: the task
        * says so, or its project does where the task says nothing; the task is
-       * open with its run done (not running, nor stopped, where starting its
-       * lead would go against the person); and no round is under way. One the
+       * open, its lead idle, and no round is under way. A run that ended
+       * otherwise than succeeded, failed or cancelled, leaves its lead idle
+       * all the same. Not while its run still goes, nor where the person
+       * stopped it, where starting its lead would go against them. One the
        * lead couldn't resolve stays the person's while its branches are as it
-       * left them.
+       * left them and what they conflicted with is where it was (`targets`,
+       * where it is now). Forced, as the person's Resolve now is, neither the
+       * rules, a stop nor a round handed back holds it.
        */
-      const askable = (taskId: string, url: string | null) =>
+      const askable = (
+        taskId: string,
+        url: string | null,
+        how: { readonly force?: boolean; readonly targets?: ReadonlyArray<string> } = {},
+      ): Effect.Effect<Askable, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [task] = yield* sql<{ projectId: ProjectId; state: string; resolveConflicts: number | null; run: string | null }>`
             SELECT k.project_id, k.state, k.resolve_conflicts,
               (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run
             FROM tasks k WHERE k.id = ${taskId}`
-          if (task === undefined || task.state !== 'open' || task.run !== 'succeeded') return 'no' as const
-          if (!resolvesConflictsFor((yield* (yield* Policies).current(task.projectId)).rules, task.resolveConflicts)) return 'no' as const
-          const [latest] = yield* sql<{ id: string; url: string | null; state: string; conflicts: string; ended: string | null }>`
-            SELECT id, pull_request_url AS url, state, conflicts, ended FROM conflict_resolutions WHERE task_id = ${taskId}
+          if (task === undefined || task.state !== 'open') return 'off'
+          const force = how.force === true
+          if (!force && !resolvesConflictsFor((yield* (yield* Policies).current(task.projectId)).rules, task.resolveConflicts)) return 'off'
+          const [latest] = yield* sql<{
+            id: string
+            url: string | null
+            state: string
+            conflicts: string
+            ended: string | null
+            failure: string | null
+          }>`
+            SELECT id, pull_request_url AS url, state, conflicts, ended, failure FROM conflict_resolutions WHERE task_id = ${taskId}
             ORDER BY created_at DESC, rowid DESC LIMIT 1`
-          if (latest?.state === 'resolving' || latest?.state === 'checking') return 'resolving' as const
-          if (latest?.state === 'failed' && latest.url === url && latest.ended !== null) {
+          if (latest?.state === 'resolving' || latest?.state === 'checking') return 'resolving'
+          // Its run still going, its lead is at work: looked at again once it ends.
+          if (task.run === 'admitted' || task.run === 'running')
+            return { why: 'Its run is still going, so Althar asks its lead once it ends.', shown: false }
+          if (task.run === null) return { why: 'It has no lead yet to ask.', shown: true }
+          if (force) return 'yes'
+          if (task.run === 'suspended') return { why: 'You stopped it, so Althar doesn’t start its lead for a conflict.', shown: true }
+          // One that ended as Althar stopped, as an earlier launch settled it, wasn't the lead's to fail.
+          if (latest?.state === 'failed' && latest.url === url && latest.ended !== null && !latest.failure?.startsWith(STOPPED_MIDWAY)) {
             const left = yield* decodeEnded(latest.ended)
-            const now = yield* endedOf(taskId, yield* decodeConflicts(latest.conflicts))
-            if (left.every((one) => now.some((head) => head.repository === one.repository && head.head === one.head))) return 'no' as const
+            const conflicts = yield* decodeConflicts(latest.conflicts)
+            const now = yield* endedOf(taskId, conflicts)
+            const still = left.every((one) => now.some((head) => head.repository === one.repository && head.head === one.head))
+            // What it conflicted with moved on since: a conflict of its own, the lead's to try again.
+            const moved = how.targets !== undefined && conflicts.some((one) => !(how.targets ?? []).includes(one.target))
+            if (still && !moved) return 'handed'
           }
-          return 'yes' as const
+          return 'yes'
+        })
+
+      /**
+       * A task that conflicts wasn't asked of its lead, or one Althar couldn't
+       * look at for a conflict (`checked` false), whatever its host says: why,
+       * logged, and on its card where the person is to see it.
+       */
+      const notSent = (taskId: string, why: string, shown = true, checked = true) =>
+        Effect.gen(function* () {
+          if (logged.get(taskId) !== why) {
+            logged.set(taskId, why)
+            yield* Effect.logInfo(
+              checked ? `A conflict wasn’t sent to its lead: ${why}` : `A task couldn’t be looked at for a conflict: ${why}`,
+            ).pipe(Effect.annotateLogs({ taskId }))
+          }
+          const was = unsent.get(taskId)
+          if (shown ? was?.why === why && was.checked === checked : was === undefined) return
+          if (shown) unsent.set(taskId, { why, checked })
+          else unsent.delete(taskId)
+          // Its board card and its task say it too, not only its card in the conversation.
+          yield* touchTask(taskId)
+        })
+
+      /** Nothing to say of a task's conflict any more: asked of its lead, or it conflicts no more. */
+      const forgetUnsent = (taskId: string) =>
+        Effect.gen(function* () {
+          logged.delete(taskId)
+          pressed.delete(taskId)
+          if (unsent.delete(taskId)) yield* touchTask(taskId)
+        })
+
+      /** What `askable` said, done: the lead asked, or why not kept; whether to ask it. */
+      const sayingWhy = (taskId: string, asked: Askable) =>
+        Effect.gen(function* () {
+          if (asked === 'yes') return true
+          // Off, the rules leave it to the person, unless they pressed Resolve now: why that went nowhere stays.
+          if (asked === 'off') {
+            if (!pressed.has(taskId)) yield* forgetUnsent(taskId)
+            return false
+          }
+          if (asked === 'handed') yield* forgetUnsent(taskId)
+          else if (asked !== 'resolving') yield* notSent(taskId, asked.why, asked.shown)
+          return false
         })
 
       /** Where a task's latest round stands, for its card (`Changes.conflictStanding`). */
@@ -3540,8 +3673,10 @@ export class Changes extends Context.Service<
           const [latest] = yield* sql<{ id: string }>`
             SELECT id FROM conflict_resolutions WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
           const round = latest === undefined ? undefined : yield* roundOf({ id: latest.id })
+          if (round?.state === 'resolving') return { state: 'resolving', checks: round.pushedHead !== null }
+          const said = unsent.get(taskId)
+          if (said !== undefined) return { state: said.checked ? 'unsent' : 'unchecked', why: said.why }
           if (round === undefined) return null
-          if (round.state === 'resolving') return { state: 'resolving', checks: round.pushedHead !== null }
           if (round.state !== 'failed' || round.ended === null || round.failure === null) return null
           // Still the person's while the branches are as the lead left them, as `askable` reads it.
           const conflicts = yield* decodeConflicts(round.conflicts)
@@ -3626,6 +3761,8 @@ export class Changes extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          unsent.delete(task.taskId)
+          pressed.delete(task.taskId)
           const id = yield* newId(Ids.conflictResolution)
           const place = yield* placeOf(task.taskId, url)
           const body = noteFor(conflicts, place, null)
@@ -3960,24 +4097,66 @@ export class Changes extends Context.Service<
         })
 
       /**
-       * What the host says of an open pull request that conflicts: where the
-       * project has the lead resolve it, Althar fetches the branch it goes
-       * into, and asks the lead where its branch here conflicts with it too.
-       * One that merges cleanly here is from before the branch moved, or
-       * merged here already and waiting for the person to push.
+       * Where a pull request's target branch is, fetched into the task's
+       * workspace at most every few turns, unless `fresh`: the worktrees of a
+       * repository share what one fetched. Null where it couldn't be fetched.
        */
-      const conflicted = (link: LinkRow, seen: Snapshot, now: ChangeRequest, host: CodeHost, repository: Repository) =>
+      const baseOf = (
+        workspace: { readonly path: string; readonly binding: string },
+        host: CodeHost,
+        repository: Repository,
+        branch: string,
+        ref: string,
+        fresh: boolean,
+      ) =>
+        Effect.gen(function* () {
+          const key = `${workspace.binding}:${ref}`
+          const at = yield* Clock.currentTimeMillis
+          const known = fetchedAt.get(key)
+          if (!fresh && known !== undefined && at - known.at < baseEvery) return known.tip
+          const tip = yield* fetchInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
+          if (tip !== null) fetchedAt.set(key, { at, tip })
+          return tip
+        })
+
+      /**
+       * Whether an open pull request conflicts with the branch it goes into,
+       * worked out here rather than taken from its host, which works it out
+       * lazily, says nothing until it has, and needn't say again when only
+       * that branch moved: the branch is fetched, at most every few turns
+       * unless `fresh` or the host says it conflicts, and merged with the
+       * task's branch here without anything moving. Where it conflicts and
+       * the lead is to resolve it, the lead is asked; where not, why not is
+       * logged and kept for its card. One that merges cleanly here is from
+       * before the branch moved, or merged here already and waiting for the
+       * person to push.
+       */
+      const lookAt = (
+        link: LinkRow,
+        seen: Snapshot,
+        now: { readonly target: string; readonly conflicts?: boolean | null | undefined; readonly headSha: string | null },
+        host: CodeHost,
+        repository: Repository,
+        how: { readonly force: boolean; readonly fresh: boolean },
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          if ((yield* askable(link.taskId, seen.url)) !== 'yes') return
-          const [workspace] = yield* sql<{ path: string; slug: string; name: string; threadId: string }>`
-            SELECT w.path, b.slug, b.display_name AS name, t.id AS thread_id FROM workspaces w
+          const first = yield* askable(link.taskId, seen.url, { force: how.force })
+          if (first === 'off') return pressed.has(link.taskId) ? undefined : yield* forgetUnsent(link.taskId)
+          if (first === 'resolving') return
+          const says = now.conflicts === true
+          // Where it can't be looked at here, that is said whatever its host says: a host saying it merges cleanly may be out of date.
+          const couldnt = (why: string) => notSent(link.taskId, why, true, says)
+          const [workspace] = yield* sql<{ path: string; binding: string; slug: string; name: string; threadId: string }>`
+            SELECT w.path, b.id AS binding, b.slug, b.display_name AS name, t.id AS thread_id FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-            WHERE w.task_id = ${link.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            WHERE w.task_id = ${link.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state <> 'cleaned'
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${seen.url} LIMIT 1) DESC,
               b.created_at, b.rowid
             LIMIT 1`
-          if (workspace === undefined) return
+          // Without its folder here, nothing can be merged: the card says why nothing happens.
+          if (workspace === undefined)
+            return yield* couldnt(`Its folder isn’t on this computer, so Althar can’t merge ${now.target} into it here.`)
           // Into the repository a fork came from, its branch is upstream's; otherwise origin's, as `git fetch` names them.
           const fork = yield* namedRemotes(workspace.path).pipe(
             Effect.map(forkOf),
@@ -3986,11 +4165,19 @@ export class Changes extends Context.Service<
           const remote =
             fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase() ? 'upstream' : 'origin'
           const ref = `${remote}/${now.target}`
-          const target = yield* fetchInto(workspace.path, yield* host.pushTarget(repository), now.target, `refs/remotes/${ref}`)
+          const target = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says)
           const from = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
-          if (target === null || from === null) return
+          if (target === null || from === null)
+            return yield* couldnt(
+              target === null
+                ? `Althar couldn’t fetch ${now.target} to merge it with the branch here.`
+                : 'Althar couldn’t read the branch here.',
+            )
           const merged = yield* gitOutcome(workspace.path, 'merge-tree', '--write-tree', '--name-only', '--no-messages', target, from)
-          if (merged.code === 0) return
+          if (merged.code === 0) return yield* forgetUnsent(link.taskId)
+          // 1 is git's word for a merge that conflicts; anything else, one it couldn't work out.
+          if (merged.code !== 1) return yield* couldnt(`Git couldn’t merge ${now.target} with the branch here.`)
+          if (!(yield* sayingWhy(link.taskId, yield* askable(link.taskId, seen.url, { force: how.force, targets: [target] })))) return
           const [sent] = yield* sql<{ head: string | null }>`
             SELECT head_commit AS head FROM repository_changes WHERE pull_request_url = ${seen.url} AND project_id = ${link.projectId} LIMIT 1`
           yield* beginRound({ projectId: link.projectId, taskId: link.taskId, threadId: workspace.threadId }, seen.url, [
@@ -4237,6 +4424,45 @@ export class Changes extends Context.Service<
         })
 
       /**
+       * A round an earlier launch left with its lead at work. Resolved by
+       * then, it is settled so; still conflicting, its lead is asked again
+       * once it has a place, rather than the round handed to the person for
+       * Althar's own stop. One fixing the checks on what Althar pushed, or
+       * whose worktree is gone, is settled as it stands.
+       */
+      const resumeRound = (id: string) =>
+        Effect.gen(function* () {
+          const round = yield* roundOf({ id })
+          if (round === undefined || round.state !== 'resolving') return
+          const stopped = STOPPED_MIDWAY
+          if (round.pushedHead !== null) return yield* settleRound(id, { why: stopped })
+          const conflicts = yield* decodeConflicts(round.conflicts)
+          const worktrees = yield* worktreesOf(round.taskId)
+          const left = yield* Effect.forEach(conflicts, (conflict) => {
+            const worktree = worktrees.get(conflict.repository)
+            return worktree === undefined || !existsSync(worktree)
+              ? Effect.succeed('gone' as const)
+              : unresolved(worktree, conflict).pipe(Effect.orElseSucceed(() => 'gone' as const))
+          })
+          if (left.includes('gone')) return yield* settleRound(id, { why: stopped })
+          if (left.every((one) => one === null)) return yield* settleRound(id)
+          const place = yield* placeOf(round.taskId, round.url)
+          const waiting: RoundWaiting = {
+            attempt: round.attempt,
+            body: noteFor(conflicts, place, null),
+            why: { restarted: true },
+            since: yield* timestamp,
+          }
+          yield* reviseRound(round, 'conflict_resolution.waiting', { waiting: JSON.stringify(waiting) }, { restarted: true })
+          yield* addItem({ projectId: round.projectId, threadId: round.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `Althar stopped while the lead was resolving the conflict with ${whereLine(conflicts)}.`,
+            description: 'Althar asks the lead again once an agent is free on this computer.',
+          })
+        })
+
+      /**
        * Waits for the lead to be done, apart from the stream of events so
        * that the rounds of other tasks aren't held up, then looks at the
        * round as its turn ending would have: what the thread holds by then
@@ -4273,10 +4499,8 @@ export class Changes extends Context.Service<
             const open = yield* sql<{ id: string; taskId: string }>`
               SELECT id, task_id FROM conflict_resolutions WHERE state = 'resolving' AND waiting IS NULL`
             // Each round on its own: one that can't be settled waits for the next launch, and the rest are settled.
-            for (const round of open)
-              yield* locked(round.taskId)(settleRound(round.id, { why: 'Althar stopped while the lead was resolving it.' })).pipe(
-                contained('Changes.sweep', () => undefined),
-              )
+            for (const round of open) yield* locked(round.taskId)(resumeRound(round.id)).pipe(contained('Changes.sweep', () => undefined))
+            if (open.length > 0) yield* busy.wake
             // Waiting for checks on a pull request no longer listened to, nothing would end it.
             const unheard = yield* sql<{ id: string; taskId: string }>`
               SELECT c.id, c.task_id FROM conflict_resolutions c WHERE c.state = 'checking' AND NOT EXISTS (
@@ -4341,16 +4565,26 @@ export class Changes extends Context.Service<
               if ((waitUntil.get(link.id) ?? 0) > now) continue
               // A pull request first seen this launch counts as busy until it has been quiet a while.
               if (!newsAt.has(link.taskId)) newsAt.set(link.taskId, now)
-              if (!listenDue({ now, polledAt: polledAt.get(link.id), newsAt: newsAt.get(link.taskId) ?? now, every })) continue
+              const unknown = unknownFor.get(link.id) ?? 0
+              const due = listenDue({ now, polledAt: polledAt.get(link.id), newsAt: newsAt.get(link.taskId) ?? now, every })
+              if (!due && (unknown === 0 || unknown > UNKNOWN_TURNS)) continue
             }
             polledAt.set(link.id, now)
             yield* listenTo(link, now)
           }
+          // A change no longer listened to, merged, closed, its task or project gone, is forgotten: these would keep one for each forever.
+          if (only === null) {
+            const links = new Set(due.map((link) => link.id))
+            const tasks = new Set(due.map((link) => link.taskId))
+            for (const id of polledAt.keys()) if (!links.has(id)) polledAt.delete(id)
+            for (const id of waitUntil.keys()) if (!links.has(id)) waitUntil.delete(id)
+            for (const id of newsAt.keys()) if (!tasks.has(id)) newsAt.delete(id)
+          }
         })
 
       /** Asks the host about one listened change now; one that can't be asked waits, as long as its service says or a while. */
-      const listenTo = (link: LinkRow, now: number) =>
-        locked(link.taskId)(poll(link)).pipe(
+      const listenTo = (link: LinkRow, now: number, how?: { readonly force: boolean; readonly fresh: boolean }) =>
+        locked(link.taskId)(poll(link, how)).pipe(
           Effect.flatMap((happened) => (happened ? news(link.taskId) : Effect.void)),
           Effect.catchCause((cause) =>
             Effect.gen(function* () {
@@ -4365,50 +4599,128 @@ export class Changes extends Context.Service<
         )
 
       /**
-       * A task's conflicts, looked for now where its lead is to resolve them
-       * (`askable`): its repositories here are merged with their default
-       * branches without anything moving, and those that conflict start a
-       * round, as pressing Merge would; then its listened pull requests are
-       * asked about, and one whose host says it conflicts starts one as ever.
-       * One round at a time, so a task conflicting both ways starts with what
-       * conflicts here.
+       * A task's conflicts here, looked for where its lead is to resolve them
+       * (`askable`): its repositories without a pull request are merged with
+       * their default branches here without anything moving, and those that
+       * conflict start a round, as pressing Merge would. Where the lead isn't
+       * asked, or a branch can't be looked at here, why not is kept for its
+       * card.
        */
-      const conflictsNow = (task: { readonly taskId: string; readonly projectId: ProjectId; readonly threadId: string }) =>
-        Effect.gen(function* () {
-          const { taskId } = task
-          yield* locked(taskId)(
-            Effect.gen(function* () {
-              if ((yield* askable(taskId, null)) !== 'yes') return
-              const found: Array<Conflict> = []
-              for (const repository of yield* repositoriesHere(taskId)) {
-                if (repository.opened !== 0) continue
-                // A branch git can't read says nothing conflicts.
-                const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
-                const files = yield* conflictsOf(repository.root, repository.base, head)
-                if (files.length > 0) found.push(yield* conflictHere(repository, files))
+      const lookHere = (task: { readonly taskId: string; readonly projectId: ProjectId; readonly threadId: string }, force: boolean) =>
+        locked(task.taskId)(
+          Effect.gen(function* () {
+            const first = yield* askable(task.taskId, null, { force })
+            if (first === 'off' || first === 'resolving') return
+            const found: Array<Conflict> = []
+            // Why a branch couldn't be looked at here: no conflict found isn't none there.
+            let couldnt: string | null = null
+            for (const repository of yield* repositoriesHere(task.taskId)) {
+              if (repository.opened !== 0) continue
+              const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => null))
+              if (head === null) {
+                couldnt ??= existsSync(repository.worktree)
+                  ? 'Althar couldn’t read the branch here.'
+                  : `Its folder isn’t on this computer, so Althar can’t merge ${repository.base} into it here.`
+                continue
               }
-              if (found.length > 0) yield* beginRound(task, null, found)
-            }),
-          )
+              const files = yield* conflictsOf(repository.root, repository.base, head)
+              if (files === null) couldnt ??= `Git couldn’t merge ${repository.base} with the branch here.`
+              else if (files.length > 0) found.push(yield* conflictHere(repository, files))
+            }
+            if (found.length === 0) {
+              // A task with a pull request too is said of as that is looked at, unless a branch here couldn't be: that, where it says no conflict.
+              const listened = (yield* linksOf(task.taskId)).some((link) => link.listening === 1)
+              if (couldnt !== null && !(listened && unsent.get(task.taskId)?.checked === true))
+                yield* notSent(task.taskId, couldnt, true, false)
+              else if (couldnt === null && !listened) yield* forgetUnsent(task.taskId)
+              return
+            }
+            const asked = yield* askable(task.taskId, null, { force, targets: found.map((one) => one.target) })
+            if (yield* sayingWhy(task.taskId, asked)) yield* beginRound(task, null, found)
+          }),
+        )
+
+      /**
+       * A task's conflicts, looked for now: here, then on its listened pull
+       * requests, asked about now, each merged here with its target fetched
+       * again. One round at a time, so a task conflicting both ways starts
+       * with what conflicts here.
+       */
+      const conflictsNow = (task: { readonly taskId: string; readonly projectId: ProjectId; readonly threadId: string }, force: boolean) =>
+        Effect.gen(function* () {
+          yield* lookHere(task, force)
           const now = yield* Clock.currentTimeMillis
-          for (const link of yield* linksOf(taskId)) if (link.listening === 1) yield* listenTo(link, now)
+          for (const link of yield* linksOf(task.taskId)) if (link.listening === 1) yield* listenTo(link, now, { force, fresh: true })
         })
 
-      /** Each open task with a branch here, of the project or the one task, looked at now for what already conflicts. */
-      const resolveNow = (where: { readonly projectId: string } | { readonly taskId: string }) =>
+      /**
+       * The open tasks of the project, of the one task, or of every project
+       * not archived: those without a folder here too, whose pull requests
+       * are looked at all the same, to say why nothing can be merged here.
+       */
+      const openHere = (where: { readonly projectId: string } | { readonly taskId: string } | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const open = yield* sql<{ taskId: string; projectId: ProjectId; threadId: string }>`
+          return yield* sql<{ taskId: string; projectId: ProjectId; threadId: string }>`
             SELECT k.id AS task_id, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE k.state = 'open'
-              AND ${'taskId' in where ? sql`k.id = ${where.taskId}` : sql`k.project_id = ${where.projectId}`}
-              AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.access = 'write')
+              AND ${
+                where === null
+                  ? sql`k.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
+                  : 'taskId' in where
+                    ? sql`k.id = ${where.taskId}`
+                    : sql`k.project_id = ${where.projectId}`
+              }
             ORDER BY k.created_at, k.rowid`
-          for (const task of open)
-            yield* conflictsNow(task).pipe(
+        })
+
+      /** Each open task, of the project or the one task, looked at now for what already conflicts. */
+      const resolveNow = (where: { readonly projectId: string } | { readonly taskId: string }, force = false) =>
+        Effect.gen(function* () {
+          if (force && 'taskId' in where) pressed.add(where.taskId)
+          for (const task of yield* openHere(where))
+            yield* conflictsNow(task, force && 'taskId' in where).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not look for a conflict to resolve', cause)),
             )
         })
+
+      /**
+       * Every open task looked at for a conflict with its default branch,
+       * every few turns, and once one moves as Althar sees (`baseMoved`):
+       * a listened pull request is merged here with its target as last
+       * fetched, fetched again where that was a while ago, without asking its
+       * host; a branch with none, with its default branch here.
+       */
+      const sweep = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const links = yield* sql<LinkRow>`
+          SELECT id, project_id, task_id, connection_id, product, snapshot, cursor, listening FROM external_links
+          WHERE kind = 'change' AND listening = 1 AND json_extract(snapshot, '$.state') = 'open'
+            AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+          ORDER BY created_at`
+        for (const link of links)
+          yield* locked(link.taskId)(
+            Effect.gen(function* () {
+              const adapters = yield* connections.adapters(link.connectionId ?? '')
+              if (adapters.host === undefined) return
+              const before = yield* decodeSnapshot(link.snapshot)
+              if (before.target === undefined) return
+              const repository = yield* adapters.host.repository(before.repository)
+              yield* lookAt(
+                link,
+                before,
+                { target: before.target, conflicts: before.conflicts, headSha: before.headSha },
+                adapters.host,
+                repository,
+                {
+                  force: false,
+                  fresh: false,
+                },
+              )
+            }),
+          ).pipe(contained('Changes.sweep', () => undefined))
+        for (const task of yield* openHere(null)) yield* lookHere(task, false).pipe(contained('Changes.sweep', () => undefined))
+      })
 
       /** The task's own say on its lead resolving conflicts, kept with its fact; turned on, as it was not, what conflicts now is resolved. */
       const setResolveConflicts = (input: {
@@ -4452,6 +4764,17 @@ export class Changes extends Context.Service<
               // A round that failed is kept to that round: the next one listens again.
               yield* listenOnce(only).pipe(contained('Changes.listen', () => undefined))
             }),
+          ),
+        ),
+      )
+
+      yield* Effect.forkScoped(
+        provide(
+          Effect.forever(
+            Effect.andThen(
+              Effect.raceFirst(Queue.take(sweepWake), Effect.as(Effect.sleep(Duration.millis(baseEvery)), false)),
+              sweep.pipe(contained('Changes.sweep', () => undefined)),
+            ),
           ),
         ),
       )
@@ -4896,7 +5219,7 @@ export class Changes extends Context.Service<
               if (task !== undefined) yield* locked(task.taskId)(leadStopped(task.taskId, how))
             }),
           ),
-        resolveNow: (where) => Effect.asVoid(Effect.forkIn(provide(resolveNow(where)), scope)),
+        resolveNow: (where, force) => Effect.asVoid(Effect.forkIn(provide(resolveNow(where, force)), scope)),
         setResolveConflicts: (input) => provide(setResolveConflicts(input)),
         // The person looking at the task counts as something happening on it.
         refresh: (taskId) =>

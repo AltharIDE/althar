@@ -6,7 +6,8 @@ import type { WindowAction } from '../renderer/data/services'
 /*
  * The window's bridge to the main process, and nothing more: the port to the
  * runtime, handed on to the page, folders the person chose, by the picker or
- * a drop or among the repositories main found, each as a grant, the thread a notification they clicked opens,
+ * a drop or among the repositories main found, each as a grant, and files and folders added to a message, each
+ * as a grant with its name and size, the thread a notification they clicked opens,
  * the icon they gave the app, the app's own preferences, where Althar
  * shows at the edge of the screen, which platform the window runs on, and the window's own buttons
  * (close, minimize, maximize). The edge's own pages say through it where they draw, and what to
@@ -94,6 +95,13 @@ contextBridge.exposeInMainWorld('althar', {
     const path = webUtils.getPathForFile(file)
     return path === '' ? Promise.resolve(null) : ipcRenderer.invoke('althar:grant-dropped', path)
   },
+  // A file or folder added to a message: measured and granted by main; one the page made, as a pasted picture, has no path, and gets null.
+  attach: (file: File): Promise<unknown> => {
+    const path = webUtils.getPathForFile(file)
+    return path === '' ? Promise.resolve(null) : ipcRenderer.invoke('althar:attach', path)
+  },
+  // The files copied in the file manager, pasted into a message: as main reads them off the clipboard.
+  attachPasted: (): Promise<unknown> => ipcRenderer.invoke('althar:attach-pasted'),
   appIcon: (): Promise<string | null> => ipcRenderer.invoke('althar:app-icon'),
   setAppIcon: (icon: string): Promise<void> => ipcRenderer.invoke('althar:set-app-icon', icon),
   preferences: (): Promise<unknown> => ipcRenderer.invoke('althar:preferences'),

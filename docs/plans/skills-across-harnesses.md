@@ -1,6 +1,6 @@
 # Skills across harnesses: shared defaults, installs, and repository boundaries
 
-**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-062](../decisions/062-skills-one-store-a-curated-catalog.md), [ADR-063](../decisions/063-skill-and-openspec-files-stay-off-the-repository.md)
+**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-067](../decisions/067-skills-one-store-a-curated-catalog.md), [ADR-068](../decisions/068-skill-and-openspec-files-stay-off-the-repository.md)
 **Research checked:** 2026-10-14
 **Upstream baseline:** `upstream/main` at `818df85e35ce4aa704334ffd846878750a30702c`
 
@@ -476,7 +476,7 @@ the two sets overlap enough that we must choose rather than merge.
 3. Curate, don't union: one skill per job from the 6.2 table. As a starting
    point to confirm in stage 1, not a decision (since settled otherwise:
    every skill of both is carried unless two do the same job, 32 in all, in
-   `packages/skills/catalog/CURATION.md` and ADR-062): agent-skills for the
+   `packages/skills/catalog/CURATION.md` and ADR-067): agent-skills for the
    lifecycle and engineering skills it alone has (API design, CI/CD,
    security, performance, documentation, source-driven development, code
    review), superpowers for what it alone has (systematic debugging,
@@ -656,9 +656,9 @@ checks and the harness permission rules remain the enforcement.
   each a new revision of the project's rules (`SetProjectRules`'s
   `repositoryFiles`). A push held back for them names the switches there
   that are off for what it held back.
-- **ADRs (2026-10-18).** [ADR-062](../decisions/062-skills-one-store-a-curated-catalog.md)
+- **ADRs (2026-10-18).** [ADR-067](../decisions/067-skills-one-store-a-curated-catalog.md)
   (the store, the catalog, delivery per session) and
-  [ADR-063](../decisions/063-skill-and-openspec-files-stay-off-the-repository.md)
+  [ADR-068](../decisions/068-skill-and-openspec-files-stay-off-the-repository.md)
   (the repository boundary, amending ADR-013 and ADR-016).
 
 **Not yet:**
@@ -692,7 +692,7 @@ checks and the harness permission rules remain the enforcement.
 
 - **Settled:** the skills carried. Every skill of both was read in full on
   2026-10-18 and 33 were carried (`packages/skills/catalog/CURATION.md`), more
-  than the ~15 section 6 aimed at for Codex's budget; ADR-062 records why and
+  than the ~15 section 6 aimed at for Codex's budget; ADR-067 records why and
   what it costs. After review, `using-git-worktrees` was left out (Althar makes
   the worktrees), leaving 32, and all ship off until the person turns them on.
 - Where skill-written planning files (`SPEC.md`, `docs/superpowers/...`) sit

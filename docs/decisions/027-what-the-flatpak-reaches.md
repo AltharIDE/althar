@@ -5,7 +5,7 @@
 - **Amended:** 2026-10-24: Althar's own git over SSH runs the device's ssh,
   with the person's agent and known hosts; ssh in the sandbox trusts pinned
   code hosts and never asks
-  ([ADR-061](061-git-over-ssh-in-the-flatpak-goes-through-the-device.md)).
+  ([ADR-066](066-git-over-ssh-in-the-flatpak-goes-through-the-device.md)).
 - **Owner:** Repository maintainers
 - **Context:** In a Flatpak the home is a fresh empty one and the filesystem
   is the runtime's: the person's own OpenCode and Codex, their editors, their
@@ -80,7 +80,7 @@
   - **git has no ssh-agent socket.** The manifest does not expose the
     person's ssh agent to the sandbox. Althar's own pushes use the code-host
     connections it keeps, and its own git over SSH runs the device's ssh,
-    which has the agent (ADR-061).
+    which has the agent (ADR-066).
   - **The profile is the app's own.** In a Flatpak it is
     `$XDG_DATA_HOME/althar` = `~/.var/app/dev.althar.app/data/althar`, with the
     worktrees beside it; the CLI keeps `~/.local/share/althar`. Projects reach

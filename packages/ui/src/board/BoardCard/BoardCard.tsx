@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { Icon } from '../../foundations/Icon/Icon'
 import { TaskKind, TaskStatus, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -18,12 +19,15 @@ import s from './BoardCard.module.css'
  * (cobalt while it runs, violet when it needs you), then its kind's word,
  * then how long. Then its title, and, where the word isn't enough, why.
  * Under them, at most, its steps, one card in the card (the pull request,
- * the branch, what it handed back) and one fact.
+ * the branch, what it handed back) and one fact. A task an automation's run
+ * started says which, quietly, at its foot.
  */
 
 export interface BoardCardText {
   /** A kind's word on the card; a plain task has none. */
   kind: Record<TaskKind, string>
+  /** The automation whose run it is. */
+  from: (automation: string) => string
 }
 
 export const boardCardText: BoardCardText = {
@@ -32,6 +36,7 @@ export const boardCardText: BoardCardText = {
     [TaskKind.Review]: 'Review',
     [TaskKind.Plain]: '',
   },
+  from: (automation) => `From ${automation}`,
 }
 
 export type BoardCardProps = RootProps<
@@ -60,6 +65,8 @@ export type BoardCardProps = RootProps<
      * finished task's Done and Keep for later.
      */
     corner?: ReactNode
+    /** The automation whose run it is, by its name: said in a small line, with the automation's mark. */
+    from?: string
     /** Open beside the board. */
     current?: boolean
     onOpen?: () => void
@@ -95,6 +102,7 @@ export function BoardCard({
   object,
   foot,
   corner,
+  from,
   current,
   onOpen,
   text,
@@ -120,6 +128,12 @@ export function BoardCard({
       {track !== undefined && track.length > 0 && <StepTrack steps={track} labels status={status} className={s.track} />}
       {object !== undefined && object !== null && <div className={s.object}>{object}</div>}
       {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}
+      {from !== undefined && from !== '' && (
+        <p className={s.from}>
+          <Icon name="automation" size={11} />
+          {t.from(from)}
+        </p>
+      )}
       {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
     </article>
   )

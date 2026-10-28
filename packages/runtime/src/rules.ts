@@ -371,7 +371,7 @@ const DEVICE_BRIDGE_REFUSED =
 /**
  * The Flatpak grants the app a broad host bridge; agents must not invoke it
  * directly, nor the ssh Althar's own git runs through it, which signs in with
- * the person's SSH agent (ADR-061).
+ * the person's SSH agent (ADR-066).
  */
 const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
   ['flatpak-spawn', 'althar-host-ssh'].includes((words[0] ?? '').split('/').at(-1) ?? '') ? DEVICE_BRIDGE_REFUSED : undefined

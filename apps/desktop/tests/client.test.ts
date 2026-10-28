@@ -227,6 +227,8 @@ describe('the client', () => {
           PushBranch: () => Effect.die('unused'),
           ListEditors: () => Effect.die('unused'),
           GetLoad: () => Effect.die('unused'),
+          GetPlanUsage: () => Effect.die('unused'),
+          GetModelRooms: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),
           OpenInEditor: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
@@ -256,6 +258,17 @@ describe('the client', () => {
           GetSettings: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
           SetPostTeamReviews: () => Effect.die('unused'),
+          GetAutomations: () => Effect.die('unused'),
+          GetAutomation: () => Effect.die('unused'),
+          MakeAutomation: () => Effect.die('unused'),
+          ChangeAutomation: () => Effect.die('unused'),
+          TurnOnAutomation: () => Effect.die('unused'),
+          PauseAutomation: () => Effect.die('unused'),
+          RunAutomationNow: () => Effect.die('unused'),
+          DeleteAutomation: () => Effect.die('unused'),
+          UndoAutomationChange: () => Effect.die('unused'),
+          SetAutomationPostsReviews: () => Effect.die('unused'),
+          SetAutomationsPaused: () => Effect.die('unused'),
           SetAgentsAtOnce: () => Effect.die('unused'),
           SetFolderWait: () => Effect.die('unused'),
           GetTaskFolders: () => Effect.die('unused'),
@@ -277,6 +290,8 @@ describe('the client', () => {
           StopSession: () => Effect.die('unused'),
           StopTask: () => Effect.die('unused'),
           SetTaskResolveConflicts: () => Effect.die('unused'),
+          ResolveConflictsNow: () => Effect.die('unused'),
+          LookForConflicts: () => Effect.die('unused'),
           SetTaskAllowEverything: () => Effect.die('unused'),
           ResumeTask: () => Effect.die('unused'),
           LeaveOutCommits: () => Effect.die('unused'),
@@ -408,6 +423,110 @@ describe('the client', () => {
     unwatch()
     expect(watches.slice(0, 2)).toEqual([10, 15])
     expect(heard[0]?._tag === 'Changed' && heard[0].cursor).toBe(15)
+    await client.close()
+  })
+})
+
+describe('automations', () => {
+  /** A stand-in runtime that keeps what each call was sent, and answers it as the runtime would. */
+  const recording = async () => {
+    const channel = new MessageChannel()
+    const sent: Array<readonly [string, unknown]> = []
+    const automation = {
+      id: 'auto1',
+      projectId: 'p1',
+      name: 'Morning review',
+      prompt: 'Review the new pull requests.',
+      schedule: { every: 'week' as const, days: [1, 2, 3, 4, 5] as const, at: '09:00' },
+      work: 'review' as const,
+      state: 'on' as const,
+      pausedBy: null,
+      pauseReason: null,
+      nextAt: '2026-10-22T09:00:00.000Z',
+      latest: [],
+    }
+    const definition = {
+      name: 'Morning review',
+      prompt: 'Review the new pull requests.',
+      schedule: { every: 'week' as const, days: [1, 2, 3, 4, 5] as const, at: '09:00' },
+      zone: 'Europe/London',
+      lead: { agentId: 'claude-code', model: null, effort: null },
+      work: { kind: 'review' as const },
+      allowEverything: true,
+      minutes: 45,
+      late: 'once' as const,
+    }
+    const answers: Record<string, unknown> = {
+      GetAutomations: { cursor: 4, automations: [automation], allPaused: false },
+      GetAutomation: { cursor: 4, automation: { ...automation, definition, postsReviews: false, runs: [], allPaused: false } },
+      MakeAutomation: { automationId: 'auto2' },
+    }
+    // Every call it is sent is answered here: the ones a test uses by what they were sent, the rest never.
+    const handlers = new Proxy(
+      {},
+      {
+        get:
+          (_target, tag: string) =>
+          (payload: unknown): Effect.Effect<unknown> => {
+            sent.push([tag, payload])
+            return tag in answers ? Effect.succeed(answers[tag]) : Effect.void
+          },
+      },
+    )
+    // Handlers made on the fly need nothing, as their type can't say.
+    const server: Layer.Layer<never> = RpcServer.layer(Api).pipe(
+      Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
+      Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
+    ) as Layer.Layer<never>
+    await serving(server)
+    const client = await connect(channel.port2 as unknown as DomMessagePort)
+    return { client, sent, definition }
+  }
+
+  /** What each call was sent, without the command's id, which is the client's own. */
+  const without = (payload: unknown) => {
+    const { commandId: _id, ...rest } = payload as { commandId?: string }
+    return rest
+  }
+
+  it('reads a project’s automations and one of them, and sends each change by its id, with the card’s item where one asks', async () => {
+    const { client, sent, definition } = await recording()
+    expect((await client.getAutomations('p1')).automations.map((one) => one.name)).toEqual(['Morning review'])
+    expect((await client.getAutomation('auto1')).automation.definition.zone).toBe('Europe/London')
+    expect(await client.makeAutomation({ projectId: 'p1', definition })).toBe('auto2')
+    expect(await client.makeAutomation({ projectId: 'p1', definition, on: true })).toBe('auto2')
+    await client.changeAutomation('auto1', { ...definition, minutes: 30 })
+    await client.turnOnAutomation('auto1')
+    await client.turnOnAutomation('auto1', 'item1')
+    await client.pauseAutomation('auto1')
+    await client.runAutomationNow('auto1')
+    await client.runAutomationNow('auto1', 'item2')
+    await client.deleteAutomation('auto1')
+    await client.undoAutomationChange('item3')
+    await client.setAutomationPostsReviews('auto1', true)
+    await client.setAutomationsPaused(true)
+    expect(sent.map(([tag, payload]) => [tag, without(payload)])).toEqual([
+      ['GetAutomations', { projectId: 'p1' }],
+      ['GetAutomation', { automationId: 'auto1' }],
+      ['MakeAutomation', { projectId: 'p1', definition }],
+      ['MakeAutomation', { projectId: 'p1', definition, on: true }],
+      ['ChangeAutomation', { automationId: 'auto1', definition: { ...definition, minutes: 30 } }],
+      ['TurnOnAutomation', { automationId: 'auto1' }],
+      ['TurnOnAutomation', { automationId: 'auto1', itemId: 'item1' }],
+      ['PauseAutomation', { automationId: 'auto1' }],
+      ['RunAutomationNow', { automationId: 'auto1' }],
+      ['RunAutomationNow', { automationId: 'auto1', itemId: 'item2' }],
+      ['DeleteAutomation', { automationId: 'auto1' }],
+      ['UndoAutomationChange', { itemId: 'item3' }],
+      ['SetAutomationPostsReviews', { automationId: 'auto1', on: true }],
+      ['SetAutomationsPaused', { paused: true }],
+    ])
+    // Each command goes under an id of the window's own.
+    expect(
+      sent
+        .filter(([tag]) => !tag.startsWith('Get'))
+        .every(([, payload]) => (payload as { commandId: string }).commandId.startsWith('cmd_')),
+    ).toBe(true)
     await client.close()
   })
 })

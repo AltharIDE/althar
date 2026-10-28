@@ -15,11 +15,11 @@ import {
 } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
-import { CARDS } from '../../data/feed'
+import { AUTOMATIONS, CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
 import type { OutputSoFar } from '../../shared/handed'
-import { type Outgoing, sentWith } from '../../shared/useImages'
+import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import { canPick } from '../../shared/agents'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
@@ -33,7 +33,8 @@ import type { Streamed } from '../../shared/thread'
  * own. Like a task's thread, it reads the newest page
  * once, then what changes: an item alone, or the thread's head. A card shows
  * a task that moves in threads of its own, so a change to any task of the
- * project reads the cards again.
+ * project reads the cards again; and an automation's card where it stands, so
+ * a change to any of its automations, or a run of one, reads those again.
  */
 
 /** How long changes are gathered before they are read. */
@@ -115,7 +116,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [newest] = useState(newestReads)
-  const changed = useRef({ head: false, cards: false, items: new Set<string>() })
+  const changed = useRef({ head: false, cards: false, automations: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
   // What the coordinator's commands have printed so far, while they run.
   const outputs = useOutputs(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.session?.turnRunning ?? false)
@@ -178,17 +179,19 @@ export const useProject = (projectId: string): ProjectModel => {
   /** Reads what the gathered changes touched. */
   const readChanged = useCallback(() => {
     timer.current = undefined
-    const { head, cards, items } = changed.current
-    changed.current = { head: false, cards: false, items: new Set() }
+    const { head, cards, automations, items } = changed.current
+    changed.current = { head: false, cards: false, automations: false, items: new Set() }
     if (threadId === null) return
     const read = new Set(items)
     if (cards) for (const item of coordinator?.items ?? []) if (item.kind === 'task') read.add(item.id)
+    // An automation's cards say where it stands, as it changes or runs.
+    if (automations) for (const item of coordinator?.items ?? []) if (item.kind === 'automation') read.add(item.id)
     void (head ? readHead(read) : readItems(read))
   }, [threadId, coordinator, readHead, readItems])
 
   useWatch((event) => {
-    // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running.
-    if (event._tag === 'Output' || event._tag === 'Background') return
+    // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running; plan usage is the plan gauge's and the pickers'.
+    if (event._tag === 'Output' || event._tag === 'Background' || event._tag === 'PlanUsage') return
     // Every run in the project, the tasks' too, whole each time, which the pill over the composer shows.
     if (event._tag === 'Launches') {
       if (event.projectId === projectId) setCoordinator((current) => ({ ...current, launches: event.launches }))
@@ -223,6 +226,7 @@ export const useProject = (projectId: string): ProjectModel => {
       if (event.aggregateType === 'user_input') for (const id of waiting(coordinator?.items ?? [])) changed.current.items.add(id)
     } else if (event.aggregateType === 'connection') changed.current.head = true
     else if (event.projectId === projectId && CARDS.has(event.aggregateType)) changed.current.cards = true
+    else if (event.projectId === projectId && AUTOMATIONS.has(event.aggregateType)) changed.current.automations = true
     else return
     timer.current ??= setTimeout(readChanged, GATHER)
   })
@@ -277,7 +281,7 @@ export const useProject = (projectId: string): ProjectModel => {
         queued,
         interrupting: disposition === 'interrupt_and_continue',
         ...(images?.dictated === true ? { dictated: true } : {}),
-        ...(images === undefined ? {} : { pictures: images.pictures }),
+        ...(images === undefined ? {} : { pictures: images.pictures, files: images.attached }),
       })
       id = next.id
       return { ...current, items: next.items }

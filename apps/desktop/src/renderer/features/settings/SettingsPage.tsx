@@ -66,6 +66,7 @@ import { GROUPS, type Section, sectionText } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
 import { useAgentsAtOnce } from './useAgentsAtOnce'
+import { useAutomationsPaused } from './useAutomationsPaused'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { useCoAuthor } from './useCoAuthor'
 import { useEdgeGlance } from './useEdgeGlance'
@@ -325,9 +326,13 @@ function SkillsSection() {
 
 /* ---- work on this computer --------------------------------------------------------- */
 
+/** The system lets Althar open at login: a Mac, and Windows. */
+const opensAtLogin = platform === 'darwin' || platform === 'win32'
+
 function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
   const { preferences, set, failed } = usePreferences()
   const atOnce = useAgentsAtOnce()
+  const paused = useAutomationsPaused()
   const folders = useTaskFolders(onTask)
   return (
     <>
@@ -356,6 +361,24 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
           checked={preferences.showLoad}
           onChange={(on) => set('showLoad', on)}
         />
+        {opensAtLogin && (
+          <SettingSwitch
+            title={text.atLoginTitle}
+            note={text.atLoginNote}
+            glyph={<Icon name="automation" size={15} />}
+            checked={preferences.openAtLogin}
+            onChange={(on) => set('openAtLogin', on)}
+          />
+        )}
+        {paused !== null && (
+          <SettingSwitch
+            title={text.pauseAllTitle}
+            note={text.pauseAllNote}
+            glyph={<Icon name="hold" size={15} />}
+            checked={paused.on}
+            onChange={paused.set}
+          />
+        )}
         {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-056). */}
         {folders !== null && (
           <TaskFolders
@@ -374,7 +397,7 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
           />
         )}
       </SettingList>
-      <Failed when={failed || atOnce?.failed === true} />
+      <Failed when={failed || atOnce?.failed === true || paused?.failed === true} />
     </>
   )
 }

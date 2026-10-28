@@ -27,13 +27,12 @@ import s from './NewProject.module.css'
  * colour and what it is made of; on the right its folders. The name comes
  * first, and leads the folders: what is on this computer named like it is
  * one press away. Each folder is shown as it was read, as a repository with
- * its branch and where its code is hosted, and what reading them found is
+ * where it is and where its code is hosted, and what reading them found is
  * said under them. Folders come from the system's picker, several at once,
- * or dropped anywhere on the page. Escape, or closing the tab, makes
- * nothing.
+ * or dropped anywhere on the page.
  */
 
-/** A folder added, as it was read: its repository, where it is, its branch, and where its remote is. */
+/** A folder added, as it was read: its repository, where it is, and where its remote is. */
 export type NewProjectFolder =
   | {
       readonly id: string
@@ -47,7 +46,6 @@ export type NewProjectFolder =
       readonly name: string
       /** Where it is, as the person knows the place: ~/code/northwind/app. */
       readonly where: string
-      readonly branch: string | null
       /** Where its code is hosted; null without a remote, or one on no host Althar knows. */
       readonly host: CodeHost | null
       /** Its remote, as its host names it: northwind-co/app; null without one. */
@@ -59,8 +57,6 @@ export interface NewProjectSuggestion {
   readonly id: string
   readonly name: string
   readonly where: string
-  /** Its branch and when it was last worked on. */
-  readonly facts: string
   /** The project it is in already, by name: said in place of Add. */
   readonly in?: string
 }
@@ -108,13 +104,8 @@ export interface NewProjectText {
   nameNote: string
   colour: string
   madeOf: string
-  madeOfEmpty: string
   folders: string
   foldersNote: string
-  noFolders: string
-  /** Folders held over the page. */
-  over: string
-  reading: string
   noRemote: string
   leaveOut: (name: string) => string
   choose: string
@@ -130,9 +121,6 @@ export interface NewProjectText {
   unconnected: (remote: ReactNode, host: string, changes: string) => ReactNode
   connect: (host: string) => string
   shared: (name: ReactNode, project: string) => ReactNode
-  /** In the foot, before a folder is added. */
-  nothingYet: string
-  count: (count: number) => string
   create: (name: string) => string
   createUnnamed: string
   createKbd: string
@@ -149,12 +137,8 @@ export const newProjectText: NewProjectText = {
   nameNote: 'What the work is called. You can rename it later.',
   colour: 'Colour',
   madeOf: 'Made of',
-  madeOfEmpty: 'Its folders, once added',
   folders: 'Its folders',
   foldersNote: 'The repositories its tasks may change. One, or several.',
-  noFolders: 'No folders yet.',
-  over: 'Let go to add them.',
-  reading: 'Reading it. Nothing in the folder changes.',
   noRemote: 'no remote',
   leaveOut: (name) => `Leave out ${name}`,
   choose: 'Choose a folder…',
@@ -182,8 +166,6 @@ export const newProjectText: NewProjectText = {
       {name} is in {project} too. Each project’s tasks work on it in worktrees of their own.
     </>
   ),
-  nothingYet: 'Closing the tab makes nothing.',
-  count: (count) => (count === 1 ? '1 repository' : `${count} repositories`),
   create: (name) => `Create ${name}`,
   createUnnamed: 'Create project',
   createKbd: modKey(keys.enter),
@@ -368,19 +350,19 @@ export function NewProject({
             {...(taken === undefined ? {} : { taken })}
             text={{ label: t.colour, ...t.swatches }}
           />
-          <span className={cx(s.label, s.gap)}>{t.madeOf}</span>
-          <p className={s.made}>
-            {read.length === 0 ? (
-              <span className={s.quiet}>{t.madeOfEmpty}</span>
-            ) : (
-              read.map((folder) => (
-                <span key={folder.id} className={s.repo}>
-                  <HostMark host={folder.host} size={12} />
-                  {folder.name}
-                </span>
-              ))
-            )}
-          </p>
+          {read.length > 0 && (
+            <>
+              <span className={cx(s.label, s.gap)}>{t.madeOf}</span>
+              <p className={s.made}>
+                {read.map((folder) => (
+                  <span key={folder.id} className={s.repo}>
+                    <HostMark host={folder.host} size={12} />
+                    {folder.name}
+                  </span>
+                ))}
+              </p>
+            </>
+          )}
         </div>
       </section>
 
@@ -390,7 +372,7 @@ export function NewProject({
             {t.folders}
           </h2>
           <p className={s.note}>{t.foldersNote}</p>
-          {folders.length === 0 || over ? <div className={cx(s.empty, over && s.dropping)}>{over ? t.over : t.noFolders}</div> : null}
+          {over && <div className={s.empty} aria-hidden="true" />}
           {folders.length > 0 && (
             <ul className={s.folders} aria-label={t.folders}>
               {folders.map((folder, at) => (
@@ -441,12 +423,10 @@ export function NewProject({
           )}
         </div>
         <footer className={s.foot}>
-          {error !== undefined && error !== null ? (
+          {error !== undefined && error !== null && (
             <span className={s.error} role="alert">
               {error}
             </span>
-          ) : (
-            <span className={s.note}>{read.length === 0 ? t.nothingYet : t.count(read.length)}</span>
           )}
           <Button kbd={t.createKbd} variant={read.length === 0 ? 'quiet' : 'default'} busy={creating || reading} onClick={create}>
             {named === '' ? t.createUnnamed : t.create(named)}
@@ -471,10 +451,7 @@ function FolderRow({ folder, t, onRemove }: { folder: NewProjectFolder; t: NewPr
         <span className={s.folderIcon}>
           <Spinner size="small" />
         </span>
-        <span className={s.folderMain}>
-          {folder.name !== undefined && <span className={s.folderName}>{folder.name}</span>}
-          <span className={s.facts}>{t.reading}</span>
-        </span>
+        <span className={s.folderMain}>{folder.name !== undefined && <span className={s.folderName}>{folder.name}</span>}</span>
       </li>
     )
   return (
@@ -486,12 +463,6 @@ function FolderRow({ folder, t, onRemove }: { folder: NewProjectFolder; t: NewPr
         <span className={s.folderName}>{folder.name}</span>
         <span className={s.facts}>
           <span className={s.mono}>{folder.where}</span>
-          {folder.branch !== null && (
-            <span className={s.fact}>
-              <Icon name="branch" size={11} />
-              <span className={s.mono}>{folder.branch}</span>
-            </span>
-          )}
           {folder.host !== null && folder.remote !== null ? (
             <span className={s.fact}>
               {folder.host.name} · <span className={s.mono}>{folder.remote}</span>
@@ -589,7 +560,6 @@ function Found({ found, t, onAdd }: { found: NewProjectFound; t: NewProjectText;
               <span className={s.foundName}>{suggestion.name}</span>
               <span className={s.facts}>
                 <span className={s.mono}>{suggestion.where}</span>
-                <span>{suggestion.facts}</span>
               </span>
             </span>
             {suggestion.in === undefined ? (

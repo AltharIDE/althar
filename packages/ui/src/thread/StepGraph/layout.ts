@@ -213,3 +213,41 @@ export function showing(view: View, card: PlacedCard, room: Room, margin = 24): 
   const dy = top < room.top + margin ? room.top + margin - top : bottom > room.h - margin ? room.h - margin - bottom : 0
   return dx === 0 && dy === 0 ? view : { ...view, x: view.x + dx, y: view.y + dy }
 }
+
+/** A round marker's room: the padding before it, and the gap kept between it and the next one. */
+export const MARKER = { pad: 10, gap: 6 } as const
+
+/** A round's span on the strip, in pixels: where it starts (below 0 where it panned off to the left) and how wide it is. */
+export interface MarkerSpan {
+  readonly from: number
+  readonly w: number
+}
+
+/** How wide a marker is whole, and without its "· 57m later". */
+export interface MarkerSize {
+  readonly full: number
+  readonly bare: number
+}
+
+/** Where a marker goes on the strip, how wide it is, and whether it keeps its "· 57m later". */
+export interface MarkerSlot {
+  readonly left: number
+  readonly width: number
+  readonly after: boolean
+}
+
+/**
+ * Where each round's marker goes. One holds at the strip's left edge while its round is in view past it, and the next round's
+ * marker pushes it out as it arrives, like a sticky header; none passes its round's end, so no two ever overlap. A label wider
+ * than its round drops its "after" first, then is cut (its `width` is less than its size). A marker wholly out of view is null.
+ */
+export function markerSlots(spans: ReadonlyArray<MarkerSpan>, sizes: ReadonlyArray<MarkerSize>): Array<MarkerSlot | null> {
+  return spans.map((span, index) => {
+    const size = sizes[index] ?? { full: 0, bare: 0 }
+    const room = Math.max(0, span.w - MARKER.pad - MARKER.gap)
+    const after = size.full <= room
+    const width = after ? size.full : Math.min(size.bare, room)
+    const left = span.from >= 0 ? span.from : Math.min(0, span.from + span.w - MARKER.pad - width - MARKER.gap)
+    return left + MARKER.pad + width <= 0 ? null : { left, width, after }
+  })
+}

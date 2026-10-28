@@ -8,6 +8,7 @@ import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
 import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
+import { PlanBar } from '../usage/PlanBar'
 import { useWindowChrome } from '../../shared/useWindowChrome'
 import { useOnline } from '../../shared/useOnline'
 import { useUpdate } from '../../shared/useUpdate'
@@ -24,7 +25,8 @@ import { useTabs } from './useTabs'
  * the projects in order, ⌘9 to the last, and Control-Tab to the next tab
  * (with Shift, the one before), as in a browser. ⌘N starts a new project in
  * a tab of its own, as the + does. ⌘K finds a task: in the project whose tab
- * has the window, or, on the home, in every project. The tabs are the
+ * has the window, or, on the home, in every project. ⌘U opens the peek of
+ * the plan gauge, after CPU and memory, and again closes it. The tabs are the
  * window's one bar: a screen puts its own controls at the bar's end with
  * BarEnd, and its way back, where it has one, at the top of its page.
  * Before it, on every screen, how hard the computer works, in two short
@@ -96,11 +98,13 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
  */
 function TabsBar({
   tabs,
+  usage,
   endRef,
   quick,
   onQuick,
 }: {
   tabs: ReturnType<typeof useTabs>
+  usage: { readonly open: boolean; readonly set: (open: boolean) => void }
   endRef: (element: HTMLElement | null) => void
   /** Whether the quick settings are open. */
   quick: boolean
@@ -122,6 +126,7 @@ function TabsBar({
         ? { settings: { current: tabs.settings.current, onSelect: () => tabs.openSettings(), onClose: tabs.closeSettings } }
         : {})}
       onSelect={select}
+      onPreview={tabs.preview}
       onClose={tabs.close}
       onReorder={tabs.reorder}
       onOpen={tabs.open}
@@ -131,6 +136,7 @@ function TabsBar({
           {load.glance !== null && (
             <LoadMeter load={load.glance} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
           )}
+          <PlanBar open={usage.open} onOpenChange={usage.set} />
           {!online && <Offline />}
           {update.ready !== null && <UpdateReady {...update.ready} />}
           <div ref={endRef} className={s.end} />
@@ -174,6 +180,8 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const [end, setEnd] = useState<HTMLElement | null>(null)
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
+  // The plan gauge's peek, from any screen with the bar.
+  const [usage, setUsage] = useState(false)
   // The quick settings, from the gear at the bar's end, and ⌘, on every screen.
   const [quick, setQuick] = useState(false)
   const { select, current, newProject, none, openSettings } = tabs
@@ -209,6 +217,12 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         setFinding(true)
         return
       }
+      // ⌘U, Control-U off a Mac: the plan gauge's peek, opened and closed again by the same key, once there is its bar.
+      if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'u' && !none) {
+        event.preventDefault()
+        setUsage((open) => !open)
+        return
+      }
       // Before there is a project, the first screen has ⌘N for a folder of its own.
       if (commandDown(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
         event.preventDefault()
@@ -240,7 +254,9 @@ export function TabsFrame({ children }: { children: ReactNode }) {
           <EndContext.Provider value={end}>
             <TabBarContext.Provider value={!tabs.none}>
               <div className={s.frame}>
-                {!tabs.none && <TabsBar tabs={tabs} endRef={setEnd} quick={quick} onQuick={setQuick} />}
+                {!tabs.none && (
+                  <TabsBar tabs={tabs} usage={{ open: usage, set: setUsage }} endRef={setEnd} quick={quick} onQuick={setQuick} />
+                )}
                 <div className={s.screen}>{children}</div>
               </div>
               {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}

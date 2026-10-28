@@ -211,6 +211,60 @@
   box-shadow: var(--lift);
 }
 
+/* a file or folder waiting to go: a chip as tall as an image beside it, its name cut short where it is long */
+.file {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 56px;
+  max-width: 240px;
+  padding: 0 34px 0 10px;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.fileIcon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--n-2);
+  color: var(--t-2);
+}
+
+.fileMain {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.fileName {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileMeta {
+  font-size: 11px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+
+.fileRemove {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+}
+
 /* what the consumer says of images: a line over the field; empty, it takes no room, its gap given back */
 .imageNote {
   display: block;
@@ -254,6 +308,7 @@
   container: composer-edge / inline-size;
 }
 .above,
+.notice,
 .carried > * {
   pointer-events: auto;
 }
@@ -270,6 +325,25 @@
   flex-wrap: wrap-reverse;
   gap: 6px;
   max-width: 100%;
+}
+
+.notice {
+  align-self: flex-start;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 5px 10px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--t-2);
+  overflow-wrap: anywhere;
+}
+.notice > * + * {
+  margin-top: 4px;
 }
 
 .bar {

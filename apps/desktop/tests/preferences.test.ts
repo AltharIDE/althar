@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { DEFAULT_PREFERENCES, holds, isPreferenceKey, preferencesIn } from '../src/main/appPreferences'
 import { keepingAwake } from '../src/main/awake'
-import { dockCount, soundOf, tells } from '../src/main/notify'
+import { dockCount, notificationsShown, soundOf, tells } from '../src/main/notify'
 import { alertSounds, playSound } from '../src/main/sounds'
 import { readAppPreferences, writeAppPreference } from '../src/main/preferences'
 
@@ -15,7 +15,7 @@ import { readAppPreferences, writeAppPreference } from '../src/main/preferences'
 const profile = () => mkdtempSync(join(tmpdir(), 'althar-preferences-'))
 
 describe('the app’s preferences kept in the profile', () => {
-  it('start awake while plugged in, every notification on, the count on, silent with no sound to go back to, the first editor found, the load in the bar, usage data and crash reports on, and light or dark as the system is', async () => {
+  it('start awake while plugged in, every notification on, the count on, silent with no sound to go back to, the first editor found, the load in the bar, usage data and crash reports on, light or dark as the system is, and not opening at login', async () => {
     expect(await readAppPreferences(profile())).toEqual({
       keepAwake: true,
       awakeOnBattery: false,
@@ -30,6 +30,7 @@ describe('the app’s preferences kept in the profile', () => {
       usageData: true,
       crashReports: true,
       appearance: 'light',
+      openAtLogin: false,
     })
   })
 
@@ -191,6 +192,34 @@ describe('what the person is told', () => {
   it('counts on the Dock only while its count is on', () => {
     expect(dockCount(3, DEFAULT_PREFERENCES)).toBe(3)
     expect(dockCount(3, { ...DEFAULT_PREFERENCES, badge: false })).toBe(0)
+  })
+
+  it('keeps one notification per thread to be clicked, its newest, and no more than a few threads’', () => {
+    const closed: Array<string> = []
+    const shown = notificationsShown<{ readonly name: string; readonly close: () => void }>(2)
+    const note = (name: string) => {
+      const made = {
+        name,
+        close: () => {
+          closed.push(name)
+          shown.drop(name.split(':')[0]!, made)
+        },
+      }
+      return made
+    }
+    const first = note('t1:a')
+    shown.add('t1', first)
+    // A newer nudge on the thread replaces the one before, which closes.
+    shown.add('t1', note('t1:b'))
+    expect(closed).toEqual(['t1:a'])
+    expect(shown.size()).toBe(1)
+    // What closed late, once replaced, lets go of nothing newer.
+    shown.drop('t1', first)
+    expect(shown.size()).toBe(1)
+    shown.add('t2', note('t2:a'))
+    shown.add('t3', note('t3:a'))
+    expect(closed).toEqual(['t1:a', 't1:b'])
+    expect(shown.size()).toBe(2)
   })
 })
 

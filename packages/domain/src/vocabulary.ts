@@ -103,6 +103,8 @@ export const ThreadItemKind = Schema.Literals([
    * already (a comment, a link, or a change the project lets through), a line.
    */
   'issue_changes',
+  /** An automation the coordinator proposed or changed, or asks the person to resume or run now, in its thread: the person turns it on there. Althar posts it and keeps it current. */
+  'automation',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -254,6 +256,32 @@ export type IssueChangeState = typeof IssueChangeState.Type
 export const ReviewDraftState = Schema.Literals(['pending', 'posting', 'posted', 'failed', 'uncertain', 'discarded'])
 export type ReviewDraftState = typeof ReviewDraftState.Type
 
+/**
+ * Where an automation stands (docs/plans/automations.md): proposed, waiting
+ * for the person to turn it on, which a change they didn't make puts it back
+ * to; on; paused, by the person or by itself; or deleted.
+ */
+export const AutomationState = Schema.Literals(['proposed', 'on', 'paused', 'deleted'])
+export type AutomationState = typeof AutomationState.Type
+
+/** Who paused an automation: the person, or the automation itself, once its runs kept failing. */
+export const AutomationPausedBy = Schema.Literals(['person', 'itself'])
+export type AutomationPausedBy = typeof AutomationPausedBy.Type
+
+/** What made an automation run once: its schedule's time, or the person asking it to run now. */
+export const AutomationOccurrenceCause = Schema.Literals(['schedule', 'now'])
+export type AutomationOccurrenceCause = typeof AutomationOccurrenceCause.Type
+
+/**
+ * One time an automation ran, or didn't: starting (its task being made),
+ * running (its task under way), made something, nothing to do (it found
+ * nothing, so no task), failed, missed (the computer was asleep or Althar closed
+ * past its window), or skipped (paused, busy, its last run still going, or
+ * too many of its pull requests open).
+ */
+export const AutomationOccurrenceState = Schema.Literals(['starting', 'running', 'made', 'nothing', 'failed', 'missed', 'skipped'])
+export type AutomationOccurrenceState = typeof AutomationOccurrenceState.Type
+
 /** What a review says of a pull request as a whole: approve it, ask for changes, or only comment. */
 export const ReviewVerdict = Schema.Literals(['approve', 'changes', 'comment'])
 export type ReviewVerdict = typeof ReviewVerdict.Type
@@ -318,6 +346,8 @@ export const AggregateType = Schema.Literals([
   'project_note',
   'review_draft',
   'issue_change',
+  'automation',
+  'automation_occurrence',
   'skill',
 ])
 export type AggregateType = typeof AggregateType.Type

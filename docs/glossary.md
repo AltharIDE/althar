@@ -100,6 +100,21 @@ say the right. When something new needs a name on screen, add it here first.
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
+## Automations
+
+| On screen | In the model | What it is |
+|---|---|---|
+| Automations | `Room.Automations`, `automations` (ADR-061) | A project's view between Board and Settings: the work that starts by itself on a schedule, on this computer while Althar is open, as cards, the one that paused itself first, with a violet dot on the view's name. A card opens its automation's own page there. |
+| Automation | an automation and its definitions | A kept request and a schedule: what each run is asked, its lead, what it ends in (nothing outside this computer, a draft or ready pull request, or a review of each new pull request), when it runs (days at a time where the computer is, or every hour), and its limits. Made by asking the coordinator, on its card, or with New automation. |
+| Run, Runs, Run now | an automation's occurrence, and the task it started | One time an automation ran, or didn't: made something, nothing to do, failed, missed while the computer slept, or skipped and why. Its page lists them, its card shows the last seven as marks. The one place "run" is said on screen. Run now runs it once, with every limit a run has. |
+| Try it once now | `RunAutomationNow` on a proposed automation | On an automation not turned on yet: one run as it would run. |
+| Turn on, Off until you turn it on | `TurnOnAutomation`, an automation `proposed` | Nothing of an automation runs until the person turns it on. A change the coordinator makes that reaches further than before puts it back to waiting for them. |
+| Paused, Paused itself | `paused_by` the person, or itself | The switch on its page pauses it; nothing of it starts until it is on again, and a run under way finishes. After three failures in a row it pauses itself and says why, violet. |
+| Pause all automations | the `automations_paused` setting | In Settings and the Automations view's menu: nothing of any automation starts until they are resumed; runs under way finish. |
+| Post this automation's reviews from now on | `posts_reviews` | On an automation's first review draft, beside Post: posts it, and lets its next reviews post themselves; on its page, a switch. A pull request from outside the team always waits. |
+| Open Althar at login | the desktop's `openAtLogin` preference | Offered on the Automations view while it is off, and in Settings: Althar opens with no window when the computer starts, so automations run after a restart. |
+| From Althar's morning review | a review or pull request signed with the automation's name | How what an automation's run posts on the code host is signed, by the automation and the agent that wrote it. |
+
 ## Updates
 
 | On screen | In the model | What it is |
@@ -128,7 +143,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Findings | review findings | What a review step found. By default the lead settles them. |
 | Artifacts | artifacts | What a task wrote that is worth keeping and isn't in a repository. |
 | Screenshots, Image | artifact of kind `image` | Pictures an agent hands back, under what it said, full size on a click. One without a name is "Image 1". |
-| Add images, Drop to add them to your message | `user_input_images`, artifacts of kind `image` | Images you send with a message: dropped on the composer, pasted, or picked with Add images; shown small above what you write, each with Remove, and above your message once sent. PNG, JPEG, GIF or WebP, up to ten a message; one wider than 2000 pixels or over 5 MB is made smaller first. An agent that doesn't take images gets none: the composer says so. One copied with no name is "Pasted image". |
+| Add files, Drop to add to your message | `user_input_images`, artifacts of kind `image`; `user_input_files`, `.althar/attachments` | Images, files and folders you send with a message: dropped on the composer, pasted (a file copied in the file manager too), or picked with Add files; shown above what you write, an image small and anything else as a chip with its size, each with Remove, and above your message once sent. Images are PNG, JPEG, GIF or WebP, up to ten a message; one wider than 2000 pixels or over 5 MB is made smaller first. An agent that doesn't take images gets an image as a file where there is one behind it, else none: the composer says so. One copied with no name is "Pasted image". Files and folders go up to ten a message, each up to 50 MB (a folder, 2,000 files), copied into the task's or the coordinator's folder for the agent to open (ADR-064). |
 | Document | a markdown file an agent wrote or pointed at | Its card stands under what it said; "Read in the panel" opens it beside the thread, as it is now in the worktree. |
 | Output | artifact of kind `log` | What a command printed, in its tool call: its last lines, "N earlier lines" a click away. |
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |
@@ -141,10 +156,10 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | The rest | the mode, `permissions` | What happens to what no rule keeps: allowed, the coordinator decides, ask me, or allow everything. A kind of request on no list is with the rest. |
 | Allow always, Never allow | an answer that keeps a rule, by its scope | An answer that is also kept in the project's rules: for this exact command, commands starting the same way, or the kind of request. Offered only where the rule would hold. |
 | Allowed by the project's rules | a decision a rule made | The quiet line under a turn for what an allow rule let through, opening to each command and its rule. |
-| Skills | Agent Skills, `@althar/skills`'s store (ADR-062) | Folders of instructions, each with a `SKILL.md`, that a task's lead is given for its session, the same for every agent. Kept on this device, outside every repository. Set up in Settings, under Skills. |
+| Skills | Agent Skills, `@althar/skills`'s store (ADR-067) | Folders of instructions, each with a `SKILL.md`, that a task's lead is given for its session, the same for every agent. Kept on this device, outside every repository. Set up in Settings, under Skills. |
 | Althar's catalog | the default catalog, `packages/skills/catalog` | The skills Althar ships, chosen and adjusted from two open-source sets; each says where it came from and its licence. All are on unless the person turns one off. |
 | Review, Install | a review card, an approved install | What a skill from GitHub shows before it is added: where it came from, at which commit, its licence, what stands out in it and its files. Only Install adds it. |
-| Repository files | `ProjectRules.repositoryFiles` (ADR-063) | Whether skill and OpenSpec files may be in the project's repository and be pushed: Write Althar-managed skills, Write OpenSpec artifacts, Push skill/OpenSpec files, each off until turned on. With them off, a push holding such files is held back. |
+| Repository files | `ProjectRules.repositoryFiles` (ADR-068) | Whether skill and OpenSpec files may be in the project's repository and be pushed: Write Althar-managed skills, Write OpenSpec artifacts, Push skill/OpenSpec files, each off until turned on. With them off, a push holding such files is held back. |
 | Settled | terminal states | Calls answered, changes accepted, tasks abandoned, Finished tasks marked Done. |
 
 ## Althar itself
@@ -157,12 +172,13 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Check for Updates… | `checkNow` | In the app menu: looks now, and says in a dialog what it found. |
 | What's new | a release's notes | In the quick settings' foot and Settings' About Althar, beside the version: that version's GitHub Release, in the browser. |
 | Light or dark: Light, Dark, Match the system | the `appearance` preference, `light`, `dark` or `system` (ADR-055) | In Settings › Appearance: Althar light, dark, or turning with the system, said in each system's words: Match the Mac, Match the PC (Windows), Match the computer (Linux). It starts light; Match the system is for whoever picks it. |
-| CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
+| CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses, and Althar itself. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
 
 ## Words the interface doesn't use
 
-Worker, session, run, attempt, node, graph patch, compensation, attention
-request, canonical, episodic, binding and failed. Each has an entry above.
+Worker, session, run (but an automation's, above), attempt, node, graph
+patch, compensation, attention request, canonical, episodic, binding and
+failed. Each has an entry above.
 If one of them turns up on screen, treat it as a bug.
 
 ## Still to align
