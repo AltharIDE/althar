@@ -136,17 +136,21 @@ describe('the process transport', () => {
     }),
   )
 
-  it.live('keeps what a process printed though it exited before it was read, every time', () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        for (let n = 0; n < 20; n += 1) {
-          const owned = yield* spawnOwned(onNode("process.stdout.write('done\\n'); process.exitCode = 3"), here)
-          assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
-          const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
-          assert.strictEqual(printed, 'done\n')
-        }
-      }),
-    ),
+  it.live(
+    'keeps what a process printed though it exited before it was read, every time',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          for (let n = 0; n < 20; n += 1) {
+            const owned = yield* spawnOwned(onNode("process.stdout.write('done\\n'); process.exitCode = 3"), here)
+            assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
+            const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
+            assert.strictEqual(printed, 'done\n')
+          }
+        }),
+      ),
+    // Twenty Nodes started one after another: a quarter of a second each on Windows' runner fills the usual five.
+    20_000,
   )
 
   it.live.skipIf(windows)('gives a process that asks a temporary folder of its own, and removes it once it has stopped', () =>
