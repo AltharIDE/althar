@@ -29,8 +29,8 @@ export interface HomeModel extends WorkActions {
 
 export const useHome = (): HomeModel => {
   const { client, cache } = useServices()
-  const actions = useWorkActions()
   const read = useQuery(reads(client).home())
+  const actions = useWorkActions(read.data?.tasks ?? null)
   const home = read.data ?? null
 
   // What the loop did is read from where the read the home opened on started, as long as it is open. Shown again while
