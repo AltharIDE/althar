@@ -33,6 +33,13 @@ Rules marked "prefer" are leanings; follow them unless the screen gives a reason
 ## Motion
 
 - **Move cleanly first, playfully second.** The segmented control's highlight slides with a slight spring (`--ease-slide`), not a cartoon bounce.
+- **Give motion a purpose:** where something came from or went, an answer to a press, or continuity. Nothing moves for decoration.
+- **Name motion by what happens:** `--enter` for what arrives or answers, `--exit` (quicker) for what goes, `--move` for what is on screen and goes elsewhere, `--fast` for hover and colour. Ease out; never ease in.
+- **Grow an overlay from what opened it,** from `--scale-pop` with a fade, never from nothing.
+- **Leave still what happens many times a day or by key:** switching tabs, projects and rooms, the command menu, words as they stream.
+- **Move only transform and opacity,** in a way that can turn back mid-way: transitions, or the browser's animations, not keyframes, for a state that flips.
+- **Move a list as a whole.** Give its items a `data-move` key inside a `ListMotion`: an item slides to its new place, travels to another lane, comes in and fades out ([ADR-068](docs/decisions/068-motion-is-one-system-named-by-what-happens.md)).
+- **With reduced motion, nothing travels or grows;** what comes and goes only fades.
 - **Never let things jump.** No page shifting when an answer arrives, no widths that change as content updates, no reflow under the pointer while dragging.
 - **Reserve the space.** Fix widths for numbers and labels that change, so their neighbours stay put.
 - **Put a placeholder where the content will appear, and replace it in place.** A shimmering "thinking" line is where the reply lands.
