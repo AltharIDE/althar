@@ -21,7 +21,7 @@ import s from './Nav.module.css'
  *
  * Pointed at or tabbed through, the pages and GitHub have a drop of the
  * same glass under them, gliding from one to the next (glassDrop). It comes
- * in as the page opens: with the light, on the homepage (`opening`).
+ * in as the page opens: after the first screen, on the homepage (`opening`).
  *
  * The glass is a layer of its own beside what reads on it, never around it:
  * a box with a backdrop filter is where the boxes in it stop seeing the
@@ -51,7 +51,7 @@ function useScrolled(past: number) {
 /** Where each thing on the bar comes in, one after another. */
 const nth = (i: number) => ({ '--i': i }) as CSSProperties
 
-/** `opening`: the page opens with the hero's light rising and its mark unveiling, and the nav comes in after it. */
+/** `opening`: the page opens with its first screen coming up out of the dark, and the nav comes in after it. */
 export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const here = useHere()
   const bar = useRef<HTMLElement>(null)

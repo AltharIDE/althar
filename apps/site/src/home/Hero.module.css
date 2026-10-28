@@ -1,81 +1,187 @@
-/* The first screen: paper, Althar's light flooding up off the bottom with a
-   cobalt heart, and the words white inside it, in Inter's display cut. */
+/* The first screen as a capsule coming in: the fire and the sky on a canvas
+   behind, the photograph of the cabin over it with its window cut out, the
+   words in the window, the lead under them. Once everything is at rest
+   (data-settled), the layers that moved are let go and the grain stops. */
 
 .hero {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  min-height: clamp(720px, 100svh, 1040px);
-  background: var(--n-2);
+  height: clamp(640px, 100svh, 1060px);
+  background: #050302;
   color: #fff;
+  /* The stage measures the photograph against this box. */
+  container-type: size;
 }
 
-/* A little wider than the page and off its bottom, so its edges are never seen to end. Its scale, set by the script, is its height against the words. */
-.light, .grain { position: absolute; left: -8%; right: -8%; bottom: -4%; height: 100%; z-index: -1; pointer-events: none; }
-.light { transform-origin: 50% 100%; }
-/* A column's place lifts under the pointer, following slowly; its swell breathes with the name; the column rises and sways. All transforms, all on the compositor. */
-.place { position: absolute; bottom: 0; height: 100%; transform-origin: 50% 100%; transition: transform 1100ms cubic-bezier(0.22, 1, 0.36, 1); }
-.swell { position: absolute; inset: 0; transform-origin: 50% 100%; }
-.column { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleY(0); transform-origin: 50% 100%; will-change: transform; }
-/* Grain only where the light is: it stands up to the bar in the middle and lower at the sides, so the mask reaches the top there and falls away with the arch. */
-.grain {
-  opacity: 0; background-size: 128px 128px;
-  mask-image: radial-gradient(ellipse 62% 100% at 50% 100%, #000 40%, transparent 92%);
-}
-.mark { position: absolute; pointer-events: none; z-index: 2; }
-/* The words are white in a light the script draws: until the page has hydrated they wait, as the launch has them, rather than show white on paper. Crawlers read them in the HTML all the same. */
-@media (scripting: enabled) { .hero:not([data-ready]) .head { visibility: hidden; } }
+/* The whole first screen is dark under the nav. */
+.under { top: 0; bottom: 0; }
 
-.head {
-  position: relative;
+/* What the camera sees, moved as one: its pivot the window, where the words are. */
+.camera { position: absolute; inset: 0; z-index: -1; transform-origin: 50% 36%; will-change: transform; }
+.hero[data-settled] .camera { will-change: auto; }
+
+/* The fire and the sky, set over the glass by the script. */
+.fire { position: absolute; display: block; }
+
+/*
+ * The photograph, covering the box as `object-fit: cover` would, but keeping
+ * its focus point (--fx, --fy, in the plate's px) as near the middle as the
+ * cover allows. --u is a plate px in CSS px; everything set by the
+ * photograph uses the same measure. The wide photograph's measure (-w), or on
+ * a phone the tall one's (-t), from the script.
+ */
+.stage {
+  position: absolute; inset: 0;
+  --pw: var(--pw-w); --ph: var(--ph-w); --fx: var(--fx-w); --fy: var(--fy-w);
+  --wx: var(--wx-w); --wy: var(--wy-w); --ww: var(--ww-w); --wh: var(--wh-w);
+  --sx: var(--sx-w); --sy: var(--sy-w); --sw: var(--sw-w); --sh: var(--sh-w);
+  --mask: var(--mask-w);
+  --u: max(100cqw / var(--pw), 100cqh / var(--ph));
+  --px: clamp(100cqw - var(--pw) * var(--u), 50cqw - var(--fx) * var(--u), 0px);
+  --py: clamp(100cqh - var(--ph) * var(--u), 50cqh - var(--fy) * var(--u), 0px);
+}
+/* The sky through the glass, where the fire would draw it, until it does; and without the graphics card, or scripts. */
+.sky {
+  position: absolute;
+  left: calc(var(--px) + var(--sx) * var(--u)); top: calc(var(--py) + var(--sy) * var(--u));
+  width: calc(var(--sw) * var(--u)); height: calc(var(--sh) * var(--u));
+  background: #0a1a3a 0 0 / 100% 100% no-repeat;
+}
+.hero[data-drawn] .sky { display: none; }
+
+.plate {
+  position: absolute;
   z-index: 1;
+  pointer-events: none;
+  left: var(--px); top: var(--py);
+  width: calc(var(--pw) * var(--u)); height: calc(var(--ph) * var(--u));
+}
+.plate picture { display: contents; }
+.photo { display: block; width: 100%; height: 100%; }
+/* The cabin's light, masked by the photograph so only the cabin takes it: dark at first, then the fire's glow through the glass, then the sky's cool light. */
+.dim, .firelit, .daylit { position: absolute; inset: 0; opacity: 0; mask: var(--mask) 0 0 / 100% 100%; -webkit-mask: var(--mask) 0 0 / 100% 100%; }
+.dim { background: #000; opacity: 0.4; }
+.firelit {
+  mix-blend-mode: screen;
+  background: radial-gradient(ellipse 80% 90% at 50% 30%, rgba(255, 128, 40, 0.75), rgba(255, 90, 30, 0.35) 45%, rgba(255, 70, 20, 0) 80%);
+}
+.daylit {
+  mix-blend-mode: soft-light;
+  background: radial-gradient(ellipse 85% 90% at 50% 30%, rgb(170, 205, 255), rgba(150, 190, 255, 0.5) 50%, rgba(140, 180, 255, 0) 85%);
+}
+
+/* The cabin's light and the flash change every frame until it is at rest, so each is given its own layer until then. */
+.dim, .firelit, .daylit, .flash { will-change: opacity; }
+.hero[data-settled] :is(.dim, .firelit, .daylit, .flash) { will-change: auto; }
+
+/* The fire breaking: the glass too bright for a moment, and fading. */
+.flash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 65% 70% at 50% 32%, #fffaf2, rgba(255, 238, 215, 0.6) 30%, rgba(255, 225, 190, 0) 75%);
+  mix-blend-mode: screen;
+}
+
+/* Up out of the dark as it sets off (--dark, from the script); dark until it has drawn the first frame, so the scene comes up once, whole. */
+.curtain { position: absolute; inset: 0; z-index: 1; background: #000; opacity: 0; pointer-events: none; }
+@media (scripting: enabled) { .curtain { opacity: var(--dark, 1); } }
+
+/* Film's grain over the whole, stepping as film does, and the corners and the foot falling dark as a lens has them, the lead on the dark. */
+.grain, .vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.grain { inset: -64px; background-size: 128px 128px; opacity: 0.6; mix-blend-mode: overlay; }
+@media (prefers-reduced-motion: no-preference) { .hero:not([data-settled]) .grain { animation: grain 0.5s steps(6) infinite; } }
+@keyframes grain {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-37px, 22px); }
+  40% { transform: translate(18px, -41px); }
+  60% { transform: translate(-12px, 9px); }
+  80% { transform: translate(41px, 30px); }
+  100% { transform: translate(0, 0); }
+}
+.vignette {
+  background:
+    radial-gradient(ellipse 90% 85% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.5) 100%),
+    linear-gradient(transparent 50%, rgba(4, 2, 1, 0.8));
+}
+
+/* The words wait for the capsule to set off, as the launch has them; crawlers read them in the HTML all the same. */
+.words { display: contents; }
+@media (scripting: enabled) { .hero:not([data-begun]) :is(.words, .foot) { visibility: hidden; } }
+
+/* The headline spans the first screen; its line and its last word stand in the window, by the photograph's measure, kept on the screen when a phone crops it. */
+.h1 {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+  pointer-events: none;
+  font-family: 'Inter Display', var(--display);
+  text-align: center;
+}
+.line, .fast {
+  position: absolute;
+  left: max(16px, calc(var(--px) + var(--wx) * var(--u)));
+  right: max(16px, calc(100cqw - var(--px) - (var(--wx) + var(--ww)) * var(--u)));
+}
+.line {
+  top: calc(var(--py) + (var(--wy) + 150) * var(--u));
+  font-size: clamp(26px, 88 * var(--u), 52px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.032em;
+  text-wrap: balance;
+  text-shadow: 0 1px 3px rgba(20, 6, 0, 0.5), 0 2px 26px rgba(20, 6, 0, 0.7);
+}
+.fast {
+  top: calc(var(--py) + (var(--wy) + 265) * var(--u));
+  font-size: calc(640 * var(--u));
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  /* Forged in the fire: white-hot and glowing at first (--cool 0), cooling to white (--cool 1); its edges always sharp. */
+  color: color-mix(in srgb, #fff calc(var(--cool, 1) * 100%), #ffe2b8);
+  text-shadow:
+    0 0 calc((1 - var(--cool, 1)) * 10px) rgba(255, 150, 50, calc(1 - var(--cool, 1))),
+    0 0 calc((1 - var(--cool, 1)) * 34px) rgba(255, 80, 10, calc((1 - var(--cool, 1)) * 0.7)),
+    0 2px 4px rgba(20, 6, 0, calc(0.15 + 0.3 * var(--cool, 1))),
+    0 10px 50px rgba(0, 10, 40, 0.3);
+  /* Slammed in at its height, settling (--punch from 1 to 0). */
+  transform: scale(calc(1 + 0.06 * var(--punch, 0)));
+  transform-origin: 50% 60%;
+}
+/* Each word rises out of its own mask; the padding keeps ascenders and descenders whole, and the margins give the room back. */
+.mask { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.1em 0.08em 0.2em; margin: -0.1em -0.08em -0.2em; }
+.word { display: inline-block; transform-origin: 0 100%; }
+
+/* The lead and the ways in, standing still in front of the camera, on the dark of the cabin's foot. */
+.foot {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: clamp(22px, 4vh, 40px);
+  width: min(620px, calc(100cqw - 32px));
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  max-width: var(--max);
-  margin: 0 auto;
-  padding: 30px var(--gut) 64px;
+  gap: 18px;
   text-align: center;
 }
+.lead { font-size: 15px; line-height: 1.55; letter-spacing: -0.006em; text-wrap: pretty; color: rgba(255, 248, 240, 0.86); text-shadow: 0 1px 14px rgba(0, 0, 0, 0.8); }
+.ways > div { justify-content: center; }
 
-/* Inter at its display size, at its lightest; only the agent's name is heavy. */
-.h1 {
-  position: relative;
-  max-width: 780px;
-  margin-top: 22px;
-  font-family: 'Inter Display', var(--display);
-  font-size: calc(clamp(54px, 8.9vw, 136px) * 1.06);
-  font-weight: 200;
-  line-height: 0.96;
-  letter-spacing: -0.05em;
-  text-wrap: balance;
-}
-.line { display: block; }
-.word { display: inline-block; }
-.pay { color: rgba(255, 255, 255, 0.74); }
-.who { margin: 0.02em 0; font-weight: 720; letter-spacing: -0.058em; }
-.name { white-space: nowrap; }
-.accent { font-style: italic; letter-spacing: -0.045em; padding-right: 0.03em; }
-
-.lead { max-width: 520px; margin-top: 32px; font-size: 18px; line-height: 1.5; letter-spacing: -0.01em; color: rgba(255, 255, 255, 0.9); }
-.short { display: none; }
-.ctas { margin-top: 26px; }
-.ctas > div { justify-content: center; }
-.fine { margin-top: 14px; font-size: 13px; color: rgba(255, 255, 255, 0.72); }
-
-/* The nav turns to smoked glass from a little above the headline, where the light's cobalt is strong, to the first screen's foot. */
-.under { top: -40px; }
-
-@media (max-width: 640px) {
-  /* The words stand in the middle of the screen under the nav, not at its top over an empty foot of light. */
-  .hero { display: flex; flex-direction: column; min-height: 100svh; }
-  .head { flex: 1; justify-content: center; width: 100%; padding-top: 12px; padding-bottom: 56px; }
-  /* And the light stands a little taller, so the words in the middle are still inside it, its pale tops still showing. */
-  .light, .grain { left: -2%; right: -2%; height: 108%; }
-  .h1 { margin-top: 20px; font-size: 66px; }
-  .lead { max-width: 300px; margin-top: 24px; font-size: 17px; }
-  .long { display: none; }
-  .short { display: inline; }
-  .ctas { margin-top: 22px; }
-  .fine { display: none; }
+@media (max-width: 760px) {
+  .stage {
+    --pw: var(--pw-t); --ph: var(--ph-t); --fx: var(--fx-t); --fy: var(--fy-t);
+    --wx: var(--wx-t); --wy: var(--wy-t); --ww: var(--ww-t); --wh: var(--wh-t);
+    --sx: var(--sx-t); --sy: var(--sy-t); --sw: var(--sw-t); --sh: var(--sh-t);
+    --mask: var(--mask-t);
+  }
+  /* In the window above the astronauts' heads: the line near its top, the word under it. */
+  .line { top: calc(var(--py) + (var(--wy) + 110) * var(--u)); font-size: clamp(26px, 7.4vw, 32px); }
+  .fast { top: calc(var(--py) + (var(--wy) + 400) * var(--u)); font-size: 30vw; }
 }

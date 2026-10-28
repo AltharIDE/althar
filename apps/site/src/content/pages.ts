@@ -72,16 +72,6 @@ export const PAGE_META = {
     image: '/og/home.png',
     index: false,
   },
-  /** The developer page with its first screen inside a capsule coming in from orbit: linked from nowhere, and kept out of search. */
-  '/reentry': {
-    path: '/reentry',
-    name: 'Althar, coming in',
-    title: 'Althar · building software, at re-entry speed',
-    description:
-      'Althar’s developer page, its first screen inside a capsule coming in from orbit, the fire building past the window until it breaks into sky.',
-    image: '/og/home.png',
-    index: false,
-  },
 } as const satisfies Record<string, PageMeta>
 
 export type PagePath = keyof typeof PAGE_META

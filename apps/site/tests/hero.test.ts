@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt } from '../src/reentry/journey'
-import { TALL, WIDE } from '../src/reentry/plate'
+import { AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt } from '../src/home/hero/journey'
+import { TALL, WIDE } from '../src/home/hero/plate'
 
-describe('the re-entry’s clock', () => {
+describe('the first screen’s clock', () => {
   it('builds the heat from a glow to its height, and loses it at the break', () => {
     expect(heatAt(0)).toBe(0)
     expect(heatAt(AT.ignite + 0.2)).toBeLessThan(0.2)
