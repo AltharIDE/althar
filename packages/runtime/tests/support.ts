@@ -362,6 +362,20 @@ export const task = (title = 'Retry checkout') =>
     return { project, task: created }
   })
 
+/**
+ * An agent out of usage until a reset some seconds after it first says so: after another task's lead (`[lead:wait]`)
+ * takes the one place, at once, and before that lead stops working, five seconds in. A reset fixed from the test's start
+ * may fall either side on a busy machine.
+ */
+export const outUntilSoon = () => {
+  let until: number | undefined
+  return {
+    get until() {
+      return (until ??= Date.now() + 2_500)
+    },
+  }
+}
+
 /** Waits until a query returns a row matching the check, reading the store every few milliseconds. */
 export const until = <A, R = SqlClient.SqlClient>(
   query: Effect.Effect<ReadonlyArray<A>, unknown, R>,
