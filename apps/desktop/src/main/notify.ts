@@ -23,3 +23,35 @@ export const soundOf = (preferences: AppPreferences): { readonly silent: boolean
 
 /** What the Dock counts: how many things wait, or nothing while its count is off. */
 export const dockCount = (waiting: number, preferences: AppPreferences): number => (preferences.badge ? waiting : 0)
+
+/** How many threads' notifications are kept to be clicked: older ones are closed. */
+export const SHOWN_MOST = 20
+
+/**
+ * Notifications the person may still click, kept so they aren't collected
+ * before then: one per thread, its newest, which replaces the one before;
+ * and no more than `most`. A notification that went into Notification
+ * Center may never say it closed, so none is kept for ever.
+ */
+export const notificationsShown = <N extends { readonly close: () => void }>(most = SHOWN_MOST) => {
+  const byThread = new Map<string, N>()
+  return {
+    /** Keeps `notification` for its thread, closing the one it replaces and the oldest past `most`. */
+    add: (threadId: string, notification: N) => {
+      const before = byThread.get(threadId)
+      byThread.delete(threadId)
+      byThread.set(threadId, notification)
+      before?.close()
+      for (const [oldest, old] of byThread) {
+        if (byThread.size <= most) break
+        byThread.delete(oldest)
+        old.close()
+      }
+    },
+    /** Lets go of a notification clicked or closed, unless a newer one replaced it. */
+    drop: (threadId: string, notification: N) => {
+      if (byThread.get(threadId) === notification) byThread.delete(threadId)
+    },
+    size: () => byThread.size,
+  }
+}

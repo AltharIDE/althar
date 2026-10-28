@@ -1,3 +1,5 @@
 # Text checks out with LF everywhere, Windows too: the formatter, snapshots and tests that read files expect it, and
 # git's own default there (core.autocrlf) would turn every line ending into CRLF. Git tells binaries apart by itself.
 * text=auto eol=lf
+# Patches apply to files with LF line ends: kept byte for byte, never normalised.
+patches/*.patch -text

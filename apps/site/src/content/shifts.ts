@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -56,6 +56,15 @@ export interface Upcoming extends Shift {
 
 export const SHIFTS: readonly Shift[] = [
   {
+    id: 'claude-api-sampling-removed',
+    date: '2026-10-21',
+    kind: ShiftKind.Tools,
+    who: 'Anthropic',
+    title: 'Claude API 2026-10-21 rejects temperature, top_p and top_k',
+    what: 'Sending any of them returns a 400, even at the default. The new major SDK and CLI releases use this version, so upgrading breaks code that still sets them.',
+    source: { name: 'Claude Platform docs', url: 'https://platform.claude.com/docs/en/api/migration-2026-10-21' },
+  },
+  {
     id: 'cursor-new-plans',
     date: '2026-10-18',
     kind: ShiftKind.Pricing,
@@ -70,11 +79,20 @@ export const SHIFTS: readonly Shift[] = [
     kind: ShiftKind.Access,
     who: 'GitHub',
     title: 'Six models leave Copilot, GPT-5.5 and GPT-5.4 among them',
-    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-5.6 Sol and Luna, Gemini 3.8 Flash and Grok 4.6; admins may need to enable them.',
+    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-6.1 Sol, GPT-6 Luna, Gemini 3.8 Flash and Grok 4.7; admins may need to enable them.',
     source: {
       name: 'GitHub Changelog',
-      url: 'https://github.blog/changelog/2026-09-18-upcoming-deprecation-of-selected-github-copilot-models-in-mid-october',
+      url: 'https://github.blog/changelog/2026-10-19-github-copilot-models-deprecated-on-october-19-2026',
     },
+  },
+  {
+    id: 'openai-legacy-models-left',
+    date: '2026-10-23',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'o1, o3-mini, GPT-4 and gpt-3.5-turbo leave the API',
+    what: 'Also o4-mini and the fine-tuned versions of these models, announced on 22 April. OpenAI’s replacements are GPT-5.6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
   },
   {
     id: 'gpt-5-5-retired',
@@ -382,24 +400,17 @@ export const SHIFTS: readonly Shift[] = [
  */
 export const UPCOMING: readonly Upcoming[] = [
   {
-    id: 'openai-legacy-models-leave',
-    date: '2026-10-23',
-    announced: '2026-04-22',
-    kind: ShiftKind.Access,
-    who: 'OpenAI',
-    title: 'o1, o3-mini, GPT-4 and gpt-3.5-turbo leave the API',
-    what: 'Also o4-mini and the fine-tuned versions of these models. OpenAI’s replacements are GPT-5.6 models.',
-    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
-  },
-  {
     id: 'chatgpt-pro-allowance-ends',
-    date: '2026-10-29',
+    date: '2026-10-30',
     announced: '2026-09-29',
     kind: ShiftKind.Limits,
     who: 'OpenAI',
     title: 'ChatGPT Pro $200 subscribers lose the old allowance',
-    what: 'People already on the plan keep their old allowance until this day, then get the reopened plan’s, which is roughly half.',
-    source: { name: 'Kingy AI', url: 'https://kingy.ai/news/chatgpt-pro-200-usage-cut/' },
+    what: 'People already on the plan keep 20x Plus usage through 29 October, then get the reopened plan’s 10x, roughly half, in Codex and Work.',
+    source: {
+      name: 'Engadget',
+      url: 'https://www.engadget.com/2272106/openai-adds-dollar500-pro-subscription-nerfs-its-existing-dollar200-tier/',
+    },
   },
   {
     id: 'usage-policy-takes-effect',

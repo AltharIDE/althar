@@ -370,8 +370,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         return event.byAgent
           ? notice({ source: 'runtime', severity: 'info', title: `The agent moved to its ${event.modeId} mode.` })
           : Effect.void
+      // The agent is told why; the person reads it on the refused call, not as a notice of its own.
       case 'Resumed':
-        return notice({ source: 'runtime', severity: 'info', title: 'Resumed after a rejection.', description: event.reason })
+        return Effect.void
       default:
         return Effect.void
     }
@@ -509,7 +510,14 @@ export const transcript = (
           // Images the person sent are said, though only the agent they went to saw them.
           const pictures = Array.isArray(content['pictures']) ? content['pictures'].length : 0
           const sent = pictures === 0 ? '' : ` [sent ${pictures === 1 ? 'an image' : `${pictures} images`}]`
-          return [`[person] ${text('text')}${sent}`]
+          // Files they sent are said by where their copies are, so an agent taking over can open them too.
+          const files = (Array.isArray(content['files']) ? (content['files'] as ReadonlyArray<unknown>) : []).flatMap((file) =>
+            typeof file === 'object' && file !== null && typeof (file as { path?: unknown }).path === 'string'
+              ? [(file as { path: string }).path]
+              : [],
+          )
+          const filed = files.length === 0 ? '' : ` [sent ${files.length === 1 ? 'a file' : `${files.length} files`}: ${files.join(', ')}]`
+          return [`[person] ${text('text')}${sent}${filed}`]
         }
         case 'agent_message':
           return [`[${agent}] ${text('text')}`]

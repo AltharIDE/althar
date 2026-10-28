@@ -31,8 +31,12 @@
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable both-edges;
-  padding: 30px 0 72px;
+  padding: 30px 0 0;
   scroll-padding-top: 30px;
+}
+/* the end of the thread clears whatever floats on the composer's edge, as tall as it is (the composer says: --composer-floats) */
+.clear {
+  height: max(72px, calc(var(--composer-floats, 0px) + 16px));
 }
 .composer {
   flex: none;

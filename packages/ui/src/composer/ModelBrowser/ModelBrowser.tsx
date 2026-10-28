@@ -12,6 +12,7 @@ import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Kbd } from '../../primitives/Kbd/Kbd'
 import { Select } from '../../primitives/Select/Select'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
+import { type ModelRoom, type ModelRoomText, RoomNote } from '../ModelPick/room'
 import s from './ModelBrowser.module.css'
 
 /** An agent runtime on this machine, and how it is signed in. Status, not pitch. */
@@ -101,6 +102,9 @@ export interface ModelBrowserProps {
   /** Switches a model off, or on again. Without it, there is no such control. */
   onToggleBlocked?: (id: string) => void
   onSetDefaultEffort: (id: string, level: string) => void
+  /** How much room a model has where work on it would start, after its name; null where its plan is read by nothing. */
+  room?: (model: ModelInfo) => ModelRoom | null | undefined
+  roomText?: Partial<ModelRoomText>
   /** Add a runtime. Without it, there is no such row. */
   onConnect?: () => void
   text?: Partial<ModelBrowserText>
@@ -139,6 +143,8 @@ export function ModelBrowser({
   onTogglePin,
   blocked = [],
   onToggleBlocked,
+  room,
+  roomText,
   onSetDefaultEffort,
   onConnect,
   text,
@@ -305,6 +311,7 @@ export function ModelBrowser({
                   const off = blocked.includes(m.id)
                   const inUse = m.id === value
                   const level = defaultEffort(m)
+                  const left = room?.(m)
                   const via = `${ids}-${m.id}-via`
                   const ctx = `${ids}-${m.id}-ctx`
                   return (
@@ -322,6 +329,7 @@ export function ModelBrowser({
                         <Model model={m} />
                         {inUse && <span className={s.inUse}>{t.inUse}</span>}
                         {off && <span className={s.inUse}>{t.off}</span>}
+                        {left !== undefined && <RoomNote room={left} compact text={roomText} />}
                       </button>
                       <span className={s.via} id={via}>
                         {c ? (

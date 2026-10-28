@@ -18,7 +18,6 @@ const APP: NewProjectFolder = {
   id: 'app',
   name: 'northwind-app',
   where: '~/code/northwind/app',
-  branch: 'main',
   host: GITHUB,
   remote: 'northwind-co/app',
 }
@@ -26,7 +25,6 @@ const API: NewProjectFolder = {
   id: 'api',
   name: 'northwind-api',
   where: '~/code/northwind/api',
-  branch: 'nw-412-invoice-export',
   host: GITHUB,
   remote: 'northwind-co/api',
 }
@@ -34,23 +32,22 @@ const OPS: NewProjectFolder = {
   id: 'ops',
   name: 'northwind-ops',
   where: '~/code/northwind/ops',
-  branch: 'main',
   host: GITLAB,
   remote: 'northwind/ops',
 }
-const LOCAL: NewProjectFolder = { id: 'notes', name: 'notes', where: '~/notes', branch: null, host: null, remote: null }
+const LOCAL: NewProjectFolder = { id: 'notes', name: 'notes', where: '~/notes', host: null, remote: null }
 
 const FOUND: NewProjectFound = {
   like: 'Northwind',
   first: [
-    { id: 'app', name: 'northwind-app', where: '~/code/northwind/app', facts: 'main · 2h ago' },
-    { id: 'api', name: 'northwind-api', where: '~/code/northwind/api', facts: 'nw-412-invoice-export · 20m ago' },
-    { id: 'ops', name: 'northwind-ops', where: '~/code/northwind/ops', facts: 'main · 3 days ago' },
-    { id: 'design', name: 'northwind-design-tokens', where: '~/code/northwind/design-tokens', facts: 'main · 5 weeks ago' },
+    { id: 'app', name: 'northwind-app', where: '~/code/northwind/app' },
+    { id: 'api', name: 'northwind-api', where: '~/code/northwind/api' },
+    { id: 'ops', name: 'northwind-ops', where: '~/code/northwind/ops' },
+    { id: 'design', name: 'northwind-design-tokens', where: '~/code/northwind/design-tokens' },
   ],
   more: [
-    { id: 'gateway', name: 'halyard-gateway', where: '~/code/halyard/gateway', facts: 'main · 1h ago', in: 'Halyard' },
-    { id: 'dotfiles', name: 'dotfiles', where: '~/dotfiles', facts: 'main · yesterday' },
+    { id: 'gateway', name: 'halyard-gateway', where: '~/code/halyard/gateway', in: 'Halyard' },
+    { id: 'dotfiles', name: 'dotfiles', where: '~/dotfiles' },
   ],
 }
 
@@ -135,10 +132,7 @@ export const Read: Story = {
 /** A folder without a remote, and one in another project already. */
 export const LocalAndShared: Story = {
   args: {
-    folders: [
-      LOCAL,
-      { id: 'gateway', name: 'halyard-gateway', where: '~/code/halyard/gateway', branch: 'main', host: GITHUB, remote: 'halyard/gateway' },
-    ],
+    folders: [LOCAL, { id: 'gateway', name: 'halyard-gateway', where: '~/code/halyard/gateway', host: GITHUB, remote: 'halyard/gateway' }],
     findings: [
       { id: 'github', kind: 'connected', host: GITHUB, owners: ['halyard'], account: 'balazs' },
       { id: 'shared', kind: 'shared', name: 'halyard-gateway', project: 'Halyard' },
@@ -165,11 +159,10 @@ export const NamingThenAdding: Story = {
     await expect(c.getByRole('heading', { level: 3 })).toHaveTextContent('On this Mac, named like Northwind')
     await userEvent.click(c.getByRole('button', { name: 'Add northwind-app' }))
     await expect(c.getByRole('list', { name: 'Its folders' })).toHaveTextContent('northwind-app')
-    await expect(c.getByText('1 repository')).toBeTruthy()
     await userEvent.click(c.getByRole('radio', { name: 'Teal, Meridian’s' }))
     await expect(c.getByRole('radio', { name: 'Teal, Meridian’s' })).toBeChecked()
     await userEvent.click(c.getByRole('button', { name: 'Leave out northwind-app' }))
-    await expect(c.getByText('No folders yet.')).toBeTruthy()
+    await expect(c.queryByRole('list', { name: 'Its folders' })).toBeNull()
     await userEvent.click(c.getByRole('button', { name: 'Add northwind-api' }))
     await userEvent.type(name, '{Meta>}{Enter}{/Meta}')
     await expect(args.onCreate).toHaveBeenCalledOnce()
@@ -235,7 +228,7 @@ export const Connecting: Story = {
   },
 }
 
-/** Folders held over the page: the box says to let go, and letting go hands them on. */
+/** Folders held over the page: the page takes them, and letting go hands them on. */
 export const Dropping: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
@@ -243,10 +236,9 @@ export const Dropping: Story = {
     const file = new File([''], 'northwind')
     const dataTransfer = { types: ['Files'], files: [file] }
     await fireEvent.dragEnter(title, { dataTransfer })
-    await expect(c.getByText('Let go to add them.')).toBeTruthy()
     await fireEvent.drop(title, { dataTransfer })
     await expect(args.onDrop).toHaveBeenCalledWith([file])
-    await expect(c.getByText('No folders yet.')).toBeTruthy()
+    await expect(c.queryByRole('list', { name: 'Its folders' })).toBeNull()
   },
 }
 
@@ -280,7 +272,6 @@ export const Long: Story = {
         id: 'long',
         name: 'northwind-invoicing-partner-export-service-with-a-long-name',
         where: '~/code/clients/northwind/services/invoicing-partner-export',
-        branch: 'nw-412-invoice-export-for-partners-in-the-eu',
         host: GITHUB,
         remote: 'northwind-co/invoicing-partner-export-service',
       },

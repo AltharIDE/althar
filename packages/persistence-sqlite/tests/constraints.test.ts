@@ -183,6 +183,18 @@ describe('constraints', () => {
       assert.isFalse(yield* image(2, mine), 'one image a place')
       assert.isFalse(yield* image(0, mine), 'places count from one')
       assert.isFalse(yield* image(3, theirs), 'no image from another project')
+      const file = (position: number, row: Readonly<Record<string, unknown>>) =>
+        succeeds(
+          sql`INSERT INTO user_input_files ${sql.insert({ projectId, userInputId: inputId, position, name: 'spec.pdf', kind: 'file', mediaType: 'application/pdf', bytes: 48_000, entries: null, path: '/t/.althar/attachments/in/spec.pdf', ...row })}`,
+        )
+      assert.isTrue(yield* file(1, {}))
+      assert.isTrue(yield* file(2, { name: 'logs', kind: 'folder', mediaType: null, entries: 3, path: '/t/.althar/attachments/in/logs' }))
+      assert.isFalse(yield* file(2, {}), 'one file a place')
+      assert.isFalse(yield* file(0, {}), 'places count from one')
+      assert.isFalse(yield* file(3, { kind: 'folder' }), 'a folder says how many files it holds')
+      assert.isFalse(yield* file(3, { entries: 2 }), 'a file holds none')
+      assert.isFalse(yield* file(3, { name: '' }), 'a file has a name')
+      assert.isFalse(yield* file(3, { kind: 'link' }), 'a file or a folder, nothing else')
     }).pipe(Effect.provide(Env)),
   )
 

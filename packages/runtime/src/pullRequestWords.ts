@@ -88,6 +88,8 @@ export const bodyOf = (input: {
   readonly written?: string | null
   /** Althar is co-author of what it sends, so it says it opened the pull request. On where not said. */
   readonly credit?: boolean
+  /** The automation whose run opened it, which it is signed with whatever the credit: nobody watched it being made. */
+  readonly automation?: string | null
 }) => {
   const parts: Array<string> = []
   const plain = said(input.built) ?? said(input.lead)
@@ -105,7 +107,9 @@ export const bodyOf = (input: {
   }
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
-  if (input.credit !== false) parts.push('<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>')
+  if (input.automation !== undefined && input.automation !== null)
+    parts.push(`<sub>Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.</sub>`)
+  else if (input.credit !== false) parts.push('<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>')
   return parts.join('\n\n')
 }
 
@@ -192,12 +196,18 @@ export const outsidersLine = (count: number) =>
 
 const SIGNATURE = '<sub>From Althar'
 
+/** An automation's name as it reads after "Althar's": its first letter small, unless its first word is in capitals. */
+export const nameInLine = (name: string) => (/^\p{Lu}\p{Ll}/u.test(name) ? `${name.charAt(0).toLowerCase()}${name.slice(1)}` : name)
+
 /**
  * A reply as posted: the lead's words, then a line saying it came from
- * Althar and which agent wrote it. It goes up under the person's own
- * account, so without the line colleagues would take it for theirs.
+ * Althar and which agent wrote it, and the automation whose run it was,
+ * where one was: "From Althar's morning review, by Claude Code". It goes up
+ * under the person's own account, so without the line colleagues would take
+ * it for theirs.
  */
-export const signed = (body: string, by: string | null) => `${body.trimEnd()}\n\n${SIGNATURE}${by === null ? '' : `, by ${by}`}.</sub>`
+export const signed = (body: string, by: string | null, automation: string | null = null) =>
+  `${body.trimEnd()}\n\n${SIGNATURE}${automation === null ? '' : `’s ${nameInLine(automation)}`}${by === null ? '' : `, by ${by}`}.</sub>`
 
 /** The signature replies carried while Althar was called Charrette, until October 2026. */
 const FORMER_SIGNATURE = '<sub>From Charrette'

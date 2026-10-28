@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End } from '@althar/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -50,6 +50,8 @@ const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
 
 export interface CardActions {
   readonly project: string
+  /** The project's id, for each model's room in a step's picker; absent outside a project. */
+  readonly projectId?: string
   readonly agents: ReadonlyArray<AgentStatus>
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
@@ -125,6 +127,7 @@ function PlanCard({
               owner={owner}
               agents={actions.agents}
               value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
+              {...(actions.projectId === undefined ? {} : { projectId: actions.projectId })}
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
               variant="field"
               placement="below"
@@ -185,7 +188,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       ? TaskStatus.Queued
       : handedBack !== null
         ? TaskStatus.Yours
-        : card.waits !== null && card.phase === 'running'
+        : (card.waits !== null || card.reconnects != null) && card.phase === 'running'
           ? TaskStatus.Paused
           : STATUS[card.phase]
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
@@ -197,10 +200,12 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
         : card.queued !== null
           ? queuedWords(card.queued)
           : card.waits !== null
-            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
-            : card.step === null
-              ? undefined
-              : text.now[card.step]
+            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+            : card.reconnects != null
+              ? reconnectsWords(card.reconnects, clock)
+              : card.step === null
+                ? undefined
+                : text.now[card.step]
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   const effort = effortOf(card.lead, card.leadModel, card.leadEffort)

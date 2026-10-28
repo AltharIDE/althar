@@ -2,6 +2,12 @@ import type {
   AccountSignInState,
   AgentModels,
   AgentStatus,
+  AutomationCard,
+  AutomationDefinition,
+  AutomationRun,
+  AutomationsSnapshot,
+  AutomationSummary,
+  AutomationView,
   ChangeSummary,
   ConnectGuide,
   ConnectionCheck,
@@ -10,8 +16,11 @@ import type {
   CoordinatorSnapshot,
   HomeSnapshot,
   Load,
+  PlanUsage,
   Picture,
   ProjectNote,
+  ProjectTracker,
+  TrackerContainer,
   ProjectRulesView,
   ProjectRepository,
   ProjectSummary,
@@ -290,7 +299,7 @@ export const task: TaskSummary = {
 const GiB = 1024 ** 3
 const MiB = 1024 ** 2
 
-/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, and its default branch running. */
+/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, its default branch running, and Althar itself. */
 export const load: Load = {
   cpu: 0.42,
   memoryUsed: 12.5 * GiB,
@@ -334,6 +343,7 @@ export const load: Load = {
       processes: 3,
     },
   ],
+  althar: { cpu: 0.015, memory: 700 * MiB, processes: 9 },
   history: [
     { cpu: 0.2, work: 0.1 },
     { cpu: 0.42, work: 0.33 },
@@ -357,7 +367,7 @@ export const items = {
     ...next(),
     agentId: null,
     kind: 'user_message',
-    content: { text, links, pictures },
+    content: { text, links, pictures, files: [] },
     input,
   }),
   says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({
@@ -623,7 +633,84 @@ export const items = {
       ...content,
     },
   }),
+  /** An automation's card in the coordinator's thread: proposed, as the coordinator made it, by default. */
+  automation: (content: Partial<AutomationCard> = {}, id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId: null,
+    kind: 'automation',
+    content: {
+      automationId: 'auto1',
+      definition: definition(),
+      was: null,
+      ask: null,
+      state: 'proposed',
+      nextAt: null,
+      ...content,
+    },
+  }),
 }
+
+/** What an automation is: the morning review, of each new pull request, every weekday at 9:00, led by Claude Code. */
+export const definition = (overrides: Partial<AutomationDefinition> = {}): AutomationDefinition => ({
+  name: 'Morning review',
+  prompt: 'Review the pull requests opened since yesterday by anyone but me.',
+  schedule: { every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' },
+  zone: 'Europe/London',
+  lead: { agentId: 'claude-code', model: null, effort: null },
+  work: { kind: 'review' },
+  allowEverything: true,
+  minutes: 45,
+  late: 'once',
+  ...overrides,
+})
+
+/** One of its runs: one that made a review, today at 9:00, by default. */
+export const automationRun = (overrides: Partial<AutomationRun> = {}): AutomationRun => ({
+  id: 'occ1',
+  cause: 'schedule',
+  state: 'made',
+  dueAt: '2026-09-29T09:00:00.000Z',
+  at: '2026-09-29T09:02:00.000Z',
+  subject: 'Review #264',
+  reason: null,
+  task: { id: 't9', threadId: 'th9', title: 'Review #264' },
+  ...overrides,
+})
+
+/** The morning review as the Automations tab lists it: on, next tomorrow at 9:00. */
+export const automationSummary = (overrides: Partial<AutomationSummary> = {}): AutomationSummary => ({
+  id: 'auto1',
+  projectId: 'p1',
+  name: 'Morning review',
+  prompt: 'Review the pull requests opened since yesterday by anyone but me.',
+  schedule: { every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' },
+  work: 'review',
+  state: 'on',
+  pausedBy: null,
+  pauseReason: null,
+  nextAt: '2026-09-30T09:00:00.000Z',
+  latest: [automationRun()],
+  ...overrides,
+})
+
+/** A project's automations, for its tab: the morning review alone, by default. */
+export const automationsSnapshot = (overrides: Partial<AutomationsSnapshot> = {}): AutomationsSnapshot => ({
+  cursor: 6,
+  automations: [automationSummary()],
+  allPaused: false,
+  ...overrides,
+})
+
+/** The morning review as its page shows it. */
+export const automationView = (overrides: Partial<AutomationView> = {}): AutomationView => ({
+  ...automationSummary(),
+  definition: definition(),
+  postsReviews: false,
+  runs: [automationRun()],
+  allPaused: false,
+  ...overrides,
+})
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 
@@ -819,6 +906,7 @@ export const connectionList: ConnectionList = {
       tracker: true,
       hostedUrl: 'https://linear.app',
       selfHosted: false,
+      workspaces: true,
       browserSignIn: false,
       tokenNeeds: null,
       tokenPrefixes: ['lin_api_'],
@@ -902,6 +990,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     getLoad: vi.fn(async () => load),
+    getPlanUsage: vi.fn(async () => ({ accounts: [] })),
+    getModelRooms: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
     openCode: vi.fn(async () => true),
     // Names no code, unless a test says what they name.
@@ -931,10 +1021,22 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
       postTeamReviews: false,
+      automationsPaused: false,
       folderWait: 'smart' as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),
+    getAutomation: vi.fn(async () => ({ cursor: 6, automation: automationView() })),
+    makeAutomation: vi.fn(async () => 'auto2'),
+    changeAutomation: vi.fn(async () => {}),
+    turnOnAutomation: vi.fn(async () => {}),
+    pauseAutomation: vi.fn(async () => {}),
+    runAutomationNow: vi.fn(async () => {}),
+    deleteAutomation: vi.fn(async () => {}),
+    undoAutomationChange: vi.fn(async () => {}),
+    setAutomationPostsReviews: vi.fn(async () => {}),
+    setAutomationsPaused: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
     setFolderWait: vi.fn(async () => {}),
     getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
@@ -943,9 +1045,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     moveInLine: vi.fn(async () => {}),
     lineOldestFirst: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
+    tryAgain: vi.fn(async () => {}),
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
+    resolveConflictsNow: vi.fn(async () => {}),
+    lookForConflicts: vi.fn(async () => {}),
     setTaskAllowEverything: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     leaveOutCommits: vi.fn(async () => {}),
@@ -991,6 +1096,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     disconnect: vi.fn(async () => {}),
     renameProject: vi.fn(async () => {}),
     setProjectInk: vi.fn(async () => {}),
+    getProjectTracker: vi.fn(async (): Promise<ProjectTracker | null> => null),
+    setProjectTracker: vi.fn(async () => {}),
+    listContainers: vi.fn(async (): Promise<ReadonlyArray<TrackerContainer>> => []),
     removeProject: vi.fn(async () => {}),
     getRepositories: vi.fn(async () => repositories),
     addRepositories: vi.fn(async () => {}),
@@ -1102,6 +1210,15 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   pickFolder: vi.fn(async () => 'grant_picked'),
   pickFolders: vi.fn(async (): Promise<ReadonlyArray<string>> => ['grant_picked']),
   grantDropped: vi.fn(async () => 'grant_dropped'),
+  attach: vi.fn(async (file: File) => ({
+    ok: true as const,
+    grant: `grant_${file.name}`,
+    name: file.name,
+    kind: file.type === '' && !file.name.includes('.') ? ('folder' as const) : ('file' as const),
+    bytes: file.size,
+    entries: file.type === '' && !file.name.includes('.') ? 3 : null,
+  })),
+  attachPasted: vi.fn(async () => []),
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
@@ -1119,6 +1236,25 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   clipboardToken: vi.fn(async () => null),
   ...overrides,
 })
+
+/** An account's plan usage as the runtime reads it: a Codex account on its plan, its 5-hour window 60% used. */
+export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}): PlanUsage['accounts'][number] => ({
+  agentId: 'codex',
+  agentName: 'Codex',
+  accountId: 'acc_codex_work',
+  accountName: 'work',
+  paidBy: 'plan',
+  source: 'agent',
+  observedAt: '2026-10-15T10:00:00.000Z',
+  plan: 'pro',
+  windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  fault: null,
+  noReading: null,
+  ...over,
+})
+
+/** The usage feed carries, whole. */
+export const planUsage = (accounts: PlanUsage['accounts'] = [usageAccount()]): PlanUsage => ({ accounts })
 
 /** A change the runtime's feed reports. */
 export const changed = (

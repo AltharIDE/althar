@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { CONNECTED, SERVICES } from '../../fixtures/setup'
+import { CONNECTED, SERVICES, WORKSPACES } from '../../fixtures/setup'
 import { States } from '../../storybook/States'
 import { Connections } from './Connections'
 
@@ -17,6 +17,7 @@ const meta = {
     onConnect: fn(),
     onSignInAgain: fn(),
     onAddServer: fn(),
+    onAddWorkspace: fn(),
     onDisconnect: fn(),
   },
 } satisfies Meta<typeof Connections>
@@ -57,6 +58,27 @@ export const Connected: Story = {
   },
 }
 
+/**
+ * Two of Linear's workspaces side by side, each saying which it reaches and
+ * disconnecting on its own; Linear offers another workspace, not a server.
+ */
+export const Workspaces: Story = {
+  args: { connections: WORKSPACES },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('· Meridian')).toBeInTheDocument()
+    await expect(c.getByText('· Halyard')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Add a workspace' }))
+    await expect(args.onAddWorkspace).toHaveBeenCalledWith('linear')
+    const disconnects = c.getAllByRole('button', { name: 'Disconnect' })
+    await expect(disconnects).toHaveLength(3)
+    const halyard = disconnects[2]
+    if (!halyard) throw new Error('no Disconnect')
+    await userEvent.click(halyard)
+    await expect(args.onDisconnect).toHaveBeenCalledWith('conn_5')
+  },
+}
+
 /** Without a way to add a server, a connected service offers none. */
 export const NoServers: Story = {
   args: { connections: CONNECTED, onAddServer: undefined },
@@ -78,6 +100,7 @@ export const AllStates: Story = {
       cells={[
         { state: 'not connected', node: <Connections {...args} /> },
         { state: 'connected, and one to sign in again', node: <Connections {...args} connections={CONNECTED} /> },
+        { state: 'two of Linear’s workspaces', node: <Connections {...args} connections={WORKSPACES} /> },
         {
           state: 'narrow',
           node: (

@@ -175,10 +175,13 @@ function OpenCodeIn({ found, threadId, compact }: { found: FoundCode; threadId: 
   )
 }
 
-/** The names in the thread that open code, in the order they read: not those in what is open beside it, nor those hidden. */
+/**
+ * The names in the thread that open code, in the order they read: not those in what is open beside it, nor those hidden,
+ * as a screen the window keeps while another shows is (`KeptScreens`).
+ */
 const namesInThread = (): HTMLElement[] =>
   [...document.querySelectorAll<HTMLElement>('[data-code-ref]')].filter(
-    (chip) => chip.closest('[data-workbench]') === null && chip.closest('[hidden], [inert]') === null,
+    (chip) => chip.closest('[data-workbench]') === null && chip.closest('[hidden], [inert], [style*="display: none"]') === null,
   )
 
 /** Where the name a file was opened from is among the thread's: the chip itself while it is there, else the first naming the same. */

@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useMemo, useState, type ReactNode } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { Behind } from '../../composer/Behind/Behind'
+import { Brand } from '../../foundations/brands/brands'
 import { Composer } from '../../composer/Composer/Composer'
 import { FINDINGS_SETTLED, reviewDoc, STEPS, summaryDoc } from '../../fixtures/meridian'
 import { GEMINI_PRO, OPUS, SONNET } from '../../fixtures/models'
@@ -159,5 +161,60 @@ export const OpeningAStep: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getAllByRole('button', { name: /thread/i })[0]!)
     await waitFor(() => expect(c.getByRole('tablist')).toBeInTheDocument())
+  },
+}
+
+/** The end of the thread clears everything on the composer's edge: the chip, a notice and its Keep link. At the bottom, the last message ends above the chip. */
+export const LastMessageClearsTheEdge: Story = {
+  render: () => (
+    <div style={{ height: 420, width: 360 }}>
+      <TaskFace
+        composer={
+          <Composer
+            value=""
+            onChange={() => {}}
+            onSubmit={() => {}}
+            placeholder="Tell the lead"
+            above={<Behind sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]} />}
+            notice={
+              <>
+                <div role="alert">
+                  The agent stopped: the repository moved. <button type="button">Dismiss</button>
+                </div>
+                <div>
+                  GPT-6.1 Sol takes over from Claude Opus 5 when you send. <button type="button">Keep Claude Opus 5</button>
+                </div>
+              </>
+            }
+          />
+        }
+      >
+        <Thread label="Task 432">
+          {THREAD}
+          <Turn model={OPUS} at="12:01">
+            <Prose>This is the last message.</Prose>
+          </Turn>
+        </Thread>
+      </TaskFace>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const host = canvasElement.querySelector<HTMLElement>('[data-floats-host]')!
+    await waitFor(() => expect(host.style.getPropertyValue('--composer-floats')).not.toBe(''))
+    const last = c.getByText('This is the last message.')
+    const chip = canvasElement.querySelector('button[aria-expanded]')!
+    const alert = c.getByRole('alert')
+    const keep = c.getByRole('button', { name: /^Keep/ })
+    // Boxes exist only in a browser; jsdom draws none, so the geometry is asserted there alone.
+    if (chip.getBoundingClientRect().width === 0) return
+    host.querySelector('[class*="scroll"]')?.scrollTo({ top: 1e6 })
+    await waitFor(() =>
+      expect(last.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        Math.min(chip.getBoundingClientRect().top, alert.getBoundingClientRect().top),
+      ),
+    )
+    await expect(chip.getBoundingClientRect().bottom).toBeLessThanOrEqual(alert.getBoundingClientRect().top)
+    await expect(alert.getBoundingClientRect().bottom).toBeLessThanOrEqual(keep.getBoundingClientRect().top)
   },
 }

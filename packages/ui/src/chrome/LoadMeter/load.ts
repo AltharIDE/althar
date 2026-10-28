@@ -8,13 +8,19 @@ import { MemoryPressure, unreachable } from '../../foundations/vocabulary'
  * changes.
  */
 
-/** One piece of Althar's work, and its share of this computer: a task's agents and runs, a project's coordinator, or a run of its default branch. */
+/**
+ * One piece of Althar's work, and its share of this computer: a task's agents
+ * and runs, a project's coordinator, a run of its default branch, or Althar
+ * itself.
+ */
 export interface LoadRow {
   id: string
-  /** What it is, as the person knows it: the task's title, or the project's coordinator. */
+  /** What it is, as the person knows it: the task's title, the project's coordinator, or Althar. */
   title: string
-  /** The project it is in. */
-  project: string
+  /** The project it is in; none for Althar itself. */
+  project?: string
+  /** Whether the row opens its work: Althar itself has none to open. */
+  opens?: boolean
   /** The agent leading it, by name; none for a run. */
   agent?: string
   mark?: Brand
@@ -52,17 +58,6 @@ export interface LoadGlance {
   history: readonly LoadPoint[]
 }
 
-/** How loaded it is in a word, for the peek's head. */
-export enum LoadLevel {
-  Quiet = 'quiet',
-  Busy = 'busy',
-  Full = 'full',
-}
-
-/** From here the CPU counts as full; from BUSY, as busy. */
-const FULL = 0.9
-const BUSY = 0.45
-
 const clamp = (n: number) => Math.min(1, Math.max(0, n))
 
 /** Whether memory is short enough to say: a Mac compressing it or moving it to disk. */
@@ -77,11 +72,6 @@ export const strained = (pressure: MemoryPressure | null): pressure is MemoryPre
     default:
       return unreachable(pressure)
   }
-}
-
-export const levelOf = (load: Pick<LoadGlance, 'cpu' | 'pressure'>): LoadLevel => {
-  if (load.cpu >= FULL || strained(load.pressure)) return LoadLevel.Full
-  return load.cpu >= BUSY ? LoadLevel.Busy : LoadLevel.Quiet
 }
 
 /** A share, 0 to 1, as a whole percent. */

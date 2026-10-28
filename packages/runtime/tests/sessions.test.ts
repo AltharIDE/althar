@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { CommandEnvelope } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
@@ -521,6 +522,45 @@ describe('sessions', () => {
       assert.notStrictEqual(first, second)
       // It is on the model asked for from the moment it starts.
       assert.strictEqual((yield* session(second))?.model, 'large')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('lets go of a session that started but could not take over its thread', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { task: created } = yield* task('Add the retry helper')
+      yield* begin(created.threadId, 'claude-code')
+      // What the person said comes again under a command id already used for something else: the switch fails once the new
+      // agent has started, before it takes over.
+      const envelope = yield* Runtime.envelope('thread.send', { threadId: created.threadId, body: 'first' })
+      yield* sessions.send({ envelope, threadId: created.threadId, body: 'first', disposition: 'after_current' })
+      yield* ended(created.threadId, 1)
+      const { commandType, schemaVersion, actorId, deviceId, issuedAt, payload } = yield* Runtime.envelope('thread.send', {
+        threadId: created.threadId,
+        body: 'second',
+      })
+      const reused = new CommandEnvelope({
+        commandId: envelope.commandId,
+        commandType,
+        schemaVersion,
+        actorId,
+        deviceId,
+        issuedAt,
+        payload,
+      })
+      const exit = yield* Effect.exit(
+        sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode', message: { envelope: reused, body: 'second' } }),
+      )
+      assert.isTrue(Exit.isFailure(exit))
+      const [started] = yield* sql<{ id: string; state: string }>`
+        SELECT id, state FROM provider_sessions WHERE thread_id = ${created.threadId} AND agent_id = 'opencode'`
+      // It is recorded as failed, not left starting, and its process as ended: nothing of it holds a place.
+      assert.strictEqual(started?.state, 'failed')
+      const processes = yield* sql<{ state: string; endedAt: string | null }>`
+        SELECT state, ended_at FROM processes WHERE provider_session_id = ${started?.id}`
+      assert.isTrue(processes.every((process) => process.state !== 'running' && process.endedAt !== null))
+      assert.isTrue(Option.isNone(yield* sessions.running(created.threadId)))
     }).pipe(Effect.provide(runtime())),
   )
 

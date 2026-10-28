@@ -10,6 +10,7 @@ import {
   ChatBubble,
   Check,
   Clock,
+  ClockRotateRight,
   CoffeeCup,
   Community,
   Compress,
@@ -52,6 +53,7 @@ import {
   TaskList,
   Terminal,
   Tools,
+  WifiOff,
   Xmark,
 } from 'iconoir-react'
 import { type ComponentType, createElement, type SVGProps } from 'react'
@@ -122,6 +124,8 @@ export const ICONS = {
   move: PageRight,
   tool: Tools,
   globe: Globe,
+  /** The computer is offline. */
+  offline: WifiOff,
   /** An MCP server. */
   plug: ServerConnection,
   agents: Community,
@@ -137,7 +141,10 @@ export const ICONS = {
   lock: Lock,
   compress: Compress,
   up: ArrowUp,
+  /** When something happens on a schedule. */
   clock: Clock,
+  /** An automation: work that starts by itself. */
+  automation: ClockRotateRight,
   /** Keeps the Mac awake while work runs. */
   cup: CoffeeCup,
   /** How hard the computer works. */

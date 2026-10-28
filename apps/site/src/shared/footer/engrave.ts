@@ -12,8 +12,10 @@ import { noise, seeded } from './random'
  * nothing tall reaches into the words. The light itself is drawn apart,
  * on every frame (drawLight), over this.
  *
- * Nothing here touches the page, so the landscape can be drawn off the
- * main thread (landscape.worker.ts), on an OffscreenCanvas.
+ * The footer shows an engraving made once in its place (Footer.tsx) and
+ * draws only the light over it; the whole landscape is drawn for the link
+ * previews (og/Card.tsx). Nothing here touches the page, so it can be drawn
+ * on an OffscreenCanvas as well.
  */
 
 /** A 2D context, on the page or off it. */
