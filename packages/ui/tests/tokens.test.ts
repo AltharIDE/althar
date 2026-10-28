@@ -37,7 +37,7 @@ const declarations = (css: string, selector: string): Map<string, string> => {
 }
 
 const light = declarations(readFileSync(join(styles, 'tokens.css'), 'utf8'), ':root')
-const dark = declarations(readFileSync(join(styles, 'dark.css'), 'utf8'), ":root[data-theme='dark']")
+const dark = declarations(readFileSync(join(styles, 'dark.css'), 'utf8'), ":root[data-theme='dark'],\n[data-theme='dark']")
 
 /** What isn't a colour: stacking, radii, type, air, motion. */
 const NOT_COLOUR = /^--(z-|r-|r$|font|mono|sp$|measure|ease|fast|base|slow|slide|fold|prose|lede|frost-blur$)/

@@ -1,0 +1,9 @@
+/* The board at night, as wide as a screen's picture, glowing faintly with the panel's fire. */
+.wrap { max-width: 1320px; margin: 70px auto 0; padding: 0 var(--gut); }
+.frame { border-radius: 14px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 40px 120px rgba(0, 0, 0, 0.65), 0 0 120px rgba(255, 130, 50, 0.1); }
+/* The kit's dark appearance for this part of the page (data-theme), and its words in its ink. */
+.window { color: var(--t-1); }
+
+@media (max-width: 700px) {
+  .wrap { margin-top: 40px; }
+}

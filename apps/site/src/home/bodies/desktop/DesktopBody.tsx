@@ -3,12 +3,9 @@ import type { ReactNode } from 'react'
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
 import { LightUnder } from '../../../shared/lightUnder'
-import { HomeWindow, IslandOpen } from '../kit/app'
 import { EdgeTour } from '../kit/EdgeTour'
-import { Desktop, MacWindow } from '../kit/Mac'
-import { NarrowWindow, useNarrow } from '../kit/Narrow'
-import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
+import { CrewAtWork } from './CrewAtWork'
 import s from './DesktopBody.module.css'
 import { Flow } from './Flow'
 import { Lift } from './Lift'
@@ -17,9 +14,10 @@ import { Trio } from './Trio'
 /*
  * Desktop: the product, shown. One claim a screen, in the first screen's
  * type, each over a large picture of the app drawn by its own components:
- * whole windows on a Mac's screen for the big things, single pieces up
- * close in Althar's light for the rest. Pictures of the app on a screen,
- * framed as one, so nothing looks like it is part of this page.
+ * first the crew at work on a panel as dark and warm as the first screen's
+ * cabin, then whole windows on a Mac's screen and single pieces up close
+ * in Althar's light. Pictures of the app framed as pictures, so nothing
+ * looks like it is part of this page.
  */
 
 function Scene({
@@ -35,12 +33,13 @@ function Scene({
   title: ReactNode
   lead: ReactNode
   children: ReactNode
-  tone?: 'ink'
+  /** A dark panel: ink, or warm as the first screen's cabin. */
+  tone?: 'ink' | 'cabin'
 }) {
   return (
-    <section id={id} className={cx(s.scene, tone === 'ink' && s.ink)} aria-labelledby={`${id}-h`}>
+    <section id={id} className={cx(s.scene, tone && s.ink, tone === 'cabin' && s.cabin)} aria-labelledby={`${id}-h`}>
       {/* Dark under the nav: it turns to smoked glass with white words over it. */}
-      {tone === 'ink' && <LightUnder tone="ink" className={s.under} />}
+      {tone && <LightUnder tone="ink" className={s.under} />}
       <div className={s.head}>
         <p className={t.kicker}>
           <i aria-hidden="true" />
@@ -56,56 +55,21 @@ function Scene({
   )
 }
 
-/** A Mac's screen: the picture of a desktop, in a thin black bezel. */
-function Screen({ children, label }: { children: ReactNode; label: string }) {
-  return (
-    <div className={s.screenWrap}>
-      <div className={s.bezel}>
-        <Shot w={1440} h={900} label={label} frame={s.screen}>
-          {children}
-        </Shot>
-      </div>
-    </div>
-  )
-}
-
-/** The home on a Mac's screen; on a phone, the home's own narrow window, the stream alone. */
-function HomeScreen() {
-  const phone = useNarrow()
-  const label = "Althar's home: three things that need you in the middle, and beside them every project with its work in progress"
-  if (phone)
-    return (
-      <div className={s.narrowWrap}>
-        <NarrowWindow label={label} h={520}>
-          <HomeWindow narrow />
-        </NarrowWindow>
-      </div>
-    )
-  return (
-    <Screen label={label}>
-      <Desktop island={<IslandOpen open={false} waiting={3} />}>
-        <MacWindow style={{ left: 70, top: 26, width: 1300, height: 820 }}>
-          <HomeWindow />
-        </MacWindow>
-      </Desktop>
-    </Screen>
-  )
-}
-
 export function DesktopBody() {
   return (
     <main id="main" tabIndex={-1} className={s.body}>
       <Scene
-        id="window"
-        kicker="The home"
+        id="crew"
+        tone="cabin"
+        kicker="Right now"
         title={
           <>
-            Every project, every agent. <b>One window.</b>
+            The whole crew. <b>All at once.</b>
           </>
         }
-        lead="What needs you, across every project, in the middle, answered where it is. Beside it, your projects, with a quiet tick for each task in progress. Under it, what happened since you looked."
+        lead="Each task gets its own crew and its own branch, and they all run side by side. You step in only where you’re needed."
       >
-        <HomeScreen />
+        <CrewAtWork />
       </Scene>
 
       <Lift />

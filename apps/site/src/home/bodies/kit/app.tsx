@@ -4,15 +4,12 @@ import {
   BoardColumn,
   BoardLane,
   BoardList,
-  Button,
   CallCard,
   ChromeButton,
   Composer,
   EdgeSheet,
-  IconButton,
   Island,
   type IslandSaying,
-  NeedLine,
   NextRow,
   ProjectHead,
   ProjectTabs,
@@ -26,21 +23,20 @@ import {
   Verdict,
   FindingState,
   WorkCard,
+  type WorkCardProps,
   WorkStatus,
   You,
   ModelPick,
 } from '@althar/ui'
-import { Home } from '@althar/ui/screens'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 // Prototype: the kit's demo world, read from its source. Ported, the site would keep its own copy.
 import { CALLS, NEXT, READY_TWO_REPOS, RUNNING as BOARD_RUNNING, SETTLED } from '../../../../../../packages/ui/src/fixtures/board'
 import { FROM_231, PLAN_432 } from '../../../../../../packages/ui/src/fixtures/coordinator'
 import { EDGE_NEEDS, EDGE_WORK, edgeLineOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
-import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../../../../../../packages/ui/src/fixtures/home'
 import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
 import { FINDINGS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
-import { CODEX, GEMINI_PRO, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
+import { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
 import s from './app.module.css'
 
 /*
@@ -59,92 +55,6 @@ const TABS = MARKED.map((p) => ({ id: p.id, name: p.name, seed: p.id, ink: p.ink
 export function Tabs({ current, only = false, end }: { current: string | null; only?: boolean; end?: ReactNode }) {
   const tabs = only ? TABS.filter((tab) => tab.id === current) : TABS.slice(0, 3)
   return <ProjectTabs tabs={tabs} current={current} onSelect={none} onClose={none} yours={3} lights="drawn" end={end} />
-}
-
-/* ---- the home: what needs you across every project in the middle, the projects beside it ---- */
-
-export function HomeWindow({
-  className,
-  style,
-  looked = '3 h ago',
-  narrow = false,
-}: {
-  className?: string
-  style?: CSSProperties
-  looked?: string
-  /** Laid out for a narrow window: what needs you alone. */
-  narrow?: boolean
-}) {
-  const needs = [
-    {
-      key: 'publish',
-      project: PUBLISH.project,
-      line: (
-        <NeedLine
-          kind={PUBLISH.kind}
-          project={PUBLISH.project}
-          task={PUBLISH.task}
-          title={PUBLISH.title}
-          command={PUBLISH.command}
-          actions={
-            <>
-              <Button size="small">Deny</Button>
-              <Button size="small" variant="signal">
-                Allow once
-              </Button>
-            </>
-          }
-        />
-      ),
-    },
-    {
-      key: 'accept',
-      project: READY.project,
-      line: (
-        <NeedLine
-          kind={READY.kind}
-          project={READY.project}
-          task={READY.task}
-          title={READY.title}
-          brief={`${READY.change.repo} #${READY.change.number} · checks passed · +${READY.change.add} −${READY.change.del}`}
-          actions={<Button size="small">Review</Button>}
-        />
-      ),
-    },
-    {
-      key: 'decision',
-      project: DECISION.project,
-      line: (
-        <NeedLine
-          kind={DECISION.kind}
-          project={DECISION.project}
-          task={DECISION.task}
-          title={DECISION.title}
-          brief={DECISION.options.map((option) => option.label).join(' or ')}
-          actions={<Button size="small">Decide</Button>}
-        />
-      ),
-    },
-  ]
-  return (
-    <div className={`${s.window} ${narrow ? s.narrow : ''} ${className ?? ''}`} style={style}>
-      {!narrow && <Tabs current={null} end={<IconButton icon="gear" label="Settings" kbd="⌘," size="small" />} />}
-      <div className={s.body}>
-        <Home
-          waiting={3}
-          needs={needs}
-          running={RUNNING}
-          since={SINCE}
-          looked={looked}
-          projects={PROJECT_LIST}
-          onOpenEvent={none}
-          onOpenProject={none}
-          onTalk={none}
-          onNewProject={none}
-        />
-      </div>
-    </div>
-  )
 }
 
 /* ---- the lead's plan for task 432: its team, step by step ---- */
@@ -311,6 +221,95 @@ export function MeridianBoard() {
       <BoardColumn lane={BoardLane.Running} count={BOARD_RUNNING.length}>
         {BOARD_RUNNING.map((x) => (
           <WorkCard key={x.task} {...x} />
+        ))}
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Yours} count={CALLS.length}>
+        <AcceptCard {...READY_TWO_REPOS} />
+        {CALLS.slice(0, 2).map((x) => (
+          <CallCard key={x.title} {...x} />
+        ))}
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Settled} count={SETTLED.length}>
+        <BoardList>
+          {SETTLED.map((x) => (
+            <SettledRow key={x.task} {...x} />
+          ))}
+        </BoardList>
+      </BoardColumn>
+    </Board>
+  )
+}
+
+/* ---- the crew at work: Meridian's board with four tasks running at once, each led by another lab ---- */
+
+/** A task running, and how it goes on: a step every `every` beats, and a minute a beat. */
+interface AtWork extends Omit<WorkCardProps, 'elapsed' | 'onOpen' | 'text' | 'current'> {
+  minutes: number
+  every: number
+}
+
+const AT_WORK: readonly AtWork[] = [
+  {
+    task: '433',
+    kind: 'Delivery',
+    title: 'Rotate the webhook signing secrets',
+    steps: ['Requirements', 'Implement', 'Review', 'Repair', 'Security review', 'Verify'],
+    at: 2,
+    minutes: 6,
+    lead: OPUS,
+    onStep: [SONNET],
+    added: 1,
+    every: 3,
+  },
+  {
+    task: '419',
+    kind: 'Delivery',
+    title: 'Migrate billing webhooks to the v2 endpoint',
+    steps: ['Requirements', 'Implement', 'Review', 'Verify'],
+    at: 1,
+    minutes: 22,
+    lead: CODEX,
+    every: 4,
+  },
+  {
+    task: '424',
+    kind: 'Session',
+    title: 'Find a shape for webhook queue sharding',
+    steps: ['Frame', 'Spike A', 'Spike B', 'Spike C', 'Replay', 'Note'],
+    at: 3,
+    minutes: 14,
+    lead: GEMINI_PRO,
+    every: 5,
+  },
+  {
+    task: '435',
+    kind: 'Delivery',
+    title: 'Retry ledger exports on a 503',
+    steps: ['Implement', 'Review', 'Verify'],
+    at: 0,
+    minutes: 3,
+    lead: QWEN,
+    every: 6,
+  },
+]
+
+/** How long a task has run, as the board says it: 6m, 1h 12m. */
+const ran = (minutes: number) => (minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`)
+
+/** Meridian's board `beat` beats on: each running task a step further at its own pace, and staying on its last. */
+export function CrewBoard({ beat }: { beat: number }) {
+  return (
+    <Board label="Meridian’s work">
+      <BoardColumn lane={BoardLane.Next} count={NEXT.length}>
+        <BoardList>
+          {NEXT.map((x, i) => (
+            <NextRow key={x.task} {...x} place={i + 1} />
+          ))}
+        </BoardList>
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Running} count={AT_WORK.length}>
+        {AT_WORK.map(({ minutes, every, ...x }) => (
+          <WorkCard key={x.task} {...x} at={Math.min(x.at + Math.floor(beat / every), x.steps.length - 1)} elapsed={ran(minutes + beat)} />
         ))}
       </BoardColumn>
       <BoardColumn lane={BoardLane.Yours} count={CALLS.length}>
