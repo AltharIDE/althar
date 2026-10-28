@@ -23,11 +23,14 @@
  * The photograph, covering the box as `object-fit: cover` would, but keeping
  * its focus point (--fx, --fy, in the plate's px) as near the middle as the
  * cover allows. --u is a plate px in CSS px; everything set by the
- * photograph uses the same measure.
+ * photograph uses the same measure. The wide photograph's measure (-w), or on
+ * a phone the tall one's (-t), from the script.
  */
 .stage {
   position: absolute; inset: 0;
-  --fx: var(--fx-wide);
+  --pw: var(--pw-w); --ph: var(--ph-w); --fx: var(--fx-w); --fy: var(--fy-w);
+  --wx: var(--wx-w); --wy: var(--wy-w); --ww: var(--ww-w); --wh: var(--wh-w);
+  --mask: var(--mask-w);
   --u: max(100cqw / var(--pw), 100cqh / var(--ph));
   --px: clamp(100cqw - var(--pw) * var(--u), 50cqw - var(--fx) * var(--u), 0px);
   --py: clamp(100cqh - var(--ph) * var(--u), 50cqh - var(--fy) * var(--u), 0px);
@@ -49,9 +52,10 @@
   width: calc(var(--pw) * var(--u)); height: calc(var(--ph) * var(--u));
   will-change: transform;
 }
+.plate picture { display: contents; }
 .photo { display: block; width: 100%; height: 100%; }
 /* The cabin's light, masked by the photograph so only the cabin takes it: dark at first, then the fire's glow through the glass, then the sky's cool light. */
-.dim, .firelit, .daylit { position: absolute; inset: 0; opacity: 0; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; }
+.dim, .firelit, .daylit { position: absolute; inset: 0; opacity: 0; mask: var(--mask) 0 0 / 100% 100%; -webkit-mask: var(--mask) 0 0 / 100% 100%; }
 .dim { background: #000; opacity: 0.4; }
 .firelit {
   mix-blend-mode: screen;
@@ -162,7 +166,12 @@
 .ways > div { justify-content: center; }
 
 @media (max-width: 760px) {
-  .stage { --fx: var(--fx-phone); }
-  .line { top: 84px; font-size: clamp(26px, 7.4vw, 32px); }
-  .fast { top: 168px; font-size: 30vw; }
+  .stage {
+    --pw: var(--pw-t); --ph: var(--ph-t); --fx: var(--fx-t); --fy: var(--fy-t);
+    --wx: var(--wx-t); --wy: var(--wy-t); --ww: var(--ww-t); --wh: var(--wh-t);
+    --mask: var(--mask-t);
+  }
+  /* In the window above the astronauts' heads: the line near its top, the word under it. */
+  .line { top: calc(var(--py) + (var(--wy) + 110) * var(--u)); font-size: clamp(26px, 7.4vw, 32px); }
+  .fast { top: calc(var(--py) + (var(--wy) + 400) * var(--u)); font-size: 30vw; }
 }

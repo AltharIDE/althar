@@ -10,7 +10,7 @@ import { flare, inOut, knocked, wobble } from '../train/motion'
 import { clamp, seeded, smooth } from '../train/paint'
 import { type Fire, makeFire } from './fire'
 import { AT, brokenAt, flowAt, heatAt, shakeAt, speedAt } from './journey'
-import { GLASS, PLATE } from './plate'
+import { PHONE, type Plate, TALL, WIDE } from './plate'
 import plasmaUrl from './plate/plasma.webp'
 import skyUrl from './plate/sky.webp'
 import s from './ReentryHero.module.css'
@@ -62,18 +62,19 @@ const picture = (src: string) =>
     img.src = src
   })
 
-/** The plate's measure, for the stylesheet: its size, the point it keeps in view, and the large window. */
-const STAGE = {
-  '--pw': PLATE.width,
-  '--ph': PLATE.height,
-  '--fx-wide': PLATE.focus.x,
-  '--fy': PLATE.focus.y,
-  '--fx-phone': PLATE.phone.x,
-  '--wx': PLATE.big.x,
-  '--wy': PLATE.big.y,
-  '--ww': PLATE.big.w,
-  '--wh': PLATE.big.h,
-} as CSSProperties
+/** Each photograph's measure, for the stylesheet, which takes the tall one's on a phone: its size, the point it keeps in view, the window, and the photograph itself as the mask for the cabin's light. */
+const measure = (plate: Plate, end: string) => ({
+  [`--pw-${end}`]: plate.width,
+  [`--ph-${end}`]: plate.height,
+  [`--fx-${end}`]: plate.focus.x,
+  [`--fy-${end}`]: plate.focus.y,
+  [`--wx-${end}`]: plate.window.x,
+  [`--wy-${end}`]: plate.window.y,
+  [`--ww-${end}`]: plate.window.w,
+  [`--wh-${end}`]: plate.window.h,
+  [`--mask-${end}`]: `url(${plate.src})`,
+})
+const STAGE = { ...measure(WIDE, 'w'), ...measure(TALL, 't') } as CSSProperties
 
 /** Quick out, long settle: an expo out. */
 const EXPO = 'cubic-bezier(0.19, 1, 0.22, 1)'
@@ -156,25 +157,30 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
     let live = true
     let fire: Fire | null = null
     let size = ''
+    // The photograph the stylesheet is showing: the tall one on a phone.
+    const phone = window.matchMedia(PHONE)
+    let shown: Plate = phone.matches ? TALL : WIDE
 
     /** Sets the fire's canvas over the glass, for the size; false if nothing changed. */
     const place = () => {
       const w = el.clientWidth
       const h = el.clientHeight
       // Where the photograph stands, by its layout box: the camera's shaking is a transform, which this ignores.
-      const scale = box.offsetWidth / PLATE.width
+      shown = phone.matches ? TALL : WIDE
+      const scale = box.offsetWidth / shown.width
       const left = box.offsetLeft
       const top = box.offsetTop
-      const next = `${w}x${h}@${left},${top},${scale.toFixed(4)}`
+      const next = `${w}x${h}@${left},${top},${scale.toFixed(4)},${shown.width}`
       if (next === size || w < 10 || h < 10 || scale <= 0) return false
       size = next
       // Over all the glass that is on the screen, and a good way round it for the shaking.
-      const x = Math.max(0, Math.floor(left + GLASS.x * scale - 40))
-      const y = Math.max(0, Math.floor(top + GLASS.y * scale - 40))
-      const r = Math.min(w, Math.ceil(left + (GLASS.x + GLASS.w) * scale + 40))
-      const b = Math.min(h, Math.ceil(top + (GLASS.y + GLASS.h) * scale + 40))
+      const glass = shown.window
+      const x = Math.max(0, Math.floor(left + glass.x * scale - 40))
+      const y = Math.max(0, Math.floor(top + glass.y * scale - 40))
+      const r = Math.min(w, Math.ceil(left + (glass.x + glass.w) * scale + 40))
+      const b = Math.min(h, Math.ceil(top + (glass.y + glass.h) * scale + 40))
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5, Math.sqrt(MOST_PIXELS / Math.max(1, (r - x) * (b - y))))
-      fire?.place({ plate: { left, top, scale }, box: { x, y, w: r - x, h: b - y }, dpr })
+      fire?.place({ plate: { left, top, scale }, box: { x, y, w: r - x, h: b - y }, dpr, sky: shown.sky, unit: shown.unit })
       return true
     }
 
@@ -185,7 +191,8 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
       const broken = brokenAt(t)
       // The break's flash: the glass white for a moment as the fire tears away.
       const white = clamp(0.5 * flare(t, AT.break, 4))
-      if (fire) fire.draw({ t, heat, flow: flowAt(t), speed: speedAt(t), broken, white, drift: 34 * Math.max(0, t - AT.break) })
+      if (fire)
+        fire.draw({ t, heat, flow: flowAt(t), speed: speedAt(t), broken, white, drift: 34 * shown.unit * Math.max(0, t - AT.break) })
       // The cabin: dark, then lit by the fire, flickering; then the cool light of the sky.
       const flicker = 0.78 + 0.22 * (wobble(t * 9, 4) * 0.6 + wobble(t * 23, 8) * 0.4)
       if (dim.current) dim.current.style.opacity = (0.55 * (1 - heat) * (1 - broken) + 0.08).toFixed(3)
@@ -252,7 +259,7 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
     void Promise.all([picture(skyUrl), picture(plasmaUrl)]).then(
       ([sky, plasma]) => {
         if (!live) return
-        fire = makeFire(cv, PLATE, sky, plasma)
+        fire = makeFire(cv, sky, plasma)
         if (fire) {
           size = ''
           place()
@@ -304,7 +311,6 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
     }
   }, [])
 
-  const mask = { maskImage: `url(${PLATE.src})`, WebkitMaskImage: `url(${PLATE.src})` }
   return (
     <div ref={root} className={s.hero} data-ready={hydrated || undefined} data-drawn={drawn || undefined}>
       {/* What the camera sees: the fire and the sky, the light, and the cabin and the words in it. */}
@@ -314,18 +320,22 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
           {/* Until the fire is drawn, and without scripts, the sky through the glass. */}
           <div className={s.sky} style={{ backgroundImage: `url(${skyUrl})` }} aria-hidden="true" />
           <div ref={plate} className={s.plate} aria-hidden="true">
-            <img
-              className={s.photo}
-              src={PLATE.src}
-              alt=""
-              width={PLATE.width}
-              height={PLATE.height}
-              decoding="async"
-              fetchPriority="high"
-            />
-            <div ref={dim} className={s.dim} style={mask} />
-            <div ref={firelit} className={s.firelit} style={mask} />
-            <div ref={daylit} className={s.daylit} style={mask} />
+            {/* The tall photograph on a phone, the wide one otherwise: a browser fetches only the one it shows. */}
+            <picture>
+              <source media={PHONE} srcSet={TALL.src} width={TALL.width} height={TALL.height} />
+              <img
+                className={s.photo}
+                src={WIDE.src}
+                alt=""
+                width={WIDE.width}
+                height={WIDE.height}
+                decoding="async"
+                fetchPriority="high"
+              />
+            </picture>
+            <div ref={dim} className={s.dim} />
+            <div ref={firelit} className={s.firelit} />
+            <div ref={daylit} className={s.daylit} />
           </div>
           <div ref={flash} className={s.flash} aria-hidden="true" />
           <div className={s.curtain} aria-hidden="true" />

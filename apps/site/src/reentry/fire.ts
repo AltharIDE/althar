@@ -10,19 +10,19 @@
  * goes white; and at the break it tears away in tatters, swept on downstream.
  */
 
-/** Where things stand, by the photograph's measure (plate px): the sky picture over the glass, and the fire's scale. */
-export interface Lens {
-  width: number
-  height: number
-  /** The sky picture's box over the plate. */
-  sky: { x: number; y: number; w: number; h: number }
-}
-
-/** Where the plate stands on the screen, and where the canvas does, in CSS px; and the canvas's px to a CSS px. */
+/**
+ * Where the plate stands on the screen, and where the canvas does, in CSS
+ * px; the canvas's px to a CSS px; and, by the photograph's measure (plate
+ * px), the sky picture's box over it and how large the fire is drawn on it
+ * (1 on the wide photograph; more on the tall one, whose px are smaller on a
+ * phone's screen, so the fire looks the same size).
+ */
 export interface Placing {
   plate: { left: number; top: number; scale: number }
   box: { x: number; y: number; w: number; h: number }
   dpr: number
+  sky: { x: number; y: number; w: number; h: number }
+  unit: number
 }
 
 export interface Moment {
@@ -44,7 +44,7 @@ export interface Fire {
   lost: () => boolean
 }
 
-/** How wide the plasma photograph is drawn, in plate px. */
+/** How wide the plasma photograph is drawn, in the wide photograph's px. */
 const PLASMA = 2100
 /** The shutter, in seconds: how long the fire is smeared for. */
 const SHUTTER = 1 / 40
@@ -58,7 +58,8 @@ precision highp float;
 uniform vec4 uBox;       // the canvas on the screen: x, y, height (CSS px), its px to a CSS px
 uniform vec3 uPlate;     // the plate on the screen: left, top (CSS px), CSS px to a plate px
 uniform vec4 uSkyAt;     // the sky picture over the plate: x, y, w, h (plate px)
-uniform vec2 uPlasmaSize;// the plasma photograph drawn, in plate px
+uniform float uUnit;     // plate px to the fire's own px
+uniform vec2 uPlasmaSize;// the plasma photograph drawn, in the fire's px
 uniform float uT, uHeat, uFlow, uSmear, uBroken, uWhite, uDrift;
 uniform int uTaps;
 uniform sampler2D uSky, uPlasma;
@@ -91,24 +92,26 @@ vec3 plasma(vec2 px, float scale, float lead) {
 void main() {
   vec2 css = vec2(uBox.x + gl_FragCoord.x / uBox.w, uBox.y + uBox.z - gl_FragCoord.y / uBox.w);
   vec2 px = (css - uPlate.xy) / uPlate.z;
+  // The fire's own px: the same size on the screen whichever photograph it is behind.
+  vec2 fp = px / uUnit;
 
   // The sky, shimmering in the heat, drifting slowly once the fire has gone.
-  vec2 shimmer = (vec2(noise(px * 0.012 + vec2(uT * 4.0, 0.0)), noise(px * 0.015 + vec2(7.0, uT * 3.0))) - 0.5) * 26.0 * uHeat;
+  vec2 shimmer = (vec2(noise(fp * 0.012 + vec2(uT * 4.0, 0.0)), noise(fp * 0.015 + vec2(7.0, uT * 3.0))) - 0.5) * 26.0 * uUnit * uHeat;
   vec3 sky = texture(uSky, (px + shimmer + vec2(uDrift, 0.0) - uSkyAt.xy) / uSkyAt.zw).rgb;
   // High up, before the fire breaks, it is dark out there, the glow drowning what light there is.
   sky *= mix(0.05, 1.0, uBroken * uBroken);
 
   // The fire, far and near: the far layer finer and slower, the near one larger and faster.
-  vec3 fire = plasma(px, 1.0, 1.0) * 0.8 + plasma(px, 1.7, 1.55) * 0.7;
+  vec3 fire = plasma(fp, 1.0, 1.0) * 0.8 + plasma(fp, 1.7, 1.55) * 0.7;
   // A faint glow at first, deep orange as it builds; only its hottest cores go white, and only near its height.
   float lum = dot(fire, vec3(0.3, 0.5, 0.2));
   fire = fire * fire * (0.03 + 3.4 * pow(uHeat, 1.4)) * vec3(1.0, 0.8, 0.66) + vec3(1.0, 0.86, 0.66) * lum * lum * lum * 4.0 * pow(uHeat, 3.0);
   // Torn away at the break, in tatters, the tears swept along with it.
-  float tatter = noise((px - ALONG * uFlow * uPlasmaSize.x * 1.55) * 0.0035) * 0.7 + noise(px * 0.011) * 0.3;
+  float tatter = noise((fp - ALONG * uFlow * uPlasmaSize.x * 1.55) * 0.0035) * 0.7 + noise(fp * 0.011) * 0.3;
   fire *= smoothstep(uBroken - 0.25, uBroken + 0.05, tatter) * (1.0 - smoothstep(0.85, 1.0, uBroken));
 
   // Sparks shooting past with it: in rows along the streaks, each a short bright stroke, more of them the hotter.
-  vec2 q = vec2(dot(px, ALONG), dot(px, vec2(-ALONG.y, ALONG.x)));
+  vec2 q = vec2(dot(fp, ALONG), dot(fp, vec2(-ALONG.y, ALONG.x)));
   float row = floor(q.y / 34.0);
   float r = hash(vec2(row, 3.0));
   float lane = (fract(q.y / 34.0) - 0.5) * 34.0;
@@ -126,7 +129,7 @@ void main() {
 }`
 
 /** The fire on `canvas`, from the photographs of the sky and the plasma; null where the browser can't draw it. */
-export function makeFire(canvas: HTMLCanvasElement, lens: Lens, sky: HTMLImageElement, plasma: HTMLImageElement): Fire | null {
+export function makeFire(canvas: HTMLCanvasElement, sky: HTMLImageElement, plasma: HTMLImageElement): Fire | null {
   const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance' })
   if (!gl) return null
   const shader = (type: number, source: string) => {
@@ -169,20 +172,21 @@ export function makeFire(canvas: HTMLCanvasElement, lens: Lens, sky: HTMLImageEl
   texture(plasma, 1, gl.REPEAT)
   gl.uniform1i(u('uSky'), 0)
   gl.uniform1i(u('uPlasma'), 1)
-  gl.uniform4f(u('uSkyAt'), lens.sky.x, lens.sky.y, lens.sky.w, lens.sky.h)
   gl.uniform2f(u('uPlasmaSize'), PLASMA, (PLASMA * plasma.naturalHeight) / plasma.naturalWidth)
 
   let lost = false
   canvas.addEventListener('webglcontextlost', () => (lost = true))
 
   return {
-    place: ({ plate, box, dpr }) => {
+    place: ({ plate, box, dpr, sky: at, unit }) => {
       canvas.width = Math.max(1, Math.round(box.w * dpr))
       canvas.height = Math.max(1, Math.round(box.h * dpr))
       Object.assign(canvas.style, { left: `${box.x}px`, top: `${box.y}px`, width: `${box.w}px`, height: `${box.h}px` })
       gl.viewport(0, 0, canvas.width, canvas.height)
       gl.uniform4f(u('uBox'), box.x, box.y, canvas.height / dpr, dpr)
       gl.uniform3f(u('uPlate'), plate.left, plate.top, plate.scale)
+      gl.uniform4f(u('uSkyAt'), at.x, at.y, at.w, at.h)
+      gl.uniform1f(u('uUnit'), unit)
     },
     draw: ({ t, heat, flow, speed, broken, white, drift }) => {
       if (lost) return
