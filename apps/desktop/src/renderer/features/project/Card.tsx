@@ -60,6 +60,8 @@ export interface CardActions {
   readonly onOpen: (threadId: string) => void
   /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
   readonly onStopBackground: (threadId: string, id: string) => void
+  /** The one waiting task that shows who holds the places, the newest: the others only wait. */
+  readonly holdersOn?: string | null
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -157,10 +159,11 @@ const pullRequestsOf = (latest: ChangeSummary, earlier: ReadonlyArray<ChangeSumm
   return earlier.length === 0 ? name(latest) : `${name(latest)}, after ${earlier.map(name).join(' and ')}`
 }
 
-/** A task's card, with, while it waits for a free agent, who holds the places. */
+/** A task's card, with, while it waits for a free agent and is the newest to, who holds the places. */
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const holders = card.queued?.holders
-  if (holders === undefined || holders.length === 0) return <Shown card={card} actions={actions} />
+  if (holders === undefined || holders.length === 0 || (actions.holdersOn !== undefined && actions.holdersOn !== card.threadId))
+    return <Shown card={card} actions={actions} />
   return (
     <div className={s.stack}>
       <Shown card={card} actions={actions} />
