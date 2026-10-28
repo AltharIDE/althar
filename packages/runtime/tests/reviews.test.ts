@@ -35,7 +35,7 @@ import { findTasks } from '../src/Search'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { fact } from '../src/records'
-import { transcript } from '../src/threads'
+import { addItem, transcript } from '../src/threads'
 import { words } from '../src/words'
 import type { ToolAccess } from '../src/ToolServer'
 import {
@@ -498,7 +498,6 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual(tagOf(yield* Effect.flip(reviews.post(`rdr_${'0'.repeat(32)}`, instance.personId))), 'NotFound')
 
         // Posted, it goes as it stands: the verdict chosen, the comment kept, of the commit the lead read.
-        const sessions = yield* Sessions
         if (Option.isNone(yield* sessions.running(threadId))) yield* sessions.startLast(threadId)
         assert.isTrue(Option.isSome(yield* sessions.running(threadId)))
         const posted = yield* reviews.post(draftId, instance.personId)
@@ -759,6 +758,34 @@ describe('reviewing someone else’s pull request', () => {
       assert.deepInclude(kept, { draftId, state: 'uncertain', summary: 'Another thought.' })
       assert.match(kept?.error ?? '', /^Its answer was lost/)
       assert.lengthOf(github.reviewsPosted, 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('moves an amended draft’s card to the end of the thread, the only one to post, and posts the amended review', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const threadId = task?.threadId ?? ''
+      const access = lead(projectId, threadId, task?.id ?? '')
+      const reviews = yield* Reviews
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_review', { verdict: 'comment', summary: 'First look.' })
+      yield* addItem({ projectId, threadId }, 'agent_message', { text: 'Drafted it; anything to change?' })
+      yield* callTool(access, 'draft_review', { verdict: 'changes', summary: 'Amended look.' })
+      const all = (yield* Effect.orDie((yield* Queries).thread(threadId))).items
+      assert.strictEqual(all[all.length - 1]?.kind, 'review_draft')
+      const cards = yield* cardsIn(threadId)
+      assert.lengthOf(cards, 1)
+      assert.strictEqual(cards[0]?.summary, 'Amended look.')
+      const posted = yield* reviews.post(cards[0]?.draftId ?? '', instance.personId)
+      assert.strictEqual(posted.state, 'posted')
+      assert.lengthOf(github.reviewsPosted, 1)
+      assert.include(github.reviewsPosted[0]?.review.body ?? '', 'Amended look.')
     }).pipe(Effect.provide(withQueries(github)))
   })
 
