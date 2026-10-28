@@ -18,6 +18,7 @@ import { draftsOf } from '../src/renderer/features/newProject/draft'
 import { TabsFrame, useLastRoom, useNewTab, useVisit } from '../src/renderer/features/tabs/TabsFrame'
 import { glanceOf, memoryOf } from '../src/renderer/features/tabs/useLoad'
 import { brandOf } from '../src/renderer/shared/agents'
+import { moved } from '../src/renderer/features/tabs/store'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
 import { changed, fakeClient, fakeHost, load, project } from './fixtures'
@@ -74,14 +75,14 @@ const rootRoute = createRootRoute({
 })
 const homeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: Where })
 const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId', component: ProjectScreen })
-const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId/rules', component: Where })
 const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Thread })
 let making = () => ''
 const newRoute = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: () => <NewScreen projectId={() => making()} /> })
+const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings/$section', component: Where })
 
 const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host: Host = fakeHost()) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute, newRoute]),
+    routeTree: rootRoute.addChildren([homeRoute, projectRoute, threadRoute, newRoute, settingsRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
@@ -137,17 +138,18 @@ describe('the window’s tabs', () => {
   })
 
   it('go by ⌘ and a number, and Control-Tab, and close to the next', async () => {
+    // Its rules were a place of their own once: kept from then, its tab opens the project.
     window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1', 'p2', 'p3'], places: { p3: { kind: 'rules' } } }))
     windowAt('/projects/p2')
     await waitFor(() => expect(tab('halyard').getAttribute('aria-current')).toBe('page'))
     fireEvent.keyDown(window, { key: '1', metaKey: true })
     await waitFor(() => expect(where()).toBe('/'))
     fireEvent.keyDown(window, { key: '9', metaKey: true })
-    await waitFor(() => expect(where()).toBe('/projects/p3/rules'))
+    await waitFor(() => expect(where()).toBe('/projects/p3'))
     fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
     await waitFor(() => expect(where()).toBe('/'))
     fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
-    await waitFor(() => expect(where()).toBe('/projects/p3/rules'))
+    await waitFor(() => expect(where()).toBe('/projects/p3'))
     fireEvent.keyDown(window, { key: '2', metaKey: true })
     await waitFor(() => expect(where()).toBe('/projects/p1'))
     // Typing a number isn't a shortcut, nor a number with no tab.
@@ -163,6 +165,24 @@ describe('the window’s tabs', () => {
     expect(where()).toBe('/projects/p2')
     await userEvent.click(nav().getByRole('button', { name: 'Close halyard' }))
     await waitFor(() => expect(where()).toBe('/'))
+  })
+
+  it('reorder the projects’ tabs by key, keep the order for the next launch, and never move the home’s', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1', 'p2', 'p3'], places: {} }))
+    windowAt('/projects/p1')
+    await waitFor(() => expect(tab('meridian').getAttribute('aria-current')).toBe('page'))
+    const order = () => keptFrom(window.localStorage.getItem('althar.tabs'))?.open
+    // ⌥⇧→ moves the focused tab one place along.
+    await userEvent.type(tab('meridian'), '{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}')
+    await waitFor(() => expect(order()).toEqual(['p2', 'p1', 'p3']))
+    expect(names().map((name) => name.replace(/, .*/, ''))).toEqual(['Home', 'halyard', 'meridian', 'tessera'])
+    // The last has nowhere further, and the first none before it: it stays after the home's.
+    await userEvent.type(tab('tessera'), '{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}')
+    await userEvent.type(tab('halyard'), '{Alt>}{Shift>}{ArrowLeft}{/Shift}{/Alt}')
+    expect(order()).toEqual(['p2', 'p1', 'p3'])
+    // Plain arrows move nothing.
+    await userEvent.type(tab('meridian'), '{ArrowLeft}')
+    expect(order()).toEqual(['p2', 'p1', 'p3'])
   })
 
   it('keep the tab that had the window while a task is read, give a project reached from anywhere a tab, and show its work as it changes', async () => {
@@ -252,7 +272,7 @@ describe('the window’s tabs', () => {
     expect(drafts.get()).toBeNull()
   })
 
-  it('make the new project’s tab the project’s own, open on its conversation', async () => {
+  it('make the new project’s tab the project’s own, open on Home', async () => {
     const { client, emit, router } = windowAt('/', [project, halyard, tessera])
     const drafts = draftsOf(client)
     // With other projects to open, New project is the + menu's last.
@@ -267,7 +287,8 @@ describe('the window’s tabs', () => {
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
     await userEvent.click(screen.getByRole('button', { name: 'Made' }))
     await waitFor(() => expect(where()).toBe(`/projects/${id}`))
-    expect(router.state.location.search).toEqual({ room: Room.Talk })
+    // No view is named: a project with none kept opens on Home.
+    expect(router.state.location.search).toEqual({})
     expect(drafts.get()).toBeNull()
     expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you', 'Northwind'])
     expect(tab('Northwind').getAttribute('aria-current')).toBe('page')
@@ -300,6 +321,89 @@ describe('the window’s tabs', () => {
     // Nothing ready, nothing said.
     act(() => tell({ ready: null, working: false, restarting: false, failed: null }))
     expect(screen.queryByText(/is ready/)).toBeNull()
+  })
+})
+
+describe('Althar’s settings, in the window', () => {
+  const gear = () => screen.getByRole('button', { name: /^Althar settings/ })
+  const quick = () => screen.findByRole('dialog', { name: 'Quick settings' })
+  const noQuick = () => waitFor(() => expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull())
+  const comma = (shiftKey = false) => fireEvent.keyDown(window, { key: shiftKey ? '<' : ',', code: 'Comma', metaKey: true, shiftKey })
+  const kept = () => keptFrom(window.localStorage.getItem('althar.tabs'))
+
+  it('open their quick settings on every screen, and a tab of their own beside the home’s, kept on its section', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1', 'p2'], places: {} }))
+    windowAt('/projects/p2')
+    await waitFor(() => expect(tab('halyard').getAttribute('aria-current')).toBe('page'))
+    // No tab for them until they are open.
+    expect(nav().queryByRole('button', { name: /^Settings/ })).toBeNull()
+
+    // From a project's screen, the gear's quick settings; All settings goes to their tab, at its first section.
+    await userEvent.click(gear())
+    await userEvent.click(within(await quick()).getByRole('button', { name: /^All settings/ }))
+    await waitFor(() => expect(where()).toBe('/settings/agents'))
+    await noQuick()
+    expect(names().map((name) => name.split(',')[0])).toEqual(['Home', 'Settings', 'meridian', 'halyard'])
+    expect(tab('Settings').getAttribute('aria-current')).toBe('page')
+    expect(tab('halyard').getAttribute('aria-current')).toBeNull()
+
+    // ⌘, on their own tab too; a card's name goes to the section it is in.
+    comma()
+    await userEvent.click(within(await quick()).getByRole('button', { name: /^Keep awake/ }))
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+
+    // To a project and back: the tab is where it was.
+    await userEvent.click(tab('meridian'))
+    expect(where()).toBe('/projects/p1')
+    expect(tab('Settings').getAttribute('aria-current')).toBeNull()
+    await userEvent.click(tab('Settings'))
+    expect(where()).toBe('/settings/this-mac')
+    // ⌘⇧, from anywhere goes there too.
+    await userEvent.click(tab('Home'))
+    comma(true)
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    // Control-Tab steps through it too, between the home's and the projects'.
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(where()).toBe('/'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    // Kept for the next launch, with its section.
+    expect(kept()).toMatchObject({ open: ['p1', 'p2'], settings: 'this-mac' })
+
+    // ⌘, opens and closes the quick settings.
+    comma()
+    expect(await quick()).toBeTruthy()
+    comma()
+    await noQuick()
+
+    // Closed: the tab after it has the window, and its section is forgotten.
+    await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(nav().queryByRole('button', { name: /^Settings/ })).toBeNull()
+    expect(kept()?.settings).toBeUndefined()
+  })
+
+  it('open again on the section they were on, after a launch, and close to the home where there is no project tab', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: [], places: {}, settings: 'reviews' }))
+    windowAt('/', [halyard])
+    await userEvent.click(await waitFor(() => tab('Settings')))
+    expect(where()).toBe('/settings/reviews')
+    await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
+    await waitFor(() => expect(where()).toBe('/'))
+  })
+
+  it('wait for the bar, which comes with the first project', async () => {
+    windowAt('/', [])
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole('button', { name: /^Althar settings/ })).toBeNull()
+    comma()
+    comma(true)
+    expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull()
+    expect(where()).toBe('/')
   })
 })
 
@@ -363,15 +467,20 @@ describe('how hard the Mac works, in the bar', () => {
     ])
     const glance = glanceOf(load)
     expect(glance).toMatchObject({ cpu: 0.42, memory: 12.5 / 32, memoryUsed: '12.5 GB', memoryTotal: '32 GB', pressure: 'normal' })
-    expect(glance.work).toBeCloseTo(0.33)
-    expect(glance.workMemory).toBeCloseTo((1.5 * 1024 + 520) / (32 * 1024))
-    expect(glance.rows?.map((row) => [row.id, row.title, row.agent, row.mark, row.memory])).toEqual([
-      ['task t1', 'Add a retry', 'Claude Code', brandOf('claude-code'), '1.5 GB'],
-      ['coordinator p1', 'Coordinator', 'Codex', brandOf('codex'), '300 MB'],
-      ['run p1', 'Default branch', undefined, undefined, '220 MB'],
+    // Althar itself counts in its part, as a row of its own among its work's by its CPU, which opens nothing.
+    expect(glance.work).toBeCloseTo(0.345)
+    expect(glance.workMemory).toBeCloseTo((1.5 * 1024 + 520 + 700) / (32 * 1024))
+    expect(glance.rows?.map((row) => [row.id, row.title, row.project, row.agent, row.mark, row.memory, row.opens])).toEqual([
+      ['task t1', 'Add a retry', 'meridian', 'Claude Code', brandOf('claude-code'), '1.5 GB', undefined],
+      ['coordinator p1', 'Coordinator', 'meridian', 'Codex', brandOf('codex'), '300 MB', undefined],
+      ['althar', 'Althar', undefined, undefined, undefined, '700 MB', false],
+      ['run p1', 'Default branch', 'meridian', undefined, undefined, '220 MB', undefined],
     ])
+    // Without its work's processes, nor Althar's own: the rows are what there is.
+    expect(glanceOf({ ...load, althar: null }).rows?.map((row) => row.id)).toEqual(['task t1', 'coordinator p1', 'run p1'])
+    expect(glanceOf({ ...load, shares: [] }).rows?.map((row) => row.id)).toEqual(['althar'])
     // Where Althar's processes can't be read, its part is unknown, not none; and a computer that says no memory has none in use.
-    const unknown = glanceOf({ ...load, shares: null, pressure: null, memoryTotal: 0 })
+    const unknown = glanceOf({ ...load, shares: null, althar: null, pressure: null, memoryTotal: 0 })
     expect(unknown).toMatchObject({ work: null, workMemory: null, rows: null, pressure: null, memory: 0 })
     expect(glanceOf({ ...load, pressure: 'critical' }).pressure).toBe('critical')
     expect(glanceOf({ ...load, pressure: 'warning' }).pressure).toBe('warning')
@@ -399,13 +508,24 @@ describe('the window’s own buttons in the strip', () => {
 })
 
 describe('working out the tabs', () => {
+  it('moves a project’s tab before another’s, or to the end, and leaves what is not a move alone', () => {
+    const kept = { open: ['a', 'b', 'c'], places: {} }
+    expect(moved('c', 'a')(kept).open).toEqual(['c', 'a', 'b'])
+    expect(moved('a', 'c')(kept).open).toEqual(['b', 'a', 'c'])
+    expect(moved('a', null)(kept).open).toEqual(['b', 'c', 'a'])
+    // Before a tab that isn't open (a project still being made) is the end.
+    expect(moved('a', 'new')(kept).open).toEqual(['b', 'c', 'a'])
+    expect(moved('a', 'b')(kept)).toBe(kept)
+    expect(moved('x', 'a')(kept)).toBe(kept)
+  })
+
   it('reads where the window is from its address', () => {
     expect(whereOf('/')).toEqual({ kind: 'home' })
     expect(whereOf('/settings')).toEqual({ kind: 'home' })
     expect(whereOf('/new')).toEqual({ kind: 'new' })
     expect(whereOf('/projects/p%201')).toEqual({ kind: 'project', projectId: 'p 1', place: { kind: 'project' } })
-    expect(whereOf('/projects/p1/rules')).toEqual({ kind: 'project', projectId: 'p1', place: { kind: 'rules' } })
-    expect(whereOf('/projects/p1/repositories')).toEqual({ kind: 'project', projectId: 'p1', place: { kind: 'repositories' } })
+    // A project's rules and repositories are sections of its settings now, not places of their own.
+    expect(whereOf('/projects/p1/rules')).toEqual({ kind: 'home' })
     expect(whereOf('/projects/p1/other')).toEqual({ kind: 'home' })
     expect(whereOf('/threads/th1')).toEqual({ kind: 'thread', threadId: 'th1' })
   })
@@ -445,5 +565,12 @@ describe('working out the tabs', () => {
       places: {},
       rooms: { p1: 'board' },
     })
+  })
+
+  it('reads the settings’ tab from its address, a section it doesn’t have as their first, and keeps one it knows', () => {
+    expect(whereOf('/settings/this-mac')).toEqual({ kind: 'settings', section: 'this-mac' })
+    expect(whereOf('/settings/mac')).toEqual({ kind: 'settings', section: 'agents' })
+    expect(keptFrom(JSON.stringify({ open: [], settings: 'notifications' }))).toEqual({ open: [], places: {}, settings: 'notifications' })
+    expect(keptFrom(JSON.stringify({ open: [], settings: 'mac' }))).toEqual({ open: [], places: {} })
   })
 })

@@ -1,12 +1,26 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Fiber, Ref, Stream } from 'effect'
 
-import { answerFor, connect, type PermissionOption } from '../src/AgentConnection'
+import { answerFor, connect, type PermissionOption, type PromptFile, promptBlocks } from '../src/AgentConnection'
 import { type Question, type QuestionAnswer, questionContent } from '../src/questions'
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
-import type { SessionEvent } from '../src/events'
+import { changeOf, type SessionEvent } from '../src/events'
 import type { Classified } from '../src/failures'
-import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, SCREENSHOT_PNG, scenarios, WHY } from '../src/testing'
+import {
+  codexLikeMeanings,
+  fakeAgent,
+  type FakeAgentOptions,
+  HANDED_DOCUMENT,
+  recorded,
+  SCREENSHOT_PNG,
+  scenarios,
+  WHY,
+} from '../src/testing'
 import { type ContractSubject, type Decide, text, withConnection } from './contract'
 
 const fake: ContractSubject = {
@@ -140,7 +154,9 @@ describe('AgentConnection', () => {
       const shot = updates.find((event) => event.toolCallId === 'shot')
       assert.strictEqual(shot?.content?.[1]?._tag, 'Image')
       const wrote = find(events, 'ToolCall').find((event) => event.toolCallId === 'write-doc')
-      assert.deepStrictEqual(wrote?.content, [{ _tag: 'Diff', path: '/tmp/docs/notes.md', created: true }])
+      assert.deepStrictEqual(wrote?.content, [
+        { _tag: 'Diff', path: join('/tmp', 'docs', 'notes.md'), created: true, change: changeOf(null, HANDED_DOCUMENT.body) },
+      ])
       const handed = find(events, 'AgentContent').map((event) => event.content._tag)
       assert.deepStrictEqual(handed, ['Link', 'Image'])
     }),
@@ -159,6 +175,7 @@ describe('AgentConnection', () => {
           mcp: { http: true, sse: false },
           authMethods: [],
           images: true,
+          embeddedContext: false,
         })
         assert.isUndefined(connection.process)
       }),
@@ -274,6 +291,34 @@ describe('AgentConnection', () => {
           yield* session.interrupt
           assert.deepStrictEqual((yield* Fiber.join(first)).at(-1), { _tag: 'TurnEnded', stopReason: 'cancelled' })
           assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
+        }),
+      ),
+    )
+
+    it.live('says a turn has started only once it can be interrupted', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          // Stopped the moment it is said to have started, as a spent budget of turns does: the stop reaches it.
+          const events = yield* Stream.runCollect(session.prompt(scenarios.slow, [], Effect.ignore(session.interrupt)))
+          assert.strictEqual(stopReason(events), 'cancelled')
+          assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
+        }),
+      ),
+    )
+
+    it.live('does not say a turn has started when the agent is already in one', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          const first = yield* Effect.forkChild(Stream.runCollect(session.prompt(scenarios.slow)))
+          yield* Effect.sleep('50 millis')
+          const started = yield* Ref.make(false)
+          const refused = yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello, [], Ref.set(started, true))))
+          assert.instanceOf(refused, TurnInProgress)
+          assert.isFalse(yield* Ref.get(started))
+          yield* session.interrupt
+          yield* Fiber.join(first)
         }),
       ),
     )
@@ -412,6 +457,26 @@ describe('AgentConnection', () => {
       ),
     )
 
+    it.live('runs several commands at once, each asking as a tool call of its own, and says what was chosen for each', () =>
+      withConnection(
+        fake,
+        (connection, permissions) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+            const events = yield* Stream.runCollect(session.prompt(`${scenarios.runEach}make deploy; ./deploy.sh`))
+            assert.strictEqual(text(events), 'chosen=allow_once,allow_once')
+            assert.deepStrictEqual(
+              (yield* Ref.get(permissions)).map((request) => [request.toolCallId, request.rawInput]),
+              [
+                ['run-1', { command: 'make deploy' }],
+                ['run-2', { command: './deploy.sh' }],
+              ],
+            )
+          }),
+        allow,
+      ),
+    )
+
     it.live("picks the rejection that carries on, by the agent's option meanings", () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.commandChoices, reject)
@@ -422,7 +487,9 @@ describe('AgentConnection', () => {
 
     it.live('resumes a turn a rejection stopped, telling the agent why', () =>
       Effect.gen(function* () {
-        const { events } = yield* turn(scenarios.fileEdit, () => Effect.succeed({ decision: 'reject', reason: 'edits wait for review' }))
+        const { events } = yield* turn(scenarios.fileEdit, () =>
+          Effect.succeed({ decision: 'reject', reason: 'edits wait for review', decidedBy: 'rules' }),
+        )
         assert.deepStrictEqual(tags(events), [
           'ToolCall',
           'PermissionAnswered',
@@ -442,10 +509,39 @@ describe('AgentConnection', () => {
         })
         assert.strictEqual(
           find(events, 'Resumed')[0]?.reason,
-          "Edit app.ts was not allowed by the project's rules: edits wait for review. Carry on without it.",
+          "Althar's rules refused this (Edit app.ts): edits wait for review. Carry on without it.",
         )
         assert.strictEqual(text(events), 'chosen=cancelcarrying on without it')
         assert.strictEqual(stopReason(events), 'end_turn')
+      }),
+    )
+
+    for (const scenario of [scenarios.commandChoices, scenarios.fileEdit])
+      it.live(`says a rule's refusal as Althar's, with its reason, even when refusal carries on: ${scenario}`, () =>
+        Effect.gen(function* () {
+          const { events } = yield* turn(scenario, () =>
+            Effect.succeed({ decision: 'reject', reason: 'Force pushes are never allowed in this project.', decidedBy: 'rules' }),
+          )
+          assert.lengthOf(find(events, 'Resumed'), 1)
+          const said = find(events, 'Resumed')[0]?.reason ?? ''
+          assert.include(said, "Althar's rules refused this")
+          assert.include(said, 'Force pushes are never allowed in this project.')
+          assert.notInclude(said, 'declined')
+          assert.strictEqual(stopReason(events), 'end_turn')
+        }),
+      )
+
+    it.live('says the person declined only for a decline on a card that stopped the turn', () =>
+      Effect.gen(function* () {
+        const { events } = yield* turn(scenarios.fileEdit, () => Effect.succeed({ decision: 'reject', reason: 'not now' }))
+        assert.strictEqual(find(events, 'Resumed')[0]?.reason, 'The person declined Edit app.ts: not now. Carry on without it.')
+      }),
+    )
+
+    it.live('does not explain a person who declined where the provider carries on', () =>
+      Effect.gen(function* () {
+        const { events } = yield* turn(scenarios.commandChoices, () => Effect.succeed({ decision: 'reject', reason: 'not now' }))
+        assert.lengthOf(find(events, 'Resumed'), 0)
       }),
     )
 
@@ -603,6 +699,60 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live(
+      'asks the person, never the rules, what an agent asks as a permission on a question’s tool call, and answers with their pick',
+      () =>
+        Effect.gen(function* () {
+          const choose = (onQuestion?: (question: Question) => Effect.Effect<QuestionAnswer>, questions: string | null = 'interaction_') =>
+            Effect.scoped(
+              Effect.gen(function* () {
+                const ruled: Array<string> = []
+                const connection = yield* connect({
+                  transport: { _tag: 'InProcess', agent: fakeAgent() },
+                  onPermission: (request) =>
+                    Effect.sync(() => ruled.push(request.toolCallId)).pipe(Effect.as({ decision: 'allow' as const })),
+                  permissions: { rejectAndContinue: [], rejectAndStop: [], allowScopes: {}, ...(questions === null ? {} : { questions }) },
+                  ...(onQuestion === undefined ? {} : { onQuestion }),
+                })
+                const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+                return { said: text(yield* Stream.runCollect(session.prompt(scenarios.choice))), ruled }
+              }),
+            )
+          const seen: Array<Question> = []
+          const picked = yield* choose((question) =>
+            Effect.sync(() => seen.push(question)).pipe(
+              Effect.as({ action: 'accept' as const, content: questionContent(question, { answer: { values: ['2'] } }) }),
+            ),
+          )
+          assert.deepStrictEqual(picked, { said: 'chosen=2', ruled: [] })
+          assert.deepStrictEqual(seen, [
+            {
+              sessionId: 'fake-1',
+              toolCallId: 'interaction_28ffdbf7',
+              message: 'Which color do you prefer?',
+              fields: [
+                {
+                  id: 'answer',
+                  question: 'Which color do you prefer?',
+                  type: 'choice',
+                  options: [
+                    { value: '1', label: 'red' },
+                    { value: '2', label: 'blue' },
+                  ],
+                  multiple: false,
+                  required: true,
+                },
+              ],
+            },
+          ])
+          // Declined, or with no one to ask, it is cancelled: never the first answer, as the rules would allow it.
+          assert.deepStrictEqual(yield* choose(() => Effect.succeed({ action: 'decline' })), { said: 'chosen=cancelled', ruled: [] })
+          assert.deepStrictEqual(yield* choose(), { said: 'chosen=cancelled', ruled: [] })
+          // An agent that doesn't ask so has it go to the rules, as any other request.
+          assert.deepStrictEqual(yield* choose(undefined, null), { said: 'chosen=1', ruled: ['interaction_28ffdbf7'] })
+        }),
+    )
+
     it.live('hears what the agent said before asking in this turn only', () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -679,6 +829,28 @@ describe('AgentConnection', () => {
   })
 
   describe('failures the agent reports', () => {
+    it.live('a usage limit said as a message, as Copilot says it: the turn fails with it, and when it resets', () =>
+      Effect.gen(function* () {
+        const before = Date.now()
+        const said = (failsInText?: string) =>
+          withConnection({ ...fake, ...(failsInText === undefined ? {} : { failsInText }) }, (connection) =>
+            Effect.gen(function* () {
+              const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+              return yield* Stream.runCollect(session.prompt(scenarios.limitInText))
+            }),
+          )
+        const ended = (yield* said('Error: ')).at(-1)
+        const failure = ended?._tag === 'TurnEnded' ? ended.failure : undefined
+        assert.strictEqual(failure?.failure, 'usage_limit')
+        assert.match(failure?.message ?? '', /^You've hit your rate limit\./)
+        const resets = Date.parse(failure?.resetsAt ?? '') - before
+        assert.isTrue(resets >= 3 * 3_600_000 + 20 * 60_000 - 1000 && resets <= 3 * 3_600_000 + 20 * 60_000 + 60_000)
+        // An agent that says its failures as errors has its words read as words.
+        const plain = (yield* said()).at(-1)
+        assert.deepStrictEqual(plain, { _tag: 'TurnEnded', stopReason: 'end_turn' })
+      }),
+    )
+
     it.live('an exhausted quota, and when it resets', () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.quota)
@@ -702,6 +874,32 @@ describe('AgentConnection', () => {
         })
       }),
     )
+
+    for (const [how, down, title] of [
+      ['offline', 'offline', recorded.claude.offline.title],
+      ['given a server error', 'server', recorded.claude.serverError.title],
+    ] as const)
+      it.live(`a lost connection, ${how}, on the turn's response as Claude Code ends it`, () =>
+        Effect.gen(function* () {
+          const subject: ContractSubject = {
+            ...fake,
+            transport: () => ({ _tag: 'InProcess', agent: fakeAgent({ connection: () => down }) }),
+          }
+          const events = yield* withConnection(subject, (connection) =>
+            Effect.gen(function* () {
+              const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+              return yield* Stream.runCollect(session.prompt('Say hi.'))
+            }),
+          )
+          // Its own retry, a warning first; then the turn ends as any other, but failed.
+          assert.deepStrictEqual(find(events, 'AgentFailure')[0]?.severity, 'warning')
+          const last = events.at(-1)
+          assert.deepStrictEqual(last?._tag === 'TurnEnded' ? [last.stopReason, last.failure] : [], [
+            'end_turn',
+            { failure: 'transient', message: title },
+          ])
+        }),
+      )
 
     it.live('a warning, which does not fail the turn', () =>
       Effect.gen(function* () {
@@ -749,6 +947,121 @@ describe('AgentConnection', () => {
       ),
     )
 
+    it.live('starts an agent with no modes in none, where its entry says its meta makes it ask', () =>
+      withConnection(variant({ modes: 'none' }), (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: null, meta: { yoloMode: false } })
+          assert.strictEqual(yield* session.mode, '')
+          assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
+        }),
+      ),
+    )
+
+    it.live('refuses to start an agent in no mode once it offers modes, as its entry no longer says what it is', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const error = yield* Effect.flip(connection.newSession({ cwd: '/tmp', mode: null }))
+          assert.instanceOf(error, OptionUnavailable)
+          assert.deepStrictEqual((error as OptionUnavailable).available, ['ask', 'read-only', 'bypass'])
+        }),
+      ),
+    )
+
+    it.live('holds an option where it is held: set as the session starts, and set back when the agent moves it', () =>
+      withConnection(variant({ allowAll: 'on' }), (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask', held: { allow_all: 'off', colour: 'blue' } })
+          assert.match(text(yield* Stream.runCollect(session.prompt(scenarios.settings))), /allow_all=off$/)
+          const moved = yield* Stream.runCollect(session.prompt(scenarios.allowAll))
+          assert.deepInclude(moved, { _tag: 'Notice', severity: 'info', title: "Althar set the agent's allow_all back to off." })
+          assert.match(text(yield* Stream.runCollect(session.prompt(scenarios.settings))), /allow_all=off$/)
+        }),
+      ),
+    )
+
+    it.live('stops a session whose held option the agent moved and Althar couldn’t set back, failing its turn and refusing the next', () =>
+      withConnection(variant({ allowAll: 'on', allowAllSticks: true }), (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask', held: { allow_all: 'off' } })
+          const moved = yield* Stream.runCollect(session.prompt(scenarios.allowAll))
+          const said = "The agent's allow_all moved, and Althar couldn't set it back to off, so it stopped the session."
+          assert.deepInclude(moved, { _tag: 'Notice', severity: 'error', title: said })
+          const ended = moved.at(-1)
+          assert.deepStrictEqual(ended?._tag === 'TurnEnded' ? ended.failure : undefined, { failure: 'unknown', message: said })
+          // Nothing more reaches an agent left approving without asking.
+          const next = yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello)))
+          assert.instanceOf(next, AgentRequestFailed)
+          assert.strictEqual((next as AgentRequestFailed).message, said)
+        }),
+      ),
+    )
+
+    it.live('refuses a session whose held option the agent says yes to and leaves where it was, and closes it', () =>
+      Effect.gen(function* () {
+        const closed: Array<string> = []
+        yield* withConnection(
+          variant({ allowAll: 'on', allowAllStays: true, closed: (sessionId) => closed.push(sessionId) }),
+          (connection) =>
+            Effect.gen(function* () {
+              const error = yield* Effect.flip(connection.newSession({ cwd: '/tmp', mode: 'ask', held: { allow_all: 'off' } }))
+              assert.instanceOf(error, OptionUnavailable)
+              assert.deepStrictEqual([(error as OptionUnavailable).configId, (error as OptionUnavailable).value], ['allow_all', 'off'])
+              assert.deepStrictEqual(closed, ['fake-1'])
+            }),
+        )
+      }),
+    )
+
+    it.live('stops a session whose held option the agent moved and says yes to setting back, but leaves where it was', () =>
+      withConnection(variant({ allowAll: 'off', allowAllStays: true }), (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask', held: { allow_all: 'off' } })
+          const moved = yield* Stream.runCollect(session.prompt(scenarios.allowAll))
+          const said = "The agent's allow_all moved, and Althar couldn't set it back to off, so it stopped the session."
+          assert.deepInclude(moved, { _tag: 'Notice', severity: 'error', title: said })
+          assert.isFalse(moved.some((event) => event._tag === 'Notice' && event.severity === 'info'))
+          assert.instanceOf(yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello))), AgentRequestFailed)
+        }),
+      ),
+    )
+
+    it.live('puts a reader back in its mode when the agent leaves it', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'read-only', held: { mode: 'read-only' } })
+          const events = yield* Stream.runCollect(session.prompt(scenarios.leaveMode))
+          assert.strictEqual(yield* session.mode, 'read-only')
+          assert.isFalse(events.some((event) => event._tag === 'ModeChanged'))
+          assert.match(text(yield* Stream.runCollect(session.prompt(scenarios.settings))), /^mode=read-only /)
+        }),
+      ),
+    )
+
+    it.live('puts a reader back in its mode where the agent has legacy modes alone, and stops the session where it can’t', () =>
+      Effect.gen(function* () {
+        yield* withConnection(variant({ modes: 'legacy' }), (connection) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'read-only', held: { mode: 'read-only' } })
+            const events = yield* Stream.runCollect(session.prompt(scenarios.leaveMode))
+            assert.deepInclude(events, { _tag: 'Notice', severity: 'info', title: "Althar set the agent's mode back to read-only." })
+            assert.strictEqual(yield* session.mode, 'read-only')
+            assert.match(text(yield* Stream.runCollect(session.prompt(scenarios.settings))), /^mode=read-only /)
+          }),
+        )
+        yield* withConnection(variant({ modes: 'legacy', leavesForGood: true }), (connection) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'read-only', held: { mode: 'read-only' } })
+            const events = yield* Stream.runCollect(session.prompt(scenarios.leaveMode))
+            const said = "The agent's mode moved, and Althar couldn't set it back to read-only, so it stopped the session."
+            assert.deepInclude(events, { _tag: 'Notice', severity: 'error', title: said })
+            const ended = events.at(-1)
+            assert.deepStrictEqual(ended?._tag === 'TurnEnded' ? ended.failure : undefined, { failure: 'unknown', message: said })
+            assert.instanceOf(yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello))), AgentRequestFailed)
+          }),
+        )
+      }),
+    )
+
     it.live('refuses a session whose mode did not change when set, and closes it at once', () =>
       Effect.gen(function* () {
         const closed: Array<string> = []
@@ -786,6 +1099,43 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live(
+      'links files and folders after the text, which the agent opens by their paths; a small text file’s words go to one that takes them',
+      () =>
+        Effect.gen(function* () {
+          const folder = mkdtempSync(join(tmpdir(), 'althar-files-'))
+          yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(folder, { recursive: true, force: true })))
+          writeFileSync(join(folder, 'build.log'), 'error: the build broke\nat line 2\n')
+          mkdirSync(join(folder, 'logs'))
+          writeFileSync(join(folder, 'logs', 'a.log'), 'a')
+          writeFileSync(join(folder, 'logs', 'b.log'), 'b')
+          const log: PromptFile = {
+            path: join(folder, 'build.log'),
+            name: 'build.log',
+            mimeType: 'text/plain',
+            bytes: 31,
+            folder: false,
+            text: 'error: the build broke\nat line 2\n',
+          }
+          const logs: PromptFile = { path: join(folder, 'logs'), name: 'logs', mimeType: null, bytes: 2, folder: true }
+          const said = (subject: ContractSubject) =>
+            withConnection(subject, (connection) =>
+              Effect.gen(function* () {
+                const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+                return text(yield* Stream.runCollect(session.prompt('read these', [log, logs])))
+              }),
+            )
+          assert.strictEqual(
+            yield* said(fake),
+            'saw files: build.log (linked, text/plain, 31 B): error: the build broke; logs (linked folder): a.log, b.log\n\necho: read these',
+          )
+          assert.strictEqual(
+            yield* said(variant({ embeddedContext: true })),
+            'saw files: build.log (embedded): error: the build broke; logs (linked folder): a.log, b.log\n\necho: read these',
+          )
+        }).pipe(Effect.scoped),
+    )
+
     it.live('fills in what a bare agent leaves out', () =>
       withConnection(variant({ bare: true }), (connection) =>
         Effect.sync(() => {
@@ -798,6 +1148,7 @@ describe('AgentConnection', () => {
             mcp: { http: false, sse: false },
             authMethods: [],
             images: false,
+            embeddedContext: false,
           })
         }),
       ),
@@ -852,5 +1203,54 @@ describe('answerFor', () => {
       scope: null,
       stopsTurn: true,
     })
+  })
+})
+
+describe('promptBlocks', () => {
+  const image = { data: SCREENSHOT_PNG, mimeType: 'image/png' }
+  const pdf: PromptFile = {
+    path: '/w/t/.althar/attachments/in_1/Q3 report.pdf',
+    name: 'Q3 report.pdf',
+    mimeType: 'application/pdf',
+    bytes: 48_000,
+    folder: false,
+  }
+  const log: PromptFile = {
+    path: '/w/t/.althar/attachments/in_1/run.log',
+    name: 'run.log',
+    mimeType: 'text/plain',
+    bytes: 12,
+    folder: false,
+    text: 'it failed\n',
+  }
+  const folder: PromptFile = {
+    path: '/w/t/.althar/attachments/in_1/specs',
+    name: 'specs',
+    mimeType: null,
+    bytes: 900,
+    folder: true,
+    text: 'never',
+  }
+  const parts = [image, pdf, log, folder]
+
+  it('links every file and folder, by its file address, to an agent that takes nothing but text', () => {
+    assert.deepStrictEqual(promptBlocks('look', parts, { images: false, embeddedContext: false }), [
+      { type: 'text', text: 'look' },
+      { type: 'resource_link', uri: pathToFileURL(pdf.path).href, name: 'Q3 report.pdf', mimeType: 'application/pdf', size: 48_000 },
+      { type: 'resource_link', uri: pathToFileURL(log.path).href, name: 'run.log', mimeType: 'text/plain', size: 12 },
+      { type: 'resource_link', uri: pathToFileURL(folder.path).href, name: 'specs', mimeType: 'inode/directory' },
+    ])
+    // A name with a space is escaped in its address, which a file address reads back as the path.
+    assert.include(pathToFileURL(pdf.path).href, 'Q3%20report.pdf')
+  })
+
+  it('sends images to an agent that takes them, and a small text file’s words to one that takes embedded context; never a folder’s', () => {
+    assert.deepStrictEqual(promptBlocks('look', parts, { images: true, embeddedContext: true }), [
+      { type: 'text', text: 'look' },
+      { type: 'image', data: SCREENSHOT_PNG, mimeType: 'image/png' },
+      { type: 'resource_link', uri: pathToFileURL(pdf.path).href, name: 'Q3 report.pdf', mimeType: 'application/pdf', size: 48_000 },
+      { type: 'resource', resource: { uri: pathToFileURL(log.path).href, text: 'it failed\n', mimeType: 'text/plain' } },
+      { type: 'resource_link', uri: pathToFileURL(folder.path).href, name: 'specs', mimeType: 'inode/directory' },
+    ])
   })
 })

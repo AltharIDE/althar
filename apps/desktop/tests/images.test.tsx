@@ -17,7 +17,7 @@ import {
   shrinkInWindow,
   text,
 } from '../src/renderer/shared/images'
-import { sentWith, takesImages, useImages } from '../src/renderer/shared/useImages'
+import { sentWith, takesImages, useAttachments } from '../src/renderer/shared/useAttachments'
 import { models } from './fixtures'
 
 const be32 = (n: number) => [(n >>> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]
@@ -50,6 +50,8 @@ const png = (width: number, height: number, padding = 0) =>
 const fileOf = (bytes: Uint8Array, name: string, type = 'image/png') => new File([new Uint8Array(bytes)], name, { type })
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const asIs: Shrink = () => Promise.resolve(null)
+/** A host with no file behind anything added: as a picture made in the window, or pasted. */
+const noFiles = { attach: async () => null, attachPasted: async () => [] }
 
 describe('reading an image to send', () => {
   it('believes its bytes, and keeps them, their digest and size, to send and to draw', async () => {
@@ -198,7 +200,7 @@ describe('images in the thread', () => {
     expect(sentOf({ data: 'AAAA', digest: 'c'.repeat(64), name: 'a.png' })).toEqual({ data: 'AAAA', name: 'a.png' })
     expect(sentOf({ data: null, digest: 'c'.repeat(64), name: 'a.png' })).toEqual({ digest: 'c'.repeat(64), name: 'a.png' })
     expect(sentWith(undefined)).toEqual({})
-    expect(sentWith({ sent: [], pictures: [] })).toEqual({})
+    expect(sentWith({ sent: [], pictures: [], files: [], attached: [] })).toEqual({})
   })
 
   it('knows which agents take images, from their models', () => {
@@ -212,9 +214,9 @@ describe('the images waiting in a composer', () => {
   const codex = { name: 'Codex', takes: false }
 
   it('reads what is added, shows it, and sends it with the message, drawn from its own bytes', async () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useAttachments('thread:th1', noFiles, asIs))
     const bytes = png(640, 400)
-    act(() => result.current.props(claude).onAddImages([fileOf(bytes, 'shot.png')]))
+    act(() => result.current.props(claude).onAddFiles([fileOf(bytes, 'shot.png')]))
     expect(result.current.props(claude).images).toEqual([{ id: 'image-1', name: 'shot.png', reading: true }])
     await waitFor(() => expect(result.current.props(claude).images[0]?.src).toMatch(/^data:image\/png;base64,/))
     let outgoing = null as ReturnType<typeof result.current.take>
@@ -231,40 +233,74 @@ describe('the images waiting in a composer', () => {
   })
 
   it('says why it refused one, takes one off, and takes no more than a message carries', async () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useAttachments('thread:th1', noFiles, asIs))
     const svg = new TextEncoder().encode('<svg/>')
-    act(() => result.current.props(claude).onAddImages([fileOf(svg, 'logo.svg'), fileOf(png(1, 1), 'a.png')]))
-    await waitFor(() => expect(result.current.props(claude).imageNote).toBe(text.unsupported('logo.svg')))
+    act(() => result.current.props(claude).onAddFiles([fileOf(svg, 'logo.svg'), fileOf(png(1, 1), 'a.png')]))
+    await waitFor(() => expect(result.current.props(claude).fileNote).toBe(text.unsupported('logo.svg')))
     await waitFor(() => expect(result.current.props(claude).images.map((image) => image.name)).toEqual(['a.png']))
     act(() => result.current.props(claude).onRemoveImage('image-2'))
     expect(result.current.props(claude)).toMatchObject({ images: [] })
-    expect(result.current.props(claude).imageNote).toBeUndefined()
+    expect(result.current.props(claude).fileNote).toBeUndefined()
     const many = Array.from({ length: MESSAGE_IMAGES.count + 2 }, (_, n) => fileOf(png(1, 1), `${n}.png`))
-    act(() => result.current.props(claude).onAddImages(many))
+    act(() => result.current.props(claude).onAddFiles(many))
     expect(result.current.props(claude).images).toHaveLength(MESSAGE_IMAGES.count)
-    expect(result.current.props(claude).imageNote).toBe(text.tooMany)
+    expect(result.current.props(claude).fileNote).toBe(text.tooMany)
   })
 
   it('holds the message back while an image is still being read', () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useAttachments('thread:th1', noFiles, asIs))
     const slow = fileOf(png(1, 1), 'slow.png')
     Object.defineProperty(slow, 'arrayBuffer', { value: () => new Promise<ArrayBuffer>(() => undefined) })
-    act(() => result.current.props(claude).onAddImages([slow]))
+    act(() => result.current.props(claude).onAddFiles([slow]))
     let outgoing: ReturnType<typeof result.current.take> | undefined
     act(() => {
       outgoing = result.current.take(claude)
     })
     expect(outgoing).toBeNull()
-    expect(result.current.props(claude).imageNote).toBe(text.stillReading)
+    expect(result.current.props(claude).fileNote).toBe(text.stillReading)
+  })
+
+  it('reads a picture copied in the file manager and pasted as an image, from its own bytes; anything beside it, and it for an agent that takes no images, as a file', async () => {
+    const bytes = png(640, 400)
+    const copied = [
+      {
+        ok: true as const,
+        grant: 'grant_shot',
+        name: 'shot.png',
+        kind: 'file' as const,
+        bytes: bytes.length,
+        entries: null,
+        picture: { type: 'image/png', data: bytes },
+      },
+      { ok: true as const, grant: 'grant_log', name: 'run.log', kind: 'file' as const, bytes: 12, entries: null },
+    ]
+    const host = { attach: async () => null, attachPasted: async () => copied }
+    const { result } = renderHook(() => useAttachments('thread:th1', host, asIs))
+    // The page gets Finder's picture of the files, which isn't what goes.
+    act(() => result.current.props(claude).onAddFiles([fileOf(png(16, 16), 'icon.png')], 'paste'))
+    await waitFor(() => expect(result.current.props(claude).images[0]?.src).toMatch(/^data:image\/png;base64,/))
+    expect(result.current.props(claude).images).toHaveLength(1)
+    expect(result.current.props(claude).files).toEqual([{ id: expect.any(String), name: 'run.log', meta: '12 B' }])
+    let outgoing = null as ReturnType<typeof result.current.take>
+    act(() => {
+      outgoing = result.current.take(claude)
+    })
+    expect(outgoing?.pictures).toMatchObject([{ digest: digest(bytes), width: 640, height: 400, name: 'shot.png' }])
+    expect(outgoing?.files).toEqual([{ grant: 'grant_log' }])
+    act(() => result.current.clear())
+    act(() => result.current.props(codex).onAddFiles([], 'paste'))
+    await waitFor(() => expect(result.current.props(codex).files.map((one) => one.name)).toEqual(['shot.png', 'run.log']))
+    expect(result.current.props(codex).images).toEqual([])
   })
 
   it('takes none for an agent that doesn’t take images, and holds back those added before it was picked, saying why', async () => {
-    const { result } = renderHook(() => useImages(asIs))
-    act(() => result.current.props(codex).onAddImages([fileOf(png(1, 1), 'a.png')]))
-    expect(result.current.props(codex)).toMatchObject({ images: [], imageNote: text.refused('Codex') })
-    act(() => result.current.props(claude).onAddImages([fileOf(png(1, 1), 'a.png')]))
+    const { result } = renderHook(() => useAttachments('thread:th1', noFiles, asIs))
+    // A picture with no file behind it, as a pasted one, can't go to it as a file either.
+    act(() => result.current.props(codex).onAddFiles([fileOf(png(1, 1), 'a.png')]))
+    await waitFor(() => expect(result.current.props(codex)).toMatchObject({ images: [], files: [], fileNote: text.refused('Codex') }))
+    act(() => result.current.props(claude).onAddFiles([fileOf(png(1, 1), 'a.png')]))
     await waitFor(() => expect(result.current.props(claude).images[0]?.src).toBeDefined())
-    expect(result.current.props(codex).imageNote).toBe(text.blocked('Codex'))
+    expect(result.current.props(codex).fileNote).toBe(text.blocked('Codex'))
     let outgoing: ReturnType<typeof result.current.take> | undefined
     act(() => {
       outgoing = result.current.take(codex)
@@ -275,18 +311,19 @@ describe('the images waiting in a composer', () => {
     act(() => {
       outgoing = result.current.take(codex)
     })
-    expect(outgoing).toEqual({ sent: [], pictures: [] })
+    expect(outgoing).toEqual({ sent: [], pictures: [], files: [], attached: [] })
   })
 
   it('gives back what went with a message Althar didn’t take, bytes and all, before any added since', async () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useAttachments('thread:th1', noFiles, asIs))
     const bytes = png(640, 400)
-    act(() => result.current.props(claude).onAddImages([fileOf(bytes, 'shot.png')]))
+    act(() => result.current.props(claude).onAddFiles([fileOf(bytes, 'shot.png')]))
     await waitFor(() => expect(result.current.props(claude).images[0]?.src).toBeDefined())
     act(() =>
-      result.current.restore([
-        { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'kept.png', unkept: null },
-      ]),
+      result.current.restore({
+        pictures: [{ digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'kept.png', unkept: null }],
+        files: [],
+      }),
     )
     let outgoing: ReturnType<typeof result.current.take> = null
     act(() => {
@@ -294,9 +331,10 @@ describe('the images waiting in a composer', () => {
     })
     act(() => result.current.clear())
     act(() =>
-      result.current.restore([
-        { digest: 'e'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'later.png', unkept: null },
-      ]),
+      result.current.restore({
+        pictures: [{ digest: 'e'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'later.png', unkept: null }],
+        files: [],
+      }),
     )
     const sent = outgoing
     if (sent !== null) act(() => result.current.giveBack(sent))
@@ -319,7 +357,7 @@ describe('the images waiting in a composer', () => {
   })
 
   it('says a queued message’s images don’t fit beside those waiting, and holds back more than a message carries', () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useAttachments('thread:th1', noFiles, asIs))
     const picture = (n: number) => ({
       digest: n.toString(16).padStart(64, '0'),
       mediaType: 'image/png',
@@ -330,36 +368,39 @@ describe('the images waiting in a composer', () => {
       unkept: null,
     })
     const nine = Array.from({ length: 9 }, (_, n) => picture(n))
-    act(() => result.current.restore(nine))
+    act(() => result.current.restore({ pictures: nine, files: [] }))
     let fits = true
     act(() => {
-      fits = result.current.fits([picture(9), { ...picture(10), digest: null }])
+      fits = result.current.fits({ pictures: [picture(9), { ...picture(10), digest: null }], files: [] })
     })
     expect(fits).toBe(true)
     act(() => {
-      fits = result.current.fits([picture(9), picture(10)])
+      fits = result.current.fits({ pictures: [picture(9), picture(10)], files: [] })
     })
     expect(fits).toBe(false)
-    expect(result.current.props(claude).imageNote).toBe(text.noRoom)
+    expect(result.current.props(claude).fileNote).toBe(text.noRoom)
     // Put back anyway, as a send given back beside others: nothing is dropped, and nothing goes until some are taken off.
-    act(() => result.current.restore([picture(9), picture(10)]))
+    act(() => result.current.restore({ pictures: [picture(9), picture(10)], files: [] }))
     let outgoing: ReturnType<typeof result.current.take> | undefined
     act(() => {
       outgoing = result.current.take(claude)
     })
     expect(outgoing).toBeNull()
     expect(result.current.props(claude).images).toHaveLength(11)
-    expect(result.current.props(claude).imageNote).toBe(text.tooMany)
+    expect(result.current.props(claude).fileNote).toBe(text.tooMany)
   })
 
   it('puts back the images of a message taken back from the queue, to go again by their digests', () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useAttachments('thread:th1', noFiles, asIs))
     act(() =>
-      result.current.restore([
-        { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null },
-        { digest: null, mediaType: 'image/png', bytes: 0, width: null, height: null, name: null, unkept: 'unkept' },
-        { digest: 'e'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: null, unkept: null },
-      ]),
+      result.current.restore({
+        pictures: [
+          { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null },
+          { digest: null, mediaType: 'image/png', bytes: 0, width: null, height: null, name: null, unkept: 'unkept' },
+          { digest: 'e'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: null, unkept: null },
+        ],
+        files: [],
+      }),
     )
     expect(result.current.props(claude).images).toEqual([
       { id: 'image-1', name: 'shot.png', src: `althar-picture://shot/${'d'.repeat(64)}?w=1120` },

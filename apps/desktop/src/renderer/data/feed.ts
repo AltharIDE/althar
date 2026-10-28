@@ -1,6 +1,6 @@
 import { hashKey, type QueryClient, type QueryKey } from '@tanstack/react-query'
 
-import type { CoordinatorSnapshot, ThreadSnapshot, WatchEvent } from '@althar/contracts'
+import type { AutomationSnapshot, CoordinatorSnapshot, ThreadSnapshot, WatchEvent } from '@althar/contracts'
 
 import type { Client } from './client'
 import { keys } from './reads'
@@ -16,6 +16,8 @@ import { keys } from './reads'
  *   permission the rules answered, which moves nothing but the home's count
  *   of them and comes with every edit an agent makes, reads the home again
  *   only while it shows; off screen it is marked, for its next visit;
+ * - plan usage, which the runtime sends whole whenever it changes, is put in
+ *   the cache as it comes;
  * - a thread (a task's, or a project's coordinator) is only marked out of
  *   date. The screen showing it reads what changed item by item, as it hears
  *   the same change; one that isn't showing is read again when it is next
@@ -46,6 +48,8 @@ export const BOARD = new Set([
   'attention_request',
   'external_link',
   'workspace',
+  // A conflict round started, ended or handed back: its card's word and why.
+  'conflict_resolution',
 ])
 
 /** What changes the home: what changes a board, the projects themselves, and a permission the rules answered. */
@@ -66,6 +70,13 @@ export const CONNECTIONS = new Set(['connection', 'project'])
 /** Changes elsewhere in a project that move what a card in its coordinator's thread shows. */
 export const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
 
+/**
+ * What changes a project's automations: one of them, or one of its runs.
+ * Each moves the Automations tab, the page of the automation it is of, and
+ * the automation's cards in the coordinator's thread, which say where it stands.
+ */
+export const AUTOMATIONS = new Set(['automation', 'automation_occurrence'])
+
 export interface Feed {
   /** Calls `listener` with every change from now on, until the returned function is called. */
   readonly listen: (listener: (event: WatchEvent) => void) => () => void
@@ -75,6 +86,8 @@ export interface Feed {
    * to those listening, such as a command's output, may have been missed.
    */
   readonly rewatched: (listener: () => void) => () => void
+  /** How many reads it remembers changes and beginnings for: only those the cache still holds. */
+  readonly remembered: () => number
   readonly stop: () => void
 }
 
@@ -104,16 +117,55 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
         .findAll({ queryKey: ['repositories'] })
         .map((query) => ({ key: query.queryKey, offScreen: false }))
     : []),
+  // Its tracker (ADR-059), which follows a connection disconnected or made again, only while it shows.
+  ...(event.projectId !== null && event.aggregateType === 'project'
+    ? [{ key: keys.projectTracker(event.projectId), offScreen: false }]
+    : []),
+  ...(event.aggregateType === 'connection'
+    ? cache
+        .getQueryCache()
+        .findAll({ queryKey: ['projectTracker'] })
+        .map((query) => ({ key: query.queryKey, offScreen: false }))
+    : []),
   // Its rules, which an answer can change too (Allow always, Deny always), only while they show.
   ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
+  // Each model's room where work would start, which its project's rules (the accounts allowed, moving work through them) say, only while it shows.
+  ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.modelRooms(event.projectId), offScreen: false }] : []),
+  // Every model's room that shows, as an agent's accounts or their holds change: which account work starts on.
+  ...(event.aggregateType === 'agent_account' || event.aggregateType === 'account_status'
+    ? cache
+        .getQueryCache()
+        .findAll({ queryKey: ['modelRooms'] })
+        .map((query) => ({ key: query.queryKey, offScreen: false }))
+    : []),
   // Its notes, which the coordinator keeps as the person decides, only while they show.
   ...(event.projectId !== null && event.aggregateType === 'project_note' ? [{ key: keys.notes(event.projectId), offScreen: false }] : []),
+  // Its automations, and the page of the one that changed or ran, only while they show: what doesn't is read as it next opens.
+  ...(event.projectId !== null && AUTOMATIONS.has(event.aggregateType)
+    ? [{ key: keys.automations(event.projectId), offScreen: false }, ...automationReads(cache, event)]
+    : []),
+  // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).
+  ...(event.aggregateType === 'workspace' || event.aggregateType === 'task' ? [{ key: keys.folders, offScreen: false }] : []),
 ]
 
-/** The threads in the cache a change moves: its own, a coordinator's whose cards or head it changes, and, renamed, every one of its project's. */
+/** The automations' pages a change moves: the one it is, or, for a run, every one of its project's, as a run names its occurrence. */
+const automationReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> =>
+  event.aggregateType === 'automation'
+    ? [{ key: keys.automation(event.aggregateId), offScreen: false }]
+    : cache
+        .getQueryCache()
+        .findAll({ queryKey: ['automation'] })
+        .filter((query) => (query.state.data as AutomationSnapshot | undefined)?.automation.projectId === event.projectId)
+        .map((query) => ({ key: query.queryKey, offScreen: false }))
+
+/**
+ * The threads in the cache a change moves: its own, a coordinator's whose
+ * cards or head it changes, and every one of its project's when it is
+ * renamed or its rules change, by whose switch a task allows everything.
+ */
 const threadReads = (cache: QueryClient, event: Changed): ReadonlyArray<QueryKey> => {
   const renamed =
-    event.aggregateType === 'project'
+    event.aggregateType === 'project' || event.aggregateType === 'policy'
       ? cache
           .getQueryCache()
           .findAll({ queryKey: ['thread'] })
@@ -128,7 +180,8 @@ const threadReads = (cache: QueryClient, event: Changed): ReadonlyArray<QueryKey
       return (
         data?.threadId === event.threadId ||
         event.aggregateType === 'connection' ||
-        (event.projectId === query.queryKey[1] && (CARDS.has(event.aggregateType) || event.aggregateType === 'project'))
+        (event.projectId === query.queryKey[1] &&
+          (CARDS.has(event.aggregateType) || AUTOMATIONS.has(event.aggregateType) || event.aggregateType === 'project'))
       )
     })
     .map((query) => query.queryKey)
@@ -156,8 +209,13 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
       void cache.invalidateQueries({ queryKey: key, exact: true, refetchType: offScreen ? 'all' : 'active' })
   }
 
-  // A read under way when a change touched it is read once more; one begun after the change holds it.
+  // A read under way when a change touched it is read once more; one begun after the change holds it. A read the cache let go is forgotten.
   const unsubscribe = cache.getQueryCache().subscribe((event) => {
+    if (event.type === 'removed') {
+      touched.delete(event.query.queryHash)
+      begun.delete(event.query.queryHash)
+      return
+    }
     if (event.type !== 'updated') return
     const { queryHash, queryKey } = event.query
     if (event.action.type === 'fetch') return void begun.set(queryHash, heardSoFar)
@@ -176,12 +234,13 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
       heardSoFar += 1
       for (const read of wholeReads(cache, event)) {
         const hash = hashKey(read.key)
-        touched.set(hash, heardSoFar)
+        // Only a read the cache holds can be under way, and needs its change remembered.
+        if (cache.getQueryCache().get(hash) !== undefined) touched.set(hash, heardSoFar)
         // Off screen if any change gathered with it says so.
         due.set(hash, { key: read.key, offScreen: read.offScreen || (due.get(hash)?.offScreen ?? false) })
       }
       if (due.size > 0) timer ??= setTimeout(readDue, GATHER)
-      // A thread on screen reads its own changes item by item; a project's new name it reads again whole, at once.
+      // A thread on screen reads its own changes item by item, and its head as its project's rules change; a project's new name it reads again whole, at once.
       const renamed = event.aggregateType === 'project'
       for (const queryKey of threadReads(cache, event)) {
         if (cache.getQueryState(queryKey) === undefined) continue
@@ -189,10 +248,22 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
         void cache.invalidateQueries({ queryKey, exact: true, refetchType: renamed ? 'active' : 'none' })
       }
     }
+    // Plan usage comes whole each time, so it is the cache's as it is, not read again; each model's room follows from it.
+    if (event._tag === 'PlanUsage') {
+      cache.setQueryData(keys.planUsage, event.usage)
+      void cache.invalidateQueries({ queryKey: ['modelRooms'] })
+    }
     for (const listener of listeners) listener(event)
   }
 
+  let watched = false
   const unwatch = client.watch(heard, since, () => {
+    // A watch that broke may have missed a plan usage, which only the feed says changed: read again if it shows.
+    if (watched) {
+      void cache.invalidateQueries({ queryKey: keys.planUsage, exact: true })
+      void cache.invalidateQueries({ queryKey: ['modelRooms'] })
+    }
+    watched = true
     for (const listener of rewatching) listener()
   })
   return {
@@ -204,6 +275,7 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
       rewatching.add(listener)
       return () => void rewatching.delete(listener)
     },
+    remembered: () => new Set([...touched.keys(), ...begun.keys()]).size,
     stop: () => {
       unwatch()
       unsubscribe()

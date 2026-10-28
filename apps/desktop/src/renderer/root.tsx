@@ -4,11 +4,14 @@ import { useEffect } from 'react'
 
 import type { Client } from './data/client'
 import { useServices } from './data/services'
+import { KeptScreens } from './features/tabs/KeptScreens'
 import { TabsFrame } from './features/tabs/TabsFrame'
 
 /*
- * The route every feature's routes hang from, under the window's tabs. A
- * notification the person clicked opens its thread, wherever the window was.
+ * The route every feature's routes hang from, under the window's tabs, with
+ * the home's, projects' and tasks' screens the window keeps beside them: the
+ * home's, a project's or a task's route says which shows. A notification the person clicked
+ * opens its thread, wherever the window was.
  */
 function Root() {
   const { host } = useServices()
@@ -17,6 +20,7 @@ function Root() {
   return (
     <TabsFrame>
       <Outlet />
+      <KeptScreens />
     </TabsFrame>
   )
 }

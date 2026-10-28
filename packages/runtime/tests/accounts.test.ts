@@ -9,7 +9,7 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts, SignOutFailed } from '../src/Accounts'
-import { Agents, RuntimeConfig, type RuntimeOptions } from '../src/Config'
+import { type AgentEntry, Agents, RuntimeConfig, type RuntimeOptions } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
 import { Models } from '../src/Models'
@@ -85,10 +85,51 @@ const ranOnCodex = (projectId?: string) =>
       (lines) => lines.some((line) => line.includes('Did the task.')),
       Duration.seconds(20),
     )
-    return { projectId: project, threadId: task.threadId, said: said.join('\n') }
+    return { projectId: project, taskId: task.taskId, threadId: task.threadId, said: said.join('\n') }
   })
 
+/** The fake agents, with one that signs in only inside Althar: no command of its own to run in a terminal. */
+const insideOnly = (agentId: string) =>
+  Layer.effect(
+    Agents,
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const inside = (entry: AgentEntry): AgentEntry =>
+        entry.definition.id === agentId
+          ? { ...entry, definition: { ...entry.definition, signIn: { ...entry.definition.signIn, login: '' } } }
+          : entry
+      return Agents.of({ list: agents.list.map(inside), get: (id) => Effect.map(agents.get(id), inside) })
+    }),
+  ).pipe(Layer.provide(fakeAgents()))
+
 describe('accounts', () => {
+  it.effect('keep an agent whose sign-in every folder shares to its usual account, and the window offers no other', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const refused = yield* Effect.flip(accounts.add({ agentId: 'opencode', name: 'Work' }))
+      assert.deepInclude(refused, { _tag: 'AccountRefused', reason: 'one' })
+      assert.deepStrictEqual(
+        (yield* accounts.of('opencode')).map((account) => account.home),
+        [null],
+      )
+      // Another agent adds accounts as before.
+      assert.isNotNull((yield* accounts.add({ agentId: 'codex', name: 'Work' })).home)
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { oneAccount: ['opencode'] }))))),
+  )
+
+  it.effect('opens no terminal to sign in an agent that signs in only inside Althar, as Antigravity does', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const [usual] = yield* accounts.of('codex')
+      if (usual === undefined) throw new Error('Codex has its usual account')
+      assert.deepInclude(yield* Effect.flip(accounts.login(usual.id)), { _tag: 'AccountRefused', reason: 'no_terminal' })
+      // Another still signs in in a terminal.
+      const [claude] = yield* accounts.of('claude-code')
+      if (claude === undefined) throw new Error('Claude Code has its usual account')
+      assert.include(yield* accounts.login(claude.id), 'fake-login claude-code')
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents: insideOnly('codex') }))))),
+  )
+
   it.effect('gives the usual Claude account one persistent home when sessions run in a Flatpak', () =>
     Effect.gen(function* () {
       const accounts = yield* Accounts
@@ -105,6 +146,9 @@ describe('accounts', () => {
       assert.deepStrictEqual(accounts.env(account), { FAKE_HOME: home })
       assert.isTrue(lstatSync(home).isDirectory())
       assert.isTrue(lstatSync(join(home, 'settings.json')).isSymbolicLink())
+      // The line to sign in names that same home: what the person runs signs
+      // the account in where its sessions will read the sign-in.
+      assert.strictEqual(yield* accounts.login(account.id), `FAKE_HOME='${home}' fake-login claude-code`)
     }).pipe(Effect.provide(withAccounts({}, [], { reachable: false, where: () => null, run: (spec) => spec }))),
   )
 
@@ -296,7 +340,10 @@ describe('accounts', () => {
         mkdirSync(join(home, made), { recursive: true })
       writeFileSync(join(home, '.codex-notes'), 'not a folder')
       const was = process.env.HOME
+      const wasProfile = process.env.USERPROFILE
+      // The home Node gives: HOME, and on Windows USERPROFILE.
       process.env.HOME = home
+      process.env.USERPROFILE = home
       try {
         const found = yield* accounts.found('codex')
         assert.deepStrictEqual(found.map((place) => [place.name, place.tool]).toSorted(), [
@@ -318,6 +365,8 @@ describe('accounts', () => {
       } finally {
         if (was === undefined) delete process.env.HOME
         else process.env.HOME = was
+        if (wasProfile === undefined) delete process.env.USERPROFILE
+        else process.env.USERPROFILE = wasProfile
       }
     }).pipe(Effect.provide(withAccounts())),
   )
@@ -373,7 +422,7 @@ describe('accounts', () => {
       const [usual] = yield* accounts.of('codex')
       yield* accounts.add({ agentId: 'codex', name: 'work', folder: folder('work') })
       const ran = yield* ranOnCodex()
-      assert.match(ran.said, /Fake codex \(main\) reached its usage limit, until [^.]+\. Fake claude-code takes over/)
+      assert.match(ran.said, /Fake codex \(main\) ran out of usage [^,]+, until [^.]+\. Fake claude-code takes the work over/)
       assert.deepStrictEqual(
         (yield* sessionsOn(ran.threadId)).map(([agentId]) => agentId),
         ['codex', 'claude-code'],
@@ -404,14 +453,14 @@ describe('accounts', () => {
       // Saying it again makes no new revision.
       yield* policies.setAccounts(project.projectId, { rotate: true }, instance.personId)
       const ran = yield* ranOnCodex(project.projectId)
-      assert.match(ran.said, /Fake codex \(main\) reached its usage limit, until [^.]+\. Fake codex \(work\) takes over/)
+      assert.match(ran.said, /Fake codex \(main\) ran out of usage [^,]+, until [^.]+\. Fake codex \(work\) takes the work over/)
       assert.deepStrictEqual(yield* sessionsOn(ran.threadId), [
         ['codex', usual?.id],
         ['codex', work.id],
       ])
       assert.deepInclude(
         launches.map(({ agentId, env }) => ({ agentId, env })),
-        { agentId: 'codex', env: { FAKE_HOME: workFolder } },
+        { agentId: 'codex', env: { FAKE_HOME: workFolder, ALTHAR_WORK: `task:${ran.taskId}` } },
       )
       // The usual account is out until its reset; the agent isn't, while work can run.
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'None')
@@ -429,7 +478,7 @@ describe('accounts', () => {
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'Some')
       assert.strictEqual((yield* limits.pick({ agentId: 'codex', projectId: project.projectId })).id, usual?.id)
       const limited = yield* ranOnCodex(project.projectId)
-      assert.match(limited.said, /Fake codex reached its usage limit, until [^.]+\. Fake claude-code takes over/)
+      assert.match(limited.said, /Fake codex ran out of usage [^,]+, until [^.]+\. Fake claude-code takes the work over/)
       assert.deepStrictEqual(
         (yield* sessionsOn(limited.threadId)).map(([agentId]) => agentId),
         ['claude-code'],

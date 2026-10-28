@@ -120,6 +120,8 @@ export enum LimitAnswer {
   Waiting = 'waiting',
   /** Tried the same agent again, as one that didn't say when it resets may be back. */
   Again = 'again',
+  /** Went on without the step: a review, skipped. */
+  Skipped = 'skipped',
 }
 
 /** A step of a task's graph. */
@@ -197,6 +199,12 @@ export enum GraphNodeState {
   Added = 'added',
   /** A stopped attempt, which stays, hollow. */
   Stopped = 'stopped',
+  /** It waits on you: a permission, a question, or a step that needs you. */
+  Waiting = 'waiting',
+  /** It waits for an agent: a free place on this machine, or one back from its usage limit. */
+  Held = 'held',
+  /** A change to the steps that waits for your say; dashed, in your colour, until you answer it. */
+  Proposed = 'proposed',
 }
 
 /** Your answer to a graph change that needs more than the run was given. */
@@ -227,6 +235,17 @@ export enum TaskActivity {
   Planned = 'planned',
   /** Nothing runs or waits to start. */
   Still = 'still',
+}
+
+/**
+ * What a task makes, read from what it has (DEV-96): a change ends in a pull
+ * request of its own, or has commits; a review reads someone else's; any
+ * other task is plain, and has no word on its card.
+ */
+export enum TaskKind {
+  Change = 'change',
+  Review = 'review',
+  Plain = 'plain',
 }
 
 /** What a task does with its work when it is done. */
@@ -318,6 +337,40 @@ export enum IssueDraftState {
   Discarded = 'discarded',
 }
 
+/** Where changes to issues stand: waiting on you, being applied, applied, not all applied, or discarded. */
+export enum IssueChangesState {
+  Pending = 'pending',
+  Applying = 'applying',
+  Applied = 'applied',
+  /** Not all of it applied: each issue says why, and applying it again tries what didn't. */
+  Failed = 'failed',
+  Discarded = 'discarded',
+}
+
+/** Where a review a lead drafted of someone else's pull request stands. */
+export enum ReviewDraftState {
+  Pending = 'pending',
+  Posting = 'posting',
+  Posted = 'posted',
+  Failed = 'failed',
+  /** Perhaps posted: the host's answer was lost, so the pull request is looked at before posting it again. */
+  Uncertain = 'uncertain',
+  Discarded = 'discarded',
+}
+
+/** What a review says of a pull request as a whole. */
+export enum ReviewVerdict {
+  Comment = 'comment',
+  Approve = 'approve',
+  Changes = 'changes',
+}
+
+/** Why a pull request counts as from outside the team: its branch is on a fork, or its author isn't one of the repository's people. */
+export enum Outside {
+  Fork = 'fork',
+  Author = 'author',
+}
+
 /** An entry of the agent's plan. */
 export enum PlanState {
   Done = 'done',
@@ -329,6 +382,7 @@ export enum PlanState {
 export enum AttachmentKind {
   Image = 'image',
   File = 'file',
+  Folder = 'folder',
   Paste = 'paste',
 }
 
@@ -403,6 +457,24 @@ export enum Wait {
   You = 'you',
 }
 
+/** Where a task a search found stands, in a word. */
+export enum FoundState {
+  /** Its plan waits to start. */
+  Planned = 'planned',
+  Running = 'running',
+  /** A call in it waits on you. */
+  Yours = 'you',
+  /** Done, waiting for you to accept it. */
+  Ready = 'ready',
+  /** Finished, not a change, and kept for later: out of Needs you as it is. */
+  Kept = 'kept',
+  Stopped = 'stopped',
+  Merged = 'merged',
+  /** Settled without a merge to show for it. */
+  Done = 'done',
+  Abandoned = 'abandoned',
+}
+
 /** What a piece of settled work came to. */
 export enum Outcome {
   Merged = 'merged',
@@ -467,6 +539,26 @@ export enum Room {
   Board = 'board',
   /** The conversation and the board side by side. */
   Both = 'both',
+  /** The work that starts by itself, on a schedule: the project's automations, each opening as its own page. */
+  Automations = 'automations',
+  /** The project's settings, in place of its work. */
+  Settings = 'settings',
+}
+
+/**
+ * One time an automation ran, or didn't, as its mark says it: starting (its
+ * task being made), running, made something, nothing to do, failed, missed
+ * (the Mac slept past its window), or skipped (paused, busy, its last run
+ * still going, too many of its pull requests open).
+ */
+export enum AutomationRunState {
+  Starting = 'starting',
+  Running = 'running',
+  Made = 'made',
+  Nothing = 'nothing',
+  Failed = 'failed',
+  Missed = 'missed',
+  Skipped = 'skipped',
 }
 
 /** Where an agent runtime on this machine stands, as Althar last found it. */
@@ -485,6 +577,8 @@ export enum RuntimeState {
   Installing = 'installing',
   /** Older than the versions Althar works with. */
   Outdated = 'outdated',
+  /** Althar couldn't check it this time; the others are checked all the same. */
+  Unchecked = 'unchecked',
 }
 
 /** How this device gets at a project's source. */

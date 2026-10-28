@@ -31,6 +31,38 @@ export const NothingTried: Story = {
   },
 }
 
+/**
+ * Its agent's service kept failing, though Althar waited longer between each
+ * try: nothing was wrong with the work, so Try again is the way on, first.
+ */
+export const ServiceKeptFailing: Story = {
+  args: {
+    step: 'Implement',
+    what: "Anthropic's service kept failing: API Error: 500 Internal server error. This is a server-side issue, usually temporary — try again in a moment. Try again, or hand the step to another agent.",
+    tried: [{ id: 'waited', what: 'Tried again 3 times, waiting longer each time', result: 'it failed each time' }],
+    tries: 3,
+    read: undefined,
+    output: undefined,
+    onAgain: fn(),
+    againFirst: true,
+  },
+  play: async ({ canvasElement }) => {
+    const [first] = within(canvasElement).getAllByRole('button')
+    await expect(first).toHaveAccessibleName('Try again')
+    // One line for all its tries, and the corner counts them all.
+    await expect(within(canvasElement).getByText('Implement, after 3 tries')).toBeInTheDocument()
+  },
+}
+
+export const TryingAgain: Story = {
+  args: ServiceKeptFailing.args,
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Try again' }))
+    await expect(args.onAgain).toHaveBeenCalled()
+    await expect(document.activeElement).toHaveTextContent('Trying again')
+  },
+}
+
 export const TellingTheLead: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
@@ -50,7 +82,7 @@ export const TellingTheLead: Story = {
 export const HandingToAnother: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Try another agent' }))
+    await userEvent.click(c.getByRole('button', { name: 'Hand to another agent' }))
     await userEvent.click(await within(document.body).findByRole('menuitem', { name: /Gemini 3 Pro/ }))
     await expect(args.onRetry).toHaveBeenCalledWith(STUCK.agents[0]!.model)
     await expect(document.activeElement).toHaveTextContent('Handed to')
@@ -62,7 +94,7 @@ export const Abandoning: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Tell the lead' }))
     await userEvent.click(c.getByRole('button', { name: 'Cancel' }))
-    await userEvent.click(c.getByRole('button', { name: 'Abandon' }))
+    await userEvent.click(c.getByRole('button', { name: 'Abandon this step' }))
     await expect(args.onAbandon).toHaveBeenCalledOnce()
     await expect(document.activeElement).toHaveTextContent('Abandoned')
   },
@@ -114,6 +146,18 @@ export const OutOfUsage: Story = {
   },
 }
 
+/** Report this, quiet at the end of its answers: it opens Report a problem with this task. */
+export const Reporting: Story = {
+  args: { onReport: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Report this' }))
+    await expect(args.onReport).toHaveBeenCalledOnce()
+    // It answers nothing: the step still waits.
+    await expect(c.getByRole('button', { name: 'Tell the lead' })).toBeInTheDocument()
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button:first-of-type', focus: 'button:first-of-type', pressed: 'button:first-of-type' }),
   render: (args) => (
@@ -124,6 +168,7 @@ export const AllStates: Story = {
         { state: 'no other agent', node: <Stuck {...args} agents={[]} /> },
         { state: 'bare', node: <Stuck {...args} read={undefined} output={undefined} /> },
         { state: 'nothing tried', node: <Stuck {...args} tried={[]} read={undefined} output={undefined} /> },
+        { state: 'with report this', node: <Stuck {...args} read={undefined} output={undefined} onReport={() => {}} /> },
         { state: 'tell, hover', force: 'hover', node: <Stuck {...args} read={undefined} output={undefined} /> },
         { state: 'tell, focus', force: 'focus', node: <Stuck {...args} read={undefined} output={undefined} /> },
       ]}

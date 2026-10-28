@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable, machine_busy
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -43,16 +43,23 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
--- external_kind: issue, change
+-- external_kind: issue, change, review
 -- repository_role: service, frontend, infrastructure, library, docs, other
 -- change_target: upstream, fork
 -- issue_draft_state: pending, filing, filed, failed, uncertain, discarded
 -- connection_cli: gh, glab, none
 -- conflict_resolution_state: resolving, checking, resolved, failed
+-- review_draft_state: pending, posting, posted, failed, uncertain, discarded
+-- review_verdict: approve, changes, comment
+-- issue_change_state: pending, applying, applied, failed, discarded
+-- automation_state: proposed, on, paused, deleted
+-- automation_paused_by: person, itself
+-- automation_occurrence_cause: schedule, now
+-- automation_occurrence_state: starting, running, made, nothing, failed, missed, skipped
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -92,7 +99,7 @@ CREATE TABLE projects (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   archived_at TEXT CHECK (archived_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'))) STRICT;
+, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber')), tracker_connection_id TEXT REFERENCES connections (id), tracker_container_id TEXT CHECK (tracker_container_id IS NULL OR tracker_connection_id IS NOT NULL), tracker_container_name TEXT CHECK ((tracker_container_name IS NULL) = (tracker_container_id IS NULL))) STRICT;
 
 CREATE TABLE policies (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'pol_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
@@ -192,7 +199,7 @@ CREATE TABLE tasks (
   created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)), line_at TEXT CHECK (line_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kept_at TEXT CHECK (kept_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), opened_at TEXT CHECK (opened_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -309,7 +316,7 @@ CREATE TABLE workspaces (
   state TEXT NOT NULL REFERENCES vocab_workspace_state (word),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   cleaned_at TEXT CHECK (cleaned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), setup TEXT CHECK (json_valid(setup)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), setup TEXT CHECK (json_valid(setup)), branched_at TEXT CHECK (branched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   UNIQUE (task_id, binding_id, device_id),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id),
@@ -400,7 +407,7 @@ CREATE TABLE user_inputs (
   state TEXT NOT NULL REFERENCES vocab_user_input_state (word),
   superseded_by_input_id TEXT,
   accepted_at TEXT NOT NULL CHECK (accepted_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), dictated INTEGER NOT NULL DEFAULT 0 CHECK (dictated IN (0, 1)),
   UNIQUE (thread_id, sequence),
   CHECK ((state = 'superseded') = (superseded_by_input_id IS NOT NULL)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
@@ -709,19 +716,6 @@ CREATE INDEX decisions_by_attention_request ON decisions (attention_request_id);
 
 CREATE INDEX decisions_by_finding ON decisions (finding_id);
 
-CREATE TABLE change_sets (
-  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'chg_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
-  project_id TEXT NOT NULL REFERENCES projects (id),
-  task_id TEXT NOT NULL,
-  run_id TEXT NOT NULL,
-  state TEXT NOT NULL REFERENCES vocab_change_set_state (word),
-  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
-  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
-  FOREIGN KEY (run_id, project_id) REFERENCES runs (id, project_id),
-  UNIQUE (id, project_id)
-) STRICT;
-
 CREATE TABLE repository_changes (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'rchg_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
   project_id TEXT NOT NULL REFERENCES projects (id),
@@ -792,8 +786,6 @@ CREATE TABLE observations (
   source TEXT NOT NULL,
   observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
 ) STRICT;
-
-CREATE INDEX change_sets_by_task ON change_sets (task_id);
 
 CREATE INDEX work_items_ready ON work_items (available_at) WHERE state = 'pending';
 
@@ -905,9 +897,7 @@ CREATE TABLE connections (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-, cli TEXT REFERENCES vocab_connection_cli (word)) STRICT;
-
-CREATE UNIQUE INDEX one_connection_per_account ON connections (device_id, product, web_url, account_id) WHERE state <> 'removed';
+, cli TEXT REFERENCES vocab_connection_cli (word), workspace_key TEXT, workspace_name TEXT) STRICT;
 
 CREATE TABLE external_links (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 6) = 'xlink_' AND length(id) = 38 AND substr(id, 7) NOT GLOB '*[^0-9a-f]*'),
@@ -1016,7 +1006,7 @@ CREATE TABLE issue_drafts (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   decided_at TEXT CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), priority TEXT CHECK (priority IN ('urgent', 'high', 'medium', 'low', 'none')),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   UNIQUE (id, project_id),
   CHECK ((state = 'filed') = (issue_url IS NOT NULL AND issue_ref IS NOT NULL AND issue_key IS NOT NULL)),
@@ -1074,3 +1064,239 @@ CREATE TABLE project_notes (
 ) STRICT;
 
 CREATE INDEX project_notes_kept ON project_notes (project_id) WHERE dropped_at IS NULL;
+
+CREATE TABLE review_drafts (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'rdr_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  task_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  connection_id TEXT NOT NULL REFERENCES connections (id),
+  product TEXT NOT NULL REFERENCES vocab_connection_product (word),
+  repository TEXT NOT NULL,
+  number INTEGER NOT NULL CHECK (number >= 1),
+  url TEXT NOT NULL,
+  title TEXT NOT NULL,
+  author TEXT NOT NULL,
+  outside INTEGER NOT NULL CHECK (outside IN (0, 1)),
+  head_commit TEXT NOT NULL CHECK (length(head_commit) IN (40, 64) AND head_commit NOT GLOB '*[^0-9a-f]*'),
+  drafter TEXT,
+  account TEXT,
+  suggested TEXT NOT NULL REFERENCES vocab_review_verdict (word),
+  verdict TEXT REFERENCES vocab_review_verdict (word),
+  summary TEXT NOT NULL,
+  comments TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(comments)),
+  state TEXT NOT NULL REFERENCES vocab_review_draft_state (word),
+  error TEXT,
+  review_ref TEXT,
+  review_url TEXT,
+  drafted_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  decided_at TEXT CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
+  FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
+  UNIQUE (id, project_id),
+  CHECK ((state = 'posted') = (review_ref IS NOT NULL AND decided_at IS NOT NULL)),
+  CHECK ((state IN ('failed', 'uncertain')) = (error IS NOT NULL)),
+  CHECK (state <> 'posted' OR verdict IS NOT NULL)
+) STRICT;
+
+CREATE INDEX review_drafts_by_task ON review_drafts (task_id);
+
+CREATE INDEX review_drafts_by_project ON review_drafts (project_id);
+
+CREATE TABLE task_search_rows (
+  id INTEGER PRIMARY KEY NOT NULL,
+  task_id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  title TEXT NOT NULL DEFAULT '',
+  asked TEXT NOT NULL DEFAULT '',
+  summaries TEXT NOT NULL DEFAULT '',
+  refs TEXT NOT NULL DEFAULT '',
+  files TEXT NOT NULL DEFAULT '',
+  changed_at TEXT NOT NULL CHECK (changed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  UNIQUE (task_id),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id)
+) STRICT;
+
+CREATE INDEX task_search_rows_by_project ON task_search_rows (project_id);
+
+CREATE VIRTUAL TABLE task_search USING fts5(title, asked, summaries, refs, files, content='task_search_rows', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+
+CREATE TABLE 'task_search_data'(id INTEGER PRIMARY KEY, block BLOB);
+
+CREATE TABLE 'task_search_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+
+CREATE TABLE 'task_search_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+
+CREATE TABLE 'task_search_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+
+CREATE TRIGGER task_search_added AFTER INSERT ON task_search_rows BEGIN
+  INSERT INTO task_search (rowid, title, asked, summaries, refs, files) VALUES (new.id, new.title, new.asked, new.summaries, new.refs, new.files);
+END;
+
+CREATE TRIGGER task_search_removed AFTER DELETE ON task_search_rows BEGIN
+  INSERT INTO task_search (task_search, rowid, title, asked, summaries, refs, files) VALUES ('delete', old.id, old.title, old.asked, old.summaries, old.refs, old.files);
+END;
+
+CREATE TRIGGER task_search_changed AFTER UPDATE ON task_search_rows BEGIN
+  INSERT INTO task_search (task_search, rowid, title, asked, summaries, refs, files) VALUES ('delete', old.id, old.title, old.asked, old.summaries, old.refs, old.files);
+  INSERT INTO task_search (rowid, title, asked, summaries, refs, files) VALUES (new.id, new.title, new.asked, new.summaries, new.refs, new.files);
+END;
+
+CREATE TABLE runnables (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'rnbl_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  binding_id TEXT NOT NULL,
+  name TEXT CHECK (name IS NULL OR length(trim(name)) > 0),
+  command TEXT CHECK (command IS NULL OR length(trim(command)) > 0),
+  position INTEGER NOT NULL CHECK (position >= 0),
+  kept_by_actor_id TEXT REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  dropped_by_actor_id TEXT REFERENCES actors (id),
+  dropped_at TEXT CHECK (dropped_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id)
+) STRICT;
+
+CREATE INDEX runnables_kept ON runnables (project_id, position) WHERE dropped_at IS NULL;
+
+CREATE TABLE "change_sets" (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'chg_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  task_id TEXT NOT NULL,
+  run_id TEXT,
+  state TEXT NOT NULL REFERENCES vocab_change_set_state (word),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
+  FOREIGN KEY (run_id, project_id) REFERENCES runs (id, project_id),
+  UNIQUE (id, project_id)
+) STRICT;
+
+CREATE INDEX change_sets_by_task ON change_sets (task_id);
+
+CREATE TABLE issue_changes (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'ich_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  thread_id TEXT NOT NULL,
+  changes TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(changes)),
+  note TEXT,
+  state TEXT NOT NULL REFERENCES vocab_issue_change_state (word),
+  error TEXT,
+  direct INTEGER NOT NULL DEFAULT 0 CHECK (direct IN (0, 1)),
+  proposed_by TEXT NOT NULL CHECK (proposed_by IN ('coordinator', 'lead', 'althar')),
+  proposed_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  decided_at TEXT CHECK (decided_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
+  UNIQUE (id, project_id),
+  CHECK ((state = 'failed') = (error IS NOT NULL))
+) STRICT;
+
+CREATE INDEX issue_changes_by_project ON issue_changes (project_id);
+
+CREATE INDEX issue_changes_by_thread ON issue_changes (thread_id, state);
+
+CREATE UNIQUE INDEX one_connection_per_account ON connections (device_id, product, web_url, account_id, coalesce(workspace_key, '')) WHERE state <> 'removed';
+
+CREATE TABLE automations (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'auto_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  device_id TEXT NOT NULL REFERENCES devices (id),
+  state TEXT NOT NULL REFERENCES vocab_automation_state (word),
+  paused_by TEXT REFERENCES vocab_automation_paused_by (word),
+  pause_reason TEXT,
+  definition INTEGER NOT NULL CHECK (definition >= 1),
+  posts_reviews INTEGER NOT NULL DEFAULT 0 CHECK (posts_reviews IN (0, 1)),
+  since TEXT CHECK (since GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  made_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  UNIQUE (id, project_id),
+  CHECK ((state = 'paused') = (paused_by IS NOT NULL)),
+  CHECK (state = 'paused' OR pause_reason IS NULL),
+  CHECK (state <> 'on' OR since IS NOT NULL)
+) STRICT;
+
+CREATE INDEX automations_by_project ON automations (project_id);
+
+CREATE TABLE automation_definitions (
+  automation_id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  number INTEGER NOT NULL CHECK (number >= 1),
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  parts TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(parts)),
+  made_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+  made_at TEXT NOT NULL CHECK (made_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (automation_id, number),
+  FOREIGN KEY (automation_id, project_id) REFERENCES automations (id, project_id)
+) STRICT;
+
+CREATE TABLE automation_occurrences (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'occ_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  automation_id TEXT NOT NULL,
+  definition INTEGER NOT NULL,
+  cause TEXT NOT NULL REFERENCES vocab_automation_occurrence_cause (word),
+  slot TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  subject_title TEXT,
+  state TEXT NOT NULL REFERENCES vocab_automation_occurrence_state (word),
+  reason TEXT,
+  task_id TEXT,
+  due_at TEXT NOT NULL CHECK (due_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  fired_at TEXT NOT NULL CHECK (fired_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  UNIQUE (id, project_id),
+  FOREIGN KEY (automation_id, project_id) REFERENCES automations (id, project_id),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
+  FOREIGN KEY (automation_id, definition) REFERENCES automation_definitions (automation_id, number),
+  UNIQUE (automation_id, slot, subject),
+  CHECK (state <> 'running' OR task_id IS NOT NULL),
+  CHECK ((state IN ('made', 'nothing', 'failed', 'missed', 'skipped')) = (ended_at IS NOT NULL))
+) STRICT;
+
+CREATE INDEX automation_occurrences_by_automation ON automation_occurrences (automation_id, fired_at);
+
+CREATE INDEX automation_occurrences_by_task ON automation_occurrences (task_id) WHERE task_id IS NOT NULL;
+
+CREATE INDEX automation_occurrences_by_project ON automation_occurrences (project_id);
+
+CREATE TABLE plan_usage_readings (
+  account_id TEXT NOT NULL REFERENCES agent_accounts (id),
+  agent_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  plan TEXT,
+  windows TEXT NOT NULL CHECK (json_valid(windows)),
+  observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (account_id)
+) STRICT;
+
+CREATE INDEX permission_requests_by_tool_call ON permission_requests (provider_session_id, tool_call_id);
+
+CREATE INDEX thread_items_questions ON thread_items (thread_id, provider_session_id, json_extract(content, '$.toolCallId')) WHERE kind = 'question';
+
+CREATE INDEX threads_by_task ON threads (task_id);
+
+CREATE INDEX turn_deliveries_by_thread ON turn_deliveries (thread_id);
+
+CREATE TABLE user_input_files (
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  user_input_id TEXT NOT NULL,
+  position INTEGER NOT NULL CHECK (position >= 1),
+  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 255),
+  kind TEXT NOT NULL CHECK (kind IN ('file', 'folder')),
+  media_type TEXT,
+  bytes INTEGER NOT NULL CHECK (bytes >= 0),
+  entries INTEGER CHECK ((entries IS NULL) = (kind = 'file') AND (entries IS NULL OR entries >= 0)),
+  path TEXT NOT NULL CHECK (length(path) >= 1),
+  PRIMARY KEY (user_input_id, position),
+  FOREIGN KEY (user_input_id, project_id) REFERENCES user_inputs (id, project_id)
+) STRICT;

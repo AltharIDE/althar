@@ -6,9 +6,11 @@ import { pathToFileURL } from 'node:url'
 
 import { build } from 'electron-builder'
 
+import { adapterPatchFor, applyAdapterPatch, assertAdapterPatched } from './adapterPatch.ts'
+import { binariesFor, speechPackage } from './binaries.ts'
 import { entitlementsFor } from './entitlements.ts'
 import { refresh } from './feed.ts'
-import { fetchNode, NODE_IN_APP } from './node.ts'
+import { fetchNode, NODE_IN_APP, nodeProgram } from './node.ts'
 import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
 
 /*
@@ -16,7 +18,9 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * (so without the end-to-end tests' hooks): on macOS, Althar.app, signed with
  * Althar's Developer ID under the hardened runtime and notarized where the
  * credentials are given, as a dmg and a zip with latest-mac.yml; on Linux,
- * an AppImage, deb and rpm, with latest-linux.yml for AppImage updates. All
+ * an AppImage, deb and rpm, with latest-linux.yml for AppImage updates; on
+ * Windows, an NSIS installer for x64 that installs for the person alone,
+ * with no administrator's prompt, with latest.yml for its updates. All
  * artifacts go to out/dist (ADR-024). The bundles hold
  * everything but the agent adapters, which run as processes of their own and
  * are found in node_modules, so the app is staged with the bundles, the
@@ -41,15 +45,20 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * Apple's notary credentials, fails instead. On Linux it makes an AppImage,
  * deb and rpm on the platform it runs on. The staged app includes the agent
  * adapters, speech engine and updater at the versions the workspace runs,
- * so the packages carry what dev and CI tested.
+ * so the packages carry what dev and CI tested. On Windows it makes the
+ * installer, unsigned for now: see `WINDOWS_SIGNING` below.
  */
 
 const desktop = join(import.meta.dirname, '..')
 const out = join(desktop, 'out')
 const stage = join(out, 'stage')
 const mac = process.platform === 'darwin'
-// The Linux packages are built on Linux: electron-builder has no deb, rpm or AppImage elsewhere, and left to it the three-package check below would fail without saying why.
-if (!mac && process.platform !== 'linux') throw new Error(`The Linux packages are built on Linux, not on ${process.platform}.`)
+const windows = process.platform === 'win32'
+// Each system's packages are built on it: electron-builder has no deb, rpm or AppImage off Linux, and left to it the three-package check below would fail without saying why.
+if (!mac && !windows && process.platform !== 'linux')
+  throw new Error(`Althar is packaged on macOS, Windows or Linux, not on ${process.platform}.`)
+// Windows is x64 alone for now, which Windows on ARM runs emulated.
+if (windows && process.arch !== 'x64') throw new Error(`The Windows installer is built for x64, not ${process.arch}.`)
 const dist = join(out, 'dist')
 const resources = join(desktop, 'resources')
 const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
@@ -74,6 +83,28 @@ const BINARIES: Record<string, string> = {
   '@openai/codex': '@agentclientprotocol/codex-acp',
   '@anthropic-ai/claude-agent-sdk': '@agentclientprotocol/claude-agent-acp',
 }
+
+/*
+ * WINDOWS_SIGNING: the slot for signing the Windows app and its installer
+ * (DEV-78 left it unsigned; SmartScreen warns until it is signed). Fill in
+ * `win` below with one of these, and release.yml's skipped "Sign" step
+ * says which secrets the release environment then needs:
+ *
+ *   Azure Artifact Signing (Trusted Signing): `azureSignOptions: { publisherName,
+ *   endpoint, codeSigningAccountName, certificateProfileName }`, from
+ *   ALTHAR_WIN_PUBLISHER, ALTHAR_WIN_SIGNING_ENDPOINT, ALTHAR_WIN_SIGNING_ACCOUNT
+ *   and ALTHAR_WIN_SIGNING_PROFILE, with AZURE_TENANT_ID, AZURE_CLIENT_ID and
+ *   AZURE_CLIENT_SECRET in the environment for electron-builder to sign in with.
+ *
+ *   An OV certificate as a .pfx: WIN_CSC_LINK (base64) and WIN_CSC_KEY_PASSWORD,
+ *   which electron-builder reads itself, and `signtoolOptions: { publisherName }`.
+ *
+ * Either way the publisher's name goes into app-update.yml, and from then on
+ * the updater installs only an update signed by it; an unsigned app's
+ * updater checks no signature, so the first signed release reaches it too.
+ * electron-builder signs before it writes latest.yml, so the feed needs no
+ * refreshing as the Mac's does.
+ */
 
 /** In CI (GitHub Actions sets CI=true), a release is signed and notarized, or it fails. */
 const ci = process.env.CI === 'true'
@@ -116,7 +147,11 @@ const installed = (name: string, adapter: string) => {
   if (found === undefined) throw new Error(`The workspace has no ${name} for ${adapter}`)
   return versionAt(found)
 }
-const pinned = Object.fromEntries(Object.entries(BINARIES).map(([name, adapter]) => [name, installed(name, adapter)]))
+const pinned = {
+  ...Object.fromEntries(Object.entries(BINARIES).map(([name, adapter]) => [name, installed(name, adapter)])),
+  // The speech engine's binaries for this platform, at the version of the engine itself, which names them only as ^ ranges.
+  [speechPackage(process.platform, process.arch)]: own.dependencies['sherpa-onnx-node'] ?? '',
+}
 
 rmSync(out, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
@@ -143,11 +178,36 @@ writeFileSync(
     2,
   )}\n`,
 )
-// npm, for a flat node_modules the adapters' own lookups find their way through.
-execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock'], { cwd: stage, stdio: 'inherit' })
+// npm, for a flat node_modules the adapters' own lookups find their way through. On Windows npm is npm.cmd, which only a shell runs.
+execFileSync(windows ? 'npm.cmd' : 'npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock'], {
+  cwd: stage,
+  stdio: 'inherit',
+  shell: windows,
+})
+// This install is npm's, which skips bun's patches: the Claude adapter's is applied here, or the app would not get plan usage before a turn's first figure.
+const CLAUDE_ADAPTER = join('node_modules', '@agentclientprotocol', 'claude-agent-acp')
+applyAdapterPatch(
+  join(stage, CLAUDE_ADAPTER),
+  adapterPatchFor(join(desktop, '..', '..'), own.dependencies['@agentclientprotocol/claude-agent-acp']),
+)
 for (const [name, version] of Object.entries(pinned)) {
   const staged = versionAt(join(stage, 'node_modules', name, 'package.json'))
   if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)
+}
+
+/** Where a package is, found from the package.json at `from` as Node would: by the folders Node looks in. */
+const folderOf = (from: string, name: string) => {
+  const found = (createRequire(from).resolve.paths(name) ?? [])
+    .map((folder) => join(folder, name))
+    .find((path) => existsSync(join(path, 'package.json')))
+  if (found === undefined) throw new Error(`The package has no ${name}, found from ${relative(stage, from)}`)
+  return found
+}
+// Codex, Claude Code and the speech engine for this platform, where the runtime looks for them (scripts/binaries.ts).
+for (const binary of binariesFor(process.platform, process.arch)) {
+  const parent = folderOf(join(stage, 'package.json'), binary.parent)
+  const program = join(folderOf(join(parent, 'package.json'), binary.name), binary.file)
+  if (!existsSync(program)) throw new Error(`The package is missing ${relative(stage, program)}`)
 }
 
 // Kept beside the workspace's packages, so it is fetched once, not for every package.
@@ -198,8 +258,8 @@ await build({
      */
     electronFuses: { runAsNode: false, enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },
     files: ['**/*'],
-    // The Node the adapters run on, with its license: `resources/node/bin/node`, where the window's process names it to the runtime.
-    extraResources: [{ from: node, to: NODE_IN_APP, filter: ['bin/node', 'LICENSE'] }],
+    // The Node the adapters run on, with its license: `resources/node/bin/node` (node.exe on Windows), where the window's process names it to the runtime.
+    extraResources: [{ from: node, to: NODE_IN_APP, filter: [`bin/${nodeProgram(process.platform)}`, 'LICENSE'] }],
     // The provider written into app-update.yml and the platform's latest*.yml feed; publication itself stays in the release workflow.
     publish: [RELEASES],
     ...(mac
@@ -228,19 +288,37 @@ await build({
               notarize(join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`), auth, join(out, 'notary'))
           },
         }
-      : {
-          linux: {
-            target: ['AppImage', 'deb', 'rpm'],
-            icon: join(resources, 'icons', 'cobalt.png'),
-            category: 'Development',
-            maintainer: 'Althar <hello@althar.ai>',
-            synopsis: 'Run software projects with AI coding agents',
-            description: 'Althar is an environment for running software projects with AI coding agents.',
-            syncDesktopName: true,
-          },
-          deb: { recommends: ['libappindicator3-1', 'gnome-keyring | kwallet6 | kwallet'] },
-          rpm: { fpm: ['--rpm-tag', 'Recommends: gnome-keyring'] },
-        }),
+      : windows
+        ? {
+            win: {
+              target: [{ target: 'nsis', arch: ['x64'] }],
+              icon: join(resources, 'icons', 'cobalt.png'),
+              // WINDOWS_SIGNING: `azureSignOptions` or `signtoolOptions` go here (see above).
+            },
+            nsis: {
+              // One click, for the person alone, in %LOCALAPPDATA%\Programs\althar: no administrator's prompt, and no choices to make.
+              oneClick: true,
+              perMachine: false,
+              allowElevation: false,
+              createStartMenuShortcut: true,
+              shortcutName: own.productName,
+              // A name with no spaces, which GitHub would turn into dots on upload, away from the name latest.yml gives it.
+              artifactName: '${productName}-${version}-x64-setup.${ext}',
+            },
+          }
+        : {
+            linux: {
+              target: ['AppImage', 'deb', 'rpm'],
+              icon: join(resources, 'icons', 'cobalt.png'),
+              category: 'Development',
+              maintainer: 'Althar <hello@althar.ai>',
+              synopsis: 'Run software projects with AI coding agents',
+              description: 'Althar is an environment for running software projects with AI coding agents.',
+              syncDesktopName: true,
+            },
+            deb: { recommends: ['libappindicator3-1', 'gnome-keyring | kwallet6 | kwallet'] },
+            rpm: { fpm: ['--rpm-tag', 'Recommends: gnome-keyring'] },
+          }),
   },
 })
 
@@ -254,12 +332,26 @@ if (mac) {
   const app = join(dist, process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
   for (const path of [app, dmg, made('-mac.zip'), join(dist, 'latest-mac.yml')])
     if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
+  // What ships, not only what was staged.
+  assertAdapterPatched(join(app, 'Contents', 'Resources', 'app', CLAUDE_ADAPTER))
   process.stdout.write(`\n${app}\n${dmg}\n${made('-mac.zip')}\n${join(dist, 'latest-mac.yml')}\n`)
+} else if (windows) {
+  const installer = join(dist, `${own.productName}-${own.version}-x64-setup.exe`)
+  const node = join(dist, 'win-unpacked', 'resources', NODE_IN_APP, 'bin', nodeProgram('win32'))
+  for (const path of [installer, `${installer}.blockmap`, join(dist, 'latest.yml'), node])
+    if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
+  // What ships, not only what was staged.
+  assertAdapterPatched(join(dist, 'win-unpacked', 'resources', 'app', CLAUDE_ADAPTER))
+  process.stdout.write(`\n${installer}\n${installer}.blockmap\n${join(dist, 'latest.yml')}\n`)
 } else {
   const made = readdirSync(dist).filter((name) => /\.(AppImage|deb|rpm)$/.test(name))
   if (made.length < 3) throw new Error(`The packages are missing: only ${made.length} were made (${made.join(', ')})`)
   const feed = join(dist, 'latest-linux.yml')
   if (!existsSync(feed)) throw new Error(`The package is missing ${feed}`)
+  // What ships, not only what was staged: the unpacked app (linux-unpacked, or linux-arm64-unpacked) the packages are made from.
+  const unpacked = readdirSync(dist).filter((name) => /^linux(-\w+)?-unpacked$/.test(name))
+  if (unpacked.length === 0) throw new Error(`The package is missing the unpacked app in ${dist}`)
+  for (const name of unpacked) assertAdapterPatched(join(dist, name, 'resources', 'app', CLAUDE_ADAPTER))
   for (const name of made) process.stdout.write(`${join(dist, name)}\n`)
   process.stdout.write(`${feed}\n`)
 }

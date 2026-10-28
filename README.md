@@ -3,7 +3,7 @@
 <h1 align="center">Every coding agent. One crew. Become your 10x self.</h1>
 
 <p align="center">
-  Althar runs Claude Code, Codex and OpenCode as one team, on the plans you already pay for.<br />
+  Althar runs Claude Code, Codex, GitHub Copilot, OpenCode and more as one team, on the plans you already pay for.<br />
   A coordinator plans the work, one agent builds it, another reviews it, and when one runs out the next takes over.<br />
   <b>Never has software engineering felt so good.</b>
 </p>
@@ -184,11 +184,25 @@ Subscriptions come and go. Your projects stay. Althar, stays.
 
 Everything runs on your machine. The project's tasks, threads and history are kept in a local database you can read.
 
+## What agents may do on your computer
+
+Each task works in a git worktree of its own, under `~/Althar`, never in your checkout. What an agent asks to do beyond its sandbox comes to Althar, which answers by the project's rules (Rules, in each project):
+
+- **By default,** what stays in the task goes ahead. These wait for you: pushing to the default branch, force pushes, pushing every branch or tags, deleting branches that aren't the task's, deploying and publishing, and writing outside the task's worktree, installing software for the whole computer among it.
+- **If the coordinator decides,** it answers the rest for you, never what waits for you or what could lose work.
+- **Allow everything,** for a project or one task, lets everything go ahead but what's under Never and what could lose work. These still wait for you: a force push, pushing to or deleting the default branch, deleting or moving by force a branch that isn't the task's, dropping or clearing git's stash, git throwing away work in another checkout or replacing a file there, deleting anything outside the task's worktree, a delete whose target Althar can't read until it runs (`xargs rm`, `rm -rf $DIR`), and reading a `.env` file outside it. Always allowing writes outside the worktree doesn't let these through either.
+- **On Windows,** the same holds for cmd's and PowerShell's commands, such as `rd /s`, `del` and `Remove-Item -Recurse`, and for paths with drive letters.
+- **Never, in any project:** reading your keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.npmrc`, the keychain and the like), or changing anything on GitHub or GitLab except through Althar. Agents run without your SSH agent, git's credential helpers and `gh`'s sign-in.
+
+Althar's own git never force pushes unless you press Push on rewritten commits, merges into your checkout only as a fast-forward with nothing uncommitted there, and never deletes your branches or worktrees.
+
+The rules see what reaches Althar. A command an agent's sandbox runs without asking (Claude Code and Codex run what stays in the worktree), and what a script does beyond its words, they don't. Keep work you care about committed and pushed.
+
 ## Your agents
 
 <table>
   <tr>
-    <td width="25%" align="center" valign="top">
+    <td width="20%" align="center" valign="top">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/claude-code-dark.svg" />
         <img src=".github/readme/agents/claude-code.svg" width="48" alt="" />
@@ -196,7 +210,7 @@ Everything runs on your machine. The project's tasks, threads and history are ke
       <b>Claude Code</b><br />
       Claude Pro or Max, or an API key
     </td>
-    <td width="25%" align="center" valign="top">
+    <td width="20%" align="center" valign="top">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/codex-dark.svg" />
         <img src=".github/readme/agents/codex.svg" width="48" alt="" />
@@ -204,7 +218,15 @@ Everything runs on your machine. The project's tasks, threads and history are ke
       <b>Codex</b><br />
       ChatGPT Plus, Pro or Business, or an API key
     </td>
-    <td width="25%" align="center" valign="top">
+    <td width="20%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/copilot-dark.svg" />
+        <img src=".github/readme/agents/copilot.svg" width="48" alt="" />
+      </picture><br />
+      <b>GitHub Copilot</b><br />
+      Copilot Pro, Pro+, Business or Enterprise
+    </td>
+    <td width="20%" align="center" valign="top">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/opencode-dark.svg" />
         <img src=".github/readme/agents/opencode.svg" width="48" alt="" />
@@ -212,21 +234,75 @@ Everything runs on your machine. The project's tasks, threads and history are ke
       <b>OpenCode</b><br />
       Any API key, or a local model
     </td>
-    <td width="25%" align="center" valign="top">
+    <td width="20%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/junie-dark.svg" />
+        <img src=".github/readme/agents/junie.svg" width="48" alt="" />
+      </picture><br />
+      <b>Junie</b><br />
+      JetBrains AI Pro or Ultimate, or a Junie key
+    </td>
+  </tr>
+  <tr>
+    <td width="20%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/grok-dark.svg" />
+        <img src=".github/readme/agents/grok.svg" width="48" alt="" />
+      </picture><br />
+      <b>Grok Build</b><br />
+      SuperGrok or X Premium+, or an xAI key
+    </td>
+    <td width="20%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/kimi-dark.svg" />
+        <img src=".github/readme/agents/kimi.svg" width="48" alt="" />
+      </picture><br />
+      <b>Kimi Code</b><br />
+      A Kimi Code membership
+    </td>
+    <td width="20%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/mistral-vibe-dark.svg" />
+        <img src=".github/readme/agents/mistral-vibe.svg" width="48" alt="" />
+      </picture><br />
+      <b>Mistral Vibe</b><br />
+      Le Chat Pro or Team, or a Mistral key
+    </td>
+    <td width="20%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/qwen-code-dark.svg" />
+        <img src=".github/readme/agents/qwen-code.svg" width="48" alt="" />
+      </picture><br />
+      <b>Qwen Code</b><br />
+      Alibaba Cloud Coding Plan, or any API key
+    </td>
+    <td width="20%" align="center" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/antigravity-dark.svg" />
+        <img src=".github/readme/agents/antigravity.svg" width="48" alt="" />
+      </picture><br />
+      <b>Google Antigravity</b><br />
+      A Google account, signed in inside Althar
+    </td>
+  </tr>
+  <tr>
+    <td width="20%" align="center" valign="top">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/on-the-way-dark.svg" />
-        <img src=".github/readme/agents/on-the-way.svg" width="150" alt="Gemini CLI, GitHub Copilot, Cursor, Qwen, Kimi and Mistral" />
+        <img src=".github/readme/agents/on-the-way.svg" width="72" alt="Cursor and Gemini CLI" />
       </picture><br />
-      <b>Many more on the way</b><br />
-      Any agent that speaks the <a href="https://agentclientprotocol.com">Agent Client Protocol</a> can join
+      <b>More on the way</b><br />
+      Any agent that speaks the <a href="https://agentclientprotocol.com">Agent Client Protocol</a> and can be held to asking can join (<a href="docs/decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md">which, and why</a>)
     </td>
   </tr>
 </table>
 
+Althar runs Claude Code and Codex through the ACP adapters it ships, and the others as you installed them. It starts each in a mode where it asks, and answers from your project's rules; what each still does without asking is in [its registry entry](packages/provider-adapters/src/registry.ts).
+
 ## Get started
 
 > [!NOTE]
-> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues).
+> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Report a problem (in Help on a Mac, or at the foot of the quick settings), which sends what happened with the app's logs, paths and repository names hidden. Crash reports go on their own, masked the same way and never with your code, until you turn them off on the first screen or in Settings.
 
 Sign in each agent you want to use with its own tool first:
 
@@ -241,6 +317,8 @@ codex login
 ```bash
 opencode auth login
 ```
+
+The others sign in with their own tools too: `copilot login`, `junie`, `grok login`, `kimi login`, `vibe --setup`, and `qwen` then `/auth`.
 
 Then [download Althar](https://github.com/AltharIDE/althar/releases/latest) for your system, open it, and pick the repositories your first project works in. The first screen shows which agents are ready.
 
@@ -271,4 +349,4 @@ The most useful thing you can do right now is use Althar on real work and tell u
 
 Althar is open source under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
 
-Claude, Codex, Gemini, OpenCode, GitHub, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
+Claude, Codex, Gemini, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.

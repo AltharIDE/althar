@@ -137,5 +137,5 @@
     var(--lift-2);
 }
 .jump:active {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }

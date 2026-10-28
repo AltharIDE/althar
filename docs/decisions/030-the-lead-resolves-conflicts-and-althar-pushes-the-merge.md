@@ -2,6 +2,17 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-12
+- **Amended:** 2026-10-27: a conflict is never skipped without a word. A
+  pull request's host works out whether it conflicts lazily and needn't say
+  so again when only its base moved, so Althar merges each open task's
+  branch with its fetched default branch here every few minutes, and at once
+  when it sees a pull request merge, rather than waiting for the host to say
+  so. A run that failed or was cancelled no longer keeps its idle lead from
+  being asked; a round the lead couldn't resolve is tried again once the
+  default branch moves on; a round under way when Althar stopped is asked
+  again rather than handed to the person. Where a conflict isn't asked of
+  the lead, its card and task say why in one line, with Resolve now, which
+  asks anyway; project settings can look at every open task now.
 - **Owner:** Repository maintainers
 - **Context:** A task's branch that conflicts with its default branch waited
   for the person. Merging here, a conflict offered a button that sent the
@@ -27,37 +38,72 @@
     going on, or a task's say where its lead wasn't resolving conflicts, has
     Althar look at once at each open task with a branch: a branch merging
     here is merged with its default branch without anything moving, and a
-    listened pull request is asked about now. What conflicts starts a round
-    as a conflict found later would, under the same rules.
+    listened pull request is asked about now, its target fetched and merged
+    here. What conflicts starts a round as a conflict found later would,
+    under the same rules. While on, "Look for conflicts now" beside the
+    switch does the same at any time.
+  - **A conflict is found here, as the default branch moves,** not only when
+    the host says so: every few listening turns, and at once when Althar sees
+    a pull request merge, each open task's branch is merged with its default
+    branch, fetched at most that often, without anything moving. A host
+    that hasn't worked it out yet is asked again soon, not taken for a no.
+  - **Never skipped without a word.** Where a conflicting task isn't asked
+    of its lead (the person stopped it, it has no lead, its folder isn't on
+    this computer, its target couldn't be fetched), its card and task say
+    why in one line, with Resolve now, which asks its lead regardless of the
+    rules, a stop, or a round handed back; one handed back offers it too.
+    Where Althar couldn't look here at all, with a pull request or not,
+    that is said whatever the host says, with Look again. Each reason is logged.
   - **On, a conflict is the lead's to resolve, unasked,** whether a merge
     here found it or the pull request's host said so. Althar sends the note
     the person's press sends, in the same words; for a pull request, the
     branch it goes into is fetched first, and the note says Althar pushes the
     merge.
-  - **Althar judges the branch, not the lead's word.** Once the lead's turn
-    is over, the branch it conflicted with must be in it, nothing half
-    merged, and no conflicted file with markers left. Not resolved, the lead
-    is asked once more with why; then it is the person's, in Needs you,
-    where the button's flow would leave it.
-  - **No review round.** The lead runs the checks and fixes what they find
-    before it commits the merge, and the pull request's checks run on what
-    Althar pushes.
+  - **Althar judges the branch, not the lead's word.** Once the lead is
+    done, the branch it conflicted with must be in it, nothing half merged,
+    and no conflicted file with markers left. Not resolved, the lead is
+    asked once more with why; then it is the person's, in Needs you, where
+    the button's flow would leave it. Where all that was left was to commit
+    the merge, the lead is told its merge is resolved but not committed, and
+    to commit it, not asked to resolve it again.
+  - **The lead commits before it finishes.** It commits the merge as soon as
+    the conflicts are settled and the quick checks pass, before the full
+    test suites, and doesn't end its turn with the merge uncommitted or
+    while it waits on something running in the background. If the full tests
+    then find something, it fixes it in one follow-up commit on top of the
+    merge.
+  - **Done is the turn over and nothing in hand.** A lead that backgrounded
+    the full tests and ended its turn isn't done: Claude Code wakes it when
+    they end (ADR-022), and it commits then. The round waits for a lead
+    with a command it left running going, in a call of its own, or that
+    spoke outside a turn Althar sent less than half a minute ago, as
+    `Sessions.busy` says; nothing says when a turn the agent starts itself
+    ends, so quiet is how it is told. A server it left running, which says
+    where it answers, isn't waited for. The wait is bounded (45 minutes),
+    and past it the branch is judged as it is, then asked once more and
+    given to the person as before.
+  - **No review round.** The lead runs the quick checks and commits the
+    merge, and the pull request's checks run on what Althar pushes.
   - **Althar pushes the resolution itself:** the one exception to "after the
     first push, pushing is the person's". Only the merge, made on the branch
     as the pull request had it, with nothing after it, and only where nobody
-    else asked the lead anything meanwhile. Where the branch had other
-    commits the pull request didn't, or anything else is on it, nothing is
-    pushed, and the task's Push card sends it all once the person has
-    looked. It uses the same push as that card, with the connection.
+    else asked the lead anything meanwhile, and with at most the one commit
+    the lead made on top of it for what the full tests found, the same
+    one commit a fix for failed checks is. Where the branch had other
+    commits the pull request didn't, or anything else is on it, such as
+    more than that one commit, nothing is pushed, and the task's Push card
+    sends it all once the person has looked. It uses the same push as that
+    card, with the connection.
   - **The round follows the checks on what Althar pushed.** Passed, the task
     is ready to merge. Failed, the lead is asked to fix them within the
     round, as one commit on top of the merge, and that commit alone is
     pushed in turn; anything after it waits for the person's Push. That fix
     is the lead's one more try: checks that fail again are the person's, in
     Needs you.
-  - **Only once the task's run has succeeded, and only until the person
-    stops it.** A task the person stopped isn't started again for a
-    conflict, and stopping or interrupting the lead, or stopping the task,
+  - **Only once the task's lead is idle, and only until the person stops
+    it.** A run that succeeded, failed or was cancelled leaves it idle; one
+    still going waits. A task the person stopped isn't started again for a
+    conflict, unless they press Resolve now, and stopping or interrupting the lead, or stopping the task,
     mid-round makes the round theirs: nothing more is pushed, and failed
     checks don't ask the lead again.
     Stopping listening to the pull request ends its round as well.
@@ -86,8 +132,10 @@
   - **A lead may settle a conflict in a way the person wouldn't,** and it
     goes up without them looking. The checks, and the pull request's own
     review on the host, are what stand between it and the default branch.
-  - **A host that doesn't say a pull request conflicts** (Bitbucket Cloud)
-    gets no help until the person merges here or asks.
+  - **Looking for conflicts here costs a fetch** of each repository's
+    default branch every couple of minutes while it has open pull requests,
+    and a merge without a working tree per task. It is what finds a conflict
+    when the host is slow or silent, Bitbucket Cloud included.
   - **Turning it on over a whole project may start several leads at once,**
     one per task that conflicts. That is what the person asked for, and each
     is a task already done, waiting to merge.
@@ -100,9 +148,20 @@
     work a lead slips into that very commit goes up with it; the checks, and
     the pull request's review, are what catch it. A fix split over several
     commits waits for the person.
-  - **A fix the checks needed found before the merge is committed is in the
-    merge.** A lead that commits it after the merge instead leaves the merge
-    for the person to push.
+  - **A fix the quick checks needed found before the merge is committed is
+    in the merge,** and one the full tests found after it is the one
+    commit on top. Two or more commits after the merge leave it for the
+    person to push. A test fix is told apart from other work only by being
+    the one commit; other work the lead slips into that commit goes up with
+    it, as it does in a fix for failed checks.
+  - **A lead that is woken after Althar judged it** has its commits wait for
+    the person's Push. Past the bound, or for an agent that says what it left
+    running only after its turn (Codex, ADR-022), a round can be judged
+    while tests still run.
+  - **The wait for "done" rests on quiet.** A turn Claude Code starts itself
+    shows as messages and calls with no end marker, so half a minute without
+    one is taken as the end. A long call the agent doesn't report as a call
+    of its own can outlast that.
 - **Revisit when:**
   - Althar runs a project's checks itself, rather than the lead: judge the
     resolution by them before pushing.

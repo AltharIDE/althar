@@ -6,15 +6,19 @@
   padding: 0;
   border: 0;
   border-radius: 99px;
-  background: var(--frost-well-hover);
+  background: var(--line-2);
   cursor: pointer;
   transition: background var(--base) var(--ease);
 }
 .switch:hover:not(:disabled) {
-  background: var(--line-2);
+  background: var(--line-3);
 }
 .switch[aria-checked='true'] {
-  background: var(--t-1);
+  background: var(--ink-fill);
+}
+/* on, a hover keeps it dark: the off hover's grey would read as off */
+.switch[aria-checked='true']:hover:not(:disabled) {
+  background: var(--t-2);
 }
 .switch:disabled {
   cursor: default;
@@ -27,12 +31,14 @@
   width: 14px;
   height: 14px;
   border-radius: 99px;
-  background: var(--on-ink);
+  background: var(--knob-off);
   box-shadow: 0 1px 2px rgba(20, 20, 28, 0.22);
   transition: translate var(--base) var(--ease-fold);
 }
 .switch[aria-checked='true'] .knob {
   translate: 12px 0;
+  /* on, the knob is the ink's own words on its fill: white on paper, dark on dark */
+  background: var(--on-ink);
 }
 .switch:active:not(:disabled) .knob {
   width: 16px;

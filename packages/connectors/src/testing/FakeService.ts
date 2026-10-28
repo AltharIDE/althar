@@ -4,12 +4,20 @@ import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
 import type {
   Account,
+  ChangeList,
   ChangeRequest,
+  ChangeState,
+  ChangeToReview,
   Check,
+  Choice,
   CodeHost,
   Comment,
   Container,
   Issue,
+  IssueChange,
+  IssueField,
+  ListedChange,
+  NewReview,
   Person,
   Product,
   Repository,
@@ -17,7 +25,7 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
-import { leftAsItIs, unstarted } from '../model'
+import { cantChange, leftAsItIs, noListing, noReviews, stillOpen, unchangeable, unstarted } from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -31,6 +39,14 @@ import { leftAsItIs, unstarted } from '../model'
  * such as a bare repository on disk.
  */
 
+/** A check as a fake host runs it: its log, or the refusal reading it meets, and its page. */
+export type FakeCheck = Pick<Check, 'name' | 'state'> & {
+  readonly log?: string | ConnectorFailed
+  readonly url?: string
+  /** Whether it runs again when asked: it does, unless the service says none do; false for one another CI service reported, or why the host refuses. */
+  readonly rerun?: false | ConnectorFailed
+}
+
 export interface FakeServiceOptions {
   readonly product?: Product
   readonly account?: Account
@@ -41,8 +57,53 @@ export interface FakeServiceOptions {
   /** Whether a change conflicts with its target, as the host works it out now; without it, the host doesn't say. */
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
-  readonly checksFor?: (number: number, sha: string) => ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }> | undefined
+  readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
+  /** Whether it lists changes: true unless said, as every host Althar knows does. */
+  readonly lists?: boolean
+  /** A scope the connection lacks, which listing changes needs: listing is refused for it, as a host refuses a token without it. */
+  readonly listLacks?: string
+  /** How many of the newest it reads before narrowing them, as a host that narrows a page at a time stops: all unless said. */
+  readonly listReads?: number
+  /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
+  readonly reruns?: boolean
+  /** Whether it reads changes to review: as GitHub does, unless said, and no other. */
+  readonly reviews?: boolean
+  /** Whether reading a change says the repository its branch is on: it does, unless a test says, as a host that can't. */
+  readonly saysHead?: boolean
+  /** What of an issue it updates: as its product's adapter does, unless a test says. */
+  readonly changes?: ReadonlyArray<IssueField>
 }
+
+/** What each product's adapter changes of an issue, as the fake takes them. */
+const CHANGES_OF = (product: Product): ReadonlyArray<IssueField> =>
+  product === 'linear'
+    ? ['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title']
+    : product === 'jira_cloud' || product === 'jira_dc'
+      ? ['status', 'close', 'priority', 'assignee', 'labels', 'title']
+      : product === 'trello'
+        ? ['status', 'close', 'assignee', 'labels', 'title']
+        : ['status', 'close', 'assignee', 'labels', 'project', 'title']
+
+/** A team's statuses, on the fake, as Linear's are: each with its category, in their order on the board. */
+const STATUSES: ReadonlyArray<Issue['status']> = [
+  { name: 'Backlog', category: 'backlog' },
+  { name: 'Todo', category: 'todo' },
+  { name: 'In Progress', category: 'started' },
+  { name: 'In Review', category: 'started' },
+  { name: 'Done', category: 'done' },
+  { name: 'Canceled', category: 'cancelled' },
+]
+
+/** A repository's, on the fake, as GitHub's are. */
+const OPEN_CLOSED: ReadonlyArray<Issue['status']> = [
+  { name: 'Open', category: 'todo' },
+  { name: 'Closed', category: 'done' },
+]
+
+/** The labels, people besides the account, and projects the fake's issues can be set to. */
+const LABELS = ['bug', 'docs', 'payments']
+const PEOPLE = [{ id: 'user-sam', login: 'sam', name: 'Sam Rivera' }]
+const PROJECTS = ['Q4 launch', 'Payments v2']
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
 export interface FakeControls {
@@ -75,23 +136,58 @@ export interface FakeControls {
     options?: { readonly path?: string; readonly line?: number; readonly bot?: boolean; readonly member?: boolean },
   ): Comment
   reviewAs(number: number, author: string, verdict: Verdict, body?: string, options?: { readonly member?: boolean }): Review
-  setChecks(number: number, checks: ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }>): void
+  setChecks(number: number, checks: ReadonlyArray<FakeCheck>): void
   /** Someone merges a change on the host itself. */
   mergeByHand(number: number): void
   close(number: number): void
+  /** Someone reopens a closed change on the host itself. */
+  reopen(number: number): void
   /** Someone marks a draft ready on the host itself. */
   readyByHand(number: number): void
   /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Althar's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
+  /** The ids of the checks Althar ran again, in order. */
+  readonly reruns: ReadonlyArray<string>
   /** Every issue `create` filed, in order, as it was filed: labels and all, since the fake takes any label. */
   readonly created: ReadonlyArray<Issue>
+  /** Every change `update` made, in order, with the issue's ref. */
+  readonly issueChanges: ReadonlyArray<{ readonly ref: string; readonly change: IssueChange }>
   commentsOn(number: number): ReadonlyArray<Comment>
   issueComments(ref: string): ReadonlyArray<string>
   linksOn(ref: string): ReadonlyArray<{ readonly url: string; readonly title: string }>
   /** The fork a change came from, by its path; null for one from the repository's own branch. */
   forkOf(number: number): string | null
+  /**
+   * Someone opens a change on one of the fake's repositories, as Althar
+   * reviews one it didn't open: its author one of the repository's people
+   * unless `member` says not, from a fork where `fork` names one (an empty
+   * path for a fork that is gone).
+   */
+  addPullRequest(input: {
+    readonly path: ReadonlyArray<string>
+    readonly title: string
+    readonly author: string
+    readonly body?: string
+    readonly member?: boolean
+    readonly fork?: ReadonlyArray<string>
+    readonly source?: string
+    readonly target?: string
+    readonly headSha?: string
+    readonly baseSha?: string
+    readonly state?: ChangeState
+    readonly additions?: number
+    readonly deletions?: number
+    readonly changedFiles?: number
+    readonly draft?: boolean
+    /** Whose review it asks for, by login. */
+    readonly reviewers?: ReadonlyArray<string>
+  }): ChangeRequest
+  /** Every review posted, in order, with the change it is on. */
+  readonly reviewsPosted: ReadonlyArray<{ readonly number: number; readonly id: string; readonly review: NewReview }>
+  /** Every branch `deleteBranch` deleted, by the number of the change it was the branch of, in order. */
+  readonly branchesDeleted: ReadonlyArray<number>
   /** Method names, in the order they were called. */
   readonly calls: ReadonlyArray<string>
 }
@@ -117,18 +213,34 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const repositoryOf = new Map<number, string>()
   /** The fork each change came from, by number, by its path. */
   const forks = new Map<number, string>()
+  /** Changes whose author isn't one of the repository's people, by number. */
+  const outsiders = new Set<number>()
+  /** Whose review each change asks for, by number, by login. */
+  const asked = new Map<number, ReadonlyArray<string>>()
+  /** Where each change's target branch is, by number, where a test says. */
+  const bases = new Map<number, string>()
+  const posted: Array<{ readonly number: number; readonly id: string; readonly review: NewReview }> = []
   const comments = new Map<number, Array<Comment>>()
   const reviews = new Map<number, Array<Review>>()
   const checks = new Map<number, Array<Check>>()
-  const logs = new Map<string, string | null>()
+  const logs = new Map<string, string | ConnectorFailed | null>()
+  const reran: Array<string> = []
+  const starting = new Set<string>()
+  /** Checks that don't run again when asked, by id: false, or the host's refusal. */
+  const fixed = new Map<string, false | ConnectorFailed>()
   const issues = new Map<string, Issue>()
   const assigned = new Set<string>()
   const issueComments = new Map<string, Array<string>>()
   const links = new Map<string, Array<{ readonly url: string; readonly title: string }>>()
   const containers = new Map<string, Container>()
   const created: Array<Issue> = []
+  const issueChanges: Array<{ readonly ref: string; readonly change: IssueChange }> = []
+  const changesHere = options.changes ?? CHANGES_OF(product)
+  /** Its statuses: a repository's issue is open or closed; any other has a team's. */
+  const statusesOf = (issue: Issue) => (issue.ref.includes('#') ? OPEN_CLOSED : STATUSES)
   const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
   const calls: Array<string> = []
+  const deleted: Array<number> = []
   let ids = 0
   const nextId = () => String((ids += 1))
 
@@ -174,7 +286,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const service: FakeService = {
     product,
     words: product === 'gitlab' ? { noun: 'merge request', short: 'MR', prefix: '!' } : { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: true, starts: true },
+    capabilities: {
+      drafts: true,
+      checkLogs: true,
+      threads: true,
+      reviews: options.reviews ?? product === 'github',
+      links: true,
+      starts: true,
+      changes: changesHere,
+    },
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
       Effect.andThen(called('repository'), () => {
@@ -232,7 +352,69 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (found === undefined) return Effect.fail(missing(`change ${number}`))
         const head = options.headOf?.(number) ?? null
         const conflicts = found.state === 'open' ? options.conflictsOf?.(number) : undefined
-        return Effect.succeed({ ...found, ...(head === null ? {} : { headSha: head }), ...(conflicts === undefined ? {} : { conflicts }) })
+        const fork = forks.get(number)
+        return Effect.succeed({
+          ...found,
+          ...(head === null ? {} : { headSha: head }),
+          ...(conflicts === undefined ? {} : { conflicts }),
+          ...(options.saysHead === false ? {} : { headRepository: fork === undefined ? null : fork === '' ? [] : fork.split('/') }),
+        })
+      }),
+    listChanges: (repository, query) =>
+      Effect.andThen(called('listChanges'), () => {
+        if (options.lists === false) return Effect.fail(noListing(product, service.words))
+        if (options.listLacks !== undefined)
+          return Effect.fail(
+            new ConnectorFailed({
+              product,
+              reason: 'forbidden',
+              status: 403,
+              message: 'Resource not accessible by token',
+              scope: options.listLacks,
+            }),
+          )
+        const words = (query.text ?? '')
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((word) => word !== '')
+        const newest = changes
+          .filter((change) => repositoryOf.get(change.number) === repository.id && (query.state === 'all' || change.state === query.state))
+          .toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : b.number - a.number))
+        const read = newest.slice(0, options.listReads ?? newest.length)
+        const found = read.filter(
+          (change) =>
+            (query.author === undefined || change.author?.login.toLowerCase() === query.author.toLowerCase()) &&
+            words.every((word) => change.title.toLowerCase().includes(word)) &&
+            (query.reviewRequested !== true || (asked.get(change.number) ?? []).includes(me.login)) &&
+            (query.draft === undefined || change.draft === query.draft) &&
+            (query.updatedUntil === undefined || change.updatedAt <= query.updatedUntil),
+        )
+        const listed = found.slice(0, query.limit).map((change): ListedChange => {
+          // Each reviewer's latest verdict: a request for changes holds over an approval.
+          const latest = new Map((reviews.get(change.number) ?? []).map((review) => [review.author.login, review.verdict]))
+          const verdicts = [...latest.values()]
+          const ran = checks.get(change.number) ?? []
+          const fork = forks.get(change.number)
+          return {
+            ...change,
+            body: '',
+            forkOwner: fork === undefined || fork === '' ? null : (fork.split('/')[0] ?? null),
+            reviewDecision: verdicts.includes('changes_requested')
+              ? 'changes_requested'
+              : verdicts.includes('approved')
+                ? 'approved'
+                : null,
+            checks:
+              ran.length === 0
+                ? null
+                : ran.some((check) => check.state === 'failed')
+                  ? 'failed'
+                  : ran.some((check) => check.state === 'queued' || check.state === 'running')
+                    ? 'running'
+                    : 'passed',
+          }
+        })
+        return Effect.succeed({ changes: listed, more: found.length > listed.length || read.length < newest.length } satisfies ChangeList)
       }),
     markReady: (_repository, change) =>
       Effect.andThen(called('markReady'), () => {
@@ -256,24 +438,57 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         update(change.number, { state: 'merged' })
         return Effect.succeed(changeNumbered(change.number))
       }),
+    closeChange: (_repository, change) =>
+      Effect.andThen(called('closeChange'), () => {
+        // As GitHub: one merged or closed already stays as it is.
+        if (changeNumbered(change.number).state === 'open') update(change.number, { state: 'closed' })
+        return Effect.succeed(changeNumbered(change.number))
+      }),
+    deleteBranch: (_repository, change) =>
+      Effect.andThen(called('deleteBranch'), () => {
+        if (changeNumbered(change.number).state === 'open') return Effect.fail(stillOpen(product, service.words, change.number))
+        if (!deleted.includes(change.number)) deleted.push(change.number)
+        return Effect.void
+      }),
     checks: (_repository, sha) =>
       Effect.andThen(called('checks'), () => {
         const change =
           changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
           changes.find((candidate) => `head-${candidate.number}` === sha)
         const ran = change === undefined ? undefined : options.checksFor?.(change.number, sha)
-        if (change === undefined || ran === undefined) return Effect.succeed(change === undefined ? [] : (checks.get(change.number) ?? []))
+        if (change === undefined || ran === undefined)
+          return Effect.succeed(
+            change === undefined
+              ? []
+              : (checks.get(change.number) ?? []).map((check) =>
+                  starting.delete(check.id) ? { ...check, state: 'running' as const } : check,
+                ),
+          )
         return Effect.succeed(
           ran.map((check, index): Check => {
             const id = `check-${change.number}-${sha}-${index}`
             logs.set(id, check.log ?? null)
-            return { id, name: check.name, state: check.state, url: null, summary: null }
+            if (check.rerun === undefined) fixed.delete(id)
+            else fixed.set(id, check.rerun)
+            // Run again, a check shows as running for a reading, as a host's does once it has started it again.
+            const again = starting.delete(id)
+            return { id, name: check.name, state: again ? 'running' : check.state, url: check.url ?? null, summary: null }
           }),
         )
       }),
     checkLog: (_repository, check) =>
       Effect.andThen(called('checkLog'), () => {
-        return Effect.succeed(logs.get(check.id) ?? null)
+        const log = logs.get(check.id) ?? null
+        return log instanceof ConnectorFailed ? Effect.fail(log) : Effect.succeed(log)
+      }),
+    rerun: (_repository, check) =>
+      Effect.andThen(called('rerun'), () => {
+        const again = fixed.get(check.id)
+        if (again instanceof ConnectorFailed) return Effect.fail(again)
+        if (options.reruns === false || again === false) return Effect.succeed(false)
+        reran.push(check.id)
+        starting.add(check.id)
+        return Effect.succeed(true)
       }),
     activity: (_repository, number, cursor) =>
       Effect.andThen(called('activity'), () => {
@@ -299,6 +514,31 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }
         comments.set(number, [...(comments.get(number) ?? []), comment])
         return Effect.succeed(comment)
+      }),
+    changeToReview: (_repository, number) =>
+      Effect.andThen(called('changeToReview'), () => {
+        if (!service.capabilities.reviews) return Effect.fail(noReviews(product, service.words))
+        const found = changes.find((change) => change.number === number)
+        if (found === undefined) return Effect.fail(missing(`change ${number}`))
+        const fork = forks.get(number)
+        return Effect.succeed({
+          ...found,
+          member: !outsiders.has(number),
+          fork: fork === undefined ? null : fork === '' ? [] : fork.split('/'),
+          baseSha: bases.get(number) ?? null,
+        } satisfies ChangeToReview)
+      }),
+    postReview: (_repository, number, review) =>
+      Effect.andThen(called('postReview'), () => {
+        if (!service.capabilities.reviews) return Effect.fail(noReviews(product, service.words))
+        const found = changes.find((change) => change.number === number)
+        if (found === undefined) return Effect.fail(missing(`change ${number}`))
+        // As GitHub: a change merged or closed takes no review; nor a comment on a line it doesn't have.
+        if (found.state !== 'open')
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 422, message: 'Pull request is closed' }))
+        const id = nextId()
+        posted.push({ number, id, review })
+        return Effect.succeed({ id, url: `${found.url}#pullrequestreview-${id}` })
       }),
     pushTarget: (repository) =>
       Effect.andThen(called('pushTarget'), () =>
@@ -342,6 +582,66 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         return Effect.succeed({ moved: true, status })
       }),
     containers: () => Effect.andThen(called('containers'), () => Effect.succeed(filable())),
+    choices: (issue, field) =>
+      Effect.andThen(called('choices'), (): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed> => {
+        const allowed: IssueField = field
+        if (!changesHere.includes(allowed)) return Effect.fail(cantChange(product, allowed, 'the fake has no such field'))
+        switch (field) {
+          case 'status':
+            return Effect.succeed(statusesOf(issue).map((status) => ({ id: status.name.toLowerCase(), name: status.name })))
+          case 'labels':
+            return Effect.succeed(LABELS.map((label) => ({ id: `label-${label}`, name: label })))
+          case 'assignee':
+            return Effect.succeed(
+              [me, ...PEOPLE].map((person) => ({ id: person.id, name: person.name ?? person.login, also: [person.login] })),
+            )
+          case 'project':
+            return Effect.succeed(PROJECTS.map((project) => ({ id: `project-${project.toLowerCase()}`, name: project })))
+        }
+      }),
+    update: (issue, wanted) =>
+      Effect.andThen(called('update'), () => {
+        const refused = unchangeable({ links: true, starts: true, changes: changesHere }, wanted)
+        if (refused !== undefined) return Effect.fail(cantChange(product, refused, 'the fake has no such field'))
+        const found = issues.get(issue.ref)
+        if (found === undefined) return Effect.fail(missing(`issue ${issue.ref}`))
+        const statuses = statusesOf(found)
+        const closed = statuses.find((status) => status.category === 'done')
+        const status =
+          wanted.status !== undefined
+            ? statuses.find((one) => one.name.toLowerCase() === wanted.status?.name.toLowerCase())
+            : wanted.close === true
+              ? closed
+              : found.status
+        if (status === undefined) return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'No such status' }))
+        const people = [me, ...PEOPLE.map((person) => ({ ...person, bot: false }))]
+        const removed = new Set((wanted.labels?.remove ?? []).map((label) => label.name.toLowerCase()))
+        const after: Issue = {
+          ...found,
+          status,
+          ...(wanted.title === undefined ? {} : { title: wanted.title }),
+          ...(wanted.priority === undefined
+            ? {}
+            : { priority: { level: wanted.priority, name: wanted.priority === 'none' ? 'No priority' : wanted.priority } }),
+          ...(wanted.assignee === undefined
+            ? {}
+            : { assignees: wanted.assignee === null ? [] : people.filter((person) => person.id === wanted.assignee?.id) }),
+          ...(wanted.labels === undefined
+            ? {}
+            : {
+                labels: [
+                  ...new Set([
+                    ...found.labels.filter((label) => !removed.has(label.toLowerCase())),
+                    ...wanted.labels.add.map((label) => label.name),
+                  ]),
+                ],
+              }),
+          updatedAt: now(),
+        }
+        issues.set(found.ref, after)
+        issueChanges.push({ ref: found.ref, change: wanted })
+        return Effect.succeed(after)
+      }),
     create: (id, draft) =>
       Effect.andThen(called('create'), () => {
         const container = filable().find((candidate) => candidate.id === id)
@@ -356,6 +656,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...service.addIssue({ ref, title: draft.title, body: draft.body, assigned: false }),
           labels: [...draft.labels],
           container: container.name,
+          // A priority where it takes them, as the adapters do; none without.
+          priority:
+            draft.priority === undefined || !changesHere.includes('priority')
+              ? null
+              : { level: draft.priority, name: draft.priority === 'none' ? 'No priority' : draft.priority },
         }
         issues.set(ref, filed)
         created.push(filed)
@@ -470,12 +775,13 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         list.map((check, index) => {
           const id = `check-${number}-${index}`
           logs.set(id, check.log ?? null)
-          return { id, name: check.name, state: check.state, url: null, summary: null }
+          return { id, name: check.name, state: check.state, url: check.url ?? null, summary: null }
         }),
       )
     },
     mergeByHand: (number) => update(number, { state: 'merged' }),
     close: (number) => update(number, { state: 'closed' }),
+    reopen: (number) => update(number, { state: 'open' }),
     readyByHand: (number) => update(number, { draft: false }),
     failNext: (method, reason, retryAt, status) =>
       void failures.set(method, {
@@ -483,16 +789,57 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         ...(retryAt === undefined ? {} : { retryAt }),
         ...(status === undefined ? {} : { status }),
       }),
+    get reruns() {
+      return reran
+    },
     get changes() {
       return [...changes]
     },
     get created() {
       return [...created]
     },
+    get issueChanges() {
+      return [...issueChanges]
+    },
     commentsOn: (number) => comments.get(number) ?? [],
     issueComments: (ref) => issueComments.get(ref) ?? [],
     linksOn: (ref) => links.get(ref) ?? [],
     forkOf: (number) => forks.get(number) ?? null,
+    addPullRequest: (input) => {
+      const repository = repositories.get(input.path.join('/').toLowerCase())
+      if (repository === undefined) throw new Error(`No repository ${input.path.join('/')}`)
+      const number = changes.length + 1
+      const opened: ChangeRequest = {
+        id: `change-${number}`,
+        number,
+        title: input.title,
+        body: input.body ?? '',
+        url: `${repository.webUrl}/pull/${number}`,
+        state: input.state ?? 'open',
+        draft: input.draft ?? false,
+        source: input.source ?? `${input.author}/change-${number}`,
+        target: input.target ?? repository.defaultBranch,
+        headSha: input.headSha ?? `head-${number}`,
+        author: person(input.author),
+        additions: input.additions ?? 58,
+        deletions: input.deletions ?? 20,
+        changedFiles: input.changedFiles ?? 4,
+        updatedAt: now(),
+      }
+      changes.push(opened)
+      repositoryOf.set(number, repository.id)
+      if (input.fork !== undefined) forks.set(number, input.fork.join('/'))
+      if (input.member === false) outsiders.add(number)
+      if (input.baseSha !== undefined) bases.set(number, input.baseSha)
+      if (input.reviewers !== undefined) asked.set(number, input.reviewers)
+      return opened
+    },
+    get reviewsPosted() {
+      return [...posted]
+    },
+    get branchesDeleted() {
+      return [...deleted]
+    },
     calls,
   }
   return service

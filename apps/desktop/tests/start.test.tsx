@@ -11,8 +11,9 @@ import { accountEntry } from '../src/renderer/features/accounts/AgentAccounts'
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
 import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
-import { SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
-import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
+import type { Section } from '../src/renderer/features/settings/sections'
+import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
+import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
 import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
@@ -34,10 +35,10 @@ function Start({ onProject }: { onProject: (id: string) => void }) {
   )
 }
 
-/* Settings, open on the agents. */
+/* The Settings tab, on the agents. */
 function Settings() {
-  const [open, setOpen] = useState(true)
-  return <SettingsPanel start={useStart()} open={open} onOpenChange={setOpen} />
+  const [section, setSection] = useState<Section>('agents')
+  return <SettingsPage start={useStart()} section={section} onSection={setSection} />
 }
 
 /** Codex, with the accounts given, as the runtime reads it: each read can be changed by the test. Here it signs in only in Terminal, unless given its ways. */
@@ -54,12 +55,8 @@ const withWays = (ways: AgentStatus['ways'], ...accounts: AgentStatus['accounts'
   }
 }
 
-/** The Codex accounts in the open panel. */
-const codexAccounts = async () => {
-  const panel = await screen.findByRole('dialog', { name: 'Settings' })
-  await userEvent.click(await within(panel).findByRole('button', { name: /^Agents/ }))
-  return within(panel).getByRole('list', { name: 'Codex accounts' })
-}
+/** The Codex accounts, on the Settings tab's agents. */
+const codexAccounts = () => screen.findByRole('list', { name: 'Codex accounts' })
 
 const work = { ...usual('acc_work', 'signed_in'), name: 'work', home: '/Users/me/work' }
 
@@ -87,6 +84,18 @@ describe('accounts in settings', () => {
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
   })
 
+  it('offers no second account for an agent whose sign-in every folder shares', async () => {
+    const one: Status = {
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: [{ ...agents[1]!, accounts: [usual('acc_usual', 'signed_in')], addsAccounts: false }],
+    }
+    const { client } = fakeClient({ status: vi.fn(async () => one) })
+    withServices(<Settings />, client)
+    await codexAccounts()
+    expect(screen.queryByRole('button', { name: 'Add an account' })).toBeNull()
+  })
+
   it(
     'signs a new account in in Terminal, in its line, says when it isn’t yet, and names it once it is',
     async () => {
@@ -96,11 +105,11 @@ describe('accounts in settings', () => {
       const accounts = await codexAccounts()
       await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
       expect(within(accounts).getByText('New account')).toBeTruthy()
-      await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
       await waitFor(() => expect(client.addAccount).toHaveBeenCalledWith({ agentId: 'codex', name: 'Account 3' }))
       await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
-      expect(await within(accounts).findByText('Finish signing in in Terminal')).toBeTruthy()
-      // While it signs in, a press outside leaves the panel open, and the list starts no other.
+      expect(await within(accounts).findByText('Finish signing in from the terminal')).toBeTruthy()
+      // While it signs in, the list starts no other.
       expect(screen.getByRole('button', { name: 'Add an account' }).hasAttribute('disabled')).toBe(true)
 
       // Back from Terminal, not signed in yet.
@@ -132,7 +141,7 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     const accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
     // Back from Terminal, and still it can't tell: not signed in yet.
     codex.next(usual('acc_usual', 'signed_in'), { ...usual('acc_added', 'unknown'), name: 'Account 2' })
@@ -276,7 +285,7 @@ describe('accounts in settings', () => {
     // Another way stops the agent's login, and offers the ways again.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Another way' }))
     expect(client.cancelAccountSignIn).toHaveBeenCalledWith('flow_account')
-    expect(within(accounts).getByRole('button', { name: 'In Terminal' })).toBeTruthy()
+    expect(within(accounts).getByRole('button', { name: 'In a terminal' })).toBeTruthy()
     // Signed in again: back to its line, nothing to name.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in again' }))
     finished = true
@@ -290,18 +299,16 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     const accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
-    await within(accounts).findByText('Finish signing in in Terminal')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
+    await within(accounts).findByText('Finish signing in from the terminal')
     await userEvent.click(within(accounts).getByRole('button', { name: 'Cancel signing in' }))
     await waitFor(() => expect(client.removeAccount).toHaveBeenCalledWith('acc_added'))
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
 
-    // Escape in the sign-in leaves it, not the panel; nothing was made yet, so nothing is removed.
+    // Escape in the sign-in leaves it; nothing was made yet, so nothing is removed.
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(within(accounts).queryByText('New account')).toBeNull())
     expect(client.removeAccount).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
   })
 
   it('opens Terminal again, and goes back to the ways in, removing the account made, signed out or not', async () => {
@@ -313,15 +320,15 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     const accounts = await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledTimes(1))
-    await userEvent.click(await within(accounts).findByRole('button', { name: 'Open Terminal again' }))
+    await userEvent.click(await within(accounts).findByRole('button', { name: 'Open the terminal again' }))
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledTimes(2))
 
     // Another way: the account made goes, signed out or not.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Another way' }))
     await waitFor(() => expect(removeAccount).toHaveBeenLastCalledWith('acc_added', true))
-    expect(within(accounts).getByRole('button', { name: 'Sign in in Terminal' })).toBeTruthy()
+    expect(within(accounts).getByRole('button', { name: 'Sign in from a terminal' })).toBeTruthy()
   })
 
   it('says what stopped a new account, and removes one made after the sign-in was left', async () => {
@@ -333,15 +340,15 @@ describe('accounts in settings', () => {
 
     // The runtime turning the new account down says why, and goes back to the ways in.
     vi.mocked(client.addAccount).mockRejectedValueOnce(new ApiError({ reason: 'AccountFailed', message: 'No room for another folder.' }))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in from a terminal' }))
     expect(await within(accounts).findByText('No room for another folder.')).toBeTruthy()
     await userEvent.click(within(accounts).getByRole('button', { name: 'Try again' }))
-    expect(within(accounts).getByRole('button', { name: 'Sign in in Terminal' })).toBeTruthy()
+    expect(within(accounts).getByRole('button', { name: 'Sign in from a terminal' })).toBeTruthy()
 
     // Left while the account was being made: it goes once it is.
     let made: (account: Awaited<ReturnType<typeof client.addAccount>>) => void = () => {}
     vi.mocked(client.addAccount).mockImplementationOnce(() => new Promise((resolve) => void (made = resolve)))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in from a terminal' }))
     await userEvent.click(within(accounts).getByRole('button', { name: 'Cancel signing in' }))
     await act(async () => made({ ...usual('acc_late', 'signed_out'), name: 'Account 2', home: '/late' }))
     await waitFor(() => expect(client.removeAccount).toHaveBeenCalledWith('acc_late'))
@@ -357,7 +364,7 @@ describe('accounts in settings', () => {
     withServices(<Settings />, client)
     await codexAccounts()
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in from a terminal' }))
     expect(await within(screen.getByRole('group', { name: 'New account' })).findByText('per use')).toBeTruthy()
   })
 
@@ -423,7 +430,7 @@ describe('accounts in settings', () => {
     expect(await within(accounts).findByText('codex isn’t installed')).toBeTruthy()
     // Try again goes back to its ways in.
     await userEvent.click(within(accounts).getByRole('button', { name: 'Try again' }))
-    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in in Terminal' }))
+    await userEvent.click(within(accounts).getByRole('button', { name: 'Sign in from a terminal' }))
     await waitFor(() => expect(signInAccount).toHaveBeenCalledTimes(3))
   })
 
@@ -492,7 +499,9 @@ describe('the start', () => {
       status: vi.fn(async () => ({
         apiVersion: 1,
         appVersion: '0.0.0',
-        agents: withoutOpenCode.map((agent) => (agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing } } : agent)),
+        agents: withoutOpenCode.map((agent) =>
+          agent.id === 'opencode' ? { ...agent, download: { size: '45 MB', installing, pinned: null } } : agent,
+        ),
       })),
       // The download runs until the test lets it end, so its row is seen downloading however slow the machine.
       installAgent: vi.fn(async () => {
@@ -503,14 +512,16 @@ describe('the start', () => {
       }),
     })
     withServices(<Start onProject={vi.fn()} />, client, fakeHost())
-    expect(await screen.findByText('Not installed on this Mac')).toBeTruthy()
-    expect(screen.getByText(/latest release from GitHub, about 45 MB/)).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Download' }))
+    // Under those on this Mac, a tile of its own: its size on its button, and no long note.
+    const away = await screen.findByRole('list', { name: 'Agents not on this Mac' })
+    expect(within(away).getByText('OpenCode')).toBeTruthy()
+    expect(screen.queryByText(/latest release from GitHub/)).toBeNull()
+    await userEvent.click(within(away).getByRole('button', { name: 'Download OpenCode, 45 MB' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
-    expect(await screen.findByText('Downloading OpenCode, about 45 MB, and checking it')).toBeTruthy()
+    expect(await screen.findByText('Downloading, 45 MB…')).toBeTruthy()
     finish()
     expect((await screen.findByRole('alert')).textContent).toBe('GitHub couldn’t be reached to find OpenCode.')
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again to download OpenCode, 45 MB' })).toBeTruthy()
   })
 
   it('offers the repositories found where people keep code, and makes the first project of those ticked', async () => {
@@ -563,6 +574,34 @@ describe('the start', () => {
         { grant: 'grant_r1', path: '/Users/me/Projects/meridian' },
       ],
     })
+  })
+
+  it('asks about crash reports once, as one quiet line with its switch at the first screen’s foot, on until turned off', async () => {
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+    const host = fakeHost()
+    const view = withServices(<Start onProject={vi.fn()} />, client, host)
+    const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
+    expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+    )
+    // Not a dialog, and nothing waits on it.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(crashes)
+    expect(host.setPreference).toHaveBeenLastCalledWith('crashReports', false)
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('false'))
+    view.unmount()
+
+    // DO_NOT_TRACK keeps it off, and the line says so.
+    withServices(
+      <Start onProject={vi.fn()} />,
+      fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) }).client,
+      fakeHost({ doNotTrack: true }),
+    )
+    const locked = await screen.findByRole('switch', { name: 'Crash reports' })
+    expect(locked.getAttribute('aria-checked')).toBe('false')
+    expect((locked as HTMLButtonElement).disabled).toBe(true)
+    expect(document.getElementById(locked.getAttribute('aria-describedby') ?? '')?.textContent).toBe('are off while DO_NOT_TRACK is set.')
   })
 
   it('adds a folder from anywhere, picked, by ⌘N or dropped, each of several repositories ticked, and opens one alone as itself', async () => {
@@ -751,6 +790,74 @@ describe('the start', () => {
       [RuntimeState.Ready, true],
       [RuntimeState.SignedOut, false],
     ])
+    // One Althar couldn't check says why on its own row, whatever else it holds.
+    const problem = "Althar couldn't check Codex. Its log has the details."
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    expect(runtimeEntry({ ...codex, installed: false, problem })).toEqual({
+      id: 'codex',
+      name: 'Codex',
+      brand: expect.any(String),
+      state: RuntimeState.Unchecked,
+      why: problem,
+    })
+  })
+
+  it('gives an agent not on this Mac its way in: a download, which version from whom, or only its maker’s page', () => {
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    // One with no mark Althar knows, and only its maker's page to install it from.
+    const aider = { ...codex, id: 'aider', name: 'Aider', installed: false, guide: 'https://aider.chat/docs/install.html' }
+    expect(runtimeEntry(aider)).toEqual({ id: 'aider', name: 'Aider', state: RuntimeState.Missing })
+    expect(runtimeEntry({ ...aider, download: { size: '45 MB', installing: true, pinned: null } })).toEqual({
+      id: 'aider',
+      name: 'Aider',
+      state: RuntimeState.Installing,
+      download: '45 MB',
+    })
+    expect(runtimeEntry({ ...aider, problem: 'Althar couldn’t check Aider.' })).toEqual({
+      id: 'aider',
+      name: 'Aider',
+      state: RuntimeState.Unchecked,
+      why: 'Althar couldn’t check Aider.',
+    })
+    // One version from its maker, with no page of its own, after a download that didn't finish.
+    const antigravity = {
+      ...aider,
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      guide: null,
+      download: { size: '330 MB', installing: false, pinned: '1.3.0' },
+    }
+    expect(runtimeEntry(antigravity, undefined, 'Google couldn’t be reached.')).toEqual({
+      id: 'antigravity',
+      name: 'Google Antigravity',
+      brand: expect.any(String),
+      guide: false,
+      state: RuntimeState.Missing,
+      download: '330 MB',
+      pinned: { from: 'Google', version: '1.3.0' },
+      failed: 'Google couldn’t be reached.',
+    })
+    // Here, with no page to open: none offered.
+    expect(runtimeEntry({ ...antigravity, installed: true })).toMatchObject({ id: 'antigravity', guide: false })
+  })
+
+  it('opens an agent’s page on installing it, where it has one', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    const model = {
+      status: {
+        agents: [
+          { ...codex, id: 'junie', guide: 'https://junie.jetbrains.com/' },
+          { ...codex, id: 'antigravity', guide: null },
+        ],
+      },
+    } as unknown as StartModel
+    for (const id of ['junie', 'antigravity', 'nobody']) openGuide(model, id)
+    expect(open.mock.calls).toEqual([['https://junie.jetbrains.com/', '_blank']])
+    open.mockRestore()
   })
 
   it('needs its services', () => {

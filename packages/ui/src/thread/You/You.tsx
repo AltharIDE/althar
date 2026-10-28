@@ -12,7 +12,7 @@ import s from './You.module.css'
 /** Something you attached to a message. */
 export type MessageAttachment =
   | ({ id: string; kind: AttachmentKind.Image } & ImageRef)
-  | { id: string; kind: AttachmentKind.File | AttachmentKind.Paste; name: string; meta?: string }
+  | { id: string; kind: AttachmentKind.File | AttachmentKind.Folder | AttachmentKind.Paste; name: string; meta?: string }
 
 export interface YouText {
   you: string
@@ -46,7 +46,7 @@ export type YouProps = RootProps<
     onOpenAttachment?: (a: MessageAttachment) => void
     /** Where it stands with the agent. Delivered by default. */
     delivery?: Delivery
-    /** A link you pasted, unfurled under the message. */
+    /** The links you pasted, unfurled in the bubble under what you said, so they read as part of the message. */
     unfurl?: ReactNode
     text?: Partial<YouText>
   }
@@ -78,10 +78,11 @@ function Status({ delivery, at, t }: { delivery: Delivery; at?: string; t: YouTe
 /** The images among a message's attachments, as the lightbox moves through them. */
 const imagesIn = (set: readonly MessageAttachment[]): ImageRef[] => set.flatMap((one) => (one.kind === AttachmentKind.Image ? [one] : []))
 
-/** What you said: a short bubble on the right, and above it what you sent with it. */
+/** What you said: a short bubble on the right, with the links you pasted unfurled in it, and above it what you sent with it. */
 export function You({ children, at, attach, onOpenAttachment, delivery = Delivery.Delivered, unfurl, text, className, ...rest }: YouProps) {
   const t = { ...youText, ...text }
   const queued = delivery === Delivery.Queued
+  const said = children !== '' && children != null
   return (
     <article
       data-rhythm={Rhythm.You}
@@ -97,8 +98,12 @@ export function You({ children, at, attach, onOpenAttachment, delivery = Deliver
         </div>
       )}
       {/* images sent with nothing written have no bubble of words */}
-      {children !== '' && children != null && <p className={s.body}>{children}</p>}
-      {unfurl && <div className={s.unfurl}>{unfurl}</div>}
+      {(said || unfurl) && (
+        <div className={s.body}>
+          {said && <p className={s.said}>{children}</p>}
+          {unfurl && <div className={s.unfurl}>{unfurl}</div>}
+        </div>
+      )}
       <span className={s.at}>
         <Status delivery={delivery} at={at} t={t} />
       </span>
@@ -141,12 +146,13 @@ function AttachmentChip({
       )
     }
     case AttachmentKind.File:
+    case AttachmentKind.Folder:
     case AttachmentKind.Paste: {
       const paste = a.kind === AttachmentKind.Paste
       const body = (
         <>
           <span className={s.icon}>
-            <Icon name={paste ? 'list' : 'file'} size={13} />
+            <Icon name={paste ? 'list' : a.kind === AttachmentKind.Folder ? 'folder' : 'file'} size={13} />
           </span>
           <span className={s.main}>
             <span className={s.name}>{a.name}</span>

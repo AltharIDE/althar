@@ -1,9 +1,13 @@
-import type { Picture, ThreadItem } from '@althar/contracts'
+import type { AttachedFile, Picture, ThreadItem } from '@althar/contracts'
 
 import { text as imagesText } from './images'
 import type { Streamed } from './thread'
 
 /* A thread's items as a window holds them: read a page at a time, and changed one by one. */
+
+/** What went with a queued message, in words: "2 images", "1 file", "1 image, 2 files". */
+const attachedText = (images: number, files: number) =>
+  [...(images === 0 ? [] : [imagesText.attached(images)]), ...(files === 0 ? [] : [files === 1 ? '1 file' : `${files} files`])].join(', ')
 
 /** The ids the window gives what the person sent until the store's copy arrives. */
 const SENDING = 'sending:'
@@ -19,8 +23,12 @@ export const sending = (
     readonly text: string
     readonly queued: boolean
     readonly interrupting: boolean
+    /** Some of its words were dictated. */
+    readonly dictated?: boolean
     /** The images sent with it. */
     readonly pictures?: ReadonlyArray<Picture>
+    /** The files and folders sent with it. */
+    readonly files?: ReadonlyArray<AttachedFile>
   },
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
   sent += 1
@@ -31,8 +39,12 @@ export const sending = (
     sequence: (items.at(-1)?.sequence ?? 0) + 0.5,
     agentId: null,
     createdAt: new Date().toISOString(),
-    content: { text: message.text, links: [], pictures: message.pictures ?? [] },
-    input: { state: message.queued ? 'queued' : 'delivered', interrupting: message.interrupting },
+    content: { text: message.text, links: [], pictures: message.pictures ?? [], files: message.files ?? [] },
+    input: {
+      state: message.queued ? 'queued' : 'delivered',
+      interrupting: message.interrupting,
+      ...(message.dictated === true ? { dictated: true } : {}),
+    },
   }
   return { id, items: [...items, item] }
 }
@@ -72,8 +84,8 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
  * An item that can't change any more: a tool call that completed or failed,
  * a message delivered (or never queued), a plan with every entry done, a
  * task settled, a question answered or withdrawn, a run or a setup ended, an issue
- * draft filed or discarded, a push the lead asked for pushed, asked again
- * or closed. What an agent
+ * draft filed or discarded, changes to issues applied or discarded, a review draft posted or discarded, a push the lead
+ * asked for pushed, asked again or closed, an automation deleted or its ask answered. What an agent
  * said, a notice, a step's result and what arrived from outside are settled
  * once written.
  */
@@ -94,8 +106,14 @@ export const settled = (item: ThreadItem): boolean => {
       return item.content.ended !== null
     case 'issue_draft':
       return item.content.state === 'filed' || item.content.state === 'discarded'
+    case 'issue_changes':
+      return item.content.state === 'applied' || item.content.state === 'discarded'
+    case 'review_draft':
+      return item.content.state === 'posted' || item.content.state === 'discarded'
     case 'push_request':
       return item.content.state !== 'open'
+    case 'automation':
+      return item.content.state === 'deleted' || item.content.ask?.done === true
     case 'agent_message':
     case 'agent_thought':
     case 'notice':
@@ -137,6 +155,20 @@ export const queueShown = (session: { readonly turnRunning: boolean } | null, se
   session === null ? !sending : session.turnRunning
 
 /**
+ * Whether what waits after the agent's last reply is being read now, with
+ * nothing to wait behind: no turn runs, and the person's own send is on its
+ * way (which may start the agent), or the agent holds the thread, idle or
+ * starting, with nothing keeping it from reading (`kept`, as a task waiting
+ * for a place or for its agent's usage). What it reads is the reply the
+ * person waits for, not a queue, while the agent starts as much as after.
+ */
+export const readingNow = (
+  session: { readonly turnRunning: boolean; readonly held: boolean; readonly state: string } | null,
+  sending: boolean,
+  kept = false,
+): boolean => !kept && session?.turnRunning !== true && (sending || session?.held === true || session?.state === 'starting')
+
+/**
  * What waits its turn, oldest first, in the composer where the person can
  * edit it or take it back, when the queue shows, with the images that went
  * with it. A message sent now isn't there: it goes first, as soon as the
@@ -145,7 +177,14 @@ export const queueShown = (session: { readonly turnRunning: boolean } | null, se
 export const queuedOf = (
   items: ReadonlyArray<ThreadItem>,
   shown: boolean,
-): ReadonlyArray<{ readonly id: string; readonly text: string; readonly attached?: string; readonly pictures: ReadonlyArray<Picture> }> =>
+): ReadonlyArray<{
+  readonly id: string
+  readonly text: string
+  readonly attached?: string
+  readonly pictures: ReadonlyArray<Picture>
+  readonly files: ReadonlyArray<AttachedFile>
+  readonly dictated?: boolean
+}> =>
   !shown
     ? []
     : items.flatMap((item) =>
@@ -154,8 +193,12 @@ export const queuedOf = (
               {
                 id: item.id,
                 text: item.content.text,
-                ...(item.content.pictures.length === 0 ? {} : { attached: imagesText.attached(item.content.pictures.length) }),
+                ...(item.content.pictures.length + item.content.files.length === 0
+                  ? {}
+                  : { attached: attachedText(item.content.pictures.length, item.content.files.length) }),
                 pictures: item.content.pictures,
+                files: item.content.files,
+                ...(item.input.dictated === true ? { dictated: true } : {}),
               },
             ]
           : [],
@@ -175,17 +218,26 @@ export const withQueued = (draft: string, text: string): string => (draft.trim()
 /**
  * Reads that can come back out of order, as the runtime answers each on its
  * own: an answer is kept only if no read of the same thing began after it,
- * so an earlier answer never puts back what a later one replaced.
+ * so an earlier answer never puts back what a later one replaced. `landed`
+ * waits for the newest read of a thing, whichever began last: the one kept.
  */
 export const newestReads = () => {
-  const begun = new Map<string, number>()
+  const begun = new Map<string, { readonly read: number; readonly landed: Promise<void> }>()
   let reads = 0
-  return <A>(key: string, read: Promise<A>, keep: (value: A) => void, fail: (failure: unknown) => void): Promise<void> => {
+  const newest = <A>(key: string, read: Promise<A>, keep: (value: A) => void, fail: (failure: unknown) => void): Promise<void> => {
     reads += 1
     const mine = reads
-    begun.set(key, mine)
-    return read.then((value) => {
-      if (begun.get(key) === mine) keep(value)
+    const landed = read.then((value) => {
+      if (begun.get(key)?.read === mine) keep(value)
     }, fail)
+    begun.set(key, { read: mine, landed })
+    return landed
   }
+  const landed = async (key: string) => {
+    for (let now = begun.get(key); now !== undefined; now = begun.get(key)) {
+      await now.landed
+      if (begun.get(key) === now) return
+    }
+  }
+  return Object.assign(newest, { landed })
 }

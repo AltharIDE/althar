@@ -102,20 +102,18 @@ export const NoEffort: Story = { render: () => <Example initial="qwen3-coder" op
 /** The model in use is not one of your pins; it shows first, marked. */
 export const NotPinned: Story = { render: () => <Example initial="gemini-3-flash" open /> }
 /**
- * Models of another runtime hand the conversation over, and say so; while
- * its agent works, picking one asks first.
+ * Models of another runtime hand the conversation over; while its agent
+ * works, picking one asks first.
  */
 export const HandingOver: Story = {
   args: {
     pinned: [OPUS, model('gpt-5.2-codex'), model('gemini-3-pro')],
     defaultOpen: true,
-    note: (x) => (x.runtime === OPUS.runtime ? undefined : `hands the task to ${RUNTIMES.find((r) => r.id === x.runtime)?.name}`),
     confirm: (x) => (x.runtime === OPUS.runtime ? undefined : 'Codex takes over from a brief; Claude Code’s turn stops.'),
     text: { proceed: 'Hand it over' },
   },
   play: async ({ args }) => {
     const page = within(document.body)
-    await expect(page.getByText('hands the task to Codex')).toBeInTheDocument()
     await userEvent.click(page.getByRole('radio', { name: /GPT-5.2 Codex/ }))
     await expect(page.getByText('Codex takes over from a brief; Claude Code’s turn stops.')).toBeInTheDocument()
     await expect(page.getByRole('button', { name: 'Hand it over' })).toHaveFocus()
@@ -125,6 +123,31 @@ export const HandingOver: Story = {
     await userEvent.click(page.getByRole('radio', { name: /GPT-5.2 Codex/ }))
     await userEvent.click(page.getByRole('button', { name: 'Hand it over' }))
     await expect(args.onChange).toHaveBeenCalledWith('gpt-5.2-codex')
+  },
+}
+
+/**
+ * Each model's room where work on it would start, at its row's end: from a
+ * quarter down, until when too. Codex, nearly out, says so beside the chip.
+ */
+export const Room: Story = {
+  args: {
+    model: model('gpt-5.2-codex'),
+    pinned: [OPUS, model('gpt-5.2-codex'), model('gemini-3-pro')],
+    defaultOpen: true,
+    room: (x) =>
+      x.runtime === 'codex'
+        ? { left: 3, until: '14:00', account: null }
+        : x.runtime === OPUS.runtime
+          ? { left: 62, until: '17:00', account: 'Side' }
+          : null,
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    await expect(page.getByText('Side · 62%')).toBeInTheDocument()
+    await expect(page.getByText('3% · until 14:00')).toBeInTheDocument()
+    await expect(page.getByText('no reading')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('3% left')).toBeInTheDocument()
   },
 }
 

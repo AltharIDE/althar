@@ -22,8 +22,8 @@ export const keyringIsSafe = (platform: NodeJS.Platform, backend: string): boole
  * Asking for gnome_libsecret on an unrecognised desktop or KDE is safe:
  * libsecret speaks the Secret Service API that gnome-keyring, KeePassXC and
  * KWallet all serve. In a Flatpak it is asked for every desktop because the
- * sandbox reaches the host's secret service, not KWallet's own socket. A
- * `--password-store` the person chose themselves is left alone.
+ * sandbox's libsecret file key is not where Chromium's host-service lookup
+ * expects it. A `--password-store` the person chose themselves is left alone.
  */
 export const passwordStore = (
   args: ReadonlyArray<string>,
@@ -39,8 +39,130 @@ export const passwordStore = (
   return flatpak || names.includes('kde') || !names.some((name) => recognised.includes(name)) ? 'gnome-libsecret' : null
 }
 
+/** Whether Flatpak sign-ins use Chromium's app-scoped Secret portal key. */
+export const sealsWithPortal = (flatpak: boolean, platform: NodeJS.Platform = process.platform): boolean => platform === 'linux' && flatpak
+
+/** Chromium's switch that makes the Secret portal key seal as well as open. */
+export const PORTAL_FEATURE = 'SecretPortalKeyProviderUseForEncryption'
+
+/** `--enable-features` with the portal key enabled, keeping switches the person passed. */
+export const withPortalFeature = (enabled: string): string => {
+  const features = enabled.split(',').filter(Boolean)
+  return (features.includes(PORTAL_FEATURE) ? features : [...features, PORTAL_FEATURE]).join(',')
+}
+
+/** Prefix for Chromium's per-application Secret portal key. */
+export const sealedByPortal = (sealed: Uint8Array): boolean => new TextDecoder().decode(sealed.subarray(0, 3)) === 'v12'
+
+/**
+ * Prefix of a sync safeStorage seal made with a key from the keyring: `v11`. Chromium's `v10` is its fixed key, used when there is
+ * no keyring password, so it is never accepted; this is only reached once Electron reports a real keyring.
+ */
+const sealedBySyncKeyring = (sealed: Uint8Array): boolean => new TextDecoder().decode(sealed.subarray(0, 3)) === 'v11'
+
+/** Shown when Chromium cannot obtain its per-app Secret portal key and no safe session fallback can seal. */
+export const portalKeyUnavailable =
+  'Althar has nowhere app-specific to keep sign-ins safely in this Flatpak: start a desktop Secret portal backed by a keyring, then try again.'
+
+/** Shown when a saved value cannot be opened by the available keyring. */
+export const portalSealUnavailable = "Althar couldn't open this saved sign-in safely. Sign in again to replace it."
+
+export interface SafeStorageLike {
+  getSelectedStorageBackend: () => string
+  isEncryptionAvailable: () => boolean
+  encryptString: (value: string) => Buffer
+  decryptString: (value: Buffer) => string
+  encryptStringAsync: (value: string) => Promise<Buffer>
+  decryptStringAsync: (value: Buffer) => Promise<{ result: string; shouldReEncrypt: boolean }>
+}
+
+export type SealReply = { value: string } | { error: string; keyring: true; unreadable?: true }
+
+/**
+ * A seal no key here opens: the keyring answered, it just can't open this. Marked `unreadable` as well, so the runtime has the
+ * sign-in made again (`reauth_required`) rather than report the keychain away, as `sealFailure` does off the portal.
+ */
+const unopenable: SealReply = { error: portalSealUnavailable, keyring: true, unreadable: true }
+
+const safeSyncKeyring = (storage: SafeStorageLike, platform: NodeJS.Platform): boolean => {
+  try {
+    const backend = platform === 'linux' ? storage.getSelectedStorageBackend() : 'keychain'
+    return (
+      storage.isEncryptionAvailable() &&
+      keyringIsSafe(platform, backend) &&
+      // The only Flatpak sync fallback that does not share its Chromium key
+      // with other applications is libsecret's sandbox-local file backend.
+      (platform !== 'linux' || backend === 'gnome_libsecret')
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Seal Flatpak secrets with Chromium's app-scoped Secret portal key when it
+ * answers. If it does not, keep the old safeStorage session behavior only
+ * when Electron reports a real keyring; never accept its shared-service or
+ * fixed-key async formats, or `basic_text`. A sync seal may stop opening after
+ * restart in a Flatpak, in which case the person signs in again.
+ */
+export const sealWithPortal = async (
+  sealing: boolean,
+  value: string,
+  storage: SafeStorageLike,
+  platform: NodeJS.Platform = process.platform,
+): Promise<SealReply> => {
+  if (sealing) {
+    try {
+      const sealed = await storage.encryptStringAsync(value)
+      if (sealedByPortal(sealed)) return { value: sealed.toString('base64') }
+    } catch {
+      // The portal provider is optional; try the session-scoped keyring path below.
+    }
+    if (!safeSyncKeyring(storage, platform)) return { error: portalKeyUnavailable, keyring: true }
+    try {
+      const sealed = storage.encryptString(value)
+      if (sealedBySyncKeyring(sealed)) return { value: sealed.toString('base64') }
+    } catch {
+      // The keyring became unavailable between the availability check and use.
+    }
+    return { error: keyringUnavailable(platform), keyring: true }
+  }
+
+  const sealed = Buffer.from(value, 'base64')
+  if (sealedByPortal(sealed)) {
+    try {
+      // shouldReEncrypt only says the seal came from another provider or an
+      // older key; the plaintext is already open, and the next save seals it anew.
+      const { result } = await storage.decryptStringAsync(sealed)
+      return { value: result }
+    } catch {
+      // A portal-sealed value cannot be opened by the session fallback.
+    }
+    return unopenable
+  }
+  if (!sealedBySyncKeyring(sealed)) return unopenable
+  if (!safeSyncKeyring(storage, platform)) return { error: keyringUnavailable(platform), keyring: true }
+  try {
+    return { value: storage.decryptString(sealed) }
+  } catch {
+    return unopenable
+  }
+}
+
 /** What the window says when secrets can't be sealed here: on Linux, what to install; elsewhere, that the keychain is missing. */
 export const keyringUnavailable = (platform: NodeJS.Platform): string =>
   platform === 'linux'
     ? 'Althar has nowhere safe to keep sign-ins: install and start a keyring (gnome-keyring or KWallet), then try again.'
     : 'The keychain Althar seals sign-ins with isn’t available.'
+
+/**
+ * What main answers the runtime when safeStorage throws. A failed open is not the keychain being away (that is answered before,
+ * as `keyring`): the keychain answered, and the key it holds doesn't open what Althar sealed. In a Flatpak whose libsecret keeps
+ * its keyring in a file of the sandbox's own, Chromium finds no key there and makes a new one at every start, so what an earlier
+ * run sealed can't be opened by the next. The runtime has the sign-in made again, rather than ask again.
+ */
+export const sealFailure = (type: 'seal' | 'open', error: unknown): { readonly error: string; readonly unreadable?: true } => ({
+  error: error instanceof Error ? error.message : String(error),
+  ...(type === 'open' ? { unreadable: true } : {}),
+})

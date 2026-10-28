@@ -5,13 +5,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type ProjectRulesView } from '@althar/contracts'
 
-import { RulesView } from '../src/renderer/features/rules/RulesView'
-import { useRules } from '../src/renderer/features/rules/useRules'
+import { RulesSection } from '../src/renderer/features/rules/RulesSection'
+import { useRules, withChange } from '../src/renderer/features/rules/useRules'
 import { agents, changed, fakeClient, projectRules, usual } from './fixtures'
 import { withServices } from './render'
 
-function Rules({ onBack = vi.fn() }: { onBack?: () => void }) {
-  return <RulesView model={useRules('p1')} onBack={onBack} />
+/** The rules, as their section of the project's settings has them: named by the page around them, so with no title of their own. */
+function Rules() {
+  return <RulesSection model={useRules('p1')} />
 }
 
 const rulesOf = (rules: Partial<ProjectRulesView>) => vi.fn(async () => ({ ...projectRules, ...rules }))
@@ -45,13 +46,15 @@ describe('a project’s rules', () => {
       }),
     })
     withServices(<Rules />, client)
-    await screen.findByRole('heading', { name: 'Rules', level: 1 })
-    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
+    await screen.findByRole('heading', { name: 'Always', level: 3 })
+    expect(screen.queryByRole('heading', { name: 'Rules' })).toBeNull()
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual([
       'Always',
       'Never',
       'Ask me',
       'Go ahead',
       'The rest',
+      'Sandbox',
       'Finished',
       'Limits',
     ])
@@ -93,7 +96,7 @@ describe('a project’s rules', () => {
     )
   })
 
-  it('changes what happens to the rest, and says while everything is allowed that what asks and goes ahead is off', async () => {
+  it('changes what happens to the rest, and says while everything is allowed that what asks, goes ahead and the rest is off', async () => {
     const { client } = fakeClient()
     withServices(<Rules />, client)
     await choose(
@@ -103,9 +106,65 @@ describe('a project’s rules', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', permissions: 'coordinator' }))
     expect(says('The rest')).toContain('the coordinator decides. What it can’t settle, and what Althar can’t read, comes to you.')
     expect(screen.queryByText('Off while everything is allowed.')).toBeNull()
-    await choose(within(sentence('The rest')).getByRole('button', { name: 'the coordinator decides' }), 'Allow everything')
-    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', permissions: 'allow' }))
-    expect(screen.getAllByText('Off while everything is allowed.')).toHaveLength(2)
+    // Allowing everything is the switch over the sentences, not what the rest gets.
+    await userEvent.click(screen.getByRole('switch', { name: 'Allow everything' }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', allowEverything: true }))
+    expect(screen.getAllByText('Off while everything is allowed.')).toHaveLength(3)
+  })
+
+  it('says what leads run outside their sandbox and the hosts they reach, and that hosts wait while the rest asks', async () => {
+    const { client } = fakeClient({ getProjectRules: rulesOf({}) })
+    withServices(<Rules />, client)
+    await screen.findByRole('heading', { name: 'Sandbox', level: 3 })
+    expect(says('Sandbox')).toBe(
+      'Leads run bunx playwright, node scripts/e2e.ts, ps and env -i outside their sandbox from the start. They reach github.com and registry.npmjs.org without asking. Each command still meets these rules.',
+    )
+    await choose(screen.getByRole('button', { name: 'allowed' }), 'Ask me')
+    await waitFor(() => expect(says('Sandbox')).toContain('registry.npmjs.org without asking, once everything else is allowed.'))
+  })
+
+  it('adds a host by its name and takes a command out, each kept as the person’s edit against the revision it read', async () => {
+    let kept: ProjectRulesView = { ...projectRules, revision: 4 }
+    const { client } = fakeClient({ getProjectRules: vi.fn(async () => kept) })
+    vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
+      expect(expectedRevision).toBe(kept.revision)
+      kept = { ...withChange(kept, change), projectId, revision: kept.revision + 1 }
+      return kept
+    })
+    withServices(<Rules />, client)
+    await screen.findByRole('heading', { name: 'Sandbox', level: 3 })
+    await userEvent.click(screen.getByRole('button', { name: 'Add a host leads reach without asking' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A host' }), 'not a host{Enter}')
+    expect(screen.getByRole('textbox', { name: 'A host', description: /isn’t a host/ })).toBeTruthy()
+    await userEvent.clear(screen.getByRole('textbox', { name: 'A host' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A host' }), '*.example.com{Enter}')
+    expect(screen.getByRole('textbox', { name: 'A host', description: /Name each host on its own/ })).toBeTruthy()
+    expect(client.setProjectRules).not.toHaveBeenCalled()
+    await userEvent.clear(screen.getByRole('textbox', { name: 'A host' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A host' }), 'HTTPS://PyPI.org/simple{Enter}')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p1',
+        sandbox: { hosts: { added: ['pypi.org'], removed: [] } },
+        expectedRevision: 4,
+      }),
+    )
+    await waitFor(() => expect(within(sentence('Sandbox')).getByText('pypi.org')).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: 'Remove env -i' }))
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p1',
+        sandbox: { commands: { added: [], removed: ['env -i'] } },
+        expectedRevision: 5,
+      }),
+    )
+    expect(screen.queryByRole('button', { name: 'Remove env -i' })).toBeNull()
+    // Claude Code keeps a line that starts with bun in its sandbox, whatever the list says.
+    const calls = vi.mocked(client.setProjectRules).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Add a command leads run outside their sandbox' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'A command, as it starts' }), 'bun run test:e2e{Enter}')
+    expect(screen.getByRole('textbox', { name: 'A command, as it starts', description: /starts with bun/ })).toBeTruthy()
+    expect(client.setProjectRules).toHaveBeenCalledTimes(calls)
   })
 
   it('takes a command out at once, and adds one where its sentence ends', async () => {
@@ -220,7 +279,7 @@ describe('a project’s rules', () => {
     vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
       expect(expectedRevision).toBe(kept.revision)
       await new Promise((resolve) => setTimeout(resolve, 150))
-      kept = { ...kept, ...change, projectId, revision: kept.revision + 1 }
+      kept = { ...withChange(kept, change), projectId, revision: kept.revision + 1 }
       return kept
     })
     withServices(<Rules />, client)
@@ -246,7 +305,7 @@ describe('a project’s rules', () => {
     vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
       // Each against its own project's rules.
       expect(expectedRevision).toBe(rulesFor(projectId).revision)
-      return { ...rulesFor(projectId), ...change, revision: rulesFor(projectId).revision + 1 }
+      return { ...withChange(rulesFor(projectId), change), revision: rulesFor(projectId).revision + 1 }
     })
     function Switching() {
       const [projectId, setProjectId] = useState('p1')
@@ -255,7 +314,7 @@ describe('a project’s rules', () => {
           <button type="button" onClick={() => setProjectId('p2')}>
             Another project
           </button>
-          <RulesView model={useRules(projectId)} onBack={vi.fn()} />
+          <RulesSection model={useRules(projectId)} />
         </>
       )
     }
@@ -287,7 +346,7 @@ describe('a project’s rules', () => {
     const { client, emit } = fakeClient({ getProjectRules })
     vi.mocked(client.setProjectRules).mockImplementation(async ({ projectId, expectedRevision, ...change }) => {
       expect(expectedRevision).toBe(1)
-      const kept = { ...server, ...change, projectId, revision: 2 }
+      const kept = { ...withChange(server, change), projectId, revision: 2 }
       // Saved; then a permission answered with always allow keeps a rule, and the watch says so before this answer arrives.
       server = { ...kept, commands: [{ pattern: 'git status', decision: 'allow' }], revision: 3 }
       emit(changed('policy', 'pol3', null, 'p1'))
@@ -336,7 +395,7 @@ describe('a project’s rules', () => {
       expect(expectedRevision).toBe(revision)
       await new Promise((resolve) => setTimeout(resolve, 30))
       revision += 1
-      return { ...projectRules, ...change, projectId, revision }
+      return { ...withChange(projectRules, change), projectId, revision }
     })
     withServices(<Rules />, client)
     await choose(await screen.findByRole('button', { name: 'force pushing' }), 'The rest')
@@ -447,23 +506,6 @@ describe('a project’s rules', () => {
     withServices(<Rules />, client)
     expect(await screen.findByRole('button', { name: 'as each repository says' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'each repository’s template, where it has one' })).toBeTruthy()
-  })
-
-  it('goes back on Escape, but not while something on the page takes it', async () => {
-    const onBack = vi.fn()
-    withServices(<Rules onBack={onBack} />, fakeClient().client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Add a command to Never' }))
-    await userEvent.keyboard('{Escape}')
-    expect(onBack).not.toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: 'force pushing' }))
-    await screen.findByRole('menu')
-    await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
-    expect(onBack).not.toHaveBeenCalled()
-    await userEvent.keyboard('{Escape}')
-    expect(onBack).toHaveBeenCalledTimes(1)
-    await userEvent.click(screen.getByRole('button', { name: /meridian/ }))
-    expect(onBack).toHaveBeenCalledTimes(2)
   })
 
   it('says what went wrong saving', async () => {

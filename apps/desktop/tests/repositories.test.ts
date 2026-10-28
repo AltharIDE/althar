@@ -20,10 +20,10 @@ const repo = (path: string, branch: string | null, daysAgo: number) => {
 describe('repositories where people keep code', () => {
   it('looks in the usual folders, and where Visual Studio and GitHub Desktop put them off a Mac, never in what a Mac guards', () => {
     const mac = placesFor('/Users/me', 'darwin')
-    expect(mac).toContain('/Users/me/Projects')
-    expect(mac).toContain('/Users/me/Developer')
+    expect(mac).toContain(join('/Users/me', 'Projects'))
+    expect(mac).toContain(join('/Users/me', 'Developer'))
     expect(mac.some((place) => /Documents|Desktop|Downloads/.test(place))).toBe(false)
-    expect(placesFor('/home/me', 'linux')).toContain('/home/me/Documents/GitHub')
+    expect(placesFor('/home/me', 'linux')).toContain(join('/home/me', 'Documents', 'GitHub'))
     expect(placesFor('C:\\Users\\me', 'win32').some((place) => place.endsWith(join('source', 'repos')))).toBe(true)
   })
 
@@ -64,8 +64,8 @@ describe('repositories where people keep code', () => {
       return `id${ids.size - 1}`
     })
     expect(shown).toMatchObject({
-      lookedIn: ['~/code'],
-      repositories: [{ id: 'id0', name: 'meridian', where: '~/code/meridian', branch: 'main' }],
+      lookedIn: [join('~', 'code')],
+      repositories: [{ id: 'id0', name: 'meridian', where: join('~', 'code', 'meridian'), branch: 'main' }],
     })
     expect(JSON.stringify(shown)).not.toContain(home)
     expect(ids.get('id0')).toBe(join(home, 'code', 'meridian'))
@@ -91,7 +91,7 @@ describe('repositories where people keep code', () => {
     const meridian = repo(join(home, 'code', 'meridian'), 'main', 1)
     const [found] = (await findRepositories(placesFor(home, 'darwin'))).repositories
     if (found === undefined) throw new Error('meridian wasn’t found')
-    expect(await stillFound(found)).toBe(realpathSync(meridian))
+    expect(await stillFound(found)).toBe(realpathSync.native(meridian))
     // Moved away, and a link to somewhere else left where it was.
     const elsewhere = repo(join(home, 'elsewhere'), 'main', 0)
     renameSync(meridian, join(home, 'moved'))
@@ -107,7 +107,7 @@ describe('repositories where people keep code', () => {
     symlinkSync(meridian, join(home, 'code'))
     const [found] = (await findRepositories(placesFor(home, 'darwin'))).repositories
     if (found === undefined) throw new Error('meridian wasn’t found')
-    expect(await stillFound(found)).toBe(realpathSync(meridian))
+    expect(await stillFound(found)).toBe(realpathSync.native(meridian))
     // Its .git gone, with a repository still inside it: not the repository found.
     repo(join(meridian, 'inner'), 'main', 0)
     rmSync(join(meridian, '.git'), { recursive: true })

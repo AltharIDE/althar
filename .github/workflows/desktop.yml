@@ -1,23 +1,9 @@
 name: desktop
 
+# On a pull request, the fast part: checks and unit tests, on Linux and on Windows, and on Windows one end-to-end smoke
+# test, since nothing else runs the app there. The coverage gate, the end-to-end run and the packages run after merge,
+# in post-merge.yml.
 on:
-  push:
-    branches: [main]
-    paths:
-      [
-        'apps/desktop/**',
-        'packages/connectors/**',
-        'packages/contracts/**',
-        'packages/domain/**',
-        'packages/persistence-sqlite/**',
-        'packages/provider-adapters/**',
-        'packages/runtime/**',
-        'packages/ui/**',
-        'package.json',
-        'bun.lock',
-        'vite.config.ts',
-        '.github/workflows/desktop.yml',
-      ]
   pull_request:
     paths:
       [
@@ -40,13 +26,12 @@ permissions:
 
 concurrency:
   group: desktop-${{ github.ref }}
-  # A run for main runs to the end; everywhere else a newer push takes over.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: apps/desktop
@@ -63,25 +48,88 @@ jobs:
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
-      - run: bun run test:coverage
-      # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
-      # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
-      # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
-      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
-      - run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e'
-      - uses: actions/upload-artifact@v6
-        if: failure()
-        with:
-          name: desktop-e2e
-          path: apps/desktop/test-results
-          retention-days: 7
+      - run: bun run test
 
-  # The packages as a build test on every branch: a broken package shows on the pull request.
-  package:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+  # Windows, where no one here works day to day: the checks and unit tests of the desktop app and everything it builds
+  # on, in parts that take about as long as each other, so what breaks there shows on the pull request. The runtime's
+  # tests, the longest, are split by file.
+  windows:
+    name: windows (${{ matrix.part }})
+    runs-on: windows-2025
+    # A few times a part's usual run (seven to ten minutes), so a hang fails here, not at the limit.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: desktop
+            packages: apps/desktop
+          - part: runtime 1/4
+            packages: packages/runtime
+            shard: 1/4
+          - part: runtime 2/4
+            packages: packages/runtime
+            shard: 2/4
+          - part: runtime 3/4
+            packages: packages/runtime
+            shard: 3/4
+          - part: runtime 4/4
+            packages: packages/runtime
+            shard: 4/4
+          - part: packages
+            packages: packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/ui
     defaults:
       run:
+        shell: bash
+    env:
+      # The runner's own temporary folder is under a short name (C:\Users\RUNNER~1), which git and Node's realpath give
+      # whole, and so differently from the paths the tests made; a person's is named whole. This one has no short name.
+      TEMP: ${{ runner.temp }}
+      TMP: ${{ runner.temp }}
+      # The runner's git checks text out with CRLF (core.autocrlf), which the repositories the tests make and read back
+      # don't expect: they write LF and compare it.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
+      - run: bun install --frozen-lockfile
+      # Each package's checks and tests, every one run even when one before it fails, so a run says all that broke.
+      - env:
+          PACKAGES: ${{ matrix.packages }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          failed=''
+          for package in $PACKAGES; do
+            echo "::group::$package"
+            (cd "$package" && bun run check && bun run test ${SHARD:+--shard=$SHARD}) || failed="$failed $package"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed on Windows:$failed"
+            exit 1
+          fi
+
+  # The app itself on Windows: built unpackaged, started, and a project made of a repository (e2e/smoke.spec.ts).
+  windows-e2e:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
         working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v5
@@ -91,14 +139,19 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/AppData/Local/electron/Cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: windows-bun-
       - run: bun install --frozen-lockfile
         working-directory: .
-      - run: bun run package
+      - run: bun run test:e2e e2e/smoke.spec.ts
       - uses: actions/upload-artifact@v6
+        if: failure()
         with:
-          name: desktop-packages
-          path: |
-            apps/desktop/out/dist/Althar-*.AppImage
-            apps/desktop/out/dist/althar_*.deb
-            apps/desktop/out/dist/althar-*.rpm
-          if-no-files-found: error
+          name: windows-e2e
+          path: apps/desktop/test-results
+          retention-days: 7

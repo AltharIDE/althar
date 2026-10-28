@@ -1,5 +1,5 @@
 import type { ActorId, DeviceId, ProjectId, RuntimeInstanceId } from '@althar/domain'
-import { osStartTime, stopProcessGroup, type StopReport } from '@althar/provider-adapters'
+import { osStartTime, platformTrees, stopProcessGroup, type StopReport } from '@althar/provider-adapters'
 import { Duration, Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -48,9 +48,10 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
     let stop: StopReport | undefined
     if (stale.pid !== null) {
       const leaderStarted = yield* osStartTime(stale.pid)
-      // Ours when the leader is the process recorded; or when the leader has gone but its group lives on, since a
+      // Ours when the leader is the process recorded; or, on Unix, when the leader has gone but its group lives on, since a
       // pid isn't reused while a group with that id exists. Then what the agent left running, such as a dev server, is stopped too.
-      const ours = leaderStarted === undefined || leaderStarted === stale.osStartedAt
+      // On Windows the tree went with its keeper, the leader recorded, and a pid without its start is another process's.
+      const ours = leaderStarted === undefined ? platformTrees().outlivesRoot : leaderStarted === stale.osStartedAt
       if (ours) stop = yield* stopProcessGroup(stale.pid, Duration.seconds(2))
     }
     const stopped = stop !== undefined && stop.signal !== 'none'
@@ -62,16 +63,29 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
     })
   }
 
-  // A worktree a crash interrupted: ready if git finished adding it, failed otherwise.
-  const preparing = yield* sql<{ id: string; projectId: ProjectId; path: string; branch: string }>`
-    SELECT id, project_id, path, branch FROM workspaces WHERE state = 'preparing' AND device_id = ${instance.deviceId}`
+  // A worktree a crash interrupted: ready if git finished adding it, on its branch or, a plain task's, on none; failed otherwise.
+  // A review's copy starts where its pull request's change does, as its review keeps it, not at the head it holds.
+  const preparing = yield* sql<{
+    id: string
+    projectId: ProjectId
+    path: string
+    branch: string
+    branched: number
+    starts: string | null
+  }>`
+    SELECT w.id, w.project_id, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
+      (SELECT json_extract(x.snapshot, '$.baseCommit') FROM external_links x WHERE x.task_id = w.task_id AND x.kind = 'review'
+        ORDER BY x.created_at LIMIT 1) AS starts
+    FROM workspaces w WHERE w.state = 'preparing' AND w.device_id = ${instance.deviceId}`
   for (const workspace of preparing) {
     const branch = yield* currentBranch(workspace.path)
-    const head = branch === workspace.branch ? yield* git(workspace.path, 'rev-parse', 'HEAD').pipe(Effect.option) : Option.none()
+    // With no branch, git finished once the folder is a worktree with a head, which reading it says.
+    const added = workspace.branched === 1 ? branch === workspace.branch : branch === undefined
+    const head = added ? yield* git(workspace.path, 'rev-parse', 'HEAD').pipe(Effect.option) : Option.none()
     const revision = yield* change(
       'workspaces',
       workspace.id,
-      Option.isSome(head) ? { state: 'ready', baseCommit: head.value } : { state: 'failed' },
+      Option.isSome(head) ? { state: 'ready', baseCommit: workspace.starts ?? head.value } : { state: 'failed' },
     )
     yield* fact({
       projectId: workspace.projectId,

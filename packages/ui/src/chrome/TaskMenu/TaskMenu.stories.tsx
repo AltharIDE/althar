@@ -36,6 +36,8 @@ export const DraftReady: Story = { args: { onStop: undefined, onMarkReady: fn(),
 export const Abandoned: Story = { args: { onStop: undefined, onAbandon: undefined, onReopen: fn(), defaultOpen: true } }
 /** Merged, it is done for good: only its folder opens. */
 export const Merged: Story = { args: { onStop: undefined, onAbandon: undefined, defaultOpen: true } }
+/** Merged with commits after its pull request in none yet, it is before you: abandoning leaves them out, and it stays merged. */
+export const MergedWithCommitsAfter: Story = { args: { onStop: undefined, merged: true, defaultOpen: true } }
 /** With no editor found, nothing but abandoning. */
 export const OnlyAbandon: Story = { args: { onOpen: undefined, onStop: undefined, defaultOpen: true } }
 /** Long words, as a translation might have them, wrap inside the menu. */
@@ -51,10 +53,31 @@ export const LongWords: Story = {
 }
 /** Open, its lead resolves conflicts as its project says, which the choice says too. */
 export const Conflicts: Story = { args: { conflicts: { choice: 'project', project: false, onChange: fn() }, defaultOpen: true } }
-/** Where it goes otherwise than its project, a quiet word beside the button says so. */
-export const ConflictsOtherwise: Story = { args: { conflicts: { choice: 'on', project: false, onChange: fn() } } }
-/** The same choice as its project's, said for the task alone, shows nothing beside the button. */
-export const ConflictsAsTheProject: Story = { args: { conflicts: { choice: 'on', project: true, onChange: fn() } } }
+/** Where it goes otherwise than its project, a dot on the button says so, and its tooltip how. */
+export const ConflictsOtherwise: Story = {
+  args: { conflicts: { choice: 'on', project: false, onChange: fn() } },
+  play: async ({ canvasElement }) => {
+    const button = within(canvasElement).getByRole('button', { name: 'More for this task' })
+    await expect(button).toHaveAccessibleDescription('Resolve conflicts automatically: on')
+  },
+}
+/** The same choice as its project's, said for the task alone, shows nothing on the button. */
+export const ConflictsAsTheProject: Story = {
+  args: { conflicts: { choice: 'on', project: true, onChange: fn() } },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'More for this task' })).not.toHaveAttribute('aria-describedby')
+  },
+}
+/** Open, everything its agents ask can be allowed with one switch. */
+export const AllowEverything: Story = { args: { allowEverything: { on: false, project: false, onChange: fn() }, defaultOpen: true } }
+/** Everything on it allowed, with its conflicts dot on the button as before. */
+export const AllowedEverything: Story = {
+  args: { allowEverything: { on: true, project: false, onChange: fn() }, conflicts: { choice: 'on', project: false, onChange: fn() } },
+}
+/** Its project allows everything: the task's switch shows on, held, and says where it is turned off. */
+export const AllowedByProject: Story = {
+  args: { allowEverything: { on: false, project: true, onChange: fn() }, onRules: fn(), defaultOpen: true },
+}
 /** With nothing it can do, there is no menu at all. */
 export const NothingToDo: Story = { args: { onOpen: undefined, onStop: undefined, onAbandon: undefined } }
 
@@ -72,18 +95,6 @@ export const OpeningTheFolder: Story = {
     await expect(args.onOpen).toHaveBeenCalledOnce()
   },
 }
-
-/** What it built runs, with no agent, beside opening it: the command it runs says what. */
-export const Running: Story = {
-  args: { onStop: undefined, onAbandon: undefined, editor: 'Zed' },
-  render: (args) => <TaskMenu {...args} run={{ command: 'bun run dev', onRun: runIt }} />,
-  play: async ({ canvasElement }) => {
-    const page = await opened(canvasElement)
-    await userEvent.click(await page.findByRole('menuitem', { name: /Run bun run dev/ }))
-    await expect(runIt).toHaveBeenCalledOnce()
-  },
-}
-const runIt = fn()
 
 export const Stopping: Story = {
   play: async ({ args, canvasElement }) => {
@@ -122,20 +133,69 @@ export const MarkingReady: Story = {
   },
 }
 
-const changing = fn()
-/** Choosing how its conflicts go says which; the word beside the button shows only where it isn't the project's. */
-export const ChangingConflicts: Story = {
-  args: { conflicts: { choice: 'project', project: true, onChange: changing } },
-  play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).queryByText('Auto-resolve conflicts: off')).toBeNull()
+/** Open, with Attach a pull request… among what it can do. */
+export const WithAttach: Story = { args: { onAttach: fn(), defaultOpen: true } }
+/** A task that follows the wrong pull request, or none, attaches one: the consumer asks which. */
+export const AttachingAPullRequest: Story = {
+  args: { onStop: undefined, onAttach: fn() },
+  play: async ({ args, canvasElement }) => {
     const page = await opened(canvasElement)
-    await expect(await page.findByRole('menuitemradio', { name: /Use the project setting/ })).toHaveAttribute('aria-checked', 'true')
-    await userEvent.click(await page.findByRole('menuitemradio', { name: /Off for this task/ }))
-    await expect(changing).toHaveBeenCalledWith('off')
+    await userEvent.click(await page.findByRole('menuitem', { name: /Attach a pull request…/ }))
+    await expect(args.onAttach).toHaveBeenCalledOnce()
   },
 }
 
-/** Abandoning is the menu's last item, set apart, and reached from the keyboard. */
+const changing = fn()
+/** How its conflicts go is three choices side by side, changed in place: the menu stays open to see it. */
+export const ChangingConflicts: Story = {
+  args: { conflicts: { choice: 'project', project: true, onChange: changing } },
+  play: async ({ canvasElement }) => {
+    const page = await opened(canvasElement)
+    const choices = await page.findByRole('group', { name: 'Resolve conflicts automatically' })
+    await expect(within(choices).getByRole('menuitemradio', { name: 'Project (on)' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(choices).getByRole('menuitemradio', { name: 'Off' }))
+    await expect(changing).toHaveBeenCalledWith('off')
+    await expect(page.getByRole('menu', { name: 'This task' })).toBeVisible()
+  },
+}
+
+const allowing = fn()
+/** Allowing everything on it is a switch at the row's end, which leaves the menu open. */
+export const AllowingEverything: Story = {
+  args: { allowEverything: { on: false, project: false, onChange: allowing } },
+  play: async ({ canvasElement }) => {
+    const page = await opened(canvasElement)
+    await userEvent.click(await page.findByRole('menuitemcheckbox', { name: /Allow everything on this task/ }))
+    await expect(allowing).toHaveBeenCalledWith(true)
+  },
+}
+
+const rules = fn()
+/** Where its project allows everything, the task's switch is held on, and pressing it opens the project's rules. */
+export const OpeningTheRules: Story = {
+  args: { allowEverything: { on: false, project: true, onChange: fn() }, onRules: rules },
+  play: async ({ canvasElement }) => {
+    const page = await opened(canvasElement)
+    const held = await page.findByRole('menuitem', { name: /Allow everything on this task/ })
+    await expect(held).toHaveAccessibleDescription(/On for every task in this project/)
+    await userEvent.click(held)
+    await expect(rules).toHaveBeenCalledOnce()
+  },
+}
+
+/** Every row is one line: what the one highlighted does shows at the menu's foot, and is its description either way. */
+export const SayingWhatItDoes: Story = {
+  args: { defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    const stop = await page.findByRole('menuitem', { name: /Stop the task/ })
+    await expect(stop).toHaveAccessibleDescription(/Every agent on it stops/)
+    await userEvent.hover(stop)
+    await expect(await page.findByText(/Every agent on it stops/, { selector: '[aria-hidden="true"]' })).toBeVisible()
+  },
+}
+
+/** Abandoning is the menu's last item, set apart, grey until it is pointed at, and reached from the keyboard. */
 export const Abandoning: Story = {
   play: async ({ args, canvasElement }) => {
     const page = await opened(canvasElement)

@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Schema } from 'effect'
 
 import { ConnectorFailed } from '../src/errors'
-import { failureOf, makeHttp } from '../src/http'
+import { ETAG_TEXT_KEPT, ETAGS_KEPT, failureOf, makeHttp } from '../src/http'
 import type { Product } from '../src/model'
 import { stubFetch } from './stub'
 
@@ -64,12 +64,102 @@ describe('a call to a service', () => {
     }),
   )
 
+  it.effect('keeps the answers asked for most lately, so a URL no longer asked for stops being kept', () =>
+    Effect.gen(function* () {
+      const { fetch, sent } = stubFetch([
+        [
+          'GET',
+          /^https:\/\/api\.test\/commits\//,
+          (request) =>
+            request.headers['if-none-match'] === `"${request.url}"`
+              ? { status: 304 }
+              : { json: { name: request.url }, headers: { etag: `"${request.url}"` } },
+        ],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      const url = (i: number) => `https://api.test/commits/${i}/checks`
+      for (let i = 0; i < ETAGS_KEPT; i++) yield* http.cached(Thing, url(i))
+      // The first is asked for again, so it is the second that goes when one more comes.
+      yield* http.cached(Thing, url(0))
+      yield* http.cached(Thing, url(ETAGS_KEPT))
+      sent.length = 0
+      yield* http.cached(Thing, url(0))
+      yield* http.cached(Thing, url(1))
+      assert.deepStrictEqual(
+        sent.map((request) => request.headers['if-none-match']),
+        [`"${url(0)}"`, undefined],
+      )
+    }),
+  )
+
+  it.effect('keeps no more of the answers’ text than its bound', () =>
+    Effect.gen(function* () {
+      const big = 'x'.repeat(ETAG_TEXT_KEPT / 2)
+      const { fetch, sent } = stubFetch([
+        [
+          'GET',
+          /^https:\/\/api\.test\/big\//,
+          (request) =>
+            request.headers['if-none-match'] === `"${request.url}"`
+              ? { status: 304 }
+              : { json: { name: big }, headers: { etag: `"${request.url}"` } },
+        ],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      yield* http.cached(Thing, 'https://api.test/big/1')
+      yield* http.cached(Thing, 'https://api.test/big/2')
+      sent.length = 0
+      assert.deepStrictEqual(yield* http.cached(Thing, 'https://api.test/big/2'), { name: big })
+      yield* http.cached(Thing, 'https://api.test/big/1')
+      assert.deepStrictEqual(
+        sent.map((request) => request.headers['if-none-match']),
+        ['"https://api.test/big/2"', undefined],
+      )
+    }),
+  )
+
   it.effect('reads text as it is', () =>
     Effect.gen(function* () {
       const { fetch, sent } = stubFetch([['GET', 'https://api.test/log', { text: 'line 1\nline 2' }]])
       const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
       assert.strictEqual(yield* http.text('https://api.test/log'), 'line 1\nline 2')
       assert.strictEqual(sent[0]?.headers.accept, '*/*')
+    }),
+  )
+
+  it.effect('follows a text’s redirects itself, signed in only on the service’s own origin', () =>
+    Effect.gen(function* () {
+      const { fetch, sent } = stubFetch([
+        ['GET', 'https://api.test/log', { status: 301, headers: { location: '/moved/log' } }],
+        ['GET', 'https://api.test/moved/log', { status: 302, headers: { location: 'https://storage.test/log?sig=s' } }],
+        ['GET', 'https://storage.test/log?sig=s', { text: 'line 1' }],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t'), headers: { 'x-api': '1' } })
+      assert.strictEqual(yield* http.text('https://api.test/log'), 'line 1')
+      assert.deepStrictEqual(
+        sent.map((request) => [request.url, request.headers.authorization, request.headers['x-api'], request.redirect]),
+        [
+          ['https://api.test/log', 'Bearer t', '1', 'manual'],
+          ['https://api.test/moved/log', 'Bearer t', '1', 'manual'],
+          ['https://storage.test/log?sig=s', undefined, undefined, 'manual'],
+        ],
+      )
+    }),
+  )
+
+  it.effect('says where a redirected text was refused, and stops following a loop', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([
+        ['GET', 'https://api.test/log', { status: 302, headers: { location: 'https://storage.test/log' } }],
+        ['GET', 'https://storage.test/log', { status: 401, text: '<?xml version="1.0"?>\n<Error/>' }],
+        ['GET', 'https://api.test/round', { status: 302, headers: { location: 'https://api.test/round' } }],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      // Refused there, it is the signed address that was, not Althar's sign-in, which never went there.
+      const refused = failure(yield* Effect.exit(http.text('https://api.test/log')))
+      assert.strictEqual(refused?.reason, 'rejected')
+      assert.strictEqual(refused?.message, 'storage.test answered 401')
+      assert.strictEqual(failure(yield* Effect.exit(http.text('https://api.test/round')))?.reason, 'invalid_response')
     }),
   )
 
@@ -285,6 +375,7 @@ describe('a GraphQL call', () => {
     [{ message: 'Authentication required', extensions: { code: 'AUTHENTICATION_ERROR' } }, 'unauthorized'],
     [{ message: 'Slow down', extensions: { code: 'RATELIMITED' } }, 'rate_limited'],
     [{ message: 'No', type: 'FORBIDDEN' }, 'forbidden'],
+    [{ message: 'Your token has not been granted the required scopes to execute this query.', type: 'INSUFFICIENT_SCOPES' }, 'forbidden'],
     [{ message: 'Gone', type: 'NOT_FOUND' }, 'not_found'],
     [{ message: 'Entity not found', extensions: { type: 'entity not found' } }, 'rejected'],
     [{ message: 'Bad input' }, 'rejected'],

@@ -50,6 +50,7 @@
  */
 .ink {
   --t-1: var(--term-t1);
+  --ink-fill: var(--term-t1);
   --t-2: var(--term-t2);
   --t-3: var(--term-t4);
   --t-4: #6e6d72;
@@ -60,14 +61,37 @@
   --n-3: rgba(255, 255, 255, 0.05);
   --n-4: rgba(255, 255, 255, 0.08);
   --paper: rgba(255, 255, 255, 0.1);
+  --hover-paper: rgba(255, 255, 255, 0.06);
+  --pressed-paper: rgba(255, 255, 255, 0.08);
+  --chip: rgba(255, 255, 255, 0.08);
+  --well: rgba(255, 255, 255, 0.06);
+  --segment-track: rgba(255, 255, 255, 0.06);
+  --segment-on: rgba(255, 255, 255, 0.14);
+  --knob: rgba(255, 255, 255, 0.85);
+  --tile: rgba(255, 255, 255, 0.06);
+  --tile-hover: rgba(255, 255, 255, 0.11);
+  --ring-track: rgba(255, 255, 255, 0.16);
+  --selection: rgba(167, 123, 255, 0.38);
+  /* the night's look of parts (dark.css) is not the island's: it is the same black in every theme */
+  --kbd-ink: initial;
+  --kbd-ink-chosen: initial;
+  --kbd-fill-wash: initial;
+  --kbd-fill-ring: initial;
+  --field-hover: initial;
+  --icon-edge: initial;
+  --logo-tile: initial;
+  --logo-ink: initial;
+  --logo-edge: initial;
   --sunk: rgba(255, 255, 255, 0.08);
   --lift: none;
   --live: var(--live-on-ink);
   --signal: var(--signal-on-ink);
   --signal-bright: var(--signal-on-ink-hover);
   --signal-pressed: var(--signal-on-ink-pressed);
+  --signal-fill: var(--signal-on-ink);
+  --signal-fill-hover: var(--signal-on-ink-hover);
+  --signal-fill-pressed: var(--signal-on-ink-pressed);
   --on-signal: #141417;
-  --edge-hover: rgba(255, 255, 255, 0.05);
   --danger: var(--term-danger);
   color-scheme: dark;
 }

@@ -13,6 +13,9 @@ import { Instance } from '../src/Instance'
 import * as Runtime from '../src/Runtime'
 import { runtime, task } from './support'
 
+/** Windows, where what some tests stand on isn't (each says what). */
+const windows = process.platform === 'win32'
+
 const database = () => join(mkdtempSync(join(tmpdir(), 'althar-profile-')), 'althar.sqlite')
 
 const alive = (pid: number) => {
@@ -58,7 +61,8 @@ describe('the runtime instance', () => {
     }),
   )
 
-  it.live('reconciles what an earlier launch left: stops its processes, and marks its sessions, turns and requests', () =>
+  // Not on Windows: the processes it leaves are POSIX ones (sleep, sh), stopped by their process group.
+  it.live.skipIf(windows)('reconciles what an earlier launch left: stops its processes, and marks its sessions, turns and requests', () =>
     Effect.gen(function* () {
       const file = database()
       const sleeper = yield* detached('sleep', ['30'])
@@ -183,7 +187,7 @@ describe('the runtime instance', () => {
       })
       const error = yield* Effect.flip(Effect.provide(Effect.void, update))
       assert.strictEqual(error._tag, 'MigrationFailed')
-      assert.match(error._tag === 'MigrationFailed' ? (error.backup ?? '') : '', /\/backups\/althar-\d{4}-[\d-]+\.sqlite$/)
+      assert.match(error._tag === 'MigrationFailed' ? (error.backup ?? '') : '', /[/\\]backups[/\\]althar-\d{4}-[\d-]+\.sqlite$/)
       // The failed launch recorded nothing: only the first and this look at it did.
       assert.lengthOf(yield* Effect.provide(launches, runtime(file)), 2)
     }),

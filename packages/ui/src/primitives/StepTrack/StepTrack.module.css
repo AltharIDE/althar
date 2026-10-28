@@ -17,13 +17,14 @@
   height: 5px;
   border-radius: 99px;
   overflow: hidden;
-  background: var(--n-3) linear-gradient(var(--t-1), var(--t-1)) no-repeat 0 0 / 0% 100%;
+  background: var(--n-3) linear-gradient(var(--ink-fill), var(--ink-fill)) no-repeat 0 0 / 0% 100%;
   box-shadow: inset 0 0 0 1px var(--line);
   transition:
     background-color 400ms var(--ease),
     box-shadow 400ms var(--ease);
 }
 .name {
+  padding-inline-end: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -33,7 +34,7 @@
 
 /* a step that finishes fills with ink from its start; its own colour goes once it is covered */
 .done i {
-  background-color: var(--t-1);
+  background-color: var(--ink-fill);
   background-size: 100% 100%;
   box-shadow: none;
   transition:
@@ -49,25 +50,27 @@
   background-color: var(--n-5);
   box-shadow: none;
 }
+/* the step it is on: a still bar of cobalt, with a faint sheen gliding over it slowly, so it reads as at work without a
+   segment running across it */
 .now i {
-  background-color: var(--live-dim);
+  background-color: var(--live-step);
   box-shadow: none;
 }
 .now i::after {
   content: '';
   position: absolute;
   inset: 0;
-  width: 40%;
-  border-radius: 99px;
-  background: var(--live);
-  animation: run 1.4s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.5), transparent);
+  animation: sheen 3.2s cubic-bezier(0.45, 0, 0.35, 1) infinite;
 }
-@keyframes run {
+@keyframes sheen {
   from {
-    transform: translateX(-100%);
+    transform: translateX(-110%);
   }
+  70%,
   to {
-    transform: translateX(250%);
+    transform: translateX(240%);
   }
 }
 .now .name {
@@ -84,6 +87,18 @@
 }
 .track[data-status='you'] .now .name {
   color: var(--signal);
+}
+/* waiting for a free agent: the step has not started, so its bar is empty and still */
+.track[data-status='queued'] .now i::after {
+  content: none;
+}
+.track[data-status='queued'] .now i {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--t-3);
+}
+.track[data-status='queued'] .now .name {
+  color: var(--t-2);
+  font-weight: inherit;
 }
 /* paused for a usage limit, or stopped by you: nothing moves */
 .track:is([data-status='paused'], [data-status='stopped']) .now i::after {
@@ -120,5 +135,9 @@
   }
   .track i {
     transition: none;
+  }
+  /* still, the bar alone says where it is: no sheen left standing on it */
+  .now i::after {
+    content: none;
   }
 }

@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import { type ModelInfo, ModelBrowser, ModelPick, type ModelPickText } from '@althar/ui'
+import { type ModelInfo, ModelBrowser, modelBrowserText, ModelPick, type ModelPickText } from '@althar/ui'
 
 import { useModels, useSetDefaultEffort, useSetModelBlocked } from '../data/models'
+import { useModelRooms } from '../features/usage/usePlan'
+import { platform } from './device'
 import {
   catalogOf,
   type Choice,
@@ -23,14 +25,14 @@ import {
  * Who runs a conversation, as the kit's model picker: the person's pinned
  * models, every model of every agent one step away, and how hard it thinks.
  * A model of another agent is that agent taking over: where something runs,
- * the picker says so on those models, and asks first while a turn is under
- * way. What the consumer does with the choice is its own.
+ * the picker asks first while a turn is under
+ * way. Each model says how much room its plan has where work on it would
+ * start, in the project where given. What the consumer does with the choice
+ * is its own.
  */
 
 /** What picking another agent's model does to a conversation that runs. */
 export interface Handover {
-  /** A word on another agent's model: that picking it hands the conversation over. */
-  readonly note: (agent: string) => string
   /** While a turn runs, what handing over would do, to ask first; null when nothing runs. */
   readonly ask: ((to: string, from: string) => string) | null
 }
@@ -38,12 +40,14 @@ export interface Handover {
 export interface ModelChoiceProps {
   /** Whose pick it is: Lead, Coordinator, Review. */
   owner: string
-  /** The agents it offers: signed in, or that don't say. */
+  /** The agents it offers: installed, and signed in or not saying (see `canPick`). */
   agents: ReadonlyArray<AgentStatus>
   value: Choice
   onChange: (choice: Choice) => void
   /** Take the pick off what it was for, like a step's review. */
   onRemove?: () => void
+  /** The project the pick is for, whose rule for moving work through an agent's accounts says which account each model's room is of. */
+  projectId?: string
   /** A conversation under way, which another agent's model hands over. */
   handover?: Handover
   variant?: 'quiet' | 'field'
@@ -51,8 +55,9 @@ export interface ModelChoiceProps {
   text?: Partial<ModelPickText>
 }
 
-export function ModelChoice({ owner, agents, value, onChange, onRemove, handover, variant, placement, text }: ModelChoiceProps) {
+export function ModelChoice({ owner, agents, value, onChange, onRemove, projectId, handover, variant, placement, text }: ModelChoiceProps) {
   const known = useModels()
+  const room = useModelRooms(projectId)
   const setDefault = useSetDefaultEffort()
   const setBlocked = useSetModelBlocked()
   const prefs = useModelPrefs()
@@ -98,10 +103,8 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, handover
         {...(choiceOf(current.id).model === null ? {} : { onMakeDefault: (name: string) => makeDefault(current.id, name) })}
         onBrowse={() => setBrowsing(true)}
         {...(onRemove === undefined ? {} : { onRemove })}
-        {...(handover === undefined
-          ? {}
-          : { note: (info: ModelInfo) => (another(info) ? handover.note(agentName(info.runtime)) : undefined) })}
         {...(confirm === undefined ? {} : { confirm })}
+        room={room}
         asking={asking}
         onAskingChange={setAsking}
         open={open}
@@ -124,6 +127,7 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, handover
           value={current.id}
           pins={pins}
           defaultEffort={defaultOf}
+          room={room}
           onPick={(key) => {
             setBrowsing(false)
             const picked = every.models.find((info) => info.id === key)
@@ -136,7 +140,11 @@ export function ModelChoice({ owner, agents, value, onChange, onRemove, handover
           onClose={() => setBrowsing(false)}
           onTogglePin={(key) => togglePin(key, pins)}
           onSetDefaultEffort={makeDefault}
-          text={{ columns: { model: 'Model', runtime: 'Agent', context: 'Context', effort: 'Default effort' } }}
+          text={{
+            columns: { model: 'Model', runtime: 'Agent', context: 'Context', effort: 'Default effort' },
+            // The pin's shortcut as this system writes it.
+            keys: { ...modelBrowserText.keys, pin: platform === 'darwin' ? '⌘P' : 'Ctrl+P' },
+          }}
         />
       )}
     </>

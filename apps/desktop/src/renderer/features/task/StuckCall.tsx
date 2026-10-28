@@ -1,5 +1,6 @@
 import type { AgentStatus, AttentionRequest, StuckStep } from '@althar/contracts'
 import { Stuck, type StuckAttempt } from '@althar/ui'
+import { useState } from 'react'
 
 import type { StuckAnswer } from '../../data/client'
 import { useModelNames } from '../../shared/modelNames'
@@ -8,46 +9,52 @@ import { LimitCall, limitText } from './LimitCall'
 
 /*
  * A step of the task's plan that needs the person (docs/architecture/05):
- * what went wrong, what Althar tried, and the ways on. The lead's steps
- * can be told what to do, handed to another agent, or abandoned; a review
- * can be run again, on the same agent or another, or gone on without.
+ * what went wrong, what Althar tried, and the ways on. Every one can be
+ * tried again on the agent it was on, in the session it was in: first,
+ * where the connection or the session failed rather than the work (ADR-060).
+ * The lead's steps can also be told what to do, handed to another agent, or
+ * abandoned; a review can be run again on another agent, or gone on without.
  */
 
 export const text = {
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<StuckStep['step'], string>,
   what: (stuck: StuckStep, agent: string): string => {
+    // A review has no lead to tell or carry on: it runs again, on this agent or another, or is skipped.
+    const review = stuck.step === 'review'
     switch (stuck.why) {
       case 'no_report':
-        return `${agent} ended its turn twice without saying the step is done.`
+        return `${agent} stopped twice without saying whether the step is done, even after Althar reminded it. ${review ? 'Review again, or skip the review.' : 'Tell it what to do next, or hand the step to another agent.'}`
       case 'session_ended':
-        return `${agent} stopped before the step was done.`
+        return `${agent} closed before finishing the step. This is usually harmless: ${review ? 'try again, or skip the review.' : 'try again, or hand the step to another agent.'}`
+      case 'transient':
+        return `${stuck.service ?? agent}'s service kept failing${stuck.detail === null ? '.' : `: ${stuck.detail.replace(/\.?$/, '.')}`} ${review ? 'Try again, or review with another agent.' : 'Try again, or hand the step to another agent.'}`
       case 'failed_to_start':
-        return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`}`
+        return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`} Check that it's installed and signed in, or ${review ? 'review with another agent.' : 'hand the step to another agent.'}`
       case 'restarted':
-        return `Althar stopped again soon after it carried this step on after a restart, so it waits for you rather than start ${agent} once more.`
+        return `Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, ${review ? 'review again.' : `start ${agent} again.`}`
       case 'round_limit':
-        return `Three rounds of review are done, and the lead's last changes haven't been reviewed.${
+        return `The work has been reviewed three times, and the lead's last changes haven't been reviewed yet.${
           stuck.open === 0 ? '' : stuck.open === 1 ? ' One finding is still open.' : ` ${stuck.open} findings are still open.`
-        }`
+        } Review it again, or accept it as it is.`
       case 'not_connected':
-        return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then try again."
+        return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then press Try again."
       case 'usage_limit':
-        return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt))
+        return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt), stuck.step, stuck.limit?.left)
       case 'stalled':
-        return `${agent} stopped showing any sign of work on this step.`
+        return `${agent} has gone quiet: there has been no sign of work on this step for a while. ${review ? 'Review again, or skip the review.' : 'Start it again, or hand the step to another agent.'}`
       case 'looping':
-        return `${agent} kept running ${stuck.detail === null ? 'the same thing' : `\`${stuck.detail}\``} to the same end.`
+        return `${agent} kept running ${stuck.detail === null ? 'the same thing' : `\`${stuck.detail}\``} and got the same result each time. ${review ? 'Review again, or skip the review.' : 'Tell it to try something else, or hand the step to another agent.'}`
       case 'over_budget':
-        return `${agent} has worked on this step for ${stuck.detail ?? 'a long time'} since you last said anything, and isn't done.`
+        return `${agent} has worked on this step for ${stuck.detail ?? 'a long time'} since you last said anything, and isn't done. ${review ? 'Review again, or skip the review.' : 'Let it carry on if it seems to be getting somewhere, or hand the step to another agent.'}`
       case 'refused':
-        return `${agent} declined to go on with this step.`
+        return `${agent} refused to go on with this step. ${review ? 'Review again with another agent, or skip the review.' : 'Tell it what to do differently, or hand the step to another agent.'}`
     }
   },
   /** What Althar did before it asked. */
   tried: (agent: string): Record<NonNullable<StuckStep['tried']>[number], { what: string; result: string }> => ({
-    carried_on: { what: 'Stopped its turn and told it to carry on', result: 'it went quiet again' },
-    restarted: { what: `Started ${agent} afresh`, result: 'it went quiet again' },
-    redirected: { what: 'Told it to try another way', result: 'it went back to the same' },
+    carried_on: { what: 'Told it to carry on', result: 'it stopped again' },
+    restarted: { what: `Started ${agent} again from the start`, result: 'it stopped again' },
+    redirected: { what: 'Told it to try another way', result: 'it did the same again' },
   }),
   /** Tried again on the same agent: started again where it went quiet, or let go on where it ran long. */
   again: {
@@ -58,21 +65,26 @@ export const text = {
   /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
     stuck.why === 'restarted'
-      ? 'Althar stopped again soon after it went back to opening the pull request.'
-      : `Althar couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`}`,
+      ? 'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.'
+      : `Althar couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`} Try again, or go on without it.`,
   publish: {
     abandon: 'Go on without it',
     abandoned: 'Went on without it',
     abandonedNote: 'the task is ready on its branch',
   },
-  reminded: { what: 'Reminded it to report', result: 'its turn ended again without a report' },
+  reminded: { what: 'Reminded it to say when the step is done', result: 'it stopped again without saying' },
+  /** Its service tried again after growing pauses (ADR-060): one line for all the tries. */
+  waited: { what: 'Tried again 3 times, waiting longer each time', result: 'it failed each time', tries: 3 },
   /** An agent out of usage: told nothing, since it would hit the same limit; handed on, or tried again once it is back. */
   out: {
     again: (agent: string) => `Try ${agent} again`,
     tryingAgain: (agent: string) => `Trying ${agent} again`,
   },
   review: {
-    retry: 'Review again',
+    /** Its try again: the review again, on the reviewer it had. */
+    again: 'Review again',
+    tryingAgain: 'Reviewing again',
+    retry: 'Review with another agent',
     retryLabel: 'Review with',
     retried: (agent: string) => `Reviewing with ${agent}`,
     retriedNote: 'a new round starts',
@@ -85,19 +97,38 @@ export const text = {
   },
 }
 
-export function StuckCall({
+interface StuckCallProps {
+  request: AttentionRequest
+  stuck: StuckStep
+  agents: ReadonlyArray<AgentStatus>
+  agentName: (id: string | null) => string
+  /** Answers it; false where it didn't go through, and the card starts afresh, answerable again. */
+  onAnswer: (attentionId: string, answer: StuckAnswer) => void | Promise<boolean>
+  /** Report a problem about this step, with its task: Report this. Without it, none. */
+  onReport?: (step: string) => void
+}
+
+/**
+ * A stuck step's card, started afresh when an answer doesn't go through: the
+ * kit's card shows an answer once given, the runtime only once it took it.
+ */
+export function StuckCall({ onAnswer, ...props }: StuckCallProps) {
+  const [round, setRound] = useState(0)
+  const send = (attentionId: string, answer: StuckAnswer) =>
+    void Promise.resolve(onAnswer(attentionId, answer)).then((through) => {
+      if (through === false) setRound((now) => now + 1)
+    })
+  return <StuckCard key={round} {...props} onAnswer={send} />
+}
+
+function StuckCard({
   request,
   stuck,
   agents,
   agentName,
   onAnswer,
-}: {
-  request: AttentionRequest
-  stuck: StuckStep
-  agents: ReadonlyArray<AgentStatus>
-  agentName: (id: string | null) => string
-  onAnswer: (attentionId: string, answer: StuckAnswer) => void
-}) {
+  onReport,
+}: Omit<StuckCallProps, 'onAnswer'> & { onAnswer: (attentionId: string, answer: StuckAnswer) => void }) {
   const named = useModelNames()
   const agent = agentName(stuck.agentId) || 'The agent'
   // A usage limit that says who could take over asks with them; one raised before it did asks as any stuck step.
@@ -105,7 +136,7 @@ export function StuckCall({
     return (
       <LimitCall
         request={request}
-        step={text.step[stuck.step]}
+        step={stuck.step}
         agentId={stuck.agentId}
         limit={stuck.limit}
         agents={agents}
@@ -116,14 +147,19 @@ export function StuckCall({
   const tried: ReadonlyArray<StuckAttempt> =
     stuck.why === 'no_report'
       ? [{ id: 'reminded', ...text.reminded }]
-      : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))
+      : stuck.why === 'transient'
+        ? [{ id: 'waited', what: text.waited.what, result: text.waited.result }]
+        : (stuck.tried ?? []).map((each) => ({ id: each, ...text.tried(agent)[each] }))
   const review = stuck.step === 'review'
-  // A review can run again on the agent it had; a lead's step goes to another.
-  const others = agents.filter((candidate) => review || candidate.id !== stuck.agentId)
+  // Handed on, a step goes to another agent: trying again is the agent it had.
+  const others = agents.filter((candidate) => stuck.agentId === null || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
   const out = stuck.why === 'usage_limit'
-  // Gone quiet, long at it, or stopped by restarts, a lead's agent can start again, or carry on; a review runs again by its own button.
-  const again = stuck.why === 'stalled' || stuck.why === 'over_budget' || stuck.why === 'restarted' ? text.again[stuck.why] : undefined
+  // Gone quiet, long at it, or stopped by restarts, a lead's agent starts again, or carries on, in its own words; any other tries again.
+  const again =
+    !review && (stuck.why === 'stalled' || stuck.why === 'over_budget' || stuck.why === 'restarted') ? text.again[stuck.why] : undefined
+  // Where the connection or the session failed rather than the work, trying again is the way on.
+  const againFirst = stuck.why === 'transient' || stuck.why === 'session_ended'
   // Opening the pull request is Althar's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')
     return (
@@ -133,6 +169,7 @@ export function StuckCall({
         tried={[]}
         onAgain={() => onAnswer(request.id, { kind: 'retry', agentId: 'althar' })}
         onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
+        {...(onReport === undefined ? {} : { onReport: () => onReport(text.step.publish) })}
         text={text.publish}
       />
     )
@@ -141,20 +178,23 @@ export function StuckCall({
       step={text.step[stuck.step]}
       what={text.what(stuck, agent)}
       tried={tried}
+      {...(stuck.why === 'transient' ? { tries: text.waited.tries } : {})}
       agents={others.filter((candidate) => !out || candidate.id !== stuck.agentId).map((candidate) => ({ model: named(candidate.id) }))}
       {...(review || out ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
-      {...((out || (again !== undefined && !review)) && stuck.agentId !== null
-        ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) }
-        : {})}
+      {...(stuck.agentId !== null ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) } : {})}
+      againFirst={againFirst}
       onRetry={(model) => onAnswer(request.id, { kind: 'retry', agentId: model.runtime })}
       onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
+      {...(onReport === undefined ? {} : { onReport: () => onReport(text.step[stuck.step]) })}
       {...(out
         ? { text: { again: text.out.again(agent), tryingAgain: text.out.tryingAgain(agent) } }
-        : again !== undefined && !review
+        : again !== undefined
           ? { text: { again: again.again(agent), tryingAgain: again.tryingAgain(agent) } }
           : review
             ? {
                 text: {
+                  again: text.review.again,
+                  tryingAgain: text.review.tryingAgain,
                   retry: text.review.retry,
                   retryLabel: text.review.retryLabel,
                   retried: text.review.retried,

@@ -1,3 +1,4 @@
+import { commandStartOf, hostOf } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -24,10 +25,22 @@ import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rule
  */
 export type UsageLimit = 'move' | 'wait' | 'ask'
 
+/** What the person added to a list Althar works out, and took from it. */
+const SandboxEdits = Schema.Struct({ added: Schema.Array(Schema.String), removed: Schema.Array(Schema.String) })
+type SandboxEdits = typeof SandboxEdits.Type
+
 export const ProjectRules = Schema.Struct({
   source: Schema.String,
-  /** What no rule keeps: allowed, judged by the coordinator, or asked about; allow mode overrides always-ask. Allowed without it. */
+  /**
+   * What no rule keeps: allowed, judged by the coordinator, or asked about. Allowed without it. Earlier revisions said `allow`
+   * here for what `allowEverything` says now, over the first mode.
+   */
   permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
+  /**
+   * Everything is allowed (ADR-043): nothing waits for the person, what always asks included, short of what is never allowed.
+   * Off without it; turned off, `permissions` is what holds again.
+   */
+  allowEverything: Schema.optional(Schema.Boolean),
   /** The kinds of request that always ask the person, by id (rules.ts). The MVP's first revisions held them in words, which read as every kind. */
   alwaysAsk: Schema.Array(Schema.String),
   /** The kinds refused outright, by id. */
@@ -62,6 +75,13 @@ export const ProjectRules = Schema.Struct({
   titlePattern: Schema.optional(Schema.String),
   /** Whether a task's issue is moved to its tracker's In Progress as the task starts: on without it. */
   moveIssues: Schema.optional(Schema.Boolean),
+  /**
+   * Whether changes to issues on the person's trackers (status, priority,
+   * assignee, labels, closing), proposed by the coordinator, a lead or
+   * Althar, apply at once rather than as a card the person applies. Off
+   * without it. Comments and links apply at once either way.
+   */
+  changeIssues: Schema.optional(Schema.Boolean),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
@@ -75,6 +95,13 @@ export const ProjectRules = Schema.Struct({
       only: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
     }),
   ),
+  /**
+   * What the person added to and took from what leads' sandboxes let through
+   * from the start (`sandboxReach.ts`): commands they run outside it, by how
+   * they start, and hosts they reach without asking. Without it, what Althar
+   * works out.
+   */
+  sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
 })
 export type ProjectRules = typeof ProjectRules.Type
 
@@ -83,9 +110,16 @@ const FIRST: ProjectRules = { source: 'mvp', alwaysAsk: [...RULES] }
 
 const isRule = (id: string): id is RuleId => (RULES as ReadonlyArray<string>).includes(id)
 
+/** Whether a revision's rules allow everything: by the switch, or as an earlier revision said it, as a mode. */
+export const allowsEverything = (rules: ProjectRules): boolean => rules.allowEverything === true || rules.permissions === 'allow'
+
+/** What holds of a revision's rules for what no rule keeps while everything isn't allowed: the first mode where it doesn't say. */
+export const modeOf = (rules: ProjectRules): 'rules' | 'coordinator' | 'ask' =>
+  rules.permissions === undefined || rules.permissions === 'allow' ? 'rules' : rules.permissions
+
 /** A revision's rules as the rules read them; one the MVP wrote in words asks about every kind, as the MVP did. */
 export const ruleSetOf = (rules: ProjectRules): ProjectRuleSet => ({
-  mode: rules.permissions ?? 'rules',
+  mode: allowsEverything(rules) ? 'allow' : modeOf(rules),
   ask: rules.alwaysAsk.every(isRule) ? rules.alwaysAsk.filter(isRule) : RULES,
   never: (rules.never ?? []).filter(isRule),
   allow: (rules.alwaysAllow ?? []).filter(isRule),
@@ -140,6 +174,9 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
 
+/** Whether a revision's rules let changes to issues apply without the person's card: not unless the person turned it on. */
+export const changesIssues = (rules: ProjectRules): boolean => rules.changeIssues === true
+
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true
 
@@ -149,6 +186,19 @@ export const resolvesConflictsFor = (rules: ProjectRules, task: number | boolean
 
 /** The project's rule for an agent's accounts: rotation, off unless the person turned it on, and the accounts it may use. */
 export type AccountRule = NonNullable<ProjectRules['accounts']>
+
+/** A list's edits as kept: each entry tidied, once, dropping what isn't one; an entry on both sides stays added. */
+const keptEdits = (edits: SandboxEdits, tidy: (typed: string) => string | null): SandboxEdits => {
+  const added = [...new Set(edits.added.flatMap((each) => tidy(each) ?? []))]
+  return { added, removed: [...new Set(edits.removed.flatMap((each) => tidy(each) ?? []))].filter((each) => !added.includes(each)) }
+}
+
+/** The sandbox's edits with what changed of them: a list given replaces that list, whole; the other stays. */
+const sandboxWith = (rules: ProjectRules, change: NonNullable<ProjectRules['sandbox']>): NonNullable<ProjectRules['sandbox']> => ({
+  ...rules.sandbox,
+  ...(change.commands === undefined ? {} : { commands: keptEdits(change.commands, commandStartOf) }),
+  ...(change.hosts === undefined ? {} : { hosts: keptEdits(change.hosts, hostOf) }),
+})
 
 /** What a revision's rules say of accounts: no rotation, and every account, unless the person said otherwise. */
 export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: false }
@@ -312,6 +362,11 @@ export class Policies extends Context.Service<
                     new RuleOnAnotherList({ pattern: held.rule.pattern, exact: held.rule.match === 'exact', list: held.list }),
                   )
                 const kept: Record<string, unknown> = { ...rules }
+                // An earlier revision's allow mode is the switch now, over the first mode, so turning it off leaves a mode that holds.
+                if (rules.permissions === 'allow') {
+                  delete kept.permissions
+                  kept.allowEverything = true
+                }
                 for (const key of CLEARABLE) {
                   const value = change[key]
                   if (value === null || (typeof value === 'string' && value.trim() === '')) delete kept[key]
@@ -321,6 +376,7 @@ export class Policies extends Context.Service<
                   ...(kept as ProjectRules),
                   ...rest,
                   ...(commands === undefined ? {} : { commands }),
+                  ...(change.sandbox === undefined ? {} : { sandbox: sandboxWith(rules, change.sandbox) }),
                   source: 'person',
                 }
                 next = changed

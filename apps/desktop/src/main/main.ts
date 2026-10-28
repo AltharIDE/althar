@@ -1,27 +1,42 @@
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
 import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
-import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
+import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
+import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { keepingAwake } from './awake'
+import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
+import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
+import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
+import { startLogs } from './logs'
 import { setAppMenu } from './menu'
-import { dockCount, soundOf, tells } from './notify'
+import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
+import type { Shot } from '@althar/runtime'
+import { pageWindow } from './screenshotWindow'
+import { takeScreenshot } from './screenshots'
+import { storeFacts } from './report/mainFacts'
+import { factsIn, type RuntimeFacts } from './report/facts'
+import { factsAsker, startReports } from './report/reports'
 import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
+import { watchOnline } from './online'
+import { afterExit } from './restarts'
 import { alertSounds, playSound } from './sounds'
 import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
 import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
+import { installOf, usageData } from './usageData'
+import { masker } from '../logs/mask'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
@@ -29,11 +44,14 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  crashReporter,
   dialog,
   ipcMain,
   Menu,
   MessageChannelMain,
   nativeImage,
+  nativeTheme,
+  net,
   Notification,
   powerMonitor,
   powerSaveBlocker,
@@ -44,8 +62,16 @@ import {
   utilityProcess,
 } from 'electron'
 
-import { appMenu, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
+import { appMenu, PAGE, windowOptions } from './windowOptions'
+import {
+  keyringIsSafe,
+  keyringUnavailable,
+  passwordStore,
+  sealFailure,
+  sealWithPortal,
+  sealsWithPortal,
+  withPortalFeature,
+} from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -55,10 +81,11 @@ import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
  * runtime to stop its sessions before the app goes. Folders reach the runtime
  * from here, never from the window, which gets a grant for each: one the
  * person picked or dropped, or one of the repositories it found where people
- * keep code (repositories.ts), for the first screen and a new project to offer. It seals and
- * opens the runtime's secrets, such as a code host's token, with Electron's
- * safeStorage, whose key the keychain keeps for this app alone: the runtime
- * keeps them sealed and never holds the key. It gives the Dock the icon the
+ * keep code (repositories.ts), for the first screen and a new project to
+ * offer. It seals and opens the runtime's secrets, such as a code host's
+ * token, with Electron's safeStorage; in a Flatpak it prefers the app-specific
+ * Secret portal key and falls back only to a safe session keyring. The runtime keeps secrets sealed and never
+ * holds the key. It gives the Dock the icon the
  * person chose, and puts Althar at the edge of the screen (edgeWindows.ts):
  * round the notch, or in the menu bar. It keeps the app's own preferences
  * (appPreferences.ts) and acts on them: the Mac kept awake while work runs
@@ -67,6 +94,11 @@ import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
  * Dictation's microphone, model and speech process are in dictation.ts.
  * A packaged app updates itself (updater.ts): it never restarts into an
  * update while work runs, and only when the person asks, or as they quit.
+ * Anonymous usage data goes from here alone (usageData.ts): what the runtime
+ * says happened, Althar opening and an update installed, each only while
+ * the person's switch is on. So do crash reports (crashReports.ts), behind a
+ * switch of their own: what main, the window and the runtime couldn't
+ * handle, a process that stopped, and a native crash, masked.
  */
 
 const here = import.meta.dirname
@@ -74,8 +106,6 @@ const here = import.meta.dirname
 const SHUTDOWN_GRACE = 20_000
 /** How long focus settles, moving between Althar's windows, before the edge hears whether Althar is in front. */
 const FOCUS_SETTLE = 120
-/** Restarts allowed within a minute before a crashing runtime ends the app instead. */
-const RESTARTS_PER_MINUTE = 3
 
 let runtime: UtilityProcess | undefined
 let quitting = false
@@ -104,9 +134,14 @@ if (fakeMicrophone) {
  */
 const quiet = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIET === '1'
 if (quiet) Notification.isSupported = () => false
-const restarts: Array<number> = []
-/* The store an update couldn't move, once the runtime says so: every window shows it, and no runtime starts again. */
+/* The end-to-end tests' PostHog, on this computer (ALTHAR_FAKE_POSTHOG): usage data goes there, under a key of its own. Packaged builds leave this out. */
+const fakePostHog = __ALTHAR_TEST_HOOKS__ ? (process.env.ALTHAR_FAKE_POSTHOG ?? '') : ''
+const usageTarget = fakePostHog === '' ? __ALTHAR_USAGE__ : { key: 'phc_fake', host: fakePostHog }
+let restarts: ReadonlyArray<number> = []
+/* The store an update couldn't move, or a profile another Althar has open, once the runtime says so: every window shows it, and no runtime starts again. */
 let storeFailure: StoreFailure | undefined
+/* The person asked to try a profile again: the runtime that found it open is stopped, and a new one starts in its place. */
+let retrying = false
 
 /** The profile and worktrees, as the command-line client has them: a Flatpak's home is a fresh empty one each run, so it keeps worktrees beside its profile (locations.ts). */
 const locations = () => locationsOf(process.env, process.platform, homedir())
@@ -120,6 +155,9 @@ if (process.platform !== 'darwin') app.on('browser-window-created', (_event, win
 // Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
 const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
+// In any Linux Flatpak, sign-ins prefer the app-specific Secret portal key (keyring.ts).
+const portal = sealsWithPortal(process.env.FLATPAK_ID !== undefined, process.platform)
+if (portal) app.commandLine.appendSwitch('enable-features', withPortalFeature(app.commandLine.getSwitchValue('enable-features')))
 
 /*
  * Where the window keeps what it remembers, its tabs and pinned models. A
@@ -133,6 +171,37 @@ app.setPath(
   'userData',
   ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'window') : join(app.getPath('appData'), '@althar', 'desktop'),
 )
+
+/*
+ * Native crashes, in any of Althar's processes, as Crashpad's minidumps,
+ * kept in the profile's window folder and never uploaded: the next launch
+ * says only that one happened, where crash reports are on (crashReports.ts).
+ */
+crashReporter.start({ uploadToServer: false })
+
+/*
+ * One Althar to a profile. A second launch (the Dock, a shortcut, a link)
+ * brings the first one's window forward and ends; it starts no runtime of
+ * its own, which could not open the profile the first holds. The lock is
+ * Electron's, kept per user data folder, which is set above from the
+ * profile: Althars on profiles of their own, as the end-to-end tests give,
+ * run side by side.
+ */
+const primary = app.requestSingleInstanceLock()
+if (!primary) app.quit()
+/** When the app is ready, in the instance that holds the lock; in a second, never: it quits without opening anything. */
+const ready = primary ? app.whenReady() : new Promise<void>(() => {})
+
+/*
+ * The app's logs (logs.ts, DEV-61): where the system keeps an app's logs, or
+ * in a profile of its own where one was given, so a test's stay with it.
+ */
+const logs = startLogs({
+  dir: ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'logs') : app.getPath('logs'),
+  passOn: !app.isPackaged,
+})
+/* What reports ask the runtime (report/reports.ts). */
+const facts = factsAsker()
 
 /*
  * Pictures agents hand back reach the window at an address of Althar's own,
@@ -157,6 +226,12 @@ interface RuntimeMessage {
   readonly requestId?: string
   readonly grant?: string
   readonly value?: unknown
+  /** A usage event, as the runtime says it; usageData.ts keeps only what it names. */
+  readonly usage?: unknown
+  /** What the runtime couldn't handle (runtime/crashes.ts); crashReports.ts reads it. */
+  readonly crash?: unknown
+  /** A screenshot an agent asked for (screenshots.ts). */
+  readonly shot?: Shot
   readonly event?: {
     readonly _tag?: string
     readonly kind?: unknown
@@ -169,7 +244,7 @@ interface RuntimeMessage {
 }
 
 /* Notifications the person may still click: kept, so they aren't collected before then. */
-const shown = new Set<Notification>()
+const shown = notificationsShown<Notification>()
 
 /* The Mac held awake while work runs, by the app-suspension blocker: the display may still sleep. */
 const awake = keepingAwake({
@@ -189,11 +264,134 @@ let waiting = 0
  * as kept. A change waits for that read, so the read can't undo it.
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
+
+/*
+ * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
+ * follows the scheme that gives, and its paper with it (paintPaper). On Linux, where Electron has no word of the
+ * desktop's own setting, the Settings portal's is followed while Appearance is as the system is (themeSourceFor).
+ */
+let linuxScheme: Scheme | undefined
+const applyAppearance = () => {
+  nativeTheme.themeSource = themeSourceFor(preferences.appearance, process.platform, linuxScheme)
+}
+if (process.platform === 'linux') {
+  const stop = followDesktopScheme((scheme) => {
+    linuxScheme = scheme
+    applyAppearance()
+  })
+  // On the process's exit, as the tray's watch: quitting ends in app.exit, which skips will-quit.
+  process.once('exit', stop)
+}
+
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
   awake.wants(kept)
+  applyAppearance()
   // A count the runtime gave before the file was read is shown again as the person has it.
   if (waiting > 0) app.setBadgeCount(dockCount(waiting, kept))
+})
+
+/*
+ * Anonymous usage data, once the preferences are read, so an event never
+ * goes before the person's switch is known (and the install is read after
+ * them, so its first write can't race a damaged file's), and once the app
+ * is ready, as its network needs: from a release build, while the switch is
+ * on and DO_NOT_TRACK isn't set. Its first events: Althar opened,
+ * and an update installed when it opens on another version than last time.
+ */
+const install = preferencesRead.then(() => installOf(locations().profile, app.getVersion()))
+const usage = Promise.all([install, ready]).then(([install]) => {
+  const sender = usageData({
+    ...usageTarget,
+    installId: install.id,
+    app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
+    allowed: () => preferences.usageData && !doNotTrack(process.env),
+    fetch: (url, options) => net.fetch(url, options),
+  })
+  sender.record({ name: 'app_opened' })
+  if (install.updatedFrom !== null) sender.record({ name: 'update_installed', properties: { from: install.updatedFrom } })
+  return sender
+})
+const recordUsage = (said: unknown) => void usage.then((sender) => sender.record(said))
+
+/* The projects' and repositories' names to hide, all those learned this launch: the runtime holds the store while it runs, so it is asked; without one, main reads it. */
+const names = factsAsker('names')
+let namesKnown: HiddenNames = { projects: [], repositories: [] }
+const namesNow = async () => {
+  let read: Pick<RuntimeFacts, 'projects' | 'repositories'> | null = null
+  try {
+    read =
+      runtime === undefined
+        ? storeFacts(locations().profile)
+        : factsIn(await Promise.race([names.ask(runtime, null), new Promise((resolve) => setTimeout(() => resolve(null), 2_000))]))
+  } catch {
+    read = null
+  }
+  // Added to what was learned, never in its place: a name renamed or removed is hidden still. A store that couldn't be read, or a runtime that couldn't say, adds none.
+  namesKnown = namesLearned(namesKnown, read)
+  return namesKnown
+}
+
+/** What hides the person in a crash report, as Report a problem does: their home, who they are, this computer, and every project's and repository's name learned this launch. */
+const maskHere = async () => {
+  const known = await namesNow()
+  let user: string | undefined
+  try {
+    user = userInfo().username
+  } catch {
+    user = undefined
+  }
+  return masker({
+    // The end-to-end tests give a home of their own, as the repositories found do; packaged builds leave this out.
+    home: (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_CODE_HOME) || homedir(),
+    ...(user === undefined ? {} : { user }),
+    device: hostname(),
+    names: { project: known.projects, repository: known.repositories },
+  })
+}
+
+/*
+ * Crash reports, as usage data: once the preferences and the install are
+ * read and the app is ready, from a release build, while their own switch
+ * is on and DO_NOT_TRACK isn't set. What fails before then waits for it.
+ * Their first: a native crash since the last launch, once each.
+ */
+const crashes = Promise.all([install, ready]).then(([install]) => {
+  const sender = crashReports({
+    ...usageTarget,
+    installId: install.id,
+    app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
+    allowed: () => preferences.crashReports && !doNotTrack(process.env),
+    fetch: (url, options) => net.fetch(url, options),
+    mask: maskHere,
+  })
+  void newDumps(app.getPath('crashDumps'), locations().profile)
+    .then((dumps) => {
+      for (const dump of dumps) sender.native(dump)
+    })
+    .catch(() => undefined)
+  return sender
+})
+/** Reports a crash once the sender is there; reporting never fails into what failed. */
+const reportCrash = (report: (sender: CrashReports) => void) => void crashes.then(report).catch(() => undefined)
+/** Lets crash reports and usage data on their way go, a few seconds at most. */
+const sendersStopped = () =>
+  Promise.race([
+    Promise.all([usage.then((sender) => sender.stop()), crashes.then((sender) => sender.stop())]),
+    new Promise((resolve) => setTimeout(resolve, 4_000)),
+  ]).catch(() => undefined)
+
+// Watched, not handled, as the log does (logs.ts): what Electron does with them stays as it was.
+process.on('uncaughtExceptionMonitor', (thrown) => reportCrash((sender) => sender.thrown(thrown, 'main', 'uncaught')))
+process.on('unhandledRejection', (reason) => reportCrash((sender) => sender.thrown(reason, 'main', 'rejection')))
+// The window's own, as it sends them for the log (renderer/shared/windowErrors.ts).
+ipcMain.on('althar:window-error', (_event, report: unknown) => reportCrash((sender) => sender.fromWindow(report)))
+// A window's page, or a process of Althar's, that crashed or failed; nothing Althar stopped itself, nor anything as it quits.
+app.on('render-process-gone', (_event, _contents, details) => {
+  if (goneBadly(details.reason) && !quitting) reportCrash((sender) => sender.gone('window', details))
+})
+app.on('child-process-gone', (_event, details) => {
+  if (goneBadly(details.reason) && !quitting) reportCrash((sender) => sender.gone(childKind(details), details))
 })
 
 /* Althar's own windows, apart from the edge's pages. */
@@ -246,12 +444,12 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
   if (!tells(event.kind, preferences) || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
   const { threadId } = event
   const notification = new Notification({ title: event.title, body: event.body, ...soundOf(preferences) })
-  shown.add(notification)
   notification.on('click', () => {
-    shown.delete(notification)
+    shown.drop(threadId, notification)
     openThread(threadId)
   })
-  notification.on('close', () => shown.delete(notification))
+  notification.on('close', () => shown.drop(threadId, notification))
+  shown.add(threadId, notification)
   notification.show()
 }
 
@@ -259,6 +457,10 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
 const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
+  if (portal)
+    return void sealWithPortal(message.type === 'seal', value, safeStorage, process.platform).then((reply) =>
+      child.postMessage({ type: 'sealed', requestId, ...reply }),
+    )
   // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
   const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
   if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend)) {
@@ -275,29 +477,68 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
           : safeStorage.decryptString(Buffer.from(value, 'base64')),
     })
   } catch (error) {
-    child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })
+    child.postMessage({ type: 'sealed', requestId, ...sealFailure(message.type === 'seal' ? 'seal' : 'open', error) })
   }
 }
+
+/** Takes a screenshot an agent asked for, offscreen, and answers with it or why not (screenshots.ts). */
+const screenshot = (child: UtilityProcess, message: RuntimeMessage) => {
+  const { requestId, shot } = message
+  if (requestId === undefined || shot === undefined) return
+  void takeScreenshot(shot, pageWindow).then(
+    (value) => child.postMessage({ type: 'screenshot-taken', requestId, value }),
+    (error: unknown) =>
+      child.postMessage({ type: 'screenshot-taken', requestId, error: error instanceof Error ? error.message : String(error) }),
+  )
+}
+/* The end-to-end tests take one as an agent would, straight from the main process (e2e/screenshots.spec.ts). Packaged builds leave this out. */
+if (__ALTHAR_TEST_HOOKS__)
+  (globalThis as unknown as { takeScreenshot: (shot: Shot) => Promise<unknown> }).takeScreenshot = (shot) =>
+    takeScreenshot(shot, pageWindow)
 
 const startRuntime = () => {
   const { profile, worktrees } = locations()
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
     serviceName: 'Althar runtime',
-    stdio: 'inherit',
+    // What it writes goes to runtime.log, and in development on to the terminal too.
+    stdio: 'pipe',
     env: {
       ...process.env,
       ALTHAR_PROFILE: profile,
       ALTHAR_WORKTREES: worktrees,
       ALTHAR_APP_VERSION: app.getVersion(),
+      ALTHAR_LOGS: logs.dir,
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
-      ...(app.isPackaged ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', 'node') } : {}),
+      ...(app.isPackaged
+        ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
+        : {}),
     },
   })
+  logs.keepOutput(child)
+  child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
+  // Whether the computer is online, so work waits out a lost connection rather than fail on it (ADR-060).
+  const stopWatchingOnline = watchOnline(
+    () => net.isOnline(),
+    (online) => {
+      logs.info(online ? 'Online' : 'Offline')
+      child.postMessage({ type: 'online', online })
+    },
+  )
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
+    if (message.type === 'screenshot') return screenshot(child, message)
+    if (message.type === 'facts') return facts.answer(message)
+    if (message.type === 'names') return names.answer(message)
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
-    if (message.type === 'store-failed') {
+    if (message.type === 'usage') return recordUsage(message.usage)
+    if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
+    if (message.type === 'store-failed' || message.type === 'profile-in-use') {
       storeFailure = storeFailureOf(message)
+      // What stopped it goes in main's log too, so a report of it carries it. A profile in use is the person's to put right, not an error.
+      if (storeFailure?.stopped === 'held')
+        logs.info('Profile is open in another Althar or the command line', { reason: storeFailure.reason })
+      else if (storeFailure !== undefined)
+        logs.error('Update couldn’t move the store', { stopped: storeFailure.stopped, reason: storeFailure.reason })
       for (const window of BrowserWindow.getAllWindows()) connect(window)
       return
     }
@@ -306,26 +547,35 @@ const startRuntime = () => {
     granting.delete(message.requestId)
   })
   child.once('exit', (code) => {
+    stopWatchingOnline()
     runtime = undefined
+    if (quitting) logs.info('Runtime exited', { code })
+    else logs.error('Runtime exited', { code })
     // Nothing runs without the runtime; a new one says again.
     awake.working(false)
+    facts.gone()
+    names.gone()
     updates?.working(false)
     for (const [requestId, settle] of granting) {
       settle(null)
       granting.delete(requestId)
     }
-    if (quitting || storeFailure !== undefined) return
     // A crash is survivable: reconciliation makes a restart safe, and each window reconnects when it reloads.
-    const now = Date.now()
-    restarts.push(now)
-    while (restarts[0] !== undefined && restarts[0] < now - 60_000) restarts.shift()
-    if (restarts.length <= RESTARTS_PER_MINUTE) {
+    const after = afterExit({ quitting, stopped: storeFailure !== undefined, retrying, restarts, now: Date.now() })
+    restarts = after.restarts
+    if (after.next === 'stay') return
+    if (after.next === 'start') {
+      retrying = false
+      storeFailure = undefined
       startRuntime()
       for (const window of BrowserWindow.getAllWindows()) window.webContents.reload()
       return
     }
+    logs.error('Runtime keeps stopping; quitting', { restarts: restarts.length })
+    reportCrash((sender) => sender.keepsStopping(restarts.length, code))
     dialog.showErrorBox('Althar stopped', `Althar's runtime keeps stopping (code ${code}). Open Althar again to carry on.`)
-    app.quit()
+    // Its report gets a moment to go.
+    void sendersStopped().finally(() => app.quit())
   })
   runtime = child
 }
@@ -385,6 +635,13 @@ const openOutside = (url: string) => {
 /** Althar's picture for the window's icon on Linux, at the size X11 takes: the full-size file would silently overflow the property and leave the window iconless. */
 const windowIcon = () => nativeImage.createFromPath(join(here, '../../resources/icons/cobalt.png')).resize({ width: 128, height: 128 })
 
+/** The paper under every window's page, in the scheme's shade: what shows as it resizes, or before the page draws. */
+const paintPaper = () => {
+  const paper = nativeTheme.shouldUseDarkColors ? PAGE.dark : PAGE.light
+  for (const window of windows) if (!window.isDestroyed()) window.setBackgroundColor(paper)
+}
+nativeTheme.on('updated', paintPaper)
+
 const openWindow = () => {
   const window = new BrowserWindow({
     width: 1280,
@@ -393,7 +650,7 @@ const openWindow = () => {
     minHeight: 600,
     show: false,
     // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), and on Linux it carries Althar's icon.
-    ...windowOptions(process.platform, windowIcon()),
+    ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
       sandbox: true,
@@ -479,6 +736,26 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
+// A file or folder added to a message, by the path the preload read from the drop or the picker: measured, and granted where a message may carry it.
+ipcMain.handle('althar:attach', async (_event, path: unknown) => {
+  if (typeof path !== 'string' || path === '') return null
+  return attachedOf(path, allowFolder)
+})
+
+// The files copied in the file manager and pasted into a message, as the clipboard names them: each as one dropped.
+ipcMain.handle('althar:attach-pasted', async () => {
+  const paths = await clipboardPaths(async (format, raw) => {
+    const type = raw ? rawFormat(format) : format
+    for (const item of await clipboard.read()) {
+      if (!item.types.includes(type)) continue
+      const got = await item.getType(type)
+      if (got instanceof Blob) return Buffer.from(await got.arrayBuffer())
+    }
+    return null
+  }, process.platform)
+  return Promise.all(paths.map((path) => pastedOf(path, allowFolder)))
+})
+
 /* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */
 const foundHere = foundIds()
 
@@ -497,6 +774,13 @@ ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
   return path === null ? null : allowFolder(path)
 })
 
+// The person closed whatever had the profile open and asks Althar to try it again: the runtime that found it held stops, and a new one starts.
+ipcMain.handle('althar:try-again', () => {
+  if (storeFailure?.stopped !== 'held' || retrying) return
+  retrying = true
+  runtime?.postMessage({ type: 'shutdown' })
+})
+
 // Shows the copy of the store from before an update that couldn't move it, in the system's file manager.
 ipcMain.handle('althar:show-backup', () => {
   const backup = storeFailure?.backup
@@ -511,6 +795,14 @@ ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
   await writeAppIcon(locations().profile, icon)
 })
 
+/*
+ * Althar opening at login, in the background, as the person's switch says (loginItem.ts): told to the system as it
+ * changes, only from a packaged app, since a development build would open Electron itself at every login.
+ */
+const startAtLogin = (on: boolean) => {
+  if (app.isPackaged && opensAtLogin(process.platform)) app.setLoginItemSettings(loginItemOf(on, process.platform))
+}
+
 // The app's own preferences, as kept; and a change to one, kept, then acted on at once. Anything a key can't hold fails, and the window says so.
 ipcMain.handle('althar:preferences', async () => {
   await preferencesRead
@@ -522,7 +814,9 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   // Merged into the preferences as they stand once it is kept, so changes made together each stay.
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
+  if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
   awake.wants(preferences)
+  if (key === 'appearance') applyAppearance()
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })
@@ -572,7 +866,7 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
   else bringForward()
 })
 
-void app.whenReady().then(() => {
+void ready.then(() => {
   // Quiet, Althar is never the active app and has no place on the Dock or in the app switcher.
   if (quiet) app.setActivationPolicy?.('accessory')
   // The window asks for nothing but dictation's microphone and the clipboard token it requests while connecting; its notifications come from main.
@@ -593,23 +887,54 @@ void app.whenReady().then(() => {
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   if (!noRuntime) startRuntime()
   // A packaged app looks for updates, and tells every window as one is ready.
-  // electron-updater supports the Linux AppImage feed; deb/rpm use their package managers.
-  if (app.isPackaged && (process.platform === 'darwin' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined)))
+  // electron-updater supports the Mac's zip, Windows' NSIS installer and the Linux AppImage; deb/rpm use their package managers.
+  if (
+    app.isPackaged &&
+    (process.platform === 'darwin' || process.platform === 'win32' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined))
+  )
     updates = startUpdates((glance: UpdateGlance) => {
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
     })
-  // macOS keeps its system menu with the updater command; elsewhere the hidden app menu keeps zoom, full screen, quit and dev tools' accelerators.
+  // macOS keeps its system menu with the updater command, and Help → Report a Problem…, which opens the dialog in Althar's window, brought forward (report/reports.ts).
+  // Elsewhere the hidden app menu keeps zoom, full screen, quit and dev tools' accelerators; Report a problem is at the quick settings' foot and in Settings' About there.
   if (process.platform === 'darwin') {
     const checking = updates
-    setAppMenu({ name: app.name, ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }) })
+    setAppMenu({
+      name: app.name,
+      ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }),
+      report: () => bringForward().window.webContents.send('althar:report'),
+    })
   } else {
     const menu = appMenu(process.platform, !app.isPackaged)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
-  openWindow()
+  // Opened at login, it starts in the background, with no window: the runtime and its automations run, and a window opens as the person asks.
+  const background = app.isPackaged && openedAtLogin(process.platform, process.argv, app.getLoginItemSettings().wasOpenedAtLogin)
+  // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
+  // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
+  void preferencesRead
+    .catch(() => undefined)
+    .then(() =>
+      process.platform === 'linux' && preferences.appearance === 'system' ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT) : undefined,
+    )
+    .then(() => {
+      if (!background && windows.size === 0) openWindow()
+    })
+  startReports({
+    profile: () => locations().profile,
+    // The install's one id, the one usage data keeps (usageData.ts), whether or not its switch is on.
+    installId: () => install.then((kept) => kept.id),
+    logs: logs.dir,
+    askRuntime: (threadId) => facts.ask(runtime, threadId),
+    mine: (contents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents),
+    address: process.env.ALTHAR_REPORT_URL ?? __ALTHAR_REPORT_URL__,
+    email: process.env.ALTHAR_REPORT_EMAIL ?? __ALTHAR_REPORT_EMAIL__,
+  })
   edge = startEdge({
     profile: () => locations().profile,
     connect,
+    open: () => void bringForward(),
+    quit: () => app.quit(),
     preload: join(here, '../preload/preload.cjs'),
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
@@ -633,6 +958,9 @@ void app.whenReady().then(() => {
   })
 })
 
+// A second launch of Althar on this profile: the first one comes forward.
+app.on('second-instance', () => void ready.then(bringForward))
+
 // Closing the last window isn't quitting on macOS: the runtime and its work carry on.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
@@ -651,7 +979,8 @@ app.on('before-quit', (event) => {
   }, SHUTDOWN_GRACE)
   child.once('exit', () => {
     clearTimeout(timer)
-    app.exit(0)
+    // Usage data and crash reports on their way get a moment to go.
+    void sendersStopped().finally(() => app.exit(0))
   })
   child.postMessage({ type: 'shutdown' })
 })

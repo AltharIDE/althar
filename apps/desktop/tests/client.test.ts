@@ -79,6 +79,9 @@ describe('the client', () => {
 
     const task = await client.createTask({ projectId: project.id, title: 'Say hello' })
     expect((await client.listTasks(project.id)).tasks.map((each) => each.title)).toEqual(['Say hello'])
+    // Found by a word begun, in its project and across every one.
+    expect((await client.searchTasks({ projectId: project.id, text: 'hel' })).tasks.map((each) => each.title)).toEqual(['Say hello'])
+    expect((await client.searchTasks({ text: 'goodbye' })).tasks).toEqual([])
     await client.startSession({ threadId: task.threadId, agentId: 'claude-code' })
     await eventually(
       () => client.getThread(task.threadId),
@@ -107,6 +110,8 @@ describe('the client', () => {
     // Stopped as a task: every agent on it stops, and nothing is left to stop.
     await client.stopTask(task.id)
     expect((await client.getThread(task.threadId, { limit: 0 })).session).toBeNull()
+    await client.renameTask(task.id, 'A better title')
+    expect((await client.getThread(task.threadId, { limit: 0 })).task.title).toBe('A better title')
     await client.abandonTask(task.id)
     expect((await client.getThread(task.threadId, { limit: 0 })).task.actions).toEqual(['reopen'])
     await client.reopenTask(task.id)
@@ -117,7 +122,8 @@ describe('the client', () => {
 
   it('reads a folder, opens the repositories kept in it, and names a pull request by its address', async () => {
     const { client, grant } = await connected()
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+    // The native call, which on Windows expands a short name (RUNNER~1) as git gives it whole.
+    const folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'althar-folder-')))
     const root = repository(folder)
     const chosen = await grant(folder)
     const reading = await client.readFolder(chosen)
@@ -207,8 +213,10 @@ describe('the client', () => {
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
+          GetOlderSettled: () => Effect.die('unused'),
           GetHome: () => Effect.die('unused'),
           LeftHome: () => Effect.die('unused'),
+          SeeTask: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
           ReadFolder: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
@@ -219,16 +227,23 @@ describe('the client', () => {
           PushBranch: () => Effect.die('unused'),
           ListEditors: () => Effect.die('unused'),
           GetLoad: () => Effect.die('unused'),
+          GetPlanUsage: () => Effect.die('unused'),
+          GetModelRooms: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),
           OpenInEditor: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),
+          SearchTasks: () => Effect.die('unused'),
           CreateTask: () => Effect.die('unused'),
           GetThread: () => Effect.die('unused'),
           GetThreadItem: () => Effect.die('unused'),
           ReadOutput: () => Effect.die('unused'),
+          ReadBackgroundOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
+          FindCode: () => Effect.die('unused'),
+          ReadCode: () => Effect.die('unused'),
+          OpenCode: () => Effect.die('unused'),
           // The first try gets no answer the client can read; the second works.
           StartSession: ({ commandId }) => {
             commands.push(commandId)
@@ -242,21 +257,48 @@ describe('the client', () => {
           SetModelBlocked: () => Effect.die('unused'),
           GetSettings: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
+          SetPostTeamReviews: () => Effect.die('unused'),
+          GetAutomations: () => Effect.die('unused'),
+          GetAutomation: () => Effect.die('unused'),
+          MakeAutomation: () => Effect.die('unused'),
+          ChangeAutomation: () => Effect.die('unused'),
+          TurnOnAutomation: () => Effect.die('unused'),
+          PauseAutomation: () => Effect.die('unused'),
+          RunAutomationNow: () => Effect.die('unused'),
+          DeleteAutomation: () => Effect.die('unused'),
+          UndoAutomationChange: () => Effect.die('unused'),
+          SetAutomationPostsReviews: () => Effect.die('unused'),
+          SetAutomationsPaused: () => Effect.die('unused'),
           SetAgentsAtOnce: () => Effect.die('unused'),
+          SetFolderWait: () => Effect.die('unused'),
+          GetTaskFolders: () => Effect.die('unused'),
+          CleanUpFolders: () => Effect.die('unused'),
+          RemoveTaskFolder: () => Effect.die('unused'),
+          MoveInLine: () => Effect.die('unused'),
+          LineOldestFirst: () => Effect.die('unused'),
           StartAccountSignIn: () => Effect.die('unused'),
           GetAccountSignIn: () => Effect.die('unused'),
           PasteAccountSignInCode: () => Effect.die('unused'),
           CancelAccountSignIn: () => Effect.die('unused'),
           // A refusal is an answer: it isn't tried again.
+          CompactContext: () => Effect.die('unused'),
           Interrupt: ({ commandId }) => {
             commands.push(commandId)
             return refuse()
           },
+          TryAgain: () => Effect.die('unused'),
           StopSession: () => Effect.die('unused'),
           StopTask: () => Effect.die('unused'),
           SetTaskResolveConflicts: () => Effect.die('unused'),
+          ResolveConflictsNow: () => Effect.die('unused'),
+          LookForConflicts: () => Effect.die('unused'),
+          SetTaskAllowEverything: () => Effect.die('unused'),
           ResumeTask: () => Effect.die('unused'),
+          LeaveOutCommits: () => Effect.die('unused'),
           AbandonTask: () => Effect.die('unused'),
+          MarkTaskDone: () => Effect.die('unused'),
+          KeepTaskForLater: () => Effect.die('unused'),
+          RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
@@ -270,7 +312,13 @@ describe('the client', () => {
           ChangeIssueDraft: () => Effect.die('unused'),
           FileIssueDraft: () => Effect.die('unused'),
           DiscardIssueDraft: () => Effect.die('unused'),
+          ApplyIssueChanges: () => Effect.die('unused'),
+          DiscardIssueChanges: () => Effect.die('unused'),
+          ChangeReviewDraft: () => Effect.die('unused'),
+          PostReviewDraft: () => Effect.die('unused'),
+          DiscardReviewDraft: () => Effect.die('unused'),
           AnswerStuck: () => Effect.die('unused'),
+          HandOverHeld: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),
           StartSignIn: () => Effect.die('unused'),
           GetSignIn: () => Effect.die('unused'),
@@ -287,9 +335,13 @@ describe('the client', () => {
           GetProjectRules: () => Effect.die('unused'),
           GetProjectNotes: () => Effect.die('unused'),
           DropProjectNote: () => Effect.die('unused'),
+          EditProjectNote: () => Effect.die('unused'),
           GetVocabulary: () => Effect.die('unused'),
           RenameProject: () => Effect.die('unused'),
           SetProjectInk: () => Effect.die('unused'),
+          GetProjectTracker: () => Effect.die('unused'),
+          SetProjectTracker: () => Effect.die('unused'),
+          ListContainers: () => Effect.die('unused'),
           RemoveProject: () => Effect.die('unused'),
           GetRepositories: () => Effect.die('unused'),
           AddRepositories: () => Effect.die('unused'),
@@ -304,12 +356,19 @@ describe('the client', () => {
           FindAccounts: () => Effect.die('unused'),
           SignInAccount: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
+          SkipReview: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
           StopListening: () => Effect.die('unused'),
+          AttachPullRequest: () => Effect.die('unused'),
+          ClosePullRequest: () => Effect.die('unused'),
           StopBackground: () => Effect.die('unused'),
           ClearBackground: () => Effect.die('unused'),
           RunProject: () => Effect.die('unused'),
           StopLaunch: () => Effect.die('unused'),
+          KeepRunnable: () => Effect.die('unused'),
+          DropRunnable: () => Effect.die('unused'),
+          OrderRunnables: () => Effect.die('unused'),
+          GetRepositoryScripts: () => Effect.die('unused'),
           ClearLaunch: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)
@@ -356,6 +415,110 @@ describe('the client', () => {
     unwatch()
     expect(watches.slice(0, 2)).toEqual([10, 15])
     expect(heard[0]?._tag === 'Changed' && heard[0].cursor).toBe(15)
+    await client.close()
+  })
+})
+
+describe('automations', () => {
+  /** A stand-in runtime that keeps what each call was sent, and answers it as the runtime would. */
+  const recording = async () => {
+    const channel = new MessageChannel()
+    const sent: Array<readonly [string, unknown]> = []
+    const automation = {
+      id: 'auto1',
+      projectId: 'p1',
+      name: 'Morning review',
+      prompt: 'Review the new pull requests.',
+      schedule: { every: 'week' as const, days: [1, 2, 3, 4, 5] as const, at: '09:00' },
+      work: 'review' as const,
+      state: 'on' as const,
+      pausedBy: null,
+      pauseReason: null,
+      nextAt: '2026-10-22T09:00:00.000Z',
+      latest: [],
+    }
+    const definition = {
+      name: 'Morning review',
+      prompt: 'Review the new pull requests.',
+      schedule: { every: 'week' as const, days: [1, 2, 3, 4, 5] as const, at: '09:00' },
+      zone: 'Europe/London',
+      lead: { agentId: 'claude-code', model: null, effort: null },
+      work: { kind: 'review' as const },
+      allowEverything: true,
+      minutes: 45,
+      late: 'once' as const,
+    }
+    const answers: Record<string, unknown> = {
+      GetAutomations: { cursor: 4, automations: [automation], allPaused: false },
+      GetAutomation: { cursor: 4, automation: { ...automation, definition, postsReviews: false, runs: [], allPaused: false } },
+      MakeAutomation: { automationId: 'auto2' },
+    }
+    // Every call it is sent is answered here: the ones a test uses by what they were sent, the rest never.
+    const handlers = new Proxy(
+      {},
+      {
+        get:
+          (_target, tag: string) =>
+          (payload: unknown): Effect.Effect<unknown> => {
+            sent.push([tag, payload])
+            return tag in answers ? Effect.succeed(answers[tag]) : Effect.void
+          },
+      },
+    )
+    // Handlers made on the fly need nothing, as their type can't say.
+    const server: Layer.Layer<never> = RpcServer.layer(Api).pipe(
+      Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
+      Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
+    ) as Layer.Layer<never>
+    await serving(server)
+    const client = await connect(channel.port2 as unknown as DomMessagePort)
+    return { client, sent, definition }
+  }
+
+  /** What each call was sent, without the command's id, which is the client's own. */
+  const without = (payload: unknown) => {
+    const { commandId: _id, ...rest } = payload as { commandId?: string }
+    return rest
+  }
+
+  it('reads a project’s automations and one of them, and sends each change by its id, with the card’s item where one asks', async () => {
+    const { client, sent, definition } = await recording()
+    expect((await client.getAutomations('p1')).automations.map((one) => one.name)).toEqual(['Morning review'])
+    expect((await client.getAutomation('auto1')).automation.definition.zone).toBe('Europe/London')
+    expect(await client.makeAutomation({ projectId: 'p1', definition })).toBe('auto2')
+    expect(await client.makeAutomation({ projectId: 'p1', definition, on: true })).toBe('auto2')
+    await client.changeAutomation('auto1', { ...definition, minutes: 30 })
+    await client.turnOnAutomation('auto1')
+    await client.turnOnAutomation('auto1', 'item1')
+    await client.pauseAutomation('auto1')
+    await client.runAutomationNow('auto1')
+    await client.runAutomationNow('auto1', 'item2')
+    await client.deleteAutomation('auto1')
+    await client.undoAutomationChange('item3')
+    await client.setAutomationPostsReviews('auto1', true)
+    await client.setAutomationsPaused(true)
+    expect(sent.map(([tag, payload]) => [tag, without(payload)])).toEqual([
+      ['GetAutomations', { projectId: 'p1' }],
+      ['GetAutomation', { automationId: 'auto1' }],
+      ['MakeAutomation', { projectId: 'p1', definition }],
+      ['MakeAutomation', { projectId: 'p1', definition, on: true }],
+      ['ChangeAutomation', { automationId: 'auto1', definition: { ...definition, minutes: 30 } }],
+      ['TurnOnAutomation', { automationId: 'auto1' }],
+      ['TurnOnAutomation', { automationId: 'auto1', itemId: 'item1' }],
+      ['PauseAutomation', { automationId: 'auto1' }],
+      ['RunAutomationNow', { automationId: 'auto1' }],
+      ['RunAutomationNow', { automationId: 'auto1', itemId: 'item2' }],
+      ['DeleteAutomation', { automationId: 'auto1' }],
+      ['UndoAutomationChange', { itemId: 'item3' }],
+      ['SetAutomationPostsReviews', { automationId: 'auto1', on: true }],
+      ['SetAutomationsPaused', { paused: true }],
+    ])
+    // Each command goes under an id of the window's own.
+    expect(
+      sent
+        .filter(([tag]) => !tag.startsWith('Get'))
+        .every(([, payload]) => (payload as { commandId: string }).commandId.startsWith('cmd_')),
+    ).toBe(true)
     await client.close()
   })
 })

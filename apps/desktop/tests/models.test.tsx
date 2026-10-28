@@ -21,10 +21,11 @@ import {
   togglePin,
   useModelPrefs,
 } from '../src/renderer/shared/models'
-import { agents, fakeClient, models } from './fixtures'
+import { canPick } from '../src/renderer/shared/agents'
+import { agents, fakeClient, models, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
-const signedIn = agents.filter((agent) => agent.signIn !== 'signed_out')
+const signedIn = agents.filter(canPick)
 const catalog = catalogOf(models, signedIn)
 
 describe('the models every agent offers', () => {
@@ -62,9 +63,12 @@ describe('the models every agent offers', () => {
       version: null,
       ways: [],
       accounts: [],
+      addsAccounts: true,
+      guide: null,
       installed: true,
       kept: false,
       download: null,
+      problem: null,
     }
     const plain = (id: string, name: string) => ({ id, name, description: null, efforts: [], effort: null })
     const offered: AgentModels = {
@@ -130,6 +134,19 @@ describe('the models every agent offers', () => {
     if (codex === undefined) throw new Error('Codex offers models')
     const off = catalogOf([{ ...codex, blocked: codex.models.map((model) => model.id) }], signedIn)
     expect(off.models.some((info) => info.runtime === 'codex')).toBe(false)
+  })
+
+  it('leave out an agent that isn’t installed, its own default, its pin and its count', () => {
+    // Junie has no status command: not installed, its sign-in is only unknown.
+    const junie: AgentStatus = { ...agents[1]!, id: 'junie', name: 'Junie', signIn: 'unknown', installed: false }
+    const offered = [...withoutOpenCode, junie].filter(canPick)
+    expect(offered.map((agent) => agent.id)).toEqual(['claude-code', 'codex'])
+    const without = catalogOf([], offered)
+    expect(without.models.map((info) => info.name)).toEqual(['Claude Code default', 'Codex default'])
+    expect(without.models).toHaveLength(2)
+    expect(defaultPins(without)).toEqual(['claude-code:', 'codex:'])
+    // Installed, it is offered again.
+    expect(catalogOf([], [...offered, { ...junie, installed: true }]).models.map((info) => info.name)).toContain('Junie default')
   })
 
   it('stand for an agent whose models aren’t known yet by its own default', () => {

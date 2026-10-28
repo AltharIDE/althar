@@ -19,14 +19,17 @@ export function RunOf({
   run: RunContent
   now: string
   onStop: (launchId: string) => void
-  onRunAgain: (taskId: string | null) => void
+  /** Runs it again, where it ran: the task's, and which of the project's runnables, where the card says. */
+  onRunAgain: (taskId: string | null, runnableId: string | null) => void
 }) {
   const url = run.url
   return (
     <RunCard
       {...runCardOf(run, now)}
       {...(url === null ? {} : { onOpen: () => void window.open(url, '_blank') })}
-      {...(run.ended === null ? { onStop: () => onStop(run.launchId) } : { onRunAgain: () => onRunAgain(run.taskId) })}
+      {...(run.ended === null
+        ? { onStop: () => onStop(run.launchId) }
+        : { onRunAgain: () => onRunAgain(run.taskId, run.runnableId ?? null) })}
     />
   )
 }

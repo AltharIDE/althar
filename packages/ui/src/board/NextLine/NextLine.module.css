@@ -1,0 +1,83 @@
+/* A row in line, with its grip in the lane's margin: shown on hover, on focus, with its menu open and while it is moved.
+   The rule between rows is each row's top border, kept the same height on all of them so that no row changes size as the order does. */
+.list > .item {
+  position: relative;
+  border-top: 1px solid transparent;
+}
+.list > .item:first-child {
+  margin-top: -1px;
+}
+.list > .item + .item {
+  border-top-color: var(--line-2);
+}
+.grip {
+  position: absolute;
+  top: 10px;
+  left: -19px;
+  width: 16px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: radial-gradient(circle, var(--t-3) 1.25px, transparent 1.7px) 50% 50% / 6px 6px;
+  cursor: grab;
+  opacity: 0;
+  transition:
+    opacity var(--fast) var(--ease),
+    background-color var(--fast) var(--ease);
+}
+.item:hover .grip,
+.grip:focus-visible,
+.grip[data-state='open'],
+.lifted .grip {
+  opacity: 1;
+}
+.grip:hover {
+  background-color: var(--n-2);
+}
+.grip:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 1px;
+}
+
+/* A row is being moved: the others slide aside, the held one follows the pointer at once, and no rule shows between rows that are not where they will be. */
+.sorting {
+  user-select: none;
+}
+.sorting > .item:not(.lifted) {
+  transition: transform var(--base) var(--ease);
+}
+.sorting > .item,
+.sorting > .item + .item {
+  border-top-color: transparent;
+}
+.sorting .item,
+.sorting .item * {
+  cursor: grabbing;
+}
+.sorting .item:not(.lifted) .grip {
+  opacity: 0;
+}
+
+/* The row being moved: lifted off the lane, on paper, as it goes between the others. */
+.lifted {
+  z-index: 1;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-2);
+  transition: none;
+}
+/* Let go: it settles into its place. */
+.sorting > .settling {
+  transition: transform var(--base) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grip,
+  .sorting > .item:not(.lifted),
+  .sorting > .settling {
+    transition: none;
+  }
+}

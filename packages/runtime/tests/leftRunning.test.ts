@@ -1,7 +1,17 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
 
-import { commandOfCall, exitCodeIn, servingAt, tailOf } from '../src/leftRunning'
+import {
+  addressOf,
+  commandOfCall,
+  exitCodeIn,
+  type InHand,
+  type LeftRunning,
+  servingAt,
+  shownOf,
+  stillBusy,
+  tailOf,
+} from '../src/leftRunning'
 
 /*
  * What is read from a command left running: where it answers, as servers
@@ -48,4 +58,98 @@ describe('what a command left running says', () => {
       assert.strictEqual(yield* tailOf('/nonexistent/althar/output'), '')
     }),
   )
+})
+
+describe('what a client is shown of one', () => {
+  const left: LeftRunning = {
+    id: 'bg1',
+    command: 'cd /w/site && node_modules/.bin/vp dev --config ../../a/vite.config.ts 2>&1 | tail -20',
+    name: 'Site dev server',
+    toolCallId: null,
+    outputPath: null,
+    printed: '',
+    url: null,
+    inferred: false,
+    startedAt: '2026-10-21T09:00:00.000Z',
+    ended: null,
+  }
+
+  it('keeps what the agent calls it, and the command at a glance as `vp dev`', () => {
+    const shown = shownOf(left)
+    assert.strictEqual(shown.name, 'Site dev server')
+    assert.strictEqual(shown.label, 'vp dev')
+    assert.strictEqual(shown.command, left.command)
+  })
+
+  it('has no name where the agent only gave the command', () => {
+    assert.notProperty(shownOf({ ...left, name: '' }), 'name')
+    assert.notProperty(shownOf({ ...left, name: left.command }), 'name')
+  })
+})
+
+describe('where one answers, from what it prints and the port found for it', () => {
+  const said = 'VITE ready\n  ➜  Local:   http://localhost:5173/\n'
+
+  it('takes a port’s address only where it has none, and marks it as worked out', () => {
+    assert.deepStrictEqual(addressOf({ url: null, inferred: false }, '', 3000), { url: 'http://localhost:3000/', inferred: true })
+    assert.isNull(addressOf({ url: null, inferred: false }, '', null))
+    assert.isNull(addressOf({ url: 'http://localhost:3000/', inferred: true }, '', 4000))
+  })
+
+  it('lets what it prints replace the address worked out, even late', () => {
+    assert.deepStrictEqual(addressOf({ url: 'http://localhost:3000/', inferred: true }, said, null), {
+      url: 'http://localhost:5173/',
+      inferred: false,
+    })
+    assert.deepStrictEqual(addressOf({ url: null, inferred: false }, said, 3000), { url: 'http://localhost:5173/', inferred: false })
+  })
+
+  it('has nothing to change once its output has said it', () => {
+    assert.isNull(addressOf({ url: 'http://localhost:5173/', inferred: false }, said, 3000))
+  })
+})
+
+describe('whether an agent that ended its turn is still at work', () => {
+  const quiet = Duration.seconds(30)
+  const idle: InHand = { turnRunning: false, background: [], callsOpen: 0, workedAt: null }
+  const running = { ended: null, url: null }
+  const ended = { ended: { at: '2026-10-12T10:00:00.000Z', code: 0 }, url: null }
+
+  it('is done when it has nothing in hand', () => {
+    assert.isFalse(stillBusy(idle, 1_000, quiet))
+    // What it left running ended by itself, and long enough ago for it to have been woken and be done.
+    assert.isFalse(stillBusy({ ...idle, background: [ended], workedAt: 1_000 }, 40_000, quiet))
+  })
+
+  it('is at work in a turn, with a command it left running going, or in a call it has not finished', () => {
+    assert.isTrue(stillBusy({ ...idle, turnRunning: true }, 1_000, quiet))
+    assert.isTrue(stillBusy({ ...idle, background: [ended, running] }, 1_000, quiet))
+    assert.isTrue(stillBusy({ ...idle, callsOpen: 1 }, 1_000, quiet))
+  })
+
+  it('is not done until it has been quiet for a while since it spoke outside a turn or something it left running ended', () => {
+    assert.isTrue(stillBusy({ ...idle, background: [ended], workedAt: 10_000 }, 20_000, quiet))
+    assert.isTrue(stillBusy({ ...idle, background: [ended], workedAt: 10_000 }, 39_999, quiet))
+    assert.isFalse(stillBusy({ ...idle, background: [ended], workedAt: 10_000 }, 40_000, quiet))
+  })
+
+  it('does not wait for a server, which says where it answers and runs on as long as the agent wants it', () => {
+    assert.isFalse(stillBusy({ ...idle, background: [{ ended: null, url: 'http://localhost:5173/' }] }, 1_000, quiet))
+    assert.isTrue(stillBusy({ ...idle, background: [{ ended: null, url: 'http://localhost:5173/' }, running] }, 1_000, quiet))
+  })
+
+  it('waits for a test run or a build that prints an address, which ends by itself, but not a dev server', () => {
+    const url = 'http://localhost:4173/'
+    assert.isTrue(stillBusy({ ...idle, background: [{ ended: null, url, command: 'bun run test:browser' }] }, 1_000, quiet))
+    assert.isFalse(stillBusy({ ...idle, background: [{ ended: null, url, command: 'bun dev' }] }, 1_000, quiet))
+  })
+
+  it('waits for an agent to wake once what it left running ended, however slow, up to the wake time, then for it to be quiet', () => {
+    const wake = Duration.minutes(5)
+    const slow = { ...idle, background: [ended], workedAt: 10_000, wakeAt: 10_000 }
+    assert.isTrue(stillBusy(slow, 200_000, quiet, wake))
+    assert.isFalse(stillBusy(slow, 311_000, quiet, wake))
+    // Once it has spoken, the quiet applies.
+    assert.isFalse(stillBusy({ ...slow, wakeAt: null }, 200_000, quiet, wake))
+  })
 })

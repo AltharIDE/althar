@@ -1,27 +1,41 @@
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Busy } from '../src/Busy'
 import { Changes } from '../src/Changes'
 import { changeOf, type Conflict, fixNoteFor, noteFor, onlyTheFix, onlyTheResolution, unresolved, whereLine } from '../src/conflicts'
-import { Connections } from '../src/Connections'
-import { Coordinator } from '../src/Coordinator'
+import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { conflictsOf } from '../src/localMerge'
 import { Plans } from '../src/Plans'
-import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { fakeConnectors, HOST, hosted, items, notices, repository, runtime, turns, until } from './support'
+import { fakeConnectors, notices, repository, runtime, until } from './support'
+import {
+  runtimeWith,
+  git,
+  moveMainOn,
+  ask,
+  cards,
+  worktreeOf,
+  mergeHere,
+  cantOf,
+  rounds,
+  asked,
+  PUSHED_FOR_IT,
+  briefOf,
+  titled,
+  taskSays,
+} from './conflictsSupport'
 
 /*
  * A lead resolving a conflict with its default branch on its own, where the
@@ -34,107 +48,6 @@ import { fakeConnectors, HOST, hosted, items, notices, repository, runtime, turn
  * comes to say its lead resolves conflicts has what conflicts already
  * resolved at once.
  */
-
-const runtimeWith = (services: { readonly github?: FakeService } = {}) =>
-  Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors(services), listenEvery: Duration.millis(100) })),
-  )
-
-const git = (cwd: string, ...args: Array<string>) =>
-  execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd, stdio: 'pipe' })
-    .toString()
-    .trim()
-
-/** Whether git's merge of two commits in a repository conflicts, as a host works it out. */
-const conflictsIn = (cwd: string, into: string, from: string) => {
-  try {
-    git(cwd, 'merge-tree', '--write-tree', into, from)
-    return false
-  } catch {
-    return true
-  }
-}
-
-/** Commits a change to the file the lead's `[lead:edit]` writes, on the repository's `main`: the default branch moves on. */
-const moveMainOn = (root: string, text = 'rate limits\n') => {
-  writeFileSync(join(root, 'change.txt'), text)
-  git(root, 'add', '.')
-  git(root, 'commit', '-q', '-m', 'Limit rates')
-}
-
-/** Opens the repository as a project, with the rule on or not, and asks its coordinator for a change. */
-const ask = (working: string, body: string, resolveConflicts: boolean) =>
-  Effect.gen(function* () {
-    const projects = yield* Projects
-    const coordinator = yield* Coordinator
-    const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
-    if (resolveConflicts) yield* (yield* Policies).set(project.projectId, { resolveConflicts: true }, (yield* Instance).personId)
-    const threadId = yield* coordinator.thread(project.projectId)
-    yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
-    return project.projectId
-  })
-
-const cards = (projectId: string) =>
-  Effect.gen(function* () {
-    const queries = yield* Queries
-    const snapshot = yield* Effect.orDie(queries.coordinator(projectId))
-    return snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
-  })
-
-/** The task's worktree, by its repository's slug. */
-const worktreeOf = (taskId: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const [worktree] = yield* sql<{ slug: string; path: string }>`
-      SELECT b.slug, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${taskId}`
-    return { slug: worktree?.slug ?? '', path: worktree?.path ?? '' }
-  })
-
-/** Merges the task's branch here at its head now, as the person's press does. */
-const mergeHere = (taskId: string) =>
-  Effect.gen(function* () {
-    const { slug, path } = yield* worktreeOf(taskId)
-    return yield* (yield* Changes).mergeHere(taskId, [{ repository: slug, head: git(path, 'rev-parse', 'HEAD') }])
-  })
-
-const cantOf = (error: unknown) => {
-  const said = error as { readonly _tag?: string; readonly why?: string; readonly detail?: string }
-  return [said._tag, said.why, said.detail]
-}
-
-const rounds = (taskId: string) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) => sql<{ state: string; attempt: number; url: string | null; pushedHead: string | null }>`
-      SELECT state, attempt, pull_request_url AS url, pushed_head FROM conflict_resolutions WHERE task_id = ${taskId} ORDER BY created_at`,
-  )
-
-/** What the lead was asked, in the task's thread. */
-const asked = (threadId: string) =>
-  Effect.map(
-    Effect.flatMap(
-      SqlClient.SqlClient,
-      (sql) => sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} ORDER BY sequence`,
-    ),
-    (rows) => rows.map((row) => row.body).filter((body) => body.includes('Bring the branch up to date')),
-  )
-
-/** What the lead's brief says Althar pushes for it, where the project has it resolve conflicts. */
-const PUSHED_FOR_IT =
-  'On a pull request, Althar pushes that merge itself once you commit it, and then a fix you commit on top of it, as one commit, when Althar tells you its checks failed. Nothing else you commit is pushed for you, and you still never push.'
-
-/** The lead's brief: its first turn. */
-const briefOf = (threadId: string) => Effect.map(turns(threadId), (all) => all[0]?.prompt ?? '')
-
-const titled = (threadId: string, start: string) =>
-  until(notices(threadId), (all) => all.some((notice) => notice.title?.startsWith(start) === true), Duration.seconds(20))
-
-/** The task's own say on its lead resolving conflicts, as its menu sets it. */
-const taskSays = (taskId: string, resolveConflicts: boolean | null) =>
-  Effect.gen(function* () {
-    const envelope = yield* Runtime.envelope('task.set_conflicts', { taskId, resolveConflicts })
-    yield* (yield* Changes).setResolveConflicts({ envelope, taskId, resolveConflicts })
-  })
 
 describe('a conflict merging here', () => {
   it.live('waits for the person to ask the lead, as it always has, where the project doesn’t say', () => {
@@ -341,7 +254,7 @@ describe('a conflict merging here', () => {
         assert.deepStrictEqual(yield* asked(threadId), [])
         const [card] = yield* cardOf(projectId, taskId)
         assert.strictEqual(card?.phase, 'running')
-        assert.deepStrictEqual(card?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(card?.queued && { busy: card.queued.busy, atOnce: card.queued.atOnce }, { busy: 1, atOnce: 1 })
         // Asked to merge again meanwhile, it says the lead is at it.
         assert.strictEqual(cantOf(yield* Effect.flip(mergeHere(taskId)))[1], 'resolving')
         return { projectId, taskId, threadId, busy }
@@ -363,7 +276,8 @@ describe('a conflict merging here', () => {
           ['resolving'],
         )
         assert.deepStrictEqual(yield* asked(threadId), [])
-        assert.deepStrictEqual((yield* cardOf(projectId, taskId))[0]?.queued, { busy: 1, atOnce: 1 })
+        const [queued] = (yield* cardOf(projectId, taskId)).map((card) => card.queued)
+        assert.deepStrictEqual(queued && { busy: queued.busy, atOnce: queued.atOnce }, { busy: 1, atOnce: 1 })
         // The other task is stopped: its place goes to the round, whose lead is asked, and resolves it.
         yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy.taskId })
         yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt')
@@ -374,6 +288,146 @@ describe('a conflict merging here', () => {
         )
       }).pipe(Effect.provide(oneAtOnce()))
     })
+  })
+})
+
+describe('rounds an earlier launch left under way', () => {
+  it.live('are settled each on its own: a worktree gone or one git can’t read is that round’s reason, and the rest are settled', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-conflicts-')), 'althar.sqlite')
+    const launch = () => Queries.layer.pipe(Layer.provideMerge(runtime(file)))
+    const reported: Array<Failure> = []
+    return Effect.gen(function* () {
+      const [gone, unreadable, kept] = yield* Effect.gen(function* () {
+        const projects = yield* Projects
+        const sql = yield* SqlClient.SqlClient
+        const root = repository()
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+        const made: Array<{ readonly taskId: string; readonly path: string }> = []
+        for (const title of ['Gone', 'Unreadable', 'Kept']) {
+          const task = yield* projects.createTask({
+            envelope: yield* Runtime.envelope('task.create', {}),
+            projectId: project.projectId,
+            title,
+          })
+          yield* until(
+            sql<{ state: string }>`SELECT state FROM workspaces WHERE task_id = ${task.taskId}`,
+            (rows) => rows[0]?.state === 'ready',
+          )
+          const { slug, path } = yield* worktreeOf(task.taskId)
+          const head = git(path, 'rev-parse', 'HEAD')
+          // Its lead was resolving a conflict with main, where the branch already is, when Althar stopped.
+          const conflict: Conflict = {
+            repository: slug,
+            name: slug,
+            branch: 'main',
+            ref: 'main',
+            target: head,
+            from: head,
+            files: ['change.txt'],
+          }
+          const at = new Date().toISOString()
+          yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+            id: `cres_${randomBytes(16).toString('hex')}`,
+            projectId: project.projectId,
+            taskId: task.taskId,
+            pullRequestUrl: null,
+            conflicts: JSON.stringify([conflict]),
+            attempt: 1,
+            state: 'resolving',
+            createdAt: at,
+            updatedAt: at,
+          })}`
+          made.push({ taskId: task.taskId, path })
+        }
+        return made
+      }).pipe(Effect.provide(launch()))
+      // Meanwhile one task's worktree went, and another's is no longer one git reads.
+      rmSync(gone?.path ?? '', { recursive: true, force: true })
+      rmSync(join(unreadable?.path ?? '', '.git'), { force: true })
+
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const ended = yield* until(
+          sql<{ taskId: string; state: string; failure: string | null }>`
+            SELECT task_id, state, failure FROM conflict_resolutions ORDER BY rowid`,
+          (rows) => rows.every((row) => row.state !== 'resolving'),
+        )
+        assert.deepStrictEqual(
+          ended.map((round) => [round.taskId, round.state]),
+          [
+            [gone?.taskId, 'failed'],
+            [unreadable?.taskId, 'failed'],
+            [kept?.taskId, 'resolved'],
+          ],
+        )
+        assert.strictEqual(ended[0]?.failure, 'Althar stopped while the lead was resolving it. Its worktree is gone.')
+        assert.match(
+          ended[1]?.failure ?? '',
+          /^Althar stopped while the lead was resolving it\. Althar couldn’t read its worktree: .*not a git repository.*\.$/i,
+        )
+        // A worktree that went is the person's to see; git that fails where it is, Althar's to hear of.
+        assert.deepStrictEqual(
+          reported.map((failure) => [failure.where, failure.name]),
+          [['Changes.settleRound', 'GitFailed']],
+        )
+      }).pipe(
+        Effect.provide(launch()),
+        Effect.provideService(Failures, {
+          report: (cause, where, agent) => Effect.sync(() => void reported.push(failureOf(cause, where, agent ?? null))),
+          events: Stream.empty,
+        }),
+      )
+    })
+  })
+})
+
+describe('rounds waiting for a place', () => {
+  it.live('wait each on its own: one whose ask doesn’t read is left out, and the rest still wait', () => {
+    const reported: Array<Failure> = []
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const tasks: Array<string> = []
+      const at = new Date().toISOString()
+      for (const [title, waiting] of [
+        ['Unreadable', '{}'],
+        ['Waits', JSON.stringify({ attempt: 1, body: 'Resolve it.', why: {}, since: at })],
+      ] as const) {
+        const task = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: project.projectId,
+          title,
+        })
+        yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+          id: `cres_${randomBytes(16).toString('hex')}`,
+          projectId: project.projectId,
+          taskId: task.taskId,
+          pullRequestUrl: null,
+          conflicts: '[]',
+          attempt: 1,
+          state: 'resolving',
+          waiting,
+          createdAt: at,
+          updatedAt: at,
+        })}`
+        tasks.push(task.taskId)
+      }
+      assert.deepStrictEqual(
+        (yield* (yield* Busy).order).map((agent) => agent.taskId),
+        [tasks[1]],
+      )
+      assert.deepStrictEqual(
+        reported.map((failure) => failure.where),
+        ['Changes.roundsWaiting'],
+      )
+    }).pipe(
+      Effect.provide(runtime()),
+      Effect.provideService(Failures, {
+        report: (cause, where, agent) => Effect.sync(() => void reported.push(failureOf(cause, where, agent ?? null))),
+        events: Stream.empty,
+      }),
+    )
   })
 })
 
@@ -443,646 +497,6 @@ describe('a task that says otherwise than its project', () => {
   })
 })
 
-describe('a conflict its pull request’s host reports', () => {
-  type Checks = ReadonlyArray<{ readonly name: string; readonly state: 'passed' | 'failed' | 'running'; readonly log?: string }>
-  const PASSED: Checks = [{ name: 'test', state: 'passed' }]
-  const RUNNING: Checks = [{ name: 'test', state: 'running' }]
-  const FAILED: Checks = [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts' }]
-
-  /** Whether a commit the host has holds what the default branch moved on with: the resolution, or after it. */
-  const holdsMain = (bare: string, sha: string) => {
-    try {
-      return git(bare, 'show', `${sha}:change.txt`).includes('rate limits')
-    } catch {
-      return false
-    }
-  }
-  /** Whether a commit the host has holds the lead's fix for its checks. */
-  const holdsFix = (bare: string, sha: string) => {
-    try {
-      git(bare, 'cat-file', '-e', `${sha}:fixed.txt`)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  /**
-   * A GitHub whose pull request conflicts when the bare repository's `main`
-   * and the task's branch do, with the checks it runs on each commit.
-   */
-  const hostOf = (
-    bare: string,
-    checks: (sha: string) => Checks | undefined = () => undefined,
-    /** Each time the host says the pull request conflicts. */
-    conflicting: () => void = () => {},
-  ) => {
-    const tip = () => {
-      try {
-        return git(bare, 'rev-parse', 'althar/add-a-retry')
-      } catch {
-        return null
-      }
-    }
-    const github = makeFakeService({
-      pushUrl: () => bare,
-      headOf: tip,
-      conflictsOf: () => {
-        if (tip() === null) return undefined
-        const conflicts = conflictsIn(bare, 'main', 'althar/add-a-retry')
-        if (conflicts) conflicting()
-        return conflicts
-      },
-      checksFor: (_, sha) => checks(sha),
-    })
-    github.addRepository(['meridian', 'api'])
-    return github
-  }
-
-  const connect = Effect.gen(function* () {
-    const connections = yield* Connections
-    const instance = yield* Instance
-    return yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
-  })
-
-  /** The default branch moves on where the host has it, conflicting with what the task changed. */
-  const moveHostMainOn = (working: string, bare: string, text?: string) => {
-    moveMainOn(working, text)
-    git(working, 'push', '-q', bare, 'main')
-  }
-
-  /** A task that ends in a pull request, with the rule on, as the lead's markers say: its card once the pull request is open. */
-  const opened = (working: string, markers: string, resolveConflicts = true) =>
-    Effect.gen(function* () {
-      yield* connect
-      const projectId = yield* ask(
-        working,
-        `Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] ${markers}`,
-        resolveConflicts,
-      )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change !== null, Duration.seconds(20))
-      return { projectId, taskId: task?.taskId ?? '', threadId: task?.threadId ?? '' }
-    })
-
-  /** Every input the lead was given in the thread. */
-  const given = (threadId: string) =>
-    Effect.map(
-      Effect.flatMap(
-        SqlClient.SqlClient,
-        (sql) => sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} ORDER BY sequence`,
-      ),
-      (rows) => rows.map((row) => row.body),
-    )
-
-  it.live('is resolved by the lead, pushed by Althar, and done once its checks pass', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      const [note] = yield* asked(threadId)
-      assert.include(note, 'merge origin/main into it, which Althar has fetched')
-      assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten.")
-      assert.include(note, "Althar pushes that merge alone to PR #1. Don't push it yourself.")
-      // Its brief says what Althar pushes for it, and that it never pushes itself.
-      assert.include(yield* briefOf(threadId), PUSHED_FOR_IT)
-      // The pull request has the merge, and conflicts no more.
-      assert.strictEqual(git(bare, 'merge-base', '--is-ancestor', 'main', 'althar/add-a-retry'), '')
-      assert.isFalse(conflictsIn(bare, 'main', 'althar/add-a-retry'))
-      // The checks on it settle the round.
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual(
-        [round?.state, round?.attempt, round?.pushedHead],
-        ['resolved', 1, git(bare, 'rev-parse', 'althar/add-a-retry')],
-      )
-      // Nothing left to push, and it waits on the person to merge it.
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.unpushed === 0, Duration.seconds(20))
-      // Asked once, though the host said so on every look until the merge was pushed.
-      assert.strictEqual((yield* asked(threadId)).length, 1)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('leaves it to the person where the task says so, though its project has its leads resolve conflicts', () => {
-    const { working, bare } = hosted()
-    let heard = 0
-    const github = hostOf(
-      bare,
-      () => PASSED,
-      () => void (heard += 1),
-    )
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      const pushed = git(bare, 'rev-parse', 'althar/add-a-retry')
-      yield* taskSays(taskId, false)
-      moveHostMainOn(working, bare)
-      // Heard a few times over that it conflicts, nothing is asked of the lead, and nothing pushed.
-      yield* until(
-        Effect.sync(() => [heard]),
-        ([times]) => (times ?? 0) >= 3,
-        Duration.seconds(20),
-      )
-      assert.deepStrictEqual(yield* rounds(taskId), [])
-      assert.deepStrictEqual(yield* asked(threadId), [])
-      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), pushed)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  /** Until the lead has committed the merge in the task's worktree: it is working still, as `[lead:resolve-hold]` does. */
-  const mergedHere = (taskId: string) =>
-    Effect.gen(function* () {
-      const { path } = yield* worktreeOf(taskId)
-      yield* until(
-        Effect.sync(() => [git(path, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ').length]),
-        ([parts]) => parts === 3,
-        Duration.seconds(20),
-      )
-    })
-
-  it.live('leaves a merge the lead made to the person when they interrupt it before its turn ends, and pushes nothing', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve-hold]')
-      const pushed = git(bare, 'rev-parse', 'althar/add-a-retry')
-      moveHostMainOn(working, bare)
-      yield* mergedHere(taskId)
-      // As the window's interrupt does: the round is handed over, then the lead interrupted.
-      yield* (yield* Changes).leadStopped({ threadId }, 'interrupted')
-      yield* (yield* Sessions).interrupt(threadId)
-      const said = (yield* notices(threadId)).find((notice) => notice.title === 'The lead resolved the conflict with main, in change.txt.')
-      assert.strictEqual(said?.description, 'The lead was stopped, so it waits for you to look at it and push it to PR #1.')
-      assert.strictEqual((yield* rounds(taskId))[0]?.state, 'resolved')
-      yield* Effect.sleep('300 millis')
-      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), pushed)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('waits for the person to push a merge where they said something to the lead meanwhile', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve-hold]')
-      const pushed = git(bare, 'rev-parse', 'althar/add-a-retry')
-      moveHostMainOn(working, bare)
-      yield* mergedHere(taskId)
-      // The person talks to the lead in the middle of it: the round goes on, and what the lead commits may be for that.
-      yield* (yield* Sessions).send({
-        envelope: yield* Runtime.envelope('thread.send', {}),
-        threadId,
-        body: 'Keep the old name too.',
-        disposition: 'interrupt_and_continue',
-      })
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt.')
-      const said = (yield* notices(threadId)).find((notice) => notice.title === 'The lead resolved the conflict with main, in change.txt.')
-      assert.strictEqual(
-        said?.description,
-        'The lead was asked something else meanwhile, so the merge waits for you to look at it and push it to PR #1.',
-      )
-      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), pushed)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('says where it couldn’t push the merge, for the person to push it', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      moveHostMainOn(working, bare)
-      // The host refuses what comes to the task's branch from here on.
-      writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "refused" >&2\nexit 1\n', { mode: 0o755 })
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, but Althar couldn’t push the merge.')
-      const said = (yield* notices(threadId)).find((notice) => notice.title?.endsWith('but Althar couldn’t push the merge.') === true)
-      // Why, as the task's Push card says it: what the host said, in a sentence, not git's hint.
-      assert.match(said?.description ?? '', /^PR #1 refused the push: pre-receive hook declined\. Push it from PR #1’s card\.$/)
-      assert.strictEqual((yield* rounds(taskId))[0]?.state, 'resolved')
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('asks nothing where the branch here merges cleanly, whatever the host says', () => {
-    const { working, bare } = hosted()
-    let heard = 0
-    const github = makeFakeService({
-      pushUrl: () => bare,
-      headOf: () => git(bare, 'rev-parse', 'althar/add-a-retry'),
-      conflictsOf: () => {
-        heard += 1
-        return true
-      },
-      checksFor: () => PASSED,
-    })
-    github.addRepository(['meridian', 'api'])
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      yield* until(
-        Effect.sync(() => [heard]),
-        ([times]) => (times ?? 0) >= 3,
-        Duration.seconds(20),
-      )
-      assert.deepStrictEqual(yield* rounds(taskId), [])
-      assert.deepStrictEqual(yield* asked(threadId), [])
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('gives the conflict to the person when they stop listening while the lead resolves it', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve-wait]')
-      const url = (yield* cards(projectId))[0]?.change?.url ?? ''
-      moveHostMainOn(working, bare)
-      yield* until(asked(threadId), (all) => all.length === 1, Duration.seconds(20))
-      yield* (yield* Changes).stopListening(taskId, url)
-      yield* titled(threadId, 'Althar no longer follows the conflict on PR #1.')
-      const [round] = yield* rounds(taskId)
-      assert.strictEqual(round?.state, 'failed')
-      // Looked at again, a pull request no longer listened to isn't asked about.
-      yield* (yield* Changes).resolveNow({ projectId })
-      yield* Effect.sleep('300 millis')
-      assert.strictEqual((yield* rounds(taskId)).length, 1)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('resolves what a pull request already conflicts on once its project says to', () => {
-    const { working, bare } = hosted()
-    let heard = 0
-    const github = hostOf(
-      bare,
-      () => PASSED,
-      () => void (heard += 1),
-    )
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]', false)
-      moveHostMainOn(working, bare)
-      yield* until(
-        Effect.sync(() => [heard]),
-        ([times]) => (times ?? 0) >= 2,
-        Duration.seconds(20),
-      )
-      assert.deepStrictEqual(yield* rounds(taskId), [])
-      yield* (yield* Policies).set(projectId, { resolveConflicts: true }, (yield* Instance).personId)
-      yield* (yield* Changes).resolveNow({ projectId })
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('ends its round once the person merges the pull request while its checks run', () => {
-    const { working, bare } = hosted()
-    let polled = 0
-    const github = hostOf(bare, (sha) => {
-      if (holdsMain(bare, sha)) polled += 1
-      return holdsMain(bare, sha) ? RUNNING : PASSED
-    })
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      // Its checks are heard running a while.
-      yield* until(
-        Effect.sync(() => [polled]),
-        ([times]) => (times ?? 0) >= 2,
-        Duration.seconds(20),
-      )
-      assert.strictEqual((yield* rounds(taskId))[0]?.state, 'checking')
-      const url = (yield* cards(projectId))[0]?.change?.url ?? ''
-      yield* (yield* Changes).merge(taskId, git(bare, 'rev-parse', 'althar/add-a-retry'), url)
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved', Duration.seconds(20))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('ends its round once the pull request moves on past what Althar pushed', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? RUNNING : PASSED))
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      // Someone else pushes to its branch.
-      git(working, 'fetch', '-q', bare, 'althar/add-a-retry')
-      git(working, 'checkout', '-q', 'FETCH_HEAD')
-      git(working, 'commit', '-q', '--allow-empty', '-m', 'From elsewhere')
-      git(working, 'push', '-q', bare, 'HEAD:althar/add-a-retry')
-      git(working, 'checkout', '-q', 'main')
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved', Duration.seconds(20))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('leaves checks that fail after the lead committed more as failed checks always are', () => {
-    const { working, bare } = hosted()
-    let merged: Checks = RUNNING
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? merged : PASSED))
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      // More is committed on the branch here, then the checks fail.
-      git((yield* worktreeOf(taskId)).path, 'commit', '-q', '--allow-empty', '-m', 'More')
-      merged = FAILED
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved', Duration.seconds(20))
-      // The lead hears them as it always does, not as the round's to fix.
-      yield* until(given(threadId), (all) => all.some((body) => body.startsWith('Checks failed')), Duration.seconds(20))
-      assert.isFalse((yield* given(threadId)).some((body) => body.includes('commit the fix as one commit on top of the merge')))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('doesn’t ask the lead to fix checks that fail once the task is abandoned', () => {
-    const { working, bare } = hosted()
-    let merged: Checks = RUNNING
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? merged : PASSED))
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', { taskId }), taskId })
-      merged = FAILED
-      yield* until(rounds(taskId), (all) => all[0]?.state === 'resolved', Duration.seconds(20))
-      assert.isFalse((yield* given(threadId)).some((body) => body.includes('commit the fix as one commit on top of the merge')))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('takes it as ready once no checks have come for a while', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, () => [])
-    return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      // None yet, so far: it waits.
-      yield* Effect.sleep('400 millis')
-      assert.strictEqual((yield* rounds(taskId))[0]?.state, 'checking')
-      // As though it had waited a few minutes.
-      const before = new Date(Date.now() - 3 * 60_000).toISOString()
-      yield* sql`UPDATE conflict_resolutions SET updated_at = ${before} WHERE task_id = ${taskId}`
-      yield* titled(threadId, 'No checks ran on what Althar pushed to PR #1.')
-      assert.strictEqual((yield* rounds(taskId))[0]?.state, 'resolved')
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  /** Until the lead has committed its fix for the checks in the task's worktree: it is working still, as `[lead:fix-hold]` does. */
-  const fixedHere = (taskId: string) =>
-    Effect.gen(function* () {
-      const { path } = yield* worktreeOf(taskId)
-      yield* until(
-        Effect.sync(() => [holdsFix(path, 'HEAD')]),
-        ([fixed]) => fixed === true,
-        Duration.seconds(20),
-      )
-    })
-
-  it.live('leaves a fix the lead made to the person when they interrupt it before its turn ends, and pushes nothing', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) && !holdsFix(bare, sha) ? FAILED : PASSED))
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix-hold]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
-      const merge = git(bare, 'rev-parse', 'althar/add-a-retry')
-      yield* fixedHere(taskId)
-      yield* (yield* Changes).leadStopped({ threadId }, 'interrupted')
-      yield* (yield* Sessions).interrupt(threadId)
-      const said = (yield* notices(threadId)).find((notice) => notice.title === 'The lead fixed the checks on the merge.')
-      assert.strictEqual(said?.description, 'The lead was stopped, so it waits for you to look at it and push it to PR #1.')
-      yield* Effect.sleep('300 millis')
-      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), merge)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('waits for the person to push a fix where they said something to the lead meanwhile', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) && !holdsFix(bare, sha) ? FAILED : PASSED))
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix-hold]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
-      const merge = git(bare, 'rev-parse', 'althar/add-a-retry')
-      yield* fixedHere(taskId)
-      yield* (yield* Sessions).send({
-        envelope: yield* Runtime.envelope('thread.send', {}),
-        threadId,
-        body: 'Keep the old name too.',
-        disposition: 'interrupt_and_continue',
-      })
-      yield* titled(threadId, 'The lead fixed the checks on the merge.')
-      const said = (yield* notices(threadId)).find((notice) => notice.title === 'The lead fixed the checks on the merge.')
-      assert.strictEqual(
-        said?.description,
-        'The lead was asked something else meanwhile, so the fix waits for you to look at it and push it to PR #1.',
-      )
-      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), merge)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('gives the checks to the person when the lead commits no fix, after its one more try', () => {
-    const { working, bare } = hosted()
-    // A check that failed with no log to pass on.
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? [{ name: 'test', state: 'failed' }] : PASSED))
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
-      yield* titled(threadId, 'The lead couldn’t fix the checks on the merge.')
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual([round?.state, round?.attempt], ['failed', 2])
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('has the lead fix the checks that fail on the merge, within the round, and pushes the fix too', () => {
-    const { working, bare } = hosted()
-    // The merge breaks a check, which the lead's fix mends.
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) && !holdsFix(bare, sha) ? FAILED : PASSED))
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
-      yield* titled(threadId, 'The lead fixed the checks on the merge, and Althar pushed the fix to PR #1.')
-      assert.isTrue(holdsFix(bare, 'althar/add-a-retry'))
-      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual(
-        [round?.state, round?.attempt, round?.pushedHead],
-        ['resolved', 2, git(bare, 'rev-parse', 'althar/add-a-retry')],
-      )
-      // Told within the round that Althar pushes the fix, never that the person does.
-      const said = yield* given(threadId)
-      const fix = said.filter((body) => body.startsWith('Checks failed on the merge Althar pushed to PR #1: test.'))
-      assert.strictEqual(fix.length, 1)
-      assert.include(fix[0], 'FAIL limit.test.ts')
-      assert.include(fix[0], 'commit the fix as one commit on top of the merge, with nothing else: Althar pushes it to PR #1 too.')
-      assert.isFalse(said.some((body) => body.includes('the person looks at it and pushes it')))
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.unpushed === 0, Duration.seconds(20))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('gives the round to the person when the checks fail on the fix too', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? FAILED : PASSED))
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead fixed the checks on the merge, and Althar pushed the fix to PR #1.')
-      yield* until(
-        notices(threadId),
-        (all) => all.filter((notice) => notice.title === 'The checks failed on what Althar pushed to PR #1: test.').length === 2,
-        Duration.seconds(20),
-      )
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual([round?.state, round?.attempt], ['failed', 2])
-      const last = (yield* notices(threadId)).at(-1)
-      assert.deepStrictEqual(
-        [last?.severity, last?.description],
-        ['warning', 'The lead had its one more try. It’s yours to settle, or to ask the lead again.'],
-      )
-      // Asked to fix them once, and not told again, by the round or as failed checks always are.
-      yield* Effect.sleep('500 millis')
-      const said = yield* given(threadId)
-      assert.strictEqual(said.filter((body) => body.startsWith('Checks failed')).length, 1)
-      // Needs you.
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('waits for the person to push a fix the lead committed other work after', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) && !holdsFix(bare, sha) ? FAILED : PASSED))
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix-more]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      const merge = git(bare, 'rev-parse', 'althar/add-a-retry')
-      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
-      yield* titled(threadId, 'The lead fixed the checks on the merge.')
-      const said = (yield* notices(threadId)).find((notice) => notice.title === 'The lead fixed the checks on the merge.')
-      assert.include(said?.description, 'commits besides the fix')
-      // Neither the fix nor what came after it went up.
-      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), merge)
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual([round?.state, round?.attempt, round?.pushedHead], ['resolved', 2, merge])
-      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 2, Duration.seconds(20))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('leaves the checks to the person once they stop the lead, and doesn’t start it again for them', () => {
-    const { working, bare } = hosted()
-    let merged: Checks = RUNNING
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? merged : PASSED))
-    return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const sessions = yield* Sessions
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      assert.strictEqual((yield* rounds(taskId))[0]?.state, 'checking')
-      // The person stops the lead while the checks run, as the window's Stop does.
-      yield* until(
-        Effect.map(sessions.running(threadId), (running) => (Option.isSome(running) ? [running.value] : [])),
-        (running) => running.length === 1,
-      )
-      const [{ n: started } = { n: 0 }] = yield* sql<{
-        n: number
-      }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${threadId}`
-      yield* sessions.stop(threadId)
-      yield* (yield* Changes).leadStopped({ threadId })
-      yield* titled(threadId, 'You stopped the lead, so the checks on what Althar pushed to PR #1 are yours.')
-      assert.strictEqual((yield* rounds(taskId))[0]?.state, 'resolved')
-      // The checks fail: the thread says so, and the lead isn't started again to fix them.
-      merged = FAILED
-      yield* until(items(threadId), (all) =>
-        all.some((item) => item.kind === 'arrival' && item.content.kind === 'checks' && item.content.failed === 1),
-      )
-      yield* Effect.sleep('500 millis')
-      assert.isTrue(Option.isNone(yield* sessions.running(threadId)))
-      assert.strictEqual(
-        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${threadId}`)[0]?.n,
-        started,
-      )
-      assert.isFalse((yield* asked(threadId)).some((body) => body.startsWith('Checks failed')))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('gives the round to the person when they stop listening, and a later conflict starts another', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) ? RUNNING : PASSED))
-    return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      const url = (yield* cards(projectId))[0]?.change?.url ?? ''
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-      // Its checks never finish, and the person stops listening to it.
-      yield* (yield* Changes).stopListening(taskId, url)
-      yield* titled(threadId, 'Althar no longer follows the checks on what it pushed to PR #1.')
-      assert.deepStrictEqual(
-        (yield* rounds(taskId)).map((round) => round.state),
-        ['resolved'],
-      )
-      // Listened to again, as opening its pull request again does, a new conflict is the lead's once more.
-      yield* sql`UPDATE external_links SET listening = 1 WHERE task_id = ${taskId}`
-      moveHostMainOn(working, bare, 'rate limits, again\n')
-      yield* until(rounds(taskId), (all) => all.length === 2, Duration.seconds(20))
-      yield* until(asked(threadId), (all) => all.length === 2, Duration.seconds(20))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('waits for the person to push a merge the lead committed other work on top of', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve-more]')
-      const before = git(bare, 'rev-parse', 'althar/add-a-retry')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt.')
-      const said = (yield* notices(threadId)).find((notice) => notice.title === 'The lead resolved the conflict with main, in change.txt.')
-      assert.include(said?.description, 'commits besides the merge')
-      // Neither the merge nor what came after it went up.
-      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), before)
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual([round?.state, round?.pushedHead], ['resolved', null])
-      const [waiting] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 3, Duration.seconds(20))
-      assert.strictEqual(waiting?.change?.localHead, git((yield* worktreeOf(taskId)).path, 'rev-parse', 'HEAD'))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('waits for the person to push the merge where the branch has other commits the pull request doesn’t', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare)
-    return Effect.gen(function* () {
-      const { projectId, taskId, threadId } = yield* opened(working, '[lead:fix] [lead:resolve]')
-      // The lead fixed a check and committed it, for the person to push.
-      github.setChecks(1, FAILED)
-      yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
-      const before = git(bare, 'rev-parse', 'althar/add-a-retry')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt.')
-      // Neither the merge nor the fix went up: both wait for the person's push.
-      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), before)
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual([round?.state, round?.pushedHead], ['resolved', null])
-      const [waiting] = yield* until(cards(projectId), (all) => (all[0]?.change?.unpushed ?? 0) > 1, Duration.seconds(20))
-      assert.strictEqual(waiting?.change?.localHead, git((yield* worktreeOf(taskId)).path, 'rev-parse', 'HEAD'))
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-
-  it.live('leaves a stopped task’s lead alone, until its run is done', () => {
-    const { working, bare } = hosted()
-    const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
-      // Stopped, as stopping a task mid-step leaves its run: suspended, for the person to resume.
-      yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${taskId}`
-      moveHostMainOn(working, bare)
-      yield* Effect.sleep('1 second')
-      assert.deepStrictEqual(yield* rounds(taskId), [])
-      assert.deepStrictEqual(yield* asked(threadId), [])
-      // Its run done, the same conflict is the lead's.
-      yield* sql`UPDATE runs SET state = 'succeeded' WHERE task_id = ${taskId}`
-      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
-})
-
 describe('a round’s words, and what git says of its branch', () => {
   /** A task branch and main that both change a.txt and b.txt: the task's branch checked out, and the conflict merging main into it. */
   const split = () => {
@@ -1109,25 +523,29 @@ describe('a round’s words, and what git says of its branch', () => {
     }
   }
 
-  it.effect('says why each repository isn’t resolved yet, until it is', () =>
+  it.effect('says why each repository isn’t resolved yet, and when only committing the merge is left, until it is', () =>
     Effect.gen(function* () {
       const { root, conflict } = split()
-      assert.strictEqual(yield* unresolved(root, conflict), "main isn't merged into the branch.")
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: "main isn't merged into the branch.", uncommitted: false })
       mergeMain(root)
-      assert.strictEqual(yield* unresolved(root, conflict), 'a.txt, b.txt still conflict.')
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'a.txt, b.txt still conflict.', uncommitted: false })
       writeFileSync(join(root, 'b.txt'), 'task\nmain\n')
       git(root, 'add', 'b.txt')
-      assert.strictEqual(yield* unresolved(root, conflict), 'a.txt still conflicts.')
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'a.txt still conflicts.', uncommitted: false })
       git(root, 'add', 'a.txt')
-      assert.strictEqual(yield* unresolved(root, conflict), "The merge of main isn't committed.")
+      // Every file is settled: the merge is all that is left to do.
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: "The merge of main isn't committed.", uncommitted: true })
       // Committed with its markers in, the conflict is in the commit.
       writeFileSync(join(root, 'b.txt'), '<<<<<<< HEAD\ntask\n=======\nmain\n>>>>>>> main\n')
       git(root, 'add', '.')
       git(root, 'commit', '-q', '--no-edit')
-      assert.strictEqual(yield* unresolved(root, conflict), 'a.txt, b.txt still have conflict markers in them.')
+      assert.deepStrictEqual(yield* unresolved(root, conflict), {
+        why: 'a.txt, b.txt still have conflict markers in them.',
+        uncommitted: false,
+      })
       writeFileSync(join(root, 'a.txt'), 'task\nmain\n')
       git(root, 'commit', '-q', '-am', 'Settle a')
-      assert.strictEqual(yield* unresolved(root, conflict), 'b.txt still has conflict markers in it.')
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'b.txt still has conflict markers in it.', uncommitted: false })
       writeFileSync(join(root, 'b.txt'), 'task\nmain\n')
       git(root, 'commit', '-q', '-am', 'Settle b')
       assert.isNull(yield* unresolved(root, conflict))
@@ -1141,7 +559,7 @@ describe('a round’s words, and what git says of its branch', () => {
       writeFileSync(join(root, 'c.txt'), 'c\n')
       git(root, 'add', '.')
       git(root, 'commit', '-q', '-m', 'Other work')
-      assert.isFalse(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
+      assert.isNull(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
       // A merge of another branch isn't one of the branch it conflicted with.
       git(root, 'reset', '-q', '--hard', conflict.from)
       git(root, 'checkout', '-q', '-b', 'other', conflict.from)
@@ -1150,7 +568,7 @@ describe('a round’s words, and what git says of its branch', () => {
       git(root, 'commit', '-q', '-m', 'Elsewhere')
       git(root, 'checkout', '-q', 'task')
       git(root, 'merge', '-q', '--no-ff', '--no-edit', 'other')
-      assert.isFalse(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
+      assert.isNull(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
       // The merge of main, settled, is.
       git(root, 'reset', '-q', '--hard', conflict.from)
       mergeMain(root)
@@ -1158,22 +576,33 @@ describe('a round’s words, and what git says of its branch', () => {
       git(root, 'add', '.')
       git(root, 'commit', '-q', '--no-edit')
       const merge = git(root, 'rev-parse', 'HEAD')
-      assert.isTrue(yield* onlyTheResolution(root, conflict, merge))
-      // On top of it, one commit is a fix; two aren't.
+      assert.strictEqual(yield* onlyTheResolution(root, conflict, merge), 'merge')
+      // On top of it, one commit is a fix, for the full tests as for the checks; two aren't.
       git(root, 'commit', '-q', '--allow-empty', '-m', 'Fix')
       assert.isTrue(yield* onlyTheFix(root, merge, git(root, 'rev-parse', 'HEAD')))
+      assert.strictEqual(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')), 'merge and fix')
       git(root, 'commit', '-q', '--allow-empty', '-m', 'More')
       assert.isFalse(yield* onlyTheFix(root, merge, git(root, 'rev-parse', 'HEAD')))
+      assert.isNull(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
+      // The one commit must sit on the merge itself: a merge of other work in its place isn't a fix.
+      git(root, 'reset', '-q', '--hard', merge)
+      git(root, 'checkout', '-q', '-b', 'elsewhere', conflict.from)
+      writeFileSync(join(root, 'e.txt'), 'e\n')
+      git(root, 'add', '.')
+      git(root, 'commit', '-q', '-m', 'Elsewhere again')
+      git(root, 'checkout', '-q', 'task')
+      git(root, 'merge', '-q', '--no-ff', '--no-edit', 'elsewhere')
+      assert.isNull(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
     }),
   )
 
-  it.effect('finds what conflicts merging here without moving anything, and nothing where it can’t tell', () =>
+  it.effect('finds what conflicts merging here without moving anything, and says where it can’t tell', () =>
     Effect.gen(function* () {
       const { root, conflict } = split()
       assert.deepStrictEqual(yield* conflictsOf(root, 'main', conflict.from), ['a.txt', 'b.txt'])
       assert.strictEqual(git(root, 'rev-parse', 'main'), conflict.target)
-      assert.deepStrictEqual(yield* conflictsOf(root, 'develop', conflict.from), [])
-      assert.deepStrictEqual(yield* conflictsOf(root, 'main', 'f'.repeat(40)), [])
+      assert.isNull(yield* conflictsOf(root, 'develop', conflict.from))
+      assert.isNull(yield* conflictsOf(root, 'main', 'f'.repeat(40)))
       assert.deepStrictEqual(yield* conflictsOf(root, 'main', conflict.target), [])
     }),
   )
@@ -1184,7 +613,33 @@ describe('a round’s words, and what git says of its branch', () => {
     assert.strictEqual(whereLine([one, two]), 'web’s develop, in README.md; api’s main, in a.ts, b.ts')
     const note = noteFor([one, two], { change: null }, null)
     assert.include(note, 'in web, develop conflicts in README.md; in api, main conflicts in a.ts, b.ts.')
-    assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.")
+    assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten.")
+    assert.include(note, "Then say it's ready to merge again.")
+    // The lead is told to commit the merge before anything slow, and before its turn ends, whatever it conflicts in.
+    for (const text of [note, noteFor([one], { change: 'PR #1' }, null), noteFor([one], { change: null }, null)]) {
+      assert.include(text, 'Commit the merge as soon as the conflicts are settled and the quick checks pass')
+      assert.include(text, "don't end your turn with the merge uncommitted, or while you wait on something running in the background")
+      assert.include(text, 'If the full tests then find something, fix it in')
+    }
+    assert.include(noteFor([one], { change: 'PR #1' }, null), 'fix it in one follow-up commit on top of the merge')
+    assert.include(noteFor([one], { change: 'PR #1' }, null), "Althar pushes the merge and that fix to PR #1. Don't push it yourself.")
+    assert.notInclude(noteFor([one], { change: null }, null), 'Althar pushes')
+    // Asked once more where the merge was all that was left, it is told so, not asked to resolve it again.
+    const commit = noteFor([one], { change: 'PR #1' }, "The merge of origin/develop isn't committed.", [one])
+    assert.match(commit, /^Your merge is resolved but not committed: commit it\. Don't end your turn with the merge uncommitted/)
+    assert.notInclude(commit, 'Try once more')
+    assert.notInclude(commit, 'settle each conflict')
+    assert.include(commit, "Althar pushes the merge and that fix to PR #1. Don't push it yourself.")
+    assert.match(noteFor([one, two], { change: null }, 'web: …', [one]), /^Your merge in web is resolved but not committed: commit it\./)
+    assert.match(
+      noteFor([one, two], { change: null }, 'web: …', [one, two]),
+      /^Your merges in web and api are resolved but not committed: commit each\./,
+    )
+    // Anything else still left is asked as before.
+    assert.match(
+      noteFor([one], { change: null }, 'README.md still conflicts.'),
+      /^The conflict isn't resolved yet: README.md still conflicts\. Try once more\. /,
+    )
     assert.strictEqual(changeOf({ change: null }), 'the pull request')
     const fix = fixNoteFor({ change: null }, { failing: ['test'], logs: [] })
     assert.match(fix, /^Checks failed on the merge Althar pushed to the pull request: test\.\n\nFix what broke/)

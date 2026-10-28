@@ -4,13 +4,13 @@ import { join } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import { assert, describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { canonicalJson, sha256Hex } from '../src/canonicalJson'
 import * as Database from '../src/Database'
 import { ForeignKeyViolations } from '../src/Database'
-import { migrations } from '../src/migrations'
+import { idOf, migrations } from '../src/migrations'
 import { checksums } from '../src/migrations/checksums'
 import { seed } from './fixtures'
 import { InMemory, WebCrypto } from './support'
@@ -38,6 +38,9 @@ const readableSchema = Effect.gen(function* () {
   ].join('\n')
 })
 
+/** Whether a statement went through, rather than being refused. */
+const succeeds = (statement: Effect.Effect<unknown, unknown, SqlClient.SqlClient>) => Effect.map(Effect.exit(statement), Exit.isSuccess)
+
 const withFile = <A, E, R>(use: (filename: string) => Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
     Effect.sync(() => mkdtempSync(join(tmpdir(), 'althar-schema-'))),
@@ -49,8 +52,10 @@ describe('schema', () => {
   it.effect('creates every table as STRICT', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      // Ordinary tables: a full-text index is a virtual table, with shadow tables of SQLite's own making.
       const tables = yield* sql<{ name: string; sql: string }>`
-        SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'`
+        SELECT m.name, m.sql FROM sqlite_schema m JOIN pragma_table_list l ON l.schema = 'main' AND l.name = m.name
+        WHERE l.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name <> 'schema_migrations'`
       assert.isAbove(tables.length, 80)
       for (const table of tables) assert.isTrue(table.sql.endsWith(') STRICT'), `${table.name} is not STRICT`)
     }).pipe(Effect.provide(InMemory)),
@@ -90,28 +95,27 @@ describe('schema', () => {
     ),
   )
 
-  it.effect(
-    'lets one runtime at a time open a file',
-    () =>
-      withFile((filename) =>
-        Effect.gen(function* () {
-          const open = Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient
-            yield* sql`SELECT 1`
-          })
-          yield* Effect.scoped(
-            Effect.gen(function* () {
-              yield* Layer.build(Layer.fresh(Database.layer({ filename })))
-              const second = yield* Effect.flip(Effect.provide(open, Layer.fresh(Database.layer({ filename }))))
-              assert.instanceOf(second, Database.DatabaseInUse)
-            }),
-          )
-          // Once the first has closed, the next can open it.
-          yield* Effect.provide(open, Layer.fresh(Database.layer({ filename })))
-        }),
-      ),
-    // The second opener waits out SQLite's busy timeout, five seconds, before it gives up.
-    15_000,
+  it.effect('lets one runtime at a time open a file', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const open = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`SELECT 1`
+        })
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* Layer.build(Layer.fresh(Database.layer({ filename })))
+            // It gives up on the lock at once, rather than after the five seconds a runtime waits.
+            const second = yield* Effect.flip(
+              Effect.provide(open, Layer.fresh(Database.layer({ filename, busyTimeout: Duration.millis(50) }))),
+            )
+            assert.instanceOf(second, Database.DatabaseInUse)
+          }),
+        )
+        // Once the first has closed, the next can open it.
+        yield* Effect.provide(open, Layer.fresh(Database.layer({ filename })))
+      }),
+    ),
   )
 
   it.effect('lets a later migration rebuild a table that others reference', () =>
@@ -127,7 +131,7 @@ describe('schema', () => {
         })
         yield* Effect.provide(referenced, Layer.fresh(Database.layer({ filename })))
         const rebuildDevices = {
-          key: `${String(migrations.length + 1).padStart(4, '0')}_rebuild_devices`,
+          key: `${String(idOf(migrations.at(-1) ?? { key: '0', statements: [] }) + 1).padStart(4, '0')}_rebuild_devices`,
           statements: [
             'CREATE TABLE devices_new (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL) STRICT',
             'INSERT INTO devices_new SELECT id, name, created_at FROM devices',
@@ -232,6 +236,144 @@ describe('schema', () => {
         })
         assert.isNull(setupOf(tasks[1]))
         assert.isNull(setupOf(tasks[2]))
+      }),
+    ),
+  )
+
+  it.effect('takes every worktree made before plain tasks as made on its branch, when it was made', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0031_branch_on_first_write')
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, deviceId, actorId, createdAt } = yield* seed
+          const bindingId = yield* newId(Ids.repositoryBinding)
+          yield* sql`INSERT INTO repository_bindings ${sql.insert({ id: bindingId, projectId, slug: 'meridian', role: 'other', displayName: 'meridian', createdAt })}`
+          const taskId = yield* newId(Ids.task)
+          yield* sql`INSERT INTO tasks ${sql.insert({ id: taskId, projectId, title: 'Retry', slug: 'retry', state: 'open', createdByActorId: actorId, createdAt })}`
+          yield* sql`INSERT INTO workspaces ${sql.insert({
+            id: yield* newId(Ids.workspace),
+            projectId,
+            taskId,
+            bindingId,
+            deviceId,
+            access: 'write',
+            path: '/worktrees/meridian/retry/meridian',
+            baseRef: 'main',
+            branch: 'althar/retry',
+            state: 'ready',
+            createdAt,
+          })}`
+          return createdAt
+        }).pipe(Effect.provide(WebCrypto))
+        const createdAt = yield* Effect.provide(made, Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })))
+        const read = Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ branchedAt: string | null }>`SELECT branched_at FROM workspaces`)
+        const after = yield* Effect.provide(read, Layer.fresh(Database.layer({ filename })))
+        assert.deepStrictEqual(after, [{ branchedAt: createdAt }])
+      }),
+    ),
+  )
+
+  it.effect('gives each repository bound before runnables its own way to run, in the order they were bound', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0033_runnables')
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, createdAt } = yield* seed
+          const bound: Array<string> = []
+          // Two repositories bound in the same millisecond, and a third left out of the project since.
+          for (const [slug, detachedAt] of [
+            ['api', null],
+            ['web', null],
+            ['infra', createdAt],
+          ] as const) {
+            const bindingId = yield* newId(Ids.repositoryBinding)
+            bound.push(bindingId)
+            yield* sql`INSERT INTO repository_bindings ${sql.insert({ id: bindingId, projectId, slug, role: 'other', displayName: slug, createdAt, detachedAt })}`
+          }
+          return bound
+        }).pipe(Effect.provide(WebCrypto))
+        const bound = yield* Effect.provide(made, Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })))
+        const read = Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) =>
+            sql<{
+              id: string
+              bindingId: string
+              name: string | null
+              command: string | null
+              position: number
+              keptByActorId: string | null
+            }>`SELECT id, binding_id, name, command, position, kept_by_actor_id FROM runnables ORDER BY position`,
+        )
+        const after = yield* Effect.provide(read, Layer.fresh(Database.layer({ filename })))
+        assert.deepStrictEqual(
+          after.map(({ id: _id, ...rest }) => rest),
+          [
+            { bindingId: bound[0]!, name: null, command: null, position: 0, keptByActorId: null },
+            { bindingId: bound[1]!, name: null, command: null, position: 1, keptByActorId: null },
+          ],
+        )
+        for (const row of after) assert.match(row.id, /^rnbl_[0-9a-f]{32}$/)
+      }),
+    ),
+  )
+
+  it.effect('keeps a connection made before workspaces, and lets one account connect once per workspace and a project bind to one', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0041_tracker_workspaces')
+        const connection = (id: string, createdAt: string, workspace: { key: string; name: string } | null) => ({
+          id,
+          deviceId: '',
+          product: 'linear',
+          webUrl: 'https://linear.app',
+          apiUrl: 'https://api.linear.app',
+          accountId: 'u1',
+          accountLogin: 'mate',
+          auth: 'pkce',
+          credentialRef: id,
+          state: 'ready',
+          createdAt,
+          updatedAt: createdAt,
+          ...(workspace === null ? {} : { workspaceKey: workspace.key, workspaceName: workspace.name }),
+        })
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, deviceId, createdAt } = yield* seed
+          const old = yield* newId(Ids.connection)
+          yield* sql`INSERT INTO connections ${sql.insert({ ...connection(old, createdAt, null), deviceId })}`
+          return { projectId, deviceId, createdAt, old }
+        }).pipe(Effect.provide(WebCrypto))
+        const { projectId, deviceId, createdAt, old } = yield* Effect.provide(
+          made,
+          Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })),
+        )
+        const after = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const insert = (id: string, workspace: { key: string; name: string } | null) =>
+            succeeds(sql`INSERT INTO connections ${sql.insert({ ...connection(id, createdAt, workspace), deviceId })}`)
+          // The one made before keeps its row, and knows no workspace yet.
+          const [kept] = yield* sql<{ workspaceKey: string | null; workspaceName: string | null }>`
+            SELECT workspace_key, workspace_name FROM connections WHERE id = ${old}`
+          assert.deepStrictEqual(kept, { workspaceKey: null, workspaceName: null })
+          // The same account in two workspaces is two connections; in the same one twice, one.
+          const althar = yield* newId(Ids.connection)
+          assert.isTrue(yield* insert(althar, { key: 'althar', name: 'althar' }))
+          assert.isTrue(yield* insert(yield* newId(Ids.connection), { key: 'fnt', name: 'FNT' }))
+          assert.isFalse(yield* insert(yield* newId(Ids.connection), { key: 'fnt', name: 'FNT' }))
+          assert.isFalse(yield* insert(yield* newId(Ids.connection), null))
+          // A project is bound to a connection, and to a team there only with it, by its id and its name together.
+          const bind = (set: Readonly<Record<string, unknown>>) =>
+            succeeds(sql`UPDATE projects SET ${sql.update(set)} WHERE id = ${projectId}`)
+          assert.isFalse(yield* bind({ trackerContainerId: 'team-1', trackerContainerName: 'FNT' }))
+          assert.isFalse(yield* bind({ trackerConnectionId: althar, trackerContainerId: 'team-1' }))
+          assert.isFalse(yield* bind({ trackerConnectionId: `conn_${'f'.repeat(32)}` }))
+          assert.isTrue(yield* bind({ trackerConnectionId: althar, trackerContainerId: 'team-1', trackerContainerName: 'Althar' }))
+          assert.isTrue(yield* bind({ trackerConnectionId: null, trackerContainerId: null, trackerContainerName: null }))
+        })
+        yield* Effect.provide(after, Layer.fresh(Database.layer({ filename }))).pipe(Effect.provide(WebCrypto))
       }),
     ),
   )

@@ -7,6 +7,7 @@ import { useControlled } from '../../lib/controlled'
 import { useRefocus } from '../../lib/refocus'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
@@ -63,6 +64,7 @@ export interface StuckText {
   abandoned: string
   abandonedNote: string
   undo: string
+  report: string
 }
 
 export const stuckText: StuckText = {
@@ -75,10 +77,10 @@ export const stuckText: StuckText = {
   send: 'Send to the lead',
   cancel: 'Cancel',
   empty: 'Say what it should do first',
-  retry: 'Try another agent',
+  retry: 'Hand to another agent',
   retryLabel: 'Hand the step to',
   again: 'Try again',
-  abandon: 'Abandon',
+  abandon: 'Abandon this step',
   told: 'Told the lead',
   retried: (agent) => `Handed to ${agent}`,
   retriedNote: 'the step starts again from the task’s record',
@@ -86,6 +88,7 @@ export const stuckText: StuckText = {
   abandoned: 'Abandoned',
   abandonedNote: 'the branch and what it found are kept',
   undo: 'Undo',
+  report: 'Report this',
 }
 
 /** What you told a stuck task to do. */
@@ -102,6 +105,8 @@ export interface StuckProps {
   what: ReactNode
   /** What Althar tried on its own, in order. */
   tried: readonly StuckAttempt[]
+  /** How many tries, where one line of `tried` stands for several (Tried again 3 times); else one for each line. */
+  tries?: number
   /** The lead's read of why, and who the lead is. */
   read?: { by: ModelInfo; says: ReactNode }
   /** The output that keeps failing, as it last ran. */
@@ -112,10 +117,18 @@ export interface StuckProps {
   onTell?: (note: string) => void
   /** Hand the step to another agent. Without it (or `agents`), no Try another agent. */
   onRetry?: (model: ModelInfo) => void
-  /** Run the step again as it was, for one no agent does: Althar's own, such as opening the pull request. Without it, no Try again. */
+  /** Run the step again as it was, on the agent it was on, or Althar's own, such as opening the pull request. Without it, no Try again. */
   onAgain?: () => void
+  /**
+   * Try again is the way to take, as where the connection or the session
+   * failed rather than the work: it comes first, as the card's own button,
+   * and the other ways after it.
+   */
+  againFirst?: boolean
   /** Settle the task without finishing it. Without it, no Abandon. */
   onAbandon?: () => void
+  /** Report it as a problem with Althar, at the end of its answers. Without it, no Report this. */
+  onReport?: () => void
   /** Take an answer back. Without it there is no Undo, as when the lead has already acted on it. */
   onUndo?: (result: StuckResult) => void
   /** The answer, when the consumer holds it: null for not yet answered. */
@@ -132,13 +145,16 @@ export function Stuck({
   step,
   what,
   tried,
+  tries = tried.length,
   read,
   output,
   agents = [],
   onTell,
   onRetry,
   onAgain,
+  againFirst = false,
   onAbandon,
+  onReport,
   onUndo,
   result: resultProp,
   defaultResult = null,
@@ -192,8 +208,21 @@ export function Stuck({
   }
 
   const retrying = onRetry && agents.length > 0
+  // Try again first, where it is the way to take; otherwise after telling the lead and handing the step on.
+  const first = againFirst && onAgain !== undefined
+  const again = onAgain && (
+    <Button
+      variant={first || !(onTell || retrying) ? 'signal' : 'default'}
+      onClick={() => {
+        onAgain()
+        give({ kind: StuckAnswer.Again })
+      }}
+    >
+      {t.again}
+    </Button>
+  )
   return (
-    <AskCard icon="stop" kicker={t.kicker} who={t.after(step, tried.length)} what={what} className={className}>
+    <AskCard icon="stop" kicker={t.kicker} who={t.after(step, tries)} what={what} className={className}>
       {/* when it came straight to you, as when the agent couldn't start, there is nothing it tried */}
       {tried.length > 0 && (
         <section className={s.section}>
@@ -240,10 +269,11 @@ export function Stuck({
           />
         </div>
       ) : (
-        (onTell || retrying || onAgain || onAbandon) && (
+        (onTell || retrying || onAgain || onAbandon || onReport) && (
           <AskFoot>
+            {first && again}
             {onTell && (
-              <Button ref={tellRef} variant="signal" onClick={() => setTelling(true)}>
+              <Button ref={tellRef} variant={first ? 'default' : 'signal'} onClick={() => setTelling(true)}>
                 {t.tell}
               </Button>
             )}
@@ -252,8 +282,8 @@ export function Stuck({
                 label={t.retryLabel}
                 width={300}
                 trigger={
-                  // The first way on is the one to take, unless the lead can be told.
-                  <Button variant={onTell ? 'default' : 'signal'} icon="agents">
+                  // The first way on is the one to take, unless the lead can be told or it is to try again.
+                  <Button variant={onTell || first ? 'default' : 'signal'} icon="agents">
                     {t.retry}
                   </Button>
                 }
@@ -272,17 +302,7 @@ export function Stuck({
                 ))}
               </Menu>
             )}
-            {onAgain && (
-              <Button
-                variant={onTell || retrying ? 'default' : 'signal'}
-                onClick={() => {
-                  onAgain()
-                  give({ kind: StuckAnswer.Again })
-                }}
-              >
-                {t.again}
-              </Button>
-            )}
+            {!first && again}
             {onAbandon && (
               <Button
                 variant="quiet"
@@ -293,6 +313,11 @@ export function Stuck({
               >
                 {t.abandon}
               </Button>
+            )}
+            {onReport && (
+              <LinkButton className={s.report} onClick={onReport}>
+                {t.report}
+              </LinkButton>
             )}
           </AskFoot>
         )

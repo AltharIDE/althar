@@ -13,11 +13,18 @@ import {
   MERIDIAN_TITLES,
 } from '../../fixtures/rules'
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd } from '../../foundations/vocabulary'
-import { type CommandPlace, ProjectRules, type ProjectRulesProps, type RuleCommand } from './ProjectRules'
+import { type CommandPlace, ProjectRules, type ProjectRulesProps, type RuleCommand, type SandboxList } from './ProjectRules'
+
+/** What Meridian's leads' sandboxes let through: what its packages, scripts and setup say, and its code host, registry and tracker. */
+const MERIDIAN_SANDBOX = {
+  commands: ['bunx playwright', 'bunx vp test run', 'node scripts/e2e.ts', 'ps', 'env -i'],
+  hosts: ['github.com', 'api.github.com', 'registry.npmjs.org', 'linear.app', 'api.linear.app'],
+}
 
 /** The screen with its values kept as they are changed, as the app keeps them; each change also goes to its spy. */
 function Live(args: ProjectRulesProps) {
   const [mode, setMode] = useState(args.mode)
+  const [allowAll, setAllowAll] = useState(args.allowAll)
   const [kinds, setKinds] = useState(args.kinds)
   const [commands, setCommands] = useState(args.commands)
   const [end, setEnd] = useState(args.end)
@@ -25,10 +32,20 @@ function Live(args: ProjectRulesProps) {
   const [rotate, setRotate] = useState(args.rotate)
   const [allowed, setAllowed] = useState(args.allowed)
   const [branch, setBranch] = useState(args.branches.value)
+  const [lists, setLists] = useState<Record<SandboxList, readonly string[]>>({
+    commands: args.sandbox?.commands ?? [],
+    hosts: args.sandbox?.hosts ?? [],
+  })
+  const sandbox = args.sandbox
   return (
     <ProjectRules
       {...args}
       mode={mode}
+      allowAll={allowAll}
+      onAllowAllChange={(on) => {
+        setAllowAll(on)
+        args.onAllowAllChange(on)
+      }}
       onModeChange={(next) => {
         setMode(next)
         args.onModeChange(next)
@@ -69,6 +86,22 @@ function Live(args: ProjectRulesProps) {
         setAllowed({ ...allowed, [agent]: ids })
         args.onAllowedChange(agent, ids)
       }}
+      {...(sandbox === undefined
+        ? {}
+        : {
+            sandbox: {
+              ...lists,
+              onAdd: (list: SandboxList, typed: string) => {
+                const problem = sandbox.onAdd(list, typed)
+                if (problem === undefined) setLists({ ...lists, [list]: [...lists[list], typed.trim()] })
+                return problem
+              },
+              onRemove: (list: SandboxList, value: string) => {
+                setLists({ ...lists, [list]: lists[list].filter((each) => each !== value) })
+                sandbox.onRemove(list, value)
+              },
+            },
+          })}
     />
   )
 }
@@ -83,6 +116,8 @@ const meta = {
     project: 'Meridian',
     mode: PermissionPolicy.Coordinator,
     onModeChange: fn(),
+    allowAll: false,
+    onAllowAllChange: fn(),
     kinds: MERIDIAN_KINDS,
     onKindChange: fn(),
     commands: MERIDIAN_COMMANDS,
@@ -100,6 +135,7 @@ const meta = {
     onRotateChange: fn(),
     allowed: {},
     onAllowedChange: fn(),
+    sandbox: { ...MERIDIAN_SANDBOX, onAdd: fn((): string | undefined => undefined), onRemove: fn() },
   },
 } satisfies Meta<typeof ProjectRules>
 export default meta
@@ -221,17 +257,31 @@ export const MovingABuiltIn: Story = {
   },
 }
 
-/** What happens to the rest, changed in place; Allow everything leaves the asks and the go-aheads saying they are off. */
-export const AllowingEverything: Story = {
+/** What happens to the rest, changed in place: three ways, as allowing everything is the switch over them. */
+export const ChoosingTheRest: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     const page = within(document.body)
     await userEvent.click(c.getByRole('button', { name: 'the coordinator decides' }))
-    await userEvent.click(await page.findByRole('menuitemradio', { name: 'Allow everything' }))
-    await expect(args.onModeChange).toHaveBeenCalledWith(PermissionPolicy.AllowAll)
-    await expect(c.getAllByText('Off while everything is allowed.')).toHaveLength(2)
+    await expect(await page.findAllByRole('menuitemradio')).toHaveLength(3)
+    await userEvent.click(page.getByRole('menuitemradio', { name: 'Ask me' }))
+    await expect(args.onModeChange).toHaveBeenCalledWith(PermissionPolicy.Ask)
   },
 }
+
+/** The switch over the sentences: on, what asks, goes ahead and the rest say they are off; Never doesn't, and still changes. */
+export const AllowingEverything: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('switch', { name: 'Allow everything' }))
+    await expect(args.onAllowAllChange).toHaveBeenCalledWith(true)
+    await expect(c.getAllByText('Off while everything is allowed.')).toHaveLength(3)
+    await expect(within(c.getByRole('listitem', { name: 'Never' })).queryByText('Off while everything is allowed.')).toBeNull()
+  },
+}
+
+/** Everything allowed, as the page opens with it on. */
+export const EverythingAllowed: Story = { args: { allowAll: true } }
 
 /** A new project's rules: every kind asks, nothing is named, and what no rule keeps is allowed. */
 export const NewProject: Story = {
@@ -363,4 +413,41 @@ export const LongCommands: Story = {
       } satisfies RuleCommand,
     ],
   },
+}
+
+/** What leads' sandboxes let through while the rest is allowed: known commands outside it, known hosts without asking. */
+export const Sandbox: Story = { args: { mode: PermissionPolicy.Rules } }
+
+/** Adding a host: typed where it will sit, Enter adds it, and focus goes back to the +. */
+export const AddingAHost: Story = {
+  args: { mode: PermissionPolicy.Rules },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Add a host leads reach without asking' }))
+    const field = c.getByRole('textbox', { name: 'A host' })
+    await waitFor(() => expect(field).toHaveFocus())
+    await expect(field).toHaveAccessibleDescription(/A host such as registry.npmjs.org/)
+    await userEvent.type(field, 'pypi.org')
+    await expect(field).toHaveAccessibleDescription('Reached without asking')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.sandbox?.onAdd).toHaveBeenCalledWith('hosts', 'pypi.org')
+    const sandbox = c.getByRole('listitem', { name: 'Sandbox' })
+    await expect(within(sandbox).getByText('pypi.org')).toBeInTheDocument()
+    await waitFor(() => expect(c.getByRole('button', { name: 'Add a host leads reach without asking' })).toHaveFocus())
+  },
+}
+
+/** Taking a command out of what runs outside the sandbox: it goes, and focus moves to the next one's ×. */
+export const RemovingAnOutsideCommand: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Remove env -i' }))
+    await expect(args.sandbox?.onRemove).toHaveBeenCalledWith('commands', 'env -i')
+    await expect(c.queryByRole('button', { name: 'Remove env -i' })).toBeNull()
+  },
+}
+
+/** A project that has nothing outside the sandbox: every command in it first, every host asking. */
+export const NothingOutside: Story = {
+  args: { sandbox: { commands: [], hosts: [], onAdd: fn((): string | undefined => undefined), onRemove: fn() } },
 }

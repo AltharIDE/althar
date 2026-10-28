@@ -18,8 +18,9 @@ export const text = {
   closed: (change: string, at: string) => `${change} closed ${at}`.trim(),
   done: (title: string, at: string) => `${title}, done ${at}`.trim(),
   abandoned: (title: string, at: string) => `${title}, abandoned ${at}`.trim(),
-  /** The tracker its tasks name, by the key their issues share. */
-  issues: (key: string) => `${key} issues`,
+  /** The tracker its tasks name, by the key their issues share, else by its name: MER issues, Trello cards. */
+  issues: (tracker: Pick<Tracker, 'product' | 'key'>) =>
+    `${tracker.key ?? productName(tracker.product)} ${tracker.product === 'trello' ? 'cards' : 'issues'}`,
   /** What opening a repository or tracker part says it does: Open on GitHub, Open on Linear. */
   openOn: (where: string) => `Open on ${where}`,
   moreTrackers: (n: number) => `+${n} more`,
@@ -60,16 +61,20 @@ export interface Tracker {
   readonly product: Product
   /** The host its issues are on: linear.app, a company's own Jira. */
   readonly at: string | null
-  readonly key: string
+  /** Null where its issues share none: a Trello card's key is its own. */
+  readonly key: string | null
   /** Its space on the web (the Linear team, the Jira project), worked out from an issue's link; null where that isn't one to build on. */
   readonly url: string | null
+  /** The connections its issues are read and moved through, the one most of them use first: Althar's standing there is theirs. */
+  readonly connections: ReadonlyArray<string>
 }
 
 /** A key's space on the web, from the link of one of its issues: linear.app/acme/team/MER, acme.atlassian.net/browse/MER. */
-export const trackerUrlOf = (product: Product, key: string, issueUrl: string): string | null => {
+export const trackerUrlOf = (product: Product, key: string | null, issueUrl: string): string | null => {
   try {
     const url = new URL(issueUrl)
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+    if (key === null) return url.origin
     if (product === 'linear') {
       const [workspace] = url.pathname.split('/').filter(Boolean)
       return workspace === undefined ? null : `${url.origin}/${workspace}/team/${key}`
@@ -81,20 +86,41 @@ export const trackerUrlOf = (product: Product, key: string, issueUrl: string): s
   }
 }
 
-/** The trackers a project's tasks name, one a key their issues share, the one most of them name first. */
+/**
+ * The trackers a project's tasks name, the one most of them name first: one
+ * a key their issues share, else one a tracker whose issues share none, as
+ * Trello's cards; each with the connections its issues are read through.
+ */
 export const trackersOf = (tasks: ReadonlyArray<BoardTask>, list: ConnectionList | null): Tracker[] => {
   const trackers = new Set(list?.products.filter((product) => product.tracker && !product.host).map((product) => product.product) ?? [])
-  const counted = new Map<string, Tracker & { n: number }>()
+  const counted = new Map<string, Omit<Tracker, 'connections'> & { n: number; through: Map<string, number> }>()
   for (const task of tasks) {
     const issue = task.issue
-    const key = issue === null ? undefined : /^([A-Z][A-Z0-9_]*)-\d+$/.exec(issue.key)?.[1]
-    if (issue === null || key === undefined || !trackers.has(issue.product)) continue
+    if (issue === null || !trackers.has(issue.product)) continue
+    const key = /^([A-Z][A-Z0-9_]*)-\d+$/.exec(issue.key)?.[1] ?? null
     const at = hostNameOf(issue.url)
-    const id = `${issue.product}:${at ?? ''}:${key}`
+    const id = `${issue.product}:${at ?? ''}:${key ?? ''}`
     const was = counted.get(id)
-    counted.set(id, { product: issue.product, at, key, url: was?.url ?? trackerUrlOf(issue.product, key, issue.url), n: (was?.n ?? 0) + 1 })
+    const through = was?.through ?? new Map<string, number>()
+    if (issue.connectionId !== undefined) through.set(issue.connectionId, (through.get(issue.connectionId) ?? 0) + 1)
+    counted.set(id, {
+      product: issue.product,
+      at,
+      key,
+      url: was?.url ?? trackerUrlOf(issue.product, key, issue.url),
+      n: (was?.n ?? 0) + 1,
+      through,
+    })
   }
-  return [...counted.values()].toSorted((a, b) => b.n - a.n).map(({ product, at, key, url }) => ({ product, at, key, url }))
+  return [...counted.values()]
+    .toSorted((a, b) => b.n - a.n)
+    .map(({ product, at, key, url, through }) => ({
+      product,
+      at,
+      key,
+      url,
+      connections: [...through].toSorted((a, b) => b[1] - a[1]).map(([connection]) => connection),
+    }))
 }
 
 /** The account Althar is connected as on a product there, if it is: a connection to another server of the same product doesn't count. */
@@ -140,8 +166,8 @@ export const partsOf = (input: {
           }
         })),
     ...shown.map((tracker) => ({
-      id: `tracker:${tracker.product}:${tracker.at ?? ''}:${tracker.key}`,
-      name: text.issues(tracker.key),
+      id: `tracker:${tracker.product}:${tracker.at ?? ''}:${tracker.key ?? ''}`,
+      name: text.issues(tracker),
       brand: productBrand(tracker.product),
       ...opening(tracker.product, tracker.url),
     })),
@@ -179,7 +205,6 @@ const POLICY = {
   rules: PermissionPolicy.Rules,
   coordinator: PermissionPolicy.Coordinator,
   ask: PermissionPolicy.Ask,
-  allow: PermissionPolicy.AllowAll,
 } as const satisfies Record<ProjectRulesView['permissions'], PermissionPolicy>
 
 /** The project's rules in a line: who answers what agents ask, and what always asks you whoever would. */
@@ -192,13 +217,12 @@ export const rulesLineOf = (rules: ProjectRulesView): { readonly policy: string;
     ...rules.commands.filter((rule) => rule.decision === 'ask').map((rule) => `“${rule.pattern}”`),
   ]
   return {
-    policy: permissionPolicyText[POLICY[rules.permissions]].title,
+    policy: permissionPolicyText[rules.allowEverything ? PermissionPolicy.AllowAll : POLICY[rules.permissions]].title,
     // With everything allowed, what always asks is kept for later, but asks nothing now.
-    asks:
-      rules.permissions === 'allow'
-        ? text.nothingWaits
-        : asking.length === 0
-          ? text.nothingAsks
-          : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
+    asks: rules.allowEverything
+      ? text.nothingWaits
+      : asking.length === 0
+        ? text.nothingAsks
+        : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
   }
 }

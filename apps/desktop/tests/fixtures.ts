@@ -2,6 +2,12 @@ import type {
   AccountSignInState,
   AgentModels,
   AgentStatus,
+  AutomationCard,
+  AutomationDefinition,
+  AutomationRun,
+  AutomationsSnapshot,
+  AutomationSummary,
+  AutomationView,
   ChangeSummary,
   ConnectGuide,
   ConnectionCheck,
@@ -10,11 +16,16 @@ import type {
   CoordinatorSnapshot,
   HomeSnapshot,
   Load,
+  PlanUsage,
   Picture,
   ProjectNote,
+  ProjectTracker,
+  TrackerContainer,
   ProjectRulesView,
   ProjectRepository,
   ProjectSummary,
+  RepositoryScript,
+  Runnable,
   Status,
   TaskSummary,
   ThreadItem,
@@ -26,6 +37,7 @@ import { vi } from 'vitest'
 
 import { type AppPreferences, DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import type { Client, ProjectRulesChange } from '../src/renderer/data/client'
+import { withChange } from '../src/renderer/features/rules/useRules'
 import type { Host } from '../src/renderer/data/services'
 
 /* What the runtime would say, as plain values, and a client that says it. */
@@ -48,6 +60,7 @@ export const projectRules: ProjectRulesView = {
   projectId: 'p1',
   revision: 1,
   permissions: 'rules',
+  allowEverything: false,
   alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
   never: [],
   alwaysAllow: [],
@@ -60,7 +73,13 @@ export const projectRules: ProjectRulesView = {
   branchPattern: null,
   titlePattern: null,
   moveIssues: true,
+  changeIssues: false,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
+  sandbox: {
+    commands: ['bunx playwright', 'node scripts/e2e.ts', 'ps', 'env -i'],
+    hosts: ['github.com', 'registry.npmjs.org'],
+    edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
+  },
 }
 
 export const agents: ReadonlyArray<AgentStatus> = [
@@ -72,9 +91,12 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: '2.1.263',
     ways: ['browser'],
     accounts: [usual('acc_claude', 'signed_in')],
+    addsAccounts: true,
+    guide: null,
     installed: true,
     kept: false,
     download: null,
+    problem: null,
   },
   {
     id: 'codex',
@@ -84,9 +106,12 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: '0.159.3',
     ways: ['browser', 'device'],
     accounts: [usual('acc_codex', 'unknown')],
+    addsAccounts: true,
+    guide: null,
     installed: true,
     kept: false,
     download: null,
+    problem: null,
   },
   {
     id: 'opencode',
@@ -96,9 +121,12 @@ export const agents: ReadonlyArray<AgentStatus> = [
     version: null,
     ways: [],
     accounts: [usual('acc_opencode', 'signed_out')],
+    addsAccounts: true,
+    guide: null,
     installed: true,
     kept: false,
-    download: { size: '45 MB', installing: false },
+    download: { size: '45 MB', installing: false, pinned: null },
+    problem: null,
   },
 ]
 
@@ -210,6 +238,32 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
   },
 ]
 
+/** What meridian runs: its repository's own way, worked out from it, and Storybook, which the person added. */
+export const runnables: ReadonlyArray<Runnable> = [
+  { id: 'rnbl_dev', name: null, command: 'bun run dev', repository: 'meridian-api', own: true, from: 'repository' },
+  {
+    id: 'rnbl_storybook',
+    name: 'Storybook',
+    command: 'bun --filter @meridian/ui storybook',
+    repository: 'meridian-api',
+    own: false,
+    from: 'person',
+  },
+]
+
+/** meridian's package.json scripts, the root's and a workspace's. */
+export const scripts: ReadonlyArray<RepositoryScript> = [
+  { repository: 'meridian-api', package: 'meridian', name: 'dev', body: 'vite', command: 'bun run dev' },
+  { repository: 'meridian-api', package: 'meridian', name: 'test:watch', body: 'vitest', command: 'bun run test:watch' },
+  {
+    repository: 'meridian-api',
+    package: '@meridian/ui',
+    name: 'storybook',
+    body: 'storybook dev',
+    command: 'bun --filter @meridian/ui storybook',
+  },
+]
+
 export const project: ProjectSummary = {
   id: 'p1',
   name: 'meridian',
@@ -245,7 +299,7 @@ export const task: TaskSummary = {
 const GiB = 1024 ** 3
 const MiB = 1024 ** 2
 
-/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, and its default branch running. */
+/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, its default branch running, and Althar itself. */
 export const load: Load = {
   cpu: 0.42,
   memoryUsed: 12.5 * GiB,
@@ -289,6 +343,7 @@ export const load: Load = {
       processes: 3,
     },
   ],
+  althar: { cpu: 0.015, memory: 700 * MiB, processes: 9 },
   history: [
     { cpu: 0.2, work: 0.1 },
     { cpu: 0.42, work: 0.33 },
@@ -312,7 +367,7 @@ export const items = {
     ...next(),
     agentId: null,
     kind: 'user_message',
-    content: { text, links, pictures },
+    content: { text, links, pictures, files: [] },
     input,
   }),
   says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({
@@ -377,6 +432,7 @@ export const items = {
       summary: 'Added the retry.',
       verdict: null,
       findings: [],
+      built: null,
       evidence: [],
       unverified: null,
       agentId: null,
@@ -400,6 +456,7 @@ export const items = {
       passed: null,
       failed: null,
       failing: [],
+      logs: [],
       url: null,
       outsider: false,
       ...content,
@@ -453,9 +510,76 @@ export const items = {
       title: 'Refunds skip the rate limiter',
       body: 'Charges go through it; **refunds** don’t.',
       labels: ['payments'],
+      priority: null,
       state: 'pending',
       error: null,
       issue: null,
+      ...content,
+    },
+  }),
+  /** Changes the coordinator proposed to two issues on Linear, waiting on the person. */
+  changes: (content: Partial<Extract<ThreadItem, { kind: 'issue_changes' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'issue_changes',
+    content: {
+      changesId: 'ich_1',
+      note: null,
+      state: 'pending',
+      error: null,
+      direct: false,
+      issues: [
+        {
+          product: 'linear',
+          tracker: 'Linear',
+          key: 'DEV-67',
+          url: 'https://linear.app/m/issue/DEV-67',
+          title: 'Refunds skip the rate limiter',
+          changes: [{ field: 'status', to: 'Done' }],
+          applied: null,
+          error: null,
+        },
+        {
+          product: 'linear',
+          tracker: 'Linear',
+          key: 'DEV-142',
+          url: 'https://linear.app/m/issue/DEV-142',
+          title: 'Nightly export is slow',
+          changes: [{ field: 'priority', to: 'Low' }],
+          applied: null,
+          error: null,
+        },
+      ],
+      ...content,
+    },
+  }),
+  /** A review the lead drafted of ninemate's pull request, from a fork, waiting on the person. */
+  review: (content: Partial<Extract<ThreadItem, { kind: 'review_draft' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'review_draft',
+    content: {
+      draftId: 'rdr_1',
+      product: 'github',
+      repository: 'meridian/api',
+      number: 1212,
+      url: 'https://github.com/meridian/api/pull/1212',
+      title: 'Honour Retry-After on refund webhooks',
+      author: 'ninemate',
+      outside: true,
+      fork: true,
+      drafter: 'Claude Code',
+      account: 'ada',
+      suggested: 'approve',
+      verdict: null,
+      summary: 'The fix is **right**, but it needs a test.',
+      comments: [
+        { id: 'c1', path: 'src/retry.ts', line: 41, body: 'Nothing covers the cap.', severity: 'blocking', kept: true },
+        { id: 'c2', path: 'src/retry.ts', line: 57, body: 'Nit: seconds.', severity: 'nit', kept: true },
+      ],
+      state: 'pending',
+      error: null,
+      review: null,
       ...content,
     },
   }),
@@ -509,7 +633,84 @@ export const items = {
       ...content,
     },
   }),
+  /** An automation's card in the coordinator's thread: proposed, as the coordinator made it, by default. */
+  automation: (content: Partial<AutomationCard> = {}, id?: string): ThreadItem => ({
+    ...next(),
+    ...(id === undefined ? {} : { id }),
+    agentId: null,
+    kind: 'automation',
+    content: {
+      automationId: 'auto1',
+      definition: definition(),
+      was: null,
+      ask: null,
+      state: 'proposed',
+      nextAt: null,
+      ...content,
+    },
+  }),
 }
+
+/** What an automation is: the morning review, of each new pull request, every weekday at 9:00, led by Claude Code. */
+export const definition = (overrides: Partial<AutomationDefinition> = {}): AutomationDefinition => ({
+  name: 'Morning review',
+  prompt: 'Review the pull requests opened since yesterday by anyone but me.',
+  schedule: { every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' },
+  zone: 'Europe/London',
+  lead: { agentId: 'claude-code', model: null, effort: null },
+  work: { kind: 'review' },
+  allowEverything: true,
+  minutes: 45,
+  late: 'once',
+  ...overrides,
+})
+
+/** One of its runs: one that made a review, today at 9:00, by default. */
+export const automationRun = (overrides: Partial<AutomationRun> = {}): AutomationRun => ({
+  id: 'occ1',
+  cause: 'schedule',
+  state: 'made',
+  dueAt: '2026-09-29T09:00:00.000Z',
+  at: '2026-09-29T09:02:00.000Z',
+  subject: 'Review #264',
+  reason: null,
+  task: { id: 't9', threadId: 'th9', title: 'Review #264' },
+  ...overrides,
+})
+
+/** The morning review as the Automations tab lists it: on, next tomorrow at 9:00. */
+export const automationSummary = (overrides: Partial<AutomationSummary> = {}): AutomationSummary => ({
+  id: 'auto1',
+  projectId: 'p1',
+  name: 'Morning review',
+  prompt: 'Review the pull requests opened since yesterday by anyone but me.',
+  schedule: { every: 'week', days: [1, 2, 3, 4, 5], at: '09:00' },
+  work: 'review',
+  state: 'on',
+  pausedBy: null,
+  pauseReason: null,
+  nextAt: '2026-09-30T09:00:00.000Z',
+  latest: [automationRun()],
+  ...overrides,
+})
+
+/** A project's automations, for its tab: the morning review alone, by default. */
+export const automationsSnapshot = (overrides: Partial<AutomationsSnapshot> = {}): AutomationsSnapshot => ({
+  cursor: 6,
+  automations: [automationSummary()],
+  allPaused: false,
+  ...overrides,
+})
+
+/** The morning review as its page shows it. */
+export const automationView = (overrides: Partial<AutomationView> = {}): AutomationView => ({
+  ...automationSummary(),
+  definition: definition(),
+  postsReviews: false,
+  runs: [automationRun()],
+  allPaused: false,
+  ...overrides,
+})
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 
@@ -532,6 +733,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   title: 'Add a retry',
   slug: 'add-a-retry',
   phase: 'planned',
+  kind: 'change',
   plan: {
     id: 'pln1',
     steps: [
@@ -566,7 +768,7 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   items: [],
   earlier: false,
   host: null,
-  runCommand: null,
+  runnables: [],
   launches: [],
   ...overrides,
 })
@@ -639,9 +841,10 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     merged: [],
     actions: ['stop', 'abandon'],
     planId: null,
-    runCommand: null,
+    runnables: [],
     launches: [],
     resolveConflicts: { task: null, project: false },
+    allowEverything: { task: false, project: false },
   },
   session: {
     id: 's1',
@@ -653,12 +856,16 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     effort: 'high',
     models: ['opus', 'sonnet'],
     turnRunning: false,
+    turnStartedAt: null,
+    turnEndedAt: null,
+    held: true,
     context: null,
     background: [],
   },
   attention: [],
   items: [],
   earlier: false,
+  reports: [],
   ...overrides,
 })
 
@@ -699,6 +906,7 @@ export const connectionList: ConnectionList = {
       tracker: true,
       hostedUrl: 'https://linear.app',
       selfHosted: false,
+      workspaces: true,
       browserSignIn: false,
       tokenNeeds: null,
       tokenPrefixes: ['lin_api_'],
@@ -753,19 +961,23 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
+    searchTasks: vi.fn(async () => ({ tasks: [] })),
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
+    readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readDocument: vi.fn(async (_threadId: string, path: string) => ({
       path,
       body: '# Notes\n\nRefunds share the partner budget.\n',
       bytes: 42,
       lines: 3,
     })),
-    getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [] })),
+    getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
+    getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),
+    seeTask: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     replacePullRequest: vi.fn(async () => {}),
@@ -778,7 +990,16 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'finder', name: 'Finder' },
     ]),
     getLoad: vi.fn(async () => load),
+    getPlanUsage: vi.fn(async () => ({ accounts: [] })),
+    getModelRooms: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
+    openCode: vi.fn(async () => true),
+    // Names no code, unless a test says what they name.
+    findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<unknown>) => ({
+      place: { kind: 'task' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'althar/retry-the-checkout' }] },
+      messages: messages.map(() => ({ found: [] })),
+    })),
+    readCode: vi.fn(async (_threadId: string, path: string) => ({ path, text: 'const tries = 5\n', from: 1, total: 1, cut: false })),
     installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
@@ -799,15 +1020,45 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
+      postTeamReviews: false,
+      automationsPaused: false,
+      folderWait: 'smart' as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
+    setPostTeamReviews: vi.fn(async () => {}),
+    getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),
+    getAutomation: vi.fn(async () => ({ cursor: 6, automation: automationView() })),
+    makeAutomation: vi.fn(async () => 'auto2'),
+    changeAutomation: vi.fn(async () => {}),
+    turnOnAutomation: vi.fn(async () => {}),
+    pauseAutomation: vi.fn(async () => {}),
+    runAutomationNow: vi.fn(async () => {}),
+    deleteAutomation: vi.fn(async () => {}),
+    undoAutomationChange: vi.fn(async () => {}),
+    setAutomationPostsReviews: vi.fn(async () => {}),
+    setAutomationsPaused: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
+    setFolderWait: vi.fn(async () => {}),
+    getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
+    cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 0 })),
+    removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
+    moveInLine: vi.fn(async () => {}),
+    lineOldestFirst: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
+    tryAgain: vi.fn(async () => {}),
+    compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
+    resolveConflictsNow: vi.fn(async () => {}),
+    lookForConflicts: vi.fn(async () => {}),
+    setTaskAllowEverything: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
+    leaveOutCommits: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),
+    markTaskDone: vi.fn(async () => {}),
+    keepTaskForLater: vi.fn(async () => {}),
+    renameTask: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
@@ -820,7 +1071,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     changeIssueDraft: vi.fn(async () => {}),
     fileIssueDraft: vi.fn(async () => {}),
     discardIssueDraft: vi.fn(async () => {}),
+    applyIssueChanges: vi.fn(async () => {}),
+    discardIssueChanges: vi.fn(async () => {}),
+    changeReviewDraft: vi.fn(async () => {}),
+    postReviewDraft: vi.fn(async () => {}),
+    discardReviewDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
+    handOverHeld: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
       flowId: 'flow1',
@@ -839,6 +1096,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     disconnect: vi.fn(async () => {}),
     renameProject: vi.fn(async () => {}),
     setProjectInk: vi.fn(async () => {}),
+    getProjectTracker: vi.fn(async (): Promise<ProjectTracker | null> => null),
+    setProjectTracker: vi.fn(async () => {}),
+    listContainers: vi.fn(async (): Promise<ReadonlyArray<TrackerContainer>> => []),
     removeProject: vi.fn(async () => {}),
     getRepositories: vi.fn(async () => repositories),
     addRepositories: vi.fn(async () => {}),
@@ -847,8 +1107,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
     getProjectNotes: vi.fn(async (): Promise<ReadonlyArray<ProjectNote>> => []),
     dropProjectNote: vi.fn(async () => {}),
+    editProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
-    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
+    setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({
+      ...withChange(projectRules, change),
+      projectId,
+    })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
       ...usual('acc_added', 'signed_out'),
       name: input.name,
@@ -866,13 +1130,24 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
+    skipReview: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
+    attachPullRequest: vi.fn(async () => ({
+      kind: 'attached' as const,
+      name: 'PR #1',
+      source: 'feature',
+      started: false,
+      kept: 0,
+      own: 0,
+    })),
+    closePullRequest: vi.fn(async () => ({ branch: null })),
     stopBackground: vi.fn(async () => {}),
     clearBackground: vi.fn(async () => {}),
-    runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null) => ({
+    runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null, runnableId?: string) => ({
       id: 'proc_run',
       taskId,
+      runnableId: runnableId ?? 'rnbl_dev',
       where: taskId === null ? 'main' : 'the task',
       command: 'bun run dev',
       url: null,
@@ -881,6 +1156,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     stopLaunch: vi.fn(async () => {}),
     clearLaunch: vi.fn(async () => {}),
+    keepRunnable: vi.fn(async () => ({ id: 'rnbl_kept' })),
+    dropRunnable: vi.fn(async () => {}),
+    orderRunnables: vi.fn(async () => {}),
+    getRepositoryScripts: vi.fn(async () => scripts),
     watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)
@@ -931,11 +1210,21 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   pickFolder: vi.fn(async () => 'grant_picked'),
   pickFolders: vi.fn(async (): Promise<ReadonlyArray<string>> => ['grant_picked']),
   grantDropped: vi.fn(async () => 'grant_dropped'),
+  attach: vi.fn(async (file: File) => ({
+    ok: true as const,
+    grant: `grant_${file.name}`,
+    name: file.name,
+    kind: file.type === '' && !file.name.includes('.') ? ('folder' as const) : ('file' as const),
+    bytes: file.size,
+    entries: file.type === '' && !file.name.includes('.') ? 3 : null,
+  })),
+  attachPasted: vi.fn(async () => []),
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
   onStoreFailed: vi.fn(() => () => {}),
   showBackup: vi.fn(async () => {}),
+  tryAgain: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
   edge: vi.fn(async () => ({ place: 'island', notch: true, platform: 'darwin', tray: true })),
@@ -947,6 +1236,25 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   clipboardToken: vi.fn(async () => null),
   ...overrides,
 })
+
+/** An account's plan usage as the runtime reads it: a Codex account on its plan, its 5-hour window 60% used. */
+export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}): PlanUsage['accounts'][number] => ({
+  agentId: 'codex',
+  agentName: 'Codex',
+  accountId: 'acc_codex_work',
+  accountName: 'work',
+  paidBy: 'plan',
+  source: 'agent',
+  observedAt: '2026-10-15T10:00:00.000Z',
+  plan: 'pro',
+  windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  fault: null,
+  noReading: null,
+  ...over,
+})
+
+/** The usage feed carries, whole. */
+export const planUsage = (accounts: PlanUsage['accounts'] = [usageAccount()]): PlanUsage => ({ accounts })
 
 /** A change the runtime's feed reports. */
 export const changed = (

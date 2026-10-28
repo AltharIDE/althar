@@ -220,8 +220,8 @@ describe('what agents hand back', () => {
         kind: 'edit',
         status: 'completed',
         content: [
-          { _tag: 'Diff', path: '/w/docs/plan.md', created: true },
-          { _tag: 'Diff', path: '/w/src/a.ts', created: false },
+          { _tag: 'Diff', path: '/w/docs/plan.md', created: true, change: 'c1' },
+          { _tag: 'Diff', path: '/w/src/a.ts', created: false, change: 'c2' },
         ],
       })
       // OpenCode's write: its whole content in its input, and no diff.
@@ -452,7 +452,7 @@ describe('a command’s output', () => {
         title: 'Write README.md',
         kind: 'edit',
         status: 'completed',
-        content: [{ _tag: 'Diff', path: 'README.md', created: true }],
+        content: [{ _tag: 'Diff', path: 'README.md', created: true, change: 'c3' }],
       })
       assert.deepStrictEqual(
         listOf((yield* toolItem(where.threadId, 'relative'))?.files).map((file) => file.path),

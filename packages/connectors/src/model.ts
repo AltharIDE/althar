@@ -1,7 +1,7 @@
 import type { Effect } from 'effect'
 import { Schema } from 'effect'
 
-import type { ConnectorFailed } from './errors'
+import { ConnectorFailed } from './errors'
 
 /*
  * The two models (docs/architecture/06, "Code hosts and trackers"): what
@@ -29,8 +29,21 @@ export const Person = Schema.Struct({
 })
 export type Person = typeof Person.Type
 
-/** Who a connection signs in as. */
-export const Account = Schema.Struct({ id: Schema.String, login: Schema.String, name: Schema.NullOr(Schema.String) })
+/**
+ * The one part of a service a sign-in reaches, where it reaches only one
+ * (ADR-059): a Linear workspace. Its key is the one its links carry
+ * (linear.app/<key>/issue/…); its name is what the person calls it.
+ */
+export const Workspace = Schema.Struct({ key: Schema.String, name: Schema.String })
+export type Workspace = typeof Workspace.Type
+
+/** Who a connection signs in as, and in which workspace, where a sign-in reaches only one. */
+export const Account = Schema.Struct({
+  id: Schema.String,
+  login: Schema.String,
+  name: Schema.NullOr(Schema.String),
+  workspace: Schema.optional(Workspace),
+})
 export type Account = typeof Account.Type
 
 // ---- Code hosts -----------------------------------------------------------
@@ -78,6 +91,12 @@ export const ChangeRequest = Schema.Struct({
    * hasn't worked it out yet, or doesn't say.
    */
   conflicts: Schema.optional(Schema.Boolean),
+  /**
+   * The repository its branch is on, where that isn't the one it goes into:
+   * a fork's path, or none where the fork is gone. Null for a branch of the
+   * repository's own; absent where the host doesn't say, as a list may not.
+   */
+  headRepository: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
 })
 export type ChangeRequest = typeof ChangeRequest.Type
 
@@ -97,6 +116,55 @@ export type Check = typeof Check.Type
 
 export const Verdict = Schema.Literals(['approved', 'changes_requested', 'commented'])
 export type Verdict = typeof Verdict.Type
+
+/** Which changes to list: open ones unless `state` says; `all` is every state. */
+export const ListedState = Schema.Literals(['open', 'closed', 'merged', 'all'])
+export type ListedState = typeof ListedState.Type
+
+/** What a list of changes is narrowed to. Each filter left out narrows nothing. */
+export interface ChangeQuery {
+  readonly state: ListedState
+  /** Its author's login. */
+  readonly author?: string
+  /** Words in its title. */
+  readonly text?: string
+  /** Only those whose review is asked of the connected account (directly, or of a team it is in, where the host has teams). */
+  readonly reviewRequested?: boolean
+  /** Only drafts, or only those ready for review. */
+  readonly draft?: boolean
+  /**
+   * Only those last updated at or before this time, to read on past the
+   * last of a listing that had more: where the host can (GitHub). A host
+   * that can't lists from the newest again.
+   */
+  readonly updatedUntil?: string
+  /** How many at most, newest change first. */
+  readonly limit: number
+}
+
+/** Where a change's reviews leave it, as the host sums them up: approved, changes asked for, or still waiting on a review it needs. */
+export const ReviewDecision = Schema.Literals(['approved', 'changes_requested', 'review_required'])
+export type ReviewDecision = typeof ReviewDecision.Type
+
+/**
+ * A change as a list gives it: what any change says, and, where the host
+ * says so in the same answer, where its reviews leave it and how its head's
+ * checks stand overall. Null where the host doesn't say, or nothing applies.
+ */
+export const ListedChange = Schema.Struct({
+  ...ChangeRequest.fields,
+  /** The owner of the fork its branch is on, where it isn't the repository's own; null for the repository's own branch, or where the host doesn't say. */
+  forkOwner: Schema.NullOr(Schema.String),
+  reviewDecision: Schema.NullOr(ReviewDecision),
+  checks: Schema.NullOr(Schema.Literals(['passed', 'failed', 'running'])),
+})
+export type ListedChange = typeof ListedChange.Type
+
+/** A list of changes, newest change first, and whether the host has more than it holds. */
+export interface ChangeList {
+  readonly changes: ReadonlyArray<ListedChange>
+  readonly more: boolean
+}
 
 /** A review of a change, with its verdict. */
 export const Review = Schema.Struct({
@@ -127,6 +195,49 @@ export const Comment = Schema.Struct({
 })
 export type Comment = typeof Comment.Type
 
+/**
+ * A change to review: someone else's pull request, as Althar reads it before
+ * it reviews one it didn't open. Beside what any change says: whether its
+ * author is one of the repository's people, the fork its branch is on, and
+ * where its target branch is.
+ */
+export const ChangeToReview = Schema.Struct({
+  ...ChangeRequest.fields,
+  /** Its author is one of the repository's people, as the host says: GitHub's owner, a member of its organisation, or a collaborator. */
+  member: Schema.Boolean,
+  /** The repository its branch is on, where that isn't the one it goes into: a fork's path, or none where the fork is gone. Null for a branch of the repository's own. */
+  fork: Schema.NullOr(Schema.Array(Schema.String)),
+  /** The commit its target branch is on, as the host says; null where it doesn't. */
+  baseSha: Schema.NullOr(Schema.String),
+})
+export type ChangeToReview = typeof ChangeToReview.Type
+
+/**
+ * Whether a change comes from outside the repository's people: from a fork,
+ * or by an author the host doesn't name one of them. What it brings is then
+ * read with less trust: its words may try to steer whoever reads them.
+ */
+export const fromOutside = (change: Pick<ChangeToReview, 'member' | 'fork'>): boolean => !change.member || change.fork !== null
+
+/** What a review says of a change as a whole: approve it, ask for changes, or only comment. */
+export const ReviewEvent = Schema.Literals(['approve', 'request_changes', 'comment'])
+export type ReviewEvent = typeof ReviewEvent.Type
+
+/** A review to post: what it says of the change, its summary, the commit it was of, and its comments on the change's lines. */
+export interface NewReview {
+  readonly event: ReviewEvent
+  /** Markdown. */
+  readonly body: string
+  /** The commit the review is of, as its reviewer read it; null for the change's head as the host has it now. */
+  readonly commit: string | null
+  /** Comments on lines of the change as it now reads (its new side), by path and line. */
+  readonly comments: ReadonlyArray<{ readonly path: string; readonly line: number; readonly body: string }>
+}
+
+/** A review the host took: its id, and its link where the host gives one. */
+export const PostedReview = Schema.Struct({ id: Schema.String, url: Schema.NullOr(Schema.String) })
+export type PostedReview = typeof PostedReview.Type
+
 /** What happened on a change since a cursor: comments and reviews, oldest first, and the cursor to ask from next. */
 export interface Activity {
   readonly comments: ReadonlyArray<Comment>
@@ -149,6 +260,12 @@ export interface HostCapabilities {
   readonly checkLogs: boolean
   /** Comments on lines sit in threads a reply can join. */
   readonly threads: boolean
+  /**
+   * A change Althar didn't open can be read for review, with whether its
+   * author is one of the repository's people and the fork it comes from, and
+   * a review posted on it with comments on its lines. Only GitHub's, for now.
+   */
+  readonly reviews: boolean
 }
 
 /** How git pushes to a repository: its URL, and the header that signs the push in. */
@@ -185,6 +302,13 @@ export interface CodeHost {
     },
   ): Effect.Effect<ChangeRequest, ConnectorFailed>
   change(repository: Repository, number: number): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * The repository's changes, whoever opened them, newest change first,
+   * narrowed as the query says, to its limit; and whether there are more.
+   * Read-only. Refused as `forbidden`, with the `scope` it needs, where the
+   * connection lacks one; as `rejected` (`noListing`) where the host can't.
+   */
+  listChanges(repository: Repository, query: ChangeQuery): Effect.Effect<ChangeList, ConnectorFailed>
   markReady(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
    * Merges a change, because the person said to: never on an agent's word.
@@ -192,9 +316,37 @@ export interface CodeHost {
    * checks or reviews it still needs, with the host's own words.
    */
   merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Closes a change without merging it, because the person said to: never
+   * on an agent's word. Read back as the host has it after; one already
+   * closed or merged is left as it is. Refused, where the account may not,
+   * with the host's own words.
+   */
+  closeChange(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Deletes a closed change's branch on the host, where the branch is (a
+   * fork's, for one from a fork), because the person said to. Refused for a
+   * change still open; a branch already gone is nothing to do.
+   */
+  deleteBranch(repository: Repository, change: ChangeRequest): Effect.Effect<void, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
-  /** The end of a check's log, when the host keeps one Althar can read. */
-  checkLog(repository: Repository, check: Check): Effect.Effect<string | null, ConnectorFailed>
+  /**
+   * The end of a check's log, or with `whole` all of it. Null for a check the
+   * host keeps no log of, such as one another CI service reported; one it
+   * keeps but won't give (refused, expired, out of reach) fails, with why.
+   */
+  checkLog(repository: Repository, check: Check, whole?: boolean): Effect.Effect<string | null, ConnectorFailed>
+  /**
+   * What a check the host keeps no log of reported of itself, where it said
+   * more than its summary: a GitHub check run's own summary and text. Null
+   * where it said nothing more.
+   */
+  checkReport?(repository: Repository, check: Check): Effect.Effect<string | null, ConnectorFailed>
+  /**
+   * Runs a check again, as for one that may have failed by chance: true where
+   * the host began it again, false where it can't run that check again.
+   */
+  rerun(repository: Repository, check: Check): Effect.Effect<boolean, ConnectorFailed>
   /** Comments and reviews since a cursor (from the start without one). */
   activity(repository: Repository, number: number, cursor: string | null): Effect.Effect<Activity, ConnectorFailed>
   /** Replies on a change: in a comment's thread, or in its conversation. */
@@ -204,7 +356,56 @@ export interface CodeHost {
     reply: { readonly body: string; readonly threadId: string | null },
   ): Effect.Effect<Comment, ConnectorFailed>
   pushTarget(repository: Repository): Effect.Effect<PushTarget, ConnectorFailed>
+  /**
+   * A change to review, whoever opened it: what it is, whether its author is
+   * one of the repository's people, and the fork it comes from. Where the
+   * host has `capabilities.reviews`; refused elsewhere, as `rejected`.
+   */
+  changeToReview(repository: Repository, number: number): Effect.Effect<ChangeToReview, ConnectorFailed>
+  /**
+   * Posts a review of a change, because the person said to, or their own
+   * setting does for their team's changes: never on an agent's word alone.
+   * Where the host has `capabilities.reviews`; refused elsewhere, as
+   * `rejected`. A comment on a line the change doesn't touch is refused by
+   * the host, with its words.
+   */
+  postReview(repository: Repository, number: number, review: NewReview): Effect.Effect<PostedReview, ConnectorFailed>
 }
+
+/** A host's refusal of a review, where it has no `capabilities.reviews`: said in its words for a change. */
+export const noReviews = (product: Product, words: ChangeWords): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t review a ${words.noun} on this host yet.` })
+
+/** A host's refusal to delete the branch of a change still open: deleting it would close the change, or orphan it. */
+export const stillOpen = (product: Product, words: ChangeWords, number: number): ConnectorFailed =>
+  new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: `${words.short} ${words.prefix}${number} is still open, so its branch stays.`,
+  })
+
+/** A branch as a URL's path takes it: each part encoded, its slashes kept. */
+export const branchPath = (branch: string): string => branch.split('/').map(encodeURIComponent).join('/')
+
+/** A host's refusal to list changes, or to narrow them as asked: said in its words for a change. */
+export const noListing = (product: Product, words: ChangeWords, why?: string): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: why ?? `Althar can’t list ${words.noun}s on this host yet.` })
+
+/**
+ * A listing refused for a permission: `forbidden`, with the scope (or a
+ * fine-grained token's permission) it needs and the host's own words. Any
+ * other failure is left as it is.
+ */
+export const lacking = (scope: string) => (error: ConnectorFailed) =>
+  error.reason === 'forbidden'
+    ? new ConnectorFailed({
+        product: error.product,
+        reason: error.reason,
+        message: error.message,
+        ...(error.status === undefined ? {} : { status: error.status }),
+        scope,
+      })
+    : error
 
 // ---- Trackers -------------------------------------------------------------
 
@@ -249,11 +450,52 @@ export const Container = Schema.Struct({
 })
 export type Container = typeof Container.Type
 
-/** An issue to file: its title, its body in Markdown, and the labels to put on it. */
+/**
+ * An issue to file: its title, its body in Markdown, the labels to put on it,
+ * and its priority, where the tracker has priorities (`changes` holds
+ * `priority`); left out, or on a tracker without them, it has none.
+ */
 export interface NewIssue {
   readonly title: string
   readonly body: string
   readonly labels: ReadonlyArray<string>
+  readonly priority?: Priority
+}
+
+/**
+ * What of an issue Althar can change, where the tracker can: its status (any
+ * of the tracker's own), closing it, its priority, who it is assigned to, its
+ * labels, the project it is in (Linear's project, a GitHub or GitLab
+ * milestone), and its title.
+ */
+export const IssueField = Schema.Literals(['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title'])
+export type IssueField = typeof IssueField.Type
+
+/** The fields set to one of the tracker's own, which `Tracker.choices` lists. */
+export type ChosenField = 'status' | 'labels' | 'assignee' | 'project'
+
+/** Something a field can be set to, as the tracker lists it: its own id, its name, and other words it answers to (a login, an email). */
+export interface Choice {
+  readonly id: string
+  readonly name: string
+  readonly also?: ReadonlyArray<string>
+}
+
+/**
+ * A change to an issue, by the tracker's own ids as `Tracker.choices` gave
+ * them: each field left out stays as it is. `close` closes it as done, by
+ * the tracker's own way (Linear's and Jira's done status, GitHub's and
+ * GitLab's closed, Trello's archive). Null takes an assignee or a project
+ * off. Labels are added and taken off; others stay.
+ */
+export interface IssueChange {
+  readonly status?: Choice
+  readonly close?: true
+  readonly priority?: Priority
+  readonly assignee?: Choice | null
+  readonly labels?: { readonly add: ReadonlyArray<Choice>; readonly remove: ReadonlyArray<Choice> }
+  readonly project?: Choice | null
+  readonly title?: string
 }
 
 /** What a tracker can do beyond the model's floor. */
@@ -262,7 +504,13 @@ export interface TrackerCapabilities {
   readonly links: boolean
   /** An issue can be moved to the tracker's own "in progress": a Linear team's started state, a Jira transition into In Progress. */
   readonly starts: boolean
+  /** What of an issue `update` can change here; what isn't listed, the tracker has no field for, or Althar can't reach it yet. */
+  readonly changes: ReadonlyArray<IssueField>
 }
+
+/** A tracker's refusal of a change it can't make: said for the field, in words an agent can pass on. */
+export const cantChange = (product: Product, field: IssueField, why: string): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t change an issue’s ${field} here: ${why}` })
 
 /** What `Tracker.start` did: moved the issue, or left it as it was; and the status it is in now. */
 export interface Started {
@@ -306,4 +554,30 @@ export interface Tracker {
    * was filed.
    */
   create(container: string, issue: NewIssue): Effect.Effect<Issue, ConnectorFailed>
+  /**
+   * What an issue's field can be set to, as the tracker lists them for it:
+   * its team's or board's statuses, its labels, the people it can be
+   * assigned to, its projects or milestones. `wanted` narrows people to
+   * those a name finds, where the tracker searches rather than lists them
+   * (Jira); a tracker that makes any label it is given (Jira) offers the
+   * one wanted, and the issue's own. Refused, as `rejected`, for a field
+   * not in `capabilities.changes`.
+   */
+  choices(issue: Issue, field: ChosenField, wanted?: string): Effect.Effect<ReadonlyArray<Choice>, ConnectorFailed>
+  /**
+   * Changes an issue as the person approved, or their own setting lets
+   * through: never on an agent's word alone. The issue as the tracker has it
+   * after. Doing it again changes nothing more, so a change whose answer was
+   * lost can be made again. A field not in `capabilities.changes` is refused
+   * before anything changes, as `rejected`.
+   */
+  update(issue: Issue, change: IssueChange): Effect.Effect<Issue, ConnectorFailed>
 }
+
+/** The fields a change touches, in the model's order. */
+export const fieldsOf = (change: IssueChange): ReadonlyArray<IssueField> =>
+  IssueField.literals.filter((field) => change[field] !== undefined)
+
+/** A change's first field the tracker can't change, if any. */
+export const unchangeable = (capabilities: TrackerCapabilities, change: IssueChange): IssueField | undefined =>
+  fieldsOf(change).find((field) => !capabilities.changes.includes(field))

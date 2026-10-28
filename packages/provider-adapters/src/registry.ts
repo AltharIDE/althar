@@ -1,7 +1,9 @@
 import type { InAppSignIn } from './signInFlow'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from './ownTools'
+import { secretReadRules } from './secrets'
 
 /*
  * Each agent is an entry here, not a code path (docs/architecture/03). The
@@ -11,9 +13,33 @@ import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from '
  * new model; OpenCode's effort on 8 October 2026, which it offers only once
  * a session is on a model that has levels. Probe again after upgrading any
  * of them.
+ *
+ * GitHub Copilot CLI 1.0.98, Junie 3659.7, Grok Build 1.0.63, Kimi Code
+ * 2.2.0, Mistral Vibe 2.26.1 and Qwen Code 0.25.2 were read on 18 and 19
+ * October 2026, each
+ * started over ACP with a home of its own and no sign-in, against a stand-in
+ * model on this machine where it takes one (a provider of its own, or a key
+ * it doesn't check before its first turn): their sessions, options and
+ * permission requests are what they said, and the rest is from their own
+ * code and help. None has run against its vendor's models yet, signed in
+ * (`bun run test:agents`), which is what each entry's gaps leave open.
+ *
+ * Google Antigravity's ACP server 1.3.0 is as Orca (stablyai/orca, MIT) runs
+ * it, read from its code and its recording of a real session on 19 October
+ * 2026: not yet started here.
  */
 
-export type AgentId = 'claude-code' | 'codex' | 'opencode'
+export type AgentId =
+  | 'claude-code'
+  | 'codex'
+  | 'opencode'
+  | 'copilot'
+  | 'junie'
+  | 'grok'
+  | 'kimi'
+  | 'mistral-vibe'
+  | 'qwen-code'
+  | 'antigravity'
 
 /**
  * A launch that happens out on the device rather than here: the person's own
@@ -40,6 +66,18 @@ export interface LaunchSpec {
    * executor runs it there instead, with the cwd and environment it assembled.
    */
   readonly onDevice?: OutOnDevice
+  /**
+   * A temporary folder of its own (`TMPDIR`, `TEMP`, `TMP`), removed once it
+   * has stopped: for an agent that unpacks itself there each time it starts
+   * (Antigravity's server, about 1 GB), which a stopped one would leave behind.
+   */
+  readonly privateTemp?: true
+  /**
+   * On Windows, its arguments as they are, unquoted, as cmd.exe takes a line
+   * (`/s /c "…"`): Node would quote one with quotes in it as a C program
+   * reads it (`\"`), which cmd doesn't. Elsewhere it changes nothing.
+   */
+  readonly verbatim?: true
 }
 
 /**
@@ -54,6 +92,12 @@ export interface PermissionMeanings {
   readonly rejectAndStop: ReadonlyArray<string>
   /** How far each allow option reaches, when it is not just this action. */
   readonly allowScopes: Readonly<Record<string, 'once' | 'turn' | 'session'>>
+  /**
+   * The start of the tool call ids on which a request is the model asking the
+   * person, one option for each answer, not for a permission (Antigravity's
+   * `interaction_`): it goes to the person as a question, never to the rules.
+   */
+  readonly questions?: string
 }
 
 export interface AgentDefinition {
@@ -71,22 +115,36 @@ export interface AgentDefinition {
    * Althar's tools. Claude Code's plan mode and OpenCode's plan agent are
    * instructions to the model, and it refuses Althar's tools in them
    * (scripts/probe-tools.ts in the runtime), so those roles run in the mode
-   * that asks, with Althar's rules denying every write.
+   * that asks, with Althar's rules denying every write. Null where the agent
+   * has no mode at all and asks by what its `sessionMeta` sends (Grok's):
+   * started so, it is refused if it offers modes after all.
    */
-  readonly modes: { readonly ask: string; readonly readOnly: string; readonly reader: string }
+  readonly modes: { readonly ask: string | null; readonly readOnly: string | null; readonly reader: string | null }
   /**
    * The ids of its session config options. `ownEffort` is the effort level
    * that leaves a model at its own default, for an agent that otherwise puts
    * a session on a model's first level: Althar sets it where nothing chose one.
    */
-  readonly options: { readonly mode: string; readonly model: string; readonly effort?: string; readonly ownEffort?: string }
+  readonly options: {
+    readonly mode: string
+    readonly model: string
+    readonly effort?: string
+    readonly ownEffort?: string
+    /**
+     * Options held at a value for every session's whole life, set as it
+     * starts and set back whenever the agent moves one: those that would
+     * approve without asking (Copilot's `allow_all`, Junie's `brave_mode`).
+     */
+    readonly held?: Readonly<Record<string, string>>
+  }
   /**
    * The agent's own sign-in (docs/architecture/03: the official tool owns it).
    * Althar runs the documented status command and reads its output; it
    * never reads a credential store. `login` is what the user runs.
    */
   readonly signIn: {
-    readonly status: (node: string) => LaunchSpec
+    /** Without one (the agent has no status command), Althar can't tell, and the first session says. */
+    readonly status?: (node: string) => LaunchSpec
     /** True when signed in, false when not, undefined when the output can't tell. */
     readonly read: (output: string, exitCode: number | null) => boolean | undefined
     /**
@@ -95,7 +153,14 @@ export interface AgentDefinition {
      * by itself only when its plan pays.
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
+    /** What the person runs in a terminal to sign in; empty where it has none, and signs in only in Althar (`inApp`). */
     readonly login: string
+    /**
+     * What lists its sign-ins one by one with how each is paid for, as JSON
+     * (`usageSources.ts`'s `openCodeCredentials`), where it can. Run in an
+     * account's home, and a plain read: the same output a person sees.
+     */
+    readonly credentials?: (node: string) => LaunchSpec
     /** Its sign-in as Althar runs it, without a terminal (`signInFlow.ts`); without it, `login` in a terminal. */
     readonly inApp?: InAppSignIn
     /**
@@ -110,6 +175,11 @@ export interface AgentDefinition {
     }
   }
   /**
+   * The agent's own control channel for plan usage, run in an account's home
+   * (`usage.ts`). Without one, its usage comes from ACP or not at all.
+   */
+  readonly usage?: { readonly run: (node: string) => LaunchSpec }
+  /**
    * Where it keeps a sign-in (ADR-012): the environment variable that points
    * it at a folder of its own, a home, and its usual folder when that isn't
    * set. `shared` picks, from what is in the usual folder, what isn't the
@@ -121,8 +191,23 @@ export interface AgentDefinition {
     readonly variable: string
     readonly usual: (env: Readonly<Record<string, string | undefined>>, homeDir: string) => string
     readonly shared: (names: ReadonlyArray<string>) => ReadonlyArray<string>
+    /**
+     * `'one'` where its sign-in isn't kept in the folder, but in a keychain
+     * item every folder shares (Mistral Vibe's), or that isn't known yet: a
+     * second account would sign the first one out, so it has its usual one
+     * alone. Without it, as many as the person adds.
+     */
+    readonly accounts?: 'one'
   }
   readonly permissions: PermissionMeanings
+  /**
+   * The service its model runs on: its name, as a step that keeps failing
+   * there says it, and an address of its API that Althar asks whether it
+   * answers while that step waits for the connection (ADR-060). None where
+   * it runs on whichever provider the person picks: then only whether the
+   * computer is online counts.
+   */
+  readonly service?: { readonly name: string; readonly url: string }
   /** What prints its own version, for Settings; without it, none is shown. */
   readonly version?: (node: string) => LaunchSpec
   /**
@@ -136,9 +221,37 @@ export interface AgentDefinition {
   /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
    * its settings say (ADR-007): for a lead, or for a role that only reads
-   * (the coordinator, a reviewer), whose writes are refused outright.
+   * (the coordinator, a reviewer, the lead of a review), whose writes are
+   * refused outright. `untrusted`, for the lead of a review of someone else's
+   * pull request, loads none of the repository's settings or hooks, nor the
+   * person's own allow rules; `offline`, for one from outside the project,
+   * takes away what the agent reaches the web with where its settings can:
+   * each agent's entry says what that holds it to.
    */
-  readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
+  readonly sessionMeta?: (role?: 'lead' | 'reader', options?: SessionOptions) => Readonly<Record<string, unknown>>
+  /**
+   * Its session settings take what a lead's sandbox lets through from the
+   * start (`SessionOptions.sandbox`): commands it runs outside it, and hosts
+   * it reaches without asking. Without it, none are worked out for its
+   * leads, as it has nowhere to put them.
+   */
+  readonly upFront?: true
+  /**
+   * How it is held as the lead of a review of someone else's pull request
+   * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
+   * `env`, what its environment adds over `withoutOwnTools`' (which it is
+   * given) so that nothing of the repository's own config, hooks or plugins
+   * loads. `outside`, whether that holds it to only reading a pull request
+   * from outside the project: every command it runs asks first and meets
+   * Althar's reader rules, none running because its sandbox would contain
+   * it, and nothing of its own reaches the network. Without `outside`, no
+   * review of someone else's pull request is started on it, a team's
+   * included: it could run the pull request's code.
+   */
+  readonly reviewing?: {
+    readonly outside: boolean
+    readonly env?: (own: Readonly<Record<string, string>>) => Readonly<Record<string, string>>
+  }
   /**
    * Verified session settings that remove the agent's built-in tools, disable
    * user hooks and exclude its own MCP servers. Without this capability the
@@ -152,25 +265,113 @@ export interface AgentDefinition {
    * only the servers it is given.
    */
   readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
+  /**
+   * `'althar'` where a message that starts with `/` runs one of its own
+   * commands, and one of them turns its asking off (Copilot's `/yolo`, Grok's
+   * `/always-approve`), with more than it lists: only those Althar sends
+   * itself (`/compact`) go as commands, and the person's go as words. Without
+   * it, the person's commands reach it as they are.
+   */
+  readonly commands?: 'althar'
+  /**
+   * Where it says a failure as a message rather than an error, ending its
+   * turn as if done (Copilot's usage limits): the words that open it. Such a
+   * message is classified as an error would be (`failures.ts`), so a limit
+   * holds the work as any other agent's does.
+   */
+  readonly failsInText?: string
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
 }
 
+/**
+ * How a session is started beyond its role: `untrusted`, it leads a review of
+ * someone else's pull request, whose repository's settings and hooks are the
+ * pull request's to write; `offline`, it has no network where the agent lets
+ * Althar take it away; `sandbox`, for a lead, what its sandbox lets through
+ * from the start, where the agent's settings can say it.
+ */
+export interface SessionOptions {
+  readonly offline?: boolean
+  readonly untrusted?: boolean
+  /**
+   * Where a trusted reader, the coordinator, may reach (ADR-058): where the
+   * agent has a sandbox Althar can hold to it, its commands run there without
+   * asking, writing only in `folder`, reading none of `denied` but what
+   * `allowed` gives back, and reaching no network; else it is started as any
+   * reader, and Althar's rules hold it.
+   */
+  readonly contained?: Contained
+  readonly sandbox?: UpFront
+}
+
+/** The coordinator's folder, and what its sandboxed commands may read: real paths. */
+export interface Contained {
+  readonly folder: string
+  readonly reads: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
+}
+
+/**
+ * What a lead's sandbox lets through from the start, which the project's
+ * rules work out: commands it runs outside the sandbox rather than failing
+ * inside it first, by how they start, which still ask and meet Althar's
+ * rules; and hosts it reaches without asking, only those the rules would let
+ * through without anyone.
+ */
+export interface UpFront {
+  readonly commands: ReadonlyArray<string>
+  readonly hosts: ReadonlyArray<string>
+}
+
+/**
+ * Claude Code's `sandbox.excludedCommands` for commands by how they start:
+ * each as the whole command, and followed by ` *` for what comes after it,
+ * as its settings take a command's start.
+ */
+export const excludedCommandsOf = (commands: ReadonlyArray<string>): ReadonlyArray<string> =>
+  commands.flatMap((command) => [command, `${command} *`])
+
 export interface AgentCli {
   /** The command by name, as on the person's PATH; `.exe` is added on Windows. */
   readonly name: string
+  /**
+   * Where npm installed it, its command is a Node script (`#!/usr/bin/env
+   * node`), and an app opened from the Finder has no Node on its PATH: it
+   * starts with the folder it was found in first there, where npm's Node is.
+   */
+  readonly node?: true
   /** The copy that ships with Althar, by its path; null where this platform has none. */
   readonly bundled?: () => string | null
   /** Where Althar can download it. */
   readonly download?: AgentDownload
+  /** Its maker's page on installing it, for a person who installs it themselves: https only. */
+  readonly guide?: string
 }
 
-export interface AgentDownload {
+export type AgentDownload = GitHubDownload | PinnedDownload
+
+/** An agent's latest release on GitHub, each file with the sha256 GitHub gives it; the command alone is kept. */
+export interface GitHubDownload {
   /** Its GitHub repository, owner/name: its latest release is what is downloaded. */
   readonly repository: string
   /** The release's file for each `platform-arch`, as Node names them: a zip or a gzipped tar with the command in it. */
   readonly assets: Readonly<Record<string, string>>
   /** About how big the download is, as the person reads it. */
+  readonly size: string
+}
+
+/**
+ * One version of an agent, from an address its maker gives, each file pinned
+ * by the sha256 it was seen with, where the maker publishes none (Google, for
+ * Antigravity's server). The whole archive is kept, as what it holds runs
+ * together, and nothing in it runs unless every pinned file is exactly so.
+ */
+export interface PinnedDownload {
+  readonly version: string
+  /** For each `platform-arch`, the zip's address and sha256, and the sha256 of each file it holds by name. */
+  readonly assets: Readonly<
+    Record<string, { readonly url: string; readonly sha256: string; readonly files: Readonly<Record<string, string>> }>
+  >
   readonly size: string
 }
 
@@ -299,6 +500,53 @@ const openCodeBase = {
 const openCodeConfig = JSON.stringify(openCodeBase)
 
 /**
+ * OpenCode as the lead of a review of someone else's pull request, as
+ * OpenCode 1.18.31 reads it (its config loader, seen 14 October 2026):
+ * `OPENCODE_DISABLE_PROJECT_CONFIG` skips the repository's `opencode.json`
+ * and its `.opencode` folders, whose plugins and tools are code it would run
+ * as it starts; `lsp: false` starts no language server, some of which run a
+ * project's build scripts to read it (none starts unless a config turns it
+ * on, but the person's may); and its web search asks too, which Althar's
+ * reader rules refuse, since nothing says what it reaches. Its permissions
+ * keep the person's MCP servers off as `withoutOwnTools` left them.
+ */
+const openCodeReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<string, string>> => {
+  const reviewAsks = { ...asks, websearch: 'ask' }
+  const config = JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig) as Readonly<Record<string, unknown>>
+  return {
+    OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      ...config,
+      permission: reviewAsks,
+      agent: { build: { permission: reviewAsks }, plan: { permission: reviewAsks } },
+      lsp: false,
+    }),
+  }
+}
+
+/**
+ * Codex as the lead of a review of someone else's pull request, through the
+ * config codex-acp merges into every session it starts (`CODEX_CONFIG`, read
+ * as dotted keys, beside the person's MCP servers switched off): its own web
+ * search off (`web_search = "disabled"`, as Codex 0.159 names it), and hooks
+ * off (`features.hooks`), since codex-acp trusts every session's folder, so a
+ * repository's `.codex` config would otherwise apply. It isn't held to
+ * reading: codex-acp 2.1.1 starts every turn with its mode's approval policy
+ * (`on-request` for `read-only`), and no session option changes it, so
+ * Codex runs a command its read-only sandbox contains without asking, and
+ * Althar's reader rules never see it. It could run the pull request's
+ * scripts there, with no network and no writes. So it reviews a team's pull
+ * request held this far, and none from outside.
+ */
+const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<string, string>> => ({
+  CODEX_CONFIG: JSON.stringify({
+    ...(own.CODEX_CONFIG === undefined ? {} : (JSON.parse(own.CODEX_CONFIG) as Readonly<Record<string, unknown>>)),
+    web_search: 'disabled',
+    'features.hooks': false,
+  }),
+})
+
+/**
  * Claude Code reads the user's settings and the repository's committed
  * `.claude/settings.json`, and an allow rule in either approves an action
  * before Althar sees it. Ask rules win over allow rules, and over a hook
@@ -320,26 +568,44 @@ const openCodeConfig = JSON.stringify(openCodeBase)
  *
  * Only the MCP servers Althar gives a session are loaded, not the user's
  * or the repository's own, whose tools the ask list doesn't cover.
+ *
+ * Where the person keeps keys and sign-ins (`SECRET_PLACES`) is denied as
+ * reads, which Claude Code's sandbox also applies to the shell commands it
+ * runs without asking: so Claude Code's documentation describes it, not yet
+ * checked against a real session (docs/plans/safety-pass.md). Althar's rules
+ * refuse what reaches them.
  */
-const claudeAsks = {
+/*
+ * A project's known commands run outside the sandbox from the start
+ * (`excludedCommands`), so a browser, Electron or a test runner, which its
+ * sandbox stops on a Mac, doesn't fail once first: Claude Code's settings
+ * say an excluded command still goes through its permission flow, so it
+ * asks, and meets Althar's rules, as it would on its second try. Known hosts
+ * (`network.allowedDomains`) a command in the sandbox reaches without
+ * asking: the project's code hosts, registries and trackers, only where its
+ * rules would let them through anyway. Both are settings Claude Code takes
+ * only from trusted sources, which these, given as the session's own, are.
+ */
+const claudeAsks = (sandbox: UpFront = { commands: [], hosts: [] }) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
-        permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
+        permissions: { deny: secretReadRules(), ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
         sandbox: {
           enabled: true,
           autoAllowBashIfSandboxed: true,
           allowUnsandboxedCommands: true,
           failIfUnavailable: false,
-          network: { allowLocalBinding: true },
+          ...(sandbox.commands.length === 0 ? {} : { excludedCommands: excludedCommandsOf(sandbox.commands) }),
+          network: { allowLocalBinding: true, ...(sandbox.hosts.length === 0 ? {} : { allowedDomains: [...sandbox.hosts] }) },
         },
       },
     },
   },
-}
+})
 
 /**
  * Claude Code for a role that only reads: its edit tools denied, which also
@@ -351,15 +617,83 @@ const claudeAsks = {
  * reader rules. Those rules refuse direct `flatpak-spawn` commands; the
  * manifest's permission remains broad and is not a boundary against a
  * compromised app or agent.
+ *
+ * Untrusted, as the lead of a review of someone else's pull request, it
+ * loads no settings file (`settingSources: []`, which claude-agent-acp 0.88.0
+ * passes over its own default of user, project and local): not the
+ * repository's `.claude/settings.json`, which the pull request writes and
+ * whose hooks would run its code and whose allow rules would approve its
+ * commands before Althar sees them, nor the person's own, whose allow rules
+ * would too. Hooks are off besides (`disableAllHooks`), as for the
+ * permission judge. Its rules and sandbox below are the programmatic
+ * settings, which load whatever the sources.
  */
-const claudeReads = (flatpak: boolean) => ({
+const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      ...(untrusted ? { settingSources: [] } : {}),
       settings: {
-        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
+        permissions: offline
+          ? { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch', ...secretReadRules()], ask: ['Bash'] }
+          : { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['Bash', 'WebFetch'] },
         sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: flatpak, failIfUnavailable: false },
+        ...(untrusted ? { disableAllHooks: true } : {}),
+      },
+    },
+  },
+})
+
+/**
+ * Whether Claude Code's sandbox can start here: macOS's own, or bubblewrap
+ * and socat on Linux, outside a Flatpak (no nested user namespaces there).
+ * Not yet on Windows, where Althar hasn't tried it.
+ */
+const claudeSandboxStarts = (): boolean => {
+  if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec')
+  if (process.platform !== 'linux' || process.env.FLATPAK_ID !== undefined) return false
+  const onPath = (name: string) =>
+    (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
+  return onPath('bwrap') && onPath('socat')
+}
+
+/**
+ * Claude Code for the coordinator, a trusted reader in its own copies of the
+ * project's repositories (ADR-058): its shell commands run in its sandbox
+ * without asking, held to the coordinator's folder. They write only there
+ * (and in the sandbox's own temporary folder); read none of the home
+ * folder, the person's checkouts or the project's task folders but what
+ * Althar gives back (the folder, the mirrors its copies fetch from, the
+ * objects they borrow, the toolchains in the home folder), and nothing
+ * where the person keeps keys and sign-ins; reach no network
+ * (`strictAllowlist` with no domain refuses every host without asking) and
+ * no socket; and never run outside it (`allowUnsandboxedCommands: false`).
+ * It loads no settings file (`settingSources: []`) and runs no hook, as a
+ * review's lead: no allow rule or sandbox exemption of the person's or the
+ * repository's lets a command out, and no hook of theirs runs beside it. Its
+ * edit tools stay denied: a change is a task. Where the sandbox can't start,
+ * the session doesn't either (`failIfUnavailable`), so it is asked for only
+ * where it can (`claudeSandboxStarts`); elsewhere the coordinator is started
+ * as any reader.
+ */
+const claudeContains = ({ folder, reads }: Contained) => ({
+  claudeCode: {
+    options: {
+      allowDangerouslySkipPermissions: false,
+      strictMcpConfig: true,
+      settingSources: [],
+      settings: {
+        disableAllHooks: true,
+        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()], ask: ['WebFetch'] },
+        sandbox: {
+          enabled: true,
+          autoAllowBashIfSandboxed: true,
+          allowUnsandboxedCommands: false,
+          failIfUnavailable: true,
+          network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+          filesystem: { allowWrite: [folder], denyRead: [...reads.denied], allowRead: [...reads.allowed] },
+        },
       },
     },
   },
@@ -383,6 +717,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
+    service: { name: 'Anthropic', url: 'https://api.anthropic.com' },
     source: 'bundled',
     launch: (node) => ({
       command: node,
@@ -411,20 +746,45 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* Its sign-in, status and version run `claude`: the person's own, else the copy its sessions run on, which ships with Althar. */
     cli: { name: 'claude', bundled: () => bundledClaude() },
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
-    sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads(process.env.FLATPAK_ID !== undefined) : claudeAsks),
+    /*
+     * Offline, a reader has WebFetch and WebSearch denied, so Claude Code
+     * reaches no page itself; every shell command still asks, and meets
+     * Althar's reader rules, which list no command that reaches the network
+     * and refuse every fetch for that session. Its sandbox, where it starts,
+     * lets a command reach only the domains its settings allow (none here)
+     * and asks for any other, which Althar refuses too: so Claude Code's
+     * documentation describes it, not yet checked against a real session. In
+     * a Flatpak, where the sandbox can't start, the rules are what holds it.
+     */
+    sessionMeta: (role = 'lead', options = {}) =>
+      role !== 'reader'
+        ? claudeAsks(options.sandbox)
+        : options.contained !== undefined && options.untrusted !== true && options.offline !== true && claudeSandboxStarts()
+          ? claudeContains(options.contained)
+          : claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true),
+    upFront: true,
+    /*
+     * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
+     * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
+     * denied. So it may read a pull request from outside.
+     */
+    reviewing: { outside: true },
     permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
-      "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules.",
+      "Hooks in the repository's or the user's settings run as code on the computer whenever Claude uses a tool; they cannot approve past the ask rules. A review's lead loads no settings and runs no hooks.",
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
-      'Usage limits reach the Agent SDK but are not forwarded over ACP; only errors show them.',
+      'The adapter forwards one plan window per event in usage_update `_meta["_claude/rateLimit"]`, and Althar patches the adapter (patches/) so it is not dropped before a turn’s first usage figure (claude-agent-acp #1127).',
+      "As the coordinator, its sandbox has to start where Althar asks for it (macOS, and Linux with bubblewrap and socat): where it can't, the coordinator's session fails rather than running commands outside it.",
+      "As the coordinator, a command it can't read itself, such as one with `$?`, asks rather than running in its sandbox, and meets Althar's reader rules.",
     ],
   },
   codex: {
     id: 'codex',
     name: 'Codex',
+    service: { name: 'OpenAI', url: 'https://api.openai.com' },
     source: 'bundled',
     /*
      * `CODEX_HOME` is the account's home, always. `CODEX_PATH` names the Codex
@@ -443,6 +803,14 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * beyond the sandbox to an automatic reviewer, so none reach Althar.
      * In `workspace-write` the person, through Althar, is the reviewer.
      */
+    /*
+     * Its read-only sandbox has no network (`networkAccess: false` in
+     * codex-acp 2.1.1): what would reach it asks, and an offline reader's
+     * ask meets Althar's rules, which refuse it. But in that mode it asks
+     * only to go beyond the sandbox: a command the sandbox contains runs
+     * without asking (codexReviewing says why no session option changes
+     * that), so it never leads a review of a pull request from outside.
+     */
     modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
     signIn: {
@@ -459,6 +827,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       },
       logout: { run: () => ({ command: 'codex', args: ['logout'] }), line: 'codex logout' },
     },
+    // Its app-server answers `account/rateLimits/read` about the account it is run for; nothing is read from the sign-in.
+    usage: { run: () => ({ command: 'codex', args: ['app-server'] }) },
     home: {
       variable: 'CODEX_HOME',
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
@@ -466,6 +836,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
+    reviewing: { outside: false, env: codexReviewing },
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
@@ -476,10 +847,19 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       rejectAndStop: ['cancel'],
       allowScopes: { allow_once: 'once', allow_permissions_turn: 'turn', allow_permissions_turn_strict_auto_review: 'turn' },
     },
+    /*
+     * A project's known commands and hosts (`UpFront`) aren't passed: its
+     * `workspace-write` sandbox has no list of commands that run outside it,
+     * and its network is one switch (`sandbox_workspace_write.network_access`).
+     * Codex 0.160's list of allowed domains belongs to its permission
+     * profiles' network proxy, experimental, which codex-acp's modes don't
+     * use. So each of those still asks first, and meets Althar's rules.
+     */
     knownGaps: [
-      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network.',
-      "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply.",
-      'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
+      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
+      "A project's known commands and hosts aren't passed to it: its sandbox has no list of commands to run outside it, and no list of hosts in the mode Althar starts it in, so each asks first.",
+      "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
+      'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
     ],
     cli: {
       name: 'codex',
@@ -498,6 +878,16 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       env: { OPENCODE_CONFIG_CONTENT: openCodeConfig },
       inheritEnv: ['OPENCODE_CONFIG_DIR'],
     }),
+    /*
+     * It has no sandbox: a reader, offline or not, is held by Althar's
+     * rules alone, and a lead's known commands and hosts (`UpFront`) have
+     * nothing to be passed to, as every command already asks and none
+     * fails inside a sandbox first. Every command asks (`bash: 'ask'`), and its web fetches
+     * do (`webfetch: 'ask'`), so an offline reader's are refused there. As a
+     * review's lead it loads nothing of the repository's own config, plugins
+     * or language servers, and its web search asks too (openCodeReviewing),
+     * so it may read a pull request from outside.
+     */
     modes: { ask: 'build', readOnly: 'plan', reader: 'build' },
     /*
      * Its efforts are a model's variants, so each model has its own, and
@@ -515,6 +905,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
       login: 'opencode auth login',
+      // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
+      credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
       // No sign-out: its sign-ins are `opencode/auth.json` in the home, gone with the folder; its own asks which to remove.
     },
     /*
@@ -531,9 +923,11 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     version: () => ({ command: 'opencode', args: ['--version'] }),
     withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
+    reviewing: { outside: true, env: openCodeReviewing },
     /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
     cli: {
       name: 'opencode',
+      guide: 'https://github.com/anomalyco/opencode',
       download: {
         repository: 'anomalyco/opencode',
         assets: {
@@ -553,6 +947,468 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     knownGaps: [
       'Provider rate limits come back as errors; API keys have no plan windows.',
       'Carrying on after a rejection relies on an experimental setting, continue_loop_on_deny.',
+    ],
+  },
+  /*
+   * GitHub's own ACP server, in its CLI (public preview). It asks before
+   * every edit, command and web fetch in its `#agent` mode, and its `#plan`
+   * mode refuses edits in its runtime: as for Claude Code, a reader runs in
+   * the mode that asks, with Althar's rules denying every write, as plan mode
+   * adds instructions of its own. Its mode ids are ACP's own addresses.
+   */
+  copilot: {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    service: { name: 'GitHub', url: 'https://api.githubcopilot.com' },
+    source: 'user_installed',
+    /*
+     * The version it was installed as, not one it downloaded since
+     * (`--no-auto-update`); none of the GitHub tools it would reach with the
+     * person's sign-in (`--disable-builtin-mcps`), as Althar pushes for agents;
+     * and not the person's login-shell environment, which it otherwise gives
+     * every command it runs, past Althar's allowlist.
+     */
+    /* Its limits and other failures come as a message, `Error: You've hit your rate limit. …`, and the turn ends as if done (1.0.63's session.error). */
+    failsInText: 'Error: ',
+    launch: () => ({
+      command: 'copilot',
+      args: ['--acp', '--no-auto-update', '--disable-builtin-mcps'],
+      env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
+      inheritEnv: ['COPILOT_HOME'],
+    }),
+    modes: {
+      ask: 'https://agentclientprotocol.com/protocol/session-modes#agent',
+      readOnly: 'https://agentclientprotocol.com/protocol/session-modes#plan',
+      reader: 'https://agentclientprotocol.com/protocol/session-modes#agent',
+    },
+    /* `allow_all` approves every request while on, and its `/yolo` turns it on (`commands` keeps the person's off). */
+    options: { mode: 'mode', model: 'model', effort: 'reasoning_effort', held: { allow_all: 'off' } },
+    /*
+     * It has no status command: whether it is signed in shows when a session
+     * starts. A sign-in is the person's Copilot plan; a key of their own
+     * (`COPILOT_PROVIDER_*`) never reaches its sessions, past Althar's allowlist.
+     */
+    signIn: { read: () => undefined, login: 'copilot login' },
+    /*
+     * Its sign-in is a keychain item (service `copilot-cli`), not known to be
+     * the folder's own, so it has one account until two are seen apart. Its
+     * settings, hooks, MCP servers and saved approvals stay its usual folder's.
+     */
+    home: {
+      variable: 'COPILOT_HOME',
+      usual: (env, homeDir) => env.COPILOT_HOME || join(homeDir, '.copilot'),
+      shared: only(['copilot-instructions.md', 'instructions', 'agents', 'skills']),
+      accounts: 'one',
+    },
+    /* Seen 18 October 2026: allow_once, allow_always (for the session) and reject_once, which ends the turn. */
+    permissions: { rejectAndContinue: [], rejectAndStop: ['reject_once'], allowScopes: { allow_once: 'once' } },
+    version: () => ({ command: 'copilot', args: ['--version'] }),
+    /*
+     * Its license lets anyone install and run copies; its releases are at
+     * github/copilot-cli, each file with GitHub's sha256, `copilot` at the
+     * archive's root. Seen 19 October 2026, v1.0.98. An npm install is a Node
+     * script, and on Windows a `.cmd`, which Althar can't start.
+     */
+    cli: {
+      name: 'copilot',
+      node: true,
+      guide: 'https://gh.io/copilot-install',
+      download: {
+        repository: 'github/copilot-cli',
+        assets: {
+          'darwin-arm64': 'copilot-darwin-arm64.tar.gz',
+          'darwin-x64': 'copilot-darwin-x64.tar.gz',
+          'linux-arm64': 'copilot-linux-arm64.tar.gz',
+          'linux-x64': 'copilot-linux-x64.tar.gz',
+          'linux-arm64-musl': 'copilot-linuxmusl-arm64.tar.gz',
+          'linux-x64-musl': 'copilot-linuxmusl-x64.tar.gz',
+          'win32-arm64': 'copilot-win32-arm64.zip',
+          'win32-x64': 'copilot-win32-x64.zip',
+        },
+        size: '110 MB',
+      },
+    },
+    commands: 'althar',
+    knownGaps: [
+      "A repository's hooks (`.github/hooks`, `.github/copilot/settings.json`, `.claude/settings.json`) run, and can approve a tool past its asking, with no way to turn them off from the launch: so it never leads a review of a pull request.",
+      'Every rejection ends the turn; Althar carries the turn on itself.',
+      "Loads the person's own MCP servers from its folder's `mcp-config.json`.",
+      "A signed-in `gh` alone doesn't sign its sessions in: Althar gives agents none of the person's code-host sign-ins, so it needs `copilot login`.",
+      'No status command, so its sign-in shows only when a session starts; and one account, until its keychain item is seen to be each folder’s own.',
+      'Usage limits come only as errors.',
+    ],
+  },
+  /*
+   * JetBrains' own ACP server. With its brave mode off, commands, edits to
+   * build, config and secret files and to anything outside the project, and
+   * MCP tools ask; ordinary edits inside the project don't, as Codex's in its
+   * sandbox. Its plan mode takes the edit tools away and keeps commands,
+   * which ask, so a reader runs there.
+   */
+  junie: {
+    id: 'junie',
+    name: 'Junie',
+    source: 'user_installed',
+    /* No config of its own or the repository's (`.junie/config.json` can turn brave mode on), and no MCP servers but Althar's. */
+    launch: () => ({
+      command: 'junie',
+      args: ['--acp=true'],
+      env: { JUNIE_SKIP_UPDATE_CHECK: '1', JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false', JUNIE_MCP_DEFAULT_LOCATIONS: 'false' },
+      inheritEnv: ['JUNIE_HOME'],
+    }),
+    modes: { ask: 'default', readOnly: 'plan', reader: 'plan' },
+    /*
+     * Its mode option has no category, and `brave_mode` has the mode's, so the
+     * mode is found by its id. Brave mode on approves everything, and its
+     * default, `brave-auto`, has a model approve the commands it thinks safe.
+     */
+    options: { mode: 'mode', model: 'model', effort: 'effort', held: { brave_mode: 'off' } },
+    /* It has no status command: whether it is signed in shows when a session starts. Sign in with a JetBrains account in its own window. */
+    signIn: { read: () => undefined, login: 'junie' },
+    /*
+     * Its sign-in is a keychain item named after the folder's path (on
+     * Windows a file in it), which deleting the folder would leave behind,
+     * and it signs out only over ACP: one account, until Althar signs a home
+     * out before removing it. `settings.json` takes the brave mode Althar sets.
+     */
+    home: {
+      variable: 'JUNIE_HOME',
+      usual: (env, homeDir) => env.JUNIE_HOME || join(homeDir, '.junie'),
+      shared: only(['AGENTS.md', 'skills', 'agent-skills', 'agents', 'commands']),
+      accounts: 'one',
+    },
+    /* Seen 19 October 2026: its option ids are their labels. `No` skips the action and it carries on; `stop` ends a turn at its step limit. */
+    permissions: { rejectAndContinue: ['No'], rejectAndStop: ['stop'], allowScopes: { Yes: 'once', continue: 'once' } },
+    version: () => ({ command: 'junie', args: ['--version'] }),
+    /* Its installer's `junie` is a bash script in ~/.local/bin; on Windows a `.bat`, which Althar can't start. */
+    cli: { name: 'junie', guide: 'https://junie.jetbrains.com/' },
+    commands: 'althar',
+    knownGaps: [
+      "Ordinary edits inside the project don't ask; edits to build, config and secret files, and outside it, do.",
+      'Its plan mode keeps commands, which ask; whether it keeps Althar’s tools there is not yet checked.',
+      'ACP launches trust the project: its skills, agents and commands load.',
+      'It keeps the brave mode a session is set to in its `settings.json`, so its own window starts with brave mode off too.',
+      'No status command, so its sign-in shows only when a session starts; and one account, until Althar signs a home out before removing it.',
+    ],
+  },
+  /*
+   * xAI's own ACP server, in its CLI. It offers no modes: what keeps it
+   * asking is its session's `_meta`, which turns its always-approve and its
+   * model-judged auto mode off whatever the person's config says. Every
+   * rejection ends its turn.
+   */
+  grok: {
+    id: 'grok',
+    name: 'Grok Build',
+    service: { name: 'xAI', url: 'https://api.x.ai' },
+    source: 'user_installed',
+    /*
+     * A process of its own rather than one a config's leader mode shares, not
+     * updating itself, and none of the MCP servers or hooks it reads from
+     * Claude Code's and Cursor's settings.
+     */
+    launch: () => ({
+      command: 'grok',
+      args: ['agent', '--no-leader', 'stdio'],
+      env: {
+        GROK_DISABLE_AUTOUPDATER: '1',
+        GROK_CLAUDE_MCPS_ENABLED: '0',
+        GROK_CURSOR_MCPS_ENABLED: '0',
+        GROK_CLAUDE_HOOKS_ENABLED: '0',
+        GROK_CURSOR_HOOKS_ENABLED: '0',
+      },
+      inheritEnv: ['GROK_HOME'],
+    }),
+    modes: { ask: null, readOnly: null, reader: null },
+    options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
+    signIn: {
+      /* `grok models` says how it is signed in, first, and exits 0 either way. */
+      status: () => ({ command: 'grok', args: ['models'] }),
+      read: (output) => (/not authenticated/i.test(output) ? false : /logged in with|authenticated via/i.test(output) ? true : undefined),
+      paidBy: (output) => (/logged in with/i.test(output) ? 'plan' : /XAI_API_KEY|deployment key/i.test(output) ? 'key' : undefined),
+      login: 'grok login',
+      logout: { run: () => ({ command: 'grok', args: ['logout'] }), line: 'grok logout' },
+    },
+    /*
+     * Its sign-in is `auth.json` in the folder. Its config holds the person's
+     * allow rules and MCP servers, and `trusted_folders.toml` and its sessions'
+     * saved grants approve things: none of them is shared.
+     */
+    home: {
+      variable: 'GROK_HOME',
+      usual: (env, homeDir) => env.GROK_HOME || join(homeDir, '.grok'),
+      shared: only(['pager.toml', 'skills', 'agents', 'rules', 'workflows']),
+    },
+    /* Seen 18 October 2026: a command's always-allow is kept for the project, and reject-always too; every rejection ends the turn. */
+    permissions: { rejectAndContinue: [], rejectAndStop: ['reject-once', 'reject-always'], allowScopes: { 'allow-once': 'once' } },
+    sessionMeta: () => ({ yoloMode: false, autoMode: false }),
+    version: () => ({ command: 'grok', args: ['--version'] }),
+    /* Its installers put it in ~/.grok/bin, a native program everywhere; its npm `grok` is one on a Mac and Linux too. */
+    cli: { name: 'grok', guide: 'https://www.npmjs.com/package/@xai-official/grok' },
+    commands: 'althar',
+    knownGaps: [
+      "The allow rules in the person's `~/.claude/settings.json` approve its commands before Althar sees them.",
+      'Its web search never asks.',
+      'Every rejection ends the turn; Althar carries the turn on itself.',
+      "A worktree Althar makes is a folder it doesn't trust, so it doesn't read the repository's AGENTS.md.",
+    ],
+  },
+  /*
+   * Moonshot's own ACP server, in Kimi Code (the CLI that followed Kimi CLI
+   * 1.x). In `default` every command asks; edits inside a git repository
+   * don't, as Codex's in its sandbox, and its web fetch and search never do.
+   * Its plan mode refuses edits and keeps commands, which ask, so a reader
+   * runs there. It says `default` as it starts whatever its config says, so
+   * Althar setting the mode is what holds it.
+   */
+  kimi: {
+    id: 'kimi',
+    name: 'Kimi Code',
+    source: 'user_installed',
+    launch: () => ({ command: 'kimi', args: ['acp'], env: { KIMI_CODE_NO_AUTO_UPDATE: '1' }, inheritEnv: ['KIMI_CODE_HOME'] }),
+    modes: { ask: 'default', readOnly: 'plan', reader: 'plan' },
+    options: { mode: 'mode', model: 'model', effort: 'thinking' },
+    signIn: {
+      /* Its providers are what its login wrote: none is signed out. What it lists signed in is not yet seen. */
+      status: () => ({ command: 'kimi', args: ['provider', 'list'] }),
+      read: (output) => (/no providers configured/i.test(output) ? false : undefined),
+      login: 'kimi login',
+    },
+    /*
+     * Its sign-in is `credentials/` in the folder, gone with it. Its config
+     * holds the providers its login wrote and the mode it starts in, and
+     * `mcp.json` the person's MCP servers: neither is shared.
+     */
+    home: {
+      variable: 'KIMI_CODE_HOME',
+      usual: (env, homeDir) => env.KIMI_CODE_HOME || join(homeDir, '.kimi-code'),
+      shared: only(['tui.toml', 'skills', 'agents']),
+    },
+    /* Seen 19 October 2026: `reject` fails the tool and it carries on; `approve_always` is the session's, for that command or file. */
+    permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { approve_once: 'once' } },
+    version: () => ({ command: 'kimi', args: ['--version'] }),
+    /*
+     * Its installer's is a program of its own in ~/.kimi-code/bin; npm's a
+     * Node script, on Windows a `.cmd`. MIT, but its releases are bare
+     * zstd-compressed programs, which Althar's downloads don't unpack yet.
+     */
+    cli: { name: 'kimi', node: true, guide: 'https://www.kimi.com/code/docs/en/' },
+    commands: 'althar',
+    knownGaps: [
+      "Edits inside a git repository don't ask; commands do.",
+      'Its web fetch and search never ask.',
+      "Loads the person's own MCP servers from its folder's `mcp.json`, and its plugins'.",
+      'The archived Kimi CLI 1.x answers to `kimi` too, with its own modes; a reader on it is refused.',
+    ],
+  },
+  /*
+   * Mistral's own ACP server. Its `ask` mode asks before edits, web, MCP
+   * tools and every command but a few it reads as safe inside the workdir.
+   * It has no read-only mode over ACP, so a reader runs in `ask`, with
+   * Althar's rules denying every write.
+   */
+  'mistral-vibe': {
+    id: 'mistral-vibe',
+    name: 'Mistral Vibe',
+    service: { name: 'Mistral', url: 'https://api.mistral.ai' },
+    source: 'user_installed',
+    /* Its settings from the environment win over the person's and the repository's: asking, with no model judging what is safe. */
+    launch: () => ({
+      command: 'vibe-acp',
+      args: [],
+      env: {
+        VIBE_DEFAULT_AGENT: 'ask',
+        VIBE_BYPASS_TOOL_PERMISSIONS: 'false',
+        VIBE_SMART_APPROVE_DEFAULT: 'false',
+        VIBE_SMART_APPROVE_AVAILABLE: 'false',
+        VIBE_ENABLE_UPDATE_CHECKS: 'false',
+      },
+      inheritEnv: ['VIBE_HOME'],
+    }),
+    modes: { ask: 'ask', readOnly: null, reader: 'ask' },
+    /* Its effort is the model's thinking, an option of its own kind. */
+    options: { mode: 'mode', model: 'model', effort: 'thinking' },
+    /*
+     * It has no status command. Its browser sign-in makes a Mistral key for the
+     * account, which a Le Chat Pro or Team plan pays for, and pay-as-you-go
+     * otherwise: Althar can't tell which.
+     */
+    signIn: { read: () => undefined, login: 'vibe --setup' },
+    /* Its key is a keychain item every folder shares, so it has one account. Its config holds the person's MCP servers. */
+    home: {
+      variable: 'VIBE_HOME',
+      usual: (env, homeDir) => env.VIBE_HOME || join(homeDir, '.vibe'),
+      shared: only(['AGENTS.md', 'agents', 'prompts', 'skills']),
+      accounts: 'one',
+    },
+    /* From its code (vibe/acp/utils.py), not yet seen in a turn: rejecting tells the model to try another way, and it carries on. */
+    permissions: { rejectAndContinue: ['reject_once'], rejectAndStop: [], allowScopes: { allow_once: 'once' } },
+    version: () => ({ command: 'vibe-acp', args: ['--version'] }),
+    /* `uv tool install mistral-vibe` puts it in ~/.local/bin. Its releases need their whole folder, which Althar's downloads don't keep. */
+    cli: { name: 'vibe-acp', guide: 'https://github.com/mistralai/mistral-vibe' },
+    commands: 'althar',
+    knownGaps: [
+      'No read-only mode over ACP: a reader asks, and Althar’s rules deny it every write.',
+      "Loads the person's own MCP servers from its folder's `config.toml`, and Mistral's connectors.",
+      'No status command, so its sign-in shows only when a session starts; and one account, as its key is shared.',
+      'Whether its web search asks under its newer harness is not yet checked.',
+    ],
+  },
+  /*
+   * Alibaba's Qwen team's ACP server. In `default` it asks before edits, web
+   * fetches, MCP tools and every command it doesn't read as only reading.
+   * Its plan mode refuses whatever would ask, Althar's tools too, so a reader
+   * runs in `default`, with Althar's rules denying every write. It starts in
+   * `auto`, where a model approves what it thinks safe, unless told.
+   */
+  'qwen-code': {
+    id: 'qwen-code',
+    name: 'Qwen Code',
+    source: 'user_installed',
+    launch: () => ({ command: 'qwen', args: ['--acp', '--approval-mode', 'default'], inheritEnv: ['QWEN_HOME'] }),
+    modes: { ask: 'default', readOnly: 'plan', reader: 'default' },
+    /* Its efforts are a model's own, and `default` leaves one at its own. */
+    options: { mode: 'mode', model: 'model', effort: 'reasoning_effort', ownEffort: 'default' },
+    /*
+     * It has no status command, and keeps its keys in its settings, which
+     * Althar never reads: Alibaba Cloud's Coding Plan key, or any provider's.
+     * Sign in with `/auth` in its own window.
+     */
+    signIn: { read: () => undefined, login: 'qwen' },
+    /* Its keys and the person's settings share `settings.json`, which isn't shared. */
+    home: {
+      variable: 'QWEN_HOME',
+      usual: (env, homeDir) => env.QWEN_HOME || join(homeDir, '.qwen'),
+      shared: only(['QWEN.md', 'skills', 'agents', 'commands', 'output-styles']),
+    },
+    /* From its code (toPermissionOptions): `cancel` is the only rejection, and ends the turn. */
+    permissions: { rejectAndContinue: [], rejectAndStop: ['cancel'], allowScopes: { proceed_once: 'once' } },
+    version: () => ({ command: 'qwen', args: ['--version'] }),
+    /* An npm install is a Node script, on Windows a `.cmd`; the standalone one starts its own Node from a shell script. */
+    cli: { name: 'qwen', node: true, guide: 'https://github.com/QwenLM/qwen-code' },
+    commands: 'althar',
+    knownGaps: [
+      "A repository's `.qwen/settings.json` can add allow rules, hooks and MCP servers, and it trusts every folder.",
+      'Commands it reads as only reading run without asking.',
+      'Every rejection ends the turn; Althar carries the turn on itself.',
+      'No status command, so its sign-in shows only when a session starts.',
+    ],
+  },
+  /*
+   * Google's own ACP server for Antigravity, which the `agy` CLI doesn't
+   * have, downloaded apart from it. Its `default` mode asks before its tools;
+   * `auto_edit` and `yolo` approve without asking, and it has no read-only
+   * mode, so every role runs in `default`, held there, with Althar's rules
+   * denying a reader every write. The model asks the person a question as a
+   * permission request on an `interaction_` tool call, one option for each
+   * answer, which goes to the person and never to the rules.
+   */
+  antigravity: {
+    id: 'antigravity',
+    name: 'Google Antigravity',
+    source: 'user_installed',
+    /*
+     * Its sign-in in the home's own file rather than the keychain item every
+     * server on the computer shares; no browser of its own (Althar opens the
+     * page); and a temporary folder of its own, as it unpacks itself there
+     * (about 1 GB) each time it starts. On Linux, `--uid=`, without which it
+     * drops to nobody when started as root (the registry's own launch).
+     */
+    launch: () => ({
+      command: 'agy_acp_server.par',
+      args: process.platform === 'linux' ? ['--uid='] : [],
+      env: { AGY_ACP_FORCE_FILE_STORAGE: '1', PYTHONUNBUFFERED: '1', BROWSER: 'true' },
+      inheritEnv: ['GEMINI_HOME'],
+      privateTemp: true,
+    }),
+    modes: { ask: 'default', readOnly: null, reader: 'default' },
+    /* Its effort is in its model's id (`gemini-3.8-flash-high`); `yolo`, a mode, is held off by holding the mode. */
+    options: { mode: 'mode', model: 'model', held: { mode: 'default' } },
+    /*
+     * It has no status or login command: it signs in only over ACP, with a
+     * Google account (`oauth-personal`), and a session's start says whether it
+     * is. Its other ways, a Gemini key or Google Cloud's, never reach it, past
+     * Althar's allowlist.
+     */
+    signIn: {
+      read: () => undefined,
+      login: '',
+      inApp: {
+        kind: 'acp-authenticate',
+        ways: ['browser'],
+        run: () => agents.antigravity.launch(''),
+        method: 'oauth-personal',
+        link: /Open the following link to authenticate the ACP server:\s*(\S+)/,
+      },
+    },
+    /*
+     * Its sign-in, settings and conversations are `antigravity-acp/` in the
+     * folder; `config/` holds the person's MCP servers and hooks, and the
+     * usual folder is Gemini CLI's too: none of them is shared.
+     */
+    home: {
+      variable: 'GEMINI_HOME',
+      usual: (env, homeDir) => env.GEMINI_HOME || join(homeDir, '.gemini'),
+      shared: only(['GEMINI.md']),
+    },
+    /* Its approvals' option ids are not yet seen: each is read by its kind. */
+    permissions: { rejectAndContinue: [], rejectAndStop: [], allowScopes: {}, questions: 'interaction_' },
+    /*
+     * Google publishes no license to pass it on and no checksums: Althar
+     * downloads it from Google at the person's asking, version 1.3.0 as Orca
+     * pins it, each archive and both programs in it by the sha256 Orca
+     * measured. The server finds its harness, `localharness_external`, beside
+     * itself. No build for Windows.
+     */
+    cli: {
+      name: 'agy_acp_server.par',
+      download: {
+        version: '1.3.0',
+        assets: {
+          'darwin-arm64': {
+            url: 'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.3.0-darwin-arm64.zip',
+            sha256: '7cd97045f7b4fe81175a107cdf16f9c51484e3c78a5162cae415338bb6aa5b88',
+            files: {
+              'agy_acp_server.par': 'cb1f0725183ed922079ed6cd1d2422b4d8be44c5fb60be3e9a43d8d04f99a18e',
+              localharness_external: 'b04b00662c1821b953a409d43626b86d1229130eeb2078b4e1304c06199aa481',
+            },
+          },
+          'darwin-x64': {
+            url: 'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.3.0-darwin-x86_64.zip',
+            sha256: 'bb23956b89984bf5d354af2c3725e6c57f0cc1b7228e77a0e91c9c2bc1d47646',
+            files: {
+              'agy_acp_server.par': 'f31bd5797eeb225a5efa12e24573f1f4eb157ec00698dd6a2cda6f0d924705cf',
+              localharness_external: 'd724f49b2c9e440c5d37925b1da203fc204c17dd9c662df45094c641f9806bc6',
+            },
+          },
+          'linux-x64': {
+            url: 'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.3.0-linux-x86_64.zip',
+            sha256: '9fb60956af0a9d76220a4db91ca9ac88e2a2372ad68f985ab5fceace6b825b96',
+            files: {
+              'agy_acp_server.par': 'cf6feaebdacfc2255dcfc8883db99b15de8554698554e2a1e78e5ccec1c68a20',
+              localharness_external: '63042ca43fc7a69600683920f7706689b82cf8aecefe21dc18cf35e99c9dde4d',
+            },
+          },
+          'linux-arm64': {
+            url: 'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.3.0-linux-arm64.zip',
+            sha256: '500b0bc0fb858e88f4df404d4cedf80bf9298c178291e39e383d6c50b111cbdf',
+            files: {
+              'agy_acp_server.par': '03ea51ff7a60cb1b44e65da40fdb35f1f457db7950d1651d9e86945c8aa584c6',
+              localharness_external: '7fe676f1234889900800bad3ca50fb9b55f1e16ee4cb82b789f84ae5145fd582',
+            },
+          },
+        },
+        size: process.platform === 'darwin' ? '115 MB' : '330 MB',
+      },
+    },
+    commands: 'althar',
+    knownGaps: [
+      "Google's Antigravity terms call reaching it with its Google sign-in from third-party software a breach that can suspend the account; Google lists this server for other editors, and Orca runs it so, but whether Althar counts is not settled.",
+      "Its usual folder's `config/` loads the person's own hooks and MCP servers; an account Althar made has neither.",
+      'Its approvals’ option ids are not yet seen, so each is read by its kind.',
+      'No status command, so its sign-in shows only when a session starts.',
+      'No build for Windows.',
+      'It unpacks about 1 GB into a temporary folder each time it starts, removed when it stops.',
     ],
   },
 }

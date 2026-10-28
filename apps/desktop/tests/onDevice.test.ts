@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { agents, usingLocated } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
 import {
@@ -41,7 +42,22 @@ describe('the device outside a Flatpak', () => {
         GIT_WORK_TREE: '/run/user/1000/doc/abc123/repo',
       },
     )
-    expect(HOST_COMMANDS).toEqual(['opencode', 'claude', 'codex'])
+    expect(HOST_COMMANDS).toEqual(['opencode', 'claude', 'codex', 'copilot', 'junie', 'grok', 'kimi', 'vibe-acp', 'qwen'])
+  })
+
+  it('carries out to the device, for every agent it may run there, its account’s home and what its launch sets', () => {
+    const facts = { env: { HOME: '/home/me', PATH: '/usr/bin' }, uid: 1000, ambient: {} } satisfies Parameters<typeof relayOut>[2]
+    const missing = Object.values(agents)
+      .filter((agent) => agent.cli !== undefined && (HOST_COMMANDS as ReadonlyArray<string>).includes(agent.cli.name))
+      .flatMap((agent) => {
+        const spec = agent.launch('/usr/bin/node')
+        const names = [...new Set([agent.home.variable, ...Object.keys(spec.env ?? {}), ...(spec.inheritEnv ?? [])])]
+        // An account's home, and whatever the agent inherits, as an executor would set them; its launch's own as they are.
+        const env = { ...Object.fromEntries(names.map((name) => [name, '/home/me/.althar/accounts/work'])), ...spec.env }
+        const crossed = relayOut({ command: agent.cli?.name ?? '', args: [] }, { env }, facts).args
+        return names.filter((name) => !crossed.some((arg) => arg.startsWith(`--env=${name}=`))).map((name) => `${agent.id}: ${name}`)
+      })
+    expect(missing).toEqual([])
   })
 
   it('takes a launch out to the device with the names it needs and what the agent was given, and nothing else', () => {
@@ -80,6 +96,29 @@ describe('the device outside a Flatpak', () => {
     expect(launched.args).toContain('--directory=/run/user/1000/doc/abc123/repo')
     expect(launched.args.slice(-3)).toEqual(['/run/user/1000/doc/abc123/repo/opencode', 'acp', '/run/user/1000/doc/abc123/repo'])
   })
+
+  // Through this computer's own PATH, which only a Linux's is like the Flatpak's.
+  it.skipIf(process.platform === 'win32')(
+    'runs an npm-installed agent out there with its own folder first on the PATH, where its Node is',
+    () => {
+      // Copilot as nvm installs it: off the device session's PATH, beside the Node its `#!/usr/bin/env node` needs.
+      const found = '/home/me/.nvm/versions/node/v22.20.0/bin/copilot'
+      const facts = { env: { HOME: '/home/me', PATH: '/usr/bin:/bin' }, uid: 1000, ambient: process.env } satisfies Parameters<
+        typeof relayOut
+      >[2]
+      const copilot = usingLocated(agents.copilot, () => ({
+        command: found,
+        whose: 'theirs',
+        out: (spec) => (at) => relayOut(spec, at, facts),
+      }))
+      const spec = copilot.launch('/usr/bin/node')
+      const launched = spec.onDevice?.({ env: { ...process.env, ...spec.env } })
+      // Its folder, then the device's own PATH: nothing of the sandbox's.
+      expect(launched?.args.filter((arg) => arg.startsWith('--env=PATH='))).toEqual([
+        '--env=PATH=/home/me/.nvm/versions/node/v22.20.0/bin:/usr/bin:/bin',
+      ])
+    },
+  )
 
   it('finds the person’s commands where the device’s shell and installers put them', () => {
     const script = whereScript(HOST_COMMANDS)

@@ -1,7 +1,8 @@
-import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
+import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import * as acp from '@agentclientprotocol/sdk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -9,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import type { InProcessAgent } from '../AgentConnection'
 import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
+import { recorded } from './recorded'
 
 /*
  * A scripted ACP agent for tests, so the adapter's contract runs in CI without
@@ -16,8 +18,27 @@ import { stopBackgroundMethod, type StopBackgroundResponse } from '../background
  * use. The prompt's text picks a scenario. It starts every session in a bypass
  * mode, so tests show the adapter always moves a session out of it. It takes
  * images in a prompt unless told not to, and says first what images it was
- * sent: `saw images: image/png 68 B, …`.
+ * sent: `saw images: image/png 68 B, …`. Then what files and folders: one
+ * linked it opens by its path, as an agent does with its own tools, and says
+ * its first line, or a folder's files; one whose words came in the prompt it
+ * says so of (`saw files: notes.log (linked, 2 KB): first line …`).
  */
+
+/** What it makes of a file sent in a prompt: a linked one opened by its path, its first line or a folder's files; one embedded, its words. */
+const sawFile = (block: acp.ContentBlock): string => {
+  if (block.type === 'resource') {
+    const words = 'text' in block.resource ? block.resource.text : ''
+    return `${block.resource.uri.split('/').pop() ?? ''} (embedded): ${words.split('\n')[0] ?? ''}`
+  }
+  if (block.type !== 'resource_link') return ''
+  try {
+    const path = fileURLToPath(block.uri)
+    if (statSync(path).isDirectory()) return `${block.name} (linked folder): ${readdirSync(path).sort().join(', ')}`
+    return `${block.name} (linked, ${block.mimeType ?? 'no type'}, ${block.size ?? '?'} B): ${readFileSync(path, 'utf8').split('\n')[0] ?? ''}`
+  } catch {
+    return `${block.name} (linked): couldn't open it`
+  }
+}
 
 export const scenarios = {
   /** Two message chunks, then the turn ends with usage. */
@@ -28,10 +49,14 @@ export const scenarios = {
   tool: 'tool',
   /** Like `tool`, but it offers only allow-always and reject-once. */
   toolAlwaysOnly: 'tool-always-only',
+  /** A web fetch that asks permission, then says what it was answered. */
+  fetch: 'fetch',
   /** A tool call that says what it is, then asks permission with nothing but its id, as Codex does for an MCP tool. */
   bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
   updates: 'updates',
+  /** Usage updates that carry Claude Code's rate-limit event in `_meta`: the five-hour window at 82 percent, then the weekly at 40. */
+  planUsage: 'plan-usage',
   /** One chunk, then waits until cancelled. */
   slow: 'slow',
   /** Fails with Claude Code's usage-limit message. */
@@ -60,14 +85,24 @@ export const scenarios = {
    * person's own words; repeats the answer.
    */
   questions: 'questions',
+  /**
+   * Asks the person to choose as Antigravity does: a permission request on an
+   * `interaction_` tool call, one `allow_once` option for each answer, with
+   * the question in its call's title only; says what was chosen.
+   */
+  choice: 'choice',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
+  /** Copilot's usage limit, said as a message, `Error: …`, and the turn ending as if done. */
+  limitInText: 'limit-in-text',
   /** Claude's structured report of a full context. */
   contextFull: 'context-full',
   /** Claude's structured warning of a short rate limit, then a normal reply. */
   rateWarning: 'rate-warning',
   /** The agent leaves the mode it was put in, as a plan session does on leaving plan mode. */
   leaveMode: 'leave-mode',
+  /** The agent turns its own approve-everything option on, as Copilot does on `/yolo` (only with `allowAll`). */
+  allowAll: 'allow-all',
   /** Ends the turn, then sends an update between turns. */
   afterTurn: 'after-turn',
   /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
@@ -99,6 +134,18 @@ export const scenarios = {
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
   backgroundCodex: 'background-codex',
   /**
+   * Leaves `bun dev` running as `background` does, but its output says
+   * nothing of where it serves: a real process, started with its output going
+   * to that file, listens on a port of its own. Stopping it ends it.
+   */
+  backgroundQuiet: 'background-quiet',
+  /**
+   * As `backgroundQuiet`, but as Codex reports one: no file its output goes
+   * to, and said only after the turn, when its server is already listening.
+   * Only when the agent runs as a process, for the server is then in its tree.
+   */
+  backgroundCodexQuiet: 'background-codex-quiet',
+  /**
    * Commands the agent starts of its own, with no tool call: `npm run watch`
    * keeps running, `npm test` ends well and `npm run lint` badly, neither
    * saying an exit code, and `npm run dev`, which it stops itself. Output
@@ -111,6 +158,13 @@ export const scenarios = {
    * says what was chosen (`chosen=allow_once`).
    */
   run: 'run ',
+  /**
+   * Followed by commands apart by `; `, `run each make deploy; ./deploy.sh`:
+   * asks to run them all at once, as an agent's parallel tool calls do, so
+   * they wait together; says what was chosen for each, in order
+   * (`chosen=allow_once,allow_once`).
+   */
+  runEach: 'run each ',
 } as const
 
 /** A 480 × 300 PNG of a page, as a screenshot tool hands it back. */
@@ -127,6 +181,9 @@ export const HANDED_DOCUMENT = {
 }
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
+
+/** What Claude Code says when Anthropic's API fails and it gives up: no class Althar tries again. */
+export const API_ERROR_MESSAGE = 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'
 
 /** How many tokens its context holds, as it says when a prompt ends `[context:…]`. */
 export const CONTEXT_SIZE = 200_000
@@ -162,6 +219,10 @@ export const codexLikeMeanings = {
 }
 
 export interface FakeAgentOptions {
+  /** Hold `session/new` open to exercise startup timeout cleanup. */
+  readonly beforeNewSession?: () => Promise<void>
+  /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
+  readonly beforeInitialize?: () => Promise<void>
   /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
   readonly judgment?: (input: {
     readonly prompt: string
@@ -186,6 +247,8 @@ export interface FakeAgentOptions {
   readonly closed?: (sessionId: string) => void
   /** Called when something a session left running is stopped, with its task's id. */
   readonly stoppedBackground?: (id: string) => void
+  /** Whether to refuse to stop what a session left running, as an agent that can't: asked as each stop is. */
+  readonly refusesStop?: () => boolean
   /** Called with what the client says it can do, as it initializes. */
   readonly initialized?: (capabilities: acp.ClientCapabilities | undefined) => void
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
@@ -196,6 +259,14 @@ export interface FakeAgentOptions {
    * for good, saying no reset time.
    */
   readonly outOfUsage?: { readonly until?: number }
+  /**
+   * Its connection, asked as each prompt starts: while it is down, every
+   * prompt ends as the agents' did when theirs was (`recorded.ts`): offline
+   * or given a server error, as Claude Code ends its turn, having used
+   * nothing; `waits`, as Codex waits for the network, its turn not ending
+   * until the connection is back, when it carries on, or it is cancelled.
+   */
+  readonly connection?: () => 'offline' | 'server' | 'waits' | undefined
   /**
    * Offer effort as OpenCode does: as a model's variants, with a `default`
    * that leaves it at its own. The small model has none, and a third, huge
@@ -210,6 +281,23 @@ export interface FakeAgentOptions {
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
+  /** Whether it says it takes a file's words in a prompt, as Claude Code and Codex do. False unless true. */
+  readonly embeddedContext?: boolean
+  /**
+   * How many of each session's first prompts end at once, having said nothing
+   * and used no tokens, as Claude Code's do while another of its processes
+   * renews the sign-in they share, or which, by their number from 1. It reads
+   * them all the same.
+   */
+  readonly blank?: number | ReadonlyArray<number>
+  /** An option that would approve every request while on, as Copilot's `allow_all`, starting at this value. */
+  readonly allowAll?: 'on' | 'off'
+  /** Once it turns `allow_all` on itself, it won't be turned off again: setting it back fails. */
+  readonly allowAllSticks?: boolean
+  /** It says yes to setting `allow_all`, and leaves it where it was. */
+  readonly allowAllStays?: boolean
+  /** Once it leaves its mode by itself (`leaveMode`), it refuses to be put back in one. */
+  readonly leavesForGood?: boolean
 }
 
 interface SessionState {
@@ -236,9 +324,21 @@ interface SessionState {
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
   /** What it left running, by its task's id. */
-  background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
+  background: Map<string, { readonly toolCallId: string; readonly outputPath?: string; readonly process?: ChildProcess }>
   /** How many commands it has left running, so each has an id of its own. */
   served: number
+  /** Its approve-everything option, where it has one (`allowAll`). */
+  allowAll: string | undefined
+  /** It turned `allow_all` on itself, and, with `allowAllSticks`, keeps it so. */
+  allowAllStuck: boolean
+  /** It left its mode by itself, and, with `leavesForGood`, won't be put back. */
+  leftForGood: boolean
+  /** How large it last said its context is, in tokens. */
+  contextSize: number
+  /** How many prompts it has been given. */
+  prompts: number
+  /** What the prompts it did nothing with said (`blank`). */
+  unread: string
 }
 
 /** What `bun dev` prints, coloured as Vite colours it. */
@@ -255,7 +355,7 @@ const leaveRunning = async (
   session: SessionState,
   client: acp.AgentContext,
   as: 'claude' | 'codex',
-  options: { readonly exits?: boolean } = {},
+  options: { readonly exits?: boolean; readonly quiet?: boolean } = {},
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -271,19 +371,33 @@ const leaveRunning = async (
     rawInput: { command: 'bun dev' },
   })
   if (as === 'codex') {
-    session.background.set(id, { toolCallId })
+    let server: ChildProcess | undefined
+    if (options.quiet === true)
+      server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: 'ignore' })
+    session.background.set(id, { toolCallId, ...(server === undefined ? {} : { process: server }) })
     // Codex says it once its list of background terminals names it, after the turn, and streams its output on its tool call.
-    setTimeout(() => {
-      void notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: id, name: 'bun dev', taskType: 'shell', canStop: true, toolCallId })
-      void notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: SERVING } } })
-    }, 20)
+    setTimeout(
+      () => {
+        void notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: id, name: 'bun dev', taskType: 'shell', canStop: true, toolCallId })
+        if (options.quiet !== true)
+          void notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: SERVING } } })
+      },
+      options.quiet === true ? 1500 : 20,
+    )
     return
   }
   const folder = join(tmpdir(), 'althar-fake-agent')
   mkdirSync(folder, { recursive: true })
   const outputPath = join(folder, `${sessionId}-${id}.output`)
-  writeFileSync(outputPath, SERVING)
-  session.background.set(id, { toolCallId, outputPath })
+  writeFileSync(outputPath, options.quiet === true ? '' : SERVING)
+  let server: ChildProcess | undefined
+  if (options.quiet === true) {
+    // A server whose output says nothing: its own process holds the file open and listens on a port it chose.
+    const out = openSync(outputPath, 'a')
+    server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: ['ignore', out, out] })
+    closeSync(out)
+  }
+  session.background.set(id, { toolCallId, outputPath, ...(server === undefined ? {} : { process: server }) })
   await notify({
     sessionUpdate: 'async_task_spawned',
     asyncTaskId: id,
@@ -405,35 +519,70 @@ const playStall = async (
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
+ * `[coordinator:review]` starts a review of the pull request whose link the
+ * person gave, `[coordinator:keep-note]` keeps what the person said
+ * before it as one of the project's notes, and `[coordinator:automate]`
+ * proposes the release notes automation, every Friday at 16:00; a review's lead, `[lead:review]`, drafts asking for changes with a
+ * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
- * it after; `[review:pass]` and `[review:findings]`
+ * it after; asked to, `[lead:make-change]` makes its quick task a change
+ * first, reviewed by Codex and ending in a draft pull request, or with no
+ * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
+ * turn there; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
- * `[lead:settle-quietly]` settles without reporting.
+ * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
+ * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
+ * seconds over what it was asked before it plays its part.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
  * the worktree, uncommitted, and finishes with it, a test run and something
- * it couldn't try, and settling, a new run and nothing left untried;
+ * it couldn't try, and settling, a new run and nothing left untried.
+ * Finishing, it says what the task built, and says it again settling a
+ * review that changed the work (with `[lead:built-unsaid]`, only once told
+ * to); set aside, it leaves what it said standing;
  * `[review:evidence]` reads each evidence file its brief names, and says so
  * in its summary. Asked for its pull request's description
  * in the repository's template, it fills it in, ticking a box it shouldn't.
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it, `[lead:fix-more]` commits other work after it, and
- * `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
- * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
+ * says again what the task built, `[lead:fix-more]` commits other work after it,
+ * `[lead:fix-late]` leaves the full tests running and commits it once they
+ * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
+ * `[lead:push]` commits what it has and asks the person to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
- * of it; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
+ * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
+ * merge; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
  * works at it until it is interrupted or stopped, and `[lead:resolve-hold]`
- * does so once it has committed the merge. Asked to plan a
+ * does so once it has committed the merge. `[lead:resolve-forgets]` settles
+ * the merge but ends its turn without committing it, and commits it when
+ * told that is all that is left. `[lead:resolve-tests]` settles it, leaves
+ * the full tests running in the background and ends its turn with the merge
+ * uncommitted; when they end it is woken, as Claude Code wakes an agent, and
+ * commits the merge outside a turn; `[lead:resolve-tests-fix]` then commits
+ * a fix the tests found too, and `[lead:resolve-tests-hang]` has tests that
+ * never end. `[lead:resolve-tests-codex]` has Codex say the tests are running
+ * just after its turn, `[lead:resolve-tests-slow]` is slow to be woken by
+ * them (`[lead:resolve-tests-again]` leaves more running once woken, `[lead:resolve-tests-output]` too, after they print once more), and `[lead:resolve-tests-url]` has tests that print a local address. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
+/** What the fake says its task built when it finishes, and again once settling a review changed it. */
+export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
+export const BUILT_SETTLED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** The description it writes for the task's pull request, where the repository has no template. */
+export const DESCRIBED =
+  'Checkout gave up on the first failed payment call, so a dropped connection lost the order. It now retries once before it says the payment failed.'
+/** What it says the task built once it fixed a failed check, after its plan was done. */
+export const BUILT_FIXED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and its check passes again. Push the fix.'
+
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
 const commitIn = (cwd: string, file: string, message: string) => {
   appendFileSync(join(cwd, file), `${file.replace(/\.txt$/, '')}\n`)
@@ -461,9 +610,135 @@ const resolveIn = (cwd: string, ref: string) => {
   }
 }
 
-const playRole = async (session: SessionState, text: string, serve: (exits: boolean) => Promise<void>): Promise<string | undefined> => {
+/** Merges a branch into the worktree's and settles each conflict as `resolveIn` does, but leaves the merge uncommitted: staged, with the merge under way. */
+const settleIn = (cwd: string, ref: string) => {
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+  try {
+    git('merge', '-q', '--no-edit', '--no-commit', '--no-ff', ref)
+  } catch {
+    for (const file of git('diff', '--name-only', '--diff-filter=U')
+      .split('\n')
+      .filter((line) => line !== '')) {
+      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
+      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
+    }
+  }
+  git('add', '-A')
+}
+
+/** Commits the merge settled under way. */
+const commitMergeIn = (cwd: string) =>
+  execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '--no-edit'], { cwd, stdio: 'pipe' })
+
+/**
+ * Leaves the full tests running in the background, as Claude Code reports a
+ * command it sends there. After `lasts` milliseconds they end (never, with
+ * no `lasts`), and Claude Code wakes the agent as it does: outside any
+ * prompt it speaks and makes a call, `then` done in it, and speaks again.
+ * `reportsAfter` says it that many milliseconds after the turn, as Codex
+ * does; `wakesAfter` has the agent slow to speak once they end, and `prints`
+ * is what they print as they run.
+ */
+const leaveTests = async (
+  sessionId: string,
+  session: SessionState,
+  client: acp.AgentContext,
+  plan: {
+    readonly lasts?: number
+    readonly commits?: () => void
+    readonly reportsAfter?: number
+    readonly wakesAfter?: number
+    readonly prints?: string
+    readonly printsAfterEnd?: boolean
+    readonly again?: boolean
+  },
+) => {
+  const notify = (update: Record<string, unknown>) =>
+    client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
+  session.served += 1
+  const id = `tests-${session.served}`
+  const toolCallId = `tests-call-${session.served}`
+  await notify({
+    sessionUpdate: 'tool_call',
+    toolCallId,
+    title: 'bun run test',
+    kind: 'execute',
+    status: 'in_progress',
+    rawInput: { command: 'bun run test' },
+  })
+  const folder = join(tmpdir(), 'althar-fake-agent')
+  mkdirSync(folder, { recursive: true })
+  const outputPath = join(folder, `${sessionId}-${id}.output`)
+  writeFileSync(outputPath, `running the full tests\n${plan.prints ?? ''}`)
+  const report = async () => {
+    session.background.set(id, { toolCallId, outputPath })
+    await notify({
+      sessionUpdate: 'async_task_spawned',
+      asyncTaskId: id,
+      name: 'Run the full tests',
+      description: 'Run the full tests',
+      taskType: 'shell',
+      showInTranscript: false,
+      canStop: true,
+      toolCallId,
+    })
+    await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+    await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+    if (plan.lasts === undefined) return
+    const timer = setTimeout(() => {
+      // Stopped meanwhile, they have ended already.
+      if (!session.background.delete(id)) return
+      appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
+      void (async () => {
+        await notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'completed' })
+        // What it printed last, on its own call, as Codex streams it: not the agent speaking.
+        if (plan.printsAfterEnd === true)
+          await notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: 'all passed\n' } } })
+        if (plan.commits === undefined) return
+        if (plan.wakesAfter !== undefined) await pause(plan.wakesAfter)
+        // Woken, it leaves more tests running, outside any turn Althar sent.
+        if (plan.again === true) {
+          await leaveTests(sessionId, session, client, { lasts: 100 })
+          await pause(300)
+        }
+        const call = `${toolCallId}-woken`
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The tests finished. ' } })
+        await notify({
+          sessionUpdate: 'tool_call',
+          toolCallId: call,
+          title: 'git commit',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: { command: 'git commit' },
+        })
+        plan.commits()
+        await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
+      })()
+    }, plan.lasts)
+    timer.unref()
+  }
+  if (plan.reportsAfter === undefined) await report()
+  else setTimeout(() => void report(), plan.reportsAfter).unref()
+}
+
+const playRole = async (
+  session: SessionState,
+  text: string,
+  serve: (exits: boolean) => Promise<void>,
+  tests: (plan: {
+    readonly lasts?: number
+    readonly commits?: () => void
+    readonly reportsAfter?: number
+    readonly wakesAfter?: number
+    readonly prints?: string
+    readonly printsAfterEnd?: boolean
+    readonly again?: boolean
+  }) => Promise<void> = () => Promise.resolve(),
+): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
-  const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
+  const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ') || text.startsWith('More to review')
   if (session.tools === undefined || !asked) return undefined
   const client = new Client({ name: 'fake-agent', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
@@ -482,6 +757,7 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         return 'Stopped reviewing.'
       }
+      if (session.markers.has('[review:slowly]')) for (let waited = 0; !session.cancelled && waited < 3_000; waited += 10) await pause(10)
       if (session.markers.has('[review:always]'))
         return await call('report_review', {
           verdict: 'changes_requested',
@@ -503,16 +779,68 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
           summary: `The heading needs fixing.${looked}`,
           findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
         })
-      if (text.includes('[review:') || text.startsWith('Round '))
+      // A round of work after the plan is reviewed for what changed since, as a later round is.
+      if (text.includes('[review:') || text.startsWith('Round ') || text.startsWith('More to review'))
         return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
+    // A review's lead, `[lead:review]`, reads the change from where its brief says and drafts: changes asked for, a blocking
+    // comment on its first changed line and a minor one on its second; `[lead:review-approve]` approves it, with nothing to say.
+    if (available.has('draft_review') && (session.markers.has('[lead:review]') || session.markers.has('[lead:review-approve]'))) {
+      if (session.markers.has('[lead:review-approve]'))
+        return await call('draft_review', { verdict: 'approve', summary: 'It does what it says.', comments: [] })
+      const base = /`git diff ([0-9a-f]{7,64})`/.exec(text)?.[1] ?? 'HEAD~1'
+      const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', base, 'HEAD'], { cwd: session.cwd }).toString()
+      const lines: Array<{ path: string; line: number }> = []
+      let path = ''
+      for (const row of diff.split('\n')) {
+        if (row.startsWith('+++ b/')) path = row.slice('+++ b/'.length)
+        const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(row)?.[1]
+        if (hunk !== undefined && path !== '') lines.push({ path, line: Number(hunk) })
+      }
+      const [first, second] = lines
+      return await call('draft_review', {
+        verdict: 'changes',
+        summary: 'The fix is right, but it needs a test.',
+        comments: [
+          ...(first === undefined ? [] : [{ ...first, body: 'Nothing covers this.', severity: 'blocking' }]),
+          ...(second === undefined ? [] : [{ ...second, body: 'Could be named better.', severity: 'minor' }]),
+        ],
+      })
+    }
     if (available.has('finish_step')) {
+      // A lead that takes a while over what it was asked, `[lead:slowly]`: long enough to be seen at work.
+      if (text.includes('[lead:slowly]')) for (let waited = 0; !session.cancelled && waited < 6_000; waited += 10) await pause(10)
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
         await serve(text.includes('[lead:serve-exits]'))
       }
+      // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
+      // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),
+      // or keeps a sketch in its scratch folder, which git ignores (`[lead:sketch]`). Without `[lead:finish]`, its turn ends there.
+      const writes = text.includes('[lead:write]')
+      const commits = text.includes('[lead:commit]')
+      const sketches = text.includes('[lead:sketch]')
+      if (writes) appendFileSync(join(session.cwd, 'draft.md'), 'A first draft.\n')
+      if (commits) commitIn(session.cwd, 'change.txt', 'Change it')
+      if (sketches) {
+        mkdirSync(join(session.cwd, '.althar', 'scratch'), { recursive: true })
+        writeFileSync(join(session.cwd, '.althar', 'scratch', 'sketch.html'), '<p>A sketch.</p>\n')
+      }
+      if ((writes || commits || sketches) && !text.includes('[lead:finish]')) return 'Did it, without reporting.'
+      // Asked in these words to make its quick task a real change, it does, and carries on as its other markers say.
+      if (text.includes('[lead:make-change') && available.has('make_it_a_change')) {
+        const made = await call('make_it_a_change', {
+          title: 'Make the sketch real',
+          review: text.includes('[lead:make-change-alone]') ? null : { agent: 'codex' },
+          output: 'draft',
+        })
+        if (!text.includes('[lead:finish]')) return made
+      }
+      // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
+      const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
+      if (moved !== undefined && available.has('settle_task')) return await call('settle_task', { how: moved })
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
@@ -530,12 +858,19 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
               unverified: [],
             }
           : {}
-        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
+        // What the task built, said again where settling changed it; or, unsaid, once Althar asks for it.
+        const built = aside ? {} : { built: BUILT_SETTLED }
+        if (session.markers.has('[lead:built-unsaid]') && !aside) {
+          const answer = await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
+          if (!answer.startsWith('Settling changed the work')) return answer
+        }
+        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...built, ...shown })
       }
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
       const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
-      // Asked for its pull request's description in the repository's template, it writes under the first heading, and ticks a box it shouldn't.
+      // Asked for its pull request's description, it writes one for each repository named; in the repository's template, it writes
+      // under the first heading, and ticks a box it shouldn't.
       // Asked to show its work, it saves a screenshot in its worktree, uncommitted, and hands it with a test run and what it couldn't try.
       const evidence = (): Record<string, unknown> => {
         if (!session.markers.has('[lead:evidence]')) return {}
@@ -556,11 +891,24 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         }
       }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.', ...evidence() })
+        // A lead that says only what it did, `[lead:terse]`: nothing of what the task built.
+        const built = session.markers.has('[lead:terse]') ? {} : { built: BUILT }
+        const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...evidence() })
+        if (!answer.startsWith("Write the description of the task's pull request")) return answer
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
-        if (template === undefined) return answer
-        const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
-        return await call('finish_step', { summary: 'Did the task.', descriptions: [{ text }] })
+        const text =
+          template === undefined ? DESCRIBED : template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
+        const names = /, one for each of ([^.]+)\./.exec(answer)?.[1]?.split(', ')
+        const descriptions = names === undefined ? [{ text }] : names.map((repository) => ({ repository, text }))
+        return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions, ...evidence() })
+      }
+      // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.
+      // Started again for it, it reads its brief first: the failure is in what it is told, not always at the start.
+      if (session.markers.has('[lead:fix-push]') && /(^|\n\n)Checks failed on /.test(text)) {
+        commitIn(session.cwd, `fixed-${Date.now()}.txt`, 'Fix the failing check')
+        await call('push_to_pull_request', {})
+        await call('finish_step', { summary: 'Fixed the failing check, and pushed it.', built: BUILT_FIXED })
+        return 'Fixed the failing check, and pushed it.'
       }
       // Asked to resolve a conflict, as a fresh session is with its brief after a restart, it does that rather than finish.
       const resolving = /Bring the branch up to date: merge \S+ into it/.test(text)
@@ -568,7 +916,7 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
         if (!session.markers.has('[lead:scratch]')) return await finish()
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
-        const answer = await call('finish_step', { summary: 'Did the task.' })
+        const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT })
         if (!/These aren.t committed/.test(answer)) return answer
         rmSync(join(session.cwd, 'scratch.log'))
         return await finish()
@@ -595,19 +943,81 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         return 'Stopped before settling it.'
       }
       const more = session.markers.has('[lead:resolve-more]')
+      const fix = session.markers.has('[lead:resolve-fix]')
       const hold = session.markers.has('[lead:resolve-hold]')
-      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || hold)) {
+      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || fix || hold)) {
         resolveIn(session.cwd, merging)
         if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (fix) {
+          commitIn(session.cwd, 'tests.txt', 'Fix what the tests found')
+          return 'Merged it, settled the conflict, committed the merge, and fixed what the tests found.'
+        }
         if (!more) return 'Merged it, settled the conflict, and committed the merge.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        commitIn(session.cwd, 'more-still.txt', 'Tidy up some more')
         return 'Merged it, settled the conflict, committed the merge, and tidied up while here.'
+      }
+      // Settled, but not committed: forgotten at first, committed once told that is all that is left.
+      const commitIt = /resolved but not committed: commit/.test(text)
+      if (session.markers.has('[lead:resolve-forgets]')) {
+        if (merging !== undefined) {
+          settleIn(session.cwd, merging)
+          return 'Merged it and settled the conflict.'
+        }
+        if (commitIt) {
+          commitMergeIn(session.cwd)
+          return 'Committed the merge.'
+        }
+      }
+      // Settled, with the full tests left running: the merge is committed once they end, by the agent they wake.
+      if (session.markers.has('[lead:resolve-tests-hang]')) {
+        if (merging !== undefined) {
+          settleIn(session.cwd, merging)
+          await tests({})
+          return "Merged it and settled the conflict. I'll wait for the tests."
+        }
+        if (commitIt) return 'Still waiting for the tests.'
+      }
+      const woken =
+        session.markers.has('[lead:resolve-tests]') ||
+        session.markers.has('[lead:resolve-tests-fix]') ||
+        session.markers.has('[lead:resolve-tests-codex]') ||
+        session.markers.has('[lead:resolve-tests-slow]') ||
+        session.markers.has('[lead:resolve-tests-url]') ||
+        session.markers.has('[lead:resolve-tests-output]') ||
+        session.markers.has('[lead:resolve-tests-again]')
+      if (merging !== undefined && woken) {
+        settleIn(session.cwd, merging)
+        const fixes = session.markers.has('[lead:resolve-tests-fix]')
+        const cwd = session.cwd
+        await tests({
+          lasts: 400,
+          ...(session.markers.has('[lead:resolve-tests-codex]') ? { reportsAfter: 300 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-slow]') ? { lasts: 1500, wakesAfter: 1200 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-again]') ? { again: true } : {}),
+          ...(session.markers.has('[lead:resolve-tests-output]') ? { lasts: 1500, wakesAfter: 1200, printsAfterEnd: true } : {}),
+          ...(session.markers.has('[lead:resolve-tests-url]')
+            ? { lasts: 3000, prints: 'serving the browser tests at http://localhost:4173/\n' }
+            : {}),
+          commits: () => {
+            commitMergeIn(cwd)
+            if (fixes) commitIn(cwd, 'tests.txt', 'Fix what the tests found')
+          },
+        })
+        return "Merged it and settled the conflict. I'll wait for the notification that the tests are done."
       }
       // Fixed and committed, for the person to push.
       const fixMore = session.markers.has('[lead:fix-more]')
       const fixHold = session.markers.has('[lead:fix-hold]')
+      // Leaves the full tests running before it commits the fix, which it does once they end, woken outside a turn.
+      if (session.markers.has('[lead:fix-late]') && text.startsWith('Checks failed')) {
+        const cwd = session.cwd
+        await tests({ lasts: 400, commits: () => commitIn(cwd, 'fixed.txt', 'Fix the failing check') })
+        return "I'll wait for the tests, then commit the fix."
+      }
       if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
+        await call('finish_step', { summary: 'Fixed the failing check, and committed it.', built: BUILT_FIXED })
         if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         if (!fixMore) return 'Fixed the failing check, and committed it.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')
@@ -619,6 +1029,27 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         return 'Stopped working.'
       }
       return undefined
+    }
+    // Told a decision, it keeps it as one of the project's notes: what the person said before the marker, as they said it.
+    if (available.has('keep_note') && text.includes('[coordinator:keep-note]')) {
+      const said = (text.slice(0, text.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+      return await call('keep_note', { note: said.trim() })
+    }
+    // Asked for work on a schedule, it proposes an automation: the release notes, every Friday.
+    if (available.has('propose_automation') && text.includes('[coordinator:automate]')) {
+      return await call('propose_automation', {
+        name: 'Release notes',
+        prompt: 'Write release notes from what merged this week.',
+        when: { days: ['friday'], at: '16:00' },
+        lead: { agent: 'claude-code' },
+        ends_in: 'nothing',
+      })
+    }
+    // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
+    if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
+      const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
+      const link = /https?:\/\/\S+/.exec(asked)?.[0] ?? /#\d+/.exec(asked)?.[0] ?? ''
+      return await call('review_pull_request', { pull_request: link, lead: { agent: 'claude-code', reason: 'Careful.' } })
     }
     // Asked for something small, it starts it at once, passing its lead the markers it was given.
     if (available.has('start_task') && text.includes('[coordinator:start]')) {
@@ -642,11 +1073,15 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
           .split(/[.!?]/)[0]
           ?.trim() || 'Add a retry'
       const link = /https?:\/\/\S+/.exec(asked)?.[0]
-      const drafted = await call('draft_task', {
+      const draft = {
         title,
         description: `Retry the checkout call. ${markers.join(' ')}`,
         ...(link === undefined ? {} : { issue: link }),
-      })
+      }
+      // In a project of several repositories, asked which it changes, it names every one it is told of.
+      const first = await call('draft_task', draft)
+      const which = /as repositories: (.+)\.$/.exec(first)?.[1]
+      const drafted = which === undefined ? first : await call('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,
@@ -683,6 +1118,15 @@ const modeOption = (session: SessionState): acp.SessionConfigOption => ({
   type: 'select',
   currentValue: session.mode,
   options: MODES.map((value) => ({ value, name: value })),
+})
+
+const allowAllOption = (value: string): acp.SessionConfigOption => ({
+  id: 'allow_all',
+  name: 'Allow all',
+  category: 'permissions',
+  type: 'select',
+  currentValue: value,
+  options: ['on', 'off'].map((each) => ({ value: each, name: each })),
 })
 
 const modelOption = (session: SessionState, variants: boolean): acp.SessionConfigOption => ({
@@ -738,9 +1182,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
   const configOptions = (session: SessionState): Array<acp.SessionConfigOption> => {
     const levels = levelsOf(session.model)
     const effort = levels.length === 0 ? [] : [effortOption(session, levels)]
+    const allowAll = session.allowAll === undefined ? [] : [allowAllOption(session.allowAll)]
     return modes === 'config' || modes === 'stuck'
-      ? [modeOption(session), modelOption(session, variants), ...effort]
-      : [modelOption(session, variants), ...effort]
+      ? [modeOption(session), modelOption(session, variants), ...effort, ...allowAll]
+      : [modelOption(session, variants), ...effort, ...allowAll]
   }
   const sessions = new Map<string, SessionState>()
   const failedOnce = new Set<string>()
@@ -753,7 +1198,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
 
   return acp
     .agent({ name: 'fake-agent' })
-    .onRequest(acp.methods.agent.initialize, ({ params }) => {
+    .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+      await options.beforeInitialize?.()
       options.initialized?.(params.clientCapabilities ?? undefined)
       return options.bare === true
         ? { protocolVersion: acp.PROTOCOL_VERSION }
@@ -763,7 +1209,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
               loadSession: false,
               mcpCapabilities: { http: true, sse: false },
               sessionCapabilities: { close: {} },
-              promptCapabilities: { image: options.images !== false },
+              promptCapabilities: { image: options.images !== false, embeddedContext: options.embeddedContext === true },
             },
             authMethods: [],
             agentInfo: { name: 'fake-agent', version: '0.0.0' },
@@ -772,6 +1218,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     })
     .onRequest(acp.methods.agent.session.new, async ({ params }) => {
       if (options.slowStart !== undefined) await pause(options.slowStart)
+      await options.beforeNewSession?.()
       created += 1
       const sessionId = `fake-${created}`
       const session: SessionState = {
@@ -793,10 +1240,16 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        contextSize: CONTEXT_SIZE,
         coordinator: false,
         runs: 0,
         background: new Map(),
         served: 0,
+        prompts: 0,
+        unread: '',
+        allowAll: options.allowAll,
+        allowAllStuck: false,
+        leftForGood: false,
       }
       sessions.set(sessionId, session)
       return {
@@ -808,6 +1261,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.setMode, ({ params }) => {
       const session = sessionOf(params.sessionId)
       if (!MODES.includes(params.modeId)) throw acp.RequestError.invalidParams(params, `No mode ${params.modeId}`)
+      if (session.leftForGood) throw acp.RequestError.internalError({ details: 'It stays where it went' })
       session.mode = params.modeId
       return {}
     })
@@ -825,6 +1279,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (variants && value !== session.model) session.effort = levelsOf(value)[0] ?? ''
         session.model = value
       } else if (params.configId === 'effort' && levelsOf(session.model).includes(value)) session.effort = value
+      else if (params.configId === 'allow_all' && session.allowAllStuck)
+        throw acp.RequestError.internalError({ details: 'allow_all is locked on' })
+      else if (params.configId === 'allow_all' && options.allowAllStays === true && session.allowAll !== undefined) {
+        // Said yes to, and stays where it was.
+      } else if (params.configId === 'allow_all' && session.allowAll !== undefined && ['on', 'off'].includes(value))
+        session.allowAll = value
       else throw acp.RequestError.invalidParams(params, `No option ${params.configId}=${value}`)
       return { configOptions: configOptions(session) }
     })
@@ -841,7 +1301,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         const session = sessions.get(params.sessionId)
         const left = session?.background.get(params.asyncTaskId)
         if (session === undefined || left === undefined) return { stopped: false }
+        if (options.refusesStop?.() === true) throw new Error('The agent could not stop it.')
         session.background.delete(params.asyncTaskId)
+        left.process?.kill()
         options.stoppedBackground?.(params.asyncTaskId)
         await client.notify(acp.methods.client.session.update, {
           sessionId: params.sessionId,
@@ -862,7 +1324,15 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = false
-      const prompted = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
+      const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
+      session.prompts += 1
+      const blank = options.blank ?? 0
+      if (typeof blank === 'number' ? session.prompts <= blank : blank.includes(session.prompts)) {
+        session.unread = `${prompted}\n\n`
+        return { stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }
+      }
+      session.unread = ''
       // A prompt that ends `[context:85]` says its context is that full, in percent, before anything else; the rest plays as it
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
@@ -876,10 +1346,75 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         )
       const update = (value: acp.SessionUpdate) =>
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
+      const down = options.connection?.()
+      // The agent keeps what it was sent, though its service never answered it, as the real ones do: its role's markers too.
+      if (down !== undefined) for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
+      if (down === 'offline' || down === 'server') {
+        const said = down === 'offline' ? recorded.claude.offline : recorded.claude.serverError
+        await update(said.retrying)
+        return said.ended
+      }
+      if (down === 'waits') {
+        await update(recorded.codex.waiting)
+        while (!session.cancelled && options.connection?.() === 'waits') await pause(10)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+      }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
+      // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
+      // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
+      // nothing. Cancelled, it stops.
+      const slowly = /\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/.exec(text)
+      if (slowly?.[2] !== undefined) {
+        const waitOut = async (ms: number) => {
+          for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
+        }
+        await waitOut(Number(slowly[2]) * 1000)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+        if (slowly[1] === 'fails') throw new acp.RequestError(-32603, API_ERROR_MESSAGE)
+        if (slowly[1] === 'ends') return ended()
+        if (slowly[1] === 'thinks')
+          await update({
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: 'The checkout calls the payment provider once, and gives up on its first timeout.' },
+          })
+        if (slowly[1] === 'reads')
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'read-1',
+            title: 'Read checkout.ts',
+            kind: 'read',
+            status: 'in_progress',
+            locations: [{ path: 'checkout.ts' }],
+          })
+        if (slowly[1] !== 'answers') await waitOut(1500)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+        if (slowly[1] === 'reads') await update({ sessionUpdate: 'tool_call_update', toolCallId: 'read-1', status: 'completed' })
+        await say('Looked into it: the payment call has no retry, so one slow answer from the provider fails the whole checkout.')
+        return ended()
+      }
+      // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
+      // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
+      if (text === '/compact') {
+        if (session.markers.has('[lead:compact-fails]')) {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'compact',
+            title: 'Compact conversation',
+            kind: 'think',
+            status: 'in_progress',
+          })
+          await update({ sessionUpdate: 'tool_call_update', toolCallId: 'compact', status: 'failed' })
+          return ended()
+        }
+        await update({ sessionUpdate: 'usage_update', used: Math.round(session.contextSize / 10), size: session.contextSize })
+        await say('Compacted the conversation.')
+        return ended()
+      }
       if (filled !== null) {
         const size = filled[3] === undefined ? CONTEXT_SIZE : Number(filled[3])
+        session.contextSize = size
         const usage = { sessionUpdate: 'usage_update' as const, used: Math.round((size * Number(filled[2])) / 100), size }
         if (filled[1] === undefined) await update(usage)
         else setTimeout(() => void update(usage), 300)
@@ -889,18 +1424,25 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
       if (images.length > 0)
         await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
+      // What files it was sent, in order: each linked one opened by its path, as an agent reads one with its own tools.
+      const sent = params.prompt.flatMap((block) => (block.type === 'resource_link' || block.type === 'resource' ? [block] : []))
+      if (sent.length > 0) await say(`saw files: ${sent.map(sawFile).join('; ')}\n\n`)
 
-      /** Asks permission; cancelling the turn withdraws the request. */
+      // How many asks wait at once, as several do from `run each`: they share one abort, let go as the last is answered.
+      let asking = 0
+      /** Asks permission; cancelling the turn withdraws the request, and any asked with it. */
       const ask = async (toolCall: acp.ToolCallUpdate, offered: Array<acp.PermissionOption>) => {
-        session.abort = new AbortController()
+        const abort = (session.abort ??= new AbortController())
+        asking += 1
         const answer = await client
           .request<acp.RequestPermissionResponse, acp.RequestPermissionRequest>(
             acp.methods.client.session.requestPermission,
             { sessionId: params.sessionId, toolCall, options: offered },
-            { cancellationSignal: session.abort.signal },
+            { cancellationSignal: abort.signal },
           )
           .catch(() => undefined)
-        session.abort = undefined
+        asking -= 1
+        if (asking === 0) session.abort = undefined
         if (answer === undefined) return 'withdrawn'
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
@@ -1014,7 +1556,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const told = /The person answered[^\n]*\n([\s\S]*)$/.exec(text)
       if (told?.[1] !== undefined) {
         await say(`told=${told[1].trim().split('\n').join(' | ')}`)
-        const after = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+        const after = await playRole(
+          session,
+          text,
+          (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+          (plan) => leaveTests(params.sessionId, session, client, plan),
+        )
         if (after !== undefined) await say(after)
         return ended()
       }
@@ -1029,8 +1576,17 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
-      // With Althar's tools, a marker in the prompt says which role to play.
-      const played = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+      // With Althar's tools, a marker in the prompt says which role to play; but what the person names as a scenario is played
+      // as one, whatever its session's markers say, as a lead keeps its session after its step (ADR-034).
+      const named = (Object.values(scenarios) as ReadonlyArray<string>).includes(text)
+      const played = named
+        ? undefined
+        : await playRole(
+            session,
+            text,
+            (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+            (plan) => leaveTests(params.sessionId, session, client, plan),
+          )
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {
@@ -1038,13 +1594,19 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
 
-      const resumed = /not allowed by (the project's rules|the coordinator)/.test(text)
+      const resumed = /Althar's rules refused this|not allowed by the coordinator|The person declined/.test(text)
       if (resumed && !session.stubborn) {
         await say('carrying on without it')
         return ended()
       }
       if (text === scenarios.stubborn) session.stubborn = true
-      const scenario = resumed ? scenarios.stubborn : text.startsWith(scenarios.run) ? scenarios.commandChoices : text
+      const scenario = resumed
+        ? scenarios.stubborn
+        : text.startsWith(scenarios.runEach)
+          ? scenarios.runEach
+          : text.startsWith(scenarios.run)
+            ? scenarios.commandChoices
+            : text
 
       switch (scenario) {
         case scenarios.commandChoices:
@@ -1074,11 +1636,62 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
+        case scenarios.runEach: {
+          const calls = text
+            .slice(scenarios.runEach.length)
+            .split('; ')
+            .map((line) => {
+              session.runs += 1
+              return { toolCallId: `run-${session.runs}`, title: `Run ${line}`, kind: 'execute' as const, rawInput: { command: line } }
+            })
+          for (const toolCall of calls) await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await Promise.all(
+            calls.map(async (toolCall) => {
+              const answer = await ask(toolCall, commandOptions)
+              await update({
+                sessionUpdate: 'tool_call_update',
+                toolCallId: toolCall.toolCallId,
+                status: answer.startsWith('allow') ? 'completed' : 'failed',
+              })
+              return answer
+            }),
+          )
+          await say(`chosen=${chosen.join(',')}`)
+          return session.cancelled || chosen.some((answer) => answer === 'cancel' || answer === 'cancelled')
+            ? { stopReason: 'cancelled' }
+            : ended()
+        }
         case scenarios.question:
         case scenarios.questions: {
           await say(await askPerson(scenario === scenarios.questions ? 'two' : 'plain'))
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
+        case scenarios.choice: {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'interaction_28ffdbf7',
+            title: 'Which color do you prefer?',
+            status: 'pending',
+            rawInput: {},
+          })
+          const chosen = await ask({ toolCallId: 'interaction_28ffdbf7', status: 'pending', rawInput: {} }, [
+            { optionId: '1', name: 'red', kind: 'allow_once' },
+            { optionId: '2', name: 'blue', kind: 'allow_once' },
+          ])
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'interaction_28ffdbf7',
+            status: 'completed',
+            rawOutput: 'Response received',
+          })
+          await say(`chosen=${chosen}`)
+          return session.cancelled ? { stopReason: 'cancelled' } : ended()
+        }
+        case scenarios.limitInText:
+          await say(
+            "Error: You've hit your rate limit. Please wait for your limit to reset in 3 hours 20 minutes or switch to auto model to continue. Learn More (https://docs.github.com/copilot/concepts/rate-limits).",
+          )
+          return ended()
         case scenarios.quota:
           await update({
             sessionUpdate: 'session_info_update',
@@ -1116,12 +1729,26 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.leaveMode:
           session.mode = 'ask'
-          await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
+          session.leftForGood = options.leavesForGood === true
+          // As its kind says it: a mode option moved, or, with legacy modes alone, the session's current mode.
+          await update(
+            modes === 'legacy'
+              ? { sessionUpdate: 'current_mode_update', currentModeId: session.mode }
+              : { sessionUpdate: 'config_option_update', configOptions: configOptions(session) },
+          )
           await say('Left plan mode')
           return ended()
         case scenarios.background:
         case scenarios.backgroundCodex:
-          await leaveRunning(params.sessionId, session, client, scenario === scenarios.background ? 'claude' : 'codex')
+        case scenarios.backgroundQuiet:
+        case scenarios.backgroundCodexQuiet:
+          await leaveRunning(
+            params.sessionId,
+            session,
+            client,
+            scenario === scenarios.backgroundCodex || scenario === scenarios.backgroundCodexQuiet ? 'codex' : 'claude',
+            { quiet: scenario === scenarios.backgroundQuiet || scenario === scenarios.backgroundCodexQuiet },
+          )
           await say('serving')
           return ended()
         case scenarios.backgroundOwn: {
@@ -1186,6 +1813,18 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           return ended()
         }
+        case scenarios.fetch: {
+          const toolCall = {
+            toolCallId: 'call-fetch',
+            title: 'Fetch https://example.test/steal',
+            kind: 'fetch' as const,
+            rawInput: { url: 'https://example.test/steal' },
+          }
+          await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await ask(toolCall, permissionOptions(false))
+          await say(`chosen=${chosen}`)
+          return ended()
+        }
         case scenarios.bareAsk: {
           const described = {
             toolCallId: 'call-4',
@@ -1196,6 +1835,32 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'tool_call', ...described, status: 'pending' })
           const chosen = await ask({ toolCallId: 'call-4' }, permissionOptions(false))
           await say(`chosen=${chosen}`)
+          return ended()
+        }
+        case scenarios.planUsage: {
+          // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
+          const inSeconds = (seconds: number) => Math.floor(Date.now() / 1000) + seconds
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 10,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': {
+                status: 'allowed_warning',
+                rateLimitType: 'five_hour',
+                utilization: 0.82,
+                resetsAt: inSeconds(3 * 3600),
+              },
+            },
+          })
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 20,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: inSeconds(5 * 86_400) },
+            },
+          })
           return ended()
         }
         case scenarios.updates:
@@ -1223,7 +1888,15 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say('after')
           return ended()
         case scenarios.settings:
-          await say(`mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}`)
+          await say(
+            `mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}${session.allowAll === undefined ? '' : ` allow_all=${session.allowAll}`}`,
+          )
+          return ended()
+        case scenarios.allowAll:
+          session.allowAll = 'on'
+          session.allowAllStuck = options.allowAllSticks === true
+          await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
+          await say('Allowing all')
           return ended()
         case scenarios.handsBack: {
           // Codex: a command's output in chunks as it runs, then its exit.

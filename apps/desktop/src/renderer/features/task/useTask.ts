@@ -6,19 +6,22 @@ import {
   ApiError,
   type AgentStatus,
   type AlwaysScope,
+  type Attachment,
   type FieldAnswer,
   PAGE,
+  type ReviewVerdict,
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { keys, reads } from '../../data/reads'
+import { canPick } from '../../shared/agents'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
-import { type Outgoing, sentWith } from '../../shared/useImages'
+import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
@@ -39,6 +42,19 @@ const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 
 /** How long changes are gathered before they are read. */
 const GATHER = 25
+
+/** A pull request to close as the task is abandoned: its address, its name in the host's words, and whether its branch goes too. */
+export interface ToClose {
+  readonly url: string
+  readonly name: string
+  readonly deleteBranch: boolean
+}
+
+/** What closing them said, where it didn't all go through. */
+export const closeText = {
+  stillOpen: (name: string, why: string) => `${name} is still open. ${why}`,
+  branchKept: (name: string, why: string) => `${name} is closed, but its branch stays on its host. ${why}`,
+}
 
 export interface TaskModel {
   /** The thread's head and the items read so far, oldest first. */
@@ -78,26 +94,54 @@ export interface TaskModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
+  /** Has the agent on the task compact its context, after what it was told before. */
+  readonly compact: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Stops the task: every agent on it, until it is resumed. */
   readonly stop: () => Promise<void>
+  /** Skips the review of the work under way: ready once its lead is done. */
+  readonly skipReview: () => Promise<void>
   /** Carries the task on from the step it stopped on, with its last lead. */
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
-  /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
-  readonly abandon: () => Promise<boolean>
+  /** Resolve now: its conflict with its default branch asked of its lead, whatever kept it from being asked. */
+  readonly resolveConflictsNow: () => Promise<void>
+  /** Allows everything its agents ask, short of what its project never allows, or takes it back: what waits goes ahead. */
+  readonly setAllowEverything: (on: boolean) => Promise<void>
+  /**
+   * Settles it without its change; its worktree and branch stay. A merged one settles without the commits after its pull
+   * request, which stay on its branch, and stays merged. Then closes on their hosts the pull requests the person left on,
+   * each with its branch there where they said. Whether it was abandoned, and the pull requests it was to close that are
+   * still open, by address: what their host said is the model's error.
+   */
+  readonly abandon: (close?: ReadonlyArray<ToClose>) => Promise<{ readonly abandoned: boolean; readonly open: ReadonlyArray<string> }>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
+  /** Settles it as Done, where it finished and isn't a change: what it left running, such as a page, stops. */
+  readonly markDone: () => Promise<void>
+  /** Takes it out of Needs you as it is, kept for later, where it finished and isn't a change. */
+  readonly keep: () => Promise<void>
+  /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
+  readonly rename: (title: string) => Promise<void>
+  /**
+   * Attaches it to an open pull request it didn't open, by its link or
+   * number; `start` starts its branch from that one's head. What happened,
+   * or null where it didn't go through and the error says why.
+   */
+  readonly attach: (pullRequest: string, start: boolean) => Promise<Attachment | null>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   /** Answers a step that needs the person. */
-  readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<void>
+  /** Whether it went through: a stuck step whose answer didn't is answerable again. */
+  readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<boolean>
+  /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
+  readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   /** Marks the task's draft pull request ready for review: the one at `url`, in a task of several. */
@@ -131,12 +175,41 @@ export interface TaskModel {
   readonly mergeNote: (url: string) => Promise<string | null>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (url: string) => Promise<void>
+  /** Changes the review a review task's lead drafted: its verdict, summary, or which comments are kept and what they say. */
+  readonly changeReview: (
+    draftId: string,
+    edit: {
+      readonly verdict?: ReviewVerdict
+      readonly summary?: string
+      readonly comments?: ReadonlyArray<{ readonly id: string; readonly kept?: boolean; readonly body?: string }>
+    },
+  ) => Promise<void>
+  /** Posts that review, as it stands; or again, after it wasn't posted. */
+  readonly postReview: (draftId: string) => Promise<void>
+  /** An automation's review: lets its next reviews post themselves, then posts this one. */
+  readonly postReviewsFromNow: (draftId: string, automationId: string) => Promise<void>
+  readonly discardReview: (draftId: string) => Promise<void>
+  /** Files an issue the lead drafted, as the person says; changes it before; or throws it away. */
+  readonly fileIssueDraft: (draftId: string) => Promise<void>
+  readonly changeIssueDraft: (
+    draftId: string,
+    edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+  ) => Promise<void>
+  readonly discardIssueDraft: (draftId: string) => Promise<void>
+  /** Applies changes to the task's issue its lead or Althar proposed, or throws them away. */
+  readonly applyIssueChanges: (changesId: string) => Promise<void>
+  readonly discardIssueChanges: (changesId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
+  /** Stops a command another task's lead left running, which keeps a place this task waits for. */
+  readonly stopHolding: (threadId: string, id: string) => Promise<void>
+  /** Puts the task, waiting for a free agent, at the front of its project's line. */
+  readonly moveToFront: () => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
-  readonly runProject: () => Promise<void>
+  /** Runs one of the project's runnables in its worktree, its default without one. */
+  readonly runProject: (runnableId?: string | null) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   readonly dismissError: () => void
@@ -148,7 +221,7 @@ export const useTask = (threadId: string): TaskModel => {
   const thread = useQuery(read.thread(threadId))
   const snapshot = thread.data ?? null
   const status = useQuery(read.status()).data
-  const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
+  const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
   // What its commands have printed so far, while they run.
   const outputs = useOutputs(threadId, snapshot?.items ?? NO_ITEMS, snapshot?.session?.turnRunning ?? false)
@@ -177,6 +250,17 @@ export const useTask = (threadId: string): TaskModel => {
     if (taskId !== null && hasChange) client.refreshTask(taskId).catch(() => undefined)
   }, [client, taskId, hasChange])
 
+  // Its screen open, the task is seen: when, kept. It moves nothing: a task that finished waits for the person to settle it.
+  useEffect(() => {
+    if (taskId !== null) client.seeTask(taskId).catch(() => undefined)
+  }, [client, taskId])
+
+  // And as it becomes ready in front of the person, however quickly it got there: it has been seen finishing.
+  const phase = snapshot?.task.phase ?? null
+  useEffect(() => {
+    if (phase === 'ready' && taskId !== null && document.visibilityState === 'visible') client.seeTask(taskId).catch(() => undefined)
+  }, [client, taskId, phase])
+
   useEffect(() => () => clearTimeout(timer.current), [])
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
@@ -189,19 +273,36 @@ export const useTask = (threadId: string): TaskModel => {
     [setSnapshot],
   )
 
-  /** The thread's head again: its task, the agent working, the calls waiting. Its items stay as they are. */
+  /** What the window holds of the thread now, for a read that lands later. */
+  const held = useRef<ReadonlyArray<ThreadItem>>([])
+  held.current = snapshot?.items ?? []
+
+  const readItems = useCallback(
+    (ids: Iterable<string>) =>
+      Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
+    [client, threadId, newest, arrived, fail],
+  )
+
+  /**
+   * The thread's head again: its task, the agent working, the calls waiting.
+   * Its items stay as they are, but for those it may have moved on, read after
+   * it and landing before it: what still waits its turn, and what else is
+   * asked. The runtime has a message delivered before it says the turn on it
+   * runs, so the thread never shows the turn running while what it took still
+   * waits in the queue.
+   */
   const readHead = useCallback(
-    () =>
+    (also: Iterable<string> = []) =>
       newest(
         'head',
-        client.getThread(threadId, { limit: 0 }),
+        client.getThread(threadId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
         (head) =>
           cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
             current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
           ),
         fail,
       ),
-    [client, cache, threadId, newest, fail],
+    [client, cache, threadId, newest, readItems, fail],
   )
 
   const readFiles = useCallback(
@@ -223,13 +324,12 @@ export const useTask = (threadId: string): TaskModel => {
     timer.current = undefined
     const { head, items } = changed.current
     changed.current = { head: false, items: new Set() }
-    if (head) void readHead()
-    for (const itemId of items) void newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail)
-  }, [client, threadId, readHead, newest, arrived, fail])
+    void (head ? readHead(items) : readItems(items))
+  }, [readHead, readItems])
 
   useWatch((event) => {
-    // A command's output as far as it has come is useOutputs'.
-    if (event._tag === 'Output') return
+    // A command's output as far as it has come is useOutputs'; plan usage is the plan gauge's and the pickers'.
+    if (event._tag === 'Output' || event._tag === 'PlanUsage') return
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>
@@ -249,7 +349,9 @@ export const useTask = (threadId: string): TaskModel => {
           ? current
           : { ...current, task: { ...current.task, launches: event.launches.filter((launch) => launch.taskId === current.task.id) } },
       )
-    if (event.threadId !== threadId) return
+    // Its project's rules, which belong to no thread: by their switch it may allow everything now, or no longer. Its head again.
+    const ofItsRules = event._tag === 'Changed' && event.aggregateType === 'policy' && event.projectId === snapshot?.project.id
+    if (event.threadId !== threadId && !ofItsRules) return
     // How full the lead's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context')
       return void setSnapshot((current) =>
@@ -283,7 +385,12 @@ export const useTask = (threadId: string): TaskModel => {
     }
   }, [client, threadId, snapshot, setSnapshot, fail])
 
-  /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
+  /**
+   * Runs an action, says what went wrong if it did, and reads the thread's
+   * head again. It stays under way until that read, or one begun after it,
+   * is shown, so what it changed shows as it ends: a Push never shows its
+   * count from before it went.
+   */
   const act = useCallback(
     async (action: () => Promise<unknown>, which: Doing | null = null) => {
       setError(null)
@@ -294,12 +401,14 @@ export const useTask = (threadId: string): TaskModel => {
       } catch (failure) {
         fail(failure)
       } finally {
+        await readHead()
+        // A read begun since, as the runtime's word of the push arrives, replaces it: shown once that lands.
+        await newest.landed('head')
         setPending(false)
         setActing(null)
-        await readHead()
       }
     },
-    [readHead, fail],
+    [readHead, newest, fail],
   )
 
   /** Runs an action on the task, once it has been read. */
@@ -328,7 +437,8 @@ export const useTask = (threadId: string): TaskModel => {
         text,
         queued,
         interrupting: disposition === 'interrupt_and_continue',
-        ...(images === undefined ? {} : { pictures: images.pictures }),
+        ...(images?.dictated === true ? { dictated: true } : {}),
+        ...(images === undefined ? {} : { pictures: images.pictures, files: images.attached }),
       })
       id = next.id
       return { ...current, items: next.items }
@@ -407,25 +517,55 @@ export const useTask = (threadId: string): TaskModel => {
       }
     },
     interrupt: () => act(() => client.interrupt(threadId)),
+    compact: () => act(() => client.compact(threadId)),
     choose: (choice) =>
       act(async () => {
         const session = snapshot?.session
-        await (session == null ? client.startSession(startOf(threadId, choice)) : moveTo(client, threadId, runningOn(session), choice))
+        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has.
+        await (session == null || !session.held
+          ? client.startSession(startOf(threadId, choice))
+          : moveTo(client, threadId, runningOn(session), choice))
       }),
     handOver: (choice, body, images) =>
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),
+    skipReview: () => onTask((taskId) => client.skipReview(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
-    abandon: async () => {
+    resolveConflictsNow: () => onTask((taskId) => client.resolveConflictsNow(taskId)),
+    setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
+    abandon: async (close = []) => {
       let abandoned = false
+      const open: Array<string> = []
+      const said: Array<string> = []
+      // Merged, the runtime offers leaving out what came after in its place: the person abandons either way.
+      const merged = snapshot?.task.actions.includes('leaveOut') === true
       await onTask(async (taskId) => {
-        await client.abandonTask(taskId)
+        await (merged ? client.leaveOutCommits(taskId) : client.abandonTask(taskId))
         abandoned = true
+        // One at a time, each on its own: one its host refuses doesn't keep the next open.
+        for (const one of close) {
+          try {
+            const { branch } = await client.closePullRequest({ taskId, url: one.url, deleteBranch: one.deleteBranch })
+            if (branch !== null) said.push(closeText.branchKept(one.name, branch))
+          } catch (failure) {
+            open.push(one.url)
+            said.push(closeText.stillOpen(one.name, messageOf(failure)))
+          }
+        }
       })
-      return abandoned
+      if (said.length > 0) setError(said.join(' '))
+      return { abandoned, open }
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
+    rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
+    attach: async (pullRequest, start) => {
+      let done = null as Attachment | null
+      await onTask(async (taskId) => {
+        done = await client.attachPullRequest(taskId, pullRequest, start)
+      })
+      return done
+    },
     startPlan: (planId) => act(() => client.startPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
@@ -445,7 +585,17 @@ export const useTask = (threadId: string): TaskModel => {
       )
       return through
     },
-    answerStuck: (attentionId, answer) => act(() => client.answerStuck({ attentionId, answer })),
+    answerStuck: async (attentionId, answer) => {
+      let through = true
+      await act(() =>
+        client.answerStuck({ attentionId, answer }).catch((failure: unknown) => {
+          through = false
+          throw failure
+        }),
+      )
+      return through
+    },
+    handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(
         () => null,
@@ -458,6 +608,8 @@ export const useTask = (threadId: string): TaskModel => {
         for (const url of urls) await client.markReady(taskId, url)
       }),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
+    markDone: () => act(async () => (snapshot === null ? undefined : client.markTaskDone(snapshot.task.id)), doing.markDone),
+    keep: () => act(async () => (snapshot === null ? undefined : client.keepTaskForLater(snapshot.task.id)), doing.keep),
     mergeHere: () =>
       act(async () => {
         setConflict(null)
@@ -519,9 +671,29 @@ export const useTask = (threadId: string): TaskModel => {
       return note
     },
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
+    changeReview: (draftId, edit) => act(() => client.changeReviewDraft(draftId, edit)),
+    postReview: (draftId) => act(() => client.postReviewDraft(draftId)),
+    postReviewsFromNow: (draftId, automationId) =>
+      act(async () => {
+        await client.setAutomationPostsReviews(automationId, true)
+        await client.postReviewDraft(draftId)
+      }),
+    discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
+    fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
+    changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
+    discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
+    applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
+    discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
+    stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
+    moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
-    runProject: () => act(async () => (snapshot === null ? undefined : client.runProject(snapshot.project.id, snapshot.task.id, threadId))),
+    runProject: (runnableId = null) =>
+      act(async () =>
+        snapshot === null
+          ? undefined
+          : client.runProject(snapshot.project.id, snapshot.task.id, threadId, ...(runnableId === null ? [] : [runnableId])),
+      ),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     dismissError: () => setError(null),

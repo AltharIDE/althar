@@ -40,7 +40,7 @@ export function Model({ model, short, strong, className }: ModelProps) {
   const label = (
     <span className={cx(s.model, strong && s.strong, className)} title={short && model.via === undefined ? model.name : undefined}>
       {model.mark && <BrandMark brand={model.mark} />}
-      <span>{short ? model.short : model.name}</span>
+      <span className={s.name}>{short ? model.short : model.name}</span>
       {model.via !== undefined && <VisuallyHidden>, {model.via}</VisuallyHidden>}
     </span>
   )

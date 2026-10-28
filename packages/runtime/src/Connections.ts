@@ -27,12 +27,14 @@ import {
   startDeviceFlow,
   type TokenSet,
   type Tracker,
+  type Workspace,
 } from '@althar/connectors'
-import { type ActorId, Ids, newId } from '@althar/domain'
+import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { Cause, Clock, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Semaphore } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import type { Ledger } from '@althar/persistence-sqlite'
 
+import { contained } from './Failures'
 import { type CliTool, Connectors } from './Config'
 import { NotFound } from './errors'
 import { git, namedRemotes } from './git'
@@ -167,6 +169,8 @@ export interface ConnectionInfo {
   readonly account: { readonly id: string; readonly login: string; readonly name: string | null }
   readonly auth: 'device_flow' | 'pkce' | 'token'
   readonly state: 'ready' | 'reauth_required'
+  /** The workspace its sign-in reaches, where it reaches only one (ADR-059); null where it doesn't, or isn't known yet. */
+  readonly workspace: Workspace | null
 }
 
 export type SignInStart =
@@ -230,7 +234,17 @@ interface Row {
   readonly credentialRef: string
   readonly state: 'ready' | 'reauth_required' | 'removed'
   readonly revision: number
+  /** The workspace its sign-in reaches, by the key its links carry; null where it reaches more, or was made before Althar noted it. */
+  readonly workspaceKey: string | null
+  readonly workspaceName: string | null
 }
+
+/** A connection's workspace, as it is kept. */
+const workspaceOf = (row: Pick<Row, 'workspaceKey' | 'workspaceName'>): Workspace | null =>
+  row.workspaceKey === null ? null : { key: row.workspaceKey, name: row.workspaceName ?? row.workspaceKey }
+
+/** Who a connection signs in as, and where, where a sign-in reaches one workspace: mate in FNT. */
+const whoIn = (login: string, workspace: Workspace | null | undefined) => (workspace == null ? login : `${login} in ${workspace.name}`)
 
 /** A token is renewed this long before it expires. */
 const RENEW_BEFORE = Duration.minutes(5)
@@ -239,6 +253,8 @@ const RENEW_BEFORE = Duration.minutes(5)
 const CLI_AGAIN = Duration.seconds(1)
 /** A browser sign-in waits this long for the person. */
 const BROWSER_WAIT = Duration.minutes(10)
+/** How long a sign-in that ended is kept for its window to read. */
+const FLOW_KEPT = Duration.minutes(10)
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Secrets | Connectors
 
@@ -345,9 +361,14 @@ export class Connections extends Context.Service<
     placeOf(remote: string): Effect.Effect<RemotePlace | null, unknown>
     /** What a link points at, and the connection that reaches it; null for a link no connection reaches. */
     resolve(link: string): Effect.Effect<({ readonly connectionId: string; readonly ref: LinkRef } & Adapters) | null, unknown>
-    /** Every ready tracker: each connection's, for listing someone's issues. */
+    /** Every ready tracker: each connection's, with the workspace it reaches where it reaches one, for listing someone's issues. */
     readonly trackers: Effect.Effect<
-      ReadonlyArray<{ readonly connectionId: string; readonly product: Product; readonly tracker: Tracker }>,
+      ReadonlyArray<{
+        readonly connectionId: string
+        readonly product: Product
+        readonly workspace: Workspace | null
+        readonly tracker: Tracker
+      }>,
       unknown
     >
   }
@@ -367,7 +388,7 @@ export class Connections extends Context.Service<
       const rows = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         return yield* sql<Row>`
-          SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision
+          SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision, workspace_key, workspace_name
           FROM connections WHERE device_id = ${instance.deviceId} AND state <> 'removed' ORDER BY created_at`
       })
 
@@ -379,13 +400,14 @@ export class Connections extends Context.Service<
         account: { id: row.accountId, login: row.accountLogin, name: row.accountName },
         auth: row.auth,
         state: row.state === 'reauth_required' ? 'reauth_required' : 'ready',
+        workspace: workspaceOf(row),
       })
 
       const rowOf = (connectionId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<Row>`
-            SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision
+            SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision, workspace_key, workspace_name
             FROM connections WHERE id = ${connectionId}`
           return row === undefined || row.state === 'removed' ? yield* new NotFound({ kind: 'connection', id: connectionId }) : row
         })
@@ -417,10 +439,19 @@ export class Connections extends Context.Service<
           )
         })
 
-      /** The token the keychain keeps for a connection: none there, or none Althar can read, is no token. */
+      /**
+       * The token the keychain keeps for a connection: none there, or none Althar can read, is no token. A token sealed with a key
+       * the keychain no longer holds is one of those, not the keychain being away: nothing will open it, so the sign-in is lost.
+       */
       const stored = (row: Row) =>
         Effect.gen(function* () {
-          const raw = yield* secrets.get(row.credentialRef)
+          const raw = yield* secrets
+            .get(row.credentialRef)
+            .pipe(
+              Effect.mapError((error) =>
+                error.unreadable === true ? new NoToken({ message: 'The keychain can no longer open the token' }) : error,
+              ),
+            )
           if (raw === null) return yield* new NoToken({ message: 'No token in the keychain' })
           return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Stored))(raw).pipe(
             Effect.mapError(() => new NoToken({ message: 'The keychain’s token is unreadable' })),
@@ -563,7 +594,7 @@ export class Connections extends Context.Service<
               cli: tool,
               secret: { token, user: null, key: null },
               actorId: instance.systemId,
-              sameAs: { id: row.accountId, login: row.accountLogin },
+              sameAs: { id: row.accountId, login: row.accountLogin, workspace: workspaceOf(row) },
               still: row,
             }),
           )
@@ -779,7 +810,7 @@ export class Connections extends Context.Service<
         readonly cli: CliTool | null
         readonly secret: TokenSet | { readonly token: string; readonly user: string | null; readonly key: string | null }
         readonly actorId: ActorId
-        readonly sameAs?: { readonly id: string; readonly login: string }
+        readonly sameAs?: { readonly id: string; readonly login: string; readonly workspace: Workspace | null }
         readonly still?: Row
       }) =>
         Effect.gen(function* () {
@@ -798,13 +829,26 @@ export class Connections extends Context.Service<
           const account: Account = yield* (
             (made.host ?? made.tracker)?.account ?? Effect.fail(new NotConnected({ product: input.product, what: 'an account' }))
           )
-          if (input.sameAs !== undefined && account.id !== input.sameAs.id)
-            return yield* new OtherAccount({ product: input.product, login: account.login, expected: input.sameAs.login })
+          // Signed in again, it is the same account, and in the same workspace where the connection knows its own.
+          const elsewhere =
+            input.sameAs?.workspace != null && account.workspace !== undefined && account.workspace.key !== input.sameAs.workspace.key
+          if (input.sameAs !== undefined && (account.id !== input.sameAs.id || elsewhere))
+            return yield* new OtherAccount({
+              product: input.product,
+              login: whoIn(account.login, account.workspace),
+              expected: whoIn(input.sameAs.login, input.sameAs.workspace),
+            })
           const at = yield* timestamp
+          // The same account in the same workspace is renewed; in another, it is a connection beside it (ADR-059). One made
+          // before Althar kept workspaces is this one's, and learns it.
+          const workspace = account.workspace ?? null
           const [existing] = yield* sql<Row>`
-            SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision FROM connections
+            SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision, workspace_key, workspace_name FROM connections
             WHERE device_id = ${instance.deviceId} AND product = ${input.product} AND web_url = ${webUrl} AND account_id = ${account.id}
-              AND state <> 'removed'`
+              AND (workspace_key IS NULL OR workspace_key = ${workspace?.key ?? null}) AND state <> 'removed'
+            ORDER BY workspace_key IS NULL LIMIT 1`
+          const kept = workspace === null ? {} : { workspaceKey: workspace.key, workspaceName: workspace.name }
+          const where = workspace === null ? {} : { workspace: workspace.key }
           const id = existing?.id ?? (yield* newId(Ids.connection))
           const credentialRef = existing?.credentialRef ?? id
           const movedOnFrom = input.still === undefined ? Effect.succeed(false) : movedOn(input.still)
@@ -834,15 +878,17 @@ export class Connections extends Context.Service<
                       state: 'ready',
                       createdAt: at,
                       updatedAt: at,
+                      ...kept,
                     })}`
                     yield* fact({
                       aggregateType: 'connection',
                       aggregateId: id,
                       revision: 1,
                       type: 'connection.added',
-                      payload: { product: input.product, webUrl, account: account.login, auth: input.auth, ...from },
+                      payload: { product: input.product, webUrl, account: account.login, auth: input.auth, ...where, ...from },
                       actorId: input.actorId,
                     })
+                    yield* adopt({ id, product: input.product, webUrl, accountId: account.id, workspaceKey: workspace?.key ?? null })
                   } else {
                     const revision = yield* change('connections', id, {
                       state: 'ready',
@@ -852,13 +898,14 @@ export class Connections extends Context.Service<
                       accountName: account.name,
                       expiresAt,
                       updatedAt: at,
+                      ...kept,
                     })
                     yield* fact({
                       aggregateType: 'connection',
                       aggregateId: id,
                       revision,
                       type: 'connection.renewed',
-                      payload: { product: input.product, auth: input.auth, ...from },
+                      payload: { product: input.product, auth: input.auth, ...where, ...from },
                       actorId: input.actorId,
                     })
                   }
@@ -870,9 +917,16 @@ export class Connections extends Context.Service<
           return toInfo(yield* rowOf(id))
         })
 
-      /* Sign-ins under way, by flow id. They live as long as the runtime; one that ends is kept for its window to read. */
-      const flows = new Map<string, { state: SignInState; fiber?: Fiber.Fiber<unknown, unknown> }>()
+      /*
+       * Sign-ins under way, by flow id. One that ends is kept a while for its
+       * window to read, then let go: a window closed meanwhile never cancels it.
+       */
+      const flows = new Map<string, { state: SignInState; fiber?: Fiber.Fiber<unknown, unknown>; endedAt?: number }>()
       const flowScope = yield* Effect.scope
+      const sweepFlows = Effect.map(Clock.currentTimeMillis, (now) => {
+        for (const [flowId, flow] of flows)
+          if (flow.endedAt !== undefined && now - flow.endedAt > Duration.toMillis(FLOW_KEPT)) flows.delete(flowId)
+      })
 
       const ended = (flowId: string, error: unknown) => {
         const flow = flows.get(flowId)
@@ -898,9 +952,10 @@ export class Connections extends Context.Service<
           const fiber = yield* Effect.forkIn(
             provide(effect).pipe(
               Effect.onExit((exit) =>
-                Effect.sync(() => {
+                Effect.map(Clock.currentTimeMillis, (now) => {
                   const flow = flows.get(flowId)
                   if (flow === undefined) return
+                  flow.endedAt = now
                   if (exit._tag === 'Success') flow.state = { state: 'done', connectionId: exit.value.id }
                   else if (!Cause.hasInterruptsOnly(exit.cause)) ended(flowId, Option.getOrUndefined(Cause.findErrorOption(exit.cause)))
                 }),
@@ -908,6 +963,7 @@ export class Connections extends Context.Service<
             ),
             flowScope,
           )
+          yield* sweepFlows
           flows.set(flowId, { state: { state: 'waiting' }, fiber })
         })
 
@@ -949,7 +1005,7 @@ export class Connections extends Context.Service<
           : Effect.map(rowOf(connectionId), (row) => ({
               product: row.product,
               webUrl: row.webUrl,
-              sameAs: { id: row.accountId, login: row.accountLogin },
+              sameAs: { id: row.accountId, login: row.accountLogin, workspace: workspaceOf(row) },
             }))
 
       const startSignIn = (given: {
@@ -1327,9 +1383,16 @@ export class Connections extends Context.Service<
           const clis =
             tool === null
               ? []
-              : (yield* Effect.forEach([...instances.values()], ({ product, webUrl }) => cliSignIn(tool, product, webUrl), {
-                  concurrency: 2,
-                })).filter((cli) => cli !== null)
+              : (yield* Effect.forEach(
+                  [...instances.values()],
+                  // One instance whose CLI didn't answer offers no sign-in of its own; the others still do.
+                  ({ product, webUrl }) =>
+                    cliSignIn(tool, product, webUrl).pipe(
+                      Effect.catchTag('CliUnanswered', () => Effect.succeed(null)),
+                      contained('GetConnectGuide.cli', () => null),
+                    ),
+                  { concurrency: 2 },
+                )).filter((cli) => cli !== null)
           // Bitbucket Cloud and Jira Cloud take the Atlassian account's email with a token.
           const wantsEmail = connectors.products.some((info) => info.service === service && info.token.needs === 'email')
           const email = wantsEmail
@@ -1363,6 +1426,87 @@ export class Connections extends Context.Service<
           } satisfies Found
         })
 
+      /**
+       * Keeps the workspace a connection's sign-in reaches, where it said one
+       * Althar didn't keep: one made before Althar kept workspaces, or one
+       * renamed since. Nothing else of it changes.
+       */
+      const learnWorkspace = (row: Row, workspace: Workspace) =>
+        Effect.gen(function* () {
+          if (row.workspaceKey === workspace.key && row.workspaceName === workspace.name) return
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('connections', row.id, { workspaceKey: workspace.key, workspaceName: workspace.name })
+              yield* fact({
+                aggregateType: 'connection',
+                aggregateId: row.id,
+                revision,
+                type: 'connection.workspace_learned',
+                payload: { product: row.product, workspace: workspace.key },
+                actorId: instance.systemId,
+              })
+            }),
+          )
+        })
+
+      /**
+       * What a connection's predecessors held: the issues, drafts and reviews
+       * of one removed on this computer, of the same product on the same
+       * server, as the same account, or in the same workspace where both
+       * know theirs. Removed and made again, as signing in anew does, a
+       * connection is a new one, and they go on through it rather than
+       * through one that is gone. Another account or workspace takes none.
+       */
+      const adopt = (row: Pick<Row, 'id' | 'product' | 'webUrl' | 'accountId' | 'workspaceKey'>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const before = sql`
+            SELECT was.id FROM connections was
+            WHERE was.device_id = ${instance.deviceId} AND was.product = ${row.product} AND was.web_url = ${row.webUrl}
+              AND was.state = 'removed' AND was.id <> ${row.id}
+              AND CASE WHEN was.workspace_key IS NULL OR ${row.workspaceKey} IS NULL THEN was.account_id = ${row.accountId}
+                ELSE was.workspace_key = ${row.workspaceKey} END`
+          for (const [table, aggregateType] of [
+            ['external_links', 'external_link'],
+            ['issue_drafts', 'issue_draft'],
+            ['review_drafts', 'review_draft'],
+          ] as const) {
+            const held = yield* sql<{ id: string; projectId: ProjectId; was: string }>`
+              SELECT id, project_id, connection_id AS was FROM ${sql(table)} WHERE connection_id IN (${before})`
+            for (const one of held) {
+              const revision = yield* change(table, one.id, { connectionId: row.id })
+              yield* fact({
+                projectId: one.projectId,
+                aggregateType,
+                aggregateId: one.id,
+                revision,
+                type: `${aggregateType}.connection_moved`,
+                payload: { from: one.was, to: row.id },
+                actorId: instance.systemId,
+              })
+            }
+          }
+        })
+
+      /** Each connection takes what its predecessors left, as one made again by an Althar before this one didn't: once a launch. */
+      const adoptAll = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        for (const row of (yield* rows).toReversed()) yield* sql.withTransaction(adopt(row))
+      })
+
+      /** Each ready connection whose product reaches one workspace a sign-in, and that doesn't know its own yet, asks it: once a launch. */
+      const learnWorkspaces = Effect.gen(function* () {
+        for (const row of yield* rows) {
+          if (row.state !== 'ready' || row.workspaceKey !== null || infoOf(row.product)?.workspaces !== true) continue
+          const account = adaptersOf(row).tracker?.account
+          if (account === undefined) continue
+          yield* Effect.flatMap(account, (said) => (said.workspace === undefined ? Effect.void : learnWorkspace(row, said.workspace))).pipe(
+            Effect.catchCause((cause) => Effect.logDebug('A connection didn’t say its workspace', cause)),
+          )
+        }
+      })
+
       const check = (connectionId: string) =>
         Effect.gen(function* () {
           const row = yield* rowOf(connectionId)
@@ -1375,6 +1519,8 @@ export class Connections extends Context.Service<
             .flatMap((place) => place.repositories.map((path) => path.split('/')))
           const unique = [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
           const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, unique)
+          if (report.account?.workspace !== undefined && report.account.id === row.accountId)
+            yield* learnWorkspace(row, report.account.workspace)
           return {
             connectionId,
             lines: report.lines,
@@ -1450,7 +1596,7 @@ export class Connections extends Context.Service<
               key: input.key?.trim() ?? (was?.kind === 'token' ? (was.key ?? null) : null),
             },
             actorId: input.actorId,
-            sameAs: { id: row.accountId, login: row.accountLogin },
+            sameAs: { id: row.accountId, login: row.accountLogin, workspace: workspaceOf(row) },
           })
         })
 
@@ -1525,14 +1671,27 @@ export class Connections extends Context.Service<
         Effect.gen(function* () {
           const ref = parseLink(link, yield* knownHosts)
           if (ref === null) return null
-          const row = (yield* rows).find(
+          const there = (yield* rows).filter(
             (candidate) =>
               candidate.state === 'ready' &&
               candidate.product === ref.product &&
               new URL(candidate.webUrl).hostname.toLowerCase() === ref.host,
           )
+          // A link that names its workspace goes to the connection in it, else to one that doesn't know its own yet, never to
+          // another workspace's, where the same key is another issue; one that names none, to any.
+          const workspace = ref.kind === 'issue' ? ref.workspace : undefined
+          const row =
+            workspace === undefined
+              ? there[0]
+              : (there.find((candidate) => candidate.workspaceKey?.toLowerCase() === workspace) ??
+                there.find((candidate) => candidate.workspaceKey === null))
           return row === undefined ? null : { connectionId: row.id, ref, ...adaptersOf(row) }
         })
+
+      yield* provide(adoptAll).pipe(
+        Effect.catchCause((cause) => Effect.logWarning('Connections made again didn’t take over what they held', cause)),
+      )
+      yield* Effect.forkIn(provide(learnWorkspaces), scope)
 
       return Connections.of({
         list: provide(Effect.map(rows, (all) => all.map(toInfo))),
@@ -1576,7 +1735,7 @@ export class Connections extends Context.Service<
           Effect.map(rows, (all) =>
             all.flatMap((row) => {
               const tracker = row.state === 'ready' ? adaptersOf(row).tracker : undefined
-              return tracker === undefined ? [] : [{ connectionId: row.id, product: row.product, tracker }]
+              return tracker === undefined ? [] : [{ connectionId: row.id, product: row.product, workspace: workspaceOf(row), tracker }]
             }),
           ),
         ),

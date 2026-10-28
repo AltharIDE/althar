@@ -133,7 +133,7 @@ button.module:active {
 }
 .circleOn,
 .circleOn:hover {
-  background: var(--t-1);
+  background: var(--ink-fill);
   color: var(--on-ink);
 }
 .toggleWords {
@@ -330,7 +330,7 @@ button.toggleWords {
   place-items: center;
   height: 118px;
   border-radius: 11px;
-  background: linear-gradient(165deg, var(--n-4), var(--n-5));
+  background: var(--desk, linear-gradient(165deg, var(--n-4), var(--n-5)));
   box-shadow: inset 0 0 0 1px var(--line-2);
 }
 .dock {
@@ -452,17 +452,30 @@ button.toggleWords {
   gap: 10px;
   padding: 14px 16px;
   border-radius: 15px;
-  background: var(--frost-raised);
+  /* on the frosted panel; a page that sets one on itself names its own (--control-sheet) */
+  background: var(--control-sheet, var(--frost-raised));
   box-shadow: var(--frost-ring);
 }
+/* quiet words and links under the modules; a long foot, as with an update ready, wraps rather than crowds */
 .foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 14px 8px 2px;
   font-size: 11.5px;
   color: var(--t-3);
+}
+
+/* the version and what goes with it, stacked: the foot's button keeps the row's end at any width, and it is these words that give way (a line wraps) in a panel too narrow for both */
+.footStart {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
 }
 
 /* a setting at its smallest: a quiet link at the foot's end */
@@ -482,6 +495,10 @@ button.toggleWords {
   transition:
     background var(--fast) var(--ease),
     color var(--fast) var(--ease);
+}
+/* Links side by side keep together at the end. */
+.link + .link {
+  margin-left: 2px;
 }
 .link:hover {
   background: var(--sunk);

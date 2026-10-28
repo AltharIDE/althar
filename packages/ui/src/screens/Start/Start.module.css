@@ -100,13 +100,13 @@
 }
 /* Where an agent landed, the light gathers on the ring under it. */
 .gather {
-  fill: var(--paper);
-  opacity: 0.55;
+  fill: var(--on-dark); /* light itself, white in either theme */
+  opacity: var(--gather, 0.55); /* on dark a hint of it, or it is a grey halo over the names (dark.css) */
   filter: blur(6px);
   animation: rise 600ms ease both;
 }
 .gatherOff {
-  opacity: 0.2;
+  opacity: var(--gather-off, 0.2);
 }
 .agent {
   position: absolute;
@@ -280,6 +280,8 @@
   padding: 18px 18px 18px 0;
 }
 .sheet {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow-y: auto;
   padding: 48px clamp(24px, 3.4vw, 52px) 40px;
@@ -289,6 +291,10 @@
     0 0 0 1px var(--line),
     var(--lift-dialog);
   transition: opacity 420ms var(--ease);
+}
+/* What it holds keeps its height, and the sheet scrolls. */
+.sheet > * {
+  flex-shrink: 0;
 }
 /* While a folder is held over the window, the sheet steps back for it. */
 .over .sheet {
@@ -316,6 +322,106 @@
 }
 .repos {
   margin-top: 34px;
+}
+/*
+ * The agents not on this computer, under those that are and quieter: a
+ * smaller heading, ruled off, and a tile each, side by side where there is
+ * room, so many more fit in a few lines. A tile's mark and name are a step
+ * down from a row's; its one way in sits at its end.
+ */
+.away {
+  container-type: inline-size;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.awayLabel {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.spares {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.spare {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 38px;
+  padding: 4px 0;
+}
+.spareMark {
+  display: flex;
+  justify-content: center;
+  color: var(--t-3);
+}
+.spareName {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.spareWay {
+  display: flex;
+  justify-content: flex-end;
+}
+.spareBusy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.spareHelp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.spareHelp:hover {
+  color: var(--t-1);
+}
+.spareFailed {
+  grid-column: 2 / -1;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+/* Where the sheet is narrow, one tile to a line. */
+@container (max-width: 420px) {
+  .spares {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* A quiet line at the sheet's foot, ruled off from what was found, at the bottom where there is room. */
+.foot {
+  flex: none;
+  margin-top: auto;
+  padding-top: 30px;
+}
+.footLine {
+  padding-top: 14px;
+  box-shadow: inset 0 1px 0 var(--line);
 }
 .quiet {
   margin: 0;
@@ -353,8 +459,8 @@
 }
 .repo:focus-visible,
 .repo:has(:focus-visible) {
-  outline: 2px solid var(--live);
-  outline-offset: -2px;
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
 }
 .tick:focus-visible {
   outline: none;
@@ -369,14 +475,15 @@
   width: 16px;
   height: 16px;
   border-radius: 5px;
-  box-shadow: inset 0 0 0 1.5px var(--line-2);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
   color: var(--on-ink);
   transition:
     background var(--fast) var(--ease),
     box-shadow var(--fast) var(--ease);
 }
 .tick[data-state='checked'] {
-  background: var(--t-1);
+  background: var(--ink-fill);
   box-shadow: none;
 }
 .tickAdd {

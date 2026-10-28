@@ -8,8 +8,10 @@ import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { kitInk } from '../../shared/inks'
 import { draftActions, draftsOf, inkOf } from '../newProject/draft'
-import { arrived, closed, tabsStoreOf } from './store'
+import { FIRST_SECTION, type Section } from '../settings/sections'
+import { arrived, closed, moved, settingsClosed, settingsOn, tabsStoreOf } from './store'
 import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './tabs'
+import { useWarmHome, useWarmTabs } from './warm'
 
 /*
  * The window's tabs: one for each project the person keeps open, with where
@@ -19,7 +21,9 @@ import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './
  * projects are read: again whenever a project, a task, a run, a session or a
  * call changes. A project being made has a tab of its own, at the end, as a
  * browser's new tab; made, it becomes the project's tab, which has the
- * project's id already.
+ * project's id already. Althar's settings have a tab too, beside the home's,
+ * from going into them until it is closed, which goes back to the section
+ * it was on.
  */
 
 export const text = {
@@ -31,23 +35,33 @@ export interface TabsModel {
   readonly tabs: ReadonlyArray<ProjectTab>
   /** The projects without a tab. */
   readonly others: ReadonlyArray<ProjectTab>
-  /** The project whose tab has the window; null for the home. */
+  /** The project whose tab has the window; null for the home, and for the settings. */
   readonly current: string | null
   /** What waits on the person across every project. */
   readonly yours: number
   /** There is no project at all yet, as read: the first screen has the whole window. */
   readonly none: boolean
+  /** Althar's settings: whether they have a tab, and whether it has the window. */
+  readonly settings: { readonly open: boolean; readonly current: boolean }
   readonly select: (id: string | null) => void
+  /** A tab is pointed at, a project's or (null) the home's: what it shows is read ahead, where the window doesn't hold it as it is. */
+  readonly preview: (id: string | null) => void
   readonly close: (id: string) => void
   readonly open: (id: string) => void
+  /** A project's tab moves before another's, or to the end: the order is kept. */
+  readonly reorder: (id: string, beforeId: string | null) => void
   /** Starts a new project in a tab of its own, or goes to the one being made; folders dropped are added to it. */
   readonly newProject: (files?: ReadonlyArray<File>) => void
-  /** The new project was made: its tab is the project's own, open on its conversation. */
+  /** The new project was made: its tab is the project's own, open on Home, as a project with no kept view is. */
   readonly made: (projectId: string) => void
   /** The new project's tab closes, and nothing is made. */
   readonly closeNew: () => void
   /** A task was read: its project's tab has the window while it does. */
   readonly visit: (threadId: string, projectId: string) => void
+  /** Goes into the settings: at a section, or the one their tab was last on. */
+  readonly openSettings: (section?: Section | null) => void
+  /** The settings' tab closes; where it had the window, the tab after it has it. */
+  readonly closeSettings: () => void
 }
 
 export const useTabs = (): TabsModel => {
@@ -63,7 +77,12 @@ export const useTabs = (): TabsModel => {
   const projects = useQuery(reads(client).projects()).data?.projects ?? null
 
   const where = whereOf(pathname)
-  const known = where.kind === 'home' || where.kind === 'new' ? null : where.kind === 'project' ? where.projectId : threads[where.threadId]
+  const known =
+    where.kind === 'home' || where.kind === 'new' || where.kind === 'settings'
+      ? null
+      : where.kind === 'project'
+        ? where.projectId
+        : threads[where.threadId]
   // A task whose project isn't read yet keeps the tab that had the window.
   const [shown, setShown] = useState<string | null>(null)
   if (known !== undefined && known !== shown) setShown(known)
@@ -81,22 +100,18 @@ export const useTabs = (): TabsModel => {
   // Going into a project, or one of its tasks, gives it a tab and keeps where in it the window is.
   const seeded = kept !== null
   const projectId = known ?? undefined
-  // Its rules or its repositories, as the place to come back to; a task's place is its thread.
-  const page = where.kind === 'project' ? where.place.kind : 'project'
+  // A task's place is its thread; the project's own, the project, which opens on the view it was last on.
   const threadId = where.kind === 'thread' ? where.threadId : undefined
   useEffect(() => {
     if (projectId === undefined || !seeded) return
-    store.change(
-      arrived(
-        projectId,
-        threadId !== undefined
-          ? { kind: 'thread', threadId }
-          : page === 'rules' || page === 'repositories'
-            ? { kind: page }
-            : { kind: 'project' },
-      ),
-    )
-  }, [store, projectId, page, threadId, seeded])
+    store.change(arrived(projectId, threadId !== undefined ? { kind: 'thread', threadId } : { kind: 'project' }))
+  }, [store, projectId, threadId, seeded])
+
+  // Going into the settings gives them a tab, and keeps the section they are on.
+  const section = where.kind === 'settings' ? where.section : undefined
+  useEffect(() => {
+    if (section !== undefined && seeded) store.change(settingsOn(section))
+  }, [store, section, seeded])
 
   const go = useCallback(
     (id: string | null, places: Readonly<Record<string, Place>>): Promise<void> => {
@@ -105,10 +120,6 @@ export const useTabs = (): TabsModel => {
       switch (at.kind) {
         case 'project':
           return navigate({ to: '/projects/$projectId', params: { projectId: id } })
-        case 'rules':
-          return navigate({ to: '/projects/$projectId/rules', params: { projectId: id } })
-        case 'repositories':
-          return navigate({ to: '/projects/$projectId/repositories', params: { projectId: id } })
         case 'thread':
           return navigate({ to: '/threads/$threadId', params: { threadId: at.threadId } })
       }
@@ -124,6 +135,10 @@ export const useTabs = (): TabsModel => {
     return project === undefined ? [] : [tabOf(project)]
   })
   const places = kept?.places ?? {}
+  // Every open tab's place stays in the window's cache, read ahead, so going to one never waits on the runtime.
+  const preview = useWarmTabs(open, places)
+  // And the home's, once there are projects: going back to it never waits either.
+  const previewHome = useWarmHome(projects !== null && projects.length > 0)
   // The project being made, at the end; once made, its own tab has its id, and stands in its place.
   const making: ProjectTab | null =
     draft === null || draft.made || open.includes(draft.id)
@@ -135,8 +150,10 @@ export const useTabs = (): TabsModel => {
           ink: kitInk(inkOf(draft, projects ?? [])),
           running: false,
           yours: 0,
+          fixed: true,
         }
   const onNew = where.kind === 'new'
+  const onSettings = where.kind === 'settings'
 
   /** Ends the draft once the window has left its tab, so its page stays until the next one shows. */
   const leaving = (id: string, going: Promise<void>) =>
@@ -156,15 +173,21 @@ export const useTabs = (): TabsModel => {
     current: onNew ? (draft?.id ?? null) : current,
     yours: (projects ?? []).reduce((sum, project) => sum + yoursIn(project), 0),
     none: projects !== null && projects.length === 0,
+    settings: { open: onSettings || kept?.settings !== undefined, current: onSettings },
     select: (id) => {
       if (id !== null && id === making?.id) return void navigate({ to: '/new' })
       void go(id, places)
     },
+    preview: (id) => {
+      if (id === null) return previewHome()
+      if (id !== making?.id) preview(id)
+    },
     close: (id) => {
       if (id === making?.id) return closeNew()
       store.change(closed(id))
-      if (id === current && !onNew) void go(afterClosing(open, id), places)
+      if (id === current && !onNew && !onSettings) void go(afterClosing(open, id), places)
     },
+    reorder: (id, beforeId) => store.change(moved(id, beforeId)),
     open: (id) => {
       store.change((was) => ({ ...was, open: was.open.includes(id) ? was.open : [...was.open, id] }))
       void go(id, places)
@@ -177,9 +200,18 @@ export const useTabs = (): TabsModel => {
     made: (projectId) => {
       store.change(arrived(projectId, { kind: 'project' }))
       drafts.change(projectId, (now) => ({ ...now, made: true }))
-      leaving(projectId, navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } }))
+      leaving(projectId, navigate({ to: '/projects/$projectId', params: { projectId } }))
     },
     closeNew,
     visit: store.visit,
+    openSettings: (at) => {
+      const next = at ?? section ?? kept?.settings ?? FIRST_SECTION
+      void navigate({ to: '/settings/$section', params: { section: next } })
+    },
+    closeSettings: () => {
+      store.change(settingsClosed)
+      // The tab after the settings' has the window: the first project's, else the home's.
+      if (onSettings) void go(open[0] ?? null, places)
+    },
   }
 }

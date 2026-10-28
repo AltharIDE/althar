@@ -99,6 +99,18 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('refuses to review a pull request it didn’t open, without asking Bitbucket', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([])
+      assert.isFalse(host.capabilities.reviews)
+      const read = yield* Effect.flip(host.changeToReview(ace, 552))
+      assert.deepInclude(read, { reason: 'rejected', message: 'Althar can’t review a pull request on this host yet.' })
+      const posted = yield* Effect.flip(host.postReview(ace, 552, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      assert.strictEqual(posted.reason, 'rejected')
+      assert.lengthOf(sent, 0)
+    }),
+  )
+
   it.effect('reads a repository: its main branch, whether the account may push, and how it merges', () =>
     Effect.gen(function* () {
       const repository = {
@@ -202,6 +214,7 @@ describe('Bitbucket Cloud as a code host', () => {
         deletions: null,
         changedFiles: null,
         updatedAt: '2025-08-22T07:42:42.339Z',
+        headRepository: null,
       })
       assert.strictEqual(
         decodeURIComponent(new URL(sent[0]?.url ?? '').searchParams.get('q') ?? ''),
@@ -209,6 +222,22 @@ describe('Bitbucket Cloud as a code host', () => {
       )
       assert.isNull(yield* host.findChange(ace, 'say "hi"\\'))
       assert.include(decodeURIComponent(sent[1]?.url ?? ''), 'source.branch.name = "say \\"hi\\"\\\\"')
+    }),
+  )
+
+  it.effect('says the fork a pull request’s branch is on, and one that is gone', () =>
+    Effect.gen(function* () {
+      const source = pull().source
+      const { host } = cloud([
+        [
+          'GET',
+          /source\.branch\.name%20%3D%20%22forked%22/,
+          { json: { values: [pull({ source: { ...source, repository: { type: 'repository', full_name: 'dana/ace' } } })] } },
+        ],
+        ['GET', /source\.branch\.name%20%3D%20%22gone%22/, { json: { values: [pull({ source: { ...source, repository: null } })] } }],
+      ])
+      assert.deepStrictEqual((yield* host.findChange(ace, 'forked'))?.headRepository, ['dana', 'ace'])
+      assert.deepStrictEqual((yield* host.findChange(ace, 'gone'))?.headRepository, [])
     }),
   )
 
@@ -397,6 +426,33 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('declines a pull request to close it, and deletes its branch once declined', () =>
+    Effect.gen(function* () {
+      let state = 'OPEN'
+      const { host, sent } = cloud([
+        ['GET', PR, () => ({ json: pull({ state }) })],
+        [
+          'POST',
+          `${PR}/decline`,
+          () => {
+            state = 'DECLINED'
+            return { json: pull({ state }) }
+          },
+        ],
+        ['DELETE', `${ACE}/refs/branches/ONECLOUD-13657/add-on-settings`, { status: 204 }],
+      ])
+      const seen = yield* host.change(ace, 552)
+      assert.deepInclude(yield* Effect.flip(host.deleteBranch(ace, seen)), { reason: 'rejected' })
+      const closed = yield* host.closeChange(ace, seen)
+      assert.strictEqual(closed.state, 'closed')
+      yield* host.deleteBranch(ace, closed)
+      assert.deepStrictEqual(
+        sent.filter((one) => one.method !== 'GET').map((one) => `${one.method} ${one.url}`),
+        [`POST ${PR}/decline`, `DELETE ${ACE}/refs/branches/ONECLOUD-13657/add-on-settings`],
+      )
+    }),
+  )
+
   it.effect('merges the head it saw, in the first way the target branch allows', () =>
     Effect.gen(function* () {
       let merged = false
@@ -548,7 +604,7 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
-  it.effect('reads the end of a failed Pipelines step’s log, and nothing for other checks', () =>
+  it.effect('reads the end of a failed Pipelines step’s log from its storage, says why where it can’t, and nothing for other checks', () =>
     Effect.gen(function* () {
       const long = Array.from({ length: 300 }, (_, n) => `line ${n}`).join('\n')
       const step = (uuid: string, result: string | null) => ({
@@ -560,7 +616,20 @@ describe('Bitbucket Cloud as a code host', () => {
       const run = `${ACE}/pipelines`
       const { host, sent } = cloud([
         ['GET', `${run}/3025/steps?pagelen=100`, { json: { values: [step('{a}', 'SUCCESSFUL'), step('{b}', 'FAILED')], pagelen: 2 } }],
-        ['GET', `${run}/3025/steps/%7Bb%7D/log`, { text: long }],
+        // As Bitbucket answers a finished step's log: a redirect to storage, signed in its URL, which refuses a token beside it.
+        [
+          'GET',
+          `${run}/3025/steps/%7Bb%7D/log`,
+          { status: 307, headers: { location: 'https://logs.s3.amazonaws.com/b?X-Amz-Signature=x' } },
+        ],
+        [
+          'GET',
+          'https://logs.s3.amazonaws.com/b?X-Amz-Signature=x',
+          (request) =>
+            request.headers.authorization === undefined
+              ? { text: long }
+              : { status: 400, text: '<Error><Code>InvalidArgument</Code><Message>Only one auth mechanism allowed</Message></Error>' },
+        ],
         ['GET', `${run}/3024/steps?pagelen=100`, { json: { values: [step('{c}', 'SUCCESSFUL'), { uuid: '{d}', state: null }] } }],
         ['GET', `${run}/3023/steps?pagelen=100`, { json: { values: [step('{e}', 'ERROR')] } }],
         [
@@ -575,8 +644,11 @@ describe('Bitbucket Cloud as a code host', () => {
       assert.strictEqual(log?.split('\n').length, 150)
       assert.isTrue(log?.endsWith('line 299'))
       assert.strictEqual(sent[1]?.headers.accept, '*/*')
+      assert.isUndefined(sent[2]?.headers.authorization)
       assert.isNull(yield* host.checkLog(ace, { ...check, id: 'pipeline:3024' }))
-      assert.isNull(yield* host.checkLog(ace, { ...check, id: 'pipeline:3023' }))
+      const gone = yield* Effect.flip(host.checkLog(ace, { ...check, id: 'pipeline:3023' }))
+      assert.strictEqual(gone.reason, 'not_found')
+      assert.strictEqual(gone.message, 'Not Found: Log in step {e} does not exist.')
       assert.isNull(yield* host.checkLog(ace, { ...check, id: 'status:jenkins' }))
       assert.strictEqual((yield* Effect.flip(host.checkLog(ace, { ...check, id: 'pipeline:3022' }))).reason, 'unreachable')
     }),
@@ -943,7 +1015,7 @@ describe('Bitbucket Data Center as a code host', () => {
       const { host, sent } = center([whoami('jcitizen', '101'), ['GET', `${DC}/users?filter=jcitizen&limit=100`, { json: page([jane]) }]])
       assert.deepStrictEqual(yield* host.account, { id: '101', login: 'jcitizen', name: 'Jane Citizen' })
       assert.strictEqual(sent[0]?.headers.authorization, 'Bearer BBDC-t')
-      assert.deepStrictEqual(host.capabilities, { drafts: true, checkLogs: false, threads: true })
+      assert.deepStrictEqual(host.capabilities, { drafts: true, checkLogs: false, threads: true, reviews: false })
       // A project's token signs in as a service account, which the users aren't listed with.
       const project = center([whoami('bot-prj-1', '7'), ['GET', /\/users\?filter=/, { json: page([]) }]])
       assert.deepStrictEqual(yield* project.host.account, { id: '7', login: 'bot-prj-1', name: null })
@@ -951,6 +1023,19 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.deepStrictEqual(yield* unlisted.host.account, { id: 'bot-prj-1', login: 'bot-prj-1', name: null })
       // Signed in as no one, the token is no good.
       assert.strictEqual((yield* Effect.flip(center([whoami(null)]).host.account)).reason, 'unauthorized')
+    }),
+  )
+
+  it.effect('refuses to review a pull request it didn’t open, without asking Data Center', () =>
+    Effect.gen(function* () {
+      const { host, sent } = center([])
+      const repository = { id: '1', path: ['PRJ', 'my-repo'], defaultBranch: 'main', webUrl: '', canPush: true, merges: [] }
+      assert.strictEqual((yield* Effect.flip(host.changeToReview(repository, 1))).reason, 'rejected')
+      assert.strictEqual(
+        (yield* Effect.flip(host.postReview(repository, 1, { event: 'approve', body: 'b', commit: null, comments: [] }))).reason,
+        'rejected',
+      )
+      assert.lengthOf(sent, 0)
     }),
   )
 
@@ -1073,9 +1158,17 @@ describe('Bitbucket Data Center as a code host', () => {
         deletions: null,
         changedFiles: null,
         updatedAt: '2013-01-25T03:52:00.000Z',
+        headRepository: null,
       })
       assert.isNull(yield* host.findChange(prj, 'other'))
       assert.lengthOf(sent, 2)
+    }),
+  )
+
+  it.effect('says the fork a pull request’s branch is on, by its project and slug', () =>
+    Effect.gen(function* () {
+      const { host } = center([['GET', `${MY}/pull-requests/101`, { json: pr({ fromRef: ref('feature-ABC-123', 'babecafe', 'DANA') }) }]])
+      assert.deepStrictEqual((yield* host.change(prj, 101)).headRepository, ['DANA', 'my-repo'])
     }),
   )
 
@@ -1223,6 +1316,33 @@ describe('Bitbucket Data Center as a code host', () => {
       },
     },
   })
+
+  it.effect('declines a pull request at the version it read, and deletes its branch with the branch utilities', () =>
+    Effect.gen(function* () {
+      let state = 'OPEN'
+      const { host, sent } = center([
+        ['GET', PULL, () => ({ json: pr({ state }) })],
+        [
+          'POST',
+          `${PULL}/decline?version=3`,
+          () => {
+            state = 'DECLINED'
+            return { json: pr({ state, version: 4 }) }
+          },
+        ],
+        ['DELETE', `${SERVER}/rest/branch-utils/latest/projects/PRJ/repos/my-repo/branches`, { status: 204 }],
+      ])
+      const seen = yield* host.change(prj, 101)
+      const closed = yield* host.closeChange(prj, seen)
+      assert.strictEqual(closed.state, 'closed')
+      yield* host.deleteBranch(prj, closed)
+      assert.deepStrictEqual(sent.find((one) => one.method === 'DELETE')?.body, { name: 'refs/heads/feature-ABC-123', dryRun: false })
+      // Declined already, it is left as it is.
+      assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
+      yield* host.closeChange(prj, closed)
+      assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
+    }),
+  )
 
   it.effect('merges the head it saw, at the version it read, in the first way the repository allows', () =>
     Effect.gen(function* () {
@@ -1542,6 +1662,165 @@ describe('Bitbucket Data Center as a code host', () => {
     Effect.gen(function* () {
       const target = yield* center([]).host.pushTarget(prj)
       assert.deepStrictEqual(target, { url: `${SERVER}/scm/prj/my-repo.git`, header: 'Authorization: Bearer BBDC-t' })
+    }),
+  )
+})
+
+describe('Bitbucket listing pull requests', () => {
+  it.effect('asks Cloud for them in its query language, with their participants, and reads where those left them', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([
+        ['GET', `${CLOUD}/user`, { json: vincent }],
+        [
+          'GET',
+          /\/pullrequests\?/,
+          {
+            json: {
+              values: [
+                pull({
+                  participants: [
+                    { approved: false, state: 'changes_requested' },
+                    { approved: true, state: 'approved' },
+                  ],
+                }),
+                pull({ id: 553, draft: false, participants: [{ approved: true, state: 'approved' }] }),
+                pull({ id: 554, state: 'DECLINED' }),
+              ],
+              next: `${ACE}/pullrequests?page=2`,
+            },
+          },
+        ],
+      ])
+      const list = yield* host.listChanges(ace, {
+        state: 'closed',
+        author: 'Mitch McCue',
+        text: 'settings',
+        reviewRequested: true,
+        draft: false,
+        limit: 3,
+      })
+      const asked = new URL(sent.find((one) => one.url.includes('/pullrequests'))?.url ?? '')
+      assert.deepStrictEqual(asked.searchParams.getAll('state'), ['DECLINED', 'SUPERSEDED'])
+      assert.deepInclude(Object.fromEntries(asked.searchParams), { pagelen: '3', sort: '-updated_on', fields: '+values.participants' })
+      assert.strictEqual(
+        asked.searchParams.get('q'),
+        `author.nickname = "Mitch McCue" AND title ~ "settings" AND reviewers.uuid = "${vincent.uuid}" AND draft = false`,
+      )
+      assert.isTrue(list.more)
+      assert.deepStrictEqual(
+        list.changes.map((change) => [change.number, change.state, change.reviewDecision, change.body]),
+        [
+          [552, 'open', 'changes_requested', ''],
+          [553, 'open', 'approved', ''],
+          [554, 'closed', null, ''],
+        ],
+      )
+    }),
+  )
+
+  it.effect('names the scope Cloud needs where it refuses', () =>
+    Effect.gen(function* () {
+      const { host } = cloud([
+        [
+          'GET',
+          /\/pullrequests\?/,
+          { status: 403, json: { type: 'error', error: { message: 'Your credentials lack one or more required privilege scopes.' } } },
+        ],
+      ])
+      assert.deepInclude(yield* Effect.flip(host.listChanges(ace, { state: 'open', limit: 30 })), {
+        reason: 'forbidden',
+        scope: 'read:pullrequest:bitbucket',
+      })
+    }),
+  )
+
+  it.effect('asks Data Center by role and filter text, keeps those with the words in the title, and drafts as asked', () =>
+    Effect.gen(function* () {
+      const { host, sent } = center([
+        whoami('jcitizen'),
+        ['GET', /\/pull-requests\?.*start=100$/, { json: page([pr({ id: 105, draft: false, title: 'Not it' })]) }],
+        [
+          'GET',
+          /\/pull-requests\?/,
+          {
+            json: page(
+              [
+                pr({ updatedDate: 1359085920000 }),
+                pr({
+                  id: 102,
+                  draft: false,
+                  title: 'Talking Nerdy again',
+                  updatedDate: 1359095920000,
+                  reviewers: [{ user: jane, status: 'NEEDS_WORK' }],
+                }),
+                pr({ id: 103, draft: false, title: 'Something else', description: 'Talking nerdy, only here' }),
+                pr({ id: 104, draft: false, fromRef: ref('fix', 'cafe', '~JANE') }),
+              ],
+              100,
+            ),
+          },
+        ],
+      ])
+      const list = yield* host.listChanges(prj, {
+        state: 'all',
+        author: 'tom',
+        text: 'Talking Nerdy',
+        reviewRequested: true,
+        draft: false,
+        limit: 5,
+      })
+      const asked = new URL(sent.find((one) => one.url.includes('/pull-requests'))?.url ?? '')
+      assert.deepStrictEqual(Object.fromEntries(asked.searchParams), {
+        state: 'ALL',
+        order: 'NEWEST',
+        limit: '100',
+        start: '0',
+        'role.1': 'AUTHOR',
+        'username.1': 'tom',
+        'role.2': 'REVIEWER',
+        'username.2': 'jcitizen',
+        filterText: 'talking nerdy',
+      })
+      // Newest change first, from both pages; the draft, and the one with the words only in its description, left out.
+      assert.deepStrictEqual(
+        list.changes.map((change) => [change.number, change.reviewDecision, change.forkOwner]),
+        [
+          [102, 'changes_requested', null],
+          [104, 'approved', '~JANE'],
+        ],
+      )
+      assert.isFalse(list.more)
+      assert.lengthOf(
+        sent.filter((one) => one.url.includes('/pull-requests')),
+        2,
+      )
+      // Without words or drafts to keep to, it asks for no more than the limit.
+      const plain = center([['GET', /\/pull-requests\?/, { json: page([pr()]) }]])
+      const one = yield* plain.host.listChanges(prj, { state: 'closed', limit: 30 })
+      assert.deepInclude(Object.fromEntries(new URL(plain.sent[0]?.url ?? '').searchParams), { state: 'DECLINED', limit: '30' })
+      assert.isFalse(one.more)
+    }),
+  )
+
+  it.effect('reads on past a page with none to keep, so a draft on the next is found', () =>
+    Effect.gen(function* () {
+      const ready = Array.from({ length: 100 }, (_, at) => pr({ id: 200 + at, draft: false }))
+      const { host, sent } = center([
+        ['GET', /\/pull-requests\?.*start=0$/, { json: page(ready, 100) }],
+        ['GET', /\/pull-requests\?.*start=100$/, { json: page([pr({ id: 301 })]) }],
+      ])
+      const list = yield* host.listChanges(prj, { state: 'open', draft: true, limit: 30 })
+      assert.deepStrictEqual(
+        list.changes.map((change) => change.number),
+        [301],
+      )
+      assert.isFalse(list.more)
+      assert.lengthOf(sent, 2)
+      // Every page without one, within the bound: it stops, and says there may be more.
+      const endless = center([['GET', /\/pull-requests\?/, { json: page(ready, 100) }]])
+      const none = yield* endless.host.listChanges(prj, { state: 'open', draft: true, limit: 30 })
+      assert.deepStrictEqual(none, { changes: [], more: true })
+      assert.lengthOf(endless.sent, 10)
     }),
   )
 })

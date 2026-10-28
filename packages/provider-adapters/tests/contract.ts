@@ -20,10 +20,15 @@ export interface ContractSubject {
   readonly name: string
   readonly transport: (cwd: string) => Transport
   readonly cwd: string
-  readonly modes: { readonly ask: string; readonly readOnly: string }
+  /** Null where the agent has no mode and asks by its `sessionMeta` (the registry's `modes`). */
+  readonly modes: { readonly ask: string | null; readonly readOnly: string | null }
   readonly modeOptionId?: string
   readonly sessionMeta?: Readonly<Record<string, unknown>>
+  /** Options held at a value for the session's life (the registry's `options.held`). */
+  readonly held?: Readonly<Record<string, string>>
   readonly permissions?: PermissionMeanings
+  /** The words that open a failure it says as a message (the registry's `failsInText`). */
+  readonly failsInText?: string
   readonly model: { readonly optionId: string; readonly switchTo: string }
   readonly prompts: { readonly short: string; readonly long: string; readonly command: string; readonly question: string }
   /** How it asks the person something: in a form Althar answers, or in its own words, as a reply. */
@@ -51,6 +56,7 @@ export const withConnection = <A, E>(
             () => decide(request),
           ),
         ...(subject.permissions === undefined ? {} : { permissions: subject.permissions }),
+        ...(subject.failsInText === undefined ? {} : { failsInText: subject.failsInText }),
         ...(onQuestion === undefined ? {} : { onQuestion }),
       })
       return yield* use(connection, permissions)
@@ -63,6 +69,7 @@ export const sessionIn = (subject: ContractSubject, connection: AgentConnection,
     mode,
     ...(subject.modeOptionId === undefined ? {} : { modeOptionId: subject.modeOptionId }),
     ...(subject.sessionMeta === undefined ? {} : { meta: subject.sessionMeta }),
+    ...(subject.held === undefined ? {} : { held: subject.held }),
   })
 
 export const text = (events: ReadonlyArray<SessionEvent>) =>
@@ -88,6 +95,8 @@ export const contract = (subject: ContractSubject) =>
       withConnection(subject, (connection) =>
         Effect.gen(function* () {
           for (const mode of [subject.modes.ask, subject.modes.readOnly]) {
+            // An agent with no mode starts in none, as its `sessionMeta` holds it.
+            if (mode === null) continue
             const session = yield* sessionIn(subject, connection, mode)
             assert.strictEqual(yield* session.mode, mode)
           }

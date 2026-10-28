@@ -2,10 +2,13 @@ import { act, renderHook } from '@testing-library/react'
 import { Brand } from '@althar/ui'
 import { describe, expect, it, vi } from 'vitest'
 
-import { agentLineOf, brandOf } from '../src/renderer/shared/agents'
-import { knownModelName, standsFor } from '@althar/contracts'
-import { isSending, mergeItems, newestReads, queueShown, sending, unsent, waiting } from '../src/renderer/shared/items'
-import { items } from './fixtures'
+import { agentLineOf, brandOf, inLineWords, pinnedOf, signInCautionOf, signInWordsOf } from '../src/renderer/shared/agents'
+import { knownModelName, standsFor, type Unfurl } from '@althar/contracts'
+import { isSending, mergeItems, newestReads, queueShown, readingNow, sending, unsent, waiting } from '../src/renderer/shared/items'
+import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
+import { change, items } from './fixtures'
+import { latestOf } from '../src/renderer/features/task/Outputs'
+import { stepIndex, stepNames, trackFor } from '../src/renderer/shared/steps'
 import { ago, clock, took, useNow } from '../src/renderer/shared/time'
 
 describe('agents', () => {
@@ -20,6 +23,48 @@ describe('agents', () => {
     expect(agentLineOf({ id: 'claude-code', version: '2.1.263' })).toBe('Anthropic · 2.1.263')
     expect(agentLineOf({ id: 'opencode', version: '1.18.31' })).toBe('1.18.31')
     expect(agentLineOf({ id: 'opencode', version: null })).toBeUndefined()
+    // Antigravity has no version command: its maker alone.
+    expect(agentLineOf({ id: 'antigravity', version: null })).toBe('Google')
+  })
+
+  it('signs Antigravity in with Google, saying first what Google’s terms put on it', () => {
+    expect(brandOf('antigravity')).toBe(Brand.Antigravity)
+    expect(signInWordsOf('antigravity')).toEqual({ plan: 'Google', host: 'accounts.google.com' })
+    expect(signInCautionOf('antigravity')).toMatch(/Google’s terms may count signing in to Antigravity from another app as a breach/)
+    expect(signInCautionOf('codex')).toBeUndefined()
+  })
+
+  it('signs an agent with no words of its own in with its account, on its sign-in page', () => {
+    expect(signInWordsOf('aider')).toEqual({ plan: 'your account', host: 'the sign-in page' })
+  })
+
+  it('says a download of one version is that version, from its maker', () => {
+    const download = { size: '115 MB', installing: false, pinned: '1.3.0' }
+    expect(pinnedOf({ id: 'antigravity', name: 'Google Antigravity', download })).toEqual({ from: 'Google', version: '1.3.0' })
+    // Its latest release on GitHub, or none: nothing pinned.
+    expect(pinnedOf({ id: 'opencode', name: 'OpenCode', download: { ...download, pinned: null } })).toBeUndefined()
+    expect(pinnedOf({ id: 'opencode', name: 'OpenCode', download: null })).toBeUndefined()
+  })
+
+  it('names one version from a maker Althar has no name for by the agent’s own', () => {
+    const download = { size: '20 MB', installing: false, pinned: '0.4.0' }
+    expect(pinnedOf({ id: 'aider', name: 'Aider', download })).toEqual({ from: 'Aider', version: '0.4.0' })
+  })
+
+  it('says where a task waits in its line: next, then 2nd, 3rd, 11th, 21st', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 111].map(inLineWords)).toEqual([
+      'Next in line',
+      '2nd in line',
+      '3rd in line',
+      '4th in line',
+      '11th in line',
+      '12th in line',
+      '13th in line',
+      '21st in line',
+      '22nd in line',
+      '23rd in line',
+      '111th in line',
+    ])
   })
 })
 
@@ -185,5 +230,100 @@ describe('the composer queue', () => {
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
+  })
+
+  it('has what waits read now while the person sends, or the agent holds the thread or starts, but not behind a turn or a wait', () => {
+    const idle = { turnRunning: false, held: true, state: 'active' }
+    expect(readingNow(idle, false)).toBe(true)
+    expect(readingNow({ ...idle, held: false, state: 'starting' }, false)).toBe(true)
+    // The person's own send on its way starts an agent that isn't there, or one Althar no longer holds.
+    expect(readingNow(null, true)).toBe(true)
+    expect(readingNow({ ...idle, held: false }, true)).toBe(true)
+    expect(readingNow(null, false)).toBe(false)
+    expect(readingNow({ ...idle, held: false }, false)).toBe(false)
+    // Behind a turn running it waits its turn; and where the task waits for a place, or its agent's usage, it waits too.
+    expect(readingNow({ ...idle, turnRunning: true }, true)).toBe(false)
+    expect(readingNow(idle, true, true)).toBe(false)
+  })
+})
+
+describe('a task’s rounds of work after its plan (ADR-034)', () => {
+  it('names its follow-up in place of Implement, and its track and step as they stand', () => {
+    const steps = [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ]
+    expect(stepNames(steps)).toEqual(['Implement', 'Review'])
+    expect(stepNames(steps, true)).toEqual(['Follow-up', 'Review'])
+    expect(stepIndex(stepNames(steps, true), 'implement')).toBe(0)
+    expect(stepIndex(stepNames(steps, true), 'settle')).toBe(1)
+    expect(trackFor(steps, 'review', false, true).map((step) => step.label)).toEqual(['Follow-up', 'Review'])
+  })
+
+  it('shows its latest pull request in each repository, and the earlier ones newest first', () => {
+    const first = change({ number: 1, state: 'merged', url: 'https://github.test/meridian/api/pull/1' })
+    const second = change({ number: 2, state: 'closed', url: 'https://github.test/meridian/api/pull/2' })
+    const third = change({ number: 3, state: 'open', url: 'https://github.test/meridian/api/pull/3' })
+    expect(latestOf([first, second, third])).toEqual({ latest: [third], earlier: [second, first] })
+    // With none open, the newest is the latest.
+    expect(latestOf([first, second])).toEqual({ latest: [second], earlier: [first] })
+    // In a task of several repositories, each has its own.
+    const web = change({ number: 7, slug: 'web', url: 'https://github.test/meridian/web/pull/7' })
+    expect(latestOf([first, web]).latest).toEqual([first, web])
+  })
+})
+
+describe('links the person pasted', () => {
+  // The tracker gives its own address, with the title's slug; the runtime keeps the one pasted.
+  const issue: Unfurl = {
+    kind: 'issue',
+    product: 'linear',
+    key: 'MER-231',
+    title: 'Rate-limit refunds',
+    url: 'https://linear.app/m/issue/MER-231/rate-limit-refunds',
+    pasted: 'https://linear.app/m/issue/MER-231',
+    status: { name: 'Todo', category: 'todo' },
+    priority: null,
+    container: null,
+  }
+  // Unfurled before the runtime kept what was pasted: known by its own address.
+  const pull: Unfurl = {
+    kind: 'change',
+    product: 'github',
+    key: 'PR #1206',
+    title: 'Rate-limit charges',
+    url: 'https://github.com/m/a/pull/1206',
+    state: 'merged',
+    repository: 'm/a',
+  }
+
+  it('are found where they were pasted, without the punctuation after them', () => {
+    expect(pastedIn('Do https://linear.app/m/issue/MER-231, like https://github.com/m/a/pull/1206.', [issue, pull])).toEqual([
+      'Do ',
+      issue,
+      ', like ',
+      pull,
+      '.',
+    ])
+    expect(pastedIn('https://github.com/m/a/pull/1206', [pull])).toEqual([pull])
+  })
+
+  it('are found each time they were pasted', () => {
+    expect(pastedIn('https://linear.app/m/issue/MER-231 again https://linear.app/m/issue/MER-231', [issue])).toEqual([
+      issue,
+      ' again ',
+      issue,
+    ])
+  })
+
+  it('leave an address that didn’t unfurl as it was written, even one that starts like one that did', () => {
+    const said = 'Not https://linear.app/m/issue/MER-2310 or https://example.com/x, nor this.'
+    expect(pastedIn(said, [issue])).toEqual([said])
+    expect(pastedIn('Nothing linked', [])).toEqual(['Nothing linked'])
+  })
+
+  it('read as their key, a pull request’s as its number', () => {
+    expect(keyOf(issue)).toBe('MER-231')
+    expect(keyOf(pull)).toBe('#1206')
   })
 })

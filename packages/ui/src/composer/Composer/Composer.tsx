@@ -30,6 +30,8 @@ export interface Dictation {
   kbd?: string
   /** Writing down what was said, or getting the speech model ready: the microphone turns. */
   busy?: boolean
+  /** What was said was written down while you were away from this composer: a quiet line over the field says so. */
+  arrived?: boolean
   /** The speech model coming down, from 0 to 1: a ring fills round the microphone. */
   progress?: number
   /** The microphone's tray (`tray`) is open. */
@@ -72,11 +74,26 @@ export interface ComposerImage {
   reading?: boolean
 }
 
-/** The kinds of image the picker offers by default: the ones every agent that takes images reads. */
-export const COMPOSER_IMAGE_TYPES = 'image/png,image/jpeg,image/gif,image/webp'
+/** How files came to the composer: dropped on it, pasted into it, or picked with its button. */
+export type AddedBy = 'drop' | 'paste' | 'pick'
+
+/** A file or folder waiting to go with what you write: a chip with its name and size, and a way to take it off. */
+export interface ComposerFile {
+  id: string
+  /** What it is called, as it was on the computer: its accessible name. */
+  name: string
+  /** What else it says, formatted: its size, or a folder's files and size. */
+  meta?: string
+  /** A folder, not a file. */
+  folder?: boolean
+  /** Still being looked at: it turns until it is ready. */
+  reading?: boolean
+}
 
 export interface ComposerText {
   send: string
+  /** The key that takes a suggestion into the field, shown where the send button would be. */
+  takeKey: string
   /** The key that sends or queues, shown in the button's tooltip. */
   sendKey: string
   /** Sending while the agent works: it waits until the agent is done with what it is doing. */
@@ -85,7 +102,6 @@ export interface ComposerText {
   stop: string
   /** The host's shortcut for stopping, shown in the button's tooltip. */
   stopKey: string
-  queueNote: string
   /** Sends while the agent works, instead of queueing: it stops at a safe point and carries on with both. */
   sendNow: string
   /** What Send now does, in its tooltip. */
@@ -108,27 +124,31 @@ export interface ComposerText {
   inputsNote: string
   /** The field's placeholder while dictating. */
   listening: string
+  /** Over the field, when what was said was written down while you were away. */
+  dictatedAway: string
   queued: (n: number) => string
   /** Takes a queued message back into the field. */
   editQueued: string
+  /** Sends a queued message now, interrupting the agent with it, rather than when the agent is done. */
+  sendQueuedNow: string
   unqueue: (text: string) => string
-  /** The button that picks images from the computer. */
-  addImages: string
-  /** Over the composer while images are held over it. */
-  dropImages: string
-  /** The images waiting to go, as a list. */
-  images: (n: number) => string
+  /** The button that picks files, images among them, from the computer. */
+  addFiles: string
+  /** Over the composer while files are held over it. */
+  dropFiles: string
+  /** The images, files and folders waiting to go, as a list. */
+  attachments: (n: number) => string
   removeImage: (name: string) => string
   readingImage: (name: string) => string
 }
 
 export const composerText: ComposerText = {
   send: 'Send',
+  takeKey: 'Tab',
   sendKey: '↵',
   queue: 'Queue',
   stop: 'Interrupt the lead',
   stopKey: '⌘.',
-  queueNote: 'Enter queues it; the lead reads it next',
   sendNow: 'Send now',
   sendNowNote: 'Interrupt the lead with this; it carries on with both',
   sendNowKey: '⌘↵',
@@ -142,12 +162,14 @@ export const composerText: ComposerText = {
   systemDefault: 'System default',
   inputsNote: 'Other microphones show here once Althar may use the microphone.',
   listening: 'Listening…',
+  dictatedAway: 'What you said was written down while you were away.',
   queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
   editQueued: 'Edit',
+  sendQueuedNow: 'Send now',
   unqueue: (text) => `Take “${text}” out of the queue`,
-  addImages: 'Add images',
-  dropImages: 'Drop to add them to your message',
-  images: (n) => (n === 1 ? '1 image to send' : `${n} images to send`),
+  addFiles: 'Add files',
+  dropFiles: 'Drop to add to your message',
+  attachments: (n) => (n === 1 ? '1 attachment to send' : `${n} attachments to send`),
   removeImage: (name) => `Remove ${name}`,
   readingImage: (name) => `Reading ${name}`,
 }
@@ -173,29 +195,43 @@ export interface ComposerProps {
   queued?: readonly QueuedMessage[]
   /** Take a queued message back into the field. Without it, a queued message has no Edit. */
   onEditQueued?: (id: string) => void
+  /** Send a queued message now, interrupting the agent with it, instead of when it is done. Without it, a queued message has no Send now. */
+  onSendQueuedNow?: (id: string) => void
   /** Take a queued message out of the queue. */
   onUnqueue?: (id: string) => void
   /** The shortcut that focuses the composer, shown when there is nothing to send. */
   hint?: string
+  /**
+   * What it would most likely be told next, in grey where nothing is
+   * written, as a suggested prompt: Tab takes it into the field, and Enter
+   * then sends it, so a stray key sends nothing. Not while the agent works.
+   */
+  suggestion?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
+  /** A line on the same edge, just under what is in `above` and nearest the field: who takes over when you send, what is missing. It wraps with the composer and never covers `above`. Put links in it; they stay clickable. */
+  notice?: ReactNode
+  /** Dictation carried from another thread (a DictationPill): centred over the composer, above all that floats on its edge, so it covers none of it. */
+  carried?: ReactNode
   /** What is joined to the composer's top edge, in the flow: a DictationTray. The field stays usable under it. */
   tray?: ReactNode
   /** Images to send with what is written, in order: they go when it is sent, even with nothing written. */
   images?: readonly ComposerImage[]
+  /** Files and folders to send with what is written, after the images: they go when it is sent, even with nothing written. */
+  files?: readonly ComposerFile[]
   /**
-   * Files dropped on the composer, pasted into it, or picked with its Add
-   * images button, for the consumer to read and check, and add to `images`
-   * or refuse in `imageNote`. Without it, the composer takes none, and offers
-   * no button.
+   * Files and folders dropped on the composer, pasted into it, or picked with
+   * its Add files button, for the consumer to read and check, and add to
+   * `images` or `files`, or refuse in `fileNote`. Without it, the composer
+   * takes none, and offers no button.
    */
-  onAddImages?: (files: readonly File[]) => void
+  onAddFiles?: (files: readonly File[], how: AddedBy) => void
   /** Takes an image off. Without it, images have no remove button. */
   onRemoveImage?: (id: string) => void
-  /** What the consumer says of images, in a line over the field: one it refused, and why; or that the agent doesn't take them. */
-  imageNote?: string
-  /** The kinds the picker offers, as a file input's `accept`. */
-  imageTypes?: string
+  /** Takes a file or folder off. Without it, they have no remove button. */
+  onRemoveFile?: (id: string) => void
+  /** What the consumer says of what is added, in a line over the field: one it refused, and why; or that the agent doesn't take images. */
+  fileNote?: string
   inputRef?: RefObject<HTMLTextAreaElement | null>
   className?: string
   text?: Partial<ComposerText>
@@ -205,10 +241,10 @@ export interface ComposerProps {
  * The one composer, for the project conversation and for a task. Two rows:
  * what you are writing, then where it goes. Enter sends, Shift+Enter breaks
  * the line. The lower row holds what the consumer puts there, the model
- * picker and the context meter, quiet until you look. Images dropped on it,
- * pasted into it or picked with its button go to the consumer, which reads
- * and checks them; those it adds wait above the field, and go with what is
- * sent.
+ * picker and the context meter, quiet until you look. Files and folders
+ * dropped on it, pasted into it or picked with its button go to the consumer,
+ * which reads and checks them; those it adds wait above the field, an image
+ * drawn small and anything else as a chip, and go with what is sent.
  */
 export function Composer({
   value,
@@ -223,24 +259,29 @@ export function Composer({
   dictation,
   queued = [],
   onEditQueued,
+  onSendQueuedNow,
   onUnqueue,
   hint,
+  suggestion,
   above,
+  notice,
+  carried,
   tray,
   images = [],
-  onAddImages,
+  files = [],
+  onAddFiles,
   onRemoveImage,
-  imageNote,
-  imageTypes = COMPOSER_IMAGE_TYPES,
+  onRemoveFile,
+  fileNote,
   inputRef,
   className,
   text,
 }: ComposerProps) {
   const t = { ...composerText, ...text }
   const own = useRef<HTMLTextAreaElement>(null)
-  const files = useRef<HTMLInputElement>(null)
-  /* images held over any part of it, the tray and what floats over it included */
-  const drop = useDragOver(onAddImages)
+  const filePicker = useRef<HTMLInputElement>(null)
+  /* files held over any part of it, the tray and what floats over it included */
+  const drop = useDragOver(onAddFiles === undefined ? undefined : (dropped) => onAddFiles(dropped, 'drop'))
   const ref = inputRef ?? own
   const hintId = useId()
   const elapsed = dictation?.elapsed ?? null
@@ -248,6 +289,23 @@ export function Composer({
   /* While words arrive or are written down, the field is the dictation's: typing would land where they are about to. */
   const dictating = elapsed !== null || dictation?.busy === true
   const overlay = useRef<HTMLDivElement>(null)
+  const edge = useRef<HTMLDivElement>(null)
+  const edgeShown = Boolean(above || notice || carried)
+  /* What floats takes no room, so it says how tall it is, on the nearest [data-floats-host] (a thread's face), which keeps the end of the thread clear of it. */
+  useLayoutEffect(() => {
+    const el = edge.current
+    const host = el?.closest<HTMLElement>('[data-floats-host]')
+    if (!el || !host) return
+    const tell = () => host.style.setProperty('--composer-floats', `${el.offsetHeight}px`)
+    tell()
+    if (typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(tell)
+    watch.observe(el)
+    return () => {
+      watch.disconnect()
+      host.style.removeProperty('--composer-floats')
+    }
+  }, [edgeShown])
   /* Whether the arriving words are followed to the end: until the person scrolls up to read, then again once they are back at the end. */
   const following = useRef(true)
   const arriving = useRef<HTMLSpanElement>(null)
@@ -260,10 +318,17 @@ export function Composer({
   const at = Math.max(0, Math.min(value.length, dictation?.at ?? value.length))
   const before = value.slice(0, at)
   const after = value.slice(at)
-  /* images alone are something to send */
-  const drafted = value.trim() !== '' || images.length > 0
+  /* images or files alone are something to send */
+  const attached = images.length + files.length
+  const drafted = value.trim() !== '' || attached > 0
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
+
+  /* Back to a draft kept from before, the cursor goes after what is there, to carry on from it. */
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) el.setSelectionRange(el.value.length, el.value.length)
+  }, [ref])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -303,22 +368,24 @@ export function Composer({
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
     const out = value.trim()
-    if (out || images.length > 0) onSubmit(out)
+    if (out || attached > 0) onSubmit(out)
   }
   const canSendNow = busy && drafted && onSendNow !== undefined
   const sendNow = () => {
     const out = value.trim()
-    if (out || images.length > 0) onSendNow?.(out)
+    if (out || attached > 0) onSendNow?.(out)
   }
+
+  /* A suggestion to take, while nothing is written or arriving and the agent is free. */
+  const suggested = suggestion !== undefined && suggestion !== '' && !busy && !drafted && !dictating ? suggestion : null
 
   const shownPlaceholder = (() => {
     if (interim) return ''
     if (elapsed !== null) return t.listening
-    return placeholder
+    return suggested ?? placeholder
   })()
 
   const note = (() => {
-    if (busy && drafted) return t.queueNote
     if (value.includes('\n')) return t.newlineNote
     return null
   })()
@@ -328,6 +395,7 @@ export function Composer({
   const action = (() => {
     if (drafted) return <IconButton icon="up" label={busy ? t.queue : t.send} tone="fill" type="submit" kbd={t.sendKey} />
     if (busy && onStopAgent) return <IconButton icon="square" label={t.stop} tone="fill" onClick={onStopAgent} kbd={t.stopKey} />
+    if (suggested !== null) return <Kbd className={s.kbd}>{t.takeKey}</Kbd>
     if (hint) return <Kbd className={s.kbd}>{hint}</Kbd>
     return null
   })()
@@ -335,13 +403,19 @@ export function Composer({
   /* One shape whether or not a tray shows, so the field is never rebuilt under the cursor as one comes and goes. What floats sits above the tray, not over it. */
   return (
     <div className={s.stack} data-tray-host="" {...drop.handlers}>
-      {above && <div className={s.above}>{above}</div>}
+      {edgeShown && (
+        <div ref={edge} className={s.floats}>
+          {carried && <div className={s.carried}>{carried}</div>}
+          {above && <div className={s.above}>{above}</div>}
+          {notice && <div className={s.notice}>{notice}</div>}
+        </div>
+      )}
       {tray != null && <div className={s.tray}>{tray}</div>}
       <form className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)} onSubmit={submit}>
         {drop.over && (
           <div className={s.dropping} aria-hidden="true">
-            <Icon name="image" size={14} />
-            {t.dropImages}
+            <Icon name="clip" size={14} />
+            {t.dropFiles}
           </div>
         )}
         {queued.length > 0 && (
@@ -362,18 +436,24 @@ export function Composer({
                       {t.editQueued}
                     </LinkButton>
                   )}
+                  {onSendQueuedNow && (
+                    <LinkButton className={s.queuedEdit} onClick={() => onSendQueuedNow(q.id)}>
+                      {t.sendQueuedNow}
+                    </LinkButton>
+                  )}
                   {onUnqueue && <IconButton icon="close" size="small" label={t.unqueue(q.text)} onClick={() => onUnqueue(q.id)} />}
                 </li>
               ))}
             </ol>
           </section>
         )}
-        {onAddImages && (
-          /* what the consumer says of images, announced as it changes; empty, it takes no room */
-          <output className={s.imageNote}>{imageNote}</output>
+        {onAddFiles && (
+          /* what the consumer says of what is added, announced as it changes; empty, it takes no room */
+          <output className={s.imageNote}>{fileNote}</output>
         )}
-        {images.length > 0 && (
-          <ul className={s.images} aria-label={t.images(images.length)}>
+        {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
+        {attached > 0 && (
+          <ul className={s.images} aria-label={t.attachments(attached)}>
             {images.map((image) => (
               <li key={image.id} className={s.image}>
                 {image.reading ? (
@@ -392,6 +472,30 @@ export function Composer({
                     size="small"
                     label={t.removeImage(image.name)}
                     onClick={() => onRemoveImage(image.id)}
+                  />
+                )}
+              </li>
+            ))}
+            {files.map((file) => (
+              <li key={file.id} className={s.file}>
+                <span className={s.fileIcon}>
+                  {file.reading ? (
+                    <Spinner size="small" label={t.readingImage(file.name)} />
+                  ) : (
+                    <Icon name={file.folder ? 'folder' : 'file'} size={13} />
+                  )}
+                </span>
+                <span className={s.fileMain}>
+                  <span className={s.fileName}>{file.name}</span>
+                  {file.meta && <span className={s.fileMeta}>{file.meta}</span>}
+                </span>
+                {onRemoveFile && (
+                  <IconButton
+                    className={s.fileRemove}
+                    icon="close"
+                    size="small"
+                    label={t.removeImage(file.name)}
+                    onClick={() => onRemoveFile(file.id)}
                   />
                 )}
               </li>
@@ -428,13 +532,19 @@ export function Composer({
             aria-describedby={note ? hintId : undefined}
             onChange={(e) => onChange(e.target.value)}
             onPaste={(e) => {
-              // A picture on the clipboard is added, not pasted as its name.
+              // A picture or a file on the clipboard is added, not pasted as its name; one a file manager copied may say it holds files and list none, for the host to read.
               const pasted = [...e.clipboardData.files]
-              if (!onAddImages || pasted.length === 0) return
+              if (!onAddFiles || (pasted.length === 0 && !e.clipboardData.types.includes('Files'))) return
               e.preventDefault()
-              onAddImages(pasted)
+              onAddFiles(pasted, 'paste')
             }}
             onKeyDown={(e) => {
+              /* Tab takes the suggestion into the field, to send with Enter or change first. */
+              if (e.key === 'Tab' && !e.shiftKey && suggested !== null) {
+                e.preventDefault()
+                onChange(suggested)
+                return
+              }
               if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
               /* Enter while dictating wraps up what was said and leaves it in the field, unsent; while it is written down, it waits. */
               if (dictating) {
@@ -452,65 +562,65 @@ export function Composer({
           />
         </div>
         <div className={s.bar}>
-          {picker}
-          <span className={s.space} />
-          {note && (
-            <span id={hintId} className={s.note}>
-              {note}
-            </span>
-          )}
-          {canSendNow && (
-            <Tooltip label={t.sendNowNote}>
-              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
-                {t.sendNow}
-              </ActionButton>
-            </Tooltip>
-          )}
-          {meter}
-          {onAddImages && (
-            <>
-              <IconButton icon="image" label={t.addImages} onClick={() => files.current?.click()} />
-              <input
-                ref={files}
-                type="file"
-                accept={imageTypes}
-                multiple
-                hidden
-                tabIndex={-1}
-                onChange={(e) => {
-                  const picked = [...(e.target.files ?? [])]
-                  // Picking the same file again is a change too.
-                  e.target.value = ''
-                  if (picked.length > 0) onAddImages(picked)
-                }}
-              />
-            </>
-          )}
-          {dictation &&
-            (elapsed !== null ? (
-              <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
-                <span className={s.wave} aria-hidden="true">
-                  {(dictation.levels ?? QUIET).map((l, i) => (
-                    <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
-                  ))}
-                </span>
-                {elapsed}
-                <Icon name="square" size={11} />
-              </button>
-            ) : (
-              <IconButton
-                ref={mic}
-                icon="mic"
-                label={micLabel(dictation, t)}
-                {...(dictation.kbd === undefined ? {} : { kbd: dictation.kbd })}
-                busy={dictation.busy}
-                progress={dictation.busy ? undefined : dictation.progress}
-                aria-expanded={dictation.expanded}
-                onClick={dictation.onStart}
-              />
-            ))}
-          {dictation?.onChooseInput && <InputMenu dictation={dictation} onChoose={dictation.onChooseInput} t={t} />}
-          {action}
+          <div className={s.left}>{picker}</div>
+          <div className={s.right}>
+            {note && (
+              <span id={hintId} className={s.note}>
+                {note}
+              </span>
+            )}
+            {canSendNow && (
+              <Tooltip label={t.sendNowNote}>
+                <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey} aria-label={t.sendNow}>
+                  <span className={s.sendNowLabel}>{t.sendNow}</span>
+                </ActionButton>
+              </Tooltip>
+            )}
+            {meter}
+            {onAddFiles && (
+              <>
+                <IconButton icon="clip" label={t.addFiles} onClick={() => filePicker.current?.click()} />
+                <input
+                  ref={filePicker}
+                  type="file"
+                  multiple
+                  hidden
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    const picked = [...(e.target.files ?? [])]
+                    // Picking the same file again is a change too.
+                    e.target.value = ''
+                    if (picked.length > 0) onAddFiles(picked, 'pick')
+                  }}
+                />
+              </>
+            )}
+            {dictation &&
+              (elapsed !== null ? (
+                <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
+                  <span className={s.wave} aria-hidden="true">
+                    {(dictation.levels ?? QUIET).map((l, i) => (
+                      <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
+                    ))}
+                  </span>
+                  {elapsed}
+                  <Icon name="square" size={11} />
+                </button>
+              ) : (
+                <IconButton
+                  ref={mic}
+                  icon="mic"
+                  label={micLabel(dictation, t)}
+                  {...(dictation.kbd === undefined ? {} : { kbd: dictation.kbd })}
+                  busy={dictation.busy}
+                  progress={dictation.busy ? undefined : dictation.progress}
+                  aria-expanded={dictation.expanded}
+                  onClick={dictation.onStart}
+                />
+              ))}
+            {dictation?.onChooseInput && <InputMenu dictation={dictation} onChoose={dictation.onChooseInput} t={t} />}
+            {action}
+          </div>
         </div>
       </form>
     </div>

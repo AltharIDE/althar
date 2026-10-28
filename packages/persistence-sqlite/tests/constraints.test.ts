@@ -183,6 +183,18 @@ describe('constraints', () => {
       assert.isFalse(yield* image(2, mine), 'one image a place')
       assert.isFalse(yield* image(0, mine), 'places count from one')
       assert.isFalse(yield* image(3, theirs), 'no image from another project')
+      const file = (position: number, row: Readonly<Record<string, unknown>>) =>
+        succeeds(
+          sql`INSERT INTO user_input_files ${sql.insert({ projectId, userInputId: inputId, position, name: 'spec.pdf', kind: 'file', mediaType: 'application/pdf', bytes: 48_000, entries: null, path: '/t/.althar/attachments/in/spec.pdf', ...row })}`,
+        )
+      assert.isTrue(yield* file(1, {}))
+      assert.isTrue(yield* file(2, { name: 'logs', kind: 'folder', mediaType: null, entries: 3, path: '/t/.althar/attachments/in/logs' }))
+      assert.isFalse(yield* file(2, {}), 'one file a place')
+      assert.isFalse(yield* file(0, {}), 'places count from one')
+      assert.isFalse(yield* file(3, { kind: 'folder' }), 'a folder says how many files it holds')
+      assert.isFalse(yield* file(3, { entries: 2 }), 'a file holds none')
+      assert.isFalse(yield* file(3, { name: '' }), 'a file has a name')
+      assert.isFalse(yield* file(3, { kind: 'link' }), 'a file or a folder, nothing else')
     }).pipe(Effect.provide(Env)),
   )
 
@@ -286,6 +298,31 @@ describe('constraints', () => {
       assert.isTrue(yield* workItem({ state: 'pending' }))
       assert.isFalse(yield* workItem({ state: 'claimed' }))
       assert.isTrue(yield* workItem({ state: 'claimed', claimedByInstanceId: instanceId, leaseExpiresAt: createdAt }))
+    }).pipe(Effect.provide(Env)),
+  )
+
+  it.effect('post a review draft only with its review and a verdict, and fail one only with why', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId, threadId, deviceId, actorId, createdAt } = yield* seedRun
+      const connectionId = yield* Domain.newId(Domain.Ids.connection)
+      yield* sql`INSERT INTO connections ${sql.insert({ id: connectionId, deviceId, product: 'github', webUrl: 'https://github.com', apiUrl: 'https://api.github.com', accountId: '1', accountLogin: 'ada', auth: 'device_flow', credentialRef: 'ref', state: 'ready', createdAt, updatedAt: createdAt })}`
+      const draft = (fields: Record<string, unknown>) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.reviewDraft), (id) =>
+          succeeds(
+            sql`INSERT INTO review_drafts ${sql.insert({ id, projectId, taskId, threadId, connectionId, product: 'github', repository: 'meridian/api', number: 123, url: 'https://github.com/meridian/api/pull/123', title: 'Send back', author: 'ninemate', outside: 1, headCommit: 'd'.repeat(40), suggested: 'changes', summary: 'Needs a test.', draftedByActorId: actorId, createdAt, updatedAt: createdAt, state: 'pending', ...fields })}`,
+          ),
+        )
+      assert.isTrue(yield* draft({}))
+      // An outside pull request's draft may wait with no verdict chosen; it posts with one, its review and when.
+      assert.isTrue(yield* draft({ verdict: null }))
+      assert.isFalse(yield* draft({ state: 'posted', verdict: null, reviewRef: '801', decidedAt: createdAt }))
+      assert.isFalse(yield* draft({ state: 'posted', verdict: 'changes', decidedAt: createdAt }))
+      assert.isTrue(yield* draft({ state: 'posted', verdict: 'changes', reviewRef: '801', decidedAt: createdAt }))
+      assert.isFalse(yield* draft({ state: 'failed' }))
+      assert.isTrue(yield* draft({ state: 'uncertain', error: 'Its answer was lost.' }))
+      assert.isFalse(yield* draft({ suggested: 'merge' }))
+      assert.isFalse(yield* draft({ headCommit: 'd4c8ae4' }))
     }).pipe(Effect.provide(Env)),
   )
 })

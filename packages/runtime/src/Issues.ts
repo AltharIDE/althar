@@ -11,6 +11,8 @@ import { Instance } from './Instance'
 import { outward } from './outward'
 import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
+import { projectTracker } from './projectTracker'
+import { indexTask } from './Search'
 import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
 
@@ -25,7 +27,7 @@ import { ToolRefused, ToolServer } from './ToolServer'
  * once, never back from further along, and never at the task's cost.
  */
 
-/** A link, unfurled where it was pasted: an issue or a change, as its service has it. */
+/** A link, unfurled where it was pasted: an issue or a change, as its service has it, with the address as the message has it (`pasted`), which can differ from the service's own (`url`). */
 export type Unfurl =
   | {
       readonly kind: 'issue'
@@ -33,6 +35,7 @@ export type Unfurl =
       readonly key: string
       readonly title: string
       readonly url: string
+      readonly pasted: string
       readonly status: { readonly name: string; readonly category: StatusCategory }
       readonly priority: { readonly level: string; readonly name: string } | null
       readonly container: string | null
@@ -43,6 +46,7 @@ export type Unfurl =
       readonly key: string
       readonly title: string
       readonly url: string
+      readonly pasted: string
       readonly state: 'draft' | 'open' | 'merged' | 'closed'
       readonly repository: string
     }
@@ -97,7 +101,7 @@ export class Issues extends Context.Service<
     unfurlInput(commandId: string): Effect.Effect<void>
     /** An issue by its link, or its key on a connected tracker: for tools, and for a task that comes from one. */
     read(text: string, projectId?: string): Effect.Effect<IssueSummary & { readonly body: string; readonly connectionId: string }, unknown>
-    /** The person's open issues, on every connected tracker; a code host's only in the project's repository. */
+    /** The person's open issues, on every connected tracker, or the project's own where it is bound to one; a code host's only in the project's repository. */
     mine(projectId: string): Effect.Effect<ReadonlyArray<IssueSummary>, unknown>
     /** Ties a task to the issue it came from. */
     attach(input: { readonly projectId: ProjectId; readonly taskId: string; readonly issue: string }): Effect.Effect<IssueSummary, unknown>
@@ -133,6 +137,7 @@ export class Issues extends Context.Service<
               key: issue.key,
               title: issue.title,
               url: issue.url,
+              pasted: link,
               status: issue.status,
               priority: issue.priority,
               container: issue.container,
@@ -147,6 +152,7 @@ export class Issues extends Context.Service<
             key: `${found.host.words.short} ${found.host.words.prefix}${change.number}`,
             title: change.title,
             url: change.url,
+            pasted: link,
             state: change.state === 'open' && change.draft ? 'draft' : change.state,
             repository: found.ref.path.join('/'),
           } satisfies Unfurl
@@ -201,8 +207,13 @@ export class Issues extends Context.Service<
             const issue = yield* adapters.tracker.issue(`${host.path.join('/')}#${number}`)
             return { ...summaryOf(adapters.info.product, issue), body: issue.body, connectionId: host.connectionId }
           }
-          // MER-231, or a Trello card's short link: whichever tracker has it, each reading its own keys as typed.
-          for (const { connectionId, product, tracker } of yield* connections.trackers) {
+          // MER-231, or a Trello card's short link: the project's own tracker first, where it is bound to one (ADR-059), then
+          // whichever has it, each reading its own keys as typed.
+          const bound = projectId === undefined ? null : yield* projectTracker(projectId)
+          const trackers = (yield* connections.trackers).toSorted(
+            (a, b) => Number(b.connectionId === bound?.connectionId) - Number(a.connectionId === bound?.connectionId),
+          )
+          for (const { connectionId, product, tracker } of trackers) {
             if (product === 'github' || product === 'gitlab') continue
             const issue = yield* tracker.issue(wanted).pipe(Effect.orElseSucceed(() => null))
             if (issue !== null) return { ...summaryOf(product, issue), body: issue.body, connectionId }
@@ -213,8 +224,13 @@ export class Issues extends Context.Service<
       const mine = (projectId: string) =>
         Effect.gen(function* () {
           const host = yield* projectRepository(projectId)
+          // A project bound to a tracker lists its issues there alone, beside its own repository's (ADR-059).
+          const bound = yield* projectTracker(projectId)
+          const trackers = (yield* connections.trackers).filter(
+            ({ connectionId }) => bound === null || connectionId === bound.connectionId || connectionId === host?.connectionId,
+          )
           const lists = yield* Effect.forEach(
-            yield* connections.trackers,
+            trackers,
             ({ connectionId, product, tracker }) => {
               // A code host's issues are listed for the project's own repository only.
               const listed =
@@ -276,6 +292,7 @@ export class Issues extends Context.Service<
                 payload: { key: issue.key, url: issue.url },
                 actorId: instance.personId,
               })
+              yield* indexTask(input.taskId)
             }),
           )
           yield* touchCard(input.taskId)
@@ -338,7 +355,7 @@ export class Issues extends Context.Service<
           const exit = yield* Effect.exit(
             Effect.gen(function* () {
               const { tracker } = yield* connections.adapters(connectionId)
-              // GitHub's, GitLab's and Trello's have no In Progress of their own: their issues are left as they are, and nothing is said.
+              // GitHub's and GitLab's have no In Progress of their own: their issues are left as they are, and nothing is said.
               if (tracker === undefined || !tracker.capabilities.starts) return null
               // As it is now, not as it was when the task was drafted: one someone started meanwhile is left as it is.
               const issue = yield* tracker.issue(link.ref)
@@ -400,9 +417,10 @@ export class Issues extends Context.Service<
           yield* touchCard(taskId)
         })
 
-      // A task's lead and its reviewers can read the issue it came from, or any other.
+      // A task's lead and its reviewers can read the issue it came from, or any other; it only reads, so a review's lead too.
       const readIssueTool = {
         name: 'read_issue',
+        inReview: true,
         description:
           'An issue on a connected tracker, or in the project’s repository: its title, status and description. Takes its link or its key.',
         input: { type: 'object', properties: { issue: { type: 'string' } }, required: ['issue'] },

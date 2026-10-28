@@ -10,10 +10,12 @@ import {
   ChatBubble,
   Check,
   Clock,
+  ClockRotateRight,
   CoffeeCup,
   Community,
   Compress,
   Copy,
+  Download,
   Edit,
   EditPencil,
   Folder,
@@ -21,6 +23,7 @@ import {
   GitMerge,
   GitPullRequest,
   Globe,
+  HalfMoon,
   LightBulb,
   List,
   Lock,
@@ -30,25 +33,27 @@ import {
   NavArrowDown,
   NavArrowLeft,
   NavArrowRight,
+  NavArrowUp,
   OpenNewWindow,
   Page,
-  Play,
   PageMinus,
   PagePlus,
   PageRight,
   Pause,
   Pin,
+  Play,
   Plus,
   Prohibition,
   Quote,
   Search,
-  SoundHigh,
   ServerConnection,
   Settings,
+  SoundHigh,
   Square,
   TaskList,
   Terminal,
   Tools,
+  WifiOff,
   Xmark,
 } from 'iconoir-react'
 import { type ComponentType, createElement, type SVGProps } from 'react'
@@ -72,6 +77,16 @@ function MoreDots(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+/* Two columns of three dots: a handle to drag something by, drawn as the three dots are. */
+const grip = (cx: number, cy: number) => createElement('circle', { key: `${cx}:${cy}`, cx, cy, r: 1.5, fill: 'currentColor' })
+function Grip(props: SVGProps<SVGSVGElement>) {
+  return createElement(
+    'svg',
+    { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', ...props },
+    [9, 15].flatMap((cx) => [5.5, 12, 18.5].map((cy) => grip(cx, cy))),
+  )
+}
+
 export const ICONS = {
   work: TaskList,
   knowledge: Book,
@@ -79,6 +94,7 @@ export const ICONS = {
   chevron: NavArrowRight,
   chevronL: NavArrowLeft,
   chevronD: NavArrowDown,
+  chevronU: NavArrowUp,
   arrow: ArrowRight,
   close: Xmark,
   /** Back to an earlier point: a loop in the graph, a changed intent. */
@@ -96,6 +112,8 @@ export const ICONS = {
   square: Square,
   pencil: EditPencil,
   more: MoreDots,
+  /** A handle to drag something into another place by. */
+  grip: Grip,
   gear: Settings,
   file: Page,
   folder: Folder,
@@ -106,12 +124,16 @@ export const ICONS = {
   move: PageRight,
   tool: Tools,
   globe: Globe,
+  /** The computer is offline. */
+  offline: WifiOff,
   /** An MCP server. */
   plug: ServerConnection,
   agents: Community,
   copy: Copy,
   clip: Attachment,
   image: MediaImage,
+  /** light or dark */
+  theme: HalfMoon,
   think: LightBulb,
   list: List,
   quote: Quote,
@@ -119,7 +141,10 @@ export const ICONS = {
   lock: Lock,
   compress: Compress,
   up: ArrowUp,
+  /** When something happens on a schedule. */
   clock: Clock,
+  /** An automation: work that starts by itself. */
+  automation: ClockRotateRight,
   /** Keeps the Mac awake while work runs. */
   cup: CoffeeCup,
   /** How hard the computer works. */
@@ -133,6 +158,8 @@ export const ICONS = {
   /** Waits for something else to merge first. */
   after: GitMerge,
   external: OpenNewWindow,
+  /** Fetches something to this computer: an agent Althar can download. */
+  download: Download,
   pr: GitPullRequest,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 

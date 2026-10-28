@@ -111,16 +111,39 @@ const linesIn = (text: string) => (text === '' ? 0 : text.split('\n').length - (
  * where its worktree started, when that can't be told, as offline.
  */
 export const baseOf = (worktree: string, baseRef: string | null, started: string): Effect.Effect<string> =>
-  baseRef === null ? Effect.succeed(started) : git(worktree, 'merge-base', baseRef, 'HEAD').pipe(Effect.orElseSucceed(() => started))
+  baseRef === null
+    ? Effect.succeed(started)
+    : git(worktree, 'merge-base', baseRef, 'HEAD').pipe(
+        // Where it started after they meet, as a branch for a task's next pull request does (ADR-034), from there.
+        Effect.flatMap((met) =>
+          met === started
+            ? Effect.succeed(met)
+            : Effect.all([
+                git(worktree, 'merge-base', '--is-ancestor', met, started),
+                git(worktree, 'merge-base', '--is-ancestor', started, 'HEAD'),
+              ]).pipe(
+                Effect.as(started),
+                Effect.orElseSucceed(() => met),
+              ),
+        ),
+        Effect.orElseSucceed(() => started),
+      )
 
-/** The files git tracks that a task changed since `base`, committed or not: without reading any of them. Its three diffs run at once. */
-const trackedFiles = (worktree: string, base: string) =>
+/**
+ * The files git tracks that a task changed since `base`, committed or not:
+ * without reading any of them. Its three diffs run at once. With `head`, a
+ * commit, what changed between the two in a repository rather than a
+ * worktree, as for a task whose folder was removed (ADR-056): nothing is
+ * uncommitted there, and the working tree, the person's own, isn't read.
+ */
+const trackedFiles = (worktree: string, base: string, head?: string) =>
   Effect.gen(function* () {
+    const range = head === undefined ? [base] : [base, head]
     const [named, numbered, uncommitted] = yield* Effect.all(
       [
-        git(worktree, 'diff', '--name-status', '-z', '-M', base),
-        git(worktree, 'diff', '--numstat', '-z', '-M', base),
-        git(worktree, 'diff', '--name-only', '-z', 'HEAD'),
+        git(worktree, 'diff', '--name-status', '-z', '-M', ...range),
+        git(worktree, 'diff', '--numstat', '-z', '-M', ...range),
+        head === undefined ? git(worktree, 'diff', '--name-only', '-z', 'HEAD') : Effect.succeed(''),
       ],
       { concurrency: 'unbounded' },
     )
@@ -188,6 +211,10 @@ const newEntry = (path: string, content: NewFile): ChangedFile | null =>
 
 /** How many new files are looked at at once. */
 const NEW_FILES_AT_ONCE = 16
+
+/** The files a task changed between two commits in a repository, in path order: a task's whose folder was removed (ADR-056). */
+export const changedBetween = (repository: string, base: string, head: string): Effect.Effect<ReadonlyArray<ChangedFile>, unknown> =>
+  Effect.map(trackedFiles(repository, base, head), (files) => files.toSorted((a, b) => (a.path < b.path ? -1 : 1)))
 
 /** The files a task changed since `base`, committed or not, in path order. Git's lists are read at once, then the new files a few at a time. */
 export const changedFiles = (worktree: string, base: string): Effect.Effect<ReadonlyArray<ChangedFile>, unknown> =>
@@ -284,13 +311,15 @@ export const parseDiff = (text: string, limit = LINES_SHOWN): { readonly lines: 
   return { lines, truncated: false }
 }
 
-/** One file's diff, from the task's base to its worktree: only a file the task changed. */
-export const fileDiff = (worktree: string, base: string, path: string): Effect.Effect<FileDiff, unknown> =>
+/** One file's diff, from the task's base to its worktree, or with `head` to that commit in a repository: only a file the task changed. */
+export const fileDiff = (worktree: string, base: string, path: string, head?: string): Effect.Effect<FileDiff, unknown> =>
   Effect.gen(function* () {
     // A path inside the worktree, never one that climbs out of it or starts at the root.
     if (path === '' || path.startsWith('/') || path.split('/').includes('..'))
       return yield* new NotFound({ kind: 'changed file', id: path })
-    const known = (yield* trackedFiles(worktree, base)).find((candidate) => candidate.path === path)
+    const known = (yield* trackedFiles(worktree, base, head)).find((candidate) => candidate.path === path)
+    // Between two commits, in a repository, only what git tracks changed.
+    if (known === undefined && head !== undefined) return yield* new NotFound({ kind: 'changed file', id: path })
     if (known === undefined) {
       // Not one git tracks: a new file nobody has added yet, read as git would add it, or nothing the task changed.
       const listed = (yield* untrackedPaths(worktree, path)).includes(path)
@@ -314,6 +343,7 @@ export const fileDiff = (worktree: string, base: string, path: string): Effect.E
         context,
         '-M',
         base,
+        ...(head === undefined ? [] : [head]),
         '--',
         ...(known.from === null ? [path] : [known.from, path]),
       )

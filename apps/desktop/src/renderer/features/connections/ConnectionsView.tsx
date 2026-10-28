@@ -13,10 +13,11 @@ import { hostOf, hostsCode, SERVICES, serviceBrand, serviceName, serviceOf } fro
 /*
  * The code hosts and trackers Althar reaches for the person, drawn by the
  * kit: each service, who they are signed in as there, or the one press that
- * connects it. Connect, Sign in again and Add a server open the service's
- * walk in: where the host has a place for it (Settings narrows its panel to
- * the card, a dialog over a project holds it at the card's width), it opens
- * there; otherwise here, in place of the list.
+ * connects it. Connect, Sign in again, Add a server and Add a workspace
+ * (another of Linear's, beside the first, ADR-059) open the service's walk
+ * in: where the host has a place for it (a dialog over a project holds
+ * it at the card's width), it opens there; otherwise, as on the Settings
+ * tab, here, in place of the list.
  */
 
 export const text = {
@@ -64,11 +65,12 @@ export const servicesOf = (list: ConnectionList, { what = true }: { readonly wha
         brand: serviceBrand(service),
         ...(said === undefined ? {} : { what: said }),
         ...(products.some((product) => product.selfHosted) ? { selfHosted: true } : {}),
+        ...(products.some((product) => product.workspaces === true) ? { workspaces: true } : {}),
       },
     ]
   })
 
-/** The connections as the kit lists them, by service: who, and where, when it isn't the hosted service. */
+/** The connections as the kit lists them, by service: who, and where, when it isn't the hosted service, or in which workspace. */
 export const connectionsOf = (list: ConnectionList): ReadonlyArray<ServiceConnection> =>
   list.connections.map((connection) => {
     const product = list.products.find((option) => option.product === connection.product)
@@ -77,6 +79,7 @@ export const connectionsOf = (list: ConnectionList): ReadonlyArray<ServiceConnec
       service: product?.service ?? connection.product,
       account: connection.account.login,
       ...(connection.webUrl === product?.hostedUrl ? {} : { instance: connection.webUrl }),
+      ...(connection.workspace === undefined || connection.workspace === null ? {} : { workspace: connection.workspace.name }),
       ...(connection.state === 'reauth_required' ? { needsSignIn: true } : {}),
     }
   })
@@ -116,6 +119,10 @@ export function ConnectionsView({ model, columns = false, onConnect }: Connectio
       }}
       onAddServer={(service) => {
         if (isService(service)) open({ service, server: true })
+      }}
+      onAddWorkspace={(service) => {
+        // The same walk as the first: the sign-in picks the workspace, and one already connected is renewed, not doubled.
+        if (isService(service)) open({ service })
       }}
       onDisconnect={(connectionId) => void model.disconnect(connectionId)}
     />

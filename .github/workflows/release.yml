@@ -1,8 +1,9 @@
 name: release
 
 # Releases come from here (ADR-024, Linear DEV-81): a tag v<version> pushed on
-# a commit on main builds, signs and notarizes every platform, and leaves ONE
-# draft GitHub Release with all their files. A person publishes it on
+# a commit on main builds every platform, signs and notarizes the Mac's
+# (Windows' is unsigned for now, DEV-78), and leaves ONE draft GitHub
+# Release with all their files. A person publishes it on
 # GitHub; nothing reaches anyone before that. Run by hand on main, it makes
 # the same draft without a tag, which publishing then makes.
 #
@@ -29,10 +30,14 @@ concurrency:
 
 jobs:
   # What is released, checked before anyone is asked to approve: a tag that is v<apps/desktop's version>, on a commit on
-  # main, or a run by hand from main; release notes for the version; and no published release of it already.
+  # main, or a run by hand from main; release notes for the version; no published release of it already; and every
+  # suite passed on the commit.
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       version: ${{ steps.what.outputs.version }}
       tag: ${{ steps.what.outputs.tag }}
@@ -78,6 +83,18 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      # Main may be red between releases, a release may not: post-merge.yml, the heavy suites, has to have passed on this
+      # very commit. Merges in quick succession share a post-merge run, so a commit can have none of its own.
+      - name: The heavy suites passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed="$(gh run list --workflow post-merge.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq length)"
+          if [ "$passed" = 0 ]; then
+            echo "::error::post-merge hasn't passed on ${GITHUB_SHA::8}. Wait for its run, or start one" \
+              "(gh workflow run post-merge.yml --ref $GITHUB_REF_NAME), then re-run this."
+            exit 1
+          fi
 
   # Althar for Apple silicon: signed with the Developer ID, notarized, stapled and checked by bun run release, which
   # fails unless all of that holds (CI=true). On macOS 26 on Apple silicon, GitHub's standard runner, free for a public
@@ -158,7 +175,17 @@ jobs:
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: bun run release
+          # Usage data's PostHog project (src/main/usageData.ts), from the release environment's secrets; the key is public, as
+          # every PostHog project key is. A release made without them sends nothing, so it isn't made.
+          ALTHAR_POSTHOG_KEY: ${{ secrets.ALTHAR_POSTHOG_KEY }}
+          ALTHAR_POSTHOG_HOST: ${{ secrets.ALTHAR_POSTHOG_HOST }}
+          # Where Report a problem posts: the reports Worker (apps/report), baked into the build. Unset, a report goes by mail.
+          ALTHAR_REPORT_URL: ${{ secrets.ALTHAR_REPORT_URL }}
+        run: |
+          for name in ALTHAR_POSTHOG_KEY ALTHAR_POSTHOG_HOST ALTHAR_REPORT_URL; do
+            if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi
+          done
+          bun run release
       - name: Forget the certificate
         if: always()
         run: |
@@ -186,11 +213,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  # Linux packages, made on the supported platform and uploaded for the one draft below.
+  # Linux packages, made on the supported platform and uploaded for the one draft below. In the release environment for
+  # its PostHog and report secrets alone; it waits with the Mac's, so one approval lets both go.
   linux:
     needs: check
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    environment: release
     defaults:
       run:
         working-directory: apps/desktop
@@ -204,7 +233,16 @@ jobs:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
         working-directory: .
-      - run: bun run package
+      - name: Package
+        env:
+          ALTHAR_POSTHOG_KEY: ${{ secrets.ALTHAR_POSTHOG_KEY }}
+          ALTHAR_POSTHOG_HOST: ${{ secrets.ALTHAR_POSTHOG_HOST }}
+          ALTHAR_REPORT_URL: ${{ secrets.ALTHAR_REPORT_URL }}
+        run: |
+          for name in ALTHAR_POSTHOG_KEY ALTHAR_POSTHOG_HOST ALTHAR_REPORT_URL; do
+            if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi
+          done
+          bun run package
       - uses: actions/upload-artifact@v6
         with:
           name: release-linux
@@ -216,21 +254,68 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # The slot for Windows (DEV-78): the NSIS installer and latest.yml, signed in the release environment, uploaded as
-  # release-windows. Then add windows to the draft job's needs.
-  #
-  # windows:
-  #   needs: check
-  #   runs-on: windows-2025
-  #   environment: release
-  #   ...
-  #   - uses: actions/upload-artifact@v6
-  #     with: { name: release-windows, path: ..., if-no-files-found: error }
+  # Windows on x64: the NSIS installer, which installs for the person alone with no administrator's prompt, and
+  # latest.yml, the feed its updater reads. In the release environment for its PostHog and report secrets, and the
+  # signing secrets once there are some; it waits with the others, so one approval lets all three go.
+  windows:
+    needs: check
+    runs-on: windows-2025
+    timeout-minutes: 60
+    environment: release
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      # UNSIGNED FOR NOW (DEV-78): Windows' SmartScreen warns on the installer until it is signed. To sign, fill in the
+      # WINDOWS_SIGNING slot in apps/desktop/scripts/package.ts, add the secrets for one of these to the release
+      # environment, pass them to "Package" below, and drop this step, which stands in for it until then (it runs, and
+      # stops the release, only if the repository variable ALTHAR_WINDOWS_SIGNING is set to true before the slot is):
+      #   Azure Artifact Signing: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (an app registration with the
+      #     Artifact Signing Certificate Profile Signer role), ALTHAR_WIN_SIGNING_ENDPOINT (the account's region,
+      #     e.g. https://weu.codesigning.azure.net), ALTHAR_WIN_SIGNING_ACCOUNT, ALTHAR_WIN_SIGNING_PROFILE and
+      #     ALTHAR_WIN_PUBLISHER (the certificate's subject CN).
+      #   An OV certificate: WIN_CSC_LINK (the .pfx, base64), WIN_CSC_KEY_PASSWORD and ALTHAR_WIN_PUBLISHER.
+      - name: Sign (skipped until Althar has a Windows certificate)
+        if: ${{ vars.ALTHAR_WINDOWS_SIGNING == 'true' }}
+        run: |
+          echo "::error::ALTHAR_WINDOWS_SIGNING is on, but package.ts's WINDOWS_SIGNING slot isn't filled in yet."
+          exit 1
+      - name: Package
+        env:
+          ALTHAR_POSTHOG_KEY: ${{ secrets.ALTHAR_POSTHOG_KEY }}
+          ALTHAR_POSTHOG_HOST: ${{ secrets.ALTHAR_POSTHOG_HOST }}
+          ALTHAR_REPORT_URL: ${{ secrets.ALTHAR_REPORT_URL }}
+        run: |
+          for name in ALTHAR_POSTHOG_KEY ALTHAR_POSTHOG_HOST ALTHAR_REPORT_URL; do
+            if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi
+          done
+          bun run package
+      - name: Install, check and uninstall
+        run: bash scripts/windows-smoke.sh
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-windows
+          path: |
+            apps/desktop/out/dist/Althar-*-x64-setup.exe
+            apps/desktop/out/dist/Althar-*-x64-setup.exe.blockmap
+            apps/desktop/out/dist/latest.yml
+          if-no-files-found: error
+          retention-days: 14
 
   # ONE draft release for the version, with every platform's files: made, or brought up to date when a run is repeated.
   # It uses only the run's own token, so it needs no approval of its own. A person publishes the draft on GitHub.
   draft:
-    needs: [check, mac, linux]
+    needs: [check, mac, linux, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -268,4 +353,4 @@ jobs:
             gh release create "$TAG" release/* --draft --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes"
           fi
           echo "### Draft release $TAG" >> "$GITHUB_STEP_SUMMARY"
-          echo "$(gh release view "$TAG" --json url --jq .url). Smoke-test its dmg, then publish it there." >> "$GITHUB_STEP_SUMMARY"
+          echo "$(gh release view "$TAG" --json url --jq .url). Smoke-test its dmg and Windows installer, then publish it there." >> "$GITHUB_STEP_SUMMARY"

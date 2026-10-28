@@ -1,7 +1,7 @@
 import { modelName } from '@althar/contracts'
-import type { ConfigOption } from '@althar/provider-adapters'
+import { type ConfigOption, leftOf, tightestWindow, type UsageWindow, type WindowKind } from '@althar/provider-adapters'
 import type { ProjectId } from '@althar/domain'
-import { Context, Duration, Effect, Layer, Option, type Schema } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -20,10 +20,76 @@ import { SignIns } from './SignIns'
  * rules (Policies): move on (the default), to the agent's next account and
  * then the next free agent; wait for the reset; or ask the person, with who
  * could take it over.
+ *
+ * Before a limit is reached, the plan's windows as last read (PlanUsage) say
+ * how much room each account has: work starts on the account with the most,
+ * and an agent whose accounts are all nearly out (under NEARLY_OUT percent of
+ * their tightest window) is treated by the same rule for new steps. A step
+ * already running is never stopped for it.
  */
+
+/**
+ * An automation's run, which nobody watches, runs only on an account its
+ * agent's own status says a plan pays for: never per use, nor where the
+ * status can't tell, as Mistral Vibe's can't (docs/plans/automations.md).
+ */
+export class PlanOnly extends Schema.TaggedError<PlanOnly>()('PlanOnly', { message: Schema.String }) {}
+
+/** Why an automation's run can't run on these accounts, as its history and its task's thread say it. */
+export const planOnlyWords = (paidBy: ReadonlyArray<'plan' | 'key' | 'unknown'>) =>
+  paidBy.includes('unknown') || paidBy.length === 0
+    ? 'Althar can’t tell that its agent is on a plan, and automations run on a plan only for now.'
+    : 'Its agent pays per use, and automations run on a plan only for now.'
 
 /** How long an agent whose limit gave no reset time counts as out. */
 const UNKNOWN_RESET = Duration.hours(1)
+
+/** Under this share of its tightest window left, an account is nearly out: new steps go elsewhere, as the project's rule says. */
+export const NEARLY_OUT = 5
+
+/** How much room an account's plan has: its tightest window as last read. */
+export interface Room {
+  readonly agentId: string
+  readonly accountId: string
+  /** 0 to 100. */
+  readonly leftPercent: number
+  readonly resetsAt: string | null
+  readonly kind: WindowKind
+  /** The agent's name for the window, where it gave one: a model's. */
+  readonly label: string | null
+}
+
+/** A window as a sentence names it: "five-hour limit", "weekly Opus limit". */
+export const windowWords = (room: Pick<Room, 'kind' | 'label'>): string => {
+  const length = { five_hour: 'five-hour', weekly: 'weekly', monthly: 'monthly', other: '' }[room.kind]
+  const named = [length, room.label ?? ''].filter((word) => word !== '').join(' ')
+  return /\blimit$/i.test(named) ? named : `${named} limit`.trim()
+}
+
+/** How much an account has left, as a thread says it: "3% of its five-hour limit left, until 14:00", or without the reset. */
+export const roomWords = (room: Room, reset = true): string =>
+  `${Math.floor(room.leftPercent)}% of its ${windowWords(room)} left${!reset || room.resetsAt === null ? '' : `, until ${whenWords(room.resetsAt)}`}`
+
+/**
+ * What a thread says when a new step steers clear of an agent that is nearly
+ * out: who has how little left, until when, and what Althar does: who takes
+ * the step instead, or that it waits for the reset.
+ */
+export const lowWords = (input: {
+  readonly from: string
+  readonly room: Room
+  readonly step?: keyof typeof outStep
+  readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
+}): string => {
+  const step = input.step === undefined ? undefined : outStep[input.step]
+  const work = step?.work ?? 'the step'
+  if (input.to !== undefined)
+    return `${input.from} has ${roomWords(input.room)}, so ${input.to.agent} takes ${work} instead${
+      input.to.model === null ? '' : `, on ${input.to.model}`
+    }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
+  const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt)}`
+  return `${input.from} has ${roomWords(input.room, false)}, so ${work} ${step?.waits ?? 'waits'} ${back}. To carry on now, pick another model on the task.`
+}
 
 /** An account that is out: until its reset, if it said, and when it is tried again either way. */
 export interface Out {
@@ -45,22 +111,47 @@ export const whenWords = (iso: string, now: Date = new Date()): string => {
   return `${day}, ${time}`
 }
 
-/** What a thread says when an agent is out of usage: who, until when, and who takes the work over, or that it waits. */
+/** A step a usage limit stopped, as a thread says it: while it was at it, and the work that waits or moves. */
+export const outStep = {
+  implement: { during: 'while working on the task', work: 'the work', waits: 'waits' },
+  settle: { during: 'while fixing what the review found', work: 'the fixes', waits: 'wait' },
+  review: { during: 'during the review', work: 'the review', waits: 'waits' },
+} as const
+
+/**
+ * What a thread says when an agent is out of usage: who, on which step, until
+ * when, and what Althar does about it: who takes the work over, or that it
+ * waits, and, for a step, that the person can pick another model meanwhile.
+ */
 export const outWords = (input: {
   readonly from: string
   readonly resetsAt: string | null
+  /** The step it was on; none outside one. */
+  readonly step?: keyof typeof outStep
   /** Who takes over, on which model; `ownWork` where it is the other step's agent, so it reviews what it wrote. */
   readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
   readonly waits?: 'step' | 'message'
+  /** The project moves work on, but no other model was free to take it. */
+  readonly nothingFree?: boolean
 }): string => {
-  const out = `${input.from} reached its usage limit${input.resetsAt === null ? '' : `, until ${whenWords(input.resetsAt)}`}.`
+  const step = input.step === undefined ? undefined : outStep[input.step]
+  const out = `${input.from} ran out of usage${step === undefined ? '' : ` ${step.during}`}`
+  const back = input.resetsAt === null ? null : whenWords(input.resetsAt)
   if (input.to !== undefined)
-    return `${out} ${input.to.agent} takes over${input.to.model === null ? '' : `, on ${input.to.model}`}${
-      input.to.ownWork === true ? ', and reviews its own work' : ''
-    }.`
-  if (input.waits === undefined) return out
-  return `${out} ${input.waits === 'step' ? 'The step' : 'Your message'} waits until ${input.resetsAt === null ? 'it is back' : 'then'}.`
+    return `${out}${back === null ? '' : `, until ${back}`}. ${input.to.agent} takes ${step === undefined ? '' : `${step.work} `}over${
+      input.to.model === null ? '' : `, on ${input.to.model}`
+    }${input.to.ownWork === true ? ', and reviews its own work' : ''}.`
+  if (input.waits === undefined) return `${out}${back === null ? '' : `, until ${back}`}.`
+  const until = back === null ? `until ${input.from} is back` : `until ${back}, when ${input.from} is back`
+  if (input.waits === 'message') return `${out}. Your message waits ${until}.`
+  const waits = `${step?.work ?? 'the step'} ${step?.waits ?? 'waits'}`
+  return input.nothingFree === true
+    ? `${out}. No other model was free, so ${waits} ${until}. Pick one on the task to carry on now.`
+    : `${out}. ${capitalized(waits)} ${until}. To carry on now, pick another model on the task.`
 }
+
+/** Words that open a sentence. */
+export const capitalized = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
 
 type Failure = SqlError.SqlError | Schema.SchemaError
 
@@ -69,35 +160,60 @@ export class Limits extends Context.Service<
   {
     /**
      * Whether the agent is out now, and until when: every account work could
-     * run on (in the project, where given: its first, unless it rotates),
+     * run on (in the project, where given: its first, unless it rotates;
+     * on the thread, where given: of an automation's run, those on a plan),
      * the soonest back.
      */
-    out(agentId: string, projectId?: string): Effect.Effect<Option.Option<Out>, Failure>
+    out(agentId: string, projectId?: string, threadId?: string): Effect.Effect<Option.Option<Out>, Failure>
     /** Whether the project moves work on to the agent's next account when one runs out: the person's to turn on (ADR-012). */
     rotates(projectId: string): Effect.Effect<boolean, Failure>
     /** Whether an account is out now, and until when. */
     outAccount(accountId: string): Effect.Effect<Option.Option<Out>, SqlError.SqlError>
+    /** How much room an account's plan has, for a model where named: its tightest window as last read; none where nothing is read. */
+    room(accountId: string, model?: string): Effect.Effect<Option.Option<Room>, SqlError.SqlError>
+    /**
+     * Whether a new step on the agent should steer clear of it: every
+     * account work could run on here is out or nearly out, and one is only
+     * nearly out (one that is all out is `out`'s). The one with the most
+     * room left, to say how little; none where any has room, or isn't read.
+     * On the thread of an automation's run, only those on a plan count, as for `out`.
+     */
+    nearlyOut(agentId: string, projectId?: string, model?: string, threadId?: string): Effect.Effect<Option.Option<Room>, Failure>
     /**
      * The account a session on the agent runs on, of those the project
-     * allows: the one given; else the thread's own, while it can; else the
-     * first, in the person's order, that isn't signed out and, where the
-     * project rotates, isn't out of usage; else the first. Where it doesn't
+     * allows: the one given; else the thread's own, while it can and isn't
+     * nearly out; else, where the project rotates, the one with the most
+     * room that isn't signed out or out of usage (the person's order where
+     * none is read); where it doesn't, the first not signed out; else the
+     * first. Room is for the model where named, so a model's own window
+     * (Opus's week) counts. Where it doesn't
      * rotate, an account out of usage is still the one work runs on: its
      * limit is handled as the project says (move to another agent, or wait).
+     * A thread of an automation's run, or `planOnly`, runs only on an account
+     * on a plan, given or picked: none is PlanOnly.
      */
     pick(input: {
       readonly agentId: string
       readonly projectId?: string
       readonly threadId?: string
       readonly accountId?: string
-    }): Effect.Effect<Account, Failure | NotFound>
+      readonly model?: string
+      readonly planOnly?: boolean
+    }): Effect.Effect<Account, Failure | NotFound | PlanOnly>
     /**
      * The first agent free to take work over, besides those given: signed in
      * on a plan, not out, in the agents' order; one the work would rather not
-     * go to (the other step's) only if none else is free. An agent paid per
-     * use, on a key, is never moved to unasked: that spends the person's money.
+     * go to (the other step's) only if none else is free. One with room comes
+     * before one nearly out, which is taken only where `withRoom` isn't asked.
+     * An agent paid per use, on a key, is never moved to unasked: that spends
+     * the person's money.
      */
-    free(besides: ReadonlyArray<string>, rather?: ReadonlyArray<string>, projectId?: string): Effect.Effect<string | undefined, Failure>
+    free(
+      besides: ReadonlyArray<string>,
+      rather?: ReadonlyArray<string>,
+      projectId?: string,
+      withRoom?: boolean,
+    ): Effect.Effect<string | undefined, Failure>
     /**
      * Who could take over work a usage limit stopped, as the person picks
      * (the project's rule asks): every account of every agent the project
@@ -168,23 +284,76 @@ export class Limits extends Context.Service<
             : Option.none<Out>()
         })
 
+      /** An account's room, from the windows PlanUsage last kept for it: a window past its reset has started again. */
+      const roomOf = (account: Pick<Account, 'id' | 'agentId'>, model?: string) =>
+        Effect.gen(function* () {
+          const [reading] = yield* sql<{ windows: string }>`SELECT windows FROM plan_usage_readings WHERE account_id = ${account.id}`
+          if (reading === undefined) return Option.none<Room>()
+          const tightest = tightestWindow(JSON.parse(reading.windows) as ReadonlyArray<UsageWindow>, yield* Clock.currentTimeMillis, model)
+          return tightest === undefined
+            ? Option.none<Room>()
+            : Option.some<Room>({
+                agentId: account.agentId,
+                accountId: account.id,
+                leftPercent: leftOf(tightest),
+                resetsAt: tightest.resetsAt ?? null,
+                kind: tightest.kind,
+                label: tightest.label ?? null,
+              })
+        })
+
+      const nearly = (room: Option.Option<Room>) => Option.isSome(room) && room.value.leftPercent < NEARLY_OUT
+
+      /** Accounts with the most room first, for the model where named; one not read goes just above one nearly out, and the person's order breaks ties. */
+      const byRoom = (list: ReadonlyArray<Account>, model?: string) =>
+        Effect.gen(function* () {
+          const rooms = new Map<string, number>()
+          for (const account of list)
+            rooms.set(
+              account.id,
+              Option.match(yield* roomOf(account, model), { onNone: () => NEARLY_OUT, onSome: (room) => room.leftPercent }),
+            )
+          return list.toSorted((a, b) => (rooms.get(b.id) ?? 0) - (rooms.get(a.id) ?? 0))
+        })
+
       /** Whether the project moves work through an agent's accounts (ADR-012); without a project, as if it did. */
       const rotating = (projectId?: string) =>
         projectId === undefined
           ? Effect.succeed(true)
           : Effect.map(policies.current(projectId as ProjectId), ({ rules }) => accountsOf(rules).rotate)
 
+      /** Whether a thread is one of an automation's run's, whose sessions run on a plan only. */
+      const automated = (threadId: string | undefined) =>
+        threadId === undefined
+          ? Effect.succeed(false)
+          : Effect.map(
+              sql<{ one: number }>`
+                SELECT 1 AS one FROM threads h JOIN automation_occurrences o ON o.task_id = h.task_id WHERE h.id = ${threadId} LIMIT 1`,
+              (rows) => rows.length > 0,
+            )
+
+      /** Those of the accounts their agent's status says a plan pays for; none, PlanOnly, saying why. */
+      const onPlan = (list: ReadonlyArray<Account>) =>
+        Effect.gen(function* () {
+          const paidBy: Array<'plan' | 'key' | 'unknown'> = []
+          for (const account of list) paidBy.push((yield* signIns.account(account)).paidBy)
+          const kept = list.filter((_, index) => paidBy[index] === 'plan')
+          return kept.length > 0 ? kept : yield* new PlanOnly({ message: planOnlyWords(paidBy) })
+        })
+
       /**
        * The accounts work on the agent can run on here: those the project
-       * allows that aren't signed out. Where the project doesn't rotate, only
-       * the first of them, whose being out of usage puts the agent out.
+       * allows that aren't signed out, and, for an automation's run, are on a
+       * plan. Where the project doesn't rotate, only the first of them, whose
+       * being out of usage puts the agent out.
        */
-      const runnable = (agentId: string, projectId?: string) =>
+      const runnable = (agentId: string, projectId?: string, planOnly = false) =>
         Effect.gen(function* () {
           const rotate = yield* rotating(projectId)
           const found: Array<Account> = []
           for (const account of yield* allowed(agentId, projectId)) {
-            if ((yield* signIns.account(account)).status === 'signed_out') continue
+            const check = yield* signIns.account(account)
+            if (check.status === 'signed_out' || (planOnly && check.paidBy !== 'plan')) continue
             found.push(account)
             if (!rotate) break
           }
@@ -204,10 +373,10 @@ export class Limits extends Context.Service<
           return last?.model ?? null
         })
 
-      const out = (agentId: string, projectId?: string) =>
+      const out = (agentId: string, projectId?: string, threadId?: string) =>
         Effect.gen(function* () {
           const outs: Array<Out> = []
-          for (const account of yield* runnable(agentId, projectId)) {
+          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId))) {
             const found = yield* outOf(account)
             if (Option.isNone(found)) return Option.none<Out>()
             outs.push(found.value)
@@ -215,8 +384,26 @@ export class Limits extends Context.Service<
           return Option.fromUndefinedOr(outs.toSorted((a, b) => a.until.localeCompare(b.until))[0])
         })
 
+      const nearlyOut = (agentId: string, projectId?: string, model?: string, threadId?: string) =>
+        Effect.gen(function* () {
+          const low: Array<Room> = []
+          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId))) {
+            if (Option.isSome(yield* outOf(account))) continue
+            const room = yield* roomOf(account, model)
+            if (!nearly(room)) return Option.none<Room>()
+            low.push(Option.getOrThrow(room))
+          }
+          return Option.fromUndefinedOr(low.toSorted((a, b) => b.leftPercent - a.leftPercent)[0])
+        })
+
       return Limits.of({
         out,
+        nearlyOut,
+        room: (accountId, model) =>
+          accounts.get(accountId).pipe(
+            Effect.flatMap((account) => roomOf(account, model)),
+            Effect.catchTag('NotFound', () => Effect.succeed(Option.none<Room>())),
+          ),
         rotates: (projectId) => Effect.map(policies.current(projectId as ProjectId), ({ rules }) => accountsOf(rules).rotate),
         outAccount: (accountId) =>
           accounts.get(accountId).pipe(
@@ -225,12 +412,16 @@ export class Limits extends Context.Service<
           ),
         pick: (input) =>
           Effect.gen(function* () {
+            const planOnly = input.planOnly === true || (yield* automated(input.threadId))
             // One given is the agent's own: another agent's would sign it in as someone else.
             if (input.accountId !== undefined) {
               const given = yield* accounts.get(input.accountId)
-              return given.agentId === input.agentId ? given : yield* new NotFound({ kind: 'account', id: input.accountId })
+              if (given.agentId !== input.agentId) return yield* new NotFound({ kind: 'account', id: input.accountId })
+              if (planOnly) yield* onPlan([given])
+              return given
             }
-            const list = yield* allowed(input.agentId, input.projectId)
+            const all = yield* allowed(input.agentId, input.projectId)
+            const list = planOnly ? yield* onPlan(all) : all
             const rotate = yield* rotating(input.projectId)
             // One it can run on: not signed out, and, where the project rotates, not out of usage.
             const runs = (account: Account) =>
@@ -244,24 +435,29 @@ export class Limits extends Context.Service<
                 SELECT account_id FROM provider_sessions WHERE thread_id = ${input.threadId} AND agent_id = ${input.agentId}
                 ORDER BY started_at DESC LIMIT 1`
               const own = list.find((account) => account.id === last?.accountId)
-              if (own !== undefined && (yield* runs(own))) return own
+              if (own !== undefined && (yield* runs(own)) && !nearly(yield* roomOf(own, input.model))) return own
             }
-            for (const account of list) if (yield* runs(account)) return account
+            // Where it rotates, the one with the most room; where it doesn't, the first, in the person's order.
+            for (const account of rotate ? yield* byRoom(list, input.model) : list) if (yield* runs(account)) return account
             const [first] = list
             return first ?? (yield* new NotFound({ kind: 'account', id: input.agentId }))
           }),
-        free: (besides, rather = [], projectId) =>
+        free: (besides, rather = [], projectId, withRoom = false) =>
           Effect.gen(function* () {
             const candidates = agents.list.map((entry) => entry.definition.id).filter((agentId) => !besides.includes(agentId))
+            // The first nearly out, taken only where none has room.
+            let low: string | undefined
             // Those the work would rather not go to come last.
             for (const agentId of [...candidates.filter((id) => !rather.includes(id)), ...candidates.filter((id) => rather.includes(id))]) {
               // Another agent takes work over unasked only on an account its plan pays for.
               for (const account of yield* runnable(agentId, projectId)) {
                 if ((yield* signIns.account(account)).paidBy !== 'plan') continue
-                if (Option.isNone(yield* outOf(account))) return agentId
+                if (Option.isSome(yield* outOf(account))) continue
+                if (!nearly(yield* roomOf(account))) return agentId
+                low ??= agentId
               }
             }
-            return undefined
+            return withRoom ? undefined : low
           }),
         choices: (input) =>
           Effect.gen(function* () {

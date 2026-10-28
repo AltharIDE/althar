@@ -15,9 +15,8 @@ import { LoadPeek, loadPeekText, type LoadPeekText } from './LoadPeek'
  * the rest in ink. A step lights only once the load is well past it and
  * goes out only once it is well under, so the bar holds still through the
  * small changes a figure would twitch at. A full CPU draws its meter in full
- * ink. Memory macOS is short of draws that meter in full ink too, and says
- * so in a word beside it, since the steps can't: a Mac keeps memory full on
- * purpose. A click opens the peek (`LoadPeek`), which closes as one of its
+ * ink. Memory macOS is short of draws that meter in full ink too, since the steps
+ * can't say it: a Mac keeps memory full on purpose. A click opens the peek (`LoadPeek`), which closes as one of its
  * rows opens its work.
  */
 
@@ -47,7 +46,8 @@ const useSteps = (share: number) => {
   return steps
 }
 
-function Gauge({ name, lit, ours, full }: { name: string; lit: number; ours: number; full: boolean }) {
+/** One meter: its short name and five steps, Althar's part lit in cobalt, the rest in ink; in full ink when `full`. The plan gauge draws with it too. */
+export function Gauge({ name, lit, ours, full }: { name: string; lit: number; ours: number; full: boolean }) {
   return (
     <span className={cx(s.gauge, full && s.full)}>
       <span className={s.name}>{name}</span>
@@ -99,7 +99,6 @@ export function LoadMeter({
   const work = useSteps(load.work ?? 0)
   const memory = useSteps(load.memory)
   const workMemory = useSteps(load.workMemory ?? 0)
-  const short = strained(load.pressure) ? load.pressure : null
   return (
     <span className={cx(s.meter, className)} {...rest}>
       <Popover
@@ -114,7 +113,7 @@ export function LoadMeter({
         trigger={
           <button type="button" className={s.button} aria-label={t.label(percent(load.cpu), percent(load.memory))}>
             <Gauge name={t.cpuShort} lit={cpu} ours={work} full={cpu === STEPS} />
-            <Gauge name={t.memoryShort} lit={memory} ours={workMemory} full={short !== null} />
+            <Gauge name={t.memoryShort} lit={memory} ours={workMemory} full={strained(load.pressure)} />
           </button>
         }
       >
@@ -134,8 +133,6 @@ export function LoadMeter({
           text={t}
         />
       </Popover>
-      {/* An output is a live status: memory running short is read out as it is said. */}
-      <output className={s.strain}>{short !== null && t.pressure[short]}</output>
     </span>
   )
 }

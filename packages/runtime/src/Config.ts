@@ -4,14 +4,36 @@ import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
-import { adapterNode, agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
+import { adapterNode, agents, type AgentDefinition, type SessionOptions, type Transport, usingLocated } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
+import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
+
+/** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
+export interface Shot {
+  readonly url: string
+  readonly width: number
+  readonly height: number
+  /** The whole page, as tall as it is, not only what the viewport shows. */
+  readonly fullPage: boolean
+  /** A CSS selector: only the first element it finds. */
+  readonly selector: string | null
+  /** The origins of Althar's runs it may be of beside this computer's: a page it goes on to, by a redirect or itself, must be at one of them too (screenshots.ts, mayDraw). */
+  readonly origins: ReadonlyArray<string>
+}
+
+/** A screenshot taken: a PNG at 1×, as base64, its size, and the page's title. */
+export interface Screenshot {
+  readonly png: string
+  readonly width: number
+  readonly height: number
+  readonly title: string
+}
 
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
@@ -40,6 +62,12 @@ export interface RuntimeOptions {
   readonly probeRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
+  /**
+   * Takes a screenshot, headless, where something can draw a page: the
+   * desktop app's main process, with Chromium. It fails with why, in words
+   * for the agent. Without it, the screenshot tool says this Althar can't.
+   */
+  readonly screenshot?: (shot: Shot) => Effect.Effect<Screenshot, string>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */
@@ -54,6 +82,18 @@ export interface RuntimeOptions {
   readonly countdown?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /** When finished tasks' folders are first swept after Althar starts, and how often after: 2 minutes and an hour unless a test says otherwise (ADR-056). */
+  readonly foldersFirst?: Duration.Duration
+  readonly foldersEvery?: Duration.Duration
+  /** How full the disk a folder is on is read, in bytes: the system's own figures unless a test says, so none depends on the Mac it runs on. */
+  readonly disk?: (path: string) => Effect.Effect<{ readonly total: number; readonly free: number; readonly used: number } | null>
+  /**
+   * How long after a change's work comes back its pull request may show no checks before Althar takes it to have none: a
+   * host registers its checks a few seconds after a push. A minute unless a test says otherwise (ADR-040).
+   */
+  readonly checksAppear?: Duration.Duration
+  /** How long a change's checks may run, while Althar sees them through, before the change is the person's: 45 minutes unless a test says (ADR-041). */
+  readonly checksStuck?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
@@ -72,12 +112,65 @@ export interface RuntimeOptions {
   readonly stalls?: StallOptions
   /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */
   readonly modelFacts?: ModelFactsOptions
+  /**
+   * What each agent's process writes to stderr, as it comes, by agent and pid: the app keeps it in its log of agents. Without it,
+   * only the last few kilobytes are kept, for the error when an agent stops.
+   */
+  readonly agentStderr?: AgentStderr
   /** How this computer's load is read, and how often at most (`MachineLoad.ts`). */
   readonly load?: LoadOptions
+  /** How plan usage is read from each agent, and how often on its own (`PlanUsage.ts`). */
+  readonly usage?: PlanUsageOptions
   /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
   readonly setups?: SetupOptions
+  /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't (`leftRunning.ts`, `conflicts.ts`). */
+  readonly idle?: IdleOptions
   /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
   readonly busy?: BusyOptions
+  /** When automations run, and the clock and zone they are read by (`Automations.ts`). */
+  readonly automations?: AutomationOptions
+  /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
+  readonly connectivity?: ConnectivityOptions
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface AutomationOptions {
+  /** The time now, in epoch milliseconds: the wall clock's. */
+  readonly now?: () => number
+  /** The zone the computer is in now: its clock's. */
+  readonly zone?: () => string
+  /** How often the clock is looked at, besides whenever an automation changes: every 30 seconds. */
+  readonly tick?: Duration.Duration
+  /** How long a run the computer slept through, or Althar was closed for, waits after waking or launching: two minutes. */
+  readonly settle?: Duration.Duration
+  /** Whether each automation starts its few minutes after its time: yes. */
+  readonly stagger?: boolean
+  /** Pull requests a review automation lists at a time, reading back from the latest: 100, as many as GitHub gives at once. */
+  readonly listed?: number
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface ConnectivityOptions {
+  /** Whether a service answers at its address: whether a light request there gets any answer within five seconds. */
+  readonly answers?: (url: string) => Effect.Effect<boolean>
+  /** How long a step waits before each try again at a service that keeps failing while the computer is online: 15 s, 1 min, 4 min. */
+  readonly pauses?: ReadonlyArray<Duration.Duration>
+  /** How often a step waiting for the connection asks again whether its service answers, while the computer says it is online: 30 s. */
+  readonly every?: Duration.Duration
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface IdleOptions {
+  /** How long an agent must say nothing outside a turn, once what it left running ended, to be taken as done: 30 seconds. */
+  readonly quiet?: Duration.Duration
+  /** How long a round waits for a lead that is still at work before it judges the branch as it is: 45 minutes. */
+  readonly within?: Duration.Duration
+  /** How long an agent is given to wake once what it left running ended, before it speaks: five minutes. */
+  readonly wake?: Duration.Duration
+  /** How long after its turn ends a lead is given to report what it left running: two seconds. */
+  readonly reports?: Duration.Duration
+  /** How long a step's agent whose turn ended having done nothing at all is given before it is told to carry on: a minute. */
+  readonly blank?: Duration.Duration
 }
 
 export interface BusyOptions {
@@ -85,6 +178,22 @@ export interface BusyOptions {
   readonly machine?: Machine
   /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */
   readonly every?: Duration.Duration
+  /** How often the CPU of what agents left running is read, while any is: every 2 seconds. */
+  readonly sample?: Duration.Duration
+  /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
+  readonly quiet?: Duration.Duration
+  /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
+  readonly askGrace?: Duration.Duration
+  /** How many automations' tasks may be at work at once: one. */
+  readonly automations?: number
+  /**
+   * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
+   * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:
+   * read with `ps` from the agent's process, once a sample.
+   */
+  readonly cpuOf?: (
+    agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>,
+  ) => Effect.Effect<ReadonlyMap<string, ReadonlyMap<number, number> | null>>
 }
 
 export interface SetupOptions {
@@ -93,6 +202,9 @@ export interface SetupOptions {
   /** The shell it runs in, as a login shell: the person's own (`SHELL`) unless a test says otherwise. */
   readonly shell?: string
 }
+
+/** Called with what an agent's process writes to stderr. */
+export type AgentStderr = (agentId: string, chunk: string, pid: number) => void
 
 /** Each is the default unless a test says otherwise. */
 export interface StallOptions {
@@ -119,8 +231,12 @@ export class RuntimeConfig extends Context.Service<RuntimeConfig, RuntimeOptions
 /** An agent the runtime can start: its registry entry, and how to reach it from a working directory. */
 export interface AgentEntry {
   readonly definition: AgentDefinition
-  /** How to reach it from a working directory, with an account's home in its environment (ADR-012). */
-  readonly transport: (cwd: string, env?: Readonly<Record<string, string>>) => Transport
+  /**
+   * How to reach it from a working directory, with an account's home in its
+   * environment (ADR-012); `untrusted`, as the lead of a review of someone
+   * else's pull request, with what keeps that repository's config from running.
+   */
+  readonly transport: (cwd: string, env?: Readonly<Record<string, string>>, options?: SessionOptions) => Transport
 }
 
 /**
@@ -154,27 +270,49 @@ export class Agents extends Context.Service<
    * isn't passed on either (provider-adapters' process environment). Nor
    * are the MCP servers the person set up for an agent themselves, which
    * Codex and OpenCode would otherwise load beside Althar's (ownTools.ts).
+   * The lead of a review of someone else's pull request also starts with what
+   * its registry entry says keeps that repository's config, hooks and plugins
+   * from loading, and with git that takes no repository the pull request
+   * carries for its own (`readingUntrusted`).
    */
-  static readonly registry: Layer.Layer<Agents, never, Installs> = Layer.effect(
-    Agents,
-    Effect.gen(function* () {
-      const installs = yield* Installs
-      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition)))
-    }),
-  )
+  static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs> =>
+    Layer.effect(
+      Agents,
+      Effect.gen(function* () {
+        const installs = yield* Installs
+        // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
+        // line the person runs names the app that carries it (`usingLocated`).
+        return Agents.fromRegistry(
+          (definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID),
+          stderr,
+        )
+      }),
+    )
 
-  /** The registry's agents, each as `located` points its commands: at the person's own, or the copy Althar downloaded. */
-  static readonly fromRegistry = (located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition) => {
+  /**
+   * The registry's agents, each as `located` points its commands: at the person's own, or the copy Althar downloaded. What each
+   * process writes to stderr goes to `stderr`, where it is given.
+   */
+  static readonly fromRegistry = (
+    located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition,
+    stderr?: AgentStderr,
+  ) => {
     const signedOut = mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
     return Agents.from(
       Object.values(agents)
         .map(located)
         .map((definition) => ({
           definition,
-          transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
+          transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
             const spec = definition.launch(adapterNode())
             const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
-            return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } }, cwd }
+            const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
+            return {
+              _tag: 'Process' as const,
+              spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...held, ...env } },
+              cwd,
+              ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
+            }
           },
         })),
     )
@@ -191,6 +329,27 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
   GIT_CONFIG_VALUE_0: '',
   GIT_TERMINAL_PROMPT: '0',
 })
+
+/**
+ * What the environment of a review's lead adds to `withoutSignIns`' (whose
+ * one git setting it keeps), beside its agent's `reviewing.env`. Git reads
+ * none of the person's config or the system's: a filter, diff or merge
+ * driver defined there (`python -m nbstripout`, a textconv) would run on the
+ * pull request's files as the lead's `git status` or `git diff` reads them,
+ * in the copy, where it finds the pull request's own modules first; the
+ * copy is a repository of its own whose config defines none (`addReadCopy`).
+ * And git uses a bare repository only where it is named, never one it finds
+ * by itself: a pull request can carry one, under any name, whose config
+ * names a program for git to run (an external diff, a signature checker);
+ * `git -C` into it would run it.
+ */
+export const readingUntrusted: Readonly<Record<string, string>> = {
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_1: 'safe.bareRepository',
+  GIT_CONFIG_VALUE_1: 'explicit',
+}
 
 /** Crypto from the platform's Web Crypto, which Node and Electron both have. */
 export const WebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(
@@ -225,7 +384,7 @@ export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | nu
     execFile(
       tool,
       args,
-      { timeout: 10_000, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      { timeout: 10_000, windowsHide: true, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
       (error, stdout) => {
         const token = stdout.trim()
         if (error === null) return resume(Effect.succeed(/^\S{20,400}$/.test(token) ? token : null))

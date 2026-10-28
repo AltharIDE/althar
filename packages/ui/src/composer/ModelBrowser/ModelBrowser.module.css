@@ -19,6 +19,7 @@
   border: 1px solid var(--line-2);
   border-radius: 14px;
   overflow: hidden;
+  container-type: inline-size;
   box-shadow: var(--lift-dialog);
   color: var(--t-1);
   animation: in var(--fast) var(--ease);
@@ -107,14 +108,14 @@
   color: var(--t-2);
 }
 .railButton:hover {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 .railButton:active {
   background: var(--n-5);
 }
 .railButton[data-state='checked'] {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
   font-weight: 550;
 }
@@ -135,6 +136,7 @@
   min-width: 0;
   overflow-y: auto;
   padding: 4px 8px 8px;
+  container-type: inline-size;
 }
 .cols,
 .row {
@@ -166,7 +168,7 @@
 }
 .row:hover,
 .row:focus-within {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .use {
   display: flex;
@@ -182,7 +184,12 @@
 .use:focus-visible {
   outline-offset: -1.5px;
 }
+.use > :first-child {
+  min-width: 0;
+}
 .inUse {
+  flex: none;
+  white-space: nowrap;
   font-size: 10.5px;
   font-weight: 500;
   color: var(--t-3);
@@ -217,7 +224,7 @@
   opacity: 1;
 }
 .pin:hover {
-  background: var(--n-4);
+  background: var(--pressed-paper);
   color: var(--t-1);
 }
 .pin[aria-pressed='true'] {
@@ -225,6 +232,10 @@
 }
 .pin[aria-pressed='true'] svg {
   fill: currentColor;
+}
+/* switching off is the stop, outlined: filled it would read as a dot */
+.block[aria-pressed='true'] svg {
+  fill: none;
 }
 .empty {
   margin: 0;
@@ -264,4 +275,49 @@
 }
 .off .use > :first-child {
   opacity: 0.5;
+}
+
+/* Narrow, the table gives way before anything overlaps: the rail slims and then
+   goes, the context window goes and the agent keeps only its name, then the
+   agent goes, and last the default effort. */
+@container (max-width: 640px) {
+  .rail {
+    width: 150px;
+  }
+}
+@container (max-width: 520px) {
+  .rail {
+    display: none;
+  }
+}
+@container (max-width: 520px) {
+  .cols,
+  .row {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 104px 62px;
+  }
+  .cols > :nth-child(3),
+  .ctx,
+  .via span {
+    display: none;
+  }
+}
+@container (max-width: 440px) {
+  .cols,
+  .row {
+    grid-template-columns: minmax(0, 1fr) 104px 62px;
+  }
+  .cols > :nth-child(2),
+  .via {
+    display: none;
+  }
+}
+@container (max-width: 270px) {
+  .cols,
+  .row {
+    grid-template-columns: minmax(0, 1fr) 62px;
+  }
+  .cols > :nth-child(4),
+  .row > :nth-child(4) {
+    display: none;
+  }
 }

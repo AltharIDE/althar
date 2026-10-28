@@ -3,8 +3,8 @@ import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
 import { ProjectInk } from '../../foundations/ProjectMark/drawing'
-import { Button } from '../../primitives/Button/Button'
 import { States } from '../../storybook/States'
+import { RunButton, type RunTarget } from '../RunButton/RunButton'
 import type { WorkNeed } from '../WorkStatus/WorkStatus'
 import { type ProjectPart, ProjectFront } from './ProjectFront'
 
@@ -28,12 +28,11 @@ const NEEDS: WorkNeed[] = [
   { id: '416', kind: 'Ready to accept', title: 'Return 409 when a refund idempotency key is reused', meta: 'api #1191', onOpen: fn() },
 ]
 
-/* The way to its settings, as the app puts it there. */
-const SETTINGS = (
-  <Button size="small" variant="quiet" icon="gear">
-    Settings
-  </Button>
-)
+/* What it runs: its repository's own way, and Storybook beside it. */
+const RUNS: RunTarget[] = [
+  { id: 'dev', command: 'bun run dev', where: 'main', from: 'repository' },
+  { id: 'storybook', name: 'Storybook', command: 'bun --filter @althar/ui storybook', where: 'main', from: 'person' },
+]
 
 const meta = {
   title: 'Chrome/ProjectFront',
@@ -49,13 +48,12 @@ const meta = {
     inProgress: 3,
     last: 'PR 1184 merged 3h ago',
     parts: PARTS,
-    settings: SETTINGS,
   },
 } satisfies Meta<typeof ProjectFront>
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** How the project stands in a line, what it is made of under it, and its settings at the end. */
+/** How the project stands in a line, and what it is made of under it. */
 export const Standing: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -95,12 +93,12 @@ export const Quiet: Story = {
 }
 
 const runIt = fn()
-/** Where its repository says how it runs, its default branch runs from here, with no agent, before its settings. */
+/** What it runs sits at the end: one press runs its default branch, with no agent; the chevron has the rest. */
 export const Runs: Story = {
-  args: { run: { command: 'bun run dev', onRun: runIt } },
+  args: { run: <RunButton targets={RUNS} onRun={runIt} onStop={fn()} onOpen={fn()} onAdd={fn()} onEdit={fn()} /> },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Run bun run dev' }))
-    await expect(runIt).toHaveBeenCalledOnce()
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Run' }))
+    await expect(runIt).toHaveBeenCalledWith('dev')
   },
 }
 
@@ -141,9 +139,44 @@ export const Crowded: Story = {
       { id: 'ops', name: 'meridian-ops', brand: Brand.GitLab },
       PARTS[3] ?? { id: 'tracker', name: 'MER issues' },
     ],
-    run: { command: 'pnpm --filter api dev', onRun: fn() },
+    run: (
+      <RunButton
+        targets={[{ id: 'api', command: 'pnpm --filter api dev', where: 'main', from: 'repository' }]}
+        onRun={fn()}
+        onStop={fn()}
+        onOpen={fn()}
+        onAdd={fn()}
+        onEdit={fn()}
+      />
+    ),
   },
   decorators: [(Story) => <div style={{ width: 640 }}>{Story()}</div>],
+}
+
+/** What an agent kept to run is one long unnamed command: the button says its last part, cut short, and the project's name keeps its room. */
+export const LongRunCommand: Story = {
+  args: {
+    name: 'althar',
+    run: (
+      <RunButton
+        targets={[
+          {
+            id: 'long',
+            command:
+              'export PATH="$HOME/.bun/bin:$PATH"; unset ELECTRON_RUN_AS_NODE; P=$(pwd); cd apps/desktop && bun run build && cd "$P" && exec zypak-wrapper electron apps/desktop --no-sandbox',
+            where: 'main',
+            from: 'agent',
+          },
+        ]}
+        onRun={fn()}
+        onStop={fn()}
+        onOpen={fn()}
+        onAdd={fn()}
+        onEdit={fn()}
+      />
+    ),
+  },
+  decorators: [(Story) => <div style={{ width: 480 }}>{Story()}</div>],
 }
 
 /* A part that opens where it lives, as the app makes one. */
@@ -232,7 +265,15 @@ export const AllStates: Story = {
       cells={[
         { state: 'standing', node: <ProjectFront {...args} /> },
         { state: 'quiet', node: <ProjectFront {...args} yours={0} inProgress={0} /> },
-        { state: 'runs', node: <ProjectFront {...args} run={{ command: 'bun run dev', onRun: fn() }} /> },
+        {
+          state: 'runs',
+          node: (
+            <ProjectFront
+              {...args}
+              run={<RunButton targets={RUNS} onRun={fn()} onStop={fn()} onOpen={fn()} onAdd={fn()} onEdit={fn()} />}
+            />
+          ),
+        },
         ...[ProjectInk.Clay, ProjectInk.Moss, ProjectInk.Slate, ProjectInk.Umber].map((ink) => ({
           state: ink,
           node: <ProjectFront {...args} ink={ink} seed={ink} name={ink[0]?.toUpperCase() + ink.slice(1)} />,

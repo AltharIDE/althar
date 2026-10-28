@@ -9,7 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Agents, Connectors, withoutSignIns } from '../src/Config'
+import { Agents, Connectors, readingUntrusted, withoutSignIns } from '../src/Config'
 import { Connections, NotConnected, pageOf, SignInUnavailable } from '../src/Connections'
 import { CliUnanswered, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
@@ -380,6 +380,53 @@ describe('a connection', () => {
       assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
     }).pipe(Effect.provide(withGitHub(fetch, { secrets })))
   })
+
+  it.live(
+    'needs signing in again when the keychain can no longer open the sealed token, and says so rather than that it is unreachable',
+    () => {
+      const { fetch } = stub([user])
+      // The keychain answers, and the key it holds doesn't open what was sealed with another: main says the secret is unreadable.
+      let lost = false
+      const kept = new Map<string, string>()
+      const secrets = Layer.succeed(
+        Secrets,
+        Secrets.of({
+          set: (name, value) => Effect.sync(() => void kept.set(name, value)),
+          get: (name) =>
+            lost
+              ? Effect.fail(
+                  new SecretsUnavailable({
+                    reason: 'Error while decrypting the ciphertext provided to safeStorage.decryptString.',
+                    unreadable: true,
+                  }),
+                )
+              : Effect.sync(() => kept.get(name) ?? null),
+          remove: (name) => Effect.sync(() => void kept.delete(name)),
+        }),
+      )
+      return Effect.gen(function* () {
+        const connections = yield* Connections
+        const instance = yield* Instance
+        const sql = yield* SqlClient.SqlClient
+        const connection = yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId })
+        lost = true
+        const { host } = yield* connections.adapters(connection.id)
+        const error = yield* Effect.flip(host?.account ?? Effect.void)
+        assert.deepInclude(error, { _tag: 'ConnectorFailed', reason: 'unauthorized' })
+        assert.notInclude(String((error as { message?: string }).message), 'safeStorage')
+        assert.strictEqual((yield* connections.list)[0]?.state, 'reauth_required')
+        const [fact] = yield* sql<{
+          type: string
+        }>`SELECT type FROM record_events WHERE aggregate_type = 'connection' ORDER BY sequence DESC LIMIT 1`
+        assert.strictEqual(fact?.type, 'connection.reauth_required')
+        // A repository there knows the sign-in stopped, and signing in again, with a key that opens, makes it ready.
+        assert.deepInclude((yield* connections.placeOf('git@github.com:meridian/api.git'))?.connection, { state: 'reauth_required' })
+        lost = false
+        yield* connections.connectToken({ product: 'github', token: 't2', actorId: instance.personId })
+        assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
+      }).pipe(Effect.provide(withGitHub(fetch, { secrets })))
+    },
+  )
 
   it.live('offers the browser sign-in only where Althar’s app is registered', () => {
     const github = makeFakeService()
@@ -979,8 +1026,11 @@ describe('where sign-ins are kept', () => {
       assert.strictEqual(yield* secrets.get('conn_1'), '{"token":"ghp newer"}')
       // What is on disk is sealed, and only this user may read it.
       assert.notInclude(readFileSync(join(folder, 'conn_1'), 'utf8'), 'ghp')
-      assert.strictEqual(statSync(join(folder, 'conn_1')).mode & 0o777, 0o600)
-      assert.strictEqual(statSync(folder).mode & 0o777, 0o700)
+      // Windows keeps no such modes: its folders under the person's profile are theirs alone already.
+      if (process.platform !== 'win32') {
+        assert.strictEqual(statSync(join(folder, 'conn_1')).mode & 0o777, 0o600)
+        assert.strictEqual(statSync(folder).mode & 0o777, 0o700)
+      }
       assert.deepStrictEqual(readdirSync(folder), ['conn_1'])
       yield* secrets.remove('conn_1')
       yield* secrets.remove('conn_1')
@@ -1018,13 +1068,15 @@ describe('where sign-ins are kept', () => {
     // The app, busy for as many asks as the test says, then answering; or with no keyring at all.
     let busy = 0
     let keyring = true
+    let unreadable = false
     let asked = 0
     const unanswered = () => Effect.fail(new SecretsUnavailable({ reason: 'Althar’s keychain didn’t answer.' }))
     const none = () => Effect.fail(new SecretsUnavailable({ reason: 'Install and start a keyring.', keyring: true }))
+    const gone = () => Effect.fail(new SecretsUnavailable({ reason: 'Error while decrypting the ciphertext.', unreadable: true }))
     const answer = <A>(then: () => Effect.Effect<A, SecretsUnavailable>) =>
       Effect.suspend(() => {
         asked += 1
-        return !keyring ? none() : busy-- > 0 ? unanswered() : then()
+        return !keyring ? none() : unreadable ? gone() : busy-- > 0 ? unanswered() : then()
       })
     const flaky: Sealer = {
       seal: (value) => answer(() => sealer().seal(value)),
@@ -1039,6 +1091,12 @@ describe('where sign-ins are kept', () => {
       // Busy for longer than that, it says so.
       busy = 3
       assert.strictEqual((yield* Effect.flip(secrets.get('conn_1'))).reason, 'Althar’s keychain didn’t answer.')
+      // A secret the keychain can't open any more is lost, not late: asked once, and said at once.
+      unreadable = true
+      asked = 0
+      assert.deepInclude(yield* Effect.flip(secrets.get('conn_1')), { unreadable: true })
+      assert.strictEqual(asked, 1)
+      unreadable = false
       // No keyring to keep it: asked once, and said at once.
       keyring = false
       asked = 0
@@ -1089,6 +1147,44 @@ describe('the agents', () => {
       assert.strictEqual(env.CODEX_HOME, home)
     }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
+
+  it.effect('start a review’s lead with nothing of the repository’s config loading, each as its registry entry says', () =>
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const cwd = mkdtempSync(join(tmpdir(), 'althar-cwd-'))
+      const envOf = (agentId: string, untrusted: boolean) => {
+        const transport = agents.list
+          .find((entry) => entry.definition.id === agentId)
+          ?.transport(cwd, { CODEX_HOME: mkdtempSync(join(tmpdir(), 'althar-codex-home-')) }, untrusted ? { untrusted } : undefined)
+        return transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
+      }
+      for (const agentId of ['claude-code', 'codex', 'opencode']) {
+        // Git's credential helper stays reset beside it.
+        assert.deepInclude(envOf(agentId, true), { ...readingUntrusted, GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '' })
+        assert.strictEqual(envOf(agentId, false).GIT_CONFIG_COUNT, '1')
+      }
+      assert.deepStrictEqual(JSON.parse(envOf('codex', true).CODEX_CONFIG ?? '{}'), { web_search: 'disabled', 'features.hooks': false })
+      assert.isUndefined(envOf('codex', false).CODEX_CONFIG)
+      assert.strictEqual(envOf('opencode', true).OPENCODE_DISABLE_PROJECT_CONFIG, '1')
+      assert.isFalse(JSON.parse(envOf('opencode', true).OPENCODE_CONFIG_CONTENT ?? '{}').lsp)
+      assert.isUndefined(envOf('opencode', false).OPENCODE_DISABLE_PROJECT_CONFIG)
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
+  )
+
+  it('leave a review’s lead’s git out of a bare repository the pull request carries, unless it is named', () => {
+    // A repository a pull request could carry under any name, whose config names a program for git to run.
+    const folder = mkdtempSync(join(tmpdir(), 'althar-carried-'))
+    spawnSync('git', ['init', '-q', '--bare', 'fixtures.git'], { cwd: folder })
+    const git = (env: Readonly<Record<string, string>>) =>
+      spawnSync('git', ['-C', 'fixtures.git', 'rev-parse', '--git-dir'], {
+        cwd: folder,
+        env: { PATH: process.env.PATH ?? '', HOME: folder, GIT_CONFIG_NOSYSTEM: '1', ...withoutSignIns(folder), ...env },
+      })
+    assert.strictEqual(git({}).status, 0)
+    const refused = git(readingUntrusted)
+    assert.notStrictEqual(refused.status, 0)
+    assert.include(refused.stderr.toString(), 'safe.bareRepository')
+  })
 
   it('leave git with no credential helper to ask, whatever the person set', () => {
     // The person's git hands out a password to whoever asks. The system's config is left out, so the real keychain isn't asked.

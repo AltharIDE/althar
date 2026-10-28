@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
 
-import { agents } from '../src/registry'
+import { agents, type Contained } from '../src/registry'
+import { SECRET_PLACES, secretReadRules } from '../src/secrets'
 
 describe('the agent registry', () => {
   it('ships every bundled adapter where it says', () => {
@@ -15,10 +16,84 @@ describe('the agent registry', () => {
 
   it('never starts an agent in a mode that skips asking', () => {
     for (const agent of Object.values(agents)) {
-      assert.notMatch(agent.modes.ask, /bypass|full-access|yolo/i, agent.id)
+      // One with no mode asks by what its session's meta holds it to, and has none for reading either.
+      if (agent.modes.ask === null) {
+        assert.isDefined(agent.sessionMeta, agent.id)
+        assert.isNull(agent.modes.reader, agent.id)
+        continue
+      }
+      for (const mode of [agent.modes.ask, agent.modes.reader])
+        assert.notMatch(mode ?? '', /bypass|full-access|yolo|autopilot|auto-approve|accept-edits|\bauto\b/i, agent.id)
       // codex-acp's `agent` mode answers its own requests with an automatic reviewer.
       assert.notStrictEqual(`${agent.id}:${agent.modes.ask}`, 'codex:agent')
       assert.notStrictEqual(agent.modes.ask, agent.modes.readOnly)
+    }
+  })
+
+  it('keeps off, for every session, what would have the later agents approve without asking', () => {
+    const { copilot, junie, grok } = agents
+    assert.deepStrictEqual(copilot.options.held, { allow_all: 'off' })
+    assert.deepStrictEqual(junie.options.held, { brave_mode: 'off' })
+    assert.deepStrictEqual(grok.sessionMeta?.(), { yoloMode: false, autoMode: false })
+    assert.deepStrictEqual(grok.sessionMeta?.('reader'), { yoloMode: false, autoMode: false })
+    assert.includeMembers([...agents['qwen-code'].launch('/usr/bin/node').args], ['--approval-mode', 'default'])
+    assert.deepInclude(agents['mistral-vibe'].launch('/usr/bin/node').env ?? {}, {
+      VIBE_DEFAULT_AGENT: 'ask',
+      VIBE_BYPASS_TOOL_PERMISSIONS: 'false',
+      VIBE_SMART_APPROVE_DEFAULT: 'false',
+    })
+    assert.deepInclude(copilot.launch('/usr/bin/node').env ?? {}, { COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' })
+    assert.deepInclude(junie.launch('/usr/bin/node').env ?? {}, { JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false' })
+    // Antigravity's mode is held where it asks, as its others approve without asking.
+    assert.deepStrictEqual(agents.antigravity.options.held, { mode: 'default' })
+    // None is launched with a flag that approves.
+    for (const agent of [copilot, junie, grok, agents.kimi, agents['mistral-vibe'], agents['qwen-code'], agents.antigravity])
+      for (const arg of agent.launch('/usr/bin/node').args)
+        assert.notMatch(arg, /allow|yolo|autopilot|brave|approve|skip-permissions/i, agent.id)
+  })
+
+  it('sends the later agents only Althar’s own commands, as one of theirs turns their asking off', () => {
+    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code', 'antigravity'] as const)
+      assert.strictEqual(agents[id].commands, 'althar', id)
+    for (const id of ['claude-code', 'codex', 'opencode'] as const) assert.isUndefined(agents[id].commands, id)
+  })
+
+  it('gives one account to an agent whose sign-in isn’t its folder’s own', () => {
+    const one = Object.values(agents)
+      .filter((agent) => agent.home.accounts === 'one')
+      .map((agent) => agent.id)
+    assert.deepStrictEqual(one, ['copilot', 'junie', 'mistral-vibe'])
+  })
+
+  it('leads no review of a pull request, and judges no permission, on an agent its session can’t hold to reading', () => {
+    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code', 'antigravity'] as const) {
+      assert.isUndefined(agents[id].reviewing, id)
+      assert.isUndefined(agents[id].permissionJudge, id)
+    }
+  })
+
+  it('runs Antigravity’s server as Google’s registry launches it, its sign-in its home’s own, with no browser and a temporary folder of its own', () => {
+    const spec = agents.antigravity.launch('/usr/bin/node')
+    assert.strictEqual(spec.command, 'agy_acp_server.par')
+    assert.deepStrictEqual(spec.args, process.platform === 'linux' ? ['--uid='] : [])
+    assert.deepStrictEqual(spec.env, { AGY_ACP_FORCE_FILE_STORAGE: '1', PYTHONUNBUFFERED: '1', BROWSER: 'true' })
+    assert.isTrue(spec.privateTemp)
+    // Every role in the mode that asks, and what it asks the person never answered by the rules.
+    assert.deepStrictEqual(agents.antigravity.modes, { ask: 'default', readOnly: null, reader: 'default' })
+    assert.strictEqual(agents.antigravity.permissions.questions, 'interaction_')
+    for (const agent of Object.values(agents).filter((entry) => entry.id !== 'antigravity')) assert.isUndefined(agent.permissions.questions)
+  })
+
+  it('downloads Antigravity’s server only from Google, at one version, each archive and both its programs pinned, and none for Windows', () => {
+    const download = agents.antigravity.cli?.download
+    if (download === undefined || !('version' in download)) return assert.fail('Antigravity has a pinned download')
+    assert.strictEqual(download.version, '1.3.0')
+    assert.deepStrictEqual(Object.keys(download.assets).sort(), ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'])
+    for (const [platform, asset] of Object.entries(download.assets)) {
+      assert.match(asset.url, /^https:\/\/dl\.google\.com\/agy-extensions\/releases\/(macos|linux)\/agy-acp-server-1\.3\.0-/, platform)
+      assert.match(asset.sha256, /^[0-9a-f]{64}$/, platform)
+      assert.deepStrictEqual(Object.keys(asset.files).sort(), ['agy_acp_server.par', 'localharness_external'], platform)
+      for (const sha256 of Object.values(asset.files)) assert.match(sha256, /^[0-9a-f]{64}$/, platform)
     }
   })
 
@@ -43,6 +118,23 @@ describe('the agent registry', () => {
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash', 'Edit', 'Write'])
   })
 
+  it('denies every Claude Code session reading where the person keeps keys and sign-ins', () => {
+    type Meta = { claudeCode: { options: { settings: { permissions: { deny?: Array<string> } } } } }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    for (const [role, options] of [
+      ['lead', {}],
+      ['reader', {}],
+      ['reader', { offline: true }],
+      ['reader', { untrusted: true }],
+    ] as const) {
+      const deny = (metaOf(role, options) as Meta).claudeCode.options.settings.permissions.deny ?? []
+      assert.includeMembers(deny, ['Read(~/.ssh/**)', 'Read(~/.aws/**)', 'Read(~/.npmrc)'], role)
+      assert.includeMembers(deny, secretReadRules() as Array<string>, role)
+    }
+    assert.lengthOf(secretReadRules(), SECRET_PLACES.length * 2)
+  })
+
   it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {
     type Sandbox = { network?: { allowLocalBinding?: boolean } }
     const sandboxOf = (role?: 'reader') =>
@@ -50,6 +142,52 @@ describe('the agent registry', () => {
         .settings.sandbox
     assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true })
     assert.isUndefined(sandboxOf('reader').network)
+  })
+
+  it('runs a Claude Code lead’s known commands outside its sandbox, and lets it reach the known hosts, and a reader neither', () => {
+    type Sandbox = {
+      autoAllowBashIfSandboxed: boolean
+      allowUnsandboxedCommands: boolean
+      excludedCommands?: Array<string>
+      network?: { allowLocalBinding?: boolean; allowedDomains?: Array<string> }
+    }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const sandboxOf = (role: 'lead' | 'reader', options?: Parameters<typeof metaOf>[1]) =>
+      (metaOf(role, options) as { claudeCode: { options: { settings: { sandbox: Sandbox; permissions: { ask: Array<string> } } } } })
+        .claudeCode.options.settings
+    const upFront = { commands: ['bunx playwright', 'bun run test:e2e', 'env -i'], hosts: ['github.com', 'registry.npmjs.org'] }
+    const lead = sandboxOf('lead', { sandbox: upFront })
+    // Each by the whole command and by how it starts, as Claude Code's settings take them.
+    assert.deepStrictEqual(lead.sandbox.excludedCommands, [
+      'bunx playwright',
+      'bunx playwright *',
+      'bun run test:e2e',
+      'bun run test:e2e *',
+      'env -i',
+      'env -i *',
+    ])
+    assert.deepStrictEqual(lead.sandbox.network, { allowLocalBinding: true, allowedDomains: ['github.com', 'registry.npmjs.org'] })
+    // A command outside the sandbox still asks, and meets Althar's rules: nothing else changes.
+    assert.include(lead.permissions.ask, 'Bash')
+    assert.isTrue(lead.sandbox.autoAllowBashIfSandboxed)
+    // Without known commands or hosts, the settings say nothing of them.
+    const plain = sandboxOf('lead', { sandbox: { commands: [], hosts: [] } }).sandbox
+    assert.isUndefined(plain.excludedCommands)
+    assert.deepStrictEqual(plain.network, { allowLocalBinding: true })
+    // A reader is given neither, whatever it is passed.
+    const reader = sandboxOf('reader', { sandbox: upFront }).sandbox
+    assert.isUndefined(reader.excludedCommands)
+    assert.isUndefined(reader.network)
+    // Only Claude Code takes them: Codex and OpenCode have nowhere to put them, and the rest aren't known to.
+    assert.deepStrictEqual(
+      Object.values(agents)
+        .filter((agent) => agent.upFront === true)
+        .map((agent) => agent.id),
+      ['claude-code'],
+    )
+    assert.isUndefined(agents.codex.sessionMeta)
+    assert.isUndefined(agents.opencode.sessionMeta)
   })
 
   it('makes Claude Code a reader: its edits denied, and every command asking', () => {
@@ -63,6 +201,150 @@ describe('the agent registry', () => {
     assert.includeMembers(meta.claudeCode.options.settings.permissions.deny, ['Edit', 'Write'])
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash'])
     assert.isFalse(meta.claudeCode.options.settings.sandbox.autoAllowBashIfSandboxed)
+  })
+
+  it('makes an offline Claude Code reader deny its web tools, and still ask for every command', () => {
+    type Meta = { claudeCode: { options: { settings: { permissions: { deny?: Array<string>; ask: Array<string> } } } } }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const permissionsOf = (role: 'lead' | 'reader', options?: { offline?: boolean }) =>
+      (metaOf(role, options) as Meta).claudeCode.options.settings.permissions
+    const offline = permissionsOf('reader', { offline: true })
+    assert.includeMembers(offline.deny ?? [], ['Edit', 'Write', 'WebFetch', 'WebSearch'])
+    assert.deepStrictEqual(offline.ask, ['Bash'])
+    // A reader with the network keeps asking for its fetches, which Althar's reader rules allow.
+    assert.notInclude(permissionsOf('reader').deny ?? [], 'WebFetch')
+    assert.include(permissionsOf('reader', { offline: false }).ask, 'WebFetch')
+    // A lead is never offline this way: the option is a reader's.
+    assert.include(permissionsOf('lead', { offline: true }).ask, 'WebFetch')
+  })
+
+  it('makes Claude Code a review’s lead with no settings file and no hooks, keeping its reader rules and sandbox', () => {
+    type Options = {
+      settingSources?: Array<string>
+      settings: {
+        disableAllHooks?: boolean
+        permissions: { deny: Array<string>; ask: Array<string> }
+        sandbox: { enabled: boolean; autoAllowBashIfSandboxed: boolean }
+      }
+    }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const optionsOf = (options?: { offline?: boolean; untrusted?: boolean }) =>
+      (metaOf('reader', options) as { claudeCode: { options: Options } }).claudeCode.options
+    for (const offline of [false, true]) {
+      const untrusted = optionsOf({ untrusted: true, offline })
+      // Neither the repository's settings (its hooks, its allow rules) nor the person's own allow rules load.
+      assert.deepStrictEqual(untrusted.settingSources, [])
+      assert.isTrue(untrusted.settings.disableAllHooks)
+      assert.deepStrictEqual(untrusted.settings.permissions, optionsOf({ offline }).settings.permissions)
+      assert.deepInclude(untrusted.settings.sandbox, { enabled: true, autoAllowBashIfSandboxed: false })
+    }
+    // The coordinator and a reviewer read the person's own code, with their settings, as before.
+    assert.isUndefined(optionsOf().settingSources)
+    assert.isUndefined(optionsOf().settings.disableAllHooks)
+    // A lead's session is never untrusted this way: the option is a review's lead's.
+    assert.isUndefined((metaOf('lead', { untrusted: true }) as { claudeCode: { options: Options } }).claudeCode.options.settingSources)
+  })
+
+  it('holds the coordinator’s Claude Code to its folder: commands run sandboxed without asking, writing only there, with no network', () => {
+    type Options = {
+      settingSources?: Array<string>
+      settings: {
+        disableAllHooks?: boolean
+        permissions: { deny: Array<string>; ask: Array<string> }
+        sandbox: {
+          enabled: boolean
+          autoAllowBashIfSandboxed: boolean
+          allowUnsandboxedCommands: boolean
+          failIfUnavailable: boolean
+          network?: Record<string, unknown>
+          filesystem?: Record<string, unknown>
+        }
+      }
+    }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const optionsOf = (options: { contained?: Contained; untrusted?: boolean; offline?: boolean }) =>
+      (metaOf('reader', options) as { claudeCode: { options: Options } }).claudeCode.options
+    const folder = '/work/meridian/.coordinator'
+    const reads = { allowed: [folder, '/work/meridian/.coordinator-mirrors', '/home/dana/.bun'], denied: ['/home/dana', '/work/meridian'] }
+    const contained = optionsOf({ contained: { folder, reads } })
+    // Only where its sandbox can start: there, failing to start it fails the session rather than running commands without it.
+    const starts = process.platform === 'darwin' || (process.platform === 'linux' && process.env.FLATPAK_ID === undefined)
+    if (!starts || contained.settings.sandbox.autoAllowBashIfSandboxed === false) {
+      assert.deepStrictEqual(contained, optionsOf({}))
+      return
+    }
+    assert.deepStrictEqual(contained.settings.sandbox, {
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      failIfUnavailable: true,
+      network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false, allowAllUnixSockets: false },
+      // It writes only its folder, and reads none of the home folder or the person's checkouts but what it is given back.
+      filesystem: { allowWrite: [folder], denyRead: reads.denied, allowRead: reads.allowed },
+    })
+    // No settings file loads, the person's or the repository's, and no hook runs: none of their allow rules or sandbox exemptions
+    // lets a command out, and none of their hooks runs beside it.
+    assert.deepStrictEqual(contained.settingSources, [])
+    assert.isTrue(contained.settings.disableAllHooks)
+    // Its edit tools and the person's keys stay denied; no command asks, as each runs in the sandbox.
+    assert.includeMembers(contained.settings.permissions.deny, ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', ...secretReadRules()])
+    assert.notInclude(contained.settings.permissions.ask, 'Bash')
+    // A review's lead never gets it, whatever it is passed: it reads a repository it doesn't trust.
+    for (const options of [
+      { contained: { folder, reads }, untrusted: true },
+      { contained: { folder, reads }, untrusted: true, offline: true },
+    ]) {
+      const held = optionsOf(options)
+      assert.include(held.settings.permissions.ask, 'Bash', JSON.stringify(options))
+      assert.isFalse(held.settings.sandbox.autoAllowBashIfSandboxed)
+    }
+  })
+
+  it('reviews a pull request from outside only on an agent its session holds to reading', () => {
+    assert.isTrue(agents['claude-code'].reviewing?.outside)
+    assert.isTrue(agents.opencode.reviewing?.outside)
+    // codex-acp starts every turn on its mode's approval policy, on-request: what its sandbox contains runs without asking.
+    assert.isFalse(agents.codex.reviewing?.outside)
+  })
+
+  it('turns Codex’s web search and hooks off for a review’s lead, beside the person’s MCP servers switched off', () => {
+    const env = agents.codex.reviewing?.env
+    if (env === undefined) return assert.fail('Codex has a review environment')
+    const own = { CODEX_CONFIG: JSON.stringify({ 'mcp_servers.github.command': 'npx', 'mcp_servers.github.enabled': false }) }
+    assert.deepStrictEqual(JSON.parse(env(own).CODEX_CONFIG ?? '{}'), {
+      'mcp_servers.github.command': 'npx',
+      'mcp_servers.github.enabled': false,
+      web_search: 'disabled',
+      'features.hooks': false,
+    })
+    assert.deepStrictEqual(JSON.parse(env({}).CODEX_CONFIG ?? '{}'), { web_search: 'disabled', 'features.hooks': false })
+  })
+
+  it('keeps the repository’s config, plugins and language servers out of an OpenCode review’s lead, and asks for its web search', () => {
+    const env = agents.opencode.reviewing?.env
+    if (env === undefined) return assert.fail('OpenCode has a review environment')
+    const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask' }
+    const own = {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
+        experimental: { continue_loop_on_deny: true },
+        mcp: { github: { enabled: false } },
+      }),
+    }
+    const held = env(own)
+    assert.strictEqual(held.OPENCODE_DISABLE_PROJECT_CONFIG, '1')
+    assert.deepStrictEqual(JSON.parse(held.OPENCODE_CONFIG_CONTENT ?? '{}'), {
+      permission: asks,
+      agent: { build: { permission: asks }, plan: { permission: asks } },
+      experimental: { continue_loop_on_deny: true },
+      mcp: { github: { enabled: false } },
+      lsp: false,
+    })
+    // Without the person's servers to switch off, from its usual config.
+    assert.deepInclude(JSON.parse(env({}).OPENCODE_CONFIG_CONTENT ?? '{}'), { lsp: false, permission: asks })
   })
 
   it('in a Flatpak, a reader’s commands run without the sandbox and every one asks, as no sandbox can start there', () => {

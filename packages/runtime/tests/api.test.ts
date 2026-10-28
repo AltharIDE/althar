@@ -2,11 +2,18 @@ import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, win32 } from 'node:path'
+import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
-import { AgentExited, AgentRequestFailed, AgentStartFailed, OptionUnavailable, TurnInProgress } from '@althar/provider-adapters'
+import {
+  type AgentDefinition,
+  AgentExited,
+  AgentRequestFailed,
+  AgentStartFailed,
+  OptionUnavailable,
+  TurnInProgress,
+} from '@althar/provider-adapters'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
@@ -35,12 +42,13 @@ import { NotConnected } from '../src/Connections'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
-import { Connectors, type RuntimeOptions } from '../src/Config'
+import { type AgentEntry, Agents, Connectors, type RuntimeOptions } from '../src/Config'
+import { type Failure, Failures } from '../src/Failures'
 import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 
-import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY } from './support'
+import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY, ROOMY_DISK } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
@@ -59,6 +67,8 @@ const connected = (
     readonly editors?: RuntimeOptions['editors']
     /** The machine how many agents are at work at once comes from: a large one unless a test says. */
     readonly machine?: { readonly cores: number; readonly memory: number }
+    /** The agents, where a test changes one: the fake ones otherwise. */
+    readonly agents?: Layer.Layer<Agents>
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -70,7 +80,7 @@ const connected = (
         worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
         appVersion: '0.0.0-test',
         deviceName: 'Test Mac',
-        agents: fakeAgents({}, options.signedOut),
+        agents: options.agents ?? fakeAgents({}, options.signedOut),
         secrets: Secrets.memory(),
         connectors: options.connectors ?? fakeConnectors({}),
         accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
@@ -81,6 +91,10 @@ const connected = (
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
         busy: { machine: options.machine ?? ROOMY },
+        // A roomy disk, so no finished task's folder goes for the Mac running the tests being full.
+        disk: () => Effect.succeed(ROOMY_DISK),
+        // A pull request with no checks has none: no test waits for a host to show them.
+        checksAppear: Duration.zero,
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
@@ -92,6 +106,30 @@ const connected = (
     /** Reads or writes the runtime's store directly, for what no client does. */
     const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
     return { client, grant, store, context }
+  })
+
+/** The fake agents, with one of them changed: to make what Althar asks of it fail. */
+const agentsWith = (agentId: string, change: (definition: AgentDefinition) => AgentDefinition) =>
+  Layer.effect(
+    Agents,
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const changed = (entry: AgentEntry): AgentEntry =>
+        entry.definition.id === agentId ? { ...entry, definition: change(entry.definition) } : entry
+      return Agents.of({ list: agents.list.map(changed), get: (id) => Effect.map(agents.get(id), changed) })
+    }),
+  ).pipe(Layer.provide(fakeAgents()))
+
+/** What the runtime reports it kept or couldn't do, from now on, as the desktop app hears it. */
+const reported = <R>(context: Context.Context<R>) =>
+  Effect.gen(function* () {
+    const heard: Array<Failure> = []
+    yield* Effect.forkScoped(
+      Stream.runForEach(Context.get(context, Failures).events, (failure) => Effect.sync(() => void heard.push(failure))),
+    )
+    // Listening before anything is said.
+    yield* Effect.sleep('20 millis')
+    return heard
   })
 
 const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
@@ -179,7 +217,7 @@ describe('the API', () => {
         assert.deepInclude(shot?.content.pictures[0], { mediaType: 'image/png', width: 480, height: 300, unkept: null })
         const wrote = tools.find((item) => item.content.files.some((file) => file.how === 'wrote'))
         const path = wrote?.content.files[0]?.path ?? ''
-        assert.isTrue(path.endsWith('/docs/notes.md'))
+        assert.match(path, /[/\\]docs[/\\]notes\.md$/)
         const document = yield* client.ReadDocument({ threadId: task.threadId, path })
         assert.deepStrictEqual([document.lines, document.body.startsWith('# Notes')], [8, true])
         assert.deepStrictEqual((yield* client.ReadDocument({ threadId: task.threadId, path: 'docs/notes.md' })).body, document.body)
@@ -302,19 +340,20 @@ describe('the API', () => {
         const [live] = (yield* Fiber.join(streamed)) as ReadonlyArray<WatchEvent>
         assert.strictEqual(live?._tag === 'Streaming' ? live.threadId : undefined, task.threadId)
 
-        // A page of the newest, then the one before it, and one item by id.
+        // A page of the newest, reaching back to the start of its round, what the person said; then the one before it, and one item by id.
         const newest = yield* client.GetThread({ threadId: task.threadId, limit: 1 })
-        assert.deepStrictEqual(texts(newest), ['Hello'])
+        assert.deepStrictEqual(texts(newest), ['hello', 'Hello'])
         assert.isTrue(newest.earlier)
         const before = yield* client.GetThread({ threadId: task.threadId, before: newest.items[0]?.sequence ?? 0, limit: 1 })
-        assert.deepStrictEqual(texts(before), ['hello'])
+        assert.isTrue(texts(before).every((text) => text?.startsWith('echo: You are working on a task') === true))
+        assert.isFalse(before.earlier)
         // What the agent already has can't be taken back.
         assert.strictEqual(
-          (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: before.items[0]?.id ?? '' }))).message,
+          (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: newest.items[0]?.id ?? '' }))).message,
           "The agent already has that message, so it can't be taken back.",
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
-        const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[0]?.id ?? '' })
+        const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[1]?.id ?? '' })
         assert.deepStrictEqual(reply.content, { text: 'Hello', pictures: [], files: [] })
 
         // A tool call keeps what the thread shows: the files it touched, not its raw input and output.
@@ -370,9 +409,156 @@ describe('the API', () => {
         assert.deepStrictEqual(usage, { _tag: 'Context', threadId: task.threadId, used: 1200, size: 200_000 })
         const full = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (value) => value.session?.context != null)
         assert.deepStrictEqual(full.session?.context, { used: 1200, size: 200_000 })
+        // The plan windows the agent reports with its usage reach the account's usage as the window watches, and each model's room.
+        const watched = yield* Effect.forkChild(
+          Stream.runCollect(
+            Stream.take(
+              Stream.filter(
+                client.Watch({}),
+                (event) => event._tag === 'PlanUsage' && event.usage.accounts.some((account) => account.windows.length > 0),
+              ),
+              1,
+            ),
+          ),
+        )
+        yield* Effect.sleep('50 millis')
+        yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.planUsage, disposition: 'after_current' })
+        const [told] = (yield* Fiber.join(watched)) as ReadonlyArray<WatchEvent>
+        assert.strictEqual(told?._tag, 'PlanUsage')
+        const plan = yield* client.GetPlanUsage({})
+        const windows = plan.accounts.find((account) => account.agentId === 'codex' && account.windows.length > 0)?.windows
+        assert.deepStrictEqual(
+          windows?.map((window) => [window.kind, window.usedPercent]),
+          [
+            ['five_hour', 82],
+            ['weekly', 40],
+          ],
+        )
+        // The account work on a Codex model would start on has 18% of its five hours left, as the pickers show it.
+        const rooms = (yield* client.GetModelRooms({})).filter((room) => room.agentId === 'codex')
+        assert.isAbove(rooms.length, 0)
+        for (const room of rooms) assert.deepStrictEqual([room.kind, room.leftPercent, room.several], ['five_hour', 18, false])
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
         assert.isNull((yield* client.GetThread({ threadId: task.threadId })).session)
+      }),
+    ),
+  )
+
+  it.live('says which agents more accounts can be added to: none whose sign-in every folder shares', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({ ...definition, home: { ...definition.home, accounts: 'one' } })),
+        })
+        const status = yield* client.Status({})
+        assert.deepStrictEqual(
+          status.agents.map((agent) => [agent.id, agent.addsAccounts]),
+          [
+            ['claude-code', true],
+            ['codex', false],
+            ['opencode', true],
+          ],
+        )
+      }),
+    ),
+  )
+
+  it.live('keeps a failed account check to that account, shows the rest as they are, and reports it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, context } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({
+            ...definition,
+            signIn: {
+              ...definition.signIn,
+              status: () => {
+                throw new Error('Codex’s status command is not there')
+              },
+            },
+          })),
+        })
+        const heard = yield* reported(context)
+        const status = yield* client.Status({ recheck: true })
+        assert.deepStrictEqual(
+          status.agents.map((agent) => [agent.id, agent.signIn, agent.accounts.map((account) => account.signIn), agent.problem]),
+          [
+            ['claude-code', 'signed_in', ['signed_in'], null],
+            ['codex', 'unknown', ['unknown'], null],
+            ['opencode', 'signed_in', ['signed_in'], null],
+          ],
+        )
+        const [failure] = yield* eventually(
+          Effect.sync(() => heard),
+          (list) => list.length > 0,
+        )
+        assert.deepInclude(failure, {
+          where: 'Status.account',
+          agent: 'codex',
+          name: 'Error',
+          message: 'Codex’s status command is not there',
+        })
+        assert.include(failure?.stack ?? '', 'Codex’s status command is not there')
+      }),
+    ),
+  )
+
+  it.live('says an agent it couldn’t check on that agent alone, and the others as they are', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, context } = yield* connected({
+          agents: agentsWith('opencode', (definition) =>
+            Object.defineProperty({ ...definition }, 'cli', {
+              get: () => {
+                throw new TypeError('No command for OpenCode')
+              },
+            }),
+          ),
+        })
+        const heard = yield* reported(context)
+        const status = yield* client.Status({})
+        const [claude, codex, opencode] = status.agents
+        assert.deepStrictEqual([claude?.signIn, claude?.problem, codex?.signIn, codex?.problem], ['signed_in', null, 'signed_in', null])
+        assert.deepInclude(opencode, { id: 'opencode', signIn: 'unknown', accounts: [], version: null, installed: true, download: null })
+        assert.strictEqual(opencode?.problem, "Althar couldn't check Fake opencode. Its log has the details.")
+        const [failure] = yield* eventually(
+          Effect.sync(() => heard),
+          (list) => list.some((each) => each.where === 'Status.agent'),
+        )
+        assert.deepInclude(failure, { where: 'Status.agent', agent: 'opencode', name: 'TypeError', message: 'No command for OpenCode' })
+      }),
+    ),
+  )
+
+  it.live('reports a call that failed for no reason of the person’s by the call’s name, and not one they can put right', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Even what stands in for an agent it couldn't check fails: the call does, at its edge.
+        const { client, context } = yield* connected({
+          agents: agentsWith('codex', (definition) =>
+            Object.defineProperty({ ...definition }, 'signIn', {
+              get: () => {
+                throw new RangeError('Codex has no sign-in')
+              },
+            }),
+          ),
+        })
+        const heard = yield* reported(context)
+        const error = yield* Effect.flip(client.Status({}))
+        assert.deepStrictEqual([error.reason, error.message], ['Unknown', "Althar's runtime couldn't do that. Its log has the details."])
+        const failures = yield* eventually(
+          Effect.sync(() => heard),
+          (list) => list.some((each) => each.where === 'Status'),
+        )
+        assert.deepInclude(
+          failures.find((each) => each.where === 'Status'),
+          { where: 'Status', agent: null, name: 'RangeError', message: 'Codex has no sign-in' },
+        )
+        // Something the person can put right is theirs to see, never reported.
+        const before = heard.length
+        assert.strictEqual((yield* Effect.flip(client.ReadOutput({ threadId: 'thr_none', itemId: 'itm_none' }))).reason, 'NotFound')
+        yield* Effect.sleep('50 millis')
+        assert.strictEqual(heard.length, before)
       }),
     ),
   )
@@ -421,6 +607,39 @@ describe('the API', () => {
     ),
   )
 
+  it.live('says when the turn running started, which the wait for its first word is counted from, and when it ended', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
+        const sent = Date.now()
+        yield* client.Send({
+          commandId: commandId(),
+          threadId,
+          body: 'Why is checkout slow? [answers-after:1s]',
+          disposition: 'after_current',
+        })
+        const thinking = yield* eventually(
+          client.GetCoordinator({ projectId: project.id }),
+          (snapshot) => snapshot.session?.turnRunning === true,
+        )
+        const started = Date.parse(thinking.session?.turnStartedAt ?? '')
+        assert.isAtLeast(started, sent)
+        assert.isAtMost(started, Date.now())
+        // Before its first turn ends, none has.
+        assert.isNull(thinking.session?.turnEndedAt)
+        const answered = yield* eventually(
+          client.GetCoordinator({ projectId: project.id }),
+          (snapshot) => snapshot.session !== null && !snapshot.session.turnRunning,
+        )
+        assert.isNull(answered.session?.turnStartedAt)
+        // Between turns, when the last ended: what was said before it has been answered.
+        assert.isAtLeast(Date.parse(answered.session?.turnEndedAt ?? ''), started)
+      }),
+    ),
+  )
+
   it.live('asks the person, and takes their answer', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -458,6 +677,8 @@ describe('the API', () => {
         // What the person turned down says so.
         const deploy = after.items.find((item) => item.kind === 'tool_call')
         assert.isTrue(deploy?.kind === 'tool_call' && deploy.content.declined)
+        // ...and who did, and what they said.
+        assert.deepInclude(deploy?.kind === 'tool_call' ? deploy.content : {}, { declinedBy: 'person', declinedWhy: 'Not today' })
       }),
     ),
   )
@@ -480,6 +701,49 @@ describe('the API', () => {
         assert.strictEqual(missing.reason, 'NotFound')
         const gone = yield* Effect.flip(client.GetProjectNotes({ projectId: 'proj_gone' }))
         assert.strictEqual(gone.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live("says a project's note in the person's words, as the coordinator then reads it, within a note's bounds", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, context } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const access = { role: 'coordinator' as const, projectId: project.id, threadId: 'none', sessionId: 'none', taskId: null }
+        yield* callTool(access, 'keep_note', { note: 'Issue drafts need an approval card.' }).pipe(Effect.provideContext(context))
+        const [note] = yield* client.GetProjectNotes({ projectId: project.id })
+        const noteId = note?.id ?? ''
+        yield* client.EditProjectNote({
+          commandId: commandId(),
+          projectId: project.id,
+          noteId,
+          body: '  Issue drafts need an approval card,\n on every tracker. ',
+        })
+        // Kept as one line, by whoever kept it first, and the coordinator reads the new words.
+        assert.deepInclude((yield* client.GetProjectNotes({ projectId: project.id }))[0], {
+          id: noteId,
+          body: 'Issue drafts need an approval card, on every tracker.',
+          keptBy: 'coordinator',
+        })
+        assert.include(yield* callTool(access, 'list_notes').pipe(Effect.provideContext(context)), 'on every tracker.')
+        // Empty or too long, it says so and stays as it was.
+        const empty = yield* Effect.flip(client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: ' ' }))
+        assert.strictEqual(empty.reason, 'NoteRefused')
+        const long = yield* Effect.flip(
+          client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: 'x'.repeat(301) }),
+        )
+        assert.match(long.message, /at most 300 characters/)
+        assert.strictEqual(
+          (yield* client.GetProjectNotes({ projectId: project.id }))[0]?.body,
+          'Issue drafts need an approval card, on every tracker.',
+        )
+        // A dropped one can't be changed.
+        yield* client.DropProjectNote({ commandId: commandId(), projectId: project.id, noteId })
+        const dropped = yield* Effect.flip(
+          client.EditProjectNote({ commandId: commandId(), projectId: project.id, noteId, body: 'Again.' }),
+        )
+        assert.strictEqual(dropped.message, "That note isn't there any more.")
       }),
     ),
   )
@@ -601,14 +865,14 @@ describe('the API', () => {
         const refused = yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this Mac's PATH."],
+          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this computer's PATH."],
         )
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.deepStrictEqual(thread.items.at(-1)?.content, {
           source: 'runtime',
           severity: 'error',
           title: "Fake missing couldn't start.",
-          description: "althar-no-such-agent isn't installed, or isn't on this Mac's PATH.",
+          description: "althar-no-such-agent isn't installed, or isn't on this computer's PATH.",
         })
         assert.strictEqual(
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,
@@ -744,6 +1008,34 @@ describe('settings, through the API', () => {
     ),
   )
 
+  it.live('posts the team’s reviews without asking only once the person turns it on, and takes review drafts’ commands', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.isFalse((yield* client.GetSettings({})).postTeamReviews)
+        yield* client.SetPostTeamReviews({ commandId: commandId(), on: true })
+        assert.isTrue((yield* client.GetSettings({})).postTeamReviews)
+        yield* client.SetPostTeamReviews({ commandId: commandId(), on: false })
+        assert.isFalse((yield* client.GetSettings({})).postTeamReviews)
+        // A draft that isn't there is said so, whichever the command.
+        const draftId = `rdr_${'0'.repeat(32)}`
+        for (const refused of [
+          client.ChangeReviewDraft({
+            commandId: commandId(),
+            draftId,
+            verdict: 'comment',
+            summary: 'x',
+            comments: [{ id: 'c1', kept: false }],
+          }),
+          client.ChangeReviewDraft({ commandId: commandId(), draftId }),
+          client.PostReviewDraft({ commandId: commandId(), draftId }),
+          client.DiscardReviewDraft({ commandId: commandId(), draftId }),
+        ])
+          assert.strictEqual((yield* Effect.flip(refused)).reason, 'NotFound')
+      }),
+    ),
+  )
+
   it.live('says how many agents this Mac runs at once and why, takes the person’s number at once, and goes back to the default', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -763,6 +1055,66 @@ describe('settings, through the API', () => {
         yield* client.SetAgentsAtOnce({ commandId: commandId(), count: null })
         assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 4, own: null, machine })
         assert.deepStrictEqual(yield* kept, [])
+      }),
+    ),
+  )
+})
+
+describe('finished tasks’ folders, through the API', () => {
+  it.live('keeps when they go, lists one with its size, removes it by hand, and brings it back as it opens in an editor', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<string> = []
+        const { client, grant, store } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (_editor, folder) => Effect.sync(() => void opens.push(folder)).pipe(Effect.as(true)),
+          },
+        })
+        assert.strictEqual((yield* client.GetSettings({})).folderWait, 'smart')
+        yield* client.SetFolderWait({ commandId: commandId(), wait: 'never' })
+        assert.strictEqual((yield* client.GetSettings({})).folderWait, 'never')
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
+        const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
+        execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'Retry'], {
+          cwd: worktree,
+        })
+        yield* store(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) =>
+              sql`UPDATE tasks SET state = 'done', settled_at = ${new Date(Date.now() - 86_400_000).toISOString()} WHERE id = ${task.id}`,
+          ),
+        )
+        const listed = yield* eventually(client.GetTaskFolders({}), (folders) => !folders.measuring && folders.folders.length === 1)
+        assert.deepStrictEqual(
+          listed.folders.map((folder) => [folder.taskId, folder.threadId, folder.title, folder.kind, folder.held]),
+          [[task.id, task.threadId, 'Add a retry', 'merged', null]],
+        )
+        assert.isTrue((listed.folders[0]?.bytes ?? 0) > 0)
+        assert.isNotNull(listed.disk)
+        const removed = yield* client.RemoveTaskFolder({ commandId: commandId(), taskId: task.id, seen: null })
+        assert.strictEqual(removed.failed, 0)
+        assert.isFalse(existsSync(worktree))
+        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).task.folder, 'removed')
+        assert.deepStrictEqual((yield* client.CleanUpFolders({ commandId: commandId() })).failed, 0)
+        // Opened in an editor, it comes back first, and counts as opened.
+        assert.isTrue(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed' }))
+        assert.isTrue(existsSync(worktree))
+        assert.strictEqual(opens.length, 1)
+        const opened = yield* store(
+          Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ openedAt: string | null }>`SELECT opened_at FROM tasks WHERE id = ${task.id}`),
+        )
+        assert.isNotNull(opened[0]?.openedAt)
+        const items = (yield* client.GetThread({ threadId: task.threadId })).items
+        assert.deepStrictEqual(
+          items.flatMap((item) => (item.kind === 'notice' && item.content.role === 'folder' ? [item.content.title.split(' · ')[0]] : [])),
+          ['You removed its folder', 'Folder back from its branch'],
+        )
+        // Opened today, it is held back.
+        const again = yield* eventually(client.GetTaskFolders({}), (folders) => folders.folders.length === 1)
+        assert.strictEqual(again.folders[0]?.held?.why, 'opened')
       }),
     ),
   )
@@ -795,6 +1147,7 @@ describe('project rules, through the API', () => {
           projectId: project.id,
           revision: 1,
           permissions: 'rules',
+          allowEverything: false,
           alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
           never: [],
           alwaysAllow: [],
@@ -807,6 +1160,13 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          changeIssues: false,
+          // A repository with no packages, on no host: only what every lead runs outside its sandbox.
+          sandbox: {
+            commands: ['ps', 'env -i'],
+            hosts: [],
+            edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
+          },
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
@@ -847,6 +1207,20 @@ describe('project rules, through the API', () => {
             { codex: ['acc_x'] },
           ],
         )
+        // What leads' sandboxes let through, changed in part: a list given is kept whole, tidied, and the other stays.
+        const reached = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          // Never a wildcard: the rules couldn't check each host under it.
+          sandbox: { hosts: { added: ['https://Registry.Acme.dev/npm', 'not a host', '*.acme.dev'], removed: [] } },
+        })
+        assert.deepStrictEqual(reached.sandbox.hosts, ['registry.acme.dev'])
+        const trimmed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          sandbox: { commands: { added: ['bunx  playwright *'], removed: ['env -i'] } },
+        })
+        assert.deepStrictEqual([trimmed.sandbox.commands, trimmed.sandbox.hosts], [['ps', 'bunx playwright'], ['registry.acme.dev']])
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(
@@ -854,8 +1228,22 @@ describe('project rules, through the API', () => {
           [null, null, true, ['force-push'], true],
         )
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
+        // Allow everything is a switch over the mode (ADR-043): the mode is kept under it, and holds again once it is off.
+        const allowing = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          permissions: 'coordinator',
+          allowEverything: true,
+        })
+        assert.deepStrictEqual([allowing.permissions, allowing.allowEverything], ['coordinator', true])
+        const off = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, allowEverything: false })
+        assert.deepStrictEqual([off.permissions, off.allowEverything], ['coordinator', false])
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+        const noTask = yield* Effect.flip(
+          client.SetTaskAllowEverything({ commandId: commandId(), taskId: 'task_missing', allowEverything: true }),
+        )
+        assert.strictEqual(noTask.reason, 'NotFound')
       }),
     ),
   )
@@ -994,6 +1382,77 @@ describe('editors, through the API', () => {
       }),
     ),
   )
+
+  it.live('finds, reads and opens the code an agent names: a task’s in its worktree, the coordinator’s on the default branch', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<[string, string, string | null, number | null]> = []
+        const { client, grant } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (editor, folder, file, line) => Effect.sync(() => void opens.push([editor, folder, file, line])).pipe(Effect.as(true)),
+          },
+        })
+        const folder = realpathSync(repository())
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry later' })
+        const worktree = realpathSync((yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? '')
+        mkdirSync(join(worktree, 'src'))
+        writeFileSync(join(worktree, 'src', 'retry.ts'), 'export function retryLater() {\n  return 1\n}\n')
+
+        // The lead's names, in its worktree as it is: what it hasn't committed, and a name in code it declared there.
+        const named = yield* client.FindCode({
+          threadId: task.threadId,
+          messages: [{ names: ['src/retry.ts:2', 'retry.ts', 'README.md', 'retryLater', 'npm test'] }],
+        })
+        assert.deepStrictEqual(
+          [named.place.kind, named.place.repositories.length, named.place.repositories[0]?.branch.startsWith('althar/')],
+          ['task', 1, true],
+        )
+        assert.deepStrictEqual(
+          named.messages[0]?.found.map((found) => (found.kind === 'file' ? [found.path, found.line, found.changed] : [found.kind])),
+          [
+            ['src/retry.ts', 2, { add: 3, del: 0 }],
+            ['src/retry.ts', undefined, { add: 3, del: 0 }],
+            ['README.md', undefined, null],
+            ['src/retry.ts', 1, { add: 3, del: 0 }],
+          ],
+        )
+        assert.deepInclude(yield* client.ReadCode({ threadId: task.threadId, path: 'src/retry.ts' }), { from: 1, total: 3, cut: false })
+        assert.strictEqual(
+          (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path: '../outside.ts' }))).message,
+          "That file isn't there any more.",
+        )
+        assert.isTrue(
+          yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: 'src/retry.ts', line: 2 }),
+        )
+        // A file that isn't there opens its folder alone; one out of it, nothing.
+        assert.isTrue(
+          yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: 'src/gone.ts', line: 4 }),
+        )
+        assert.isFalse(yield* client.OpenCode({ commandId: commandId(), threadId: task.threadId, editor: 'zed', path: '../x.ts' }))
+
+        // The coordinator's, on the default branch: what the task wrote isn't there, and opens in the person's own checkout.
+        const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
+        const said = yield* client.FindCode({ threadId, messages: [{ names: ['README.md:1', 'src/retry.ts'] }] })
+        assert.deepStrictEqual([said.place.kind, said.place.repositories[0]?.branch], ['default', 'main'])
+        assert.deepStrictEqual(
+          said.messages[0]?.found.map((found) => [found.kind, found.name]),
+          [
+            ['file', 'README.md:1'],
+            ['missing', 'src/retry.ts'],
+          ],
+        )
+        assert.deepInclude(yield* client.ReadCode({ threadId, path: 'README.md' }), { text: '# Meridian\n', total: 1 })
+        assert.isTrue(yield* client.OpenCode({ commandId: commandId(), threadId, editor: 'zed', path: 'README.md', line: 1 }))
+        assert.deepStrictEqual(opens, [
+          ['zed', worktree, join(worktree, 'src/retry.ts'), 2],
+          ['zed', worktree, null, null],
+          ['zed', folder, join(folder, 'README.md'), 1],
+        ])
+      }),
+    ),
+  )
 })
 
 describe('a project’s menu, through the API', () => {
@@ -1126,7 +1585,7 @@ describe('a project’s menu, through the API', () => {
         assert.lengthOf(yield* client.GetRepositories({ projectId: project.id }), 3)
         // Its tasks' worktrees are in a folder named for it, as it was made.
         assert.strictEqual(
-          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`/${named?.slug}`),
+          (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.worktrees?.endsWith(`${sep}${named?.slug}`),
           true,
         )
         assert.isNull(named?.worktrees)
@@ -1328,6 +1787,68 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('leaves a plain task that finished in Needs you once the person opens it, until they mark it done or keep it for later', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        // A plain task is one the coordinator starts with no plan, and stays one though its lead commits, on a branch of its own; one
+        // the person starts is a change, though it makes nothing.
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          body: 'Which partners still call v1? [coordinator:start] [lead:commit] [lead:finish]',
+          disposition: 'after_current',
+        })
+        const change = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:finish]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        const both = yield* eventually(
+          client.GetBoard({ projectId: project.id }),
+          (board) => board.tasks.length === 2 && board.tasks.every((one) => one.phase === 'ready'),
+        )
+        assert.sameDeepMembers(
+          both.tasks.map((one) => [one.title, one.kind]),
+          [
+            ['Which partners still call v1', 'plain'],
+            ['Retry', 'change'],
+          ],
+        )
+        const question = both.tasks.find((one) => one.kind === 'plain')
+        assert.isNotNull(question?.branch)
+        yield* client.SeeTask({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.SeeTask({ commandId: commandId(), taskId: change.id })
+        const phases = Effect.map(client.GetBoard({ projectId: project.id }), (board) => board.tasks.map((one) => [one.title, one.phase]))
+        // Opened, both still wait on the person.
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'ready'],
+          ['Retry', 'ready'],
+        ])
+        // Kept for later, the plain task is out of Needs you; a change can't be kept, nor marked done.
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'kept'],
+          ['Retry', 'ready'],
+        ])
+        // Marked done, it settles.
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'settled'],
+          ['Retry', 'ready'],
+        ])
+        const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
+        assert.strictEqual(unknown.reason, 'NotFound')
+      }),
+    ),
+  )
+
   it.live('has the project’s leads resolve what already conflicts as soon as its rules say they do, and a task say otherwise', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1515,6 +2036,15 @@ describe('the coordinator, through the API', () => {
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'codex', model: 'large', effort: 'high' })
         const resumed = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(resumed.session?.agentId, 'codex')
+        // Renamed by the person, even now; a retry is one rename, and an empty title is refused.
+        const rename = { commandId: commandId(), taskId: task.id, title: ' Retry the checkout ' }
+        yield* client.RenameTask(rename)
+        yield* client.RenameTask(rename)
+        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).task.title, 'Retry the checkout')
+        assert.strictEqual(
+          (yield* Effect.flip(client.RenameTask({ commandId: commandId(), taskId: task.id, title: ' ' }))).message,
+          'Give the task a title.',
+        )
         yield* client.AbandonTask({ commandId: commandId(), taskId: task.id })
         const abandoned = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
         assert.deepStrictEqual([abandoned.task.state, abandoned.task.phase, abandoned.task.actions], ['abandoned', 'settled', ['reopen']])
@@ -1738,7 +2268,7 @@ describe('code hosts and trackers, through the API', () => {
         )
         // gh isn't signed in here; and a server that doesn't answer is said to be one.
         const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
-        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this Mac."])
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this computer."])
         const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
         assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })
@@ -1812,6 +2342,68 @@ describe('code hosts and trackers, through the API', () => {
 
 describe('words', () => {
   const name = (agentId: string) => (agentId === 'codex' ? 'Codex' : agentId)
+
+  it('says the rest of what can go wrong as the window shows it, and a reason it has no words for in general ones', () => {
+    const said = (error: unknown) => words(error, name).message
+    const cases: ReadonlyArray<readonly [unknown, string]> = [
+      [
+        { _tag: 'InstallFailed', agentId: 'opencode', summary: 'GitHub couldn’t be reached to find OpenCode.' },
+        'GitHub couldn’t be reached to find OpenCode.',
+      ],
+      [{ _tag: 'AlwaysNotOffered' }, "That can't be kept as a rule for this request. Answer it once instead."],
+      [{ _tag: 'QuestionUnanswered' }, 'Answer each question: pick an option, or write your own.'],
+      [{ _tag: 'NotHeld' }, "The step isn't waiting for its usage limit any more: it carried on, or was stopped."],
+      [{ _tag: 'LaunchRefused', message: 'Codex needs Node 20 or later.' }, 'Codex needs Node 20 or later.'],
+      [
+        { _tag: 'SignOutFailed', line: 'codex logout' },
+        "Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: codex logout. If the agent isn't on this computer any more, remove it anyway; its sign-in may stay behind.",
+      ],
+      [{ _tag: 'DraftClosed', state: 'filed' }, 'That issue is filed already. Change it on its tracker.'],
+      [{ _tag: 'DraftClosed', state: 'archived' }, 'That issue draft can’t change now.'],
+      [{ _tag: 'DraftUntitled' }, 'An issue needs a title.'],
+      [{ _tag: 'CliUnanswered', tool: 'gh' }, "gh didn't answer in time. Try again in a moment."],
+      [
+        { _tag: 'CliElsewhere', tool: 'glab', address: 'http://git.example' },
+        "Althar only gives glab's sign-in to a server it knows, over HTTPS. http://git.example isn't one.",
+      ],
+      [
+        { _tag: 'OtherAccount', login: 'dana', expected: 'meridian-bot' },
+        "This token is dana's. Make one as meridian-bot, or connect dana as well from the list.",
+      ],
+      [
+        { _tag: 'RuleOnAnotherList', exact: true, pattern: 'rm -rf build', list: 'ask' },
+        '“rm -rf build” is on “Always ask me”, which comes first, so nothing changed. Take it off “Always ask me” first.',
+      ],
+      [
+        { _tag: 'PushRefused', remote: 'origin', why: 'refused', said: 'pre-receive hook declined.' },
+        'origin refused the push: pre-receive hook declined.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: 'src/a.ts' },
+        'The lead left changes it didn’t commit, in src/a.ts. Ask it to commit them or clear them away, then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'uncommitted', detail: '' },
+        'The lead left changes it didn’t commit. Ask it to commit them or clear them away, then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'conflicts', detail: 'README.md' },
+        'The new commits don’t apply on the default branch as it is now: they conflict in README.md. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+      ],
+      [
+        { _tag: 'NoChangeToOpen', why: 'conflicts', detail: '' },
+        'The new commits don’t apply on the default branch as it is now: they conflict. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.',
+      ],
+      // A reason added since, with no words of its own yet: the general sentence for its kind.
+      [{ _tag: 'ProjectRefused', reason: 'new_reason' }, "Althar can't change the project that way."],
+      [{ _tag: 'DocumentRefused', reason: 'new_reason' }, 'Althar can’t show that file here.'],
+      [{ _tag: 'ImageRefused', reason: 'new_reason', name: 'shot.png' }, "Althar can't send that image."],
+      [{ _tag: 'NoteRefused', why: 'new_reason' }, 'Althar can’t keep that note.'],
+      [{ _tag: 'CantMerge', why: 'new_reason', detail: 'It moved.' }, "Althar couldn't merge it. It moved."],
+      [{ _tag: 'AccountRefused', reason: 'new_reason' }, "Althar can't add that account."],
+    ]
+    for (const [error, words] of cases) assert.strictEqual(said(error), words, JSON.stringify(error))
+  })
 
   it("says each of the runtime's errors as the window shows it", () => {
     const said = (error: unknown) => words(error, name).message
@@ -1998,7 +2590,19 @@ describe('words', () => {
     assert.isUndefined(agentSaid('nothing'))
     assert.strictEqual(summarize(Cause.fail(new AgentExited({ code: 1, signal: null, stderr: '' }))), 'The agent stopped.')
     assert.strictEqual(summarize(Cause.die(new Error('It broke'))), 'It broke.')
+    // An agent that couldn't start says why, as Althar put it then, and nothing more where it had nothing to say.
+    const unstarted = (summary: string) => new SessionFailed({ agentId: 'codex', reason: 'spawn codex ENOENT', summary })
+    assert.strictEqual(
+      summarize(Cause.fail(unstarted("codex isn't installed, or isn't on this computer's PATH."))),
+      "codex isn't installed, or isn't on this computer's PATH.",
+    )
+    assert.strictEqual(summarize(Cause.fail(unstarted(''))), '')
     assert.strictEqual(summarize(Cause.empty), '')
+    // A host's refusal is said as the person reads it, not as the error is named.
+    assert.strictEqual(
+      summarize(Cause.fail(new ConnectorFailed({ product: 'github', reason: 'unauthorized', message: 'Bad credentials' }))),
+      "GitHub no longer takes Althar's sign-in. Sign in to it again.",
+    )
     // A command the sandbox could not take out to the device says what to put right, not that it is missing.
     assert.include(
       agentSaid(
@@ -2066,7 +2670,7 @@ describe('thread items', () => {
       agentId: 'codex',
       createdAt: '2026-09-29T12:00:00.000Z',
       kind: 'user_message',
-      content: { text: 'Now', links: [], pictures: [] },
+      content: { text: 'Now', links: [], pictures: [], files: [] },
       input: { state: 'queued', interrupting: true },
     })
     const tool = itemOf(
@@ -2127,6 +2731,7 @@ describe('thread items', () => {
           { severity: 'blocking', file: 'a.ts', line: null, claim: 'y' },
           { severity: 'nit', file: null, line: null, claim: 'z' },
         ],
+        built: null,
         evidence: [],
         unverified: null,
         agentId: 'codex',
@@ -2139,6 +2744,7 @@ describe('thread items', () => {
       summary: 'Done.',
       verdict: null,
       findings: [],
+      built: null,
       evidence: [],
       unverified: null,
       agentId: null,
@@ -2174,6 +2780,7 @@ describe('thread items', () => {
         summary: 'Done.',
         verdict: null,
         findings: [],
+        built: null,
         evidence: [
           {
             kind: 'screenshot',

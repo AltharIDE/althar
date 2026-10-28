@@ -85,7 +85,7 @@
   box-shadow: none;
 }
 :global([data-term='dark']) .out {
-  color: var(--on-ink-2);
+  color: var(--on-dark-2);
 }
 :global([data-term='dark']) .command {
   color: var(--term-t1);
@@ -105,5 +105,5 @@
   color: var(--term-t4);
 }
 :global([data-term='dark']) .earlier button {
-  color: var(--on-ink-2);
+  color: var(--on-dark-2);
 }

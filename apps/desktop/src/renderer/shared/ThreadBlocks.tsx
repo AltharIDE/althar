@@ -4,9 +4,9 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
-  Evidence,
-  FindingState,
+  FailedLogs,
   Issue,
+  IssueRef,
   LinkButton,
   Markdown,
   Plan,
@@ -14,34 +14,34 @@ import {
   Question,
   type QuestionAnswer,
   Reasoning,
-  Review,
-  type ReviewFinding,
-  Severity,
-  Step,
-  StepState,
   Terminal,
+  Thinking,
   ThreadDivider,
   Tool,
   ToolState,
   Turn,
-  Verdict,
   WorkedFor,
   You,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
-import { piecesOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
+import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
+import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
+import { SaidIn } from './code/CodeHost'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
 import type {
   ArrivalContent,
+  AutomationCardContent,
   Block,
+  IssueChangesContent,
   IssueDraftContent,
+  ReviewDraftContent,
   Part,
   PushRequestContent,
   QuestionContent,
@@ -56,8 +56,10 @@ import s from './ThreadBlocks.module.css'
  * A thread's blocks as the kit draws them, the same in a task and in the
  * coordinator's thread. A turn's work folds under how long it worked, or is
  * working, with its last message open under it; a step's result stands open
- * under the work that led to it. A task's card is the host's
- * to draw, since what it can do with one is the host's.
+ * under the work that led to it. Before the agent says anything, its turn
+ * stands under its name, thinking, where its words will take its place. A
+ * task's card is the host's to draw, since what it can do with one is the
+ * host's.
  */
 
 /** How long a command can be before its row, at the thread's width, clips it. */
@@ -65,6 +67,8 @@ const LONG_COMMAND = 72
 
 export const text = {
   thought: 'Thought',
+  /** Under a last turn that failed, as on the connection: what the person said in it goes again. */
+  tryAgain: 'Try again',
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
     StepResult['step'],
@@ -107,13 +111,6 @@ export const text = {
       .split('\n')
       .map((line) => `> ${line}`)
       .join('\n')}`,
-}
-
-const SEVERITY: Readonly<Record<StepResult['findings'][number]['severity'], Severity>> = {
-  blocking: Severity.High,
-  major: Severity.High,
-  minor: Severity.Medium,
-  nit: Severity.Low,
 }
 
 /**
@@ -180,6 +177,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
       verb={part.verb}
       target={part.target}
       state={part.state}
+      {...(part.why === undefined ? {} : { why: part.why })}
       {...(part.command === null ? {} : { copy: part.command })}
       {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}
       open={open}
@@ -193,10 +191,16 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   )
 }
 
-function PartView({ part, threadId }: { part: Part; threadId: string }) {
+/** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. */
+export function PartView({ part, threadId }: { part: Part; threadId: string }) {
   switch (part.kind) {
     case 'message':
-      return <Markdown source={part.text} />
+      // Its names are read as they were when it was said.
+      return (
+        <SaidIn.Provider value={part.id}>
+          <Markdown source={part.text} />
+        </SaidIn.Provider>
+      )
     case 'thought':
       return (
         <Reasoning took="" text={{ thought: () => text.thought }}>
@@ -212,81 +216,14 @@ function PartView({ part, threadId }: { part: Part; threadId: string }) {
   }
 }
 
-/** What a step reported: the lead's summary, open under its work, or the review's verdict and findings. */
-function StepView({ id, result, of }: { id: string; result: StepResult; of: number }) {
-  const named = useModelNames()
-  // Implement is the first step, a review and settling it the second, and the pull request the last.
-  const n = result.step === 'implement' ? 1 : result.step === 'publish' ? of : 2
-  const model = result.agentId === null ? undefined : named(result.agentId)
-  if (result.step === 'publish') {
-    const change = result.change
-    return (
-      <Step
-        n={n}
-        of={of}
-        label={change === null ? text.pushed : text.step.publish}
-        state={StepState.Done}
-        defaultOpen
-        detail={
-          <>
-            <Markdown source={result.summary} />
-            {change !== null && (
-              <Issue
-                mark={productBrand(change.product)}
-                source={productName(change.product)}
-                id={`${change.short} ${change.prefix}${change.number}`}
-                title={change.title}
-                href={change.url}
-                meta={[change.repository, change.draft ? text.change.draft : text.change[change.state]].join(' · ')}
-              />
-            )}
-          </>
-        }
-      />
-    )
-  }
-  if (result.step !== 'review')
-    return (
-      <Step
-        n={n}
-        of={of}
-        label={text.step[result.step]}
-        state={StepState.Done}
-        {...(model === undefined ? {} : { model })}
-        defaultOpen
-        detail={
-          <>
-            <Markdown source={result.summary} />
-            <Evidence pieces={piecesOf(id, result.evidence)} unverified={result.unverified ?? []} headingLevel={4} />
-          </>
-        }
-      />
-    )
-  // The lead settles findings on its own for now: what the review found is left to it.
-  const findings: ReadonlyArray<ReviewFinding> = result.findings.map((finding, index) => ({
-    id: `${id}-${index}`,
-    severity: SEVERITY[finding.severity],
-    at: finding.file === null ? '' : finding.line === null ? finding.file : `${finding.file}:${finding.line}`,
-    by: model === undefined ? [] : [model],
-    state: FindingState.Lead,
-    claim: finding.claim,
-  }))
-  return (
-    <>
-      <Review
-        n={n}
-        of={of}
-        reviewers={model === undefined ? [] : [{ model }]}
-        verdict={result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}
-        defaultFindings={findings}
-        {...(result.round > 0 ? { round: result.round + 1 } : {})}
-      />
-      {result.summary !== '' && (
-        <div className={s.said}>
-          <Markdown source={result.summary} />
-        </div>
-      )}
-    </>
+/** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
+function Said({ text, links }: { text: string; links: ReadonlyArray<Unfurl> }) {
+  return pastedIn(text, links).map((piece, at) =>
+    typeof piece === 'string' ? (
+      <Fragment key={at}>{piece}</Fragment>
+    ) : (
+      <IssueRef key={at} mark={productBrand(piece.product)} id={keyOf(piece)} linear={piece.product === 'linear'} />
+    ),
   )
 }
 
@@ -340,9 +277,27 @@ export const heardVerb = (arrival: ArrivalContent): string => {
   }
 }
 
+/** A GitHub Actions log line's time, which every line starts with: noise on a card. */
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z /
+
+/**
+ * A failed check's log as its card shows it: by its lines, without their
+ * times, ending where GitHub Actions marked it failed (`##[error]`), not in
+ * the job's cleanup after.
+ */
+export const logLines = (log: string) => {
+  const lines = log
+    .trimEnd()
+    .split('\n')
+    .map((line) => line.replace(STAMP, ''))
+  const failed = lines.findLastIndex((line) => line.startsWith('##[error]'))
+  return failed === -1 ? lines : lines.slice(0, failed + 1)
+}
+
 /**
  * Something heard from outside, as a quoted note: who, what they did, where,
- * and what they said. What someone who can't write to the repository said
+ * and what they said. Failed checks show the end of each one's log, or why
+ * it couldn't be read. What someone who can't write to the repository said
  * wasn't passed to the lead, as anyone can comment on a public one; the
  * person reads it, and can pass it on.
  */
@@ -370,6 +325,16 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
       {...(foot === false ? {} : { foot })}
     >
       {body !== null && body !== '' && <Markdown source={body} />}
+      {arrival.logs.length > 0 && (
+        <FailedLogs
+          logs={arrival.logs.map((log) => ({
+            name: log.name,
+            url: log.url,
+            lines: log.log === null ? null : logLines(log.log),
+            missing: log.missing,
+          }))}
+        />
+      )}
     </Arrived>
   )
 }
@@ -431,8 +396,12 @@ export function ThreadBlocks({
   card,
   run,
   draft,
+  changes,
   push,
+  review,
+  automation,
   queued,
+  onTryAgain,
   onPassOn,
   onAnswerQuestion,
   focusQuestion,
@@ -461,14 +430,19 @@ export function ThreadBlocks({
   run?: (run: RunContent) => ReactNode
   /** Draws an issue the coordinator drafted, in its thread. */
   draft?: (draft: IssueDraftContent) => ReactNode
+  /** Draws changes to issues, in the thread of whoever proposed them. */
+  changes?: (changes: IssueChangesContent) => ReactNode
   /** Draws a push the lead asked for, in a task's thread, with when it was asked or settled. */
   push?: (request: PushRequestContent, at: string) => ReactNode
+  /** Draws a review the lead drafted of someone else's pull request, in a review task's thread. */
+  review?: (review: ReviewDraftContent) => ReactNode
+  /** Draws an automation's card in the coordinator's thread, by its item, which turning it on, undoing and answering it name. */
+  automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
+  /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
+  onTryAgain?: () => void
 }) {
-  // A task that was reviewed has two steps, the review and settling it being the second; its pull request, once opened, is one more.
-  const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
-  const of = 1 + (done.has('review') || done.has('settle') ? 1 : 0) + (done.has('publish') ? 1 : 0)
   const named = useModelNames()
   // What each document was last changed by, so it is read again after an edit.
   const versionOf = documentVersions(
@@ -478,28 +452,29 @@ export function ThreadBlocks({
   // A turn of the thread's own agent, on its session's model and account; another's, on its own model.
   const turnModel = (agentId: string | null) =>
     session != null && agentId === session.agentId ? named(agentId, session.model, session.account) : named(agentId)
+  // The thread's last turn, where an error ended it: it can be tried again. What the person said in it may wait after it.
+  const last = blocks.findLast((block) => block.kind === 'turn' || block.kind === 'waiting')
+  const ending = last?.kind === 'turn' && !last.live ? last.said.at(-1) : undefined
+  const failed = ending?.kind === 'notice' && ending.tone === 'error' ? last?.id : undefined
   return blocks.map((block) => {
     switch (block.kind) {
       case 'you':
         return (
-          <Fragment key={block.id}>
-            <You
-              at={block.at}
-              delivery={block.delivery}
-              {...(queued === undefined ? {} : { text: { queued } })}
-              // The images sent with it, each opening full size with the others.
-              {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
-            >
-              {block.text}
-            </You>
-            {block.links.length > 0 && (
-              <div className={s.links}>
-                {block.links.map((link) => (
-                  <LinkView key={link.url} link={link} />
-                ))}
-              </div>
-            )}
-          </Fragment>
+          <You
+            key={block.id}
+            data-item={block.id}
+            at={block.at}
+            delivery={block.delivery}
+            {...(queued === undefined ? {} : { text: { queued } })}
+            // The images sent with it, each opening full size with the others; then its files and folders, a chip each.
+            {...(block.pictures.length + block.files.length === 0
+              ? {}
+              : { attach: [...sentAttachments(block.pictures), ...fileAttachments(block.files)] })}
+            // The links in it that unfurled, in the bubble under the words, so they read as part of what the person said.
+            {...(block.links.length === 0 ? {} : { unfurl: block.links.map((link) => <LinkView key={link.url} link={link} />) })}
+          >
+            {block.links.length === 0 || block.text === '' ? block.text : <Said text={block.text} links={block.links} />}
+          </You>
         )
       case 'arrival':
         return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />
@@ -510,7 +485,8 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'step':
-        return <StepView key={block.id} id={block.id} result={block.result} of={of} />
+        // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
+        return null
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
       case 'question':
@@ -526,10 +502,22 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
       case 'draft':
         return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
+      case 'changes':
+        return <Fragment key={block.id}>{changes?.(block.changes)}</Fragment>
       case 'setup':
         return <SetupView key={block.id} setup={block.setup} />
       case 'push':
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
+      case 'review':
+        return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
+      case 'automation':
+        return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
+      case 'waiting':
+        return (
+          <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
+            <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
+          </Turn>
+        )
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')
@@ -546,6 +534,7 @@ export function ThreadBlocks({
             {block.said.map((part) => (
               <PartView key={part.id} part={part} threadId={threadId} />
             ))}
+            {block.id === failed && onTryAgain !== undefined && <LinkButton onClick={onTryAgain}>{text.tryAgain}</LinkButton>}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>
         )

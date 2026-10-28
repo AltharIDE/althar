@@ -1,7 +1,14 @@
 # ADR-031: Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes
 
-- **Status:** Accepted
+- **Status:** Accepted; extended to a task's lead by [ADR-038](038-a-lead-starts-afresh-at-a-break.md)
 - **Date:** 2026-10-11
+- **Amended:** 2026-10-19: the person says a note in their own words, where
+  it is in the project's settings (`EditProjectNote`, recorded as
+  `project_note.edited`), within a kept note's bounds: a sentence or two,
+  at most `NOTE_LENGTH` (300) characters, on one line. The note stays
+  whoever kept it, and the coordinator reads the new words from its next
+  brief or `list_notes`. A dropped note can't be changed. Its code, links
+  and emphasis show as markdown has them.
 - **Owner:** Repository maintainers
 - **Context:** The coordinator is one long conversation (ADR-004). Its
   agent's context fills, and the agent then compacts it by itself, at a
@@ -51,9 +58,10 @@
     `list_notes`, `drop_note`), and its brief tells it to keep one when the
     person decides something like that. Every brief of the coordinator holds
     them, a fresh one's or not, and so does `project_overview`. The person
-    sees them in the project's settings, and drops one that no longer holds.
-    Each is a row with its record (`project_note.kept`, `.dropped`); a
-    dropped one keeps its row.
+    sees them in the project's settings, says one in their own words, and
+    drops one that no longer holds. Each is a row with its record
+    (`project_note.kept`, `.edited`, `.dropped`); a dropped one keeps its
+    row.
 - **Alternatives considered:**
   - **Leaving it to the agent's compaction.** What happens now: at the
     agent's moment, by the agent's summary.
@@ -75,10 +83,10 @@
     handed over, and nor is one whose brief would nearly fill it, as with a
     model of a small context and a project of many open tasks.
   - **Notes are as good as the coordinator's judgment of what is a
-    decision;** the person can drop one, but not yet add or edit one.
+    decision;** the person can change or drop one, but not yet add one.
 - **Revisit when:**
   - Agents let a client set or turn off their own compaction.
   - Continuous compaction writes summaries as records
     (docs/architecture/04): the brief would hold them before its last
     messages.
-  - People want to write or edit notes themselves.
+  - People want to write notes themselves.

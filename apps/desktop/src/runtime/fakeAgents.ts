@@ -1,9 +1,10 @@
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
 import { agents, type AgentDefinition } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent } from '@althar/provider-adapters/testing'
-import { Agents } from '@althar/runtime'
+import { type AgentEntry, Agents } from '@althar/runtime'
 import { Layer } from 'effect'
 
 /*
@@ -14,11 +15,45 @@ import { Layer } from 'effect'
  * set, in a build with the test hooks.
  */
 
-const definition = (real: AgentDefinition): AgentDefinition => ({
+/** Agents whose sign-in can't be checked, as where their status command isn't there: ALTHAR_FAKE_UNCHECKED lists them. */
+const unchecked = new Set((process.env.ALTHAR_FAKE_UNCHECKED ?? '').split(',').filter((agentId) => agentId !== ''))
+
+/**
+ * The fake agents' connection, where ALTHAR_FAKE_CONNECTION names a file:
+ * what it says as each prompt starts, `offline`, `server` or `waits`, ends
+ * the prompt as the real agents' did when theirs was down (ADR-060); empty
+ * or missing, it is up. Their service is at ALTHAR_FAKE_SERVICE where that
+ * is set, a test's own server, so whether it answers is the test's; else
+ * they have none, and only whether the computer is online counts.
+ */
+const connectionFile = process.env.ALTHAR_FAKE_CONNECTION
+const connection =
+  connectionFile === undefined
+    ? undefined
+    : () => {
+        try {
+          const said = readFileSync(connectionFile, 'utf8').trim()
+          return said === 'offline' || said === 'server' || said === 'waits' ? said : undefined
+        } catch {
+          return undefined
+        }
+      }
+const serviceUrl = process.env.ALTHAR_FAKE_SERVICE
+
+const definition = ({ service, ...real }: AgentDefinition): AgentDefinition => ({
   ...real,
+  ...(service === undefined || serviceUrl === undefined ? {} : { service: { name: service.name, url: serviceUrl } }),
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
-  signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, paidBy: () => 'plan', login: real.signIn.login },
+  signIn: {
+    status: () => {
+      if (unchecked.has(real.id)) throw new Error(`${real.name}’s status command isn’t there`)
+      return { command: 'true', args: [] }
+    },
+    read: () => true,
+    paidBy: () => 'plan',
+    login: real.signIn.login,
+  },
   // Its usual folder is the test's, so nothing of the person's is read or linked.
   home: {
     variable: 'ALTHAR_FAKE_HOME',
@@ -45,19 +80,46 @@ const out = new Map(
     }),
 )
 
+/** How long each fake agent takes to start a session, in milliseconds, where ALTHAR_FAKE_SLOW_START says: for what shows meanwhile. */
+const slowStart = process.env.ALTHAR_FAKE_SLOW_START === undefined ? undefined : Number(process.env.ALTHAR_FAKE_SLOW_START)
+
+/**
+ * Every other agent the registry has, as it is, where ALTHAR_FAKE_EVERY_AGENT
+ * is set: for what the window shows with all of them. None is started; where
+ * its command isn't on this computer, it shows as not there, to download or
+ * install.
+ */
+const others = (): ReadonlyArray<AgentEntry> =>
+  process.env.ALTHAR_FAKE_EVERY_AGENT !== '1'
+    ? []
+    : Object.values(agents)
+        .filter((real) => real.id !== 'claude-code' && real.id !== 'codex')
+        .map((real) => ({
+          definition: real,
+          transport: (cwd: string) => ({ _tag: 'Process' as const, spec: { command: 'althar-e2e-not-started', args: [] }, cwd }),
+        }))
+
 export const fakeAgents = Layer.succeed(
   Agents,
-  Agents.from(
-    [agents['claude-code'], agents.codex].map((real) => {
+  Agents.from([
+    ...[agents['claude-code'], agents.codex].map((real) => {
       const limited = out.get(real.id)
       return {
         definition: definition(real),
         transport: (_cwd: string, env: Readonly<Record<string, string>> = {}) => {
           const home = env.ALTHAR_FAKE_HOME
           const own = out.get(`${real.id}@${home === undefined ? 'usual' : basename(home)}`) ?? limited
-          return { _tag: 'InProcess' as const, agent: fakeAgent(own === undefined ? {} : { outOfUsage: own }) }
+          return {
+            _tag: 'InProcess' as const,
+            agent: fakeAgent({
+              ...(own === undefined ? {} : { outOfUsage: own }),
+              ...(slowStart === undefined ? {} : { slowStart }),
+              ...(connection === undefined ? {} : { connection }),
+            }),
+          }
         },
       }
     }),
-  ),
+    ...others(),
+  ]),
 )

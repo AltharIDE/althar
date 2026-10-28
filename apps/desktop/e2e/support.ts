@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
+import { _electron as electron, type ElectronApplication, expect, type Page } from '@playwright/test'
 
 /* What the end-to-end tests share: the app launched on a profile of its own, with the fake agents, and the person's ways in. */
 
@@ -37,14 +37,20 @@ export const mainWindow = async (electronApp: ElectronApplication): Promise<Page
  */
 const quiet = process.platform === 'darwin' && process.env.ALTHAR_E2E_FOREGROUND !== '1'
 
-export const launch = async (home: string, env: Record<string, string> = {}) => {
+/**
+ * Launches the app on `home`'s profile. Playwright has the window's `prefers-color-scheme` say light unless told otherwise;
+ * `scheme: 'system'` leaves it to the app's own appearance, as it is outside a test.
+ */
+export const launch = async (home: string, env: Record<string, string> = {}, { scheme }: { readonly scheme?: 'system' } = {}) => {
   // Run from inside an Electron app, as a lead in Althar is, the shell says to run Electron as Node; the app must run as itself.
   // And from inside an agent's sandbox, git is configured for the agent (its proxy, its safe folders): the app's git is its own.
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_')),
   )
   const electronApp = await electron.launch({
-    args: [app],
+    // Chromium refuses to run as root with its sandbox, as in a container: there, without it.
+    args: [app, ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])],
+    ...(scheme === 'system' ? { colorScheme: null } : {}),
     env: {
       ...inherited,
       ALTHAR_PROFILE: join(home, 'profile'),
@@ -97,6 +103,48 @@ export const startTask = async (page: Page, title: string, lead = '[lead:finish]
   await planTask(page, title, lead)
   // The newest plan is the last in the conversation; any before it have started.
   await page.getByRole('button', { name: 'Start now' }).last().click()
+}
+
+/** A section of the project's settings: Settings, the last of its views in the window's bar, then the section down the side. */
+export const projectSettings = async (page: Page, section: 'General' | 'Code and issues' | 'Rules' | 'Running' | 'Notes') => {
+  await page
+    .getByRole('radiogroup', { name: 'View' })
+    .getByRole('radio', { name: /^Settings/ })
+    .click()
+  await page
+    .getByRole('navigation', { name: 'Project settings' })
+    .getByRole('button', { name: new RegExp(`^${section}`) })
+    .click()
+}
+
+/** From the project's settings back to its work: the conversation with its coordinator. */
+export const backToWork = async (page: Page) => {
+  await page
+    .getByRole('radiogroup', { name: 'View' })
+    .getByRole('radio', { name: /^Conversation/ })
+    .click()
+}
+
+/**
+ * Connects the fake GitHub, where the project's work goes, from where its
+ * settings say so, with a token pasted as the person would; then back to
+ * the conversation.
+ */
+export const connectGitHub = async (page: Page) => {
+  await projectSettings(page, 'Code and issues')
+  await page.getByRole('region', { name: 'GitHub' }).getByRole('button', { name: 'Connect GitHub' }).click()
+  const connecting = page.getByRole('dialog', { name: 'GitHub' })
+  await connecting
+    .getByRole('group', { name: 'Ways to connect GitHub' })
+    .getByRole('button', { name: /Make a token/ })
+    .click()
+  await connecting.getByRole('button', { name: 'Paste it myself' }).click()
+  await connecting.getByLabel('Paste it').fill('github_pat_e2e')
+  await connecting.getByRole('button', { name: 'Check' }).click()
+  await expect(connecting.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
+  await connecting.getByRole('button', { name: 'Done' }).click()
+  await expect(connecting).toHaveCount(0)
+  await backToWork(page)
 }
 
 /** A ready task opens on what it made: its conversation is the header's other face, not the project's view of that name. */

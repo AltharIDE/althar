@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
@@ -82,7 +84,19 @@ describe('reading sign-in status', () => {
   it('names the command the user runs to sign in', () => {
     assert.deepStrictEqual(
       Object.values(agents).map((agent) => agent.signIn.login),
-      ['claude auth login', 'codex login', 'opencode auth login'],
+      [
+        'claude auth login',
+        'codex login',
+        'opencode auth login',
+        'copilot login',
+        'junie',
+        'grok login',
+        'kimi login',
+        'vibe --setup',
+        'qwen',
+        // It signs in only over ACP, inside Althar.
+        '',
+      ],
     )
   })
 })
@@ -95,13 +109,31 @@ describe('an agent’s homes', () => {
     const usual = (env: Record<string, string>) =>
       Object.values(agents).map((agent) => [agent.home.variable, agent.home.usual(env, '/Users/me')])
     assert.deepStrictEqual(usual({}), [
-      ['CLAUDE_CONFIG_DIR', '/Users/me/.claude'],
-      ['CODEX_HOME', '/Users/me/.codex'],
-      ['XDG_DATA_HOME', '/Users/me/.local/share'],
+      ['CLAUDE_CONFIG_DIR', join('/Users/me', '.claude')],
+      ['CODEX_HOME', join('/Users/me', '.codex')],
+      ['XDG_DATA_HOME', join('/Users/me', '.local', 'share')],
+      ['COPILOT_HOME', join('/Users/me', '.copilot')],
+      ['JUNIE_HOME', join('/Users/me', '.junie')],
+      ['GROK_HOME', join('/Users/me', '.grok')],
+      ['KIMI_CODE_HOME', join('/Users/me', '.kimi-code')],
+      ['VIBE_HOME', join('/Users/me', '.vibe')],
+      ['QWEN_HOME', join('/Users/me', '.qwen')],
+      ['GEMINI_HOME', join('/Users/me', '.gemini')],
     ])
     assert.deepStrictEqual(
-      usual({ CLAUDE_CONFIG_DIR: '/c', CODEX_HOME: '/x', XDG_DATA_HOME: '/d' }).map(([, folder]) => folder),
-      ['/c', '/x', '/d'],
+      usual({
+        CLAUDE_CONFIG_DIR: '/c',
+        CODEX_HOME: '/x',
+        XDG_DATA_HOME: '/d',
+        COPILOT_HOME: '/p',
+        JUNIE_HOME: '/j',
+        GROK_HOME: '/g',
+        KIMI_CODE_HOME: '/k',
+        VIBE_HOME: '/v',
+        QWEN_HOME: '/q',
+        GEMINI_HOME: '/m',
+      }).map(([, folder]) => folder),
+      ['/c', '/x', '/d', '/p', '/j', '/g', '/k', '/v', '/q', '/m'],
     )
   })
 
@@ -115,6 +147,34 @@ describe('an agent’s homes', () => {
     assert.deepStrictEqual(
       agents.opencode.home.shared(PRESENT),
       PRESENT.filter((name) => name !== 'opencode'),
+    )
+  })
+
+  it('shares none of what signs the later agents in, or approves for them, or brings the person’s own tools', () => {
+    const kept = [
+      'config.json',
+      'settings.json',
+      'config.toml',
+      'auth.json',
+      '.env',
+      'allowlist.json',
+      'trusted_folders.toml',
+      'permissions-config.json',
+      'mcp-config.json',
+      'mcp',
+      'hooks',
+      'installed-plugins',
+      'sessions',
+      'secure_credentials.json',
+      'AGENTS.md',
+      'skills',
+    ]
+    for (const id of ['copilot', 'junie', 'grok', 'kimi', 'mistral-vibe', 'qwen-code'] as const)
+      assert.includeMembers(['AGENTS.md', 'skills'], [...agents[id].home.shared(kept)], id)
+    // Antigravity's usual folder is Gemini CLI's too: its sign-in, its `config/` of MCP servers and hooks, and Gemini CLI's own stay.
+    assert.deepStrictEqual(
+      agents.antigravity.home.shared(['antigravity-acp', 'config', 'antigravity-cli', 'settings.json', 'oauth_creds.json', 'GEMINI.md']),
+      ['GEMINI.md'],
     )
   })
 })
@@ -142,6 +202,28 @@ describe('signInStatus', () => {
     }),
   )
 
+  it.live('says unknown, running nothing, for an agent with no status command', () =>
+    Effect.map(signInCheck(agents.copilot, '/no/such/node'), (check) =>
+      assert.deepStrictEqual(check, { status: 'unknown', paidBy: 'unknown' }),
+    ),
+  )
+
+  it('reads Grok’s sign-in from what `grok models` says first', () => {
+    const { read, paidBy } = agents.grok.signIn
+    assert.isFalse(read('You are not authenticated.\nDefault model: grok-4.6', 0))
+    assert.isTrue(read('You are logged in with dana@example.com.\nDefault model: grok-4.6', 0))
+    assert.isUndefined(read('Default model: grok-4.6', 0))
+    assert.strictEqual(paidBy?.('You are logged in with dana@example.com.'), 'plan')
+    assert.strictEqual(paidBy?.('You are using XAI_API_KEY.'), 'key')
+    assert.isUndefined(paidBy?.('Default model: grok-4.6'))
+  })
+
+  it('reads Kimi Code as signed out only where it lists no provider', () => {
+    const { read } = agents.kimi.signIn
+    assert.isFalse(read('No providers configured. Run `kimi login`.', 0))
+    assert.isUndefined(read('kimi-code  https://api.kimi.com', 0))
+  })
+
   it.live('says unknown when the command is missing', () =>
     Effect.gen(function* () {
       const missing: AgentDefinition = {
@@ -155,11 +237,11 @@ describe('signInStatus', () => {
 
   it.live('resolves Codex status through the CLI the session uses', () =>
     Effect.sync(() => {
-      const spec = agents.codex.signIn.status('/path/to/node')
-      assert.strictEqual(spec.command, 'codex')
-      assert.deepStrictEqual(spec.args, ['login', 'status'])
+      const spec = agents.codex.signIn.status?.('/path/to/node')
+      assert.strictEqual(spec?.command, 'codex')
+      assert.deepStrictEqual(spec?.args, ['login', 'status'])
       const bundled = usingLocated(agents.codex, () => ({ command: '/bundle/codex', whose: 'bundled' }))
-      assert.deepStrictEqual(bundled.signIn.status('/path/to/node'), { command: '/bundle/codex', args: ['login', 'status'] })
+      assert.deepStrictEqual(bundled.signIn.status?.('/path/to/node'), { command: '/bundle/codex', args: ['login', 'status'] })
     }),
   )
 })

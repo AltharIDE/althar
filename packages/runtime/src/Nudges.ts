@@ -1,10 +1,12 @@
 import type { StuckStep } from '@althar/contracts'
 import { Ledger } from '@althar/persistence-sqlite'
-import { Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
-import { field, parse, stuckOf, text } from './Queries'
+import { answeredIn, issueCardsWaiting } from './kinds'
+import { outStep } from './Limits'
+import { field, parse, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
 import { Sessions } from './Sessions'
 
@@ -16,7 +18,8 @@ import { Sessions } from './Sessions'
  * things wait, for the app's badge. Never for progress. With them, whether
  * any work runs, so the app can keep the Mac awake while it does. Read from
  * the store whenever a change that can bear on it is recorded; what already
- * waited when Althar started isn't nudged again.
+ * waited when Althar started isn't nudged again. A plain task that finished
+ * is neither nudged nor counted: it waits on its board to be seen.
  */
 
 /** How long changes are gathered, so a burst is read once. */
@@ -62,7 +65,7 @@ export const callWords = (
     const stuck = stuckOf(call.payload)
     if (stuck.why === 'usage_limit' && stuck.agentId !== null) {
       const agent = agents.find((entry) => entry.definition.id === stuck.agentId)?.definition.name ?? stuck.agentId
-      return `Needs you: ${agent} reached its usage limit`
+      return `Needs you: ${agent} ran out of usage${stuck.step === 'publish' ? '' : ` ${outStep[stuck.step].during}`}`
     }
     return `Needs you: ${STEPS[stuck.step]} is stuck`
   }
@@ -85,6 +88,12 @@ export const readyWords = (summary: string): string => {
   return said === '' ? 'Ready to look at' : `Ready: ${said}`
 }
 
+/** A review drafted, in the words a nudge says it: whose pull request waits for the person to post its review. */
+/** Issues a lead drafted, for the person to file. */
+export const issuesWords = (count: number): string => (count === 1 ? 'An issue to file' : `${count} issues to file`)
+
+export const draftedWords = (number: number, author: string): string => `Review drafted: #${number} by ${author}`
+
 export class Nudges extends Context.Service<
   Nudges,
   {
@@ -92,13 +101,14 @@ export class Nudges extends Context.Service<
     readonly events: Stream.Stream<NudgeEvent>
   }
 >()('@althar/runtime/Nudges') {
-  static readonly layer: Layer.Layer<Nudges, never, SqlClient.SqlClient | Ledger | Sessions | Agents> = Layer.effect(
+  static readonly layer: Layer.Layer<Nudges, never, SqlClient.SqlClient | Ledger | Sessions | Agents | Queries> = Layer.effect(
     Nudges,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const ledger = yield* Ledger
       const sessions = yield* Sessions
       const agents = yield* Agents
+      const queries = yield* Queries
       const published = yield* PubSub.unbounded<NudgeEvent>()
       const waiting = yield* Ref.make(0)
       const working = yield* Ref.make(false)
@@ -142,12 +152,16 @@ export class Nudges extends Context.Service<
             AND coalesce((SELECT state FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
               ORDER BY proposed_at DESC LIMIT 1), '') <> 'proposed'
             AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
             AND NOT EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
               WHERE e.run_id = r.id AND a.state = 'admitted')
             AND NOT EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
               WHERE h.task_id = k.id AND s.state = 'starting')
           ORDER BY k.created_at, k.id`
+        // A task kept for later is out of Needs you: nothing nudges for it.
+        const kept = ready.length === 0 ? new Set<string>() : yield* queries.kept
         for (const task of ready) {
+          if (kept.has(task.taskId)) continue
           const turning = (threadId: string | null) =>
             threadId === null
               ? Effect.succeed(false)
@@ -165,6 +179,71 @@ export class Nudges extends Context.Service<
             threadId: task.threadId,
           })
         }
+        // A review drafted, waiting for the person to post it (DEV-96): a review has no run, so it is read from its draft.
+        const drafted = yield* sql<{ taskId: string; threadId: string; title: string; number: number; author: string }>`
+          SELECT k.id AS task_id, t.id AS thread_id, k.title, d.number, d.author
+          FROM review_drafts d
+          JOIN tasks k ON k.id = d.task_id
+          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE d.state = 'pending' AND k.state = 'open'
+            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
+          ORDER BY d.created_at, d.rowid`
+        for (const review of drafted) {
+          const turning = yield* Effect.map(
+            sessions.running(review.threadId),
+            Option.exists((session) => session.turnRunning),
+          )
+          if (turning) continue
+          found.set(`ready:${review.taskId}`, {
+            _tag: 'Nudge',
+            kind: 'ready',
+            key: `ready:${review.taskId}`,
+            title: review.title,
+            body: draftedWords(review.number, review.author),
+            threadId: review.threadId,
+          })
+        }
+        // A review posted, written to again and answered: finished, the person's to settle (ADR-051), once its lead is done.
+        const answered = yield* sql<{ taskId: string; threadId: string; title: string }>`
+          SELECT k.id AS task_id, t.id AS thread_id, k.title
+          FROM tasks k
+          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE k.state = 'open' AND k.kept_at IS NULL AND ${sql.unsafe(answeredIn('k'))}
+            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
+          ORDER BY k.created_at, k.id`
+        for (const review of answered) {
+          if (Option.exists(yield* sessions.running(review.threadId), (session) => session.turnRunning)) continue
+          found.set(`ready:${review.taskId}`, {
+            _tag: 'Nudge',
+            kind: 'ready',
+            key: `ready:${review.taskId}`,
+            title: review.title,
+            body: readyWords(''),
+            threadId: review.threadId,
+          })
+        }
+        // Issues a lead drafted, for the person to file: one nudge for a task, whatever the number.
+        const issues = yield* sql<{ threadId: string; title: string; drafts: number }>`
+          SELECT thread_id, title, drafts FROM (
+            SELECT t.id AS thread_id, k.title, ${sql.unsafe(issueCardsWaiting('k'))} AS drafts, k.created_at, k.id AS task_id
+            FROM tasks k
+            JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+            WHERE k.state = 'open')
+          WHERE drafts > 0 ORDER BY created_at, task_id`
+        for (const task of issues)
+          found.set(`issues:${task.threadId}`, {
+            _tag: 'Nudge',
+            kind: 'call',
+            key: `issues:${task.threadId}`,
+            title: task.title,
+            body: issuesWords(task.drafts),
+            threadId: task.threadId,
+          })
         return found
       })
 
@@ -203,14 +282,15 @@ export class Nudges extends Context.Service<
 
       /**
        * Whether a change after `cursor` bears on what needs the person: a call,
-       * a task, its plan or run, a step, a session starting, a turn ending. A
-       * thread's items, most of what is recorded, never do.
+       * a task, its plan or run, a step, a session starting, a turn ending, a
+       * review or an issue drafted, posted, filed or dropped. A thread's items, most of what is
+       * recorded, never do.
        */
       const movedSince = (cursor: number) =>
         Effect.map(
           sql<{ moved: number }>`
             SELECT EXISTS (SELECT 1 FROM change_log WHERE cursor > ${cursor} AND aggregate_type IN ('attention_request', 'task',
-              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery')) AS moved`,
+              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery', 'review_draft', 'issue_draft')) AS moved`,
           (rows) => rows.some((row) => row.moved === 1),
         )
 
@@ -238,7 +318,12 @@ export class Nudges extends Context.Service<
           // Read again once the record next grows, when it couldn't be read.
           yield* Effect.forever(
             round.pipe(
-              Effect.catchCause((cause) => Effect.andThen(Effect.logWarning('Could not read what needs the person', cause), grown)),
+              // Stopping isn't a failure to read: an interrupt ends it, rather than leaving a warning in the log on every quit.
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.andThen(Effect.logWarning('Could not read what needs the person', cause), grown),
+              ),
             ),
           )
         }),

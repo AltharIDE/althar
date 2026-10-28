@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
@@ -7,20 +7,27 @@ import { makeHttp, paged } from './http'
 import type {
   Account,
   Activity,
+  ChangeList,
+  ChangeQuery,
   ChangeRequest,
+  ChangeToReview,
   Check,
   CheckState,
+  Choice,
   CodeHost,
   Comment,
   Container,
   Issue,
+  IssueField,
+  ListedChange,
   Person,
   Repository,
   Review,
+  ReviewEvent,
   Tracker,
   Verdict,
 } from './model'
-import { leftAsItIs } from './model'
+import { branchPath, cantChange, lacking, leftAsItIs, stillOpen, unchangeable } from './model'
 import {
   type Answer,
   answered,
@@ -75,9 +82,19 @@ const PullAnswer = Schema.Struct({
   state: Schema.String,
   draft: Schema.optional(Schema.Boolean),
   merged_at: Schema.optional(Schema.NullOr(Schema.String)),
-  head: Schema.Struct({ ref: Schema.String, sha: Schema.String }),
-  base: Schema.Struct({ ref: Schema.String }),
+  // The repository each side is on: a fork's, for a branch from one; null where the fork is gone.
+  head: Schema.Struct({
+    ref: Schema.String,
+    sha: Schema.String,
+    repo: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
+  }),
+  base: Schema.Struct({
+    ref: Schema.String,
+    sha: Schema.optional(Schema.String),
+    repo: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
+  }),
   user: Schema.optional(Schema.NullOr(User)),
+  author_association: Schema.optional(Schema.String),
   additions: Schema.optional(Schema.Number),
   deletions: Schema.optional(Schema.Number),
   changed_files: Schema.optional(Schema.Number),
@@ -100,6 +117,13 @@ const CheckRuns = Schema.Struct({
       output: Schema.optional(Schema.Struct({ title: Schema.optional(Schema.NullOr(Schema.String)) })),
       app: Schema.optional(Schema.NullOr(Schema.Struct({ slug: Schema.optional(Schema.String) }))),
     }),
+  ),
+})
+
+/** One check run, with what it reported beyond its title. */
+const CheckRunAnswer = Schema.Struct({
+  output: Schema.optional(
+    Schema.Struct({ summary: Schema.optional(Schema.NullOr(Schema.String)), text: Schema.optional(Schema.NullOr(Schema.String)) }),
   ),
 })
 
@@ -165,6 +189,13 @@ const personOf = (user: User | null | undefined): Person =>
     ? { id: 'ghost', login: 'ghost', name: null, bot: false }
     : { id: String(user.id), login: user.login, name: user.name ?? null, bot: user.type === 'Bot' || user.login.endsWith('[bot]') }
 
+/** The repository a pull request's branch is on, as `headRepository` says it; undefined where GitHub doesn't say. */
+const headRepositoryOf = (pull: PullAnswer): ReadonlyArray<string> | null | undefined => {
+  const head = pull.head.repo
+  const base = pull.base.repo?.full_name.toLowerCase()
+  return head === undefined ? undefined : head?.full_name.toLowerCase() === base ? null : head === null ? [] : head.full_name.split('/')
+}
+
 const changeOf = (pull: PullAnswer): ChangeRequest => ({
   id: pull.node_id,
   number: pull.number,
@@ -181,6 +212,7 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   deletions: pull.deletions ?? null,
   changedFiles: pull.changed_files ?? null,
   updatedAt: pull.updated_at,
+  ...(headRepositoryOf(pull) === undefined ? {} : { headRepository: headRepositoryOf(pull) }),
   // Not mergeable, or `dirty`, is GitHub's way of saying the merge conflicts.
   ...(pull.mergeable === false || pull.mergeable_state === 'dirty'
     ? { conflicts: true }
@@ -188,6 +220,161 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
       ? { conflicts: false }
       : {}),
 })
+
+/**
+ * A pull request to review, whoever opened it: whether GitHub names its
+ * author one of the repository's people, and the fork its branch is on (one
+ * GitHub no longer has is a fork all the same, with no path).
+ */
+const toReviewOf = (pull: PullAnswer): ChangeToReview => ({
+  ...changeOf(pull),
+  member: memberOf(pull.author_association),
+  fork: headRepositoryOf(pull) ?? null,
+  baseSha: pull.base.sha ?? null,
+})
+
+/**
+ * A pull request as GitHub's search lists it, over GraphQL: REST's list
+ * says nothing of reviews or checks, and its search nothing of branches,
+ * where this says all of them in one call.
+ */
+const ListedAnswer = Schema.Struct({
+  id: Schema.String,
+  number: Schema.Number,
+  title: Schema.String,
+  url: Schema.String,
+  state: Schema.String,
+  isDraft: Schema.Boolean,
+  headRefName: Schema.String,
+  baseRefName: Schema.String,
+  headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
+  isCrossRepository: Schema.optional(Schema.Boolean),
+  headRepositoryOwner: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
+  author: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        __typename: Schema.optional(Schema.String),
+        login: Schema.String,
+        databaseId: Schema.optional(Schema.NullOr(Schema.Number)),
+        name: Schema.optional(Schema.NullOr(Schema.String)),
+      }),
+    ),
+  ),
+  reviewDecision: Schema.optional(Schema.NullOr(Schema.String)),
+  commits: Schema.optional(
+    Schema.Struct({
+      nodes: Schema.Array(
+        Schema.NullOr(
+          Schema.Struct({ commit: Schema.Struct({ statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })) }) }),
+        ),
+      ),
+    }),
+  ),
+  updatedAt: Schema.String,
+})
+type ListedAnswer = typeof ListedAnswer.Type
+
+const SearchAnswer = Schema.Struct({
+  // An issue the search found has none of a pull request's fields: it is left out.
+  search: Schema.Struct({ issueCount: Schema.Number, nodes: Schema.Array(Schema.Unknown) }),
+})
+
+const SEARCH = `query($q: String!, $n: Int!) {
+  search(query: $q, type: ISSUE, first: $n) {
+    issueCount
+    nodes {
+      ... on PullRequest {
+        id number title url state isDraft headRefName baseRefName headRefOid updatedAt
+        isCrossRepository headRepositoryOwner { login }
+        author { __typename login ... on User { databaseId name } ... on Bot { databaseId } }
+        reviewDecision
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+}`
+
+/** A login GitHub could give: letters, digits and hyphens; an app's ends in `[bot]`. */
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(\[bot\])?$/
+
+/**
+ * What GitHub's search is asked for a repository's pull requests: newest
+ * change first, narrowed as the query says. Each word of the text is
+ * quoted, so none of it is read as a qualifier; an app is its author as
+ * `app/name`. Undefined for an author no login could be.
+ */
+export const searchOf = (path: ReadonlyArray<string>, query: ChangeQuery): string | undefined => {
+  const author = query.author?.trim().replace(/^@/, '')
+  if (author !== undefined && author !== '' && !LOGIN.test(author)) return undefined
+  const words = (query.text ?? '')
+    .replaceAll('"', ' ')
+    .split(/\s+/)
+    .filter((word) => word !== '')
+  return [
+    `repo:${path.join('/')}`,
+    'is:pr',
+    { open: 'is:open', closed: 'is:closed is:unmerged', merged: 'is:merged', all: '' }[query.state],
+    author === undefined || author === '' ? '' : `author:${author.endsWith('[bot]') ? `app/${author.slice(0, -'[bot]'.length)}` : author}`,
+    query.reviewRequested === true ? 'review-requested:@me' : '',
+    query.draft === undefined ? '' : `draft:${query.draft}`,
+    query.updatedUntil === undefined ? '' : `updated:<=${query.updatedUntil.replace(/\.\d+Z$/, 'Z')}`,
+    ...words.map((word) => `"${word}"`),
+    words.length === 0 ? '' : 'in:title',
+    'sort:updated-desc',
+  ]
+    .filter((word) => word !== '')
+    .join(' ')
+}
+
+const listedOf = (pull: ListedAnswer): ListedChange => {
+  const rollup = pull.commits?.nodes[0]?.commit.statusCheckRollup?.state
+  const author = pull.author
+  return {
+    id: pull.id,
+    number: pull.number,
+    title: pull.title,
+    // Never read from a list: what it says is read with the pull request, where it is marked as its author's.
+    body: '',
+    url: pull.url,
+    state: pull.state === 'MERGED' ? 'merged' : pull.state === 'OPEN' ? 'open' : 'closed',
+    draft: pull.isDraft,
+    source: pull.headRefName,
+    target: pull.baseRefName,
+    headSha: pull.headRefOid ?? null,
+    author:
+      author == null
+        ? null
+        : author.__typename === 'Bot'
+          ? { id: String(author.databaseId ?? author.login), login: `${author.login}[bot]`, name: null, bot: true }
+          : { id: String(author.databaseId ?? author.login), login: author.login, name: author.name ?? null, bot: false },
+    additions: null,
+    deletions: null,
+    changedFiles: null,
+    updatedAt: pull.updatedAt,
+    forkOwner: pull.isCrossRepository === true ? (pull.headRepositoryOwner?.login ?? null) : null,
+    reviewDecision:
+      pull.reviewDecision === 'APPROVED'
+        ? 'approved'
+        : pull.reviewDecision === 'CHANGES_REQUESTED'
+          ? 'changes_requested'
+          : pull.reviewDecision === 'REVIEW_REQUIRED'
+            ? 'review_required'
+            : null,
+    checks:
+      rollup === 'SUCCESS'
+        ? 'passed'
+        : rollup === 'FAILURE' || rollup === 'ERROR'
+          ? 'failed'
+          : rollup === 'PENDING' || rollup === 'EXPECTED'
+            ? 'running'
+            : null,
+  }
+}
+
+/** What GitHub calls each verdict a review can post. */
+const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', request_changes: 'REQUEST_CHANGES', comment: 'COMMENT' }
+
+const PostedAnswer = Schema.Struct({ id: Schema.Number, html_url: Schema.optional(Schema.NullOr(Schema.String)) })
 
 /** A check run's state from its status and conclusion. */
 export const checkRunState = (status: string, conclusion: string | null | undefined): CheckState => {
@@ -227,6 +414,16 @@ const HEADERS = { accept: 'application/vnd.github+json', 'x-github-api-version':
 /** `owner/repo#12`: the ref GitHub's issues go by. */
 const issueRef = /^([^/\s]+)\/([^#\s]+)#(\d+)$/
 
+/** What GitHub changes of an issue: all but its priority, which GitHub's issues haven't (a project board's field is the board's own). */
+const ISSUE_CHANGES: ReadonlyArray<IssueField> = ['status', 'close', 'assignee', 'labels', 'project', 'title']
+
+/** An issue's statuses on GitHub: open, or closed as done or as not planned, by the state reason each closes with. */
+const ISSUE_STATES: ReadonlyArray<Choice> = [
+  { id: 'open', name: 'Open', also: ['reopened'] },
+  { id: 'completed', name: 'Closed', also: ['done', 'completed'] },
+  { id: 'not_planned', name: 'Closed as not planned', also: ['not planned', 'cancelled', 'canceled'] },
+]
+
 /** `owner/repo`: a repository, where an issue is filed. */
 const repositoryRef = /^([^/\s]+)\/([^/#\s]+)$/
 
@@ -237,10 +434,19 @@ const Listed = Schema.Struct({
   archived: Schema.optional(Schema.Boolean),
 })
 
+/**
+ * How long a listing is kept: a GraphQL search is a POST, with no ETag to ask
+ * "anything new?" by, so the same search again within a minute is answered
+ * from memory, and a coordinator asking twice costs GitHub nothing more.
+ */
+export const LISTING_KEPT_MS = 60_000
+
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
   const api = options.apiUrl.replace(/\/+$/, '')
   const graphqlUrl = api.endsWith('/api/v3') ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
+  /** Listings by their search, with when each was asked. */
+  const listings = new Map<string, { readonly at: number; readonly list: ChangeList }>()
   const http = makeHttp({
     product,
     fetch: options.fetch,
@@ -312,10 +518,74 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       : Effect.succeed({ owner: match[1] ?? '', name: match[2] ?? '', number: Number(match[3]) })
   }
 
+  /** Every page of a repository's list, a hundred at a time: a page short of a hundred is the last. */
+  const everyPage = <A>(schema: Schema.Codec<A, unknown>, url: string) =>
+    paged(1, (page) =>
+      Effect.map(http.json(Schema.Array(schema), 'GET', `${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`), (items) => ({
+        items,
+        next: items.length < 100 ? undefined : page + 1,
+      })),
+    )
+
+  const issueChoices: Tracker['choices'] = (issue, field) =>
+    Effect.gen(function* () {
+      const { owner, name } = yield* parseRef(issue.ref)
+      const at = repo([owner, name])
+      switch (field) {
+        case 'status':
+          return ISSUE_STATES
+        case 'labels':
+          return (yield* everyPage(Schema.Struct({ name: Schema.String }), `${at}/labels`)).map((label): Choice => ({
+            id: label.name,
+            name: label.name,
+          }))
+        // Those GitHub lets it be assigned to: the repository's people.
+        case 'assignee':
+          return (yield* everyPage(User, `${at}/assignees`)).map((user): Choice => ({
+            id: user.login,
+            name: user.name ?? user.login,
+            also: [user.login],
+          }))
+        // A milestone, still open, is where GitHub groups an issue's work.
+        case 'project':
+          return (yield* everyPage(Schema.Struct({ number: Schema.Number, title: Schema.String }), `${at}/milestones?state=open`)).map(
+            (milestone): Choice => ({ id: String(milestone.number), name: milestone.title }),
+          )
+      }
+    })
+
+  const changeIssue: Tracker['update'] = (issue, wanted) =>
+    Effect.gen(function* () {
+      const refused = unchangeable({ links: false, starts: false, changes: ISSUE_CHANGES }, wanted)
+      if (refused !== undefined) return yield* cantChange(product, refused, 'GitHub’s issues have no priority')
+      const { owner, name, number } = yield* parseRef(issue.ref)
+      const at = `${repo([owner, name])}/issues/${number}`
+      // Open, or closed with a reason: done, or not planned.
+      const state = wanted.close === true && wanted.status === undefined ? 'completed' : wanted.status?.id
+      const edit = {
+        ...(wanted.title === undefined ? {} : { title: wanted.title }),
+        ...(state === undefined ? {} : state === 'open' ? { state: 'open' } : { state: 'closed', state_reason: state }),
+        ...(wanted.assignee === undefined ? {} : { assignees: wanted.assignee === null ? [] : [wanted.assignee.id] }),
+        ...(wanted.project === undefined ? {} : { milestone: wanted.project === null ? null : Number(wanted.project.id) }),
+      }
+      if (Object.keys(edit).length > 0) yield* http.json(Schema.Unknown, 'PATCH', at, edit)
+      const add = wanted.labels?.add ?? []
+      if (add.length > 0) yield* http.json(Schema.Unknown, 'POST', `${at}/labels`, { labels: add.map((label) => label.name) })
+      // One already off is nothing to take off.
+      for (const label of wanted.labels?.remove ?? [])
+        yield* http.json(Schema.Unknown, 'DELETE', `${at}/labels/${encodeURIComponent(label.name)}`).pipe(
+          Effect.catchIf(
+            (error) => error.reason === 'not_found',
+            () => Effect.void,
+          ),
+        )
+      return issueOf(yield* http.json(IssueAnswer, 'GET', at), owner, name)
+    })
+
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: false, starts: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, links: false, starts: false, changes: ISSUE_CHANGES },
     account,
     repository: (path) =>
       Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
@@ -352,6 +622,29 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ),
         ),
     change: (repository, number) => Effect.map(http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`), changeOf),
+    listChanges: (repository, query) =>
+      Effect.gen(function* () {
+        const q = searchOf(repository.path, query)
+        if (q === undefined)
+          return yield* Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `Not a GitHub login: ${query.author}` }))
+        const n = Math.min(Math.max(query.limit, 1), 100)
+        const key = `${n} ${q}`
+        const now = yield* Clock.currentTimeMillis
+        const kept = listings.get(key)
+        if (kept !== undefined && now - kept.at < LISTING_KEPT_MS) return kept.list
+        const { search } = yield* http
+          .graphql(SearchAnswer, graphqlUrl, SEARCH, { q, n })
+          .pipe(Effect.mapError(lacking('repo (a fine-grained token’s Pull requests: Read)')))
+        const changes = search.nodes.flatMap((node) => {
+          const pull = Schema.decodeUnknownOption(ListedAnswer)(node)
+          return pull._tag === 'Some' ? [listedOf(pull.value)] : []
+        })
+        const list: ChangeList = { changes, more: search.issueCount > changes.length }
+        // A search asked a minute ago or more is asked again, so it goes, rather than stay for each cursor or query once asked.
+        for (const [asked, listing] of listings) if (now - listing.at >= LISTING_KEPT_MS) listings.delete(asked)
+        listings.set(key, { at: now, list })
+        return list
+      }),
     markReady: (repository, change) =>
       http
         .graphql(
@@ -369,6 +662,36 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ...(change.headSha === null ? {} : { sha: change.headSha }),
         })
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
+        if (now.state !== 'open') return changeOf(now)
+        return changeOf(yield* http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, { state: 'closed' }))
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
+        if (now.state === 'open') return yield* stillOpen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        // Its branch is where its head is: a fork's, for one from a fork; a fork that is gone took it along.
+        const on = now.head.repo?.full_name
+        if (on == null) return
+        const branch = branchPath(now.head.ref)
+        yield* http.json(Schema.Unknown, 'DELETE', `${repo(on.split('/'))}/git/refs/heads/${branch}`).pipe(
+          // GitHub answers 422 for a branch already gone, but for the default branch, a validation or throttling too: only one
+          // GitHub then says isn't there is gone, and any other refusal is said.
+          Effect.catchIf(
+            (error) => error.status === 422,
+            (refused) =>
+              http.json(Schema.Unknown, 'GET', `${repo(on.split('/'))}/git/ref/heads/${branch}`).pipe(
+                Effect.andThen(Effect.fail(refused)),
+                Effect.catchIf(
+                  (error) => error.reason === 'not_found',
+                  () => Effect.void,
+                ),
+              ),
+          ),
+        )
+      }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
@@ -395,17 +718,27 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         }))
         return [...fromRuns, ...fromStatuses]
       }),
-    checkLog: (repository, check) => {
-      // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's.
+    checkLog: (repository, check, whole = false) => {
+      // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's. GitHub answers with a redirect to the log in
+      // its storage, signed for a minute, which `text` follows without the token. Refused, or gone once kept long enough, it fails.
       const match = /^run:(\d+):github-actions$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
-      return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(
-        Effect.map(tail),
-        Effect.catchIf(
-          (error) => error.reason === 'not_found' || error.reason === 'forbidden',
-          () => Effect.succeed(null),
-        ),
-      )
+      return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(Effect.map((log) => (whole ? log : tail(log))))
+    },
+    checkReport: (repository, check) => {
+      // A check run from another service (CodeQL, CircleCI's app) keeps its log there, but says what it found in its output.
+      const match = /^run:(\d+):/.exec(check.id)
+      if (match === null) return Effect.succeed(null)
+      return Effect.map(http.json(CheckRunAnswer, 'GET', `${repo(repository)}/check-runs/${match[1]}`), (run) => {
+        const said = [run.output?.summary, run.output?.text].filter((part) => part != null && part.trim() !== '').join('\n\n')
+        return said === '' ? null : tail(said)
+      })
+    },
+    rerun: (repository, check) => {
+      // Only a GitHub Actions job runs again from here: its check run's id is the job's.
+      const match = /^run:(\d+):github-actions$/.exec(check.id)
+      if (match === null) return Effect.succeed(false)
+      return http.json(Schema.Unknown, 'POST', `${repo(repository)}/actions/jobs/${match[1]}/rerun`).pipe(Effect.as(true))
     },
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
@@ -452,6 +785,18 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             }),
             (comment) => commentOf(comment, true),
           ),
+    changeToReview: (repository, number) => Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${number}`), toReviewOf),
+    postReview: (repository, number, review) =>
+      Effect.map(
+        http.json(PostedAnswer, 'POST', `${repo(repository)}/pulls/${number}/reviews`, {
+          ...(review.commit === null ? {} : { commit_id: review.commit }),
+          body: review.body,
+          event: EVENTS[review.event],
+          // On the change as it now reads: the right side of its diff.
+          comments: review.comments.map((comment) => ({ path: comment.path, line: comment.line, side: 'RIGHT', body: comment.body })),
+        }),
+        (posted) => ({ id: String(posted.id), url: posted.html_url ?? null }),
+      ),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${options.webUrl.replace(/\/+$/, '')}/${repository.path.join('/')}.git`,
@@ -520,6 +865,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         })
         return issueOf(filed, owner, name)
       }),
+    choices: issueChoices,
+    update: changeIssue,
   }
 }
 

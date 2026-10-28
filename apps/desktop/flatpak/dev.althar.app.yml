@@ -11,10 +11,11 @@ base-version: '24.08'
 command: althar
 separate-locales: false
 
-# Network, display, GPU and the host keyring are available. The permission to
-# talk to org.freedesktop.Flatpak is broad: it can run commands on the host,
-# which the app uses to reach the person's tools. Project folders enter via
-# the document portal; the host bridge is not a sandbox boundary.
+# Network, display, GPU, the host keyring and the desktop's tray are available.
+# The permission to talk to org.freedesktop.Flatpak is broad: it can run
+# commands on the host, which the app uses to reach the person's tools.
+# Project folders enter via the document portal; the host bridge is not a
+# sandbox boundary.
 finish-args:
   - --share=network
   - --socket=wayland
@@ -22,7 +23,18 @@ finish-args:
   # X11 clients need shared memory; without it fallback-x11 is slow and some drawing breaks (Flathub's Electron sample keeps it too).
   - --share=ipc
   - --device=dri
+  # Flatpak's default xdg-desktop-portal proxy exposes org.freedesktop.portal.Secret
+  # without a talk-name grant; Althar uses its per-app key on every desktop.
+  # This permission is only for the safe synchronous keyring fallback when the
+  # portal is absent: it seals with the keyring's own key (Chromium's v11) and
+  # refuses the fixed-key v10; that seal may need replacing at the next restart.
   - --talk-name=org.freedesktop.secrets
+  # The edge's tray icon: Electron asks the desktop's StatusNotifierWatcher to
+  # show it, and without this talk permission the sandbox cannot see the
+  # watcher, so the tray silently does not appear. Under Flatpak Electron
+  # registers the item under its own unique bus name, so no own-name
+  # permission is needed.
+  - --talk-name=org.kde.StatusNotifierWatcher
   # The person's own agents and editors, found and run where they are
   # installed (Codex among them: flatpak/codex-host.sh); nothing else.
   - --talk-name=org.freedesktop.Flatpak
@@ -30,6 +42,15 @@ finish-args:
 modules:
   - name: althar
     buildsystem: simple
+    # flatpak-builder rewrites every ELF file it finds, stripping it and
+    # extracting debug info (eu-strip). A Bun-compiled executable keeps its
+    # JavaScript payload in a trailer at the very end of the file, which the
+    # rewrite drops: Claude Code's bundled `claude` (the Agent SDK's native
+    # binary) would run as plain `bun`, so sign-in and sessions fail. Leave
+    # the app's binaries exactly as electron-builder made them.
+    build-options:
+      strip: false
+      no-debuginfo: true
     build-commands:
       - mkdir -p /app/main /app/bin /app/share/applications /app/share/icons/hicolor/512x512/apps /app/share/metainfo
       - cp -a . /app/main

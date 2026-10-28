@@ -6,20 +6,19 @@ import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
 /*
  * Where Althar keeps a secret, such as a code host's token
  * (docs/architecture/06, "Signing in"): sealed, in a file of its own in the
- * profile, never in the record or a log. Only Althar can open one. In the
- * app, Electron's safeStorage seals it in the main process, with a key the
- * system keychain keeps for the signed app alone: another process asking for
- * that key, an agent's shell among them, gets a prompt the person would
- * notice. The runtime never holds the key; it asks main to seal and open.
- *
- * The command-line client has no such key, so it keeps no secrets: the
- * connections it shares with the app stay the app's. Tests keep secrets in
- * memory.
+ * profile, never in the record or a log. In the app, Electron's safeStorage
+ * seals it in the main process, using the system keychain or, in a Linux
+ * Flatpak, the Secret portal's key for Althar's application id when available.
+ * Main falls back only to a safe synchronous keyring for the current session;
+ * the runtime never holds the key and asks main to seal and open. The command-line client
+ * has no such key, so it keeps no secrets: the connections it shares with the
+ * app stay the app's. Tests keep secrets in memory.
  *
  * Under load a secret can fail to be kept or given back for a moment: the
  * main process too busy to answer in time, the keychain slow to hand over its
  * key, or the system out of open files. Each is tried again, a moment apart,
- * before Althar says it couldn't.
+ * before Althar says it couldn't. A secret the keychain answers it can no
+ * longer open is another matter: it is lost, not late.
  */
 
 /** Secrets couldn't be kept or given back. */
@@ -27,17 +26,22 @@ export class SecretsUnavailable extends Schema.TaggedError<SecretsUnavailable>()
   reason: Schema.String,
   /** The main process's own keyring refusal: its words are the person's, and only these are shown verbatim (words.ts). */
   keyring: Schema.optional(Schema.Boolean),
+  /**
+   * The secret is there, sealed, and the main process answered that it can't open it: sealed with a key the keychain no longer
+   * holds. No ask will change that, so it is not tried again; the sign-in it was is lost, and its person makes it again.
+   */
+  unreadable: Schema.optional(Schema.Boolean),
 }) {}
 
 /**
  * A secret that couldn't be kept or opened is tried this many times more, a
  * moment apart, then twice that; not where there is no keyring to keep it,
- * which a moment doesn't change.
+ * or where the key to open it is gone, which a moment doesn't change.
  */
 const AGAIN = {
   times: 2,
   schedule: Schedule.exponential(Duration.millis(200)),
-  while: (error: SecretsUnavailable) => error.keyring !== true,
+  while: (error: SecretsUnavailable) => error.keyring !== true && error.unreadable !== true,
 }
 
 /** What seals a secret so that only Althar can open it, and opens it again: in the app, its main process. */
@@ -56,10 +60,10 @@ export class Secrets extends Context.Service<
     remove(name: string): Effect.Effect<void, SecretsUnavailable>
   }
 >()('@althar/runtime/Secrets') {
-  /** Secrets in memory, for tests. */
-  static readonly memory = (): Layer.Layer<Secrets> =>
+  /** Secrets in memory, for tests: kept for each runtime, or across several given the same map, as a keychain is across launches. */
+  static readonly memory = (shared?: Map<string, string>): Layer.Layer<Secrets> =>
     Layer.sync(Secrets, () => {
-      const kept = new Map<string, string>()
+      const kept = shared ?? new Map<string, string>()
       return Secrets.of({
         set: (name, value) => Effect.sync(() => void kept.set(name, value)),
         get: (name) => Effect.sync(() => kept.get(name) ?? null),

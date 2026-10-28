@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, toConversation } from './support'
 
 /*
  * What goes on behind a task, in a real window with the fake agent and the
@@ -26,22 +26,7 @@ test('shows over the composer the server its lead left running and the pull requ
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900))
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
-    await page
-      .getByRole('dialog', { name: 'meridian’s settings' })
-      .getByRole('button', { name: /^GitHub/ })
-      .click()
-    const connecting = page.getByRole('dialog', { name: 'GitHub' })
-    await connecting
-      .getByRole('group', { name: 'Ways to connect GitHub' })
-      .getByRole('button', { name: /Make a token/ })
-      .click()
-    await connecting.getByRole('button', { name: 'Paste it myself' }).click()
-    await connecting.getByLabel('Paste it').fill('github_pat_e2e')
-    await connecting.getByRole('button', { name: 'Check' }).click()
-    await expect(connecting.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
-    await connecting.getByRole('button', { name: 'Done' }).click()
-    await expect(connecting).toHaveCount(0)
+    await connectGitHub(page)
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
     await box.fill('Rate-limit refunds per partner. [coordinator:plan-no-review] [coordinator:plan] [lead:serve] [lead:finish] [lead:edit]')
@@ -51,30 +36,25 @@ test('shows over the composer the server its lead left running and the pull requ
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)
 
-    // Both float over the composer: what it listens to, and what its lead left running, with where it answers.
-    const listening = page.getByRole('button', { name: /^Listening to/ })
-    const running = page.getByRole('button', { name: /^Running/ })
-    await expect(listening).toContainText('PR #1')
-    await expect(running).toContainText('bun dev')
-    await expect(running).toContainText('localhost:5173')
+    // One chip floats over the composer: what its lead left running, with where it answers, and what it listens to.
+    const chip = page.getByRole('button', { name: /Listening to PR #1$/ })
+    await expect(chip).toContainText('localhost:5173')
+    await expect(chip).toContainText('PR #1')
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/behind.png', animations: 'disabled' })
 
-    // The server's list: where it answers, and Stop.
-    await running.click()
-    const list = page.getByRole('dialog', { name: 'Running' })
+    // It opens all of it: the server, where it answers, and Stop.
+    await chip.click()
+    const list = page.getByRole('dialog', { name: 'Behind this task' })
     await expect(list.getByRole('button', { name: 'Open localhost:5173' })).toBeVisible()
-    await page.screenshot({ path: 'test-results/behind-running.png', animations: 'disabled' })
-    await list.getByRole('button', { name: 'Stop bun dev' }).click()
-    await expect(running).toHaveCount(0)
+    await page.screenshot({ path: 'test-results/behind-open.png', animations: 'disabled' })
+    await list.getByRole('button', { name: /^Stop (?!listening)/ }).click()
+    await expect(chip).not.toContainText('localhost:5173')
 
-    // The pull request's list: what it listens for, and Stop; nothing said there after reaches the thread.
-    await listening.click()
-    const sources = page.getByRole('dialog', { name: 'Listening to' })
-    await expect(sources.getByText('meridian/api')).toBeVisible()
-    await page.screenshot({ path: 'test-results/behind-listening.png', animations: 'disabled' })
-    await sources.getByRole('button', { name: 'Stop listening to PR #1' }).click()
-    await expect(listening).toHaveCount(0)
+    // The pull request: what it listens for, and Stop; nothing said there after reaches the thread.
+    await expect(list.getByText('meridian/api')).toBeVisible()
+    await list.getByRole('button', { name: 'Stop listening to PR #1' }).click()
+    await expect(chip).toHaveCount(0)
     await page.screenshot({ path: 'test-results/behind-quiet.png', animations: 'disabled' })
   } finally {
     await electronApp.close()

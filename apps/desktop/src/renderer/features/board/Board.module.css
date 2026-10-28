@@ -9,4 +9,22 @@
   margin: 16px 0 0;
   color: var(--danger);
   font-size: 13px;
+  /* Some say what git said, line by line. */
+  white-space: pre-line;
+}
+
+/* A change ready with one repository's pull request open and another's commits in none: both, one under the other. */
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Settled, while nothing has settled but something was kept for later. */
+.shelfNote {
+  margin: 0 2px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-3);
+  text-wrap: pretty;
 }

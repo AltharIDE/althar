@@ -1,17 +1,19 @@
 import { Checkbox } from 'radix-ui'
-import { useEffect, useId, useRef } from 'react'
+import { type ReactNode, useEffect, useId, useRef } from 'react'
 
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Light } from '../../foundations/Light/Light'
-import { BrandChip } from '../../foundations/Marks/Marks'
+import { BrandChip, BrandMark } from '../../foundations/Marks/Marks'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { useDragOver } from '../../lib/dragOver'
 import { Button } from '../../primitives/Button/Button'
 import { Kbd } from '../../primitives/Kbd/Kbd'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
-import { type RuntimeEntry, Runtimes, type RuntimesProps, type RuntimesText } from '../../setup/Runtimes/Runtimes'
+import { Spinner } from '../../primitives/Spinner/Spinner'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { type PinnedDownload, type RuntimeEntry, Runtimes, type RuntimesProps, type RuntimesText } from '../../setup/Runtimes/Runtimes'
 import s from './Start.module.css'
 
 /*
@@ -22,14 +24,19 @@ import s from './Start.module.css'
  *
  * On the left the mark stands in its own light, and each agent that
  * answered lands on a ring under it: signed in in full, otherwise faint. On
- * the right, on a sheet over the light, the agents' rows, then the
- * repositories found where people keep code.
+ * the right, on a sheet over the light, the agents on this computer, a row
+ * each with who it is signed in as and its accounts; under them, quieter, a
+ * small tile for each other agent Althar runs, to download where Althar can
+ * fetch it, as many as there are; then the repositories found where people
+ * keep code.
  *
  * A project is one repository or several, so they are picked, not opened:
  * each one ticked joins the project taking shape under the mark, named after
  * the first until the person names it. More come from Add a folder, or
  * dropped on the window. Nothing here is a step to finish: a project can be
- * made with no agent ready, and its tasks start once one is.
+ * made with no agent ready, and its tasks start once one is. At the
+ * sheet's foot, a quiet line may ask once what may be sent, such as crash
+ * reports, with its switch: never a step to finish either.
  */
 
 /** A repository that could be in the first project, as the screen lists it. */
@@ -54,6 +61,20 @@ export interface StartText {
   agentsLabel: string
   asking: string
   readyOf: (ready: number, of: number) => string
+  /** Under the rows where none is on this computer yet. */
+  noneHere: string
+  /** The other agents Althar runs, under those on this computer: their heading, and their list's name. */
+  away: string
+  awayLabel: string
+  /** A tile's way to have its agent: Althar fetches it, about this big (its button shows the size), or the agent's own instructions. */
+  downloadNamed: (name: string, size: string) => string
+  /** Where a download comes from, on its button's tooltip: a release's latest on GitHub, or one version its maker publishes. */
+  downloadFrom: (pinned?: PinnedDownload) => string
+  downloading: (size: string) => string
+  install: string
+  installNamed: (name: string) => string
+  tryAgain: string
+  tryAgainNamed: (name: string, size: string) => string
   repositories: string
   repositoriesLabel: string
   lookedIn: (where: string) => string
@@ -85,6 +106,19 @@ export const startText: StartText = {
   agentsLabel: 'Agents on this Mac',
   asking: 'asking…',
   readyOf: (ready, of) => `${ready} of ${of} ready`,
+  noneHere: 'None is on this Mac yet. Download one below, or install one yourself.',
+  away: 'Not on this Mac',
+  awayLabel: 'Agents not on this Mac',
+  downloadNamed: (name, size) => `Download ${name}, ${size}`,
+  downloadFrom: (pinned) =>
+    pinned === undefined
+      ? 'Its latest release from GitHub, checked against it, in a folder of its own'
+      : `${pinned.version} from ${pinned.from}, checked against what it was pinned with, in a folder of its own`,
+  downloading: (size) => `Downloading, ${size}…`,
+  install: 'How to install',
+  installNamed: (name) => `How to install ${name}`,
+  tryAgain: 'Try again',
+  tryAgainNamed: (name, size) => `Try again to download ${name}, ${size}`,
   repositories: 'Repositories',
   repositoriesLabel: 'Repositories for the project',
   lookedIn: (where) => `in ${where}`,
@@ -96,7 +130,7 @@ export const startText: StartText = {
   more: 'Tick more, or drop folders on the window.',
   leaveOut: (name) => `Leave ${name} out`,
   create: 'Make the project',
-  createKbd: '⌘⏎',
+  createKbd: '⌘↵',
 }
 
 export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 'text' | 'runtimes'> {
@@ -125,6 +159,8 @@ export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 
   text?: Partial<StartText>
   /** The agents' rows' own words, such as what this computer is called. */
   runtimesText?: Partial<RuntimesText>
+  /** One quiet line at the sheet's foot, such as crash reports with their switch (CrashReportsLine). */
+  foot?: ReactNode
 }
 
 /** How far round the ring the agents sit: under the mark, at most from 200° to 340°, as a share of the stage. */
@@ -155,6 +191,7 @@ export function Start({
   className,
   text,
   runtimesText,
+  foot,
   ...rows
 }: StartProps) {
   const t = { ...startText, ...text }
@@ -176,8 +213,10 @@ export function Start({
   })
   const asking = runtimes === null
   const agents = runtimes ?? []
-  // Round the mark, only the agents on this computer: one to download is in the rows alone.
-  const landed = agents.filter((r) => r.state !== RuntimeState.Missing)
+  // On this computer: round the mark, and a row each, with who it is signed in as and its accounts.
+  const here: readonly RuntimeEntry[] = agents.filter((r) => r.state !== RuntimeState.Missing && r.state !== RuntimeState.Installing)
+  // The others Althar runs, under those and quieter, a tile each: those it can fetch first, as there may be many.
+  const away = [...agents.filter((r) => !here.includes(r) && fetchable(r)), ...agents.filter((r) => !here.includes(r) && !fetchable(r))]
   const ready = agents.filter((r) => r.state === RuntimeState.Ready).length
   const chosen = picked.flatMap((id) => repositories?.find((r) => r.id === id) ?? [])
   const forming = chosen.length > 0
@@ -197,8 +236,8 @@ export function Start({
         <div className={s.stage}>
           <svg className={s.orbit} viewBox="0 0 100 100" aria-hidden="true">
             <circle cx="50" cy="50" r={RING.radius * 50} className={s.ring} pathLength="1" />
-            {landed.map((r, i) => {
-              const p = placeOn(i, landed.length)
+            {here.map((r, i) => {
+              const p = placeOn(i, here.length)
               return (
                 <circle
                   key={r.id}
@@ -212,8 +251,8 @@ export function Start({
             })}
           </svg>
           <HalftoneMark size={250} className={s.mark} />
-          {landed.map((r, i) => {
-            const p = placeOn(i, landed.length)
+          {here.map((r, i) => {
+            const p = placeOn(i, here.length)
             return (
               <span
                 key={r.id}
@@ -288,7 +327,7 @@ export function Start({
         <div className={s.sheet}>
           <h2 id={agentsId} className={s.label}>
             {t.agents}
-            <span className={s.labelNote}>{asking ? t.asking : t.readyOf(ready, agents.length)}</span>
+            <span className={s.labelNote}>{asking ? t.asking : t.readyOf(ready, here.length)}</span>
           </h2>
           {asking ? (
             <div className={s.waiting} aria-labelledby={agentsId} aria-busy="true">
@@ -297,7 +336,14 @@ export function Start({
               <Skeleton height={36} />
             </div>
           ) : (
-            <Runtimes label={t.agentsLabel} runtimes={agents} {...rows} {...(runtimesText === undefined ? {} : { text: runtimesText })} />
+            <>
+              {here.length > 0 ? (
+                <Runtimes label={t.agentsLabel} runtimes={here} {...rows} {...(runtimesText === undefined ? {} : { text: runtimesText })} />
+              ) : (
+                <p className={s.quiet}>{t.noneHere}</p>
+              )}
+              {away.length > 0 && <Away agents={away} t={t} onInstall={rows.onInstall} onHelp={rows.onHelp} />}
+            </>
           )}
 
           <div className={s.repos}>
@@ -343,8 +389,92 @@ export function Start({
               </ul>
             )}
           </div>
+          {foot !== undefined && (
+            <div className={s.foot}>
+              <div className={s.footLine}>{foot}</div>
+            </div>
+          )}
         </div>
       </section>
     </div>
   )
+}
+
+/** Whether Althar can fetch an agent that isn't on this computer, or is fetching it. */
+const fetchable = (r: RuntimeEntry) => r.state === RuntimeState.Installing || (r.state === RuntimeState.Missing && r.download !== undefined)
+
+/**
+ * The agents Althar runs that aren't on this computer, under those that are:
+ * a heading quieter than theirs, and a small tile each, side by side where
+ * there is room, so many more fit in a few lines. A tile is the agent's mark
+ * and name, and its one way in: a download, about so big, where Althar can
+ * fetch it (where from, on its tooltip); else the agent's own instructions.
+ */
+function Away({
+  agents,
+  t,
+  onInstall,
+  onHelp,
+}: {
+  agents: readonly RuntimeEntry[]
+  t: StartText
+  onInstall: RuntimesProps['onInstall']
+  onHelp: RuntimesProps['onHelp']
+}) {
+  const id = useId()
+  return (
+    <section className={s.away} aria-labelledby={id}>
+      <h3 id={id} className={s.awayLabel}>
+        {t.away}
+        <span className={s.labelNote}>{agents.length}</span>
+      </h3>
+      <ul className={s.spares} aria-label={t.awayLabel}>
+        {agents.map((r) => (
+          <li key={r.id} className={s.spare}>
+            <span className={s.spareMark}>{r.brand ? <BrandMark brand={r.brand} size={15} /> : <Icon name="plug" size={14} />}</span>
+            <span className={s.spareName}>{r.name}</span>
+            <span className={s.spareWay}>{wayOf(r, t, onInstall, onHelp)}</span>
+            {r.state === RuntimeState.Missing && r.failed !== undefined && (
+              <span className={s.spareFailed} role="alert">
+                {r.failed}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/** A tile's one way in: downloading, a download, or the agent's own instructions; nothing where it has none. */
+function wayOf(r: RuntimeEntry, t: StartText, onInstall: RuntimesProps['onInstall'], onHelp: RuntimesProps['onHelp']) {
+  if (r.state === RuntimeState.Installing)
+    return (
+      <output className={s.spareBusy}>
+        <Spinner size="small" />
+        {t.downloading(r.download)}
+      </output>
+    )
+  if (r.state !== RuntimeState.Missing) return null
+  if (r.download !== undefined && onInstall !== undefined)
+    return (
+      <Tooltip label={t.downloadFrom(r.pinned)} placement="above" align="end">
+        <Button
+          size="small"
+          {...(r.failed === undefined ? { icon: 'download' as const } : {})}
+          aria-label={r.failed === undefined ? t.downloadNamed(r.name, r.download) : t.tryAgainNamed(r.name, r.download)}
+          onClick={() => onInstall(r.id)}
+        >
+          {r.failed === undefined ? r.download : t.tryAgain}
+        </Button>
+      </Tooltip>
+    )
+  if (onHelp !== undefined && r.guide !== false)
+    return (
+      <button type="button" className={s.spareHelp} aria-label={t.installNamed(r.name)} onClick={() => onHelp(r.id)}>
+        {t.install}
+        <Icon name="external" size={11} />
+      </button>
+    )
+  return null
 }

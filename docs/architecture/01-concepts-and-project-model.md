@@ -206,10 +206,12 @@ Tasks, evidence, and decisions remain readable when a source is unavailable.
 
 ### Changing a project after it is made
 
-A project's settings, opened from the top of its screen, rename it and change
-the ink its mark is drawn in, open its repositories and its rules, connect
-its code host, and remove it. Each change is recorded as a fact of the
-project, so every window reads the project again.
+A project's settings, a view of the project beside its conversation and its
+board, rename it and change the ink its mark is drawn in, switch how its
+tasks work, add and leave out its repositories, connect its code host and
+trackers, change its rules and what it runs, show its notes, and remove it.
+Each change is recorded as a fact of the project, so every window reads the
+project again.
 
 - **Renaming** changes its name only. Its slug, and so the folders its tasks'
   worktrees are in, stays, and so does its mark, drawn from its id.
@@ -225,13 +227,13 @@ project, so every window reads the project again.
   as whom, from the connections on this device. Nothing is asked of the
   host. A host Althar doesn't know is named by its address; a repository
   with no remote, or one that is a folder, keeps its work on this device.
-  The Repositories screen draws each folder wired to where its work goes,
+  Its settings draw each folder wired to where its work goes,
   and reads it again when a connection is made or stops working.
 - **Leaving a repository out** sets its binding's `detached_at`. New tasks
   can't require it and the coordinator stops reading it; tasks made with it
   keep their requirement and their worktree. The last binding stays, since a
   task needs one.
-- **A role** is one of the roles the Repositories screen offers, suggested
+- **A role** is one of the roles its settings offer, suggested
   from the repository's name. Tasks and the coordinator are told it.
 - **A fork** is known from its clone's remotes, an `upstream` beside
   `origin` on the same host. Its binding says where tasks open pull requests:
@@ -243,9 +245,9 @@ project, so every window reads the project again.
   declined, its calls withdrawn and its runs cancelled, so no step reacts to
   its agents stopping; then every agent on it stops. Nothing starts in it
   after: no plan, no agent, and nothing said to one. Its folders, its tasks'
-  worktrees and their branches stay where they are (ADR-006 never removes
-  the person's worktrees for them), and opening its folder again makes a
-  new project.
+  worktrees and their branches stay where they are (ADR-006; finished
+  tasks' folders in a removed project are never cleaned up, ADR-056), and
+  opening its folder again makes a new project.
 
 ### Existing working copies
 
@@ -259,7 +261,9 @@ It never:
 - changes the user's current branch;
 - hides or stashes their changes;
 - resets their working tree;
-- removes their worktree;
+- removes their worktree, but for a finished task's folder once its wait
+  is up, its branch kept, and only where nothing in it exists nowhere
+  else ([ADR-056](../decisions/056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md));
 - rewrites remotes;
 - initializes Git without a separate explicit action.
 
@@ -269,6 +273,20 @@ install its lockfile names, which never changes the lockfile
 ([ADR-023](../decisions/023-althar-runs-the-project.md),
 [03](03-agent-runtime-and-auth.md#setting-up-a-worktree)). Untracked files to
 copy into it, such as `.env`, are not declared yet.
+
+A planned task's worktree is on its own branch from the start. A plain task's,
+one the coordinator starts with no plan (a question, a quick look, a
+prototype), has no branch: it is detached at the commit the task starts from,
+set up the same way, with a scratch folder (`.althar/scratch`) that ignores
+everything in it for what its lead throws away. Its branch's name is planned
+as any task's, and Althar makes the branch where the lead first changes the
+repository, with that work on it, as its turn ends or as it reports
+(`workspaces.branched_at`;
+[ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)), so
+nothing is lost. The lead stays in the same folder and session, the branch
+stays on this Mac, and the task stays plain until the person asks its lead to
+make it a change (`make_it_a_change`), which makes its branch then where it
+has none.
 
 Working on a plain branch in the user's own checkout may come later, as an
 explicit per-project choice. It relaxes the rules above and must say so where
@@ -295,7 +313,8 @@ drafts it, and New task has the person tick them; with one, it is that one.
 Its lead may still read the others where they are.
 
 The task's worktrees sit side by side in its folder, each on the task's
-branch, and its lead starts there: in the one worktree, or the folder in it
+branch (a plain task's, on none until its lead first writes, when each gets
+it), and its lead starts there: in the one worktree, or the folder in it
 the project is about, where there is one; in the task's folder, where there
 are several. Writing outside all of them asks. Each repository is published
 on its own: a pull request where its host is connected, its branch where

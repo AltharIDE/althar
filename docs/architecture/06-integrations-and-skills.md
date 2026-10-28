@@ -200,16 +200,26 @@ service's model.
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
-- **A pull request is described in the repository's template,** where it
-  has one in the places its host looks (GitHub's
-  `pull_request_template.md`, GitLab's default merge request template,
-  Bitbucket Cloud's). The lead writes the description in it, as a teammate
-  would; Althar asks it to before the step can end. Althar keeps the
-  template's headings and checklists, unticks every box, and adds the
-  review below. A description that drops the template is replaced by the
-  template with the lead's summary in its place for one. Templates kept
-  elsewhere (an organisation's `.github` repository, a host's settings)
-  aren't read yet.
+- **The lead writes the pull request's description,** for whoever reviews
+  it on the host, as a teammate would: why the change exists, what it does,
+  how it was approached and how it was checked, in short prose. Althar asks
+  for it before the step that opens a pull request can end, and again after
+  settling a review that changes what it says. It is kept apart from the
+  step's summary and what the task built, which are the person's, in
+  Althar: the review, its findings and the evidence stay there too, never
+  in the description. Pictures can't go up with it (GitHub has no API to
+  host an image outside the repository), so it has none. Below it, Althar
+  adds the issue's link and its own line, which the person can turn off.
+  Where the lead wrote none, as an older task's didn't, it is what the task
+  built.
+- **In the repository's template,** where it has one in the places its host
+  looks (GitHub's `pull_request_template.md`, GitLab's default merge request
+  template, Bitbucket Cloud's), the lead writes the description in it.
+  Althar keeps the template's headings and checklists and unticks every box.
+  A description that drops the template is replaced by the template with
+  what the task built in its place for a summary. Templates kept elsewhere
+  (an organisation's `.github` repository, a host's settings) aren't read
+  yet.
 - **What leaves the Mac is credited to the person, and to Althar.** Agents
   sign their commits in their own ways (a `Co-authored-by` trailer, a
   "Generated with" footer), and only Althar sees every agent's commits on
@@ -258,8 +268,16 @@ service's model.
   or why that can't go up: rewritten under what went up, or behind commits
   pushed from elsewhere.
   One exception (ADR-030): where the project has its leads resolve
-  conflicts, Althar pushes the merge that resolves one, and a fix for checks
-  that fail on it, and nothing with them (Resolving a conflict, below).
+  conflicts, Althar pushes the merge that resolves one, with at most one fix
+  for what the full tests found, and a fix for checks that fail on it, and
+  nothing with them (Resolving a conflict, below).
+- **A tag the lead makes, Althar pushes** (`push_tag`): to the remote that
+  repository's work goes to, with the person's own git, never forced, so a
+  tag the remote has already stays as it is. A tag often starts a release, so
+  it waits for the person as the lead's own `git push` of it would
+  (ADR-013), short of a project that allows everything or never allows it.
+  Answered within half a minute, the call says what happened; else the lead
+  is told once it is.
 - **Without a connection, the person pushes the task's branch with their own
   git** (ADR-016): to the remote that repository's work goes to (the one its
   default branch follows, else `origin`, else its only remote), under the
@@ -284,6 +302,15 @@ service's model.
     out, or by a fast-forward in the working tree that has it. That needs
     nothing uncommitted there, and no file git doesn't track where the merge
     puts one, so the person's own work is never touched.
+  - Submodule checkouts never move with it. Only a submodule whose recorded
+    commit the merge changes is read, and it must be clean (its untracked
+    files aside, which nothing moves), at the commit recorded for it; any
+    other is left alone, whatever its state, even one git can't read. A
+    checkout or such a submodule that can't be read stops
+    every repository, with its path and git's complete diagnostic. Every
+    destination is checked again, and must still have the branch, before any
+    ref moves. See the
+    [notes on submodules and merging here](../troubleshooting/local-merge-submodules.md).
   - Refs move first and checkouts last. A checkout that refuses anyway
     (something written there since) puts back what moved, so it is all or
     none.
@@ -332,6 +359,9 @@ service's model.
 - **A pull request that conflicts with its target** is read from the host,
   once it has worked it out: GitHub's mergeable state, GitLab's merge
   status, Bitbucket Data Center's merge result. Bitbucket Cloud doesn't say.
+  A host that hasn't worked it out yet (GitHub's `null`) is asked again each
+  turn for a few turns, not taken for a no. Where the project resolves
+  conflicts, Althar doesn't go by the host alone (below).
 
 **Resolving a conflict, where the project says so** (ADR-030). A project's
 rules can have its leads resolve a conflict with the default branch on their
@@ -339,56 +369,97 @@ own, switched by "Resolve conflicts automatically" in its settings. Off, a confl
 for the person, as above.
 
 - **A task can say otherwise.** Its ⋯ menu offers "Resolve conflicts
-  automatically": use the project setting, on for this task, or off for it. It is
-  kept on the task; where it differs from the project's, a quiet word beside
-  the menu says so, and otherwise nothing shows. Each conflict found goes by
-  what the task and its project say then, and the lead's brief by what they
-  said as it started.
+  automatically" as three choices side by side, changed in place: as the
+  project (on or off), on for this task, or off for it. It is kept on the
+  task; where it differs from the project's, a dot on the menu's button says
+  so, and its tooltip how, and otherwise nothing shows. Each conflict found
+  goes by what the task and its project say then, and the lead's brief by
+  what they said as it started.
 - **Turned on, it acts at once.** The project's switch going on, or a task's
   menu where the task wasn't resolving its conflicts, has Althar look at
   each open task with a branch here, rather than waiting for a new
   conflict: its repositories merging here are merged with their default
   branches without anything moving, whatever the person's own checkout
   holds, and a conflict starts a round as a Merge pressed would; its
-  listened pull requests are asked about now, and one whose host says it
-  conflicts starts one as ever. The rules below hold for each: a run that
-  succeeded, one round at a time, and the same push. Turned off, a round
-  under way carries on; the next conflict waits for the person.
+  listened pull requests are asked about now, each target fetched again and
+  merged here, whatever the host says. The rules below hold for each: its
+  lead idle, one round at a time, and the same push. Turned off, a round
+  under way carries on; the next conflict waits for the person. While on,
+  "Look for conflicts now" beside the switch does the same at any time.
+- **Found as the default branch moves, not only as the host says.** A
+  host works out whether a pull request conflicts lazily, and needn't say
+  so again when only the branch it goes into moved: GitHub's answer can
+  stay "mergeable" against a base several merges old. So every few
+  listening turns (two minutes), and at once when Althar sees a pull request
+  merge, each open task is looked at here: a listened pull request's target
+  is fetched (at most that often per repository, at once where its host says
+  it conflicts) and merged with the task's branch without anything moving;
+  a branch with no pull request, with its default branch here.
 
 - **Found either way, asked the same way.** A merge here that conflicts, or
   a pull request its host says conflicts, has Althar send the lead the note
   the person's press would, unasked: merge the default branch into the
   task's branch, settle each conflict so both sides' changes hold, run the
-  checks, and commit the merge. For a pull request, Althar first fetches the
+  quick checks, and commit the merge as soon as they pass, before the full
+  test suites, and not end its turn with the merge uncommitted or while it
+  waits on something running in the background. For a pull request, Althar first fetches the
   branch it goes into, under the remote's name (`origin/main`, or
   `upstream/main` into the repository a fork came from), and asks only where
   the task's branch conflicts with it here too; one that merges cleanly is
   from before the target moved, or merged already and not yet pushed. A
   lead that isn't running is started, on the agent last on the thread.
-- **Only where the task is open and its run succeeded,** and one round at a
+- **Only where the task is open and its lead idle,** and one round at a
   time: not while the run runs, nor where the person stopped it, which an
-  agent starting would go against. The thread says Althar asked, and why:
-  the project's rules, or the task's own say. A merge here pressed
-  meanwhile says the lead is resolving it.
-- **Althar looks at the branch, not at what the lead said,** once its turn
-  is over: not while more waits for it, or while it asks the person
-  something. Resolved means the branch it conflicted with is in it, nothing
-  is half merged, and no file it conflicted in still has markers.
-- **Not resolved, it is asked once more,** with why. Then, or where the
-  person stopped it, it is the person's: the thread says why, the task is
-  back in Needs you, and merging again offers the person's press, as before,
-  until the branch moves.
-- **No review round.** The checks are enough: the lead runs them and fixes
-  what they find before it commits the merge, so the fix is in it; on a pull
-  request, the host's run on what Althar pushes.
+  agent starting would go against. A run that failed or was cancelled
+  leaves its lead idle, and it is asked. The thread says Althar asked, and
+  why: the project's rules, or the task's own say. A merge here pressed
+  meanwhile says the lead is resolving it. Rounds wait their turn for a
+  place among the agents at work on this computer, in Up next, so many
+  conflicts at once start one after another.
+- **Never skipped without a word.** A task that conflicts and isn't asked
+  of its lead says why on its card and over its composer, in one line, with
+  Resolve now: the person stopped it, it has no lead yet, its folder isn't
+  on this computer, or its target couldn't be fetched or merged here. A
+  round the lead couldn't resolve offers Resolve now too. Where Althar
+  couldn't look here at all (no folder, a fetch that failed, git that
+  couldn't merge), for a pull request or a branch merging here, that is
+  said whatever the host says, as the host's "merges cleanly" may be out
+  of date, with Look again, and the card keeps its next step. Each reason is logged once. Resolve now looks again, its
+  target fetched anew, at a task without a folder here too, and asks the
+  lead whatever the rules, a stop, or a round handed back say; only a run
+  still going, or a round under way, holds it.
+- **Althar looks at the branch, not at what the lead said,** once the lead
+  is done: its turn over, and nothing it left running in the background
+  still going (the full tests, say) or at work after, as Claude Code starts
+  a turn of its own when that ends. Not while more waits for it, or while it
+  asks the person something. Nothing says when a turn the agent starts
+  itself ends, so it counts as done once it has said nothing for half a
+  minute since it last did, or since what it left running ended. A server
+  it left running, which says where it answers, is not waited for. The wait
+  is bounded (45 minutes): past it the branch is looked at as it is, as a
+  lead that never finishes would otherwise hold the round for ever.
+  Resolved means the branch it conflicted with is in it, nothing is half
+  merged, and no file it conflicted in still has markers.
+- **Not resolved, it is asked once more,** with why. Where all that was
+  left was to commit the merge, it is told that: its merge is resolved but
+  not committed, commit it; not asked to resolve it again. Then, or where
+  the person stopped it, it is the person's: the thread says why, the task
+  is back in Needs you, and merging again offers the person's press, as
+  before, until the branch moves, or the default branch moves on from what
+  it conflicted with, which is a conflict of its own, the lead's again.
+- **No review round.** The checks are enough: the lead runs the quick ones
+  and commits the merge before the slow ones, and if the full tests then
+  find something, fixes it in one follow-up commit on top of the merge; on
+  a pull request, the host's run on what Althar pushes.
 - **On a pull request, Althar pushes the resolution itself** with the
   connection, the one push of the lead's work that isn't the person's: the
-  merge alone, made on the branch as the pull request had it. Where the
-  branch had other commits the pull request didn't, the lead committed
-  anything after the merge, something else came in, or anyone else asked
-  the lead something meanwhile, nothing is pushed: the thread says the
-  merge waits, and the task's Push sends it with the rest. Merging stays
-  the person's.
+  merge, made on the branch as the pull request had it, with at most one
+  commit on top of it, the fix for what the full tests found, as a fix for
+  failed checks is (below). Where the branch had other commits the pull
+  request didn't, the lead committed more than that one after the merge,
+  something else came in, or anyone else asked the lead something
+  meanwhile, nothing is pushed: the thread says the merge waits, and the
+  task's Push sends it with the rest. Merging stays the person's.
 - **The round follows the checks on what Althar pushed.** Passed (or none
   two minutes after the push), it is done, and the task is ready to merge.
   Failed, the lead is asked to fix them within the round, not as failed
@@ -412,7 +483,10 @@ for the person, as above.
   Its brief says what Althar pushes for it where the task, or else its
   project, has it resolve conflicts.
 - **A round under way when Althar stopped** is looked at as it starts again,
-  by what the branch holds, and is the person's if it isn't resolved.
+  by what the branch holds: resolved, it goes on as resolved; still
+  conflicting, its lead is asked again once it has a place, and the thread
+  says so, since Althar's stop isn't the lead failing. One fixing the checks
+  on what Althar pushed, or whose worktree is gone, is the person's.
 
 ### Trackers
 
@@ -430,11 +504,15 @@ for the person, as above.
   call for the person. Trello's lists are mapped by the person, once per
   board. Althar moves an issue to In Progress as its task's first step
   starts (Linear: the team's first `started` state; Jira: the first
-  transition offered into the In Progress category), once, and leaves one
-  already started, done or cancelled as it is. GitHub's, GitLab's and
-  Trello's issues have no standard In Progress and are left alone. A
-  project's rules can turn it off. Who moves an issue to in review or done,
-  and when, is an open question.
+  transition offered into the In Progress category; Trello: the top of the
+  board's first open list named Doing or In progress), once, and leaves one
+  already started, done or cancelled as it is. GitHub's and GitLab's issues
+  have no standard In Progress and are left alone. A
+  project's rules can turn it off. As the task's pull request opens, Althar
+  offers to move the issue to its tracker's review status, on a card in the
+  task's thread; as it merges, to close it as done, on a card in the
+  coordinator's thread (the task settles). Both follow the same rule, and
+  are cards like any change to an issue ("Changing issues", below).
 - **The key goes in the branch and the PR's title,** so the trackers' own
   Git integrations link them. Field ownership (above) decides whether
   Althar also moves a status those integrations move.
@@ -449,14 +527,30 @@ now. Nothing reaches the tracker on its word:
   goes there (a container), its title, body and labels. The person files it,
   changes it first, or discards it. There is no countdown: a draft left
   alone files nothing.
+- **A task's lead can draft too**, with `draft_issue`, and look for what is
+  tracked already with `find_issues`: a bug or follow-up it comes across, or
+  several the person asks it to file. The card is in the task's thread, and
+  the task stands in Needs you while any wait (as a call does, though no
+  `attention_requests` row stands for it); a task with several offers File
+  all. Unnamed, a lead's draft goes beside the issue its task came from,
+  then where the project's issues come from. Once the person files or
+  discards one, the lead is told in its thread, with the key and link, as
+  the coordinator hears it as news (a lead's drafts aren't the
+  coordinator's news). Leads never file on their own: that is the one flag
+  `leadsNeedTheCard` in `IssueDrafts.ts`. A review's lead has no such tool,
+  and a reviewer only reads.
 - **Where it goes** is what the coordinator names, a tracker by its name and
-  a container by its id, key or name; or, without them, where the project's
+  a container by its id, key or name; or, without them, the tracker and
+  container the project is bound to in its settings
+  ([ADR-059](../decisions/059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md));
+  or, unbound, where the project's
   issues already come from (the newest issue a task came from, or a draft
   filed), then its repository's issues, then the one tracker or container
   there is. Where none of that decides, the tool says what to name.
-- **Two connections of one tracker** (two Jira sites, two GitLab servers,
-  two accounts) are told apart by site, and by account where they share
-  one: `Jira (acme.atlassian.net)`. The coordinator names one so, or by its
+- **Two connections of one tracker** (two of Linear's workspaces, two Jira
+  sites, two GitLab servers, two accounts) are told apart by workspace, by
+  site, and by account where they share one: `Linear (FNT)`,
+  `Jira (acme.atlassian.net)`. The coordinator names one so, or by its
   site's address; a container named without a tracker, or with a name
   several share, is looked for on each, and one found on more than one is
   asked about, never guessed. The card names the tracker the same way.
@@ -491,6 +585,171 @@ Creating an issue needs a sign-in that may write: Linear's sign-in asks to
 read and write, GitLab's for `api`, Trello's token for `read,write`; a Jira
 token files where the account has Create Issues, and Althar's GitHub App
 needs Issues: Read and write, which is set on the app itself.
+
+### Changing issues
+
+Leads and the coordinator change issues that already exist
+(`IssueChanges.ts`), through each tracker's `update`, `comment` and `link`:
+
+- **A lead** changes only the issue its task came from: `comment_on_issue`
+  and `link_pull_request` apply at once, and show in its thread as a line;
+  `change_issue` proposes its status (any of its tracker's), closing it, its
+  priority, assignee, labels or title. For any other issue it tells the
+  person, and the coordinator changes it.
+- **The coordinator** changes any issue on the person's trackers, by key or
+  link: `change_issues` proposes the same fields and a project or milestone,
+  several issues on one card ("move DEV-67 to Done, set DEV-142 to Low");
+  `comment_on_issue` comments at once.
+- **Status, priority, assignee, labels, project, title and closing wait on a
+  card** the person applies with one press, or discards, in the thread of
+  whoever proposed them. Each name is read against the tracker before the
+  card is made (its statuses, members, labels, projects), and one it lacks
+  is refused with what it has, so a card never holds what can't apply. A
+  project's rule, Change issues without asking (`changeIssues`, off by
+  default), applies them at once instead, as a line. Whether a change
+  waits is that one rule (`waitsOnThePerson`).
+- **Applying is per issue,** each a receipt in the outbound ledger: what
+  applied stays applied, and a card where not all of it did says why for
+  each and applies again only the rest. A card being applied as Althar
+  closed is failed on its next start, to apply again. A comment whose
+  answer was lost or couldn't be read is never posted again: its card says
+  to look on the tracker. A tracker that answers it didn't take a comment or
+  a link (Linear's `success: false`) has its refusal shown, never a line
+  saying it was done. The lead hears what
+  the person decided in its thread; the coordinator hears it as news, as it
+  hears of its drafts.
+- **A lead's waiting card** holds its task in Needs you, as its drafts do.
+  Althar's own offer as a pull request opens doesn't: the task is Ready
+  for the person then, and the card waits in the thread they open.
+- **Drafts take a priority** (`draft_issue`'s `priority`), set at creation
+  where the tracker has priorities, never written into the description.
+
+What each tracker changes:
+
+| | Linear | Jira | Trello | GitHub issues | GitLab issues |
+|---|---|---|---|---|---|
+| Status | The team's states | A transition offered now; one that needs fields fails in Jira's words | The board's lists | Open, closed as done or not planned | Open or closed |
+| Priority | Yes | Yes | No priorities | No priorities | No priorities |
+| Assignee, labels, title | Yes | Yes | Members, labels, name | Yes | Yes |
+| Project | Its project | No | No | Its milestone | Its milestone |
+| Comment | Yes | Yes | Yes | Yes | Yes |
+| Link a pull request | An attachment | A remote link | An attachment | No: a PR that names the issue links it | No: as GitHub |
+
+Not covered yet: Jira's epic, sprint and transition screens with fields,
+Linear's cycles and estimates, GitHub Projects' fields, and GitLab's
+work-item statuses beyond open and closed.
+
+### Reviewing someone else's pull request
+
+A review is a task. The coordinator starts one (`review_pull_request`, [04](04-coordinator.md))
+when the person asks for a review, or pastes a pull request's link and
+asks; its thread opens with what they said and the pull request under it.
+Asked to review someone's pull requests without their numbers, it finds
+them first (`find_pull_requests`), through each host's list call
+(`CodeHost.listChanges`): GitHub's search over GraphQL, which says each
+one's branches, review decision and checks in one call, and, a POST with no
+ETag, is kept a minute so the same search again costs nothing; GitLab's,
+and Bitbucket's, cached lists, Data Center's read page after page where
+Althar narrows them itself. A listing refused for a scope says which
+(`ConnectorFailed.scope`); a host that can't list says so
+(`noListing`).
+
+- **Its lead reads a copy, fetched by Althar.** Althar fetches the pull
+  request's head (`refs/pull/<n>/head`) and its target branch into refs of
+  its own (`refs/althar/reviews/…`), signed in as a push is, and checks the
+  head out detached in a folder of the task's: a workspace with access
+  `read`, on no branch. The copy is a repository of its own, not a worktree
+  of the person's: it borrows their repository's objects, and keeps the
+  head and where the change starts as refs of its own. Git runs there, for
+  Althar and for the lead, with none of the person's config or the
+  system's: a filter, diff or merge driver defined there (`python -m
+  nbstripout`, a textconv) would otherwise run on the pull request's files
+  as the copy is checked out, or as `git status` or `git diff` reads it, in
+  the copy, where it finds the pull request's own modules first. A review
+  reopened after its copy's folder went has it made again at the head its
+  lead read. The lead never fetches. Nothing Althar sets up a task with
+  touches the copy: no install, no run of the project, no merge here, no
+  conflict round, nothing published.
+- **It runs nothing of it.** The lead's session is in reader mode, under the
+  reader rules, as the coordinator's and a reviewer's are (04, "Read-only by
+  construction"): it reads, searches and runs commands that only look. Since
+  the repository is the pull request's to write, a read is decided from what
+  runs, never from a name it could give something else: a program named by a
+  path outside the system's folders (`./cat`), a variable set for a command
+  (`PATH=. cat`), `env`, `sudo`, `exec`, a shell started with more than its
+  script (`bash -i`, `--rcfile`), a process substitution, a file name the
+  shell would expand into a flag (`rg x *`), and `git --git-dir` are refused,
+  and no interpreter or package script is ever a read. Nor is anything that
+  would change how a later command is found: a shell command that sets a
+  variable, a function or an alias (`printf -v PATH .`, `read`, `export`,
+  `hash`, `alias`, `set`), parentheses (a subshell, a function named `cat`,
+  zsh's qualifier on a pattern), an expansion that assigns or works out
+  arithmetic (`${PATH:=.}`, `$[…]`, zsh's `$a[…]`), and `printf` or `test`
+  with what zsh works out as arithmetic (`%d`, `-v`, `-t`). Comments and
+  `$'…'` are read as the shell reads them, so neither hides a command after
+  it. Nor does it load anything
+  of the repository's own: Claude Code starts with no settings file, the
+  repository's or the person's (whose allow rules would approve its
+  commands), and its hooks off; OpenCode with no project config, plugins or
+  language servers; Codex with its hooks off. Git takes no bare repository
+  the pull request carries for its own unless named (`safe.bareRepository`).
+- **Only a review's tools.** Its lead is given `read_pull_request`,
+  `read_issue` and `draft_review`; every other lead tool is refused to it
+  when called, listed or not, nothing that could change the project
+  (keeping how it runs, which Althar later runs outside any sandbox) or reach
+  the host (a reply, a push).
+- **From outside, it has no network.** A pull request from a fork, or by an
+  author GitHub doesn't name its owner, a member or a collaborator, is from
+  outside the team: its code and its words may try to steer whoever reads
+  them. Its lead's reader rules then refuse every fetch as well. Any review,
+  a team's or one from outside, is led only by an agent its session holds to
+  reading:
+  - **Claude Code**: every command asks and meets the rules (none runs
+    because its sandbox would contain it), WebFetch and WebSearch are
+    denied, and its sandbox lets a command reach only the domains its
+    settings allow, which are none (as its documentation says, not yet
+    checked against a real session).
+  - **OpenCode**: it has no sandbox, so the rules alone hold it: every
+    command and fetch asks, and its web search asks too, which the rules
+    refuse.
+  - **Codex** isn't: codex-acp starts every turn on its mode's approval
+    policy, which for its read-only mode asks only to go beyond the sandbox,
+    so a command the sandbox contains runs without asking, and the rules
+    never see it, and it could run the pull request's code, a team's too.
+    The coordinator is told to review it with another agent, and a switch
+    to Codex on a review doesn't start.
+
+  Each review task's view says what its lead can reach, in a sentence under
+  its header.
+- **It reads the pull request through Althar.** `read_pull_request` reads it
+  the pull request as GitHub has it now: its description, its checks with the
+  end of a failed one's log, and what everyone said, those who aren't the
+  repository's people marked so. Whether its head moved since the copy is
+  said too.
+- **It drafts, and the person posts.** The lead's `draft_review` (a verdict:
+  approve, changes or comment; a summary; comments on lines of the change as
+  it now reads, each with a severity) is kept (`review_drafts`) and shown as a
+  card in the thread. A comment on a file the pull request hasn't, or a line
+  its diff doesn't show, is refused before anything is kept, since GitHub
+  would refuse the whole review for it. Drafting again replaces the draft
+  that waits, or one that wasn't posted, never one perhaps posted; a task
+  drafts one at a time, so two calls at once make one draft, and a call
+  made while its review was posted drafts nothing over it. The person keeps or drops each comment, rewords them, and
+  chooses the verdict: the lead's is a suggestion, and on a pull request from
+  outside, Approve is never chosen for them. Nothing reaches GitHub until they
+  press Post, which posts the review with their verdict and the comments
+  kept, of the commit the lead read, signed as Althar's replies are. Posting
+  is guarded as filing an issue draft is: marked first, refused or perhaps
+  posted said on the card, never posted again unasked. Posted, the card folds
+  to a line with the review's link, and the task is done, in the same
+  transaction. Asked again once it is done, the coordinator starts a new
+  review; while it is open, the same one answers.
+- **A setting of the person's own** posts a review of their team's pull
+  request as soon as it is drafted, with the lead's verdict ("Post reviews of
+  my team's pull requests without asking", off by default). A pull request
+  from outside always waits for Post.
+- **Other hosts** don't take reviews yet: the code host model's
+  `capabilities.reviews` is GitHub's alone, and the coordinator says so.
 
 ### Signing in
 
@@ -573,7 +832,9 @@ Agents reach code hosts and trackers only through Althar:
   checks with their logs) and an issue, and reply on a pull request. They
   reach only the task's own repository, and every call is recorded.
 - **The coordinator drafts issues,** and the person files them: no agent
-  files an issue, or anything else on a tracker, on its own word.
+  files an issue, or anything else on a tracker, on its own word. A review's
+  lead drafts a review, which the person posts, or their setting posts for
+  their team's pull requests (Reviewing someone else's pull request, above).
 - **Agents run without the person's ways into a host:** `gh` and `glab`
   signed out, git's credential helpers reset (`credential.helper` empty, in
   git's environment), git's prompts off, and no SSH agent. Althar pushes

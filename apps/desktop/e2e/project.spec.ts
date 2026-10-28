@@ -3,25 +3,19 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch, openFirstProject } from './support'
+import { backToWork, chooseFolder, launch, openFirstProject, projectSettings, say } from './support'
 
 /*
  * A project made in a tab of its own, named first and then given its
- * folders; and a project after it is made, from the settings on its front
- * page: renamed and drawn in another ink in place, a repository added, its
- * host connected from where its work goes, and left out, and removed from
- * Althar, each showing in the tabs and the home at once, with the person's
- * folders left exactly as they were.
+ * folders; and a project after it is made, from its settings, a view of it
+ * in the window's bar: renamed and drawn in another ink in place, a
+ * repository added, its host connected from where its work goes, and left
+ * out, and removed from Althar, each showing in the tabs and the home at
+ * once, with the person's folders left exactly as they were.
  */
-
-/** The project's settings, from the button on its front page. */
-const settings = async (page: Page, project: string) => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  return page.getByRole('dialog', { name: `${project}’s settings` })
-}
 
 /** What the repositories page calls the folders on this computer, as the system it runs on is named: Linux's, as CI runs. */
 const HERE = process.platform === 'darwin' ? 'On this Mac' : process.platform === 'win32' ? 'On this PC' : 'On this computer'
@@ -53,35 +47,29 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(page.getByText(meridian)).toHaveCount(0)
 
     // Renamed in place: the front page and the tab say it at once.
-    let panel = await settings(page, 'meridian')
-    await panel.getByRole('button', { name: /^Name and colour/ }).click()
-    await panel.getByRole('textbox', { name: 'Name' }).fill('Refunds v2')
+    await projectSettings(page, 'General')
+    const name = page.getByRole('textbox', { name: 'Name' })
+    await name.fill('Refunds v2')
     await page.screenshot({ path: 'test-results/project-rename.png', animations: 'disabled' })
-    await panel.getByRole('textbox', { name: 'Name' }).press('Enter')
+    await name.press('Enter')
     await expect(page.getByRole('heading', { name: 'Refunds v2', level: 1 })).toBeVisible()
     await expect(tabs.getByRole('button', { name: /^Refunds v2/ })).toBeVisible()
-    // The settings are named for it too.
-    panel = page.getByRole('dialog', { name: 'Refunds v2’s settings' })
 
     // Drawn in another ink: the front page's wash takes it, and it is kept.
-    await panel.getByRole('radio', { name: /^Rose/ }).click()
-    await expect(panel.getByRole('radio', { name: /^Rose/ })).toBeChecked()
+    await page.getByRole('radio', { name: /^Rose/ }).click()
+    await expect(page.getByRole('radio', { name: /^Rose/ })).toBeChecked()
     await expect(page.locator('header', { has: page.getByRole('heading', { name: 'Refunds v2', level: 1 }) })).toHaveAttribute(
       'style',
       /--project-rose/,
     )
-    // Escape steps back to all of them, then closes the settings.
-    await page.keyboard.press('Escape')
-    await expect(panel.getByRole('button', { name: /^Name and colour/ })).toContainText('Rose')
-    await page.keyboard.press('Escape')
-    await expect(panel).toBeHidden()
+    // Tasks: each switch says when it acts.
+    await expect(page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })).not.toBeChecked()
+    await expect(page.getByRole('switch', { name: 'Move issues along with their tasks' })).toBeChecked()
+    await page.screenshot({ path: 'test-results/project-settings-general.png', animations: 'disabled' })
 
     // A repository added, with its role, and where its work goes; GitHub connected from there; then left out again.
-    panel = await settings(page, 'Refunds v2')
-    await panel.getByRole('button', { name: /^Repositories/ }).click()
-    await expect(page.getByRole('heading', { name: 'Repositories', level: 1 })).toBeVisible()
-    // A screen on a tabbed route keeps the one bar's window controls.
-    await expect(page.getByRole('button', { name: 'Close the window' })).toHaveCount(1)
+    await projectSettings(page, 'Code and issues')
+    await expect(page.getByRole('heading', { name: 'Code and issues', level: 2 })).toBeVisible()
     await chooseFolder(electronApp, web)
     await page.getByRole('button', { name: 'Add a folder' }).click()
     const here = page.getByRole('list', { name: HERE })
@@ -116,17 +104,18 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(here.getByText('meridian-web', { exact: true })).toBeHidden()
     // The last one stays: with no remote, it has nothing more to offer.
     await expect(here.getByRole('button', { name: /More for/ })).toBeHidden()
-    // Escape goes back.
-    await page.keyboard.press('Escape')
-    await expect(page.getByRole('heading', { name: 'Refunds v2', level: 1 })).toBeVisible()
+    // Back to its work.
+    await backToWork(page)
+    await expect(page.getByRole('textbox', { name: 'Tell the coordinator something' })).toBeVisible()
 
     // On the home, by its new name.
     await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(page.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: /Refunds v2/ })).toBeVisible()
     await tabs.getByRole('button', { name: /^Refunds v2/ }).click()
 
-    // Removed: it says what happens first, then the window goes home, without its tab.
-    await (await settings(page, 'Refunds v2')).getByRole('button', { name: 'Remove from Althar' }).click()
+    // Removed, from the foot of its settings' side: it says what happens first, then the window goes home, without its tab.
+    await projectSettings(page, 'General')
+    await page.getByRole('navigation', { name: 'Project settings' }).getByRole('button', { name: 'Remove from Althar…' }).click()
     const remove = page.getByRole('dialog', { name: 'Remove Refunds v2 from Althar?' })
     await expect(remove.getByText(/Nothing in its folders changes/)).toBeVisible()
     await page.screenshot({ path: 'test-results/project-remove.png', animations: 'disabled' })
@@ -199,6 +188,47 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     await expect(page.getByRole('heading', { name: 'Northwind', level: 1 })).toBeVisible()
     await expect(tabs.getByRole('button', { name: /^Scratch/ })).toHaveCount(0)
     await expect(tabs.getByRole('listitem')).toHaveCount(3)
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('says a note the coordinator kept in the person’s own words, in place, shown as markdown and kept so', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const meridian = repository(home, 'meridian')
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, meridian)
+    // The person decides something in conversation, and the coordinator keeps it.
+    await say(page, 'Release from `main` on Tuesdays, **never on a Friday**. [coordinator:keep-note]')
+    await expect(page.getByText(/^Kept as note_/)).toBeVisible()
+
+    // In the project's settings, its code and emphasis show as markdown has them.
+    await projectSettings(page, 'Notes')
+    const notes = page.getByRole('region', { name: 'Notes' })
+    await expect(notes.locator('code', { hasText: 'main' })).toBeVisible()
+    await expect(notes.locator('strong', { hasText: 'never on a Friday' })).toBeVisible()
+
+    // Changed where it is: its pencil, the words as they were said, then Enter.
+    await notes.getByRole('button', { name: /^Edit “Release from/ }).click()
+    const field = notes.getByRole('textbox', { name: 'Note' })
+    await expect(field).toHaveValue('Release from `main` on Tuesdays, **never on a Friday**.')
+    await field.fill('Release from `main` on Tuesdays and Thursdays, as [the runbook](https://example.test/runbook) says.')
+    await field.press('Enter')
+    await expect(field).toBeHidden()
+    await expect(notes.getByRole('link', { name: 'the runbook' })).toHaveAttribute('href', 'https://example.test/runbook')
+    await page.screenshot({ path: 'test-results/project-note-edited.png', animations: 'disabled' })
+
+    // Read afresh from Althar, it says the new words, as they were said.
+    await page.reload()
+    await projectSettings(page, 'Notes')
+    await expect(notes.getByRole('link', { name: 'the runbook' })).toBeVisible()
+    await expect(notes.locator('code', { hasText: 'main' })).toBeVisible()
+    await expect(notes.locator('strong')).toHaveCount(0)
+    await notes.getByRole('button', { name: /^Edit “Release from/ }).click()
+    await expect(notes.getByRole('textbox', { name: 'Note' })).toHaveValue(
+      'Release from `main` on Tuesdays and Thursdays, as [the runbook](https://example.test/runbook) says.',
+    )
   } finally {
     await electronApp.close()
   }

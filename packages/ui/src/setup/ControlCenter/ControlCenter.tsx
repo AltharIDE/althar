@@ -587,10 +587,19 @@ export function ControlSheet({ children, className, ...rest }: ControlSheetProps
   )
 }
 
-/** The panel's foot: the version, and a setting that matters least as a quiet link at its end. */
+/** The panel's foot: the version and quiet links beside it, and a setting that matters least as a quiet link at its end. A long foot wraps. */
 export function ControlFoot({ children, className, ...rest }: RootProps<'div', { children: ReactNode }>) {
   return (
     <div className={cx(s.foot, className)} {...rest}>
+      {children}
+    </div>
+  )
+}
+
+/** The foot's start: what it says of this Althar, one line under another, so the foot's one button stays beside it on the same row. */
+export function ControlFootStart({ children, className, ...rest }: RootProps<'div', { children: ReactNode }>) {
+  return (
+    <div className={cx(s.footStart, className)} {...rest}>
       {children}
     </div>
   )

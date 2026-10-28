@@ -4,7 +4,20 @@ import { type Access, type AccessLine, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
-import { type Account, type Container, type Issue, leftAsItIs, type Person, type StatusCategory, type Tracker } from './model'
+import {
+  cantChange,
+  type Account,
+  type Choice,
+  type Container,
+  type Issue,
+  type IssueField,
+  leftAsItIs,
+  type Person,
+  type StatusCategory,
+  type Tracker,
+  unchangeable,
+  unstarted,
+} from './model'
 import { answered, failedOf, probe, readAs, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
@@ -63,6 +76,14 @@ export const categoryOf = (list: string): StatusCategory => {
   if (/\b(backlog|icebox)\b/.test(name)) return 'backlog'
   return 'todo'
 }
+
+/**
+ * A list a card moves to as its work starts: one named for work under way
+ * now, not one for review, testing or what is blocked, which also read as
+ * started.
+ */
+const underWay = (list: List): boolean =>
+  list.closed !== true && categoryOf(list.name) === 'started' && /\b(doing|in[ -]progress)\b/i.test(list.name)
 
 /**
  * Trello says why it refused in plain words, and its statuses don't always
@@ -139,6 +160,9 @@ const Created = Schema.Struct({
   labels: Card.fields.labels,
 })
 
+/** What Trello changes of a card: no priority, which a card hasn't, nor a project, which its board is. */
+const CHANGES: ReadonlyArray<IssueField> = ['status', 'close', 'assignee', 'labels', 'title']
+
 export const makeTrello = (options: AdapterOptions): Tracker => {
   const product = 'trello' as const
   const api = options.apiUrl.replace(/\/+$/, '')
@@ -157,7 +181,7 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       ? Effect.succeed(id)
       : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a Trello ${what}: ${id}` }))
 
-  const issue = (ref: string) =>
+  const read = (ref: string) =>
     Effect.flatMap(named(ref, 'card'), (card) =>
       Effect.map(
         call(
@@ -169,11 +193,78 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
       ),
     )
 
+  /** The board a card is on, by its id. */
+  const boardOf = (issue: Issue) =>
+    Effect.gen(function* () {
+      const card = yield* named(issue.id, 'card')
+      const { idBoard } = yield* call(Schema.Struct({ idBoard: Schema.String }), 'GET', `${api}/cards/${card}?fields=idBoard`)
+      return { card, board: yield* named(idBoard, 'board') }
+    })
+
+  const choices: Tracker['choices'] = (issue, field) =>
+    Effect.gen(function* () {
+      if (field === 'project') return yield* cantChange(product, 'project', 'a card’s project is its board')
+      const { board } = yield* boardOf(issue)
+      switch (field) {
+        // A card's status is its list: its board's open lists, left to right.
+        case 'status':
+          return (yield* call(Schema.Array(List), 'GET', `${api}/boards/${board}/lists?filter=open&fields=name,closed`)).map(
+            (list): Choice => ({ id: list.id, name: list.name }),
+          )
+        // Its board's labels with a name; one with only a colour has none to find it by.
+        case 'labels':
+          return (yield* call(BoardLabels, 'GET', `${api}/boards/${board}/labels?fields=name&limit=1000`)).flatMap(
+            (label): ReadonlyArray<Choice> => (label.name == null || label.name.trim() === '' ? [] : [{ id: label.id, name: label.name }]),
+          )
+        // Its board's people, who can be put on the card.
+        case 'assignee':
+          return (yield* call(Schema.Array(Member), 'GET', `${api}/boards/${board}/members?fields=${MEMBER_FIELDS}`)).map(
+            (member): Choice => ({ id: member.id, name: member.fullName ?? member.username, also: [member.username] }),
+          )
+      }
+    })
+
+  const changeIssue: Tracker['update'] = (issue, wanted) =>
+    Effect.gen(function* () {
+      const refused = unchangeable({ links: true, starts: true, changes: CHANGES }, wanted)
+      if (refused !== undefined)
+        return yield* cantChange(
+          product,
+          refused,
+          refused === 'priority' ? 'a Trello card has no priority' : 'a card’s project is its board',
+        )
+      const card = yield* named(issue.id, 'card')
+      // Its title, its list, its people (one, or none), and archived to close it, in one edit.
+      const assignee =
+        wanted.assignee === undefined ? undefined : wanted.assignee === null ? '' : yield* named(wanted.assignee.id, 'member')
+      const list = wanted.status === undefined ? undefined : yield* named(wanted.status.id, 'list')
+      const edit = {
+        ...(wanted.title === undefined ? {} : { name: wanted.title }),
+        ...(list === undefined ? {} : { idList: list }),
+        ...(assignee === undefined ? {} : { idMembers: assignee }),
+        ...(wanted.close === true ? { closed: true } : {}),
+      }
+      if (Object.keys(edit).length > 0) yield* call(Schema.Unknown, 'PUT', `${api}/cards/${card}`, edit)
+      // A label is added and taken off by its id; one already on, or already off, Trello refuses, and nothing changes.
+      const settled = (effect: Effect.Effect<unknown, ConnectorFailed>) =>
+        Effect.catchIf(
+          effect,
+          (error) => error.reason === 'rejected' && /already|not found|isn['’]?t/i.test(error.message),
+          () => Effect.void,
+        )
+      for (const label of wanted.labels?.add ?? [])
+        if (!issue.labels.some((had) => had.toLowerCase() === label.name.toLowerCase()))
+          yield* settled(call(Schema.Unknown, 'POST', `${api}/cards/${card}/idLabels`, { value: yield* named(label.id, 'label') }))
+      for (const label of wanted.labels?.remove ?? [])
+        yield* settled(call(Schema.Unknown, 'DELETE', `${api}/cards/${card}/idLabels/${yield* named(label.id, 'label')}`))
+      return yield* read(card)
+    })
+
   return {
     product,
-    capabilities: { links: true, starts: false },
+    capabilities: { links: true, starts: true, changes: CHANGES },
     account,
-    issue,
+    issue: read,
     // The cards the account is on, not archived, on an open board; those done or cancelled left out, as other trackers' are.
     mine: (options = {}) =>
       Effect.map(
@@ -212,8 +303,21 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
         if (attached.some((attachment) => attachment.url === link.url)) return
         yield* call(Schema.Unknown, 'POST', `${api}/cards/${issue.id}/attachments`, { url: link.url, name: link.title })
       }),
-    // A card's status is its list, named as each board likes: which list is "in progress" would be a guess, so a card stays where it is.
-    start: (issue) => Effect.succeed(leftAsItIs(issue)),
+    // A card's status is its list: one still to do goes to the top of its board's first open list named for work under way, as a person would drag it.
+    start: (issue) =>
+      Effect.gen(function* () {
+        if (!unstarted(issue.status.category)) return leftAsItIs(issue)
+        const card = yield* named(issue.id, 'card')
+        const { idBoard } = yield* call(Schema.Struct({ idBoard: Schema.String }), 'GET', `${api}/cards/${card}?fields=idBoard`)
+        const board = yield* named(idBoard, 'board')
+        // Trello lists a board's lists in their order on it, left to right.
+        const lists = yield* call(Schema.Array(List), 'GET', `${api}/boards/${board}/lists?filter=open&fields=name,closed`)
+        const into = lists.find(underWay)
+        if (into === undefined)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Its board has no list named Doing or In progress' })
+        yield* call(Schema.Unknown, 'PUT', `${api}/cards/${card}`, { idList: into.id, pos: 'top' })
+        return { moved: true, status: { name: into.name, category: 'started' } }
+      }),
     // A list is where a card is filed: every open list on the account's open boards, named with its board. Trello lists every board in one answer, unpaged.
     containers: () =>
       Effect.map(
@@ -261,7 +365,7 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
         })
         // Filed: a failed read of it now is no reason to file it again, so it is as Trello answered the filing.
         const now = yield* Clock.currentTimeMillis
-        return yield* issue(card.shortLink).pipe(
+        return yield* read(card.shortLink).pipe(
           Effect.orElseSucceed((): Issue => ({
             id: card.id,
             ref: card.shortLink,
@@ -278,6 +382,8 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
           })),
         )
       }),
+    choices,
+    update: changeIssue,
   }
 }
 

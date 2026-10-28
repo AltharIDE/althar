@@ -1,15 +1,17 @@
 import { useState } from 'react'
 
-import type { AgentStatus, PlanStep, TaskEnd as End } from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End } from '@althar/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
+import { Holders } from '../../shared/Holders'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
 import { stepIndex, stepNames, stepText } from '../../shared/steps'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
+import s from './Card.module.css'
 
 /*
  * A task's card in the Talk room. Before it starts, its plan: who does each
@@ -33,7 +35,6 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   now: stepText.now,
-  task: (task: string, started: string) => (started === '' ? `Task ${task}` : `Task ${task} · ${started}`),
 }
 
 const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
@@ -42,18 +43,25 @@ const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
   running: TaskStatus.Running,
   waiting: TaskStatus.Yours,
   ready: TaskStatus.Done,
+  kept: TaskStatus.Paused,
   stopped: TaskStatus.Stopped,
   settled: TaskStatus.Done,
 }
 
 export interface CardActions {
   readonly project: string
+  /** The project's id, for each model's room in a step's picker; absent outside a project. */
+  readonly projectId?: string
   readonly agents: ReadonlyArray<AgentStatus>
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
   readonly onHold: (planId: string) => void
   readonly onChange: (planId: string, steps: ReadonlyArray<PlanStep>, end?: End | null) => void
   readonly onOpen: (threadId: string) => void
+  /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
+  readonly onStopBackground: (threadId: string, id: string) => void
+  /** The one waiting task that shows who holds the places, the newest: the others only wait. */
+  readonly holdersOn?: string | null
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -121,6 +129,7 @@ function PlanCard({
               owner={owner}
               agents={actions.agents}
               value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
+              {...(actions.projectId === undefined ? {} : { projectId: actions.projectId })}
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
               variant="field"
               placement="below"
@@ -144,7 +153,26 @@ function PlanCard({
   )
 }
 
+/** Its pull requests in a few words: the latest, and those of its earlier rounds of work before it (ADR-034). */
+const pullRequestsOf = (latest: ChangeSummary, earlier: ReadonlyArray<ChangeSummary>) => {
+  const name = (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`
+  return earlier.length === 0 ? name(latest) : `${name(latest)}, after ${earlier.map(name).join(' and ')}`
+}
+
+/** A task's card, with, while it waits for a free agent and is the newest to, who holds the places. */
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
+  const holders = card.queued?.holders
+  if (holders === undefined || holders.length === 0 || (actions.holdersOn !== undefined && actions.holdersOn !== card.threadId))
+    return <Shown card={card} actions={actions} />
+  return (
+    <div className={s.stack}>
+      <Shown card={card} actions={actions} />
+      <Holders holders={holders} onStop={actions.onStopBackground} />
+    </div>
+  )
+}
+
+function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const named = useModelNames()
   const effortOf = useEffortNames()
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
@@ -152,21 +180,35 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
   if (card.planWaits === true && card.queued !== null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
-  const steps = stepNames(card.plan?.steps ?? [])
+  const steps = stepNames(card.plan?.steps ?? [], card.followUp === true)
   const at = stepIndex(steps, card.step)
+  // Ready, but its lead couldn't resolve a conflict: it needs the person, and says why.
+  const handedBack = card.phase === 'ready' ? (card.handedBack ?? null) : null
   // Waiting for a free agent, it says so, rather than that it runs.
-  const status = card.queued !== null ? TaskStatus.Queued : STATUS[card.phase]
+  // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
+  const status =
+    card.queued !== null
+      ? TaskStatus.Queued
+      : handedBack !== null
+        ? TaskStatus.Yours
+        : (card.waits !== null || card.reconnects != null) && card.phase === 'running'
+          ? TaskStatus.Paused
+          : STATUS[card.phase]
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
   const now =
-    status === TaskStatus.Done
-      ? card.summary?.split('\n')[0]
-      : card.queued !== null
-        ? queuedWords(card.queued)
-        : card.waits !== null
-          ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
-          : card.step === null
-            ? undefined
-            : text.now[card.step]
+    handedBack !== null
+      ? handedBack
+      : status === TaskStatus.Done
+        ? card.summary?.split('\n')[0]
+        : card.queued !== null
+          ? queuedWords(card.queued)
+          : card.waits !== null
+            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+            : card.reconnects != null
+              ? reconnectsWords(card.reconnects, clock)
+              : card.step === null
+                ? undefined
+                : text.now[card.step]
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
@@ -176,16 +218,15 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
       title={card.title}
       status={status}
       steps={steps}
-      at={status === TaskStatus.Done ? steps.length - 1 : at}
+      at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
       started={card.startedAt === null ? '' : ago(card.startedAt)}
       lead={named(card.lead, card.leadModel)}
       {...(effort === null ? {} : { effort })}
-      {...(card.branch === null ? {} : { branch: card.branch })}
       {...(from === undefined ? {} : { from })}
-      {...(card.change === null ? {} : { pr: `${card.change.short} ${card.change.prefix}${card.change.number}` })}
+      {...(card.change === null ? {} : { pr: pullRequestsOf(card.change, card.earlier ?? []) })}
       onOpen={() => actions.onOpen(card.threadId)}
-      text={{ status: text.status, task: text.task }}
+      text={{ status: text.status }}
     />
   )
 }

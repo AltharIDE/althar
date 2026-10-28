@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, say, startTask, toConversation } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, tell its
@@ -57,8 +57,8 @@ test('makes the first project of a repository it found, starts a task, and talks
     await page.keyboard.press('o')
     await expect(page.getByRole('heading', { name: 'Nothing changed', level: 2 })).toBeVisible()
     await page.keyboard.press('c')
-    // The lead is briefed first, and reports its step; its summary is what shows, its work folded above it.
-    await expect(page.getByText('Did the task.')).toBeVisible()
+    // The lead is briefed first, and reports its step: what it built is its result, its work one line above it (ADR-042).
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
 
     await say(page, 'hello')
     await expect(page.getByText('Hello', { exact: true })).toBeVisible()
@@ -74,9 +74,9 @@ test('makes the first project of a repository it found, starts a task, and talks
     // An edit inside the worktree: the project's rules allow it without asking.
     await say(page, 'tool')
     await expect(page.getByText('chosen=allow-once')).toBeVisible()
-    // The turn is over, so its work folds under how long it took.
+    // The round is over, so its work is one line, how long it took.
     await page
-      .getByRole('button', { name: /^Worked for/ })
+      .getByRole('button', { name: /[Ww]orked \d/ })
       .last()
       .click()
     await expect(page.getByText('hello.txt', { exact: true })).toBeVisible()
@@ -86,21 +86,21 @@ test('makes the first project of a repository it found, starts a task, and talks
     await expect(page.getByText('Needs you', { exact: true })).toBeVisible()
     await expect(page.getByText('Needs your permission')).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
-    await page.getByRole('button', { name: /^Allow/ }).click()
+    await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
     await expect(page.getByText('Needs you', { exact: true })).toHaveCount(0)
 
     await say(page, 'think')
     await expect(page.getByText('Done', { exact: true })).toBeVisible()
-    // Its fold says how long it worked once the turn has ended; until then it is still working.
-    await expect(page.getByRole('button', { name: /^Working for/ })).toHaveCount(0)
+    // Its line says how long it worked once the round has ended; until then it is still working.
+    await expect(page.getByRole('button', { name: /^Working · / })).toHaveCount(0)
     await page
-      .getByRole('button', { name: /^Worked for/ })
+      .getByRole('button', { name: /[Ww]orked \d/ })
       .last()
       .click()
     await expect(page.getByRole('button', { name: 'Thought' })).toBeVisible()
-    // A turn with nothing to say folds whole once it ends.
-    const folds = page.getByRole('button', { name: /^Worked for/ })
+    // A round with nothing to say is its line alone, with who worked.
+    const folds = page.getByRole('button', { name: /[Ww]orked \d/ })
     const before = await folds.count()
     await say(page, 'updates')
     await expect(folds).toHaveCount(before + 1)
@@ -179,10 +179,10 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByRole('button', { name: 'Merge into main' })).toBeVisible()
     await page.screenshot({ path: 'test-results/outputs.png' })
     await toConversation(page)
-    await expect(page.getByText('Did the task.')).toBeVisible()
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
+    // The reviewer in its own voice: what it found, then, after the lead settled it, that it holds.
     await expect(page.getByText('The heading needs fixing.')).toBeVisible()
-    await expect(page.getByText(/round 2/)).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Worked for/ }).first()).toBeVisible()
+    await expect(page.getByText('Looks good to me.')).toBeVisible()
     await page.screenshot({ path: 'test-results/steps.png' })
   } finally {
     await electronApp.close()
@@ -204,10 +204,10 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's settings connect it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
     await expect(page.getByRole('list', { name: 'Made of' }).getByRole('listitem')).toHaveText(['meridian'])
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
-    const github = page.getByRole('dialog', { name: 'meridian’s settings' }).getByRole('button', { name: /^GitHub/ })
+    await projectSettings(page, 'Code and issues')
+    const github = page.getByRole('region', { name: 'GitHub' })
     await expect(github).toContainText('Not connected')
-    await github.click()
+    await github.getByRole('button', { name: 'Connect GitHub' }).click()
 
     // GitHub's own walk opens over the project, at a sign-in card's width. GitHub has no sign-in of Althar's in this build: gh's,
     // which is signed in to it here, or a token.
@@ -232,11 +232,10 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await connecting.getByRole('button', { name: 'Done' }).click()
     await expect(connecting).toHaveCount(0)
     await expect(page.getByText(/isn't connected to/)).toHaveCount(0)
-    // The project's settings say who Althar is there.
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    // Where its work goes, in the project's settings, says who Althar is there.
     await expect(github).toContainText('Connected as you')
     await page.screenshot({ path: 'test-results/connected.png', animations: 'disabled' })
-    await page.keyboard.press('Escape')
+    await backToWork(page)
     await expect(github).toHaveCount(0)
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
@@ -259,12 +258,11 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     // Ready, it opens on its pull request: its files and checks, and marking it ready.
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByText('change.txt')).toBeVisible()
-    await expect(page.getByText('None have run yet')).toBeVisible()
+    await expect(page.getByText('No checks have run yet')).toBeVisible()
     await page.screenshot({ path: 'test-results/change.png', animations: 'disabled' })
 
     // Marked ready here, it is ready on GitHub, and accepting it is the person's.
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
-    await expect(page.getByText('Nothing merges until you accept it')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Accept and merge' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark ready for review' })).toHaveCount(0)
     await toConversation(page)
@@ -411,11 +409,10 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
     await page.getByRole('menuitem', { name: /Stop the task/ }).click()
     await expect.poll(holds, { timeout: 15_000 }).toBe(0)
 
-    // From the home's Settings: no notification for a ready task, and no count on the Dock.
-    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
-    await page.keyboard.press('Meta+,')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
-    await settings.getByRole('button', { name: /^Notifications/ }).click()
+    // From Althar's settings, on their tab: no notification for a ready task, and no count on the Dock.
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    const settings = page.getByRole('main')
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Notifications' }).click()
     await settings.getByRole('switch', { name: 'A task is ready for you' }).click()
     await settings.getByRole('switch', { name: COUNT }).click()
     await expect.poll(kept).toContain('"notifyReady": false')
@@ -431,16 +428,18 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
     await catchWhatReachesThem(electronApp)
     const tabs = page.getByRole('navigation', { name: 'Projects' })
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await page.keyboard.press('Meta+,')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
-    await expect(settings.getByRole('switch', { name: 'Keep awake' })).toHaveAttribute('aria-checked', 'true')
-    await settings.getByRole('button', { name: /^Notifications/ }).click()
+    await page.keyboard.press('ControlOrMeta+Comma')
+    const quick = page.getByRole('dialog', { name: 'Quick settings' })
+    await expect(quick.getByRole('switch', { name: 'Keep awake' })).toHaveAttribute('aria-checked', 'true')
+    // A card's name opens the Settings tab at its section, which the tab kept between launches too.
+    await quick.getByRole('button', { name: /^Notifications/ }).click()
+    const settings = page.getByRole('main')
     await expect(settings.getByRole('switch', { name: 'A task is ready for you' })).toHaveAttribute('aria-checked', 'false')
     await expect(settings.getByRole('switch', { name: COUNT })).toHaveAttribute('aria-checked', 'false')
     await expect(settings.getByRole('switch', { name: 'A call waits on you' })).toHaveAttribute('aria-checked', 'true')
-    await page.keyboard.press('Escape')
-    await page.keyboard.press('Escape')
-    await expect(settings).toHaveCount(0)
+    await tabs.getByRole('button', { name: 'Close Settings' }).click()
+    await expect(tabs.getByRole('button', { name: /^Settings/ })).toHaveCount(0)
+    await tabs.getByRole('button', { name: /^Home/ }).click()
 
     // A task ready while the person is elsewhere: it waits, but nothing says so outside the window.
     await page

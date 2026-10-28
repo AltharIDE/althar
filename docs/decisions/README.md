@@ -41,3 +41,35 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [031](031-coordinator-handed-over-before-it-fills.md) | Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes |
 | [032](032-agents-at-once-on-this-machine.md) | A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn |
 | [033](033-adapters-on-a-node-of-their-own.md) | The agent adapters run on a Node the app ships, and Althar's binary never runs as Node |
+| [034](034-a-task-goes-back-to-work-and-ships-again.md) | A task goes back to work whenever its lead does, and ships again in a pull request of its own |
+| [035](035-a-task-s-kind-is-read-from-what-it-has.md) | A task's kind is read from what it has, and its card has nothing to press |
+| [036](036-usage-data-from-the-main-process.md) | Anonymous usage data goes from the main process, named events only |
+| [037](037-what-the-person-does-goes-first.md) | What the person does goes first, a task keeps its place between its steps, and new work waits |
+| [038](038-a-lead-starts-afresh-at-a-break.md) | A task's lead starts afresh before its context grows large, and at a break in its work |
+| [039](039-the-person-compacts-an-agent-s-context.md) | The person can have an agent compact its context, at once, with the agent's own command |
+| [040](040-a-change-reaches-the-person-green.md) | Until the person has looked, a change's checks are Althar's to see through |
+| [041](041-what-failed-said-in-full.md) | What failed is said in full: a check run again once, its whole log on request, and the checks Althar can't see |
+| [042](042-a-task-s-thread-reads-in-rounds.md) | A task's thread reads in rounds: an ask, then what its lead says first, its work in a line, and what it says last |
+| [043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md) | Allow everything is one switch, for a project or a task, apart from what the rest gets |
+| [044](044-a-project-runs-many-things.md) | A project runs many things, from a list with a default |
+| [045](045-problem-reports.md) | Problems are reported from the app, masked, through a Worker that makes Linear issues |
+| [046](046-crash-reports-to-posthog-from-main.md) | Errors and crashes go to PostHog's error tracking from the main process, masked, behind a switch of their own; native minidumps stay on the computer |
+| [047](047-failures-kept-where-they-belong-and-reported-at-the-edge.md) | Failures are kept to what they belong to, and what Althar didn't expect is reported where it is kept |
+| [048](048-where-the-runtime-runs-and-who-may-reach-it.md) | The runtime stays in the app and runs headless too, and a client on the local socket can't answer for the person (proposed) |
+| [049](049-the-line-up-next-is-in-the-person-s-order.md) | The line up next is every task no agent has worked on yet, in the person's order |
+| [050](050-an-agent-joins-where-althar-can-hold-it-to-asking.md) | An ACP agent joins where Althar can hold it to asking, and the rest wait with their reasons |
+| [051](051-a-finished-task-waits-for-the-person-to-settle-it.md) | A finished task that isn't a change waits in Needs you until the person settles it |
+| [052](052-a-task-attaches-to-a-pull-request-it-didn-t-open.md) | A task can be attached to an open pull request it didn't open, and follows it as one it opened |
+| [053](053-the-code-an-agent-names-opens-beside-the-conversation.md) | The code an agent names opens beside the conversation, read where the agent works, and never edited |
+| [054](054-a-task-s-steps-are-a-graph-in-a-lane-for-each-agent.md) | A task's steps are a graph of its own face, in a lane for each agent, read from the runtime's runs |
+| [055](055-light-dark-or-as-the-system-is.md) | Althar is light, dark, or as the system is: one warm dark set of tokens, followed from nativeTheme |
+| [056](056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md) | A finished task's folder goes after a wait that suits how it ended, and comes back when the task needs it |
+| [057](057-a-lead-works-outside-its-sandbox-through-althar-s-tools.md) | A lead installs, runs the project, takes screenshots and runs checks again through Althar's tools, outside its sandbox; the coordinator takes screenshots too |
+| [058](058-the-coordinator-is-a-trusted-reader-in-copies-of-its-own.md) | The coordinator is a trusted reader, in copies of its own, held by a sandbox where it has one |
+| [059](059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md) | A tracker's workspaces are connected side by side, and a project may be bound to one |
+| [060](060-a-lost-connection-is-waited-out-and-a-failing-service-tried-again.md) | A lost connection is waited out, and a failing service tried again, as a usage limit is held |
+| [061](061-automations-start-ordinary-tasks-on-a-schedule.md) | Automations start ordinary tasks on a schedule: a kept request, and an occurrence for each time it was due, on this computer while Althar runs |
+| [062](062-a-usage-read-may-use-an-account-s-own-sign-in-once.md) | A usage read may use an account's own sign-in, once, for one call to its provider's usage URL, Anthropic's included |
+| [063](063-althar-s-part-is-all-its-work-started-and-itself.md) | Althar's part of the load is everything its work started, however it runs, and Althar itself |
+| [064](064-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md) | A file or folder sent with a message is copied into the thread's folder, which git ignores, and linked for the agent to open |
+| [065](065-running-is-what-an-agent-works-on-and-up-next-is-everything-that-waits.md) | Running is what an agent works on now, and Up next is everything that waits, in the order it goes on |

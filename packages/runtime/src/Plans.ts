@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
 import { NotFound } from './errors'
+import { backoff, keptGoing } from './Failures'
 import { RuntimeConfig } from './Config'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
@@ -40,11 +41,14 @@ export class Plans extends Context.Service<
       readonly end?: TaskEnd | null
       /** Held from the start: it waits until someone starts it, with no countdown. */
       readonly held?: boolean
+      /** Nothing of it leaves this Mac when it is done, whatever the project's host (`PlanParameters.here`). */
+      readonly here?: boolean
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
      * waits for a place among the agents at work on this machine (`waiting`);
-     * null where it no longer stood to start.
+     * null where it no longer stood to start. One accepted whose run was never
+     * made, as when Althar stopped in between, runs now.
      */
     start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
     /** Holds a proposed plan until someone starts it. */
@@ -140,7 +144,12 @@ export class Plans extends Context.Service<
                   projectId: input.projectId,
                   taskId: input.taskId,
                   workflowVersionId,
-                  parameters: JSON.stringify({ steps: input.steps, reason: input.reason, end: input.end ?? null }),
+                  parameters: JSON.stringify({
+                    steps: input.steps,
+                    reason: input.reason,
+                    end: input.end ?? null,
+                    ...(input.here === true ? { here: true } : {}),
+                  }),
                   proposedByActorId: input.actorId,
                   state: 'proposed',
                   proposedAt: at,
@@ -174,27 +183,34 @@ export class Plans extends Context.Service<
             'task_plan.accepted',
             actorId,
           )
-          return accepted ? yield* runs.run(planId) : null
+          if (accepted) return yield* runs.run(planId)
+          // Accepted, but Althar stopped before its run was made: it runs now, once.
+          return !due && (yield* load(planId)).state === 'accepted' ? yield* runs.run(planId) : null
         })
 
-      // The countdown: the next plan due starts when its time comes, or sooner if a plan changes.
+      /** Plans that couldn't start when their time came, each waiting a while before it is tried again. */
+      const tries = backoff()
+
+      // The countdown: the next plan due starts when its time comes, or sooner if a plan changes. One that couldn't start
+      // is due again once it has waited, and the others start in their time meanwhile.
       const countdown = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         for (;;) {
-          const [next] = yield* sql<{ id: string; startsAt: string }>`
-            SELECT id, starts_at FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL ORDER BY starts_at LIMIT 1`
+          const counting = yield* sql<{ id: string; startsAt: string }>`
+            SELECT id, starts_at FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL`
+          const [next] = counting
+            .map((plan) => ({ id: plan.id, at: Math.max(Date.parse(plan.startsAt), tries.until(plan.id)) }))
+            .toSorted((a, b) => a.at - b.at)
           if (next === undefined) {
             yield* Queue.take(wake)
             continue
           }
-          const wait = Date.parse(next.startsAt) - Date.now()
+          const wait = next.at - Date.now()
           if (wait > 0) {
             yield* Effect.raceFirst(Queue.take(wake), Effect.sleep(Duration.millis(wait)))
             continue
           }
-          yield* start(next.id, instance.systemId, true).pipe(
-            Effect.catchCause((cause) => Effect.logWarning('A plan could not start', cause)),
-          )
+          yield* tries.attempt(next.id, 'Plans.start', start(next.id, instance.systemId, true))
         }
       })
 
@@ -207,7 +223,7 @@ export class Plans extends Context.Service<
           for (const plan of overdue) yield* transition(plan.id, counting, () => ({ startsAt: null }), 'task_plan.held', instance.systemId)
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hold the plans that came due while Althar was closed', cause))),
       )
-      yield* Effect.forkScoped(provide(countdown))
+      yield* Effect.forkScoped(provide(keptGoing('Plans.countdown', countdown)))
 
       return Plans.of({
         propose,
@@ -219,8 +235,13 @@ export class Plans extends Context.Service<
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const changed = (plan: PlanRow) => {
-                const before = JSON.parse(plan.parameters) as { reason?: string | null; end?: TaskEnd | null }
-                return JSON.stringify({ steps, reason: before.reason ?? null, end: end === undefined ? (before.end ?? null) : end })
+                const before = JSON.parse(plan.parameters) as { reason?: string | null; end?: TaskEnd | null; here?: boolean }
+                return JSON.stringify({
+                  steps,
+                  reason: before.reason ?? null,
+                  end: end === undefined ? (before.end ?? null) : end,
+                  ...(before.here === true ? { here: true } : {}),
+                })
               }
               const plan = yield* load(planId)
               if (plan.state === 'proposed') {

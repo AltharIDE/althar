@@ -1,7 +1,8 @@
 /* The board: lanes side by side, each on the page, each scrolling on its own.
-   Centred while they fit; when they don't, they start at the left edge and
-   scroll, rather than spilling off it where no scroll reaches. A narrow
-   board (beside the conversation) sets --lane-min, as the prototype does. */
+   Centred while they fit; when they don't, lanes collapse to rails (the
+   board sets each lane's track), and what still doesn't fit starts at the
+   left edge and scrolls, rather than spilling off it where no scroll
+   reaches. A narrow board (beside the conversation) sets --lane-min. */
 .board {
   display: grid;
   grid-template-columns: repeat(4, minmax(var(--lane-min, 260px), 460px));
@@ -10,6 +11,7 @@
   min-height: 0;
   overflow-x: auto;
   background: var(--n-2);
+  transition: grid-template-columns 200ms var(--ease);
 }
 .column {
   display: flex;
@@ -25,7 +27,7 @@
 }
 /* the lane of calls only you can make, washed faintly in their colour */
 .you.column {
-  background: color-mix(in srgb, var(--signal) 3.5%, var(--n-2));
+  background: var(--you-lane);
 }
 
 .head {
@@ -50,6 +52,10 @@
 .you .count {
   color: var(--signal);
 }
+/* nothing waits on you: the count says so in ink */
+.you .none {
+  color: var(--t-3);
+}
 .ring {
   flex: none;
   width: 8px;
@@ -69,6 +75,106 @@ span.you {
   color: var(--t-3);
 }
 
+/* The chevron that collapses a lane: there only while its head is pointed
+   at, or it has the focus. On Needs you, while something waits, it only says
+   why it can't. */
+.collapse {
+  margin: -6px -10px -6px -4px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.head:hover .collapse,
+.collapse:focus-visible {
+  opacity: 1;
+}
+.head:hover .collapse[aria-disabled='true'] {
+  opacity: 0.45;
+}
+
+/* A collapsed lane: a rail with its glyph, its count, and its name written
+   down it, aligned with the heads beside it. The whole of it opens it. */
+.collapsed {
+  position: relative;
+  align-items: center;
+  gap: 8px;
+  padding-top: 20px;
+  transition: background var(--fast) var(--ease);
+}
+.collapsed:hover {
+  background: color-mix(in srgb, var(--t-1) 3%, transparent);
+}
+.you.collapsed:hover {
+  background: color-mix(in srgb, var(--signal) 6%, var(--n-2));
+}
+.railGlyph {
+  display: flex;
+  align-items: center;
+  height: 18px;
+}
+.collapsed .count {
+  margin: 0;
+}
+.railName {
+  margin-top: 4px;
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+  color: var(--t-2);
+}
+.expand {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  outline: 0;
+}
+.expand:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+
+/* A lane holding two things, one at a time: both named in its head, the one showing in ink. */
+.shelves {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.shelf {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--t-3);
+  cursor: pointer;
+  outline: 0;
+  transition: color var(--fast) var(--ease);
+}
+.shelf[aria-pressed='true'],
+.shelf:hover {
+  color: var(--t-1);
+}
+.shelf:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--signal);
+}
+.shelfCount {
+  font: 500 11.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+
 .body {
   flex: 1;
   min-height: 0;
@@ -85,7 +191,45 @@ span.you {
   border-radius: 12px;
   text-align: center;
   font-size: 12px;
+  color: var(--t-2);
+}
+/* a quiet line naming the group under it, ruled to the lane's edge. The label
+   keeps one line and gives way first; an end that can't fit beside it goes under, at the right. */
+.divider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  margin: 0 0 2px;
+  font-size: 11.5px;
   color: var(--t-3);
+}
+.dividerLead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 9em;
+  min-width: 0;
+}
+.dividerLead::after {
+  content: '';
+  flex: 1;
+  min-width: 0;
+  border-top: 1px solid var(--line-2);
+}
+.dividerLabel {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What to do with the group, past the rule: a quiet link. */
+.dividerEnd {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
 }
 .list {
   margin: -4px 0 0;
@@ -124,7 +268,7 @@ span.you {
 .card[aria-current='true'] {
   background: var(--paper);
   box-shadow:
-    inset 0 0 0 1.5px var(--t-1),
+    inset 0 0 0 1.5px var(--ink-fill),
     var(--lift-card);
 }
 .card:has(.open:focus-visible) {
@@ -146,7 +290,7 @@ span.you {
 }
 .row[aria-current='true'] {
   background: var(--paper);
-  box-shadow: inset 0 0 0 1.5px var(--t-1);
+  box-shadow: inset 0 0 0 1.5px var(--ink-fill);
 }
 .row:has(.open:focus-visible) {
   outline: 1.5px solid var(--signal);
@@ -193,6 +337,10 @@ span.you {
   letter-spacing: -0.02em;
   color: var(--t-3);
 }
+/* a consumer that names no task leaves no gap for it */
+.ref:empty {
+  display: none;
+}
 .at {
   margin-left: auto;
   display: inline-flex;
@@ -228,6 +376,9 @@ span.you {
   transform: translateX(2px);
 }
 @media (prefers-reduced-motion: reduce) {
+  .board,
+  .collapse,
+  .collapsed,
   .card,
   .row,
   .go svg {

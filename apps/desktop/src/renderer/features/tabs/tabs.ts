@@ -1,49 +1,51 @@
 import type { ProjectSummary } from '@althar/contracts'
 import { type ProjectTab, Room } from '@althar/ui'
 
-import { refOf } from '../home/HomeView'
+import { refOf } from '../home/glance'
+import { isSection, type Section } from '../settings/sections'
 
 /*
  * The window's tabs, worked out: which projects have one, where in each the
  * person last was, and which has the window, from where the window is. The
- * home has the first tab, with settings in its bar; every other place belongs
- * to a project. A task's address names only its thread, so its project is
- * learnt when the task is read.
+ * home has the first tab; Althar's settings have one beside it while they
+ * are open, kept on the section they were last on; every other place
+ * belongs to a project. A task's address names only its thread, so its
+ * project is learnt when the task is read.
  */
 
-/** Where in a project its tab was last: its conversation and board, its rules, its repositories, or one of its tasks. */
-export type Place =
-  | { readonly kind: 'project' }
-  | { readonly kind: 'rules' }
-  | { readonly kind: 'repositories' }
-  | { readonly kind: 'thread'; readonly threadId: string }
+/** Where in a project its tab was last: the project, on the view it was last on, or one of its tasks. */
+export type Place = { readonly kind: 'project' } | { readonly kind: 'thread'; readonly threadId: string }
 
-/** Where the window is, as the tabs see it: a new project has a tab of its own. */
+/** Where the window is, as the tabs see it: a new project has a tab of its own, and so do the settings. */
 export type Where =
   | { readonly kind: 'home' }
   | { readonly kind: 'new' }
+  | { readonly kind: 'settings'; readonly section: Section }
   | { readonly kind: 'project'; readonly projectId: string; readonly place: Place }
   | { readonly kind: 'thread'; readonly threadId: string }
 
-/** What a window keeps between launches: its projects' tabs in order, where in each it was, and the view each was last on. */
+/** What a window keeps between launches: its projects' tabs in order, where in each it was, the view each was last on, and the settings' tab. */
 export interface Kept {
   readonly open: ReadonlyArray<string>
   readonly places: Readonly<Record<string, Place>>
   readonly rooms?: Readonly<Record<string, Room>>
+  /** The settings have a tab, on this section; none while they are closed. */
+  readonly settings?: Section
 }
 
 /** Where the window is, from its address. */
 export const whereOf = (pathname: string): Where => {
-  const project = /^\/projects\/([^/]+)(?:\/(rules|repositories))?\/?$/.exec(pathname)
-  if (project?.[1] !== undefined)
-    return {
-      kind: 'project',
-      projectId: decodeURIComponent(project[1]),
-      place: project[2] === 'rules' || project[2] === 'repositories' ? { kind: project[2] } : { kind: 'project' },
-    }
+  const project = /^\/projects\/([^/]+)\/?$/.exec(pathname)
+  if (project?.[1] !== undefined) return { kind: 'project', projectId: decodeURIComponent(project[1]), place: { kind: 'project' } }
   const thread = /^\/threads\/([^/]+)\/?$/.exec(pathname)
   if (thread?.[1] !== undefined) return { kind: 'thread', threadId: decodeURIComponent(thread[1]) }
   if (/^\/new\/?$/.test(pathname)) return { kind: 'new' }
+  // A section the settings don't have is their first.
+  const settings = /^\/settings\/([^/]+)\/?$/.exec(pathname)
+  if (settings?.[1] !== undefined) {
+    const section = decodeURIComponent(settings[1])
+    return { kind: 'settings', section: isSection(section) ? section : 'agents' }
+  }
   return { kind: 'home' }
 }
 
@@ -94,7 +96,8 @@ const isRoom = (value: unknown): value is Room => Object.values(Room).some((room
 
 const isPlace = (value: unknown): value is Place => {
   if (typeof value !== 'object' || value === null || !('kind' in value)) return false
-  if (value.kind === 'project' || value.kind === 'rules' || value.kind === 'repositories') return true
+  // A project's rules and repositories were places of their own before they were sections of its settings: the project now.
+  if (value.kind === 'project') return true
   return value.kind === 'thread' && 'threadId' in value && typeof value.threadId === 'string'
 }
 
@@ -111,7 +114,8 @@ export const keptFrom = (raw: string | null): Kept | null => {
     const rooms: Record<string, Room> = {}
     if ('rooms' in parsed && typeof parsed.rooms === 'object' && parsed.rooms !== null)
       for (const [id, room] of Object.entries(parsed.rooms)) if (isRoom(room)) rooms[id] = room
-    return Object.keys(rooms).length === 0 ? { open, places } : { open, places, rooms }
+    const settings = 'settings' in parsed && isSection(parsed.settings) ? { settings: parsed.settings } : {}
+    return { open, places, ...(Object.keys(rooms).length === 0 ? {} : { rooms }), ...settings }
   } catch {
     return null
   }

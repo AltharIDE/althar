@@ -7,9 +7,12 @@ import { checkFor, SETTLE, type UpdateGlance, type Updates, updating } from './u
  * The updater wired to Electron (ADR-024): electron-updater reads the feed,
  * latest-mac.yml on the repository's latest GitHub Release, and downloads
  * the zip it names; Squirrel.Mac checks the new app is signed as this one
- * is, and puts it in place, to install when Althar restarts or quits.
- * Checks run a little after launch, then every four hours, and from the app
- * menu. Only a packaged app updates.
+ * is, and puts it in place, to install when Althar restarts or quits. On
+ * Windows the feed is latest.yml and the download the NSIS installer, which
+ * runs silently as Althar quits; on Linux, latest-linux.yml and the
+ * AppImage. There, the update is ready once it is down. Checks run a little
+ * after launch, then every four hours, and from the app menu. Only a
+ * packaged app updates.
  *
  * ALTHAR_UPDATE_FEED points the updater at another feed instead, an address
  * on this Mac alone: for testing an update against a local server. Squirrel
@@ -43,7 +46,8 @@ export const startUpdates = (changed: (glance: UpdateGlance) => void): Updates =
   const updates = updating(
     {
       check: () => checkFor(autoUpdater),
-      install: () => autoUpdater.quitAndInstall(),
+      // On Windows the installer runs silently and opens the new version; elsewhere these say nothing.
+      install: () => autoUpdater.quitAndInstall(process.platform === 'win32', process.platform === 'win32'),
       settle: () => new Promise((resolve) => setTimeout(resolve, SETTLE)),
     },
     changed,
@@ -52,8 +56,10 @@ export const startUpdates = (changed: (glance: UpdateGlance) => void): Updates =
   autoUpdater.on('update-available', (info) => updates.available(info.version))
   autoUpdater.on('update-not-available', updates.none)
   autoUpdater.on('error', (error) => updates.failed(error.message))
-  // electron-updater's own update-downloaded comes as the zip is down; Squirrel's, once it has checked the app and put it in place.
-  squirrel.on('update-downloaded', updates.staged)
+  // On a Mac, electron-updater's own update-downloaded comes as the zip is down; Squirrel's, once it has checked the app and put it in place.
+  // Elsewhere Squirrel has no part, and the download is the update: the installer or AppImage runs as Althar quits.
+  if (process.platform === 'darwin') squirrel.on('update-downloaded', updates.staged)
+  else autoUpdater.on('update-downloaded', updates.staged)
 
   setTimeout(() => void updates.check(), FIRST_CHECK)
   setInterval(() => void updates.check(), EVERY).unref()

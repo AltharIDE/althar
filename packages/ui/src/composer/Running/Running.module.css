@@ -1,15 +1,65 @@
-/* The same pill and list as Listening, which it sits beside; cobalt only for what is still running. */
+/* Neutral, like the composer it floats over; cobalt only for what is still running. */
 .pill {
-  composes: pill from '../Listening/Listening.module.css';
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 9px 0 10px;
+  border-radius: 99px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  font-size: 11.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
+.pill:hover,
+.pill[aria-expanded='true'] {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-card);
+  color: var(--t-1);
+}
+.pill:active {
+  background: var(--hover-paper);
+}
+.pill:focus-visible {
+  outline-offset: 2px;
+}
+.pill[aria-expanded='true'] .chev {
+  transform: rotate(180deg);
+}
+
 .text {
-  composes: text from '../Listening/Listening.module.css';
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  animation: in var(--slow) var(--ease) both;
+}
+@keyframes in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .text {
+    animation: none;
+  }
 }
 .k {
-  composes: k from '../Listening/Listening.module.css';
+  color: var(--t-3);
 }
 .name {
-  composes: name from '../Listening/Listening.module.css';
+  color: var(--t-1);
+  font-weight: 550;
 }
 .mono {
   /* even a command that can't be shortened leaves the pill its size */
@@ -17,13 +67,20 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+/* without a name, the command at a glance is what the pill says */
+.code {
   font: 500 11px var(--mono);
 }
 .what {
-  composes: what from '../Listening/Listening.module.css';
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--t-3);
 }
 .chev {
-  composes: chev from '../Listening/Listening.module.css';
+  flex: none;
+  color: var(--t-4);
+  transition: transform var(--fast) var(--ease);
 }
 .still {
   flex: none;
@@ -34,47 +91,117 @@
 }
 
 .pop {
-  composes: pop from '../Listening/Listening.module.css';
+  padding: 5px;
 }
 .head {
-  composes: head from '../Listening/Listening.module.css';
+  padding: 7px 9px 6px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
 }
 .list {
-  composes: list from '../Listening/Listening.module.css';
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .row {
-  composes: row from '../Listening/Listening.module.css';
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 6px 7px 9px;
+  border-radius: 6px;
+}
+.row:hover {
+  background: var(--hover-paper);
 }
 .rowGlyph {
-  composes: rowGlyph from '../Listening/Listening.module.css';
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--tile);
   color: var(--t-2);
 }
-.rowMain {
-  composes: rowMain from '../Listening/Listening.module.css';
+.row:hover .rowGlyph {
+  background: var(--tile-hover);
 }
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* what it is and where it answers; the row stays a few lines tall however long they are, the whole on hover */
 .rowTitle {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  column-gap: 8px;
   min-width: 0;
+}
+.called {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.4;
+  color: var(--t-1);
 }
 .command {
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 550 12px var(--mono);
+  font: 550 12px/1.4 var(--mono);
   color: var(--t-1);
 }
+/* the command at a glance, quiet, before how long it has run */
+.line {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font: 400 11px/1.4 var(--mono);
+}
 .url {
-  flex: none;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  white-space: nowrap;
   font-size: 11.5px;
 }
 span.url {
   color: var(--t-3);
 }
 .rowMeta {
-  composes: rowMeta from '../Listening/Listening.module.css';
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--t-3);
+  /* only the command gives way, so how long it has run is always there */
+  display: flex;
+  white-space: pre;
+}
+.rowMeta > * {
+  flex: none;
+}
+.rowMeta > .line {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 /* where it runs, kept to a line beside how long */

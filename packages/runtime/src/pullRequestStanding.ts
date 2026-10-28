@@ -36,6 +36,12 @@ export interface PullRequestFacts {
   readonly merged: ReadonlyArray<MergedHere>
   /** How many repositories hold work of the task that is neither merged nor in a pull request: the task isn't done while any does. */
   readonly unmerged: number
+  /**
+   * How many commits are on its branches after their last pull request merged
+   * or closed, in none yet (ADR-034): the person opens a new pull request for
+   * them, and the task isn't done while there are any.
+   */
+  readonly unshipped?: number
 }
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
@@ -91,12 +97,47 @@ const mergedWords = (merged: MergedHere, several: boolean) =>
 
 const unmergedWords = (n: number) => `${n === 1 ? '1 repository' : `${n} repositories`} with work not merged or in a pull request yet`
 
+/** The repository a pull request is in, by its folder here where known. */
+const repositoryOf = (change: ChangeSummary) => change.slug ?? change.repository
+
+const unshippedWords = (n: number) => `${plural(n, 'commit')} after its last pull request, in none yet`
+
+/**
+ * A task's pull requests in the order they're told: in each repository its
+ * latest (the open one, else the newest) first, then those of its earlier
+ * rounds of work, newest first (ADR-034).
+ */
+const inOrder = (changes: ReadonlyArray<SeenChange>) => {
+  const byRepository = new Map<string, Array<SeenChange>>()
+  for (const seen of changes) {
+    const where = repositoryOf(seen.change)
+    byRepository.set(where, [...(byRepository.get(where) ?? []), seen])
+  }
+  return [...byRepository.values()].flatMap((all) => {
+    const latest = all.find((seen) => seen.change.state === 'open') ?? all.at(-1)
+    return [
+      ...(latest === undefined ? [] : [{ seen: latest, earlier: false }]),
+      ...all
+        .filter((seen) => seen !== latest)
+        .toReversed()
+        .map((seen) => ({ seen, earlier: true })),
+    ]
+  })
+}
+
 /** Everything a task's pull requests come to, for its line in the list; empty for a task with none. */
 export const listWords = (facts: PullRequestFacts): string => {
-  const several = facts.changes.length + facts.merged.length > 1
-  const words = [...facts.changes.map((seen) => changeWords(seen, several)), ...facts.merged.map((merged) => mergedWords(merged, several))]
+  const several = new Set(facts.changes.map(({ change }) => repositoryOf(change))).size + facts.merged.length > 1
+  const words = [
+    ...inOrder(facts.changes).map(({ seen, earlier }) => `${earlier ? 'earlier ' : ''}${changeWords(seen, several)}`),
+    ...facts.merged.map((merged) => mergedWords(merged, several)),
+  ]
   if (words.length === 0) return ''
-  return [...words, ...(facts.unmerged > 0 ? [unmergedWords(facts.unmerged)] : [])].join('; ')
+  return [
+    ...words,
+    ...(facts.unmerged > 0 ? [unmergedWords(facts.unmerged)] : []),
+    ...((facts.unshipped ?? 0) > 0 ? [unshippedWords(facts.unshipped ?? 0)] : []),
+  ].join('; ')
 }
 
 /**
@@ -106,11 +147,13 @@ export const listWords = (facts: PullRequestFacts): string => {
  * is closed, which may have been reopened since without Althar seeing it.
  */
 export const finishedBy = (facts: PullRequestFacts): 'merged' | null => {
-  if (facts.unmerged > 0) return null
-  const states = [...facts.changes.map(({ change }) => change.state), ...facts.merged.map(() => 'merged' as const)]
+  if (facts.unmerged > 0 || (facts.unshipped ?? 0) > 0) return null
+  // Each repository by its latest pull request: one closed before its next merged is history (ADR-034).
+  const latest = inOrder(facts.changes).flatMap(({ seen, earlier }) => (earlier ? [] : [seen.change]))
+  const states = [...latest.map((change) => change.state), ...facts.merged.map(() => 'merged' as const)]
   if (states.length === 0 || states.includes('open')) return null
   // A closed one may have been reopened, and nothing watches it any more: not finished.
-  if (facts.changes.some(({ change }) => change.state === 'closed')) return null
+  if (latest.some((change) => change.state === 'closed')) return null
   return 'merged'
 }
 
@@ -163,16 +206,21 @@ const changeSection = (seen: SeenChange, several: boolean): string => {
 
 /** The "Pull request" section of a task, for reading it; empty for a task with none. */
 export const sectionWords = (facts: PullRequestFacts): string => {
-  const several = facts.changes.length + facts.merged.length > 1
+  const repositories = new Set(facts.changes.map(({ change }) => repositoryOf(change))).size + facts.merged.length
+  const several = repositories > 1
   const sections = [
-    ...facts.changes.map((seen) => changeSection(seen, several)),
+    ...inOrder(facts.changes).map(({ seen, earlier }) => `${earlier ? 'Earlier: ' : ''}${changeSection(seen, several)}`),
     ...facts.merged.map((merged) => mergedWords(merged, several)),
   ]
   if (sections.length === 0) return ''
   const finished = finishedBy(facts)
+  const unshipped = facts.unshipped ?? 0
   return [
-    `Pull request${several ? 's' : ''}:\n${sections.join('\n\n')}`,
+    `Pull request${sections.length > 1 ? 's' : ''}${facts.changes.length > repositories ? ', the latest first' : ''}:\n${sections.join('\n\n')}`,
     facts.unmerged > 0 ? `${unmergedWords(facts.unmerged)}: the task is not done.` : null,
+    unshipped > 0
+      ? `${plural(unshipped, 'commit')} on the task's branch ${unshipped === 1 ? 'is' : 'are'} after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for ${unshipped === 1 ? 'it' : 'them'} from the task, or leaves ${unshipped === 1 ? 'it' : 'them'} out.`
+      : null,
     finished === null ? null : `The task is finished (${finished}): nothing waits on the person.`,
   ]
     .filter((part): part is string => part !== null)

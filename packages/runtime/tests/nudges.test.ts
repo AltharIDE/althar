@@ -11,8 +11,10 @@ import { Instance } from '../src/Instance'
 import { callWords, type NudgeEvent, Nudges, readyWords } from '../src/Nudges'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime, until } from './support'
 
@@ -21,7 +23,7 @@ import { repository, runtime, until } from './support'
  * need them, and how many things wait, never progress.
  */
 
-const withNudges = (database = ':memory:') => Nudges.layer.pipe(Layer.provideMerge(runtime(database)))
+const withNudges = (database = ':memory:') => Nudges.layer.pipe(Layer.provideMerge(Queries.layer), Layer.provideMerge(runtime(database)))
 
 /** Every event the nudges give, as they come. */
 const heard = Effect.gen(function* () {
@@ -31,8 +33,12 @@ const heard = Effect.gen(function* () {
   return { events, stop: Fiber.interrupt(fiber) }
 })
 
-/** A task planned for its lead alone, started at once: one that reports, or, without `[lead:finish]`, one that never does. */
-const started = (title: string) =>
+/**
+ * A task planned for its lead alone, started at once: one that reports, or, without `[lead:finish]`, one that never does.
+ * `plain`, as the coordinator's start_task makes one: a quick task, its plan staying on this Mac, with no branch until its lead
+ * changes the repository.
+ */
+const started = (title: string, plain = false) =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const plans = yield* Plans
@@ -43,6 +49,7 @@ const started = (title: string) =>
       projectId: project.projectId,
       title,
       draft: true,
+      ...(plain ? { plain } : {}),
     })
     const planId = yield* plans.propose({
       projectId: project.projectId as ProjectId,
@@ -51,6 +58,7 @@ const started = (title: string) =>
       reason: null,
       actorId: instance.personId,
       end: null,
+      ...(plain ? { here: true } : {}),
     })
     yield* plans.start(planId, instance.personId)
     return task
@@ -65,13 +73,13 @@ describe('nudges', () => {
   it.live('say when a task is ready and when a step needs the person, with how many things wait, and less once answered', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
-      const ready = yield* started('Retry the checkout [lead:finish]')
+      const ready = yield* started('Retry the checkout [lead:finish] [lead:edit]')
       yield* until(
         Effect.sync(() => nudged(events)),
         (said) => said.length === 1,
         Duration.seconds(20),
       )
-      assert.deepStrictEqual(nudged(events), [['Retry the checkout [lead:finish]', 'Ready: Did the task.']])
+      assert.deepStrictEqual(nudged(events), [['Retry the checkout [lead:finish] [lead:edit]', 'Ready: Did the task.']])
       // A step that never reports needs the person.
       yield* started('Quietly')
       yield* until(
@@ -106,10 +114,49 @@ describe('nudges', () => {
     }).pipe(Effect.provide(withNudges())),
   )
 
+  it.live('say and count a plain task that finished, as any task ready, until the person keeps it for later', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      // A question, with no branch and no pull request at its end: it waits in Needs you, said and counted.
+      const plain = yield* started('Which partners still call v1? [lead:finish]', true)
+      yield* until(
+        Effect.sync(() => nudged(events)),
+        (said) => said.length === 1,
+        Duration.seconds(20),
+      )
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 1,
+      )
+      assert.deepStrictEqual(nudged(events), [['Which partners still call v1? [lead:finish]', 'Ready: Did the task.']])
+      // Kept for later, it is out of Needs you: no longer counted.
+      const tasks = yield* Tasks
+      assert.isTrue(yield* tasks.keep({ envelope: yield* Runtime.envelope('task.keep', { taskId: plain.taskId }), taskId: plain.taskId }))
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 0,
+        Duration.seconds(20),
+      )
+      // Then a change that is ready: said, and counted alone.
+      yield* started('Retry the checkout [lead:finish] [lead:edit]')
+      yield* until(
+        Effect.sync(() => nudged(events)),
+        (said) => said.length === 2,
+        Duration.seconds(20),
+      )
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 1,
+      )
+      assert.strictEqual(counts(events).at(-1), 1)
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
   it.live('go quiet while the lead works on what the person said after, and say the task is ready again once it is done', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
-      const task = yield* started('Retry the checkout [lead:finish]')
+      const task = yield* started('Retry the checkout [lead:finish] [lead:edit]')
       yield* until(
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 1,
@@ -134,7 +181,7 @@ describe('nudges', () => {
         (said) => said.length === 2,
         Duration.seconds(20),
       )
-      assert.deepStrictEqual(nudged(events)[1], ['Retry the checkout [lead:finish]', 'Ready: Did the task.'])
+      assert.deepStrictEqual(nudged(events)[1], ['Retry the checkout [lead:finish] [lead:edit]', 'Ready: Did the task.'])
       yield* stop
     }).pipe(Effect.provide(withNudges())),
   )
@@ -176,7 +223,7 @@ describe('nudges', () => {
       })
       yield* last(false)
       // A task ready, its run over; its lead at work on what the person said after is work running too.
-      const task = yield* started('Retry the checkout [lead:finish]')
+      const task = yield* started('Retry the checkout [lead:finish] [lead:edit]')
       yield* until(
         Effect.sync(() => kinds(events)),
         (said) => said.includes('ready'),
@@ -241,7 +288,7 @@ describe('nudges', () => {
     return Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const { events, stop } = yield* heard
-        yield* started('Retry the checkout [lead:finish]')
+        yield* started('Retry the checkout [lead:finish] [lead:edit]')
         yield* until(
           Effect.sync(() => nudged(events)),
           (said) => said.length === 1,
@@ -288,8 +335,14 @@ describe('nudges', () => {
     )
     const stuck = (payload: object) => callWords({ kind: 'stuck', payload }, named)
     assert.strictEqual(stuck({ step: 'publish', why: 'failed_to_start' }), 'Needs you: Opening the pull request is stuck')
-    assert.strictEqual(stuck({ step: 'review', why: 'usage_limit', agentId: 'codex' }), 'Needs you: Codex reached its usage limit')
-    assert.strictEqual(stuck({ step: 'review', why: 'usage_limit', agentId: 'aider' }), 'Needs you: aider reached its usage limit')
+    assert.strictEqual(
+      stuck({ step: 'review', why: 'usage_limit', agentId: 'codex' }),
+      'Needs you: Codex ran out of usage during the review',
+    )
+    assert.strictEqual(
+      stuck({ step: 'review', why: 'usage_limit', agentId: 'aider' }),
+      'Needs you: aider ran out of usage during the review',
+    )
     assert.strictEqual(readyWords(''), 'Ready to look at')
     assert.strictEqual(readyWords('Did it.\nAnd more.'), 'Ready: Did it.')
   })

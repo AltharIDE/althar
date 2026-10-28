@@ -1,6 +1,6 @@
 # ADR-032: A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn
 
-- **Status:** Accepted
+- **Status:** Accepted; its order of what waits amended by [ADR-037](037-what-the-person-does-goes-first.md); a task's own servers count once for it (follow-up of 2026-10-21)
 - **Date:** 2026-10-13
 - **Owner:** Repository maintainers
 - **Context:** Althar set no limit on tasks at once, and had no queue
@@ -22,14 +22,14 @@
     person's own.
   - **A lead or reviewer waiting on the person's answer to a question
     doesn't count:** it isn't using the machine. **One idle but with
-    something it left running still running counts**
+    something it left running that is at work counts**
     ([ADR-022](022-what-agents-leave-running.md)): that is often when its
-    tests run.
+    tests run. A server it left running that sits idle doesn't (see the
+    follow-up below).
   - **A step after another on the same task** (the review after the lead's
     step, the lead settling after a review) takes the place of the agent
-    before it, unless what that agent left running still runs: then the two
-    would be two agents at work, and the next step waits for a place of its
-    own.
+    before it, what that agent left running going on in it (see the
+    follow-up of 21 October below).
   - **The default is worked out at each launch, from this machine,** and
     isn't stored: the lower of a figure from its cores (`os.cpus()`) and one
     from its memory (`os.totalmem()`), at least 1 and at most 16, the active
@@ -92,3 +92,108 @@
 - **Revisit when:** people raise or lower the number often, which says the
   default is wrong; or once footprints are measured, so the default can
   follow what tasks actually take.
+
+## Follow-up: what is left running counts only while it works (2026-10-13)
+
+- **What went wrong.** With the number at 4, one task was at work and the
+  rest waited. Every task whose lead had left a server running (a prototype's
+  Vite server, a preview, Storybook) held a place for as long as the server
+  lived, though its step was done and the server did nothing: four ready
+  prototype tasks held all four places. Counting what a lead left running was
+  right for a test run and wrong for a server that waits for a browser.
+- **Decision.** What an agent left running takes a place only while its
+  process tree **does work**, read the way the CPU and memory meter reads it
+  (`ps`, the agent's process and everything it started, `processTree.ts`).
+  Every 2 seconds, while any session has something running, Althar reads each
+  process of the tree with its CPU time and compares it with the last
+  reading. It is work if a process started or ended since, or if the CPU time
+  of the processes present in both rose by at least 5% of one core over that
+  time (the tree's total falls when a process ends, so totals can't be
+  subtracted). Work counts at once. It stops counting only after **30 seconds
+  without** any, so a test run that pauses for a moment doesn't flip back and
+  forth, and a server that starts working again (a request, a rebuild)
+  counts again at the next reading. A server just started counts until it
+  has been quiet for those 30 seconds. Where the CPU can't be read (the agent
+  is no process of its own, `ps` fails, as on Windows), it counts, as
+  before: when in doubt, protect the machine. A task's own step or turn
+  counts whenever it runs, as before, whatever its server does.
+- **Admitting what waits.** A reading that turns work into idle looks at the
+  queue at once, so a waiting task starts as soon as the server it waited for
+  goes quiet (up to 30 seconds after its last use, and one reading), without
+  another turn ending or anyone answering. Stopping the server or its
+  session does the same, as before.
+- **Who holds the places.** A task that waits for a place now carries who
+  holds them: each task at work, and, for one kept only by what it left
+  running, that server. Where it waits, its plan card or its thread says "Held
+  by" those tasks, the kept ones with "(a server it left running)", and a
+  "Keeping a place" pill lists each server with the task it is from and a
+  Stop, the same list as Running. The words of the wait ("Waiting: 4 of 4
+  agents busy on this Mac") are unchanged. When who holds the places changes,
+  the waiting task's card and its own thread are told, so an open view reads
+  them again.
+- **Alternatives.**
+  - *Classify instead:* a background process that listens on a port and is
+    the session's only background work counts as a server, not as work. Needs
+    the port of a process tree (`lsof`, not portable), or the guess from its
+    output that `leftRunning.ts` already makes for a link, which a server that
+    prints no address defeats. And a dev server that rebuilds on each save, or
+    a test runner with a watch UI, listens on a port and works; only CPU says
+    which. Rejected, and it would still need a clock for a server that stops
+    listening.
+  - *Count nothing left running.* Tests the lead started in the background
+    would run unbounded again, the reason this counts it.
+  - *A longer or shorter quiet time.* 30 seconds covers a test run waiting on
+    a network call or a build step between suites; it is an option
+    (`busy.quiet`), with the reading interval (`busy.sample`).
+- **Trade-off.** `ps` can't show a worker that starts, works and ends
+  entirely between two readings: its CPU time goes with it, and on macOS its
+  parent's own time doesn't include it (checked). Such work is seen only by a
+  reading that finds the worker alive, so a tree whose only work is bursts
+  that each dodge every reading for 30 seconds (15 readings) is taken for
+  idle and releases its place. Readings every 2 seconds, and counting until
+  none has shown work for 30, make that unlikely for a test run or a build,
+  whose workers live seconds, and cost about a `ps` listing (15 ms) a
+  reading; closing it for good needs the kernel's own accounting of reaped
+  children, which `ps` doesn't give on macOS. A server idle for 30 seconds
+  still holds its place for those 30 seconds, and one that serves a burst of requests holds it while they
+  last. The 5% line is a guess: a server that always burns a little (a
+  watcher polling), or whose tree keeps starting a process, counts, which
+  errs toward waiting, not toward load.
+
+## Follow-up: one task, one place, whatever its lead left running (2026-10-21)
+
+- **What went wrong.** A task waited behind itself. After a follow-up round
+  on "Dark mode", its lead left a dev server running and reported; the
+  server had worked in the last 30 seconds, so the lead didn't hand its
+  place to the review. The review waited for a place of its own, as work
+  under way, while the lead's place stayed held under the task by that
+  server. The card said "Waiting · 7 agents busy on this Mac, which runs 6
+  at once", and listed the task itself, "(a server it left running)", among
+  those holding it up.
+- **Decision.** What a task's agents left running is part of the task's
+  place, not another one:
+  - **Kept only by what its agents left running, a task holds one place,**
+    and none beside an agent of its own at work. Other tasks' servers count
+    as before, while they work.
+  - **A task's next work takes the place the task holds:** the step after
+    another on the same task (the review after the lead's step, the lead
+    settling after a review, a follow-up's review) takes the place of the
+    agent before it whatever that agent left running, and any work of a task
+    kept only by what it left running (a step carried on after a restart, a
+    turn Althar tells it) starts in that place, ahead of whatever waits. Its
+    servers keep running in it.
+  - **Work of a task that does have to wait** (another of its agents is at
+    work, in a turn the person started) **has the task's place first** once
+    that agent's frees, before other work that waited longer.
+  - **A waiting task is left out of its own count and holders,** on its card
+    and in its view: it never waits behind itself. Over the number, the
+    words say how many more: "Waiting: 6 of 6 agents busy on this Mac, and 1
+    more".
+- **Alternatives.** *Count a task's lead and reviewer under one key
+  always:* a lead in a turn the person started and its reviewer at work
+  would count as one, though both use the machine. Only what is left
+  running folds into the task's place.
+- **Trade-off.** A task's server and its next step share one place, so a
+  heavy test run left by the lead and its review run together while another
+  task waits. The two belong to the same piece of work, which the person
+  expects to go on.

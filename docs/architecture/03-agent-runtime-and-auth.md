@@ -29,7 +29,8 @@ Althar reaches every agent through one protocol, the Agent Client Protocol
 
 ## Agents in the MVP
 
-Claude Code, Codex and OpenCode are interchangeable from the first version. A
+Claude Code, Codex and OpenCode are interchangeable from the first version, and
+seven more since October 2026 ([ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)). A
 task's lead, any step and the coordinator can run on any of them, and a task
 can move between them.
 
@@ -38,6 +39,13 @@ can move between them.
 | Claude Code | `claude-agent-acp`, the ACP project's adapter on the Claude Agent SDK. Claude Code has no native ACP | Claude plan or Anthropic API key; status from `claude auth status` | Starts in the user's own default mode, which can be `bypassPermissions`, so Althar turns bypass off and adds ask rules for every session. The Agent SDK reports usage limits, but the adapter doesn't forward them |
 | Codex | `codex-acp`, the ACP project's adapter, driving its own bundled Codex | ChatGPT plan or OpenAI API key; status from `codex login status` | Althar uses its `workspace-write` mode, not the default `agent` mode, whose automatic reviewer answers requests itself. Usage limits reach the adapter but are only rendered as `/status` text |
 | OpenCode | `opencode acp`, native | API keys for any provider; local model servers; status from `opencode auth list` | The bring-your-own-key route. It cannot use a Claude plan. It allows most actions without asking unless configured, so Althar starts it with inline config that makes it ask |
+| GitHub Copilot | `copilot --acp`, native (public preview); Althar can download it | A Copilot plan; no status command | Asks before every edit, command and fetch in its `#agent` mode. Althar holds its `allow_all` off and sends the person's `/` messages as words, as `/yolo` would turn asking off. A repository's hooks can approve, so it leads no review. One account until its keychain sign-in is seen per folder |
+| Junie | `junie --acp=true`, native | A JetBrains AI plan or a Junie key; no status command | Ordinary edits inside the project don't ask; commands, sensitive files and MCP tools do. Althar holds its brave mode off. Its plan mode has no edit tools, so readers run there. One account until Althar signs a home out before removing it |
+| Grok Build | `grok agent --no-leader stdio`, native | SuperGrok or X Premium+, or an xAI key; status from `grok models` | No modes: its session's `_meta` turns always-approve and its auto mode off. The allow rules in the person's Claude Code settings approve its commands, and nothing at launch stops them |
+| Kimi Code | `kimi acp`, native | A Kimi Code membership; status from `kimi provider list` | Commands ask; edits inside a git repository and web fetches don't. Its plan mode refuses edits, so readers run there |
+| Mistral Vibe | `vibe-acp`, native | A Mistral key its browser sign-in makes, paid by Le Chat Pro or Team, or pay-as-you-go; no status command | Its `ask` mode asks before edits, web, MCP tools and most commands; no read-only mode, so readers ask and Althar's rules deny their writes. One account: its key is a keychain item every folder shares |
+| Qwen Code | `qwen --acp --approval-mode default`, native | Alibaba Cloud's Coding Plan key or any provider's; no status command | Starts in `auto`, a model judging what is safe, unless told. Commands it reads as only reading run unasked. A repository's `.qwen/settings.json` can add allow rules |
+| Google Antigravity | `agy_acp_server.par`, Google's own ACP server, apart from the `agy` CLI; Althar downloads 1.3.0 from Google at the person's asking, pinned by sha256, as Orca does. No Windows build | A Google account, signed in only inside Althar over ACP's `authenticate`; no status command | Every role runs in `default`, held there, as `auto_edit` and `yolo` approve unasked; no read-only mode, so Althar's rules deny a reader's writes. The model's questions come as permission requests on `interaction_` tool calls and go to the person. Its sign-in is the home's own file, not the keychain. Google's terms may count a sign-in from another app a breach |
 
 What each agent reports was read from the agents themselves on 28 September
 2026, with `scripts/probe.ts` in `@althar/provider-adapters`: claude-agent-acp
@@ -47,6 +55,17 @@ model as session config options and can change both within a session; all
 three can load and resume sessions. Claude Code and Codex also advertise
 steering a turn in progress, as an extension in `_meta`. Probe again after
 upgrading any of them.
+
+The six after them were read on 18 and 19 October 2026 (GitHub Copilot CLI
+1.0.98, Junie 3659.7, Grok Build 1.0.63, Kimi Code 2.2.0, Mistral Vibe 2.26.1,
+Qwen Code 0.25.2): each started over ACP with a home of its own and no
+sign-in, against a stand-in model on the computer where it takes one, so their
+sessions, options and permission requests were seen; and from their own code
+and help. Google Antigravity's server 1.3.0 is as Orca (stablyai/orca) runs
+it, from Orca's code and its recording of a real session; it hasn't run here.
+None has run signed in against its vendor's models yet. Which agents join, and
+why four more wait, is
+[ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md).
 
 Althar checks sign-in with each agent's documented status command, never by
 reading a credential store, and tells the user the agent's own login command
@@ -58,8 +77,20 @@ and the agent's usual folder is the first
 ([ADR-012](../decisions/012-several-accounts-per-agent.md); Several accounts,
 below).
 
-Another ACP agent, such as Gemini CLI, is added by a registry entry and the
-contract suite, not new code.
+Another ACP agent is added by a registry entry and the contract suite, not new
+code, where its entry can say what keeps it asking
+([ADR-050](../decisions/050-an-agent-joins-where-althar-can-hold-it-to-asking.md)).
+Gemini CLI no longer runs on Google's consumer plans (since 18 June 2026), which
+moved to Antigravity.
+
+### Agents not run yet
+
+| Agent | What it waits for |
+|---|---|
+| Cursor | A signed-in probe of its current build: what was read is two months older, and its plan and ask modes are its servers', which may not keep Althar's tools |
+| Devin | A mode that asks before an edit; and the kinds of its permission options, some of which switch the session to bypass |
+| Factory Droid | Its `Script` tool asking in an ACP session |
+| Auggie | Augment's permission to build it in; and a way to make it ask that doesn't name each tool |
 
 ## Adapter contract
 
@@ -246,14 +277,16 @@ Each agent is a registry entry, not a code path:
 
 ```ts
 type AgentDefinition = {
-  id: "claude-code" | "codex" | "opencode"
+  id: "claude-code" | "codex" | "opencode" | "copilot" | "junie" | "grok" | "kimi" | "mistral-vibe" | "qwen-code" | "antigravity"
   source: "bundled" | "user_installed"
   launch: (node: string) => LaunchSpec // command, args, env, which parent variables it inherits
-  modes: { ask: string; readOnly: string }
-  options: { mode: string; model: string; effort?: string; ownEffort?: string } // config option ids, and the level that is a model's own
-  signIn: { status: (node: string) => LaunchSpec; read: (output, exitCode) => boolean | undefined; login: string }
+  modes: { ask: string | null; readOnly: string | null; reader: string | null } // null: no modes, it asks by its `sessionMeta`
+  options: { mode: string; model: string; effort?: string; ownEffort?: string; held?: Record<string, string> } // config option ids, the level that is a model's own, and options held at a value
+  signIn: { status?: (node: string) => LaunchSpec; read: (output, exitCode) => boolean | undefined; login: string }
+  home: { variable: string; usual: (env, homeDir) => string; shared: (names) => string[]; accounts?: 'one' } // ADR-012
   permissions: PermissionMeanings // what its option ids mean
   sessionMeta?: (role?: 'lead' | 'reader') => Record<string, unknown> // `_meta` for session/new: asking, or read-only
+  commands?: 'althar' // the person's `/` messages go as words: one of its commands turns asking off
   knownGaps: string[]
 }
 ```
@@ -298,7 +331,8 @@ A brief contains, as the role needs:
 - the task, its plan, and where the graph stands;
 - the workspace: base, branch, and the diff so far;
 - the conversation record: the user's messages verbatim, earlier agents'
-  turns, decisions, what was tried and failed, and open items;
+  turns, decisions, what was tried and failed (for a command that failed, a
+  bounded excerpt of what it printed), and open items;
 - step results and artifacts the role needs;
 - for a later review round, the earlier rounds' findings and how each was
   settled, with the lead's response and any person's decision
@@ -381,43 +415,82 @@ release (Tier D), and provider-signed reasoning is lost either way.
 A usage limit belongs to an account (`ProviderPrincipal`), so it pauses every
 session on that account at once ([05](05-workflow-engine.md)). The agent's
 other accounts are not out, and moving on tries them first (Several
-accounts, below). ACP does not report limits. Althar detects them in two
-layers:
+accounts, below). ACP does not report plan windows yet. Althar detects limits
+in two layers:
 
 1. **From errors, on every agent.** Each adapter classifies a failed turn as
-   `usage_limit`, with the reset time when the error carries one. Claude's
-   adapter also reports failures in structured form when the client asks (the
-   JetBrains AIR `sessionFailure` extension, in `_meta`): its category and the
-   actions it suggests tell an exhausted quota from a short rate limit and a
-   full context, where the text alone can't. Every failure is one of
-   `usage_limit`, `context_full` (start a new session from a brief),
-   `transient` (a short rate limit or an overloaded service: retry after a
-   pause), `auth_required`, `invalid_request` or `unknown`.
-2. **From account status, where the agent exposes it.** A native side channel
-   reports use per window and reset times before the limit is reached:
-   - Claude Code: the Agent SDK's `rate_limit_event` gives status, use per
-     window (five-hour, seven-day, per model) and reset times.
-     `claude-agent-acp` doesn't forward it, so Althar ships the adapter
-     with a patch that forwards it as an ACP extension notification, and
-     offers the patch upstream.
+   `usage_limit`, with the reset time when the error carries one, from each
+   agent's own words (`failures.ts`): a length ("reset after 19h14m47s"), a
+   time on a clock in a named zone or this computer's ("resets 3pm
+   (Europe/Budapest)", "try again at 3:05 PM"), or a date. Some agents give
+   it as a code (Junie's -32010, Mistral Vibe's -31001) or in the error's
+   data (OpenCode's `provider.quota`), and Copilot says it as a message and
+   ends its turn as if done (the registry's `failsInText`). Claude's and
+   Codex's adapters also report failures in structured form when the client
+   asks (the JetBrains AIR `sessionFailure` extension, in `_meta`): its
+   category and the actions it suggests tell an exhausted quota from a short
+   rate limit and a full context, where the text alone can't. A
+   failure that ends a turn comes on the prompt's response, the turn
+   `end_turn` like any other; a warning while the agent retries by itself
+   comes on a `session_info_update`. Every failure is one of `usage_limit`,
+   `context_full` (start a new session from a brief), `transient` (a lost
+   connection, a short rate limit, an overloaded or failing service: waited
+   out while offline, and retried after a pause, ADR-060), `auth_required`,
+   `invalid_request` or `unknown`.
+2. **From account status, before the limit is reached.** Plan usage is
+   required for every agent and every subscription account
+   ([plan](../plans/plan-usage.md)). An account's windows (five hours, a
+   week, a month, told apart by length) come from the first of these that
+   works for its (agent, provider) pair:
+   1. ACP's quota feature, once an adapter advertises it (an RFD is open:
+      [#2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316);
+      v1's `usage_update` carries context and cost only, and ACP v2, a Draft,
+      leaves it unchanged);
+   2. an extension the adapter ships in ACP;
+   3. the agent's own control channel, started with the account's home;
+   4. the provider's usage endpoint, read with the account's own sign-in:
+      the usage read, rule 3's one exception
+      ([ADR-062](../decisions/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md)).
+
+   Today (`usageSources.ts` declares each pair's sources, or why it has none):
+   - Claude Code: live, `claude-agent-acp` forwards one window per event in
+     `usage_update` `_meta["_claude/rateLimit"]` (the Agent SDK's
+     `rate_limit_event`), and drops it if it arrives before a turn's first
+     usage figure ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
+     so Althar carries a patch for that (`patches/`, on the pinned version).
+     Any account, idle ones too: Anthropic's `/api/oauth/usage`, at most
+     every five minutes, and not while a session has just said.
    - Codex: app-server's `account/rateLimits/read` and
-     `account/rateLimits/updated`, through a small app-server connection used
-     only for this.
-   - OpenCode: the provider's rate-limit errors and retry hints. API keys have
-     no plan windows.
+     `account/rateLimits/updated` (`usage.ts`), started in the account's
+     home; ChatGPT's `wham/usage` where it can't answer.
+   - Kimi Code and Grok Build: their providers' usage URLs.
+   - OpenCode: plan or key is told per provider from its own
+     `opencode auth list --standalone --format json` (2.x; 1.x can't say);
+     its plan sign-ins are kept in its own database, and not read.
+   - Copilot, Junie, Mistral Vibe, Qwen Code and Antigravity give their usage
+     to no other app; each says why, calmly, rather than as a fault.
+
+   Errors (layer 1) stay under all of it: they say a limit was reached, not
+   how much is left.
 
 ```ts
 type AccountStatus = {
   principalId: string
-  state: "ok" | "warning" | "limited"
-  windows: Array<{ kind: string; usedFraction?: number; resetsAt?: string }>
-  source: "error" | "side_channel"
+  state: "ok" | "warning" | "limited" | "fault"
+  windows: Array<{ kind: "five_hour" | "weekly" | "monthly" | "other"; label?: string; usedPercent: number; resetsAt?: string }>
+  source: "acp" | "acp_extension" | "agent" | "endpoint" | "error"
+  fault?: "sign_in_again" | "expired" | "source_changed" | "unreachable" | "no_source" | "no_data_yet" | "cannot_classify"
+  noReading?: string // why the agent's usage can't be read, said calmly
   observedAt: string
 }
 ```
 
-With account status, the scheduler can hold or move work before the limit is
-reached rather than after.
+With the windows, the scheduler moves or holds new work before the limit is
+reached rather than after ([05](05-workflow-engine.md), Usage limits): an
+account's room is its tightest window left, as last read (a window past its
+reset has started again; a model's own window counts for that model; money
+spent past the plan doesn't), and under 5% it is nearly out. Warnings fire at
+50, 25, 10 and 5% remaining (once per account, window and reset).
 
 ## Provider session lifecycle
 
@@ -538,7 +611,10 @@ Rules:
 2. Althar may invoke documented status/login commands or react to a
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
-   synchronizes the CLI's credential cache.
+   synchronizes the CLI's credential cache, but for one exception: the
+   usage read ([ADR-062](../decisions/062-a-usage-read-may-use-an-account-s-own-sign-in-once.md)),
+   an account's access token read into memory for one allowlisted `GET` to
+   its provider's usage URL, and dropped.
 4. It never asks for a provider password or browser session cookie.
 5. Subscription-backed execution runs on the user's device and only where the
    provider's current documentation and terms permit that use.
@@ -789,10 +865,44 @@ So where an agent has a sandbox, it keeps commands inside the worktree:
   also connect to any localhost port, including an unauthenticated local
   service outside the sandbox such as a debugger or proxy, and can listen on
   non-loopback addresses that other machines may reach. We accept that for
-  leads. It adds no hosts to the network allowlist and no writable paths, and
-  readers don't get it.
+  leads. It adds no writable paths, and readers don't get it.
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
+
+**Known commands and hosts, from the start.** Some commands can't work inside
+Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`), and
+some hosts every lead reaches (the code host, the package registry). Each
+used to cost a failed try inside the sandbox, then a retry outside it that
+the rules allowed anyway. A lead's Claude Code session now starts with both
+in its settings (`sandboxReach.ts`, `Permissions.upFront`):
+
+- commands that run outside the sandbox from the start
+  (`sandbox.excludedCommands`). Each still goes through Claude Code's
+  permission flow, so it asks and meets the rules as its second try would
+  have. Claude Code 2.1 runs a line outside only where every command in it
+  is on the list, never one with `cd`, and never one that starts with `bun`
+  (`bunx` it does), so a lead is told to run them on a line of their own,
+  and a Bun script is listed by what it runs (`node scripts/e2e.ts`, not
+  `bun run test:e2e`);
+- hosts its sandboxed commands reach without asking
+  (`sandbox.network.allowedDomains`), only those the rules would let a
+  request for them through without anyone: none while the rest asks the
+  person or the coordinator decides it, none the project never allows. A
+  host is named on its own, never `*.` for every host under one: the rules
+  judge a request by the host it names, and a wildcard would let through
+  hosts under it that they ask about or refuse.
+
+Both are worked out from the project: the tools its packages bring, its
+test and end-to-end scripts, what is kept for how it runs and is set up,
+its repositories' code hosts, its package managers' registries and what
+its packages download, and the trackers Althar is connected to (Linear's
+hosts, for one). The person adds to them and takes from them in the
+project's rules, under Sandbox, and those edits hold over what is worked
+out later. A change applies from a lead's next session. Codex's
+`workspace-write` has no list of commands to run outside it, and its list
+of hosts belongs to its experimental permission profiles, which codex-acp's
+modes don't use, so its leads are given neither; OpenCode has no sandbox.
+Every network request keeps its host on the record.
 
 Installing a worktree's dependencies would have to leave it, and needn't:
 Althar does it before the lead starts ([below](#setting-up-a-worktree)).
@@ -804,7 +914,22 @@ the rules read it as a shell would, into commands and words. They ask about:
   tags, and deleting a branch other than the task's;
 - merges, and deploy and publish commands;
 - git pointed at another repository;
-- a write whose words name a place outside the worktree, following symlinks.
+- a write whose words name a place outside the worktree, following symlinks,
+  installing for the whole computer (`npm i -g`, `brew install`) among them;
+- deleting or forcing a local branch that isn't the task's, clearing the
+  stash, and throwing away what git keeps to recover lost work, since a
+  worktree shares these with the person's checkout;
+- reading a `.env` file outside the worktree.
+
+They refuse, for every role, a request that names where the person keeps
+keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.npmrc` and the like), and Claude
+Code sessions are given those places as denied reads. What could lose work
+(a force push, a push to the default branch, deleting outside the worktree,
+git throwing away work in another checkout or replacing a file there,
+dropping a stash entry, a delete whose target shows only when it runs) asks
+even with everything allowed, and the coordinator never judges it; always
+allowing writes outside the worktree doesn't cover it
+([the safety pass](../plans/safety-pass.md)).
 
 Where they can't tell where a push goes or where an edit writes, they ask.
 
@@ -961,7 +1086,7 @@ The adapter classifies failures without collapsing them:
 |---|---|---|
 | `auth_required` | Logged out or expired grant | Pause and request authentication |
 | `unsupported_version` | CLI schema outside support matrix | Block or degraded mode; never guess |
-| `transient_provider` | Short rate limit or temporary network failure | Bounded retry with jitter and provider hint |
+| `transient` | Lost connection, short rate limit, overloaded or failing service | Never a missing report. Offline, or the service out of reach: the step is held for the connection, and its turn goes again in the same session once the computer is back and the service answers, however long that takes. The service answering with errors: retried after 15 s, 1 min, 4 min, then the step needs the person, with what it said (ADR-060) |
 | `usage_limit` | The account's allowance is used up until a reset | Pause every session on that account; move or hold work under the project rule |
 | `invalid_request` | Unsupported model/tool option | Fail node with actionable detail |
 | `provider_refusal` | Policy refusal | Record terminal provider outcome |

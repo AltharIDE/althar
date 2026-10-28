@@ -103,6 +103,28 @@ describe('the edge', () => {
     expect(within(screen.getByRole('article', { name: 'Run npm publish' })).queryByRole('button', { name: 'Allow once' })).toBeNull()
   })
 
+  it('lists and counts a plain task that finished, and neither one kept for later', async () => {
+    const finished = task({
+      taskId: 't9',
+      threadId: 'th9',
+      title: 'Which partners call v1?',
+      phase: 'ready',
+      kind: 'plain',
+      projectId: 'p2',
+    })
+    const kept = task({ taskId: 't10', threadId: 'th10', title: 'Prototype the tabs', phase: 'kept', kind: 'plain', projectId: 'p2' })
+    const { client } = fakeClient({
+      getHome: vi.fn(async () => home({ tasks: [running, ready, finished, kept], calls: [permission], projects: [project, halyard] })),
+    })
+    withServices(<Edge />, client)
+    await userEvent.click(await screen.findByRole('button', { name: '3 need you' }))
+    expect(screen.getByRole('article', { name: 'Name the limits better' })).toBeTruthy()
+    expect(screen.getByRole('article', { name: 'Which partners call v1?' })).toBeTruthy()
+    expect(screen.queryByText('Prototype the tabs')).toBeNull()
+    // Neither is work in progress.
+    expect(screen.getByText('1 in progress')).toBeTruthy()
+  })
+
   it('says why a stuck task waits and what a change is, and counts the work held and stopped', async () => {
     const host = fakeHost()
     const stuck: HomeCall = {
@@ -125,7 +147,11 @@ describe('the edge', () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks, calls: [stuck], projects: [project, halyard] })) })
     withServices(<Edge shown={{ place: 'menu' }} />, client, host)
     const stalled = await screen.findByRole('article', { name: 'Spike the cache' })
-    expect(within(stalled).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    expect(
+      within(stalled).getByText(
+        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
     expect(within(screen.getByRole('article', { name: 'Name the limits better' })).getByText(/#1191 · .+ · \+212 −41$/)).toBeTruthy()
     await userEvent.click(within(stalled).getByRole('button', { name: 'Open' }))
     expect(host.openInWindow).toHaveBeenCalledWith('th4')
@@ -148,13 +174,81 @@ describe('the edge', () => {
     expect(screen.queryByText('Allowed')).toBeNull()
   })
 
+  it('under the menu bar, opens with focus on the first permission’s Allow once, so Enter answers it', async () => {
+    let visibility: DocumentVisibilityState = 'hidden'
+    const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+    try {
+      const { client } = fakeClient({ getHome: vi.fn(async () => home({ calls: [permission], projects: [project, halyard] })) })
+      withServices(<Edge shown={{ place: 'menu' }} />, client)
+      const allow = within(await screen.findByRole('article', { name: 'Run npm publish' })).getByRole('button', { name: 'Allow once' })
+      // Kept hidden between clicks, it takes nothing.
+      expect(allow).not.toBe(document.activeElement)
+      visibility = 'visible'
+      act(() => void document.dispatchEvent(new Event('visibilitychange')))
+      expect(allow).toBe(document.activeElement)
+      await userEvent.keyboard('{Enter}')
+      expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1', decision: 'allow' }))
+      expect(await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
+    } finally {
+      seen.mockRestore()
+    }
+  })
+
+  it('under the menu bar, never lets two Enters in a row allow a second permission unread', async () => {
+    const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => 'visible')
+    try {
+      const second: HomeCall = { ...permission, id: 'a2', title: 'Run npm test', command: 'npm test' }
+      const { client } = fakeClient({ getHome: vi.fn(async () => home({ calls: [permission, second], projects: [project, halyard] })) })
+      withServices(<Edge shown={{ place: 'menu' }} />, client)
+      const next = within(await screen.findByRole('article', { name: 'Run npm test' })).getByRole('button', { name: 'Allow once' })
+      await waitFor(() => expect(document.activeElement).not.toBe(document.body))
+      await userEvent.keyboard('{Enter}')
+      expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1' }))
+      // Focus is on the answered line, so a screen reader announces it, not on the next Allow once.
+      const answered = await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })
+      await waitFor(() => expect(answered).toBe(document.activeElement))
+      expect(next).not.toBe(document.activeElement)
+      await userEvent.keyboard('{Enter}')
+      await act(async () => {})
+      expect(client.answer).toHaveBeenCalledTimes(1)
+      expect(client.answer).not.toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a2' }))
+    } finally {
+      seen.mockRestore()
+    }
+  })
+
+  it('under the menu bar, takes no focus for an Allow once that comes in while the sheet is open', async () => {
+    let calls: ReadonlyArray<HomeCall> = []
+    const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => 'visible')
+    try {
+      const { client, emit } = fakeClient({
+        getHome: vi.fn(async () => home({ tasks: [running], calls, projects: [project, halyard] })),
+      })
+      withServices(<Edge shown={{ place: 'menu' }} />, client)
+      await act(async () => {})
+      calls = [permission]
+      act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+      const allow = await within(await screen.findByRole('article', { name: 'Run npm publish' })).findByRole('button', {
+        name: 'Allow once',
+      })
+      await act(async () => {})
+      expect(allow).not.toBe(document.activeElement)
+      await userEvent.keyboard('{Enter}')
+      expect(client.answer).not.toHaveBeenCalled()
+    } finally {
+      seen.mockRestore()
+    }
+  })
+
   it('keeps a call answered here as a line, with focus on it, until the island closes', async () => {
     const pointed: Array<(on: boolean) => void> = []
     const host = fakeHost({ onEdgePointed: vi.fn((listener) => (pointed.push(listener), () => {})) })
     const { client } = fakeClient({ getHome: vi.fn(async () => home({ calls: [permission], projects: [project, halyard] })) })
     withServices(<Edge />, client, host)
-    await userEvent.click(await screen.findByRole('button', { name: '1 needs you' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Allow once' }))
+    // Pressed without pointing at it: the island's own hover would open it again, a moment later, after it closed.
+    const user = userEvent.setup({ skipHover: true })
+    await user.click(await screen.findByRole('button', { name: '1 needs you' }))
+    await user.click(screen.getByRole('button', { name: 'Allow once' }))
     const line = await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })
     await waitFor(() => expect(line).toBe(document.activeElement))
     act(() => pointed.forEach((listener) => listener(false)))
@@ -219,7 +313,12 @@ describe('the edge’s reads', () => {
     vi.useFakeTimers()
     try {
       const listeners: Array<(event: WatchEvent) => void> = []
-      const feed: Feed = { listen: (listener) => (listeners.push(listener), () => {}), rewatched: () => () => {}, stop: () => {} }
+      const feed: Feed = {
+        listen: (listener) => (listeners.push(listener), () => {}),
+        rewatched: () => () => {},
+        remembered: () => 0,
+        stop: () => {},
+      }
       const cache = new QueryClient()
       const invalidate = vi.spyOn(cache, 'invalidateQueries')
       followEdge(feed, cache)

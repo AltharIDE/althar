@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Brand } from '../../foundations/brands/brands'
 import { effortFor, MODEL_LIST, RUNTIMES, UNKNOWN_MODEL, useModelPrefs } from '../../fixtures/models'
 import { Button } from '../../primitives/Button/Button'
 import { ModelBrowser } from './ModelBrowser'
@@ -56,6 +57,33 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {
   render: () => <Example onConnect={() => {}} />,
+}
+
+/**
+ * Each model's room after its name: the figure alone, so the name keeps its
+ * room, and until when on hover. Opus counts its own week; models on a key
+ * have nothing to say.
+ */
+export const Room: Story = {
+  args: {
+    room: (m) =>
+      m.id === 'claude-opus-5'
+        ? { left: 19, until: 'Mon 09:00', account: null }
+        : m.runtime === 'claude-code'
+          ? { left: 56, until: '17:00', account: null }
+          : m.runtime === 'codex'
+            ? { left: 3, until: '14:00', account: 'Side' }
+            : undefined,
+  },
+  play: async () => {
+    const page = within(document.body)
+    const row = (id: string) => within(document.querySelector<HTMLElement>(`[data-id="${id}"]`)!)
+    await expect(row('claude-opus-5').getByText('19%')).toHaveAttribute('title', '19% · until Mon 09:00')
+    await expect(row('claude-sonnet-5').getByText('56%')).not.toHaveAttribute('title')
+    await expect(row('gpt-5.2').getByText('Side · 3%')).toHaveAttribute('title', 'Side · 3% · until 14:00')
+    await expect(row('gemini-3-pro').queryByText(/%/)).toBeNull()
+    await expect(page.getAllByText(/%$/).length).toBeGreaterThan(0)
+  },
 }
 
 /** Searching, moving into the list and pinning with a shortcut. */
@@ -153,4 +181,37 @@ export const AllStates: Story = {
     },
   },
   render: () => <Example onConnect={() => {}} />,
+}
+
+const OPENCODE = { id: 'opencode', name: 'OpenCode', how: 'signed in', brand: Brand.OpenCode }
+const LONG_NAMES: typeof MODEL_LIST = [
+  ...MODEL_LIST.slice(0, 3),
+  ...[
+    'Muse Spark 1.3 Contributor · OpenCode Go',
+    'DeepSeek V4.1 Flash Free · OpenCode',
+    'Qwen3 Coder Next 480B A35B Instruct · OpenCode Zen',
+  ].map((name, i) => ({ id: `opencode-${i}`, name, short: name, runtime: 'opencode', context: 256, efforts: ['low', 'high'] })),
+]
+
+function Long({ blocked }: { blocked: readonly string[] }) {
+  return (
+    <ModelBrowser
+      models={LONG_NAMES}
+      runtimes={[...RUNTIMES, OPENCODE]}
+      value="opencode-0"
+      pins={['opencode-2']}
+      defaultEffort={() => 'high'}
+      onTogglePin={fn()}
+      onSetDefaultEffort={fn()}
+      onClose={fn()}
+      onPick={fn()}
+      blocked={blocked}
+      onToggleBlocked={fn()}
+    />
+  )
+}
+
+/** Long names, and models switched off: no text spills into another column, at any width. */
+export const LongNames: Story = {
+  render: () => <Long blocked={['opencode-1', 'opencode-2']} />,
 }

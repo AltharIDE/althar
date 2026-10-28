@@ -8,6 +8,7 @@ import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { Code } from '../../primitives/Code/Code'
 import { Field } from '../../primitives/Field/Field'
+import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { Caret, Disclosure, DisclosureTrigger, Fold, type Disclosable } from '../../primitives/Fold/Fold'
 import { Select } from '../../primitives/Select/Select'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
@@ -61,6 +62,12 @@ export interface PermissionRequest {
   cmd: string
   /** Why it asks, in its own words. */
   why?: string
+  /**
+   * Where the rules keep it for the person whatever else would answer: why no
+   * "always allow" is offered, and a way out, in the consumer's words. Said
+   * under the answers.
+   */
+  held?: ReactNode
   /** The model asking. */
   agent?: ModelInfo
   /** The step it is on. */
@@ -124,6 +131,8 @@ export function offersFor(request: Pick<PermissionRequest, 'offers' | 'prefix' |
 
 export interface PermissionText {
   kicker: string
+  /** The command asked for, as the name of its block, which scrolls where it is long. */
+  command: string
   position: (pos: number, total: number) => string
   legend: string
   /** Each answer, as an option. */
@@ -156,6 +165,7 @@ export interface PermissionText {
 
 export const permissionText: PermissionText = {
   kicker: 'Needs your permission',
+  command: 'The command, in full',
   position: (pos, total) => `${pos} of ${total}`,
   legend: 'Your answer',
   option: {
@@ -211,6 +221,19 @@ export function scopeSaid(scope: PermissionScope, request: Pick<PermissionReques
 
 type Phase = null | 'beat' | 'out' | 'outNo'
 
+/**
+ * Whether a card takes focus as it first shows, on the answer picked, so
+ * Enter gives it at once: always, where the person was brought to it; `idle`
+ * only while focus is nowhere else, so typing in another field never is.
+ */
+export type PermissionFocus = boolean | 'idle'
+
+/** Focus is on the page itself, with no dialog open and no text selected: nothing the person is at that a card would take focus from. */
+const focusIsIdle = () =>
+  (document.activeElement === null || document.activeElement === document.body) &&
+  document.querySelector('dialog[open], [aria-modal="true"]') === null &&
+  (window.getSelection()?.isCollapsed ?? true)
+
 interface CardProps extends PermissionRequest {
   project: string
   defaultDecision?: Decision
@@ -218,6 +241,7 @@ interface CardProps extends PermissionRequest {
   pos?: number
   total?: number
   phase: Phase
+  focusOnMount?: PermissionFocus
   onAnswer: (a: PermissionAnswer) => void
   onAll?: () => void
   t: PermissionText
@@ -227,6 +251,7 @@ function Card({
   what,
   cmd,
   why,
+  held,
   agent,
   step,
   prefix,
@@ -239,6 +264,7 @@ function Card({
   pos = 1,
   total = 1,
   phase,
+  focusOnMount = false,
   onAnswer,
   onAll,
   t,
@@ -252,12 +278,28 @@ function Card({
   const name = useId()
   const title = useId()
   const noteField = useRef<HTMLInputElement>(null)
+  const form = useRef<HTMLFormElement>(null)
   const denying = pick === Decision.Deny
   const no = refuses(pick)
 
   useEffect(() => {
     if (denying) focusQuietly(noteField.current)
   }, [denying])
+
+  // Once, as it first shows: on the answer picked, so Enter gives it. Just after the commit, as AskAnswered focuses.
+  const takes = useRef(focusOnMount)
+  useEffect(() => {
+    const how = takes.current
+    if (!how) return
+    let live = true
+    queueMicrotask(() => {
+      if (!live || (how === 'idle' && !focusIsIdle())) return
+      focusQuietly(form.current?.querySelector<HTMLInputElement>('input[type="radio"]:checked'))
+    })
+    return () => {
+      live = false
+    }
+  }, [])
 
   /* narrowest first: this command, then what the consumer says an always would cover; one that can't be kept by the scope picked keeps its narrowest */
   const choicesOf = (d: AlwaysDecision) =>
@@ -336,10 +378,14 @@ function Card({
         <span className={s.prompt} aria-hidden="true">
           $
         </span>
-        <code>{cmd}</code>
+        <code className={s.cmdText} tabIndex={0} aria-label={t.command}>
+          {cmd}
+        </code>
+        <CopyButton ghost value={cmd} className={s.copy} />
       </div>
       {why && <p className={s.why}>{why}</p>}
       <form
+        ref={form}
         aria-labelledby={title}
         onSubmit={(e) => {
           e.preventDefault()
@@ -347,7 +393,19 @@ function Card({
         }}
         onKeyDown={(e) => {
           const target = e.target
+          // A key held down repeats: once a card is answered the next takes focus, and it must wait for a fresh press.
+          if (e.key === 'Enter' && e.repeat) {
+            e.preventDefault()
+            return
+          }
           if (phase || e.defaultPrevented || (target instanceof HTMLInputElement && target.type === 'text')) return
+          // Enter on a choice gives it, as the button says: not every engine submits a form from a radio. A field and a button do on their own.
+          if (e.key === 'Enter' && target instanceof HTMLInputElement && target.type === 'radio') {
+            if (e.nativeEvent.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+            e.preventDefault()
+            e.currentTarget.requestSubmit()
+            return
+          }
           const d = offers[Number(e.key) - 1]
           if (d) {
             e.preventDefault()
@@ -380,6 +438,7 @@ function Card({
             </div>
           ))}
         </fieldset>
+        {held && <p className={s.why}>{held}</p>}
         <AskFoot>
           <Button type="submit" variant="signal" kbd="↵">
             {no ? t.deny : t.allow}
@@ -484,6 +543,8 @@ export type PermissionProps = PermissionRequest & {
   defaultDecision?: Decision
   /** How far an "always" reaches before you choose. This exact command, unless told. */
   defaultScope?: PermissionScope
+  /** Take focus as it first shows, so Enter answers it: always where the person was brought to it, `idle` only while nothing else has focus. */
+  focusOnMount?: PermissionFocus
   /** You answered. Called at once; the card's motion follows. */
   onAnswer?: (answer: PermissionAnswer) => void
   /** Take the answer back. Without it there is no Undo, as when the agent has already acted on it. */
@@ -499,6 +560,7 @@ export function Permission({
   answeredBy,
   defaultDecision,
   defaultScope,
+  focusOnMount,
   onAnswer,
   onUndo,
   project,
@@ -543,6 +605,7 @@ export function Permission({
         defaultDecision={defaultDecision}
         defaultScope={defaultScope}
         phase={phase}
+        focusOnMount={focusOnMount}
         t={t}
         onAnswer={(a) => {
           onAnswer?.(a)
@@ -565,6 +628,8 @@ export interface PermissionsProps {
   onAnswer?: (request: PermissionRequest, answer: PermissionAnswer) => void
   /** Take every answer in the stack back, one call each. Without it there is no Undo. */
   onUndo?: (request: PermissionRequest, answer: PermissionAnswer) => void
+  /** The first card takes focus as it shows, as a lone card's does; each card after one answered here takes it while nothing else has. */
+  focusOnMount?: PermissionFocus
   className?: string
   text?: Partial<PermissionText>
 }
@@ -578,7 +643,7 @@ export interface PermissionsProps {
  * in front beats once for all of them. A stack of one folds as one card
  * does.
  */
-export function Permissions({ items, project, onAnswer, onUndo, className, text }: PermissionsProps) {
+export function Permissions({ items, project, onAnswer, onUndo, focusOnMount, className, text }: PermissionsProps) {
   const t = { ...permissionText, ...text }
   const [answers, setAnswers] = useState<ReadonlyMap<string, PermissionAnswer>>(new Map())
   const [answeredHere, setAnsweredHere] = useState(false)
@@ -653,6 +718,7 @@ export function Permissions({ items, project, onAnswer, onUndo, className, text 
         pos={pos}
         total={items.length}
         phase={current.id === leavingId ? phase : null}
+        focusOnMount={answeredHere ? 'idle' : focusOnMount}
         t={t}
         onAnswer={(a) => {
           onAnswer?.(current, a)

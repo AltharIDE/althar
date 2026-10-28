@@ -1,26 +1,36 @@
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { CommandEnvelope } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Layer, Option } from 'effect'
+import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
 import { Instance } from '../src/Instance'
+import { Live } from '../src/Live'
 import { Permissions } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { errorClassOf, promptFor, Sessions } from '../src/Sessions'
+import { DICTATED, errorClassOf, promptFor, Sessions } from '../src/Sessions'
 import { items, repository, runtime, task, turns, until } from './support'
 
-const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current') =>
+const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current', dictated = false) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
-    return yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body, disposition })
+    return yield* sessions.send({
+      envelope: yield* Runtime.envelope('thread.send', { threadId, body }),
+      threadId,
+      body,
+      disposition,
+      ...(dictated ? { dictated } : {}),
+    })
   })
 
 /** The thread item of what the person said, and where that input stands. */
@@ -157,6 +167,69 @@ describe('sessions', () => {
         `echo: ${promptFor([{ body: 'use the retry helper', disposition: 'interrupt_and_continue' }], undefined)}`,
       )
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('tells the agent a message was dictated, and only that one, in the prompt and not in the thread', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, 'ask alpha about the retry', 'after_current', true)
+      yield* ended(created.threadId, 1)
+      yield* say(created.threadId, 'ask Althar about the cache')
+      yield* ended(created.threadId, 2)
+      const all = yield* threadItems(created.threadId)
+      const said = all.filter((item) => item.kind === 'user_message').map((item) => item.content.text)
+      const replies = all.filter((item) => item.kind === 'agent_message').map((item) => String(item.content.text))
+      // What the thread shows is what the person said, as it was.
+      assert.deepStrictEqual(said.slice(-2), ['ask alpha about the retry', 'ask Althar about the cache'])
+      assert.strictEqual(replies.at(-2), `echo: ask alpha about the retry\n\n${DICTATED}`)
+      assert.strictEqual(replies.at(-1), 'echo: ask Althar about the cache')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps the mark on a dictated message that waits behind a turn, and says it as the thread shows it', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      yield* say(created.threadId, scenarios.slow)
+      yield* until(threadItems(created.threadId), (rows) => rows.some((item) => item.content.text === 'Starting'))
+      const queued = yield* say(created.threadId, 'then check the alter docs', 'after_current', true)
+      const row = yield* message(queued.inputId)
+      assert.strictEqual(row.state, 'queued')
+      // The thread shows its words as they were said, marker or not.
+      const waiting = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'user_message').at(-1)
+      assert.strictEqual(waiting?.content.text, 'then check the alter docs')
+      yield* sessions.interrupt(created.threadId)
+      yield* ended(created.threadId, 2)
+      const replies = (yield* threadItems(created.threadId))
+        .filter((item) => item.kind === 'agent_message')
+        .map((item) => String(item.content.text))
+      assert.strictEqual(replies.at(-1), `echo: then check the alter docs\n\n${DICTATED}`)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('stops a turn that is stopped as soon as it is said to have started', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const live = yield* Live
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'codex')
+        // Stopped the moment it is said to have started, as a spent budget of turns does: it is said once the agent can be stopped.
+        const events = yield* live.subscribe
+        yield* Effect.forkScoped(
+          Stream.runForEach(events, (event) =>
+            event._tag === 'TurnStarted' && event.threadId === created.threadId
+              ? Effect.asVoid(Effect.forkScoped(Effect.ignore(sessions.interrupt(created.threadId))))
+              : Effect.void,
+          ),
+        )
+        yield* say(created.threadId, scenarios.slow)
+        const [turn] = yield* ended(created.threadId, 1)
+        assert.deepStrictEqual([turn?.state, turn?.stopReason], ['interrupted', 'cancelled'])
+      }),
+    ).pipe(Effect.provide(runtime())),
   )
 
   it.live('takes back a message waiting its turn, so the agent never reads it, and keeps one the agent has', () =>
@@ -352,6 +425,68 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('describes the session the runtime holds while a handover starts', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      const first = yield* sessions.start({ threadId: created.threadId, agentId: 'codex', model: 'large', effort: 'high' })
+      yield* settled(created.threadId, 1)
+
+      // The new row exists, but its slow connection has not replaced the session the runtime still holds.
+      const switching = yield* Effect.forkChild(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode', model: 'small' }))
+      yield* until(sql<{ state: string }>`SELECT state FROM provider_sessions WHERE thread_id = ${created.threadId}`, (rows) =>
+        rows.some((row) => row.state === 'starting'),
+      )
+      const during = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual(
+        [during.session?.id, during.session?.agentId, during.session?.model, during.session?.effort, during.session?.held],
+        [first, 'codex', 'large', 'high', true],
+      )
+
+      yield* Fiber.join(switching)
+      const after = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual([after.session?.agentId, after.session?.model, after.session?.held], ['opencode', 'small', true])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each: { opencode: { slowStart: 500 } } }))))),
+  )
+
+  it.live('describes a recorded session the runtime no longer holds as not held', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      const sessionId = yield* begin(created.threadId, 'codex', 'large')
+      yield* sessions.stop(created.threadId)
+      // The row a crash leaves: still live, while the runtime holds nothing on the thread.
+      yield* sql`UPDATE provider_sessions SET state = 'active' WHERE id = ${sessionId}`
+
+      const { session } = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual(
+        [session?.id, session?.model, session?.held, session?.turnRunning, session?.turnStartedAt, session?.context, session?.background],
+        [sessionId, 'large', false, false, null, null, []],
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
+  it.live('briefs the agent that takes over with what a failed command printed, not only that it failed', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task('Fix the lint')
+      yield* begin(created.threadId, 'claude-code')
+      yield* say(created.threadId, scenarios.handsBack)
+      yield* ended(created.threadId, 1)
+      yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })
+      yield* settled(created.threadId, 3)
+      const reply = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'agent_message').at(-1)?.content.text as string
+      assert.include(reply, 'You are taking over a task from Fake claude-code')
+      assert.include(reply, '[tool] npm run lint (failed)\n[it printed] src/a.ts\n  3:1  error  Unexpected any\n✗ 1 problem\nexit code: 1')
+      // A command that succeeded is said as before, without what it printed.
+      assert.include(reply, '[tool] git status --short (completed)\n')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('hands the thread over with what the person said: the new lead takes it first, after its brief, and the old one never does', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -387,6 +522,45 @@ describe('sessions', () => {
       assert.notStrictEqual(first, second)
       // It is on the model asked for from the moment it starts.
       assert.strictEqual((yield* session(second))?.model, 'large')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('lets go of a session that started but could not take over its thread', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { task: created } = yield* task('Add the retry helper')
+      yield* begin(created.threadId, 'claude-code')
+      // What the person said comes again under a command id already used for something else: the switch fails once the new
+      // agent has started, before it takes over.
+      const envelope = yield* Runtime.envelope('thread.send', { threadId: created.threadId, body: 'first' })
+      yield* sessions.send({ envelope, threadId: created.threadId, body: 'first', disposition: 'after_current' })
+      yield* ended(created.threadId, 1)
+      const { commandType, schemaVersion, actorId, deviceId, issuedAt, payload } = yield* Runtime.envelope('thread.send', {
+        threadId: created.threadId,
+        body: 'second',
+      })
+      const reused = new CommandEnvelope({
+        commandId: envelope.commandId,
+        commandType,
+        schemaVersion,
+        actorId,
+        deviceId,
+        issuedAt,
+        payload,
+      })
+      const exit = yield* Effect.exit(
+        sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode', message: { envelope: reused, body: 'second' } }),
+      )
+      assert.isTrue(Exit.isFailure(exit))
+      const [started] = yield* sql<{ id: string; state: string }>`
+        SELECT id, state FROM provider_sessions WHERE thread_id = ${created.threadId} AND agent_id = 'opencode'`
+      // It is recorded as failed, not left starting, and its process as ended: nothing of it holds a place.
+      assert.strictEqual(started?.state, 'failed')
+      const processes = yield* sql<{ state: string; endedAt: string | null }>`
+        SELECT state, ended_at FROM processes WHERE provider_session_id = ${started?.id}`
+      assert.isTrue(processes.every((process) => process.state !== 'running' && process.endedAt !== null))
+      assert.isTrue(Option.isNone(yield* sessions.running(created.threadId)))
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -494,7 +668,7 @@ describe('sessions', () => {
           yield* ended(created.threadId, 1)
           // By its tool call's command, not by what the call says it does; where it answers, from what it printed, colours and all.
           const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
-          assert.deepInclude(serving, { command: 'bun dev', url: 'http://localhost:5173/', ended: null })
+          assert.deepInclude(serving, { command: 'bun dev', name: 'Start the dev server', url: 'http://localhost:5173/', ended: null })
           // Background work that isn't a command isn't kept.
           assert.lengthOf(yield* shown(created.threadId), 1)
           yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
@@ -509,6 +683,65 @@ describe('sessions', () => {
           assert.strictEqual(exited?.ended?.code, 1)
           yield* sessions.clearBackground(created.threadId, exited?.id ?? '')
           assert.lengthOf(yield* shown(created.threadId), 0)
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('finds where one answers from its port when its output never says, and it keeps its name', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'claude-code')
+        yield* say(created.threadId, scenarios.backgroundQuiet)
+        yield* ended(created.threadId, 1)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+        assert.strictEqual(serving?.name, 'Start the dev server')
+        yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('finds a silent server in the agent’s tree that was already listening when the agent reported it', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        // A process, so its tree is known; no file its output goes to, so that is all there is to tell it by.
+        yield* begin(created.threadId, 'process')
+        yield* say(created.threadId, scenarios.backgroundCodexQuiet)
+        yield* ended(created.threadId, 1)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+        yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live.skipIf(process.platform === 'win32')(
+      'finds a silent server started while the lookup of what listened before is still slow',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          // `lsof` answers late, from the machine as it is then: the server the agent starts as its turn begins is listening by
+          // then, and is in what listened before unless the turn waited for that to be read before the agent was told.
+          const real = execFileSync('which', ['lsof'], { encoding: 'utf8' }).trim()
+          const dir = mkdtempSync(join(tmpdir(), 'slow-lsof-'))
+          writeFileSync(join(dir, 'lsof'), `#!/bin/sh\nsleep 1\nexec ${real} "$@"\n`, { mode: 0o755 })
+          const path = process.env.PATH
+          process.env.PATH = `${dir}:${path ?? ''}`
+          yield* Effect.gen(function* () {
+            yield* begin(created.threadId, 'process')
+            yield* say(created.threadId, scenarios.backgroundCodexQuiet)
+            yield* ended(created.threadId, 1)
+            const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+            assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+            yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                process.env.PATH = path
+                rmSync(dir, { recursive: true, force: true })
+              }),
+            ),
+          )
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     )
 
@@ -637,7 +870,9 @@ describe('sessions', () => {
         yield* say(created.threadId, scenarios.commandChoices)
         yield* until(sql<{ id: string }>`SELECT id FROM attention_requests WHERE state = 'open'`, (rows) => rows.length === 1)
         const [process] = yield* sql<{ pid: number }>`SELECT pid FROM processes WHERE provider_session_id = ${sessionId}`
-        globalThis.process.kill(-(process?.pid ?? 0), 'SIGKILL')
+        // Its whole tree: its process group, or on Windows its keeper, whose job ends with it.
+        const pid = process?.pid ?? 0
+        globalThis.process.kill(globalThis.process.platform === 'win32' ? pid : -pid, 'SIGKILL')
         yield* until(
           Effect.map(session(sessionId), (row) => [row]),
           ([row]) => row?.state === 'lost',
@@ -684,6 +919,98 @@ describe('sessions', () => {
         assert.strictEqual((yield* ended(created.threadId, 1))[0]?.state, 'completed')
       }).pipe(Effect.provide(runtime())),
     )
+
+    // The agent's startup stops answering at `hangsIn`; the timeout then cuts it off and the current lead carries on.
+    const timesOutStartup = (hangsIn: 'beforeInitialize' | 'beforeNewSession') => {
+      let entered!: () => void
+      const waitingForStartup = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      let releaseStartup!: () => void
+      const startupResponse = new Promise<void>((resolve) => {
+        releaseStartup = resolve
+      })
+      const startupTimeoutScheduled = Deferred.makeUnsafe<void>()
+      const testGuardScheduled = Deferred.makeUnsafe<void>()
+      // The test clock stands in for time, and the timeout isn't reachable from here, so the clock is watched instead: the
+      // timeout is found as the one 2-minute `Clock.sleep` (SESSION_START_TIMEOUT, which relies on `Effect.timeoutOption`
+      // sleeping on the Clock service) and the test's own 3-minute guard as the 3-minute one. Change either duration, or
+      // how the timeout waits, and this stops finding it and the test hangs rather than fails.
+      const observedClock = Layer.effect(
+        Clock.Clock,
+        Effect.gen(function* () {
+          const baseClock = yield* Clock.Clock
+          const clock = Object.create(baseClock) as Clock.Clock
+          Object.defineProperty(clock, 'sleep', {
+            value: (duration: Duration.Duration) =>
+              Effect.gen(function* () {
+                const millis = Duration.toMillis(duration)
+                if (millis === Duration.toMillis(Duration.minutes(2))) {
+                  yield* Deferred.succeed(startupTimeoutScheduled, undefined)
+                } else if (millis === Duration.toMillis(Duration.minutes(3))) {
+                  yield* Deferred.succeed(testGuardScheduled, undefined)
+                }
+                yield* baseClock.sleep(duration)
+              }),
+          })
+          return clock
+        }),
+      ).pipe(Layer.provideMerge(TestClock.layer()))
+      const app = runtime(
+        ':memory:',
+        {},
+        {
+          each: {
+            opencode: {
+              [hangsIn]: () => {
+                entered()
+                return startupResponse
+              },
+            },
+          },
+        },
+      ).pipe(Layer.provideMerge(observedClock))
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const { task: created } = yield* task()
+        const first = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+        const attempt = yield* Effect.forkChild(Effect.exit(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })))
+        yield* Effect.promise(() => waitingForStartup)
+        yield* Deferred.await(startupTimeoutScheduled)
+        const timeout = yield* Effect.forkChild(Effect.timeoutOption(Fiber.join(attempt), Duration.minutes(3)))
+        yield* Deferred.await(testGuardScheduled)
+        yield* TestClock.adjust(Duration.minutes(3))
+        const finished = yield* Fiber.join(timeout)
+        releaseStartup()
+        if (Option.isNone(finished)) throw new Error('The startup attempt should finish before the test guard.')
+        if (Exit.isSuccess(finished.value)) throw new Error('The startup attempt should fail after its timeout.')
+        const failure = finished.value.cause.reasons.find(Cause.isFailReason)
+        if (failure === undefined) throw new Error('The startup attempt should fail with a typed error.')
+        assert.instanceOf(failure.error, SessionFailed)
+        assert.include(failure.error.summary, 'Timed out after 2m waiting for Fake opencode to set up a session.')
+        // The tag is what tells a hang from a failure, in the log and for telemetry.
+        assert.include(failure.error.reason, 'StartTimedOut')
+
+        assert.strictEqual((yield* session(first))?.state, 'active')
+        assert.strictEqual(Option.getOrUndefined(yield* sessions.running(created.threadId))?.sessionId, first)
+        const states = yield* sql<{ agentId: string; state: string }>`
+          SELECT agent_id, state FROM provider_sessions ORDER BY agent_id`
+        assert.deepStrictEqual(states, [
+          { agentId: 'codex', state: 'active' },
+          { agentId: 'opencode', state: 'failed' },
+        ])
+        const notices = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'notice')
+        assert.strictEqual(notices.at(-1)?.content.title, "Fake opencode couldn't start.")
+        assert.include(String(notices.at(-1)?.content.description), 'Timed out after 2m waiting for Fake opencode to set up a session')
+      }).pipe(Effect.ensuring(Effect.sync(releaseStartup)), Effect.provide(app))
+    }
+
+    it.effect('times out an ACP startup that hangs in session/new, records the failure and leaves the current lead running', () =>
+      timesOutStartup('beforeNewSession'),
+    )
+
+    it.effect('times out an ACP startup that hangs in initialize', () => timesOutStartup('beforeInitialize'))
 
     it.live('starts one session when two starts race', () =>
       Effect.gen(function* () {

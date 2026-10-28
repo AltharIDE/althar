@@ -214,14 +214,25 @@ describe('what screens read from git', () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const queries = yield* Queries
-      const { taskId, threadId, worktree } = yield* ready
+      const instance = yield* Instance
+      const { projectId, taskId, threadId, worktree } = yield* ready
       quiet(worktree)
       assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
       writeFileSync(join(worktree, 'notes.md'), 'notes\n')
       assert.isTrue((yield* queries.home()).tasks.some((task) => task.taskId === taskId))
       assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
 
-      yield* sql`UPDATE tasks SET state = 'done', settled_at = ${new Date().toISOString()} WHERE id = ${taskId}`
+      // Settled, it is no longer the home's to list, but the board still shows it (it may be ready again with commits after a merge), so what was read is kept.
+      yield* sql`UPDATE tasks SET state = 'done', settled_at = ${new Date(Date.now() - 60_000).toISOString()} WHERE id = ${taskId}`
+      assert.isFalse((yield* queries.home()).tasks.some((task) => task.taskId === taskId))
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+
+      // Thirty tasks settled since push it off the board: the home lets go of what was kept, and git is read afresh.
+      const now = new Date().toISOString()
+      for (let n = 0; n < 30; n += 1)
+        yield* sql`
+          INSERT INTO tasks (id, project_id, title, slug, state, created_by_actor_id, created_at, settled_at)
+          VALUES (${yield* newId(Ids.task)}, ${projectId}, 'Done since', ${`done-since-${n}`}, 'done', ${instance.personId}, ${now}, ${now})`
       assert.isFalse((yield* queries.home()).tasks.some((task) => task.taskId === taskId))
       assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'notes.md'])
     }).pipe(Effect.provide(withQueries())),
@@ -240,6 +251,56 @@ describe('the git screens read with', () => {
       assert.deepStrictEqual(yield* commitsOf(root, []), [])
       assert.deepStrictEqual(yield* commitsOf(join(root, 'missing'), ['HEAD']), [null])
     }),
+  )
+
+  it.live('loads the 30 most recently settled tasks, counts all 35, and pages back to the rest', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const ids = yield* Effect.forEach(
+        Array.from({ length: 35 }, (_, n) => n),
+        (n) =>
+          Effect.gen(function* () {
+            const task = yield* projects.createTask({
+              envelope: yield* Runtime.envelope('task.create', {}),
+              projectId: project.projectId,
+              title: `Task ${n}`,
+              description: '',
+              draft: true,
+            })
+            // Task 0 settled first, task 34 last; every fifth was abandoned.
+            const at = new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString()
+            yield* sql`UPDATE tasks SET state = ${n % 5 === 0 ? 'abandoned' : 'done'}, settled_at = ${at} WHERE id = ${task.taskId}`
+            return { taskId: task.taskId as string, at }
+          }),
+      )
+      const board = yield* queries.board(project.projectId)
+      assert.strictEqual(board.settledTotal, 35)
+      assert.deepStrictEqual(
+        board.tasks.map((task) => task.taskId).toSorted(),
+        ids
+          .slice(5)
+          .map((one) => one.taskId)
+          .toSorted(),
+      )
+
+      const oldest = board.tasks.map((task) => task.settledAt ?? '').toSorted()[0] ?? ''
+      const older = yield* queries.olderSettled(
+        project.projectId,
+        oldest,
+        board.tasks.find((task) => task.settledAt === oldest)?.taskId ?? '',
+      )
+      assert.deepStrictEqual(
+        older.map((task) => task.taskId),
+        ids
+          .slice(0, 5)
+          .map((one) => one.taskId)
+          .toReversed(),
+      )
+      assert.strictEqual((yield* queries.olderSettled(project.projectId, ids[0]?.at ?? '', ids[0]?.taskId ?? '')).length, 0)
+    }).pipe(Effect.provide(withQueries())),
   )
 
   it.effect("stamps a worktree's index, linked or not, anew whenever git writes it", () =>

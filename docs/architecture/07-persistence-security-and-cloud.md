@@ -185,6 +185,20 @@ refcount alone is too fragile after crashes, restore, or partial migration.
 Provider transcripts, tool output, patches, screenshots, logs, and generated
 files may contain secrets. Default retention must differ by artifact class.
 
+A command that fails keeps a bounded excerpt of what it printed on its thread
+item, written as it ends failed and before anything the agent says next, so a
+process that exits before the agent explains the failure doesn't take the
+evidence with it, and the agent that takes over reads it in its brief. Only
+what the command printed, the output fields of what came back, the tool's
+error and the exit code are eligible: never a whole object, a read or edit
+tool's result, or a command that reads files or the environment. What looks
+like a credential (keys, tokens, bearer and basic credentials, private keys,
+passwords in URLs) is taken out before the excerpt is cut to its first and
+last few thousand characters. This is best-effort filtering, not a guarantee
+that no secret remains, and the excerpt is what the tool reported, not why it
+failed. The whole output stays in the artifact store, marked as possibly
+holding secrets.
+
 ## Backup, export, and restore
 
 A backup is not successful until restoration is tested.
@@ -383,6 +397,13 @@ Do not market file synchronization of SQLite/artifacts as collaboration.
 The cloud is introduced when sharing or cross-device continuity is actually
 valuable.
 
+It comes first as a relay, not an authority
+([ADR-048](../decisions/048-where-the-runtime-runs-and-who-may-reach-it.md)):
+the laptop's runtime dials out to it, a paired phone talks to the runtime
+through it, encrypted end to end, and it keeps no project state. The laptop
+stays canonical. Cloud authority, as below, comes when a project is shared by
+several people or work must go on with the laptop shut.
+
 ### Shape
 
 Start as a private modular monolith:
@@ -414,6 +435,17 @@ The client resolves the authoritative endpoint behind one typed control-plane
 API.
 
 ### Local runner leases
+
+A lease is held where the attempt is canonical. While the laptop is (the
+relay above), it is the laptop that leases an attempt to a runner in the cloud,
+a headless host (ADR-048), and what follows applies with the roles turned
+round; how a runner claims work is DEV-130's ADR. Once the cloud is the
+authority, it leases to the person's device as written here.
+
+A runner in the cloud takes only credentials that may be used remotely: API
+keys from storage on the cloud side, never a subscription's sign-in or one of
+the laptop's (doc 03, rules 5–8). Work on a subscription stays on the person's
+device, which is the local runner below.
 
 A cloud-authoritative run delegated locally requires:
 

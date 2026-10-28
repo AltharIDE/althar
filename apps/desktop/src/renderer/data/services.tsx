@@ -4,8 +4,10 @@ import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } 
 import type { WatchEvent } from '@althar/contracts'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
+import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
 import type { UpdateGlance } from '../../main/updates'
 
+import type { Attached } from '../shared/files'
 import type { Client } from './client'
 import type { Feed } from './feed'
 
@@ -94,20 +96,63 @@ export interface FoundRepositories {
   }>
 }
 
-/** An update that couldn't move the store, as main says: what stopped, the copy from before it where the person knows the place, and what was said. */
-export interface StoreFailure {
-  readonly stopped: 'moving' | 'copying'
-  /** `~/Library/Application Support/Althar/backups/…`; null where no copy was made. */
-  readonly backup: string | null
-  readonly reason: string
+/**
+ * A store the runtime can't serve, as main says: an update that couldn't move it (what stopped, and the copy from before it where the
+ * person knows the place), or a profile another Althar or the command line has open (`held`); and what was said.
+ */
+export type StoreFailure =
+  | {
+      readonly stopped: 'moving' | 'copying'
+      /** `~/Library/Application Support/Althar/backups/…`; null where no copy was made. */
+      readonly backup: string | null
+      readonly reason: string
+    }
+  | { readonly stopped: 'held'; readonly backup: null; readonly reason: string }
+
+/**
+ * What a problem the person reports is about, so the report carries it: an
+ * update that couldn't move the store, with what stopped it; asked for from
+ * the menu or Settings, about wherever they are; or a step or task that
+ * couldn't go on, by its ids and in a few words.
+ */
+export type ProblemAbout =
+  | { readonly kind: 'update'; readonly reason: string }
+  | { readonly kind: 'asked'; readonly from: 'menu' | 'settings' }
+  | {
+      readonly kind: 'failed'
+      readonly taskId: string
+      readonly projectId: string | null
+      readonly threadId: string | null
+      /** In a few words: "Stuck: Implement". */
+      readonly what: string
+    }
+
+/** Report a problem, through the main process (DEV-61): it takes the screenshot, gathers what goes, and sends or saves it. */
+export interface ReportHost {
+  /** Opens a report from where the person is, taking the window's picture before the dialog draws over it. */
+  readonly open: (context: ReportContext) => Promise<Opened>
+  /** What goes with it, once gathered, for See what's sent. */
+  readonly preview: (reportId: string) => Promise<ReportPreview>
+  readonly send: (reportId: string, choices: ReportChoices) => Promise<Sent>
+  /** The report is done with: what was gathered for it goes. */
+  readonly close: (reportId: string) => void
+  /** Calls `listener` with what each report asked for is about, from `reportProblem` or the menu, until the returned function is called. */
+  readonly onAsked: (listener: (about: ProblemAbout) => void) => () => void
 }
 
-/** What a problem the person reports is about, so the report carries it. */
-export type ProblemAbout = { readonly kind: 'update'; readonly reason: string }
+/** An error the page didn't handle, for main's log. */
+export interface WindowError {
+  readonly kind: 'error' | 'rejection'
+  readonly message: string
+  readonly stack: string
+  readonly source?: string
+}
 
 export interface Host {
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
   readonly platform: string
+  /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
+  readonly doNotTrack?: boolean
   /** Closes, minimizes, or maximizes and restores the window itself. */
   readonly window: (action: WindowAction) => void
   /** Whether the window is maximized now, for the buttons' maximize or restore. */
@@ -120,6 +165,10 @@ export interface Host {
   readonly pickFolders: () => Promise<ReadonlyArray<string>>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
+  /** A file or folder added to a message, measured and granted: its grant, name and size, or why it can't go; null for one with no file behind it, as a pasted picture. */
+  readonly attach: (file: File) => Promise<Attached | null>
+  /** The files copied in the file manager, as the clipboard names them, each as `attach` says it; none where what was copied isn't files. */
+  readonly attachPasted: () => Promise<ReadonlyArray<Attached>>
   /** The git repositories where people usually keep code on this computer, newest work first, and where it looked; a new project offers them too. */
   readonly findRepositories: () => Promise<FoundRepositories>
   /** A grant for a repository it found, by its id; null for one it didn't. */
@@ -138,12 +187,12 @@ export interface Host {
   readonly sounds: () => Promise<ReadonlyArray<string>>
   /** Plays one of them once, so the person hears it. */
   readonly playSound: (name: string) => Promise<void>
-  /** Calls `listener` if an update couldn't move the store, once main knows, even if it knew before the page listened, until the returned function is called. */
+  /** Calls `listener` if the store can't be served (an update couldn't move it, or the profile is open elsewhere), once main knows, even if it knew before the page listened, until the returned function is called. */
   readonly onStoreFailed: (listener: (failure: StoreFailure) => void) => () => void
   /** Shows the copy from before that update in the system's file manager. */
   readonly showBackup: () => Promise<void>
-  /** Reports a problem, with what it is about (DEV-61). Absent until the app can send one: nothing offers to then. */
-  readonly reportProblem?: (about: ProblemAbout) => void
+  /** Starts the runtime again on a profile that was open elsewhere, once the person has closed that; the window reloads. */
+  readonly tryAgain: () => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
   /**
@@ -176,6 +225,12 @@ export interface Host {
   readonly clipboardToken: () => Promise<string | null>
   /** Updates; absent where the page has no way to them, as the edge's. */
   readonly update?: UpdateHost
+  /** Reports a problem, with what it is about (DEV-61): the window's Report a problem dialog opens. Absent where it can't: nothing offers to then. */
+  readonly reportProblem?: (about: ProblemAbout) => void
+  /** How the dialog reaches the main process; absent with `reportProblem`. */
+  readonly report?: ReportHost
+  /** Keeps an error the page didn't handle in main's log. */
+  readonly logError?: (error: WindowError) => void
 }
 
 export interface Services {

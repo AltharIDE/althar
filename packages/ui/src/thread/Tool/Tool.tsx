@@ -93,6 +93,8 @@ export interface ToolProps extends Disclosable {
   /** For a failed call: the exit code, shown in red. */
   exit?: number
   state?: ToolState
+  /** For a declined call: who refused it and why, in a few words, after "Denied". Absent where the person refused it. */
+  why?: string
   took?: string
   /** For a command: what Copy puts on the clipboard. */
   copy?: string
@@ -118,6 +120,7 @@ export function Tool({
   meta,
   exit,
   state = ToolState.Done,
+  why,
   took,
   copy,
   sheet,
@@ -146,6 +149,11 @@ export function Tool({
     <span className={s.meta}>
       {state === ToolState.Failed && exit !== undefined && <span className={s.exit}>{t.exit(exit)}</span>}
       {state === ToolState.Declined && <span className={s.said}>{t.declined}</span>}
+      {state === ToolState.Declined && why && (
+        <span className={s.why} title={why}>
+          {why}
+        </span>
+      )}
       {state === ToolState.Cancelled && <span className={s.said}>{t.cancelled}</span>}
       {meta}
       {took && <span className={s.took}>{took}</span>}

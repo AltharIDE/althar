@@ -9,6 +9,127 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Automations, 19 October
+
+Decided with the person on 21 October: five calls were theirs, the rest
+taken where Claude Code, Codex, Cursor, Orca and Superset agree. The build
+plan is [plans/automations.md](plans/automations.md), What was decided. The
+prototype picked the Automations tab, as cards, each automation on its own
+page.
+
+- [x] **While Althar is closed.** While Althar runs, windows or not, with an
+  opt-in "Open Althar at login, in the background"; no daemon.
+- [x] **A run the computer slept through.** Once on waking, within its window.
+- [x] **What a fire does.** Althar starts the kept plan; the coordinator
+  isn't asked.
+- [x] **Each run: a new task, or the open one carried on.** A choice on the
+  automation, a new task each time by default; carrying on a change's open
+  pull request comes later. A review automation makes one review a pull
+  request.
+- [x] **What it may do with nobody there.** Mostly anything, signed with the
+  automation's name, never a merge. Its first review waits; the person can
+  let the next ones post by themselves.
+- [x] **Permission asks at night.** They don't stop a run: its task allows
+  everything, by default, and pushing to the default branch is never
+  allowed.
+- [x] **Events from outside the team.** They fire nothing, unless allowed,
+  and then the run only reads.
+- [x] **The limits by default.** One place; an hour apart at least; 45
+  minutes of work a run, over all its steps; runs a day capped for all
+  automations together; stop on a usage limit; plan accounts only at
+  first, which leaves OpenCode out; at most five pull requests open.
+- [x] **The coordinator's reach.** Pause in words; resume and Run now on a
+  small card; any other change on a card.
+- [x] **Where they live.** In Althar, the person's own, on the computer they were
+  made on; no files in the repository.
+- [x] **Rules or automations** for what needs no agent, such as closing an
+  issue when its pull request merges. Rules.
+- [x] **The cloud.** This computer only now; a webhook relay later; then runs in
+  the cloud, a product of their own, paid per use.
+- [x] **A run's worktree.** Its task's own, as any task's; the clean-up of
+  finished task folders (DEV-143) removes them.
+- [x] **9:00 where the person is, or where it was made.** Where the person
+  is.
+- [x] **What Pause all stops.** Only what would start.
+- [x] **"Run" on screen.** It joins the glossary for automations when the
+  tab ships.
+
+## Failures kept where they belong, 18 October
+
+- [x] **What one failure may take down.** Only what it belongs to; one item
+  of many says so on its own, and a loop goes on (ARCHITECTURE.md;
+  [ADR-047](decisions/047-failures-kept-where-they-belong-and-reported-at-the-edge.md)).
+- [x] **Whether a failure the runtime catches is reported.** Yes, where it
+  is kept, unless the person caused it or can put it right: as a handled
+  crash report, ten a launch (ADR-047).
+- [x] **The all-or-nothing places left.** A sweep on 18 October found four;
+  each item is now its own. Conflict rounds still `resolving` at launch are
+  settled one by one, and a repository whose worktree is gone or whose git
+  fails is that round's reason, not a stop for the rest. The lead's read of
+  a task's pull requests says of one it can't read why ("web#3: Althar
+  couldn't read it (…)") and reads the others. The plans' countdown and the
+  usage-limit holds read each row on its own, give an item that fails a
+  backoff (`backoff` in `Failures.ts`: 10 seconds, doubling, at most 10
+  minutes), and start again after a round that fails whole (`keptGoing`).
+  One waiting conflict round that can't be read is left out, and the rest
+  still wait (ADR-047).
+
+## Crash reports, 17 October
+
+- [x] **Where errors and crashes go.** PostHog's error tracking, from the
+  main process, masked, behind a switch of their own; no Sentry for now, and
+  native minidumps stay on the computer, only their occurrence sent
+  ([ADR-046](decisions/046-crash-reports-to-posthog-from-main.md)).
+- [x] **On or off at first, and where it is asked.** On, asked once as a
+  quiet line with its switch on the first screen, and in Settings beside
+  Usage data (DEV-66; ADR-046).
+- [ ] **Source maps.** Uploading the window's maps to PostHog in the release
+  workflow, with posthog-cli and a key that can write them (DEV-62).
+- [x] **An agent's adapter that dies.** Reported from the runtime as a
+  handled failure when its session is lost: its id and how its process
+  ended, never what it wrote (ADR-047).
+
+## The Flatpak's sign-in key, 15 October
+
+- [x] **A sign-in whose key is lost asks to be made again.** When
+  `safeStorage.decryptString` throws, main marks the answer `unreadable`
+  (`sealFailure`), and the runtime puts the connection in `reauth_required`
+  ("sign in again") rather than reporting the keychain away.
+- [x] **Keep a sign-in key across restarts on GNOME and KDE.** Every Linux
+  Flatpak prefers Chromium's app-specific Secret portal seal (`v12`), KDE
+  included; direct KWallet access is removed from this branch so browser apps
+  do not share the normal key. If the portal is missing, Althar keeps the
+  former synchronous safeStorage behavior only when the selected backend passes
+  `keyringIsSafe`, encryption is available, and the backend is the private
+  sandbox-local `gnome_libsecret` file. This fallback can be session only and
+  may prompt again after restart. The runtime still carries opaque
+  sealed values and never receives the key. See
+  [ADR-028](decisions/028-linux-windows-packages-and-the-keyring.md).
+- [ ] **Run the real GNOME restart test.** It has not been run in this task's
+  KDE-only sandbox. Follow the exact GNOME session or VM steps in ADR-028;
+  verify GitHub stays connected after `flatpak kill dev.althar.app` and the
+  second launch has no `OSCrypt generated a new password` message. #207
+  replaces the closed #201's KDE-specific path with the app-specific portal
+  path on both desktops.
+
+## Usage data, 12 October
+
+- [x] **Where usage data goes from, and what can.** The main process, with
+  posthog-node: named events and properties only, never a name, a path or
+  anything written; the window has no SDK
+  ([ADR-036](decisions/036-usage-data-from-the-main-process.md)).
+- [x] **On or off at first.** On, with the switch in Settings only, not on
+  the first screen; `DO_NOT_TRACK` keeps it off (settled with the person,
+  15 October; ADR-036).
+- [x] **US or EU.** US (`us.i.posthog.com`), where the project already is;
+  the ticket had leaned to the EU cloud (settled with the person, 12
+  October; ADR-036).
+- [ ] **Consent in the EU.** A random install id kept on the device may
+  need an explicit yes under ePrivacy; look again before the public launch.
+- [ ] **The dashboard.** The funnel from Althar opened to a task settled, and
+  day-1 and day-7 retention, are made in PostHog, with discarding client IP
+  addresses turned on in the project's settings.
+
 ## Questions agents ask, 10 October
 
 - [x] **What a question waits on.** The thread, not the session: it outlives
@@ -243,7 +364,8 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   fight. A product question to try out before deciding. Althar puts the key
   in the branch and the pull request's title. Since 12 October it moves the
   issue to In Progress as its task's first step starts, once, on Linear and
-  Jira, unless the project's rules turn it off; it never moves one back from
+  Jira, and since 18 October on Trello, unless the project's rules turn it
+  off; it never moves one back from
   further along. In review and done are still open.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own
@@ -274,9 +396,13 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   Until then such a project's setup command runs outside the agent.
 - [ ] **A sandbox for agents' shells.** The environment keeps the person's
   ambient sign-ins from agents, and the rules refuse the keychain and git's
-  helpers, but a shell can still read what the person keeps in plain files
-  under their home folder (`~/.git-credentials`, an unencrypted SSH key, a
-  cloud CLI's config). Only running agents in a sandbox closes that:
+  helpers, and since DEV-69 any request that names where people keep keys
+  and sign-ins (`~/.git-credentials`, `~/.ssh`, a cloud CLI's config), and
+  Claude Code's sandbox is given those places as denied reads. But a command
+  an agent's sandbox runs without asking never reaches the rules, Codex's
+  sandbox reads anywhere, and a command can find such a file without naming
+  it ([the safety pass](plans/safety-pass.md)). Only running agents in a
+  sandbox of Althar's own closes that:
   macOS's sandbox profiles, a container, or a separate user. Also: agents'
   own API keys (03, "API keys and OAuth") should be sealed the way code hosts' tokens
   are, not kept where `security` reads them.
@@ -375,8 +501,39 @@ never under running work.
   session's life, so this is handled, but should Althar also warn when the
   user's Claude Code defaults to bypass, since their own use of it skips every
   check?
-- [ ] **Usage limits in ACP itself.** Propose a rate-limit extension to ACP,
-  rather than keep a side channel per agent?
+- [ ] **Usage limits in ACP itself.** Researched 15 October 2026
+  ([plan](plans/plan-usage.md#decision)). ACP has no plan windows yet: a
+  quotas RFD is open as [PR #2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316),
+  and ACP v2 is a Draft that leaves usage unchanged. Settled with the person:
+  usage data is required for every agent and every subscription account.
+  The rule: ACP, then an adapter extension, then the agent's own channel,
+  then the provider's usage endpoint (read-only, under a narrow exception to
+  architecture 03 rule 3), errors only as the floor. Claude is the exception
+  to the endpoint step (Anthropic's terms). Don't write our own ACP proposal
+  unless #2316 is declined. Open until #2316 is accepted or declined.
+- [ ] **Amend rule 3 for a usage read.** Agreed in outline on 15 October
+  2026 with the person: a narrow exception, an account's token in memory for
+  one call to a per-provider allowlisted usage URL, never written,
+  refreshed, logged or sent elsewhere, no Claude endpoint. Taken out of
+  #218 on review, since no source could run it yet; open until a spike shows
+  a real one ([#221](https://github.com/AltharIDE/althar/issues/221); the
+  draft is in [the plan](plans/plan-usage.md#the-exception-to-rule-3)).
+- [ ] **OpenCode 2.x usage.** Its credentials moved into `opencode.db` and
+  `auth list` says "can't tell", so an OpenCode 2.x account has no usage
+  source and shows a fault until OpenCode documents a way to read one
+  account's credential or usage, and the registry reads
+  `auth list --standalone --format json`
+  ([research](plans/plan-usage.md#the-exception-to-rule-3)).
+- [ ] **Claude accounts with no session.** Can the Agent SDK's
+  `usage_EXPERIMENTAL…()` or a probe session read them within Anthropic's
+  terms? If not, they stay uncovered until Anthropic allows a read.
+- [x] **Usage warnings and the usage tab.** Settled on a prototype (22
+  October 2026): no warnings at thresholds, no notices and no tab, but a plan
+  gauge in the bar after CPU and memory that says who is nearly out beside
+  it, its peek on Ctrl/Cmd+U, and each model's room in the pickers
+  ([plan](plans/plan-usage.md#where-the-window-shows-it)). The coordinator
+  sees each model's room in `list_models`. Still open: an operating-system
+  notification, and the 1-month window (no source yet for Claude or Codex).
 - [x] **Agent settings that approve before Althar sees.** Settled: every
   session gets settings that make the agent ask, and they win over the user's
   and the repository's own. Claude gets ask rules per session (ask beats allow

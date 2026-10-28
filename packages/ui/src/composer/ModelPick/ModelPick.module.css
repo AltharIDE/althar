@@ -2,7 +2,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   height: 28px;
   padding: 0 7px 0 8px;
   border-radius: 7px;
@@ -14,11 +15,11 @@
 }
 .button:hover,
 .button[aria-expanded='true'] {
-  background: var(--n-2);
+  background: var(--hover-paper);
   color: var(--t-1);
 }
 .button:active {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .field {
   height: 26px;
@@ -67,10 +68,10 @@
   color: var(--t-1);
 }
 .option:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .option:active {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .current {
   font-weight: 550;
@@ -80,19 +81,17 @@
   font-weight: 400;
   color: var(--t-3);
 }
-.note {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--t-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .check {
   flex: none;
   margin-left: auto;
   visibility: hidden;
+}
+/* a model's room keeps the row's right edge, before the check */
+.room {
+  margin-left: auto;
+}
+.room + .check {
+  margin-left: 0;
 }
 
 /* A pick that asks first: what it would do, and the answer. */
@@ -161,10 +160,10 @@
 }
 .all:hover {
   color: var(--t-1);
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 .all:active {
-  background: var(--n-4);
+  background: var(--pressed-paper);
 }
 .all svg {
   margin-left: auto;
@@ -176,4 +175,24 @@
 .count {
   font: 500 10.5px/1 var(--mono);
   color: var(--t-3);
+}
+
+/* narrow, the name is cut with an ellipsis; the effort and the chevron stay */
+.name {
+  min-width: 0;
+}
+.name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.button > :is(.effort, .chev) {
+  flex: none;
+}
+
+/* narrowest, the picker is its mark and effort */
+@container foot (max-width: 380px) {
+  .name > span {
+    display: none;
+  }
 }

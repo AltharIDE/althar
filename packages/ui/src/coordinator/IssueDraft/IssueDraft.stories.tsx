@@ -7,6 +7,7 @@ import { IssueDraftState } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Turn } from '../../thread/Turn/Turn'
+import { Button } from '../../primitives/Button/Button'
 import { IssueDraft, type IssueDraftEdit, type IssueDraftProps } from './IssueDraft'
 
 const meta = {
@@ -27,6 +28,14 @@ export const Pending: Story = {
     await expect(c.getByText('Labels: refunds, webhooks, bug')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'File issue' }))
     await expect(args.onFile).toHaveBeenCalled()
+  },
+}
+
+/** With the priority it is filed with, beside its labels. */
+export const WithPriority: Story = {
+  args: { priority: 'Low' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Priority: Low · Labels: refunds, webhooks, bug')).toBeInTheDocument()
   },
 }
 
@@ -254,6 +263,31 @@ export const InTheConversation: Story = {
       <IssueDraft {...args} />
     </>
   ),
+}
+
+/** A task's lead drafts several as it works: each is a card in the task's thread, and one press files the lot. */
+export const FromATasksLead: Story = {
+  render: (args) => (
+    <>
+      <Turn voice="Claude Opus" at="14:12">
+        Done with the retry. Two things I came across that are outside this task, so I drafted them as issues rather than taking them on
+        here.
+      </Turn>
+      <IssueDraft {...args} />
+      <IssueDraft {...args} {...DRAFT_JIRA} mark={DRAFT_LINEAR.mark} source="Linear" container="Meridian" labels={['perf']} />
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <Button variant="signal" size="small">
+          File all 2
+        </Button>
+      </div>
+    </>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    // The lead's turn is an article too, beside the two cards.
+    await expect(c.getAllByRole('article')).toHaveLength(3)
+    await expect(c.getByRole('button', { name: 'File all 2' })).toBeInTheDocument()
+  },
 }
 
 export const AllStates: Story = {

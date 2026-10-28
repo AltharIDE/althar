@@ -29,6 +29,24 @@ import { statements as conflictResolutions } from './0024_conflict_resolutions'
 import { statements as pushRequests } from './0025_push_requests'
 import { statements as projectNotes } from './0026_project_notes'
 import { statements as agentsAtOnce } from './0027_agents_at_once'
+import { statements as taskSeen } from './0028_task_seen'
+import { statements as reviewDrafts } from './0029_review_drafts'
+import { statements as taskSearch } from './0030_task_search'
+import { statements as branchOnFirstWrite } from './0031_branch_on_first_write'
+import { statements as taskAllowEverything } from './0032_task_allow_everything'
+import { statements as runnables } from './0033_runnables'
+import { statements as dictatedInput } from './0034_dictated_input'
+import { statements as line } from './0035_line'
+import { statements as taskKept } from './0036_task_kept'
+import { statements as attachedChangeSets } from './0037_attached_change_sets'
+import { statements as roundOpeners } from './0038_round_openers'
+import { statements as taskOpened } from './0039_task_opened'
+import { statements as issueChanges } from './0040_issue_changes'
+import { statements as trackerWorkspaces } from './0041_tracker_workspaces'
+import { statements as automations } from './0042_automations'
+import { statements as planUsage } from './0043_plan_usage'
+import { statements as lookupIndexes } from './0044_lookup_indexes'
+import { statements as inputFiles } from './0045_input_files'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -75,6 +93,24 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0025_push_requests', statements: pushRequests },
   { key: '0026_project_notes', statements: projectNotes },
   { key: '0027_agents_at_once', statements: agentsAtOnce },
+  { key: '0028_task_seen', statements: taskSeen },
+  { key: '0029_review_drafts', statements: reviewDrafts },
+  { key: '0030_task_search', statements: taskSearch },
+  { key: '0031_branch_on_first_write', statements: branchOnFirstWrite },
+  { key: '0032_task_allow_everything', statements: taskAllowEverything },
+  { key: '0033_runnables', statements: runnables },
+  { key: '0034_dictated_input', statements: dictatedInput },
+  { key: '0035_line', statements: line },
+  { key: '0036_task_kept', statements: taskKept },
+  { key: '0037_attached_change_sets', statements: attachedChangeSets },
+  { key: '0038_round_openers', statements: roundOpeners },
+  { key: '0039_task_opened', statements: taskOpened },
+  { key: '0040_issue_changes', statements: issueChanges },
+  { key: '0041_tracker_workspaces', statements: trackerWorkspaces },
+  { key: '0042_automations', statements: automations },
+  { key: '0043_plan_usage', statements: planUsage },
+  { key: '0044_lookup_indexes', statements: lookupIndexes },
+  { key: '0045_input_files', statements: inputFiles },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

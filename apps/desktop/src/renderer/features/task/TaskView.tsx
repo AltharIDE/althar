@@ -1,24 +1,27 @@
-import { useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
-import type { TaskAction, ThreadSnapshot } from '@althar/contracts'
+import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
   AbandonTask,
+  AttachPullRequest,
   ChangeView,
   BackCrumb,
+  Button,
   ChromeButton,
   Delivery,
   DiffLineKind,
   type FileView,
+  Behind,
   Composer,
   DictationTray,
   Issue,
   TaskActivity,
   LinkButton,
-  Listening,
   type ModelInfo,
-  Running,
   TaskFace,
   TaskHeader,
+  type TaskHeaderStep,
+  ReachLine,
   type TaskConflicts,
   TaskMenu,
   TaskStatus,
@@ -28,49 +31,70 @@ import {
   ThreadMeasure,
   ThreadSkeleton,
   TitleBar,
+  SettleWays,
 } from '@althar/ui'
 
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
+import { text as boardText } from '../board/BoardView'
+import { doing } from './actions'
+import { device, platform } from '../../shared/device'
+import { queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
+import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
+import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
-import { queuedOf, queueShown, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { stepNames, stepText, trackFor } from '../../shared/steps'
+import { stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
-import { blocksOf } from '../../shared/thread'
-import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { roundsOf } from '../../shared/rounds'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
-import { type Outgoing, takesImages, useImages } from '../../shared/useImages'
+import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
-import { behindText, listeningOf, useHeard } from './behind'
+import { listeningText, listeningOf, useHeard, waitOf } from './behind'
+import { ChangesCard } from '../../shared/ChangesCard'
+import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
+import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
+import { usePostTeamReviews } from '../settings/usePostTeamReviews'
+import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
+import { TaskThread } from './TaskThread'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
+import { useServices } from '../../data/services'
+import { text as reportText } from '../report/reportWords'
+import { BackgroundOutput } from './BackgroundOutput'
 import { NoOutputsView } from './NoOutputsView'
-import { conflictsOf, hasOutputs, Outputs } from './Outputs'
+import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
+import { chooseFace, chosenFaces } from './chosenFaces'
+import { REQUEST, taskGraphOf } from './graph'
+import { GraphFace } from './GraphFace'
+import { reveal } from './reveal'
 
 /*
- * A task, with two faces under its header, as in the prototype: the
+ * A task, with its faces under its header, as in the prototype: the
  * conversation, its thread and the composer that talks to its lead, where
- * the person is while the work happens; and its outputs, what it changed,
- * where they decide whether to accept it. A ready task opens on its outputs,
+ * the person is while the work happens; its outputs, what it changed, where
+ * they decide whether to accept it; and its graph, the steps it went
+ * through, once it has any (ADR-054). A ready task opens on its outputs,
  * anything else on the conversation, and the person switches with the
- * header's switch, or c and o. The project's bar is over it, so the way
+ * header's switch, or c, o and g. The project's bar is over it, so the way
  * around the project is the one its own screen has. What the rules keep for
  * the person arrives as a call at the end of the thread. What it changed
  * opens over the whole window, file by file, from the header, its outputs,
@@ -78,19 +102,30 @@ import type { TaskModel } from './useTask'
  * kit's; this view only arranges it.
  */
 
-/** The task's faces: its conversation, and what it made. */
-type Face = 'talk' | 'out'
+/** The task's faces: its conversation, what it made, and the steps it went through. */
+export type Face = 'talk' | 'out' | 'graph'
 
 export const text = {
   thread: 'Thread',
+  /** Dictation carried once the person leaves the task: whose it is, and putting another thread's here. */
+  carriedTo: (task: string) => `To the lead · ${task}`,
+  carriedSend: 'Send to the lead',
+  carriedTake: 'Move it to this task',
+  /** The sentence under a review's header: what its lead can reach. */
+  reach: 'What this review’s lead can reach',
   noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
   needsAgent: 'No agent is signed in, so nothing can pick this up. Sign one in from Settings; what you send waits for it.',
-  handsOver: (agent: string) => `hands the task to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
+  /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
+  conflictUnsent: (why: string) => `It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`,
+  resolveNow: 'Resolve now',
+  /** Althar couldn't look for a conflict here, whatever its host says, and why; the button looks again, fetching anew. */
+  conflictUnchecked: (why: string) => `Althar couldn’t look for a conflict with its default branch. ${why}`,
+  lookAgain: 'Look again',
   keep: (from: string) => `Keep ${from}`,
   /** What the lead is asked when merging its branch here conflicts: in each repository, the branch it merges into and where. */
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
@@ -103,28 +138,33 @@ export const text = {
   working: 'Working',
   needsYou: 'Needs you',
   ready: 'Ready for you',
+  /** A review of someone else's pull request, drafted: the person's to post. */
+  drafted: 'Review drafted',
+  /** A task that isn't a change, its lead done: the person settles it, or keeps it for later. */
+  finished: 'Finished',
+  kept: 'Kept for later',
+  /** Its folder coming back from its branch, and set up again, before its lead goes on (ADR-056). */
+  returning: 'Bringing its folder back',
+  /** What the composer suggests to a task that finished and isn't a change, in grey: Tab takes it, Enter sends it to its lead. */
+  suggest: 'Mark this as done',
+  /** Issues its lead drafted wait for the person to file. */
+  issues: 'Issues to file',
+  /** Changes its lead proposed to its issue wait for the person to apply. */
+  issueChanges: 'Issue changes to apply',
+  fileAll: (count: number) => `File all ${count}`,
   done: 'Done',
   abandoned: 'Abandoned',
   idle: 'Idle',
   stopped: 'Stopped',
-  faces: { talk: 'Conversation', out: 'Outputs' } satisfies Record<Face, string>,
-  facesKbd: { talk: 'c', out: 'o' } satisfies Record<Face, string>,
-  /** How long it has been on what it is doing now, or since it last changed. */
-  since: {
-    step: (step: string, took: string) => `${step} · ${took}`,
-    waiting: (took: string) => `waiting · ${took}`,
-    ready: (ago: string) => `ready · ${ago}`,
-    done: (ago: string) => `done · ${ago}`,
-    abandoned: (ago: string) => `abandoned · ${ago}`,
-    stopped: (ago: string) => `stopped · ${ago}`,
-  },
+  faces: { talk: 'Conversation', out: 'Outputs', graph: 'Graph' } satisfies Record<Face, string>,
+  facesKbd: { talk: 'c', out: 'o', graph: 'g' } satisfies Record<Face, string>,
   dismiss: 'Dismiss',
   earlier: 'Earlier in this task',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
-  diffKey: '⌘D',
+  diffKey: platform === 'darwin' ? '⌘D' : 'Ctrl+D',
 }
 
 /**
@@ -138,18 +178,46 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
+  // No call waits, yet the task does: issues its lead drafted wait to be filed, or changes it proposed to its issue to be applied.
+  if (snapshot.task.phase === 'waiting')
+    return {
+      status: TaskStatus.Yours,
+      state: snapshot.items.some(
+        (item) => item.kind === 'issue_draft' && item.content.state !== 'filed' && item.content.state !== 'discarded',
+      )
+        ? text.issues
+        : text.issueChanges,
+    }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
+  if (waits !== null)
+    return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step, waits.left) }
+  // Held for the connection, it carries on by itself once it is back (ADR-060).
+  if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
-  const doing = step === null ? undefined : stepText.now[step]
+  // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
+  if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
+  // A round of work after its plan is its lead following up, as the person asked (ADR-034).
+  const doing =
+    step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
+  // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
+  if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
+  // A review drafted is the person's to post (DEV-96).
+  if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
+    return { status: TaskStatus.Yours, state: text.drafted }
+  // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
+  if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
+    return { status: TaskStatus.Yours, state: text.finished }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
+  // Kept for later: out of Needs you as it is, until the person writes to it or settles it.
+  if (phase === 'kept') return { status: TaskStatus.Paused, state: text.kept }
   // Abandoned, it says so in place of where it stood, as stopped does.
   if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
   // On a step another agent takes, a review, while its lead waits.
   if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
-  if (snapshot.session === null) return { status: TaskStatus.Stopped, state: text.stopped }
+  // A recorded session the runtime no longer holds is no lead at work either.
+  if (snapshot.session === null || !snapshot.session.held) return { status: TaskStatus.Stopped, state: text.stopped }
   return { status: TaskStatus.Running, state: text.idle }
 }
 
@@ -171,33 +239,27 @@ export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null 
   return running(startedAt, last?.createdAt ?? now)
 }
 
+/** How long the step it is on has run, while it runs: what its header's card says beside that step. */
+export const tookOf = (snapshot: ThreadSnapshot, now: string): string | null => {
+  const { phase, step, stepAt } = snapshot.task
+  return phase === 'running' && step !== null && stepAt !== null ? running(stepAt, now) : null
+}
+
 /**
- * Since when a task has been where it stands, for its header's facts: on its
- * step, how long; waiting on the person, how long; ready, done or stopped,
- * how long ago. Nothing for a lead that is idle between steps, or held for a
- * usage limit, which its state already says.
+ * Its plan's steps, for its header, each with who does it: the work its lead,
+ * the one on it now or last, and each review the agent its plan names.
  */
-export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null => {
-  const { phase, step, stepAt, settledAt, waits } = snapshot.task
-  const [call] = snapshot.attention
-  if (call !== undefined) return text.since.waiting(running(call.createdAt, now))
-  if (waits !== null) return null
-  if (phase === 'settled')
-    return settledAt === null
-      ? null
-      : (snapshot.task.state === 'abandoned' ? text.since.abandoned : text.since.done)(ago(settledAt, new Date(now)))
-  if (phase === 'ready') {
-    const reported = snapshot.items.findLast((item) => item.kind === 'step_result')
-    return reported === undefined ? null : text.since.ready(ago(reported.createdAt, new Date(now)))
-  }
-  if (phase === 'stopped') {
-    const last = snapshot.items.at(-1)
-    return last === undefined ? null : text.since.stopped(ago(last.createdAt, new Date(now)))
-  }
-  if (step === null || stepAt === null) return null
-  // By the step's name, as its track says it: settling a review is part of the review.
-  const [name] = stepNames([{ key: step === 'implement' ? 'implement' : 'review', agentId: '', model: null, skipped: false }])
-  return name === undefined ? null : text.since.step(name.toLowerCase(), running(stepAt, now))
+export const stepsOf = (
+  snapshot: ThreadSnapshot,
+  lead: string,
+  named: (agentId: string, model: string | null) => string,
+): TaskHeaderStep[] => {
+  const { steps, step, phase, followUp } = snapshot.task
+  const planned = steps.filter((one) => !one.skipped)
+  return trackFor(steps, step, phase === 'ready' || phase === 'settled', followUp === true).map((item, at) => {
+    const one = planned[at]
+    return { ...item, who: one === undefined || one.key === 'implement' ? lead : named(one.agentId, one.model) }
+  })
 }
 
 /** Whether a key is meant for a field: one pressed in a text box, or with a modifier. */
@@ -211,10 +273,27 @@ const typing = (event: KeyboardEvent) => {
   )
 }
 
+/**
+ * The face a task opens on. A call waiting on the person is answered in the
+ * conversation, whatever the task is. Otherwise a change that is ready, or
+ * merged here with its remote still to have it, opens on what it made: there
+ * is something there to accept. Any other task (a quick one, a prototype, a
+ * review) has nothing to accept in its outputs, so it opens on its
+ * conversation, where its lead's last word, its links and its questions are.
+ */
+export const openingFace = (snapshot: ThreadSnapshot): Face => {
+  const { task } = snapshot
+  if (snapshot.attention.length > 0 || (task.kind !== undefined && task.kind !== 'change')) return 'talk'
+  return (task.phase === 'ready' && hasOutputs(snapshot)) || task.merged.some((one) => one.ahead > 0) ? 'out' : 'talk'
+}
+
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
 
 /** The task's own say on its lead resolving conflicts, as its menu offers it: none goes by the project. */
 const conflictsChoice = (own: boolean | null): TaskConflicts => (own === null ? 'project' : own ? 'on' : 'off')
+
+/** How long a title may be, as the runtime keeps it. */
+const TITLE_LENGTH = 60
 
 /** The line of a file's first change, where its diff is read: for an editor to open at. */
 const firstChange = (view: FileView): number | undefined => {
@@ -229,43 +308,91 @@ const firstChange = (view: FileView): number | undefined => {
 export function TaskView({
   model,
   onBack,
+  onRules,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
   onBack: () => void
+  /** Opens its project's rules, from a card the project always asks about. */
+  onRules?: () => void
 }) {
-  const [draft, setDraft] = useState('')
-  const voice = useDictation(setDraft, { projectId: model.snapshot?.project.id ?? null })
-  // Images to send with what the person says, and which agents take them.
-  const images = useImages()
+  // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
+  const kept = draftKey.task(model.snapshot?.threadId ?? '')
+  const [draft, setDraft] = useDraft(kept)
+  const threadId = model.snapshot?.threadId ?? null
+  const voice = useDictation(kept, {
+    projectId: model.snapshot?.project.id ?? null,
+    to:
+      threadId === null || model.snapshot === null
+        ? null
+        : {
+            to: text.carriedTo(model.snapshot.task.title),
+            back: { kind: 'task', threadId },
+            // Sent from elsewhere only while its lead is on it; otherwise its own composer starts one.
+            threadId: model.snapshot.session?.held === true ? threadId : null,
+            send: text.carriedSend,
+            take: text.carriedTake,
+          },
+  })
+  // Images and files to send with what the person says, and which agents take images.
+  const images = useAttachments(kept, useServices().host)
   const models = useModels()
+  // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
+  const postsTeamReviews = usePostTeamReviews()?.on === true
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
-  // Abandoning it asks first, saying what happens to its worktree and branch.
+  // The command its lead left running whose output is shown.
+  const [outputOf, setOutputOf] = useState<string | null>(null)
+  // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
+  // Attaching it to a pull request asks which; then, where its branch isn't based on that one's head, whether to start it there.
+  const [attaching, setAttaching] = useState<{
+    readonly value: string
+    readonly start?: { readonly name: string; readonly source: string; readonly own: number }
+  } | null>(null)
+  // Abandoned, the pull requests it was to close that are still open, by address, offered again: null until then.
+  const [leftOpen, setLeftOpen] = useState<ReadonlyArray<string> | null>(null)
+  const endAbandoning = () => {
+    setAbandoning(false)
+    setLeftOpen(null)
+  }
+  // Whether its title is a field, from its menu's Rename or from pressing the title.
+  const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
-  const [face, setFace] = useState<Face | null>(null)
-  // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
-  // An agent's question waiting comes first: it opens on the conversation, where it is answered.
+  const [face, showFace] = useState<Face | null>(null)
+  // Their choice is kept for the task, so opening it again from the board or home doesn't undo it.
+  const taskId = model.snapshot?.task.id
+  const setFace = useCallback(
+    (value: Face) => {
+      if (taskId !== undefined) chooseFace(taskId, value)
+      showFace(value)
+    },
+    [taskId],
+  )
+  // An agent's question waiting is kept to answer it here, whatever else the task is.
   const [asking, setAsking] = useState<string | null | undefined>(undefined)
+  // Without one, a permission waiting as it opens takes focus, so Enter answers it; one that comes later takes it only while nothing else has it.
+  const [permitting, setPermitting] = useState(false)
   if (face === null && model.snapshot !== null) {
     const question = model.snapshot.attention.find((call) => call.kind === 'question')
     setAsking(question?.id ?? null)
-    setFace(
-      question === undefined &&
-        ((model.snapshot.task.phase === 'ready' && hasOutputs(model.snapshot)) || model.snapshot.task.merged.some((one) => one.ahead > 0))
-        ? 'out'
-        : 'talk',
-    )
+    setPermitting(question === undefined && model.snapshot.attention.some((call) => call.kind === 'permission'))
+    // A call waiting is answered in the conversation, ahead of a view picked earlier.
+    showFace(model.snapshot.attention.length > 0 ? 'talk' : (chosenFaces.get(model.snapshot.task.id) ?? openingFace(model.snapshot)))
+  } else if (permitting && model.snapshot !== null && !model.snapshot.attention.some((call) => call.kind === 'permission')) {
+    // Those answered, one that comes later is like any other: it doesn't take focus from what is being typed.
+    setPermitting(false)
   }
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
   const editor = editors.main
-  // What the thread's parts open: a picture in the lightbox, a document beside the thread.
-  const host = useThreadHost()
+  // What the thread's parts open: a picture in the lightbox, a document or a file the lead names beside the thread.
+  const host = useThreadHost(true, { threadId: model.snapshot?.threadId ?? null, taskId: model.snapshot?.task.id ?? null })
+  // Report this, on a stuck step: Report a problem, with this task (DEV-61).
+  const { reportProblem } = useServices().host
   const files = model.snapshot?.task.files ?? []
   // What it changed opens on the first file someone wrote, not a lockfile.
   const changes = useChanges(model.snapshot?.task.id ?? null, (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null)
@@ -292,22 +419,48 @@ export function TaskView({
     showed.current = { task: showsTask, outputs: showsOutputs, changes: showsChanges }
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
-  // c and o switch the faces, and Escape goes back to the project: never while typing, or with something else open.
-  const open = changes.open || abandoning
+  // c, o and g switch the faces, and Escape goes back to the project: never while typing, or with something else open.
+  const open = changes.open || abandoning || attaching !== null
+  const hasGraph = (model.snapshot?.task.graph?.length ?? 0) > 0
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || typing(event) || open) return
       if (event.key === 'Escape' && event.target === document.body) onBack()
       else if (event.key === text.facesKbd.talk) setFace('talk')
       else if (event.key === text.facesKbd.out) setFace('out')
+      else if (event.key === text.facesKbd.graph && hasGraph) setFace('graph')
       else return
       event.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onBack, open])
+  }, [onBack, open, setFace, hasGraph])
+  // The Graph face takes the person to a place in the conversation: earlier pages are read from the model as it is then.
+  const latest = useRef(model)
+  useLayoutEffect(() => {
+    latest.current = model
+  })
+  const showInThread = useCallback(
+    (itemId: string | undefined) => {
+      setFace('talk')
+      if (itemId === undefined) return
+      void reveal(itemId, async () => {
+        const now = latest.current
+        if (now.snapshot?.earlier !== true) return false
+        await now.loadEarlier()
+        return true
+      })
+    },
+    [setFace],
+  )
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
-  const now = useNow(ticking(model.snapshot) || (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false))
+  const now = useNow(
+    ticking(model.snapshot) ||
+      // While what the person sent is on its way, or the lead starts for it, how long they have waited.
+      model.pending ||
+      model.snapshot?.session?.state === 'starting' ||
+      (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false),
+  )
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
@@ -335,22 +488,27 @@ export function TaskView({
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Running or not, the task has its lead: the one on it now, else the last, else the one its plan names.
   const lead =
-    session !== null
+    session !== null && session.held
       ? named(session.agentId, session.model, session.account)
       : snapshot.task.lead === null
         ? noLead
         : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
   const { status, state } = statusOf(snapshot, agentName)
   const elapsed = elapsedOf(snapshot, now)
-  const since = sinceOf(snapshot, now)
-  const shown: Face = face ?? 'talk'
+  const took = tookOf(snapshot, now)
+  // Its steps as a graph, where the runtime keeps rounds of work for it; without, its face isn't offered.
+  const graph = taskGraphOf(snapshot, named, now)
+  const shown: Face = face === null || (face === 'graph' && graph === null) ? 'talk' : face
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
+  const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
   const running = [...(session?.background ?? []), ...snapshot.task.launches]
   const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
-  const leftRunning = runningOf(running, now)
+  // Althar's own runs keep their output in their cards, not here.
+  const leftRunning = runningOf(running, now).map((one) => (launched.has(one.id) ? { ...one, output: false } : one))
+  const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
     ...(snapshot.task.request === null || snapshot.earlier
@@ -358,16 +516,30 @@ export function TaskView({
       : [
           {
             kind: 'you' as const,
-            id: 'request',
+            id: REQUEST,
             text: snapshot.task.request,
             at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
             delivery: Delivery.Delivered,
-            links: [],
+            // A review's thread opens with the pull request it reviews, under what the person asked.
+            links: snapshot.task.review == null ? [] : [reviewedUnfurl(snapshot.task.review)],
             pictures: [],
+            files: [],
           },
         ]),
-    ...blocksOf(
-      { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree, queue, outputs: model.outputs },
+    // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).
+    ...roundsOf(
+      {
+        items: snapshot.items,
+        turnRunning: busy,
+        turnStarted: session?.turnStartedAt ?? null,
+        reading: readingNow(session, model.pending, snapshot.task.queued !== null || snapshot.task.waits !== null),
+        turnEnded: session?.turnEndedAt ?? null,
+        // What the person asked for, which opens the thread above, is what the lead's first turn answers.
+        openedAt: snapshot.task.request === null || snapshot.earlier ? null : snapshot.task.startedAt,
+        worktree: snapshot.task.worktree,
+        queue,
+        outputs: model.outputs,
+      },
       model.streaming,
       (iso) => ago(iso),
       now,
@@ -375,7 +547,7 @@ export function TaskView({
   ]
   // What each document was last changed by, so one open beside the thread follows its edits.
   const versionOf = documentVersions(
-    blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
+    blocks.flatMap((block) => (block.kind === 'round' ? block.parts : [])),
     snapshot.task.worktree,
   )
   // A file the lead wrote or pointed at opens in the person's editor, as its changes do.
@@ -395,17 +567,17 @@ export function TaskView({
       : resume === undefined
         ? null
         : { agentId: resume.id, model: null, effort: null })
-  const waiting = session === null || handover?.agentId === session.agentId ? null : handover
-  const choice = session === null ? chosen : (waiting ?? runningOn(session))
+  const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
+  const choice = session === null || !session.held ? chosen : (waiting ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
-  const receiving = waiting?.agentId ?? session?.agentId ?? chosen?.agentId ?? null
+  const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
   const receiver = { name: agentName(receiving), takes: takesImages(models, receiving) }
   // With no lead working, what the person says starts the one picked, as its first turn; with another agent picked, that one takes over with it.
   const send = (body: string, now: boolean, outgoing?: Outgoing) => {
     setDraft('')
     if (outgoing !== undefined) images.clear()
-    if (session === null) return model.send(body, chosen ?? undefined, outgoing)
+    if (session === null || !session.held) return model.send(body, chosen ?? undefined, outgoing)
     if (waiting !== null) {
       setHandover(null)
       return model.handOver(waiting, body, outgoing)
@@ -430,7 +602,7 @@ export function TaskView({
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
-    if (session === null) return setPick(next)
+    if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
     void model.choose(next)
@@ -438,12 +610,24 @@ export function TaskView({
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
     const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
-    // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
-    if (said === undefined || !images.fits(said.pictures)) return
+    // One whose images or files wouldn't fit beside those waiting stays in the queue, and the composer says why.
+    if (said === undefined || !images.fits(said)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
-      images.restore(said.pictures)
+      if (said.dictated === true) setDraftDictated(kept, true)
+      images.restore(said)
     }
+  }
+
+  // A queued message goes to the lead now, interrupting it, rather than when the lead is done: out of the queue, and said again. One the lead has already read stays as it was.
+  const sendQueuedNow = async (id: string) => {
+    const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
+    if (said === undefined || !(await model.takeBack(id))) return
+    if (await model.sendNow(said.text, outgoingOf(said))) return
+    // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
+    setDraft((current) => withQueued(current, said.text))
+    if (said.dictated === true) setDraftDictated(kept, true)
+    images.restore(said)
   }
 
   const issue = snapshot.task.issue
@@ -451,8 +635,29 @@ export function TaskView({
   const can = (action: TaskAction) => snapshot.task.actions.includes(action)
   const { planId } = snapshot.task
   // Its draft pull requests, marked ready from the menu too, while it is under way or ready.
+  // The issues its lead drafted that wait to be filed, oldest first: one press files them all.
+  const waitingIssues = snapshot.items.flatMap((item) =>
+    item.kind === 'issue_draft' && item.content.state === 'pending' ? [item.content.draftId] : [],
+  )
   const drafts = snapshot.task.phase === 'settled' ? [] : snapshot.task.changes.filter((one) => one.state === 'open' && one.draft)
-  const openChange = snapshot.task.changes.find((one) => one.state === 'open')
+  // Its pull requests still open, offered to close as it is abandoned; those left open after, offered again.
+  const openChanges = snapshot.task.changes.filter((one) => one.state === 'open')
+  const offered = leftOpen === null ? openChanges : openChanges.filter((one) => leftOpen.includes(one.url))
+  // Its newest pull request that merged: what a merged task's commits came after.
+  const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
+  // A task that finished and isn't a change: Done and Keep for later, beside where it stands; a review only keeps, as it settles
+  // once posted. Anything else is said to its lead. Not while its lead is mid-turn: what it does may still change where it stands.
+  const settleable = !busy && isSettleable({ kind: snapshot.task.kind ?? 'change', phase: snapshot.task.phase ?? '' })
+  // Done for a plain task, or a review posted and answered since; one with a draft settles as it is posted.
+  const done = takesDone({ kind: snapshot.task.kind ?? 'change', reviewing: snapshot.task.review })
+  const settle = settleable ? (
+    <SettleWays
+      place="header"
+      {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
+      {...(snapshot.task.phase === 'ready' ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
+      {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
+    />
+  ) : null
   // What it changed opens over the window; what else it can do is in its menu.
   const actions = (
     <>
@@ -465,15 +670,40 @@ export function TaskView({
           onClick={() => changes.show()}
         />
       )}
+      {/* What it built runs with no agent, in its worktree (ADR-044); a review runs nothing of what it reads. */}
+      {snapshot.task.worktree !== null && snapshot.task.review == null && (
+        <Runs
+          projectId={snapshot.project.id}
+          project={snapshot.project.name}
+          taskId={snapshot.task.id}
+          runnables={snapshot.task.runnables}
+          launches={snapshot.task.launches}
+          now={now}
+          onRun={(id) => void model.runProject(id)}
+          onStop={(id) => void model.stopLaunch(id)}
+        />
+      )}
       <TaskMenu
-        // What it built runs with no agent, where its repository says how.
-        {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
+        onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
+        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-052); a
+        // review reads one only.
+        {...(can('abandon') && snapshot.task.phase !== 'settled' && snapshot.task.review == null && snapshot.task.worktree !== null
+          ? {
+              onAttach: () => {
+                model.dismissError()
+                setAttaching({ value: '' })
+              },
+            }
+          : {})}
+        {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
-        {...(can('abandon')
+        // A merged task abandons the commits after its pull request, and stays merged: one Abandon, said for what it does.
+        {...(can('abandon') || can('leaveOut')
           ? {
+              merged: can('leaveOut'),
               onAbandon: () => {
                 model.dismissError()
                 setAbandoning(true)
@@ -489,55 +719,100 @@ export function TaskView({
                 project: snapshot.task.resolveConflicts.project,
                 onChange: (choice: TaskConflicts) => void model.setResolveConflicts(choice === 'project' ? null : choice === 'on'),
               },
+              // And whether everything its agents ask is allowed: by its own switch, or its project's.
+              allowEverything: {
+                on: snapshot.task.allowEverything.task,
+                project: snapshot.task.allowEverything.project,
+                onChange: (on: boolean) => void model.setAllowEverything(on),
+              },
             }
           : {})}
-        // Its folder opens in the editor files open in, once it has a worktree.
-        {...(snapshot.task.branch === null || editor === undefined
+        // Held on by its project, allowing everything opens the project's rules, where it is turned off.
+        {...(onRules === undefined ? {} : { onRules })}
+        // Its folder opens in the editor files open in, once it has a worktree: a plain task's has no branch, but is there.
+        {...(snapshot.task.worktree === null || editor === undefined
           ? {}
           : { onOpen: () => editors.open(editor.id), editor: editor.name, text: { open: openInText.in } })}
       />
     </>
   )
 
+  // A conflict that is the person's (its lead couldn't resolve it, or wasn't asked), or one Althar couldn't look for: why, and what asks again.
+  const conflict =
+    snapshot.task.handedBack != null
+      ? { words: snapshot.task.handedBack, act: text.resolveNow }
+      : snapshot.task.conflictUnsent != null
+        ? { words: text.conflictUnsent(snapshot.task.conflictUnsent), act: text.resolveNow }
+        : snapshot.task.conflictUnchecked != null
+          ? { words: text.conflictUnchecked(snapshot.task.conflictUnchecked), act: text.lookAgain }
+          : null
+
+  const line: ReactNode =
+    waiting !== null ? (
+      <>
+        {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
+        <LinkButton onClick={() => setHandover(null)}>{text.keep(lead.name)}</LinkButton>
+      </>
+    ) : (session === null || !session.held) && model.agentsKnown && model.agents.length === 0 ? (
+      text.needsAgent
+    ) : null
+
   const composer = (
     <div className={s.composer}>
-      {model.error !== null && (
-        <p className={s.failure} role="alert">
-          {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-        </p>
-      )}
-      {session === null && model.agentsKnown && model.agents.length === 0 && <p className={s.handover}>{text.needsAgent}</p>}
-      {waiting !== null && (
-        <p className={s.handover}>
-          {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
-          <LinkButton onClick={() => setHandover(null)}>{text.keep(lead.name)}</LinkButton>
-        </p>
-      )}
       <Composer
         value={draft}
         onChange={setDraft}
+        // What a task that finished and isn't a change is likely told next, for Tab to take; its lead marks it done (settle_task). A
+        // review's draft is posted by the person, on it, so nothing is suggested there.
+        {...(settleable && done ? { suggestion: text.suggest } : {})}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
-        // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
-        above={
-          (listening.length > 0 || leftRunning.length > 0) && (
+        carried={<CarriedOver here={kept} />}
+        // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
+        notice={
+          model.error !== null || conflict !== null || line !== null ? (
             <>
-              {listening.length > 0 && (
-                <Listening sources={listening} heard={heard} onStop={(url) => void model.stopListening(url)} note={behindText.note} />
+              {model.error !== null && (
+                <div className={s.failure} role="alert">
+                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                </div>
               )}
-              <Running
-                processes={leftRunning}
-                onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
-                onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
-                // Where it answers opens in the person's browser.
-                onOpenUrl={(id) => {
-                  const url = running.find((command) => command.id === id)?.url
-                  if (url != null) window.open(url, '_blank')
-                }}
-              />
+              {conflict !== null && (
+                <div>
+                  {conflict.words} <LinkButton onClick={() => void model.resolveConflictsNow()}>{conflict.act}</LinkButton>
+                </div>
+              )}
+              {line !== null && <div>{line}</div>}
             </>
-          )
+          ) : null
+        }
+        text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
+        // What goes on outside the conversation, as one chip over its end: why it waits, what its lead left running, the pull requests it listens to.
+        above={
+          <Behind
+            wait={wait}
+            onStopHeld={(taskId) => {
+              // Stopping what a task left running frees its place.
+              const holder = snapshot.task.queued?.holders?.find((one) => one.taskId === taskId)
+              if (holder?.threadId != null) for (const command of holder.running) void model.stopHolding(holder.threadId, command.id)
+            }}
+            // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-065).
+            {...(snapshot.task.front === true ? { onFront: () => void model.moveToFront() } : {})}
+            processes={leftRunning}
+            onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
+            onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
+            onOutput={setOutputOf}
+            // Where it answers opens in the person's browser.
+            onOpenUrl={(id) => {
+              const url = running.find((command) => command.id === id)?.url
+              if (url != null) window.open(url, '_blank')
+            }}
+            sources={listening}
+            heard={heard}
+            onStopListening={(url) => void model.stopListening(url)}
+            text={listeningText}
+          />
         }
         onSubmit={(body) => submit(body, false)}
         onSendNow={(body) => submit(body, true)}
@@ -546,25 +821,61 @@ export function TaskView({
         busy={busy}
         queued={queuedOf(snapshot.items, queue)}
         onEditQueued={(id) => void edit(id)}
+        onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
-        meter={contextMeter(session, named)}
+        placeholder={busy ? text.placeholderBusy : text.placeholder(receiver.name)}
+        meter={contextMeter(session, named, model.compact)}
         // Another agent's model hands the task to that agent.
         picker={
           model.agents.length > 0 &&
           choice !== null && (
-            <ModelChoice
-              owner={text.lead}
-              agents={model.agents}
-              value={choice}
-              onChange={choose}
-              // Another agent's model hands the task over, once the person says something.
-              {...(session === null ? {} : { handover: { note: text.handsOver, ask: null } })}
-            />
+            <ModelChoice owner={text.lead} agents={model.agents} projectId={snapshot.project.id} value={choice} onChange={choose} />
           )
         }
       />
     </div>
+  )
+
+  // A stuck step's call, answered in the conversation or where the Graph face opens it.
+  const stuckCall = (request: AttentionRequest) =>
+    request.stuck === null ? null : (
+      <StuckCall
+        key={request.id}
+        request={request}
+        stuck={request.stuck}
+        agents={model.agents}
+        agentName={agentName}
+        onAnswer={model.answerStuck}
+        {...(reportProblem === undefined
+          ? {}
+          : {
+              onReport: (step: string) =>
+                reportProblem({
+                  kind: 'failed',
+                  taskId: snapshot.task.id,
+                  projectId: snapshot.project.id,
+                  threadId: snapshot.threadId,
+                  what: reportText.stuck(step),
+                }),
+            })}
+      />
+    )
+  // Permissions waiting, as one stack with Allow all, in the conversation or where the Graph face opens the step asking:
+  // there, opened to be answered, it takes focus, so Enter answers it.
+  const permissionCalls = (requests: ReadonlyArray<AttentionRequest>, opened = false) => (
+    <PermissionCalls
+      requests={requests}
+      project={snapshot.project.name}
+      focusOnMount={opened || permitting || 'idle'}
+      onAnswer={model.answer}
+      // Out of what the project always asks about: everything on this task allowed, where it isn't yet; or the rules.
+      wayOut={{
+        ...(snapshot.task.allowEverything.task || snapshot.task.phase === 'settled'
+          ? {}
+          : { onAllowEverything: () => void model.setAllowEverything(true) }),
+        ...(onRules === undefined ? {} : { onRules }),
+      }}
+    />
   )
 
   return (
@@ -577,29 +888,61 @@ export function TaskView({
             title={snapshot.task.title}
             status={status}
             state={state}
-            lead={lead}
-            {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
-            {...(since === null ? {} : { since })}
+            // Who does each step: while its plan runs, where it stands says so on hover, the reviewer not being the lead.
+            steps={stepsOf(snapshot, lead.name, (agentId, model) => named(agentId, model).name)}
+            {...(took === null ? {} : { took })}
             {...(elapsed === null ? {} : { elapsed })}
-            steps={trackFor(snapshot.task.steps, snapshot.task.step, snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled')}
-            faces={(['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] }))}
+            faces={(graph === null ? (['talk', 'out'] as const) : (['talk', 'out', 'graph'] as const)).map((value) => ({
+              value,
+              label: text.faces[value],
+              kbd: text.facesKbd[value],
+            }))}
             face={shown}
             onFace={setFace}
+            // Finished and the person's to settle: Done and Keep for later, inside where it stands.
+            {...(settle === null ? {} : { beside: settle })}
             actions={actions}
           />
         }
       >
-        <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} titleLevel={1} onBack={onBack} />
+        <BackCrumb
+          to={snapshot.project.name}
+          kbd="esc"
+          title={snapshot.task.title}
+          titleLevel={1}
+          maxLength={TITLE_LENGTH}
+          editing={renaming}
+          onEditingChange={setRenaming}
+          onRename={(title) => void model.rename(title)}
+          onBack={onBack}
+        />
       </TitleBar>
-      {shown === 'out' && !hasOutputs(snapshot) ? (
+      {/* What a review's lead can reach, in a sentence under the header. */}
+      {snapshot.task.review != null && (
+        <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
+      )}
+      {shown === 'graph' && graph !== null ? (
+        <GraphFace
+          className={s.graphFace}
+          graph={graph}
+          stuck={stuckCall}
+          permissions={(requests) => permissionCalls(requests, true)}
+          onShow={showInThread}
+          // The composer that says what went wrong is the conversation's: here, the face says it.
+          error={model.error}
+          onDismissError={model.dismissError}
+        />
+      ) : shown === 'out' && !hasOutputsToShow(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
-        <div className={connecting ? s.withPanel : s.outputsFace}>
+        <div
+          className={connecting || host.code !== null ? s.withPanel : s.outputsFace}
+          style={host.code !== null && !connecting ? ({ '--panel-width': `${host.bench.width}px` } as CSSProperties) : undefined}
+        >
           {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
           <ThreadShellProvider value={host.shell}>
             <Outputs
               snapshot={snapshot}
-              lead={lead}
               pending={model.pending}
               doing={model.doing}
               error={model.error}
@@ -616,8 +959,6 @@ export function TaskView({
                 })
               }
               onMarkReady={(url) => void model.markReady(url)}
-              // Sending it back is a note to its lead, which starts it again if it stopped.
-              onSendBack={(note) => send(note, false)}
               onOpenFile={changes.show}
               conflict={model.conflict}
               onPushHere={() => void model.pushHere()}
@@ -630,16 +971,19 @@ export function TaskView({
               }}
             />
           </ThreadShellProvider>
-          {connecting && snapshot.host !== null && (
+          {connecting && snapshot.host !== null ? (
             <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
+          ) : (
+            // A file a lead's report names, beside it, as beside the thread.
+            host.workbench(null)
           )}
         </div>
       ) : (
         <TaskFace
           className={s.face}
           composer={composer}
-          // A document the lead wrote opens beside the thread, where the kit puts one, and follows its edits.
-          panel={
+          // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
+          panel={host.workbench(
             host.doc && (
               <DocumentPanel
                 key={host.doc.source ?? host.doc.path ?? host.doc.title}
@@ -649,8 +993,9 @@ export function TaskView({
                 onClose={host.closeDoc}
                 {...(openFile === undefined || docInEditor === null ? {} : { onOpen: () => openFile(docInEditor) })}
               />
-            )
-          }
+            ),
+          )}
+          panelWidth={host.bench.width}
         >
           <Thread label={text.thread} busy={busy}>
             {issue !== null && !snapshot.earlier && (
@@ -680,8 +1025,9 @@ export function TaskView({
               </ThreadDivider>
             )}
             <ThreadShellProvider value={host.shell}>
-              <ThreadBlocks
-                blocks={blocks}
+              <TaskThread
+                rounds={blocks}
+                versionOf={versionOf}
                 threadId={snapshot.threadId}
                 worktree={snapshot.task.worktree}
                 {...(openFile === undefined ? {} : { openFile })}
@@ -691,7 +1037,45 @@ export function TaskView({
                 onAnswerQuestion={model.answerQuestion}
                 {...(asking == null ? {} : { focusQuestion: asking })}
                 run={(run) => (
-                  <RunOf run={run} now={now} onStop={(id) => void model.stopLaunch(id)} onRunAgain={() => void model.runProject()} />
+                  <RunOf
+                    run={run}
+                    now={now}
+                    onStop={(id) => void model.stopLaunch(id)}
+                    onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
+                  />
+                )}
+                // An issue the lead drafted is filed from its card, only when the person says.
+                draft={(draft) => (
+                  <DraftCard
+                    draft={draft}
+                    actions={{
+                      onFile: (draftId) => void model.fileIssueDraft(draftId),
+                      onChange: model.changeIssueDraft,
+                      onDiscard: (draftId) => void model.discardIssueDraft(draftId),
+                    }}
+                  />
+                )}
+                // Changes to its issue its lead or Althar proposed apply from their card, only when the person says.
+                changes={(changes) => (
+                  <ChangesCard
+                    changes={changes}
+                    actions={{
+                      onApply: (changesId) => void model.applyIssueChanges(changesId),
+                      onDiscard: (changesId) => void model.discardIssueChanges(changesId),
+                    }}
+                  />
+                )}
+                // A review the lead drafted is posted from its card, only when the person says.
+                review={(draft) => (
+                  <ReviewCard
+                    draft={draft}
+                    actions={{
+                      onChange: model.changeReview,
+                      onPost: (draftId) => void model.postReview(draftId),
+                      onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
+                      onDiscard: (draftId) => void model.discardReview(draftId),
+                    }}
+                  />
                 )}
                 // A push the lead asked for is pushed as the outputs push: up to the head it shows.
                 push={(request, at) => (
@@ -705,39 +1089,112 @@ export function TaskView({
                 )}
               />
             </ThreadShellProvider>
-            {snapshot.attention.map((request) =>
-              request.kind === 'stuck' && request.stuck !== null ? (
-                <StuckCall
-                  key={request.id}
-                  request={request}
-                  stuck={request.stuck}
-                  agents={model.agents}
-                  agentName={agentName}
-                  onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
-                />
-              ) : null,
+            {waitingIssues.length > 1 && (
+              <div className={s.fileAll}>
+                <Button
+                  variant="signal"
+                  size="small"
+                  busy={model.pending}
+                  onClick={() =>
+                    void (async () => {
+                      for (const draftId of waitingIssues) await model.fileIssueDraft(draftId)
+                    })()
+                  }
+                >
+                  {text.fileAll(waitingIssues.length)}
+                </Button>
+              </div>
             )}
-            <PermissionCalls
-              requests={snapshot.attention.filter((request) => request.kind === 'permission')}
-              project={snapshot.project.name}
-              onAnswer={model.answer}
-            />
+            {snapshot.attention.map((request) => (request.kind === 'stuck' && request.stuck !== null ? stuckCall(request) : null))}
+            {/* Held for a usage limit with nothing asked of the person: another model can carry it on now, or it keeps waiting. */}
+            {snapshot.task.waits !== null && snapshot.attention.length === 0 && (
+              <HeldLimit
+                key={`${snapshot.task.waits.agentId}:${snapshot.task.waits.until}`}
+                waits={snapshot.task.waits}
+                step={snapshot.task.step === 'review' || snapshot.task.step === 'settle' ? snapshot.task.step : 'implement'}
+                agents={model.agents}
+                agentName={agentName}
+                onHandOver={(to) => void model.handOverHeld(to)}
+                {...(snapshot.task.step === 'review' ? { onSkip: () => void model.skipReview() } : {})}
+              />
+            )}
+            {permissionCalls(snapshot.attention.filter((request) => request.kind === 'permission'))}
           </Thread>
         </TaskFace>
       )}
       {host.lightbox}
       {abandoning && (
         <AbandonTask
+          text={{ branchHere: (name) => `Its branch ${name} stays on ${device.this}.` }}
           activity={can('stop') ? TaskActivity.Working : can('start') ? TaskActivity.Planned : TaskActivity.Still}
           worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
           branch={snapshot.task.branch}
-          {...(openChange === undefined
+          changes={offered.map((one) => ({ id: one.url, name: `${one.noun} ${one.prefix}${one.number}`, host: productName(one.product) }))}
+          abandoned={leftOpen !== null}
+          {...(mergedChange === undefined || !can('leaveOut')
             ? {}
-            : { change: { name: `${openChange.short} ${openChange.prefix}${openChange.number}`, host: productName(openChange.product) } })}
+            : {
+                merged: {
+                  name: `${mergedChange.short} ${mergedChange.prefix}${mergedChange.number}`,
+                  commits: snapshot.task.unshipped?.commits ?? 0,
+                },
+              })}
           busy={model.pending}
           {...(model.error === null ? {} : { error: model.error })}
-          onAbandon={() => void model.abandon().then((abandoned) => abandoned && setAbandoning(false))}
-          onClose={() => setAbandoning(false)}
+          onAbandon={(choices) =>
+            void model
+              .abandon(
+                offered
+                  .filter((one) => choices.close.includes(one.url))
+                  .map((one) => ({
+                    url: one.url,
+                    name: `${one.short} ${one.prefix}${one.number}`,
+                    deleteBranch: choices.deleteBranch.includes(one.url),
+                  })),
+              )
+              .then(({ abandoned, open }) => {
+                // Abandoned, with each it was to close closed: done. One its host wouldn't close stays offered, with why.
+                if (!abandoned) return
+                if (open.length === 0) endAbandoning()
+                else setLeftOpen(open)
+              })
+          }
+          onClose={endAbandoning}
+        />
+      )}
+      {attaching !== null && (
+        <AttachPullRequest
+          key={attaching.start === undefined ? 'ask' : 'start'}
+          defaultValue={attaching.value}
+          {...(attaching.start === undefined
+            ? {}
+            : {
+                start: attaching.start,
+                onBack: () => {
+                  model.dismissError()
+                  setAttaching({ value: attaching.value })
+                },
+              })}
+          busy={model.pending}
+          {...(model.error === null ? {} : { error: model.error })}
+          onAttach={(pullRequest, start) =>
+            void model.attach(pullRequest, start).then((done) => {
+              if (done === null) return
+              setAttaching(
+                done.kind === 'start' ? { value: pullRequest, start: { name: done.name, source: done.source, own: done.own } } : null,
+              )
+            })
+          }
+          onClose={() => setAttaching(null)}
+        />
+      )}
+      {outputShown !== undefined && threadId !== null && (
+        <BackgroundOutput
+          threadId={threadId}
+          id={outputShown.id}
+          name={outputShown.name ?? outputShown.label ?? outputShown.command}
+          command={outputShown.command}
+          onClose={() => setOutputOf(null)}
         />
       )}
       {changes.open && (

@@ -38,6 +38,7 @@ export const EVERY_STATE: RuntimeEntry[] = [
   { ...GEMINI_CLI, state: RuntimeState.SignedOut, waiting: 2 },
   { ...OLLAMA, state: RuntimeState.Outdated, version: '0.3.2', needs: '0.5' },
   { id: 'aider', name: 'Aider', state: RuntimeState.Checking },
+  { id: 'amp', name: 'Amp', state: RuntimeState.Unchecked, why: 'Althar couldn’t check Amp. Its log has the details.' },
 ]
 
 export const ROLES: SelectOption<string>[] = [
@@ -204,7 +205,7 @@ export const SERVICES: ServiceOption[] = [
   { id: 'github', name: 'GitHub', brand: Brand.GitHub, what: 'Meridian’s code is here', selfHosted: true },
   { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, what: 'Halyard’s code is on git.halyard.dev', selfHosted: true },
   { id: 'bitbucket', name: 'Bitbucket', brand: Brand.Bitbucket, selfHosted: true },
-  { id: 'linear', name: 'Linear', brand: Brand.Linear },
+  { id: 'linear', name: 'Linear', brand: Brand.Linear, workspaces: true },
   { id: 'jira', name: 'Jira', brand: Brand.Jira, selfHosted: true },
   { id: 'trello', name: 'Trello', brand: Brand.Trello },
 ]
@@ -214,6 +215,13 @@ export const CONNECTED: ServiceConnection[] = [
   { id: 'conn_1', service: 'github', account: 'you' },
   { id: 'conn_2', service: 'github', account: 'you', instance: 'https://git.meridian.dev' },
   { id: 'conn_3', service: 'jira', account: 'you@meridian.dev', instance: 'https://meridian.atlassian.net', needsSignIn: true },
+]
+
+/** Signed in to two of Linear's workspaces as the same person, side by side, and to GitHub. */
+export const WORKSPACES: ServiceConnection[] = [
+  { id: 'conn_1', service: 'github', account: 'you' },
+  { id: 'conn_4', service: 'linear', account: 'you', workspace: 'Meridian' },
+  { id: 'conn_5', service: 'linear', account: 'you', workspace: 'Halyard' },
 ]
 
 /** Codex with five accounts: its usual folder, one Althar made, one codex-profiles made that is out of usage, one signed out, and a key, billed per use, last. */

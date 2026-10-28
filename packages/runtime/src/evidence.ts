@@ -101,7 +101,8 @@ const findPicture = (path: string, worktrees: ReadonlyArray<string>) =>
     for (const root of worktrees) {
       const realRoot = yield* inside(root, [root])
       if (realRoot !== null && real.startsWith(`${realRoot}${sep}`)) {
-        at = { worktree: root, file: relative(realRoot, real) }
+        // Where in it, the way git and the person write it: with `/`, on Windows too.
+        at = { worktree: root, file: relative(realRoot, real).split(sep).join('/') }
         break
       }
     }
@@ -232,19 +233,39 @@ export const evidenceOf = (value: unknown): ReadonlyArray<Evidence> =>
 export const unverifiedIn = (value: unknown): ReadonlyArray<string> | null =>
   Array.isArray(value) ? value.flatMap((line) => (typeof line === 'string' && line !== '' ? [line] : [])) : null
 
+/** What a step result says the task built, as it stood then; null where it didn't say, as a round that changed nothing needn't. */
+export const builtIn = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null)
+
+/** The descriptions a step result gave its pull requests, by the slug of the repository each is for; nothing where it gave none. */
+export const descriptionsIn = (value: unknown): { readonly descriptions?: Readonly<Record<string, string>> } => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const given = Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim() !== '')
+  return given.length === 0 ? {} : { descriptions: Object.fromEntries(given) }
+}
+
+/** What the lead is told when it finishes without saying what the task built; or, settling, when its round changed the work. */
+export const builtAsk = (changed: boolean) =>
+  `${changed ? 'Settling changed the work, so say again' : 'Say'} what the task has built, as it stands now, in \`built\`: what it does for the person now, the main changes and where they are, anything left open or decided along the way, and what they should do next. A few lines or a short list, about where it ended, not how it got there. Then call finish_step again.`
+
 /**
- * What a task's lead showed across its steps, in order, and what it last said
- * it couldn't show: a step that says nothing of it leaves the last list
- * standing, and one that says none clears it.
+ * A task's finished view, from its lead's steps: what it last said the task
+ * built, which a step that changed the work says again (finish_step refuses
+ * it otherwise), so it is never older than the work; what it showed across
+ * its steps, in order; and what it last said it couldn't show: a step that
+ * says nothing of it leaves the last list standing, and one that says none
+ * clears it.
  */
-export const taskShown = (threadId: string) =>
+export const taskShown = (threadId: string, since: string | null = null) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    // Since a time, where only what came after counts: a task's next pull request is described from its own work (ADR-034).
     const rows = yield* sql<{ content: string }>`
       SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
-        AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence`
+        AND json_extract(content, '$.step') IN ('implement', 'settle') AND (${since} IS NULL OR created_at > ${since})
+      ORDER BY sequence`
     const reported = rows.map((row) => recordIn(JSON.parse(row.content)))
     return {
+      built: reported.map((report) => builtIn(report.built)).findLast((said) => said !== null) ?? null,
       evidence: reported.flatMap((report) => evidenceOf(report.evidence)),
       unverified: reported.map((report) => unverifiedIn(report.unverified)).findLast((list) => list !== null) ?? [],
     }

@@ -4,22 +4,38 @@
   color: var(--t-3);
 }
 
-/* the agents' module, before they have answered: a line in the middle of it */
-.waiting {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  color: var(--t-3);
-  text-align: center;
-}
-
-.coAuthor {
-  padding: 16px 18px 14px;
-}
-
 .failed {
   margin: 0;
   font-size: 12.5px;
   color: var(--danger);
+}
+
+/* ---- the quick settings, from the window's bar ---- */
+.quick {
+  display: grid;
+  gap: 10px;
+}
+
+/* the agents: their tabs over the chosen one's sheet */
+.agents {
+  display: grid;
+  gap: 12px;
+}
+
+/* what a row holds under its name, as wide as the row */
+.under {
+  display: grid;
+  gap: 12px;
+}
+
+.coAuthor {
+  padding-top: 4px;
+}
+
+.about {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 0;
 }

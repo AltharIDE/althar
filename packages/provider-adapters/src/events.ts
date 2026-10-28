@@ -1,8 +1,11 @@
+import { createHash } from 'node:crypto'
+
 import type * as acp from '@agentclientprotocol/sdk'
 import type { ToolKind } from '@althar/domain'
 
 import type { BackgroundEvent } from './background'
 import type { Classified } from './failures'
+import { claudeRateLimitWindow, record, type UsageWindow } from './usage'
 
 /*
  * What an agent's updates become inside Althar. The runtime turns these
@@ -69,12 +72,13 @@ export type Handed =
  * What a tool call holds, as its content says: words (a result, or a
  * command's output where the agent has no other way to send it), what it
  * hands back, a file it changes, or the terminal its command runs in. A
- * diff keeps its path, and whether the file is new, not its text.
+ * diff keeps its path, and whether the file is new, not its text: what it
+ * changes is only a digest (`changeOf`), to tell one edit from another.
  */
 export type ToolContent =
   | { readonly _tag: 'Text'; readonly text: string }
   | Handed
-  | { readonly _tag: 'Diff'; readonly path: string; readonly created: boolean }
+  | { readonly _tag: 'Diff'; readonly path: string; readonly created: boolean; readonly change: string }
   | { readonly _tag: 'Terminal'; readonly terminalId: string }
 
 /**
@@ -101,6 +105,8 @@ export type SessionEvent =
       readonly kind: ToolKind
       readonly status: ToolCallStatus
       readonly rawInput?: unknown
+      /** What came back, where the call arrives already ended. */
+      readonly rawOutput?: unknown
       /** The files it touches, when it says. */
       readonly locations?: ReadonlyArray<ToolLocation>
       readonly content?: ReadonlyArray<ToolContent>
@@ -125,7 +131,11 @@ export type SessionEvent =
       readonly used: number
       readonly size: number
       readonly cost?: { readonly amount: number; readonly currency: string }
+      /** Claude Code's adapter sends a plan window with the usage it streams (`usage.ts`): one per event. */
+      readonly planWindow?: UsageWindow
     }
+  /** A plan window with no context figure to go with it (`usage_update` below): the context is as it was. */
+  | { readonly _tag: 'PlanWindow'; readonly window: UsageWindow }
   | { readonly _tag: 'OptionsChanged'; readonly options: ReadonlyArray<ConfigOption> }
   /** The mode changed. `byAgent` when Althar didn't ask for it, such as a plan session leaving plan mode. */
   | { readonly _tag: 'ModeChanged'; readonly modeId: string; readonly byAgent: boolean }
@@ -214,6 +224,18 @@ export const handedOf = (content: acp.ContentBlock): Handed | undefined => {
   }
 }
 
+/**
+ * What a diff changes, as a digest: the same text before and after gives the
+ * same digest, and nothing of the text can be read back from it. Claude
+ * Code's adapter leaves an edit's text out of its input for a client that
+ * asks as Althar does, so the diff is all that tells two edits to a file apart.
+ */
+export const changeOf = (oldText: string | null | undefined, newText: string) =>
+  createHash('sha256')
+    .update(JSON.stringify([oldText ?? null, newText]))
+    .digest('hex')
+    .slice(0, 16)
+
 const toolContentOf = (content: ReadonlyArray<acp.ToolCallContent> | null | undefined): ReadonlyArray<ToolContent> | undefined =>
   content === null || content === undefined
     ? undefined
@@ -226,7 +248,14 @@ const toolContentOf = (content: ReadonlyArray<acp.ToolCallContent> | null | unde
             return handed === undefined ? [] : [handed]
           }
           case 'diff':
-            return [{ _tag: 'Diff', path: entry.path, created: entry.oldText === null || entry.oldText === undefined }]
+            return [
+              {
+                _tag: 'Diff',
+                path: entry.path,
+                created: entry.oldText === null || entry.oldText === undefined,
+                change: changeOf(entry.oldText, entry.newText),
+              },
+            ]
           case 'terminal':
             return [{ _tag: 'Terminal', terminalId: entry.terminalId }]
         }
@@ -316,6 +345,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         kind: asToolKind(update.kind),
         status: update.status ?? 'pending',
         ...defined('rawInput', update.rawInput),
+        ...defined('rawOutput', update.rawOutput),
         ...defined('locations', locationsOf(update.locations)),
         ...defined('content', toolContentOf(update.content)),
         ...defined('terminal', terminalOf(update._meta)),
@@ -334,7 +364,10 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
       }
     case 'plan':
       return { _tag: 'Plan', entries: update.entries.map((entry) => ({ content: entry.content, status: entry.status })) }
-    case 'usage_update':
+    case 'usage_update': {
+      const planWindow = claudeRateLimitWindow(record(update._meta)?.['_claude/rateLimit']) ?? undefined
+      // Althar's patch of Claude Code's adapter sends a rate limit before the session has a context figure, with 0 for it: a context is never empty once the agent has asked its model, so that 0 is no figure, and the meter and the handover check keep theirs.
+      if (planWindow !== undefined && update.used === 0) return { _tag: 'PlanWindow', window: planWindow }
       return {
         _tag: 'ContextUsage',
         used: update.used,
@@ -343,7 +376,9 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
           'cost',
           update.cost === null || update.cost === undefined ? undefined : { amount: update.cost.amount, currency: update.cost.currency },
         ),
+        ...defined('planWindow', planWindow),
       }
+    }
     case 'config_option_update':
       return { _tag: 'OptionsChanged', options: normalizeOptions(update.configOptions) }
     case 'current_mode_update':

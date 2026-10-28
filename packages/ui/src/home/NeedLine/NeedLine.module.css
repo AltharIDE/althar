@@ -71,9 +71,10 @@
   text-decoration-color: var(--line-3);
   text-underline-offset: 3px;
 }
+/* inside the title, which cuts what runs past it: the ring is drawn within, or it would be cut too */
 .open:focus-visible {
   outline: 1.5px solid var(--signal);
-  outline-offset: 2px;
+  outline-offset: -1.5px;
   border-radius: 3px;
 }
 .brief {
@@ -83,6 +84,9 @@
   color: var(--t-3);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.glance {
+  min-width: 0;
 }
 .command {
   font-size: 11.5px;
@@ -127,8 +131,8 @@
   color: var(--t-3);
 }
 .line:focus-visible {
-  outline: 2px solid var(--signal);
-  outline-offset: -2px;
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
   border-radius: 8px;
 }
 .line:focus:not(:focus-visible) {
@@ -183,6 +187,13 @@
   .brief {
     grid-area: brief;
     font-size: 11.5px;
+  }
+  .glance {
+    grid-area: brief;
+    overflow: hidden;
+  }
+  .glance .brief {
+    grid-area: auto;
   }
   .kind,
   .whose {

@@ -1,7 +1,7 @@
 import { type QueryClient, useQuery } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { BoardSnapshot } from '@althar/contracts'
+import type { BoardSnapshot, BoardTask } from '@althar/contracts'
 
 import { type Client, messageOf } from '../../data/client'
 import { reads } from '../../data/reads'
@@ -17,25 +17,108 @@ import { type WorkActions, useWorkActions } from './useWorkActions'
  * lead with a note.
  */
 
+/**
+ * Which of a task's heads the board stands at: its card and the calls it
+ * waits on, as the board read them. A change elsewhere on the board leaves
+ * it, so its head isn't read again; one to the task moves it.
+ */
+export const headVersion = (board: BoardSnapshot, task: BoardTask) => {
+  const said = JSON.stringify([task, board.calls.filter((call) => call.taskId === task.taskId)])
+  let hash = 0x811c9dc5
+  for (let i = 0; i < said.length; i++) hash = Math.imul(hash ^ said.charCodeAt(i), 0x01000193)
+  return (hash >>> 0).toString(36)
+}
+
 /** Reads ahead the head of every ready task with a pull request, as the board stands, so its dock opens with its files. */
 export const readHeadsAhead = (client: Client, cache: QueryClient, board: BoardSnapshot | null) => {
   for (const task of board?.tasks ?? [])
-    if (task.phase === 'ready' && task.change !== null) void cache.prefetchQuery(reads(client).head(task.threadId, board?.cursor ?? 0))
+    if (board !== null && task.phase === 'ready' && task.change !== null)
+      void cache.prefetchQuery(reads(client).head(task.threadId, headVersion(board, task)))
 }
 
 export interface BoardModel extends WorkActions {
+  /** The board as read, with the older settled tasks the person asked for added to its tasks. */
   readonly board: BoardSnapshot | null
+  /** Whether settled tasks remain that the board hasn't loaded. */
+  readonly moreSettled: boolean
+  /** Loads the next page of settled tasks, older than the oldest it shows. */
+  readonly showOlder: () => void
+  /** Why the last page of older tasks didn't load. */
+  readonly olderError: string | null
+  /** Putting the project's line in the person's order. */
+  readonly line: LineActions
 }
+
+/** What the person does to the line of tasks waiting for a free agent, and why the last of it failed. */
+export interface LineActions {
+  /** Puts a task at a place in the line, from 0: it fails where the runtime refused it. */
+  readonly move: (taskId: string, to: number) => Promise<void>
+  readonly oldestFirst: () => void
+  readonly failed: string | null
+}
+
+/** Settled tasks, most recent first. */
+const recentFirst = (a: BoardTask, b: BoardTask) => (b.settledAt ?? '').localeCompare(a.settledAt ?? '') || b.taskId.localeCompare(a.taskId)
 
 export const useBoard = (projectId: string): BoardModel => {
   const { client, cache } = useServices()
   const actions = useWorkActions()
   const read = useQuery(reads(client).board(projectId))
-  const board = read.data ?? null
+  // Every settled task this project's board has shown, by id: settled work doesn't change, so what was shown stays as the snapshot moves on.
+  const kept = useRef<{ projectId: string; tasks: Map<string, BoardTask> }>({ projectId, tasks: new Map() })
+  const [loaded, setLoaded] = useState(0)
+  const loading = useRef(false)
+  const [olderError, setOlderError] = useState<string | null>(null)
+  const [lineFailed, setLineFailed] = useState<string | null>(null)
+  const lined = (go: () => Promise<void>) => {
+    setLineFailed(null)
+    return go().catch((error: unknown) => {
+      setLineFailed(messageOf(error))
+      throw error
+    })
+  }
+  const snapshot = read.data ?? null
+  const board = useMemo(() => {
+    if (snapshot === null) return null
+    if (kept.current.projectId !== projectId) kept.current = { projectId, tasks: new Map() }
+    const have = new Set(snapshot.tasks.map((task) => task.taskId))
+    for (const task of snapshot.tasks) if (task.phase === 'settled') kept.current.tasks.set(task.taskId, task)
+    // A task the snapshot has again (reopened) is its own.
+    const more = [...kept.current.tasks.values()].filter((task) => !have.has(task.taskId))
+    return more.length === 0 ? snapshot : { ...snapshot, tasks: [...snapshot.tasks, ...more] }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- `loaded` says pages were added to `kept`
+  }, [snapshot, projectId, loaded])
+  const settled = board?.tasks.filter((task) => task.phase === 'settled').toSorted(recentFirst) ?? []
+  const oldest = settled.at(-1)
+  const showOlder = () => {
+    if (oldest?.settledAt == null || loading.current) return
+    loading.current = true
+    setOlderError(null)
+    client.getOlderSettled(projectId, oldest.settledAt, oldest.taskId).then(
+      (page) => {
+        loading.current = false
+        if (kept.current.projectId !== projectId) return
+        for (const task of page) kept.current.tasks.set(task.taskId, task)
+        setLoaded((n) => n + 1)
+      },
+      (error: unknown) => {
+        loading.current = false
+        setOlderError(messageOf(error))
+      },
+    )
+  }
   useEffect(() => readHeadsAhead(client, cache, board), [client, cache, board])
   return {
     ...actions,
     board,
+    moreSettled: board !== null && settled.length < board.settledTotal,
+    showOlder,
+    olderError,
+    line: {
+      move: (taskId, to) => lined(() => client.moveInLine(taskId, to)),
+      oldestFirst: () => void lined(() => client.lineOldestFirst(projectId)).catch(() => undefined),
+      failed: lineFailed,
+    },
     error: actions.error ?? (read.error === null ? null : messageOf(read.error)),
   }
 }

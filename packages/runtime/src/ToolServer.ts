@@ -34,14 +34,33 @@ export type ToolRole = 'coordinator' | 'lead' | 'reviewer'
 /** A tool's answer when it can't do what was asked: told to the agent, which can try again. */
 export class ToolRefused extends Schema.TaggedError<ToolRefused>()('ToolRefused', { message: Schema.String }) {}
 
+/** A tool's answer with a picture beside its words, as a screenshot's: the picture as base64, and its type. */
+export interface ToolPicture {
+  readonly text: string
+  readonly image: { readonly data: string; readonly mimeType: string }
+}
+
 export interface Tool {
   readonly name: string
   readonly description: string
   /** The input, as JSON Schema. */
   readonly input: Readonly<Record<string, unknown>>
-  /** Runs the tool; the text the agent reads back. */
-  readonly call: (input: unknown, access: ToolAccess) => Effect.Effect<string, ToolRefused>
+  /** Runs the tool; the text the agent reads back, or that with a picture. */
+  readonly call: (input: unknown, access: ToolAccess) => Effect.Effect<string | ToolPicture, ToolRefused>
+  /**
+   * Given to the lead of a review of someone else's pull request too: it only
+   * reads, or drafts that review. A review's lead is refused every other tool
+   * (Reviews.ts guards the lead's), whatever is added later.
+   */
+  readonly inReview?: boolean
 }
+
+/**
+ * Why a session may not call a tool, or null where it may, asked before
+ * every call and every listing of its role's tools. The services that know
+ * what a session works on add these; one that can't tell refuses.
+ */
+export type ToolGuard = (tool: Tool, access: ToolAccess) => Effect.Effect<string | null>
 
 export class ToolServer extends Context.Service<
   ToolServer,
@@ -50,6 +69,8 @@ export class ToolServer extends Context.Service<
     grant(access: ToolAccess): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> }>
     /** Adds tools to a role, replacing any of the same name. Each service that owns tools adds them once it is built. */
     serve(role: ToolRole, tools: ReadonlyArray<Tool>): Effect.Effect<void>
+    /** Adds a guard to a role's tools: a tool it refuses isn't listed to that session, and is refused if called. */
+    guard(role: ToolRole, check: ToolGuard): Effect.Effect<void>
   }
 >()('@althar/runtime/ToolServer') {
   static readonly layer: Layer.Layer<ToolServer> = Layer.effect(
@@ -57,6 +78,7 @@ export class ToolServer extends Context.Service<
     Effect.gen(function* () {
       const grants = new Map<string, ToolAccess>()
       const roles = new Map<ToolRole, ReadonlyArray<Tool>>()
+      const guards = new Map<ToolRole, ReadonlyArray<ToolGuard>>()
 
       const respond = async (req: IncomingMessage, res: ServerResponse) => {
         const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1]
@@ -67,15 +89,44 @@ export class ToolServer extends Context.Service<
         }
         const tools = roles.get(access.role) ?? []
         const server = new Server({ name: 'althar', version: '1.0.0' }, { capabilities: { tools: {} } })
-        server.setRequestHandler(ListToolsRequestSchema, async () => ({
-          tools: tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.input as { type: 'object' } })),
-        }))
+        // Why this session may not call a tool, by its role's guards; null where it may.
+        const refusal = (tool: Tool) =>
+          Effect.runPromise(
+            Effect.gen(function* () {
+              for (const check of guards.get(access.role) ?? []) {
+                const why = yield* check(tool, access)
+                if (why !== null) return why
+              }
+              return null
+            }),
+          )
+        server.setRequestHandler(ListToolsRequestSchema, async () => {
+          const allowed: Array<Tool> = []
+          for (const tool of tools) if ((await refusal(tool)) === null) allowed.push(tool)
+          return {
+            tools: allowed.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.input as { type: 'object' },
+            })),
+          }
+        })
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const tool = tools.find((candidate) => candidate.name === request.params.name)
           if (tool === undefined)
             return { isError: true, content: [{ type: 'text' as const, text: `Althar has no tool called ${request.params.name}.` }] }
+          const guarded = await refusal(tool)
+          if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: guarded }] }
           const exit = await Effect.runPromiseExit(tool.call(request.params.arguments ?? {}, access))
-          if (Exit.isSuccess(exit)) return { content: [{ type: 'text' as const, text: exit.value }] }
+          if (Exit.isSuccess(exit))
+            return typeof exit.value === 'string'
+              ? { content: [{ type: 'text' as const, text: exit.value }] }
+              : {
+                  content: [
+                    { type: 'text' as const, text: exit.value.text },
+                    { type: 'image' as const, data: exit.value.image.data, mimeType: exit.value.image.mimeType },
+                  ],
+                }
           const refused = exit.cause.reasons.find((reason) => reason._tag === 'Fail')
           const text =
             refused !== undefined && refused._tag === 'Fail' && refused.error instanceof ToolRefused
@@ -99,7 +150,14 @@ export class ToolServer extends Context.Service<
       yield* Effect.callback<void>((resume) => {
         http.listen(0, '127.0.0.1', () => resume(Effect.void))
       })
-      yield* Effect.addFinalizer(() => Effect.callback<void>((resume) => void http.close(() => resume(Effect.void))))
+      // By now every session has stopped, so a connection still open is one an agent kept alive for its next call, which
+      // would hold quitting up until it timed out (five seconds): it is cut, as the agents' own ends were.
+      yield* Effect.addFinalizer(() =>
+        Effect.callback<void>((resume) => {
+          http.close(() => resume(Effect.void))
+          http.closeAllConnections()
+        }),
+      )
       const url = `http://127.0.0.1:${(http.address() as AddressInfo).port}/mcp`
 
       return ToolServer.of({
@@ -116,6 +174,10 @@ export class ToolServer extends Context.Service<
           Effect.sync(() => {
             const kept = (roles.get(role) ?? []).filter((tool) => !tools.some((added) => added.name === tool.name))
             roles.set(role, [...kept, ...tools])
+          }),
+        guard: (role, check) =>
+          Effect.sync(() => {
+            guards.set(role, [...(guards.get(role) ?? []), check])
           }),
       })
     }),

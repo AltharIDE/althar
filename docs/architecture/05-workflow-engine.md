@@ -200,7 +200,8 @@ stateDiagram-v2
     abandoned --> open: reopened
     abandoned --> draft: reopened, its plan never started
     abandoned --> done: its pull requests merged on the host after all
-    done --> [*]
+    done --> open: its lead goes back to work on it
+    open --> done: a round of work made nothing new, or its next pull request merged
 ```
 
 ```mermaid
@@ -254,15 +255,87 @@ stateDiagram-v2
   deleted or closed on the host. A pull request it opened stays open there,
   and should every one merge there after all, the task is done.
 - **Reopen** applies only to an abandoned task, never to a merged one: a task
-  is `done` once every repository is merged, for good, abandoned or not. It opens the task
+  is `done` once every repository is merged, and nothing after its pull
+  requests is left out of them, abandoned or not. A merged task opens again
+  only as its lead goes back to work on it, below. Reopen opens the task
   again, on the same worktree and branch, without replaying the plan: a
   worktree whose folder went is put back from its branch first (and with the
-  branch gone too, it can't be reopened). Where its run was cut short, the
+  branch gone too, it can't be reopened); a plain task's that never had a
+  branch is put back with none, where it started. Where its run was cut short, the
   run is still suspended, so it resumes like a stopped one; a run that had
   passed is ready again; a task abandoned before its plan started is a
   draft again, its plan proposed anew and held. Nothing starts on its own.
   While a task is abandoned no agent starts on it; writing to it reopens it
   first, refused as Reopen is, and what was written is the lead's first word.
+- **Abandon, on a merged task**, leaves out the commits after its last pull
+  request that are in none yet, which put it in Needs you, while no round
+  of work or agent's turn may add to them: `actionsOf` offers `leaveOut` in
+  place of `abandon` for a `done` task, and for an open one merged in
+  every repository, as settling it asks (a repository with no pull request
+  merged where its branch is in its default branch)
+  ([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+  The menu says Abandon for both, and the dialog that it stays merged.
+  Where each worktree is is kept in a ref of Althar's, and only what is
+  committed after counts again; the task settles as a merge does, `done`,
+  at the time it first settled where it had one. The commits stay on its
+  branch, in its worktree. Commits the default branch has already, merged
+  in or cherry-picked under another hash, never count.
+
+### Rounds of work after the plan
+
+A task is a conversation that outlives its plan
+([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+When a turn of its lead delivers the person's own words and its latest run is
+over, Althar opens a **round**: a run with no plan, whose steps and ending
+are the plan's run's, its Implement step under way on the lead's session as
+the turn begins; a merged task is open again for it. Althar's own messages to
+the lead (what its pull request heard, a conflict to resolve) open none. A
+round ends as any of the lead's steps does, with `finish_step`, its review
+where the plan has one (the person can skip it from the menu); with nothing
+new, when the lead finishes or its turn ends, it closes and the task is back
+where it was, a merged one done at the time it first settled. A round never
+publishes by itself (but for the one a quick task is made a change in,
+below): what it commits goes to the task's open pull request when the person
+pushes it, or, once the last merged or closed, into a **new pull request**
+the person opens from the task, on a new branch from the default branch as
+the host has it, its new commits cherry-picked onto it, never forced. A
+quick task's round offers none. Between turns a round takes no place among the agents at work
+([ADR-032](../decisions/032-agents-at-once-on-this-machine.md)). Whenever an
+agent on a task is in a turn, starting, or waiting for a place, its card says
+Running, whatever the task was.
+
+### A quick task's first write, and making it a change
+
+A task the coordinator starts with `start_task` is a quick task: its plan
+stays on this Mac (`here`) and ends in nothing, and its worktree has no
+branch, detached where it started
+([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)).
+Whenever its lead's turn ends, or its session goes, and when it calls
+`finish_step`, Althar looks at what it has: new commits, or changes not
+committed that aren't evidence it handed (its scratch folder git ignores).
+With either, it makes the task's branch there (`git switch -c` in each of its
+worktrees, the first free of the planned name), so commits made with no
+branch and changes not committed are on it; under the task's lock, one at a
+time with publishing it. It records `workspace.branched` (`from: null`),
+says so in the thread, and reads the task's card and search row again.
+Nothing else changes: the step, the lead's session and its folder are the
+same, the task is still plain, and its run ends without publishing anything,
+nor offering to, as does a follow-up round of it. With no branch, its lead's
+report needs only its summary.
+
+It becomes a change only when the person asks its lead to make it one, and
+the lead calls `make_it_a_change`: a title, a reviewer, and a draft pull
+request or one ready for review. Its branch is made then where it has none.
+In one transaction the task is renamed, and its plan, the run of its plan
+(which a later round copies) and the run under way take the review and the
+ending and no longer stay here, with a patch to the run's graph; its thread
+and the coordinator's news say so. A round under way then publishes when it
+is done, as its plan's run would (`publishes`), its start moved back to where
+the task's worktrees started, so all the quick task's work is the round's,
+reviewed whole and in the pull request. Where the last run had ended and no
+round is under way, one opens on the lead's session with that ending. The
+lead's next `finish_step` goes through the review, and the run publishes as
+any change does.
 
 ## Dynamic graph evolution
 
@@ -350,14 +423,28 @@ every running turn instead, every 30 seconds.
 - **Going round in circles.** The same tool call to the same end, three times
   failing or four however it went, or two calls taking turns, gets the agent
   told to try another way; doing it again, the person is asked. A call is the
-  same as another by its command or its whole input, never by its title: an
-  agent titles every edit to a file alike.
+  same as another by its command, or by its whole input and what its diffs
+  change, never by its title: an agent titles every edit to a file alike, and
+  Claude Code leaves an edit's text out of its input for Althar, so only the
+  diff tells two edits apart. A diff's change is kept as a digest, not its text.
 - **A budget.** A step's agents may work 6 hours, or take 40 turns, since the
   person last said anything on the thread or the step began. Past that, the
   person is asked whether it carries on.
 - **The agent's own limits.** A turn cut off at the agent's output or step
   limit carries on where it was, a few times, before the step is reminded to
   report. A refusal goes to the person at once.
+- **A turn that did nothing.** A turn that ended having used no tokens and
+  said nothing never reached the agent's model: Claude Code's turns end so
+  while another of its processes renews the sign-in they share, as an agent
+  started when Althar starts, after a gap longer than the sign-in lasts, may
+  find. That is no step left unreported: a minute later, unless another turn
+  came or waits meanwhile, the agent is told to carry on, up to three such
+  turns in a row, before it counts as stalled and the person is asked. A
+  quick task's round, which may only have been asked something, is told to
+  carry on with what it was last asked, and no report is asked for (ADR-034).
+  Carrying on assumes the agent keeps what it was given in the turns that did
+  nothing, as Claude Code keeps them in its transcript, and reads them with
+  the next; it isn't given them again.
 
 On a step, asking the person is a call with what Althar tried; elsewhere, such
 as the coordinator's thread, the thread says why. An agent that stalled even
@@ -540,13 +627,37 @@ so it pauses every node running on that account at once: the lead, any steps,
 and their sub-agents. The agent's other accounts carry on. How Althar
 detects a limit is in [03](03-agent-runtime-and-auth.md), Usage limits.
 
+**Before a limit is reached, new work steers by the plans' windows** as last
+read ([03](03-agent-runtime-and-auth.md), Usage limits). Work starts on the
+account with the most room where the project rotates through an agent's
+accounts, room for the model it runs where that model has a window of its own
+(Opus's week), and a conversation keeps its account unless it is nearly out
+(under 5% of its tightest window): a session kept for a new step, as the lead
+for its fixes or the reviewer for a later round, goes on on another of its
+agent's accounts that has room. A new step whose agent is nearly out on
+every account it could run on goes by the project's rule as if it were out,
+the lead's fixes after a review and a review that waited for a place
+included: moved
+to an agent with room (or, with none, started on what is left), held until
+the reset, or asked about, with the agent itself among the ways on; the
+thread says why ("Codex has 3% of its five-hour limit left, until 14:00, so
+Claude Code takes the review instead, on Sonnet 5.5"). A step already running
+is never stopped for it. The coordinator's `list_models` says each model's
+room, so it plans with it.
+
 Under the default project rule, the paused work moves on, in this order:
 1. the same agent's next account that the project allows;
 2. the next free agent.
 
 Either way the new session takes the work over from a brief in the same
 workspace (03, Switching model or agent), and the thread shows one line per
-move. Under the wait rule the work is held until the reset. Under the ask
+move. Under the wait rule, or where nothing else was free to move it to, the
+work is held until the reset, and the thread says which it was. A held step
+keeps who could take it over, so the task offers them while it waits, without
+asking: the person can move it to one (as answering the call below would; a
+lead's step waits its turn for a place among the agents at work, as work
+under way), keep waiting, or skip a review. Moving it ends the hold, so the
+reset brings nothing back. Under the ask
 rule, or when the agent didn't say when it resets, the work needs the person:
 an attention request names whose limit it is, when it resets, and each
 account that could take the work over, with the model it would run. The

@@ -1,6 +1,7 @@
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { Outcome, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
+import { Button } from '../../primitives/Button/Button'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
 import s from './SettledRow.module.css'
@@ -8,7 +9,9 @@ import s from './SettledRow.module.css'
 /*
  * Settled work is a ledger, not a pile of cards: what each piece of work
  * came to, and when. Merged is green, as merges are; the rest is ink, and
- * what was abandoned is quieter.
+ * what was abandoned is quieter. What it left to put right, such as a pull
+ * request still open on its host, is one quiet button under it, above the
+ * row's own; what went wrong pressing it is said under that.
  */
 
 const glyph = (outcome: Outcome): IconName => {
@@ -57,17 +60,21 @@ export interface SettledRowProps {
   at: string
   current?: boolean
   onOpen?: () => void
+  /** What it left to put right, as one button: Close PR #145. */
+  action?: { readonly label: string; readonly onAction: () => void; readonly busy?: boolean }
+  /** What went wrong doing it, in words. */
+  error?: string
   text?: Partial<SettledRowText>
 }
 
 /** One row of the settled ledger. Put it in a BoardList. */
-export function SettledRow({ outcome, task, kind, title, meta, at, current, onOpen, text }: SettledRowProps) {
+export function SettledRow({ outcome, task, kind, title, meta, at, current, onOpen, action, error, text }: SettledRowProps) {
   const t = { ...settledRowText, ...text }
   return (
     <article className={cx(b.row, s[outcome])} aria-current={current || undefined}>
       <div className={b.top}>
         <span className={s.outcome}>
-          <Icon name={glyph(outcome)} size={12} />
+          <Icon name={glyph(outcome)} size={11} />
           {t.outcome[outcome]}
         </span>
         <span className={b.ref}>{t.task(task)}</span>
@@ -80,6 +87,18 @@ export function SettledRow({ outcome, task, kind, title, meta, at, current, onOp
         <p className={s.meta}>
           {kind && <span className={s.kind}>{kind}</span>}
           {meta}
+        </p>
+      )}
+      {action && (
+        <div className={s.action}>
+          <Button variant="quiet" size="small" busy={action.busy ?? false} onClick={action.onAction}>
+            {action.label}
+          </Button>
+        </div>
+      )}
+      {error && (
+        <p className={s.error} role="alert">
+          {error}
         </p>
       )}
     </article>

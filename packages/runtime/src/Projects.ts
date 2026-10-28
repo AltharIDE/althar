@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs'
-import { basename, join, relative } from 'node:path'
+import { basename, join, relative, sep } from 'node:path'
 
 import { inkFor, type ProjectInk } from '@althar/contracts'
 import {
@@ -22,7 +22,9 @@ import { RuntimeConfig } from './Config'
 import { branchFor, conventionsOnBase, ruleOf } from './conventions'
 import { type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
 import { type Fork, forkOf } from './forks'
+import { makeScratch } from './firstWrite'
 import {
+  addDetachedWorktree,
   addWorktree,
   branchExists,
   commitOf,
@@ -35,7 +37,9 @@ import {
   topLevel,
 } from './git'
 import { Instance } from './Instance'
+import { linkTask } from './automated'
 import { change, fact, timestamp } from './records'
+import { indexTask } from './Search'
 import { Setups } from './Setups'
 
 /*
@@ -43,7 +47,8 @@ import { Setups } from './Setups'
  * project: of the repository it is, of a folder inside one (one package of a
  * monorepo, say), or of the repositories directly inside it, as many as the
  * person keeps. A task gets its own thread, and a worktree of its own on a
- * branch of its own (ADR-006).
+ * branch of its own (ADR-006); a plain one, started with no plan, a worktree
+ * with no branch until its lead changes the repository (`firstWrite.ts`).
  *
  * Git runs outside the store's transactions: the facts are read first, and a
  * task's worktree is added after the task is committed, its workspace marked
@@ -68,10 +73,14 @@ export interface Reading {
   readonly project: { readonly id: string; readonly name: string } | null
 }
 
-/** The path as the file system has it, without symbolic links, as git names a repository's root. */
+/**
+ * The path as the file system has it, without symbolic links, as git names a
+ * repository's root: on Windows by the native call, the one that expands a
+ * short name (`RUNNER~1`) to the whole one git gives.
+ */
 const real = (path: string) => {
   try {
-    return realpathSync(path)
+    return process.platform === 'win32' ? realpathSync.native(path) : realpathSync(path)
   } catch {
     return path
   }
@@ -113,7 +122,12 @@ export const readFolder = (opened: string) =>
     if (root !== null)
       return root === path
         ? { kind: 'repository' as const, name: basename(path), repositories: [yield* describe(root, null)] }
-        : { kind: 'inside' as const, name: basename(path), repositories: [yield* describe(root, relative(root, path))] }
+        : // The folder in it, with `/` as git writes it, on Windows too.
+          {
+            kind: 'inside' as const,
+            name: basename(path),
+            repositories: [yield* describe(root, relative(root, path).split(sep).join('/'))],
+          }
     let entries: ReadonlyArray<string> = []
     try {
       entries = readdirSync(path, { withFileTypes: true })
@@ -207,7 +221,7 @@ export const slugify = (name: string, fallback: string) => {
 }
 
 /** The first of `slug`, `slug-2`, `slug-3`… that isn't taken. */
-const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
+export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   if (!taken.includes(slug)) return slug
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }
@@ -218,13 +232,16 @@ const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
  * request doesn't conflict for that reason), falling back to the local branch
  * when origin can't be reached. A branch or folder that already exists, from
  * another project on the same repository or an earlier profile, gets the next
- * free name instead of failing.
+ * free name instead of failing. A plain task's has no branch: it is detached
+ * at that commit, with a scratch folder git ignores, and its branch's name
+ * is kept for when its lead first changes the repository.
  */
 const prepareWorktree = (
   repository: string,
   base: string,
   planned: { readonly worktree: string; readonly branch: string },
   from = 'origin',
+  plain = false,
 ) =>
   Effect.gen(function* () {
     const fetched = yield* fetchBranch(repository, base, from)
@@ -240,12 +257,29 @@ const prepareWorktree = (
       branch = `${planned.branch}-${n}`
       worktree = `${planned.worktree}-${n}`
     }
-    yield* addWorktree(repository, worktree, branch, baseCommit)
-    return { worktree, branch, baseRef, baseCommit, fetched }
+    if (plain) {
+      yield* addDetachedWorktree(repository, worktree, baseCommit)
+      yield* makeScratch(worktree)
+    } else yield* addWorktree(repository, worktree, branch, baseCommit)
+    return { worktree, branch, baseRef, baseCommit, fetched, ...(plain ? { plain } : {}) }
   })
 
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | RuntimeConfig | Setups
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
+
+/** A repository's own way to run, last in its project's list of what it runs (ADR-044), as the repository is bound. */
+const ownRunnable = (projectId: string, bindingId: string, createdAt: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [last] = yield* sql<{ position: number | null }>`SELECT max(position) AS position FROM runnables WHERE project_id = ${projectId}`
+    yield* sql`INSERT INTO runnables ${sql.insert({
+      id: yield* newId(Ids.runnable),
+      projectId,
+      bindingId,
+      position: (last?.position ?? -1) + 1,
+      createdAt,
+    })}`
+  })
 
 export class Projects extends Context.Service<
   Projects,
@@ -289,6 +323,10 @@ export class Projects extends Context.Service<
       readonly repositories?: ReadonlyArray<string>
       /** What the person asked for, in their own words: what its thread starts with, so it is never lost behind the title. */
       readonly request?: string
+      /** A plain task's, started with no plan: its worktrees have no branch until its lead changes the repository. */
+      readonly plain?: boolean
+      /** The automation's occurrence it is the run of, named in the transaction that makes it, so a restart never makes a second. */
+      readonly occurrence?: string
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | GitFailed | Failure>
     /** A project's repositories, as this device has them: each one's branch, remote, role, and the fork it is. */
     repositories(projectId: string): Effect.Effect<ReadonlyArray<ProjectRepository>, NotFound | Failure>
@@ -296,6 +334,19 @@ export class Projects extends Context.Service<
     rename(projectId: string, name: string, commandId?: CommandId): Effect.Effect<void, NotFound | ProjectRefused | Failure>
     /** Draws a project's mark in another ink, as the person picked. Another project may have the same one. */
     setInk(projectId: string, ink: ProjectInk, commandId?: CommandId): Effect.Effect<void, NotFound | Failure>
+    /**
+     * Binds a project to one of the connected trackers, and where its issues
+     * are filed there, or leaves it unbound, null, for where its issues go to
+     * be learned from those it has (ADR-059).
+     */
+    setTracker(
+      projectId: string,
+      tracker: {
+        readonly connectionId: string
+        readonly container: { readonly id: string; readonly name: string } | null
+      } | null,
+      commandId?: CommandId,
+    ): Effect.Effect<void, NotFound | Failure>
     /**
      * Adds the repositories at a folder to a project, as opening it would find
      * them: the repository it is or is in, whole, or those directly inside it.
@@ -471,6 +522,7 @@ export class Projects extends Context.Service<
                   verifiedAt: createdAt,
                   createdAt,
                 })}`
+                yield* ownRunnable(projectId, bindingId, createdAt)
               }
               const coordinatorThreadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: coordinatorThreadId, projectId, kind: 'coordinator', ownerActorId: instance.personId, createdAt })}`
@@ -517,11 +569,14 @@ export class Projects extends Context.Service<
         readonly issueKey?: string
         readonly repositories?: ReadonlyArray<string>
         readonly request?: string
+        readonly plain?: boolean
+        readonly occurrence?: string
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const commands = yield* Commands
           const { envelope } = input
+          const plain = input.plain === true
           const bindings = yield* sql<{
             projectId: ProjectId
             projectSlug: string
@@ -611,6 +666,8 @@ export class Projects extends Context.Service<
                   branch,
                   state: 'preparing',
                   createdAt,
+                  // A plain task's has its branch only once its lead changes the repository; any other's as it is made.
+                  ...(plain ? {} : { branchedAt: createdAt }),
                 })}`
                 workspaces.push({ id: workspaceId, worktree, branch })
               }
@@ -624,6 +681,8 @@ export class Projects extends Context.Service<
                 actorId: envelope.actorId,
                 commandId: envelope.commandId,
               })
+              yield* indexTask(taskId)
+              if (input.occurrence !== undefined) yield* linkTask(input.occurrence, taskId, envelope.actorId)
               // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
               if (input.draft !== true) yield* postCard(first.projectId, taskId)
               const [made] = workspaces
@@ -646,7 +705,9 @@ export class Projects extends Context.Service<
             // Named as the repository's docs say, where the person has no rule: read now, from where the task starts.
             const docs = rule === null ? (yield* conventionsOnBase(binding.repository, base, remote)).branch : null
             const branch = docs === null ? workspace.branch : branchFor(docs.pattern, { key: input.issueKey ?? null, slug: created.slug })
-            const prepared = yield* Effect.exit(prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote))
+            const prepared = yield* Effect.exit(
+              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote, plain),
+            )
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const done = prepared._tag === 'Success'
@@ -677,6 +738,8 @@ export class Projects extends Context.Service<
             if (prepared._tag === 'Failure') return yield* Effect.failCause(prepared.cause)
             ready.push({ worktree: prepared.value.worktree, branch: prepared.value.branch })
           }
+          // Found by the branches it has now: a repository's docs may have named them otherwise.
+          yield* indexTask(created.taskId)
           // Set up now, without waiting, so a draft's worktree is ready by the time its plan starts.
           yield* (yield* Setups).begin(created.taskId)
           const [made] = ready
@@ -813,6 +876,41 @@ export class Projects extends Context.Service<
           )
         })
 
+      const setTracker = (
+        projectId: string,
+        tracker: { readonly connectionId: string; readonly container: { readonly id: string; readonly name: string } | null } | null,
+        commandId?: CommandId,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const project = yield* projectOf(projectId)
+              if (tracker !== null) {
+                const [connection] = yield* sql<{ id: string }>`
+                  SELECT id FROM connections WHERE id = ${tracker.connectionId} AND device_id = ${instance.deviceId} AND state <> 'removed'`
+                if (connection === undefined) return yield* new NotFound({ kind: 'connection', id: tracker.connectionId })
+              }
+              const revision = yield* change('projects', project.id, {
+                trackerConnectionId: tracker?.connectionId ?? null,
+                trackerContainerId: tracker?.container?.id ?? null,
+                trackerContainerName: tracker?.container?.name ?? null,
+              })
+              yield* fact({
+                projectId: project.id,
+                aggregateType: 'project',
+                aggregateId: project.id,
+                revision,
+                type: 'project.tracker_set',
+                payload:
+                  tracker === null ? { tracker: null } : { connectionId: tracker.connectionId, container: tracker.container?.name ?? null },
+                actorId: instance.personId,
+                ...(commandId === undefined ? {} : { commandId }),
+              })
+            }),
+          )
+        })
+
       const addRepositories = (projectId: string, path: string, commandId?: CommandId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -881,6 +979,7 @@ export class Projects extends Context.Service<
                   verifiedAt: createdAt,
                   createdAt,
                 })}`
+                yield* ownRunnable(projectId, bindingId, createdAt)
                 added.push(repository.name)
               }
               if (added.length > 0) yield* changed(projectId, 'project.repositories_added', { repositories: added }, commandId)
@@ -1012,6 +1111,7 @@ export class Projects extends Context.Service<
         repositories: (projectId) => run(repositories(projectId)),
         rename: (projectId, name, commandId) => run(rename(projectId, name, commandId)),
         setInk: (projectId, ink, commandId) => run(setInk(projectId, ink, commandId)),
+        setTracker: (projectId, tracker, commandId) => run(setTracker(projectId, tracker, commandId)),
         addRepositories: (projectId, path, commandId) => run(addRepositories(projectId, real(path), commandId)),
         leaveOut: (projectId, repositoryId, commandId) => run(leaveOut(projectId, repositoryId, commandId)),
         setRepository: (input) => run(setRepository(input)),

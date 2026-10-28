@@ -8,7 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./locations": "./src/locations.ts",
-    "./artifacts": "./src/artifactFiles.ts"
+    "./artifacts": "./src/artifactFiles.ts",
+    "./attachments": "./src/attachments.ts",
+    "./screenshots": "./src/screenshots.ts"
   },
   "scripts": {
     "check": "vp check",
@@ -26,7 +28,8 @@
     "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.31.0",
-    "effect": "4.0.0-rc.118"
+    "effect": "4.0.0-rc.118",
+    "fflate": "0.8.3"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0-rc.118",

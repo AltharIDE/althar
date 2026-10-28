@@ -29,7 +29,11 @@ export interface Http {
   json<A>(schema: Schema.Codec<A, unknown>, method: string, url: string, body?: unknown): Effect.Effect<A, ConnectorFailed>
   /** A JSON GET, answered from the cache when its ETag says nothing changed. */
   cached<A>(schema: Schema.Codec<A, unknown>, url: string): Effect.Effect<A, ConnectorFailed>
-  /** A call whose answer is text, such as a log. */
+  /**
+   * A call whose answer is text, such as a log. A redirect is followed here,
+   * not by `fetch`: the sign-in goes only to the service's own origin, never
+   * to storage elsewhere that a log is sent to.
+   */
   text(url: string): Effect.Effect<string, ConnectorFailed>
   /** A GET whose answer is its headers, such as who Bitbucket Data Center says is signed in. */
   headers(url: string): Effect.Effect<Headers, ConnectorFailed>
@@ -154,9 +158,16 @@ const retryAtOf = (headers: Headers, now: number): string | undefined => {
   return undefined
 }
 
-/** Classifies an answer that isn't a success. */
-export const failureOf = (product: Product, status: number, headers: Headers, body: string, now: number): ConnectorFailed => {
-  const message = messageOf(body, `${status}`)
+/** Classifies an answer that isn't a success; `fallback` is what it says where the answer has no words of its own. */
+export const failureOf = (
+  product: Product,
+  status: number,
+  headers: Headers,
+  body: string,
+  now: number,
+  fallback = `${status}`,
+): ConnectorFailed => {
+  const message = messageOf(body, fallback)
   const limited = status === 429 || (status === 403 && (headers.get('x-ratelimit-remaining') === '0' || headers.has('retry-after')))
   if (limited) {
     const retryAt = retryAtOf(headers, now)
@@ -192,7 +203,7 @@ const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, statu
         ? 'unauthorized'
         : /RATE_?LIMIT/.test(code)
           ? 'rate_limited'
-          : /FORBIDDEN/.test(code)
+          : /FORBIDDEN|INSUFFICIENT_SCOPES/.test(code)
             ? 'forbidden'
             : /NOT_FOUND|ENTITY_NOT_FOUND/.test(code)
               ? 'not_found'
@@ -200,24 +211,74 @@ const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, statu
   return new ConnectorFailed({ product, reason, message: error.message.slice(0, MESSAGE_KEPT) })
 }
 
+/** The statuses that send a call elsewhere, by their `Location`. */
+const REDIRECTS = new Set([301, 302, 303, 307, 308])
+
+/** How many redirects a call follows: GitHub's and Bitbucket's logs take one, to the storage that keeps them. */
+const REDIRECTS_FOLLOWED = 5
+
+/*
+ * How many answers are kept by their ETags, and how much of their text in
+ * all. Some URLs are asked for only a while, such as a commit's checks until
+ * the next push, or comments since a time until there are newer ones: the
+ * answers asked for least lately go first, so those stop being kept once
+ * they aren't asked for, and what is polled now stays.
+ */
+export const ETAGS_KEPT = 500
+export const ETAG_TEXT_KEPT = 16_000_000
+
 export const makeHttp = (options: HttpOptions): Http => {
   const { product } = options
   const timeout = options.timeout ?? Duration.seconds(30)
-  /** Answers by URL, with their ETags. */
+  /** Answers by URL, with their ETags, the one asked for least lately first. */
   const etags = new Map<string, { readonly etag: string; readonly body: string }>()
+  let etagText = 0
+  const forget = (url: string) => {
+    const known = etags.get(url)
+    if (known === undefined) return
+    etags.delete(url)
+    etagText -= known.body.length
+  }
+  const keep = (url: string, answer: { readonly etag: string; readonly body: string }) => {
+    forget(url)
+    // An answer bigger than all that is kept is asked for whole each time.
+    if (answer.body.length > ETAG_TEXT_KEPT) return
+    etags.set(url, answer)
+    etagText += answer.body.length
+    for (const oldest of etags.keys()) {
+      if (etags.size <= ETAGS_KEPT && etagText <= ETAG_TEXT_KEPT) break
+      forget(oldest)
+    }
+  }
 
   const invalid = (detail: string) => new ConnectorFailed({ product, reason: 'invalid_response', message: detail.slice(0, MESSAGE_KEPT) })
 
-  /** One call: its status, headers and body, or why it never got an answer. */
-  const call = (method: string, url: string, init: { readonly body?: unknown; readonly accept?: string; readonly etag?: string }) =>
+  /**
+   * One call: its status, headers and body, or why it never got an answer.
+   * One `elsewhere`, off the service's origin, goes without its sign-in or
+   * its headers; one asked to stay (`manual`) answers a redirect as itself.
+   */
+  const call = (
+    method: string,
+    url: string,
+    init: {
+      readonly body?: unknown
+      readonly accept?: string
+      readonly etag?: string
+      readonly manual?: boolean
+      readonly elsewhere?: boolean
+    },
+  ) =>
     Effect.gen(function* () {
-      const authorization = yield* options.authorization
-      const headers: Record<string, string> = {
-        'user-agent': 'Althar',
-        accept: init.accept ?? 'application/json',
-        ...options.headers,
-        authorization,
-      }
+      const headers: Record<string, string> =
+        init.elsewhere === true
+          ? { 'user-agent': 'Althar', accept: init.accept ?? 'application/json' }
+          : {
+              'user-agent': 'Althar',
+              accept: init.accept ?? 'application/json',
+              ...options.headers,
+              authorization: yield* options.authorization,
+            }
       if (init.body !== undefined) headers['content-type'] = 'application/json'
       if (init.etag !== undefined) headers['if-none-match'] = init.etag
       const response = yield* Effect.tryPromise({
@@ -226,6 +287,7 @@ export const makeHttp = (options: HttpOptions): Http => {
             method,
             headers,
             signal,
+            ...(init.manual === true ? { redirect: 'manual' as const } : {}),
             ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
           }),
         catch: (error) => new ConnectorFailed({ product, reason: 'unreachable', message: String(error).slice(0, MESSAGE_KEPT) }),
@@ -264,17 +326,50 @@ export const makeHttp = (options: HttpOptions): Http => {
       Effect.gen(function* () {
         const known = etags.get(url)
         const answer = yield* call('GET', url, known === undefined ? {} : { etag: known.etag })
-        if (answer.status === 304 && known !== undefined) return yield* decode(schema, known.body)
+        if (answer.status === 304 && known !== undefined) {
+          keep(url, known)
+          return yield* decode(schema, known.body)
+        }
         const ok = yield* success(answer)
         const etag = ok.headers.get('etag')
-        if (etag !== null) etags.set(url, { etag, body: ok.body })
+        if (etag === null) forget(url)
+        else keep(url, { etag, body: ok.body })
         return yield* decode(schema, ok.body)
       }),
     text: (url) =>
-      call('GET', url, { accept: '*/*' }).pipe(
-        Effect.flatMap(success),
-        Effect.map((answer) => answer.body),
-      ),
+      Effect.gen(function* () {
+        // `fetch` would send the sign-in on to wherever it is redirected (Electron's net.fetch does), and the storage a log is
+        // kept in refuses a request signed twice: by its URL and by a token not its own. Each hop is asked here instead.
+        const origin = new URL(url).origin
+        let at = url
+        for (let hop = 0; hop <= REDIRECTS_FOLLOWED; hop++) {
+          const elsewhere = new URL(at).origin !== origin
+          const answer = yield* call('GET', at, { accept: '*/*', manual: true, elsewhere })
+          const location = REDIRECTS.has(answer.status) ? answer.headers.get('location') : null
+          if (location === null) {
+            if (answer.status >= 200 && answer.status < 300) return answer.body
+            const now = yield* Clock.currentTimeMillis
+            if (!elsewhere) return yield* Effect.fail(failureOf(product, answer.status, answer.headers, answer.body, now))
+            // Storage elsewhere says why in its own XML, which isn't words Althar can read: where it was, and its status, are. Its
+            // refusal is of the signed address it was sent to, not of Althar's sign-in, which never went there.
+            const failed = failureOf(
+              product,
+              answer.status,
+              answer.headers,
+              answer.body,
+              now,
+              `${new URL(at).host} answered ${answer.status}`,
+            )
+            return yield* Effect.fail(
+              failed.reason === 'unauthorized' || failed.reason === 'forbidden'
+                ? new ConnectorFailed({ product, reason: 'rejected', status: answer.status, message: failed.message })
+                : failed,
+            )
+          }
+          at = new URL(location, at).toString()
+        }
+        return yield* Effect.fail(invalid(`The service redirected more than ${REDIRECTS_FOLLOWED} times`))
+      }),
     headers: (url) =>
       call('GET', url, {}).pipe(
         Effect.flatMap(success),

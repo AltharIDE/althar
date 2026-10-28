@@ -10,10 +10,11 @@ import {
   type ProviderSessionState,
   transition,
 } from '@althar/domain'
+import { hostOf } from '@althar/contracts'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { answerFor, type PermissionDecision, type PermissionMeanings, type PermissionRequest } from '@althar/provider-adapters'
 import { Cause, Context, Crypto, Deferred, Effect, Fiber, Layer, Schema } from 'effect'
-import { SqlClient } from 'effect/sql'
+import { SqlClient, type SqlError } from 'effect/sql'
 
 import { AlwaysNotOffered, AttentionClosed, NotFound } from './errors'
 import { currentBranch } from './git'
@@ -21,6 +22,8 @@ import { Instance } from './Instance'
 import { Live } from './Live'
 import { PermissionJudge } from './PermissionJudge'
 import { Policies, type Remembered, ruleSetOf } from './Policies'
+import { runRules } from './automated'
+import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import {
   type AllowRule,
@@ -39,6 +42,7 @@ import {
   sayAllowRule,
   type Verdict,
 } from './rules'
+import { type Reach, withEdits, workedOutReach } from './sandboxReach'
 import { addItem } from './threads'
 
 /*
@@ -63,8 +67,23 @@ export interface RequestContext {
   /** The provider session's row id. */
   readonly sessionId: string
   readonly meanings: PermissionMeanings
-  /** A task's lead works under the project rules; a role that only reads, under the reader's rules, which never ask. */
-  readonly rules: { readonly role: 'task'; readonly context: RuleContext } | { readonly role: 'reader' }
+  /**
+   * A task's lead works under the project rules; a role that only reads,
+   * under the reader's rules, which never ask: `offline`, as the lead of a
+   * review of a pull request from outside is, with no fetch allowed either;
+   * `cwd`, the folder a reader works in, which the paths it names are read from;
+   * `trusted`, the coordinator in its own copies (ADR-058), never a review's lead;
+   * `reads`, where a trusted reader's own tools for reading may reach.
+   */
+  readonly rules:
+    | { readonly role: 'task'; readonly context: RuleContext }
+    | {
+        readonly role: 'reader'
+        readonly offline?: boolean
+        readonly cwd?: string
+        readonly trusted?: boolean
+        readonly reads?: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
+      }
 }
 
 interface Waiting {
@@ -156,10 +175,28 @@ export class Permissions extends Context.Service<
       readonly reason?: string
       readonly always?: AlwaysScope
     }): Effect.Effect<void, AttentionClosed | NotFound | AlwaysNotOffered>
+    /**
+     * What a lead's sandbox lets through from the start (`sandboxReach.ts`),
+     * as its session starts: the commands it runs outside it, which still
+     * ask and meet the rules, and the hosts it reaches without asking, only
+     * those the rules would let a network request reach without anyone. A
+     * change to the rules applies from the lead's next session.
+     */
+    upFront(projectId: ProjectId, taskId: string | null, rules: RuleContext): Effect.Effect<Reach, SqlError.SqlError | Schema.SchemaError>
     /** Withdraws every request a session is still waiting on, as when its agent has gone. */
     withdrawAll(sessionId: string): Effect.Effect<void>
     /** Decides again every request of a project still waiting on the person, by its rules as they now are: what they no longer keep for the person is answered. */
     reconsider(projectId: string): Effect.Effect<void>
+    /**
+     * Allows everything on one task, or takes it back (ADR-043), recorded as
+     * the person's: turned on, what its agents wait on is decided again, and
+     * goes ahead, short of what its project never allows.
+     */
+    allowEverything(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly on: boolean
+    }): Effect.Effect<void, NotFound>
   }
 >()('@althar/runtime/Permissions') {
   static readonly layer: Layer.Layer<Permissions, never, Store> = Layer.effect(
@@ -270,14 +307,39 @@ export class Permissions extends Context.Service<
             yield* live.publish({ _tag: 'AttentionClosed', threadId: waiter.context.threadId, attentionId, outcome: 'withdrawn' })
         })
 
-      /** A task's request as the project's rules decide it now, with the context they read it in and the revision they are. */
-      const byRules = (projectId: ProjectId, rules: RuleContext, request: PermissionRequest) =>
+      /**
+       * The rules a task's requests are decided by now, and the revision they
+       * are: its project's, everything allowed where the task itself allows
+       * everything (ADR-043). An automation's run (docs/plans/automations.md)
+       * allows everything where its automation says, and never pushes to the
+       * default branch, which no switch goes past. A change the person makes
+       * applies to the next request.
+       */
+      const rulesNow = (projectId: ProjectId, taskId: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const policy = yield* policies.current(projectId)
+          const project = ruleSetOf(policy.rules)
+          const [task] =
+            taskId === null
+              ? []
+              : yield* sql<{ allowEverything: number; automated: number | null }>`
+                  SELECT k.allow_everything,
+                    (SELECT json_extract(d.parts, '$.allowEverything') FROM automation_occurrences o
+                      JOIN automation_definitions d ON d.automation_id = o.automation_id AND d.number = o.definition
+                      WHERE o.task_id = k.id LIMIT 1) AS automated
+                  FROM tasks k WHERE k.id = ${taskId}`
+          if (task !== undefined && task.automated !== null)
+            return { policy, project: runRules(project, task.automated === 1 || task.allowEverything === 1) }
+          return { policy, project: task?.allowEverything === 1 ? { ...project, mode: 'allow' as const } : project }
+        })
+
+      /** A task's request as the rules decide it now, with the context they read it in and the revision they are. */
+      const byRules = (projectId: ProjectId, taskId: string | null, rules: RuleContext, request: PermissionRequest) =>
         Effect.gen(function* () {
           // Where a push without a destination goes depends on the branch checked out now.
           const current = request.kind === 'execute' || request.kind === 'other' ? yield* currentBranch(rules.worktree) : undefined
-          // The project's rules as they are now: a change the person makes applies to the next request.
-          const policy = yield* policies.current(projectId)
-          const project = ruleSetOf(policy.rules)
+          const { policy, project } = yield* rulesNow(projectId, taskId)
           const context: RuleContext = { ...rules, project, ...(current === undefined ? {} : { currentBranch: current }) }
           return { context, project, verdict: decide(request, context), policyId: policy.id }
         })
@@ -290,7 +352,7 @@ export class Permissions extends Context.Service<
         readonly decision: PermissionDecision
         readonly cited?: { readonly rules: ReadonlyArray<AllowRule>; readonly policyId: string }
       } => {
-        if (verdict.verdict === 'deny') return { decision: { decision: 'reject', reason: verdict.reason } }
+        if (verdict.verdict === 'deny') return { decision: { decision: 'reject', reason: verdict.reason, decidedBy: 'rules' } }
         const [first] = verdict.rules ?? []
         return first === undefined || verdict.rules === undefined
           ? { decision: { decision: 'allow', reason: 'Allowed by the project rules.' } }
@@ -359,7 +421,7 @@ export class Permissions extends Context.Service<
           [...waiting].filter(([, waiter]) => waiter.context.projectId === projectId),
           ([attentionId, waiter]) =>
             Effect.gen(function* () {
-              const { verdict, policyId } = yield* byRules(waiter.context.projectId, waiter.rules, waiter.request)
+              const { verdict, policyId } = yield* byRules(waiter.context.projectId, waiter.context.taskId, waiter.rules, waiter.request)
               if (settles(verdict)) yield* settle(attentionId, waiter, decisionOf(verdict, policyId))
             }).pipe(Effect.ignore),
           { discard: true },
@@ -386,11 +448,11 @@ export class Permissions extends Context.Service<
           // Re-read the rules and commit the answer together: a concurrent edit cannot slip past this check.
           return yield* sql.withTransaction(
             Effect.gen(function* () {
-              const latest = yield* policies.current(requestContext.projectId)
-              const changed = latest.id !== ruled.policyId
+              const { policy: latest, project } = yield* rulesNow(requestContext.projectId, requestContext.taskId)
+              const changed = latest.id !== ruled.policyId || project.mode !== ruled.project.mode
               const context: RuleContext = {
                 ...ruled.rules,
-                project: ruleSetOf(latest.rules),
+                project,
                 ...(branchNow === undefined ? {} : { currentBranch: branchNow }),
               }
               const next = decide(request, context)
@@ -412,14 +474,16 @@ export class Permissions extends Context.Service<
                   ...(judgment.decision === 'deny' ? { decidedBy: 'coordinator' as const } : {}),
                 }
                 yield* recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.coordinatorId })
-                yield* addItem(requestContext, 'notice', {
-                  source: 'runtime',
-                  severity: 'info',
-                  about: 'permission',
-                  requestId,
-                  title: `${judgment.decision === 'allow' ? 'Allowed' : 'Denied'} ${receiptLine(request.title, 120)}`,
-                  description: receiptLine(`By the coordinator: ${judgment.reason}`),
-                })
+                // A denial is read on the refused call's own row, so it gets no receipt of its own.
+                if (judgment.decision === 'allow')
+                  yield* addItem(requestContext, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    about: 'permission',
+                    requestId,
+                    title: `Allowed ${receiptLine(request.title, 120)}`,
+                    description: receiptLine(`By the coordinator: ${judgment.reason}`),
+                  })
                 return { decision }
               }
               // Left to the person: not held, so their card offers the always answers, and an allow rule they keep answers next time first.
@@ -474,11 +538,17 @@ export class Permissions extends Context.Service<
             )
             // A role that only reads is answered at once: allowed, or refused with a reason it reads.
             if (requestContext.rules.role === 'reader') {
-              const read = decideReader(request)
+              const { offline, cwd, trusted, reads } = requestContext.rules
+              const read = decideReader(request, {
+                offline: offline === true,
+                ...(cwd === undefined ? {} : { cwd }),
+                ...(trusted === true ? { trusted } : {}),
+                ...(reads === undefined ? {} : { reads }),
+              })
               const decision: PermissionDecision =
                 read.verdict === 'allow'
                   ? { decision: 'allow', reason: 'This role may do this.' }
-                  : { decision: 'reject', reason: read.reason }
+                  : { decision: 'reject', reason: read.reason, decidedBy: 'rules' }
               yield* sql.withTransaction(
                 recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.systemId }),
               )
@@ -486,7 +556,7 @@ export class Permissions extends Context.Service<
             }
             const rules = requestContext.rules.context
             // The rules first, the allow rules among them: the coordinator judges only what none of them answers.
-            const ruled = yield* byRules(requestContext.projectId, rules, request)
+            const ruled = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request)
             let ruleContext = ruled.context
             let policyId = ruled.policyId
             let verdict: Exclude<Verdict, { readonly verdict: 'judge' }>
@@ -563,9 +633,11 @@ export class Permissions extends Context.Service<
               always,
             }
             waiting.set(attentionId, waiter)
-            // The rules may have changed while the call was being made, and been decided again without it: then it is decided again now.
-            if ((yield* policies.current(requestContext.projectId)).id !== policyId) {
-              const again = yield* byRules(requestContext.projectId, rules, request)
+            // The rules, or the task's switch, may have changed while the call was being made, and been decided again without it:
+            // then it is decided again now.
+            const now = yield* rulesNow(requestContext.projectId, requestContext.taskId)
+            if (now.policy.id !== policyId || now.project.mode !== ruleContext.project?.mode) {
+              const again = yield* byRules(requestContext.projectId, requestContext.taskId, rules, request)
               if (settles(again.verdict)) yield* settle(attentionId, waiter, decisionOf(again.verdict, again.policyId))
             }
             if (waiting.has(attentionId))
@@ -602,7 +674,27 @@ export class Permissions extends Context.Service<
           )
         })
 
+      const upFront = (projectId: ProjectId, taskId: string | null, rules: RuleContext) =>
+        Effect.gen(function* () {
+          const { policy, project } = yield* rulesNow(projectId, taskId)
+          const reach = yield* workedOutReach(projectId, taskId)
+          const edits = policy.rules.sandbox
+          // A host goes in only where the rules let a request for it through without the person or the coordinator;
+          // never a wildcard, which would let through hosts under it the rules ask about or refuse.
+          const reached = (host: string) =>
+            hostOf(host) === host &&
+            decide(
+              { sessionId: '', toolCallId: '', title: host, kind: 'other', rawInput: { host }, paths: [], options: [] },
+              { ...rules, project },
+            ).verdict === 'allow'
+          return {
+            commands: withEdits(reach.commands, edits?.commands),
+            hosts: withEdits(reach.hosts, edits?.hosts).filter(reached),
+          } satisfies Reach
+        })
+
       return Permissions.of({
+        upFront: (projectId, taskId, rules) => run(upFront(projectId, taskId, rules)),
         decide: (requestContext, request) =>
           Effect.gen(function* () {
             // Track the whole callback, including its commit, until the adapter gets the answer.
@@ -645,7 +737,11 @@ export class Permissions extends Context.Service<
                 const rule = rememberedOf(waiter.always, decision, always)
                 if (rule === undefined) return yield* new AlwaysNotOffered({ attentionId, scope: always })
                 // Where a push without a destination goes is read now, from git, before the answer's transaction.
-                keep = { scope: always, rule, context: (yield* byRules(waiter.context.projectId, waiter.rules, waiter.request)).context }
+                keep = {
+                  scope: always,
+                  rule,
+                  context: (yield* byRules(waiter.context.projectId, waiter.context.taskId, waiter.rules, waiter.request)).context,
+                }
               }
               const answered: PermissionDecision = { decision, ...(reason === undefined ? {} : { reason }) }
               yield* commands.execute({
@@ -658,7 +754,7 @@ export class Permissions extends Context.Service<
                   if (attention?.state !== 'open') return yield* new AttentionClosed({ attentionId })
                   // A rule the rules as they now are would override, as when the person has since kept it for themselves, isn't kept.
                   if (keep !== undefined) {
-                    const now = ruleSetOf((yield* policies.current(waiter.context.projectId)).rules)
+                    const now = (yield* rulesNow(waiter.context.projectId, waiter.context.taskId)).project
                     if (!holds(waiter.request, { ...keep.context, project: now }, keep.rule))
                       return yield* new AlwaysNotOffered({ attentionId, scope: keep.scope })
                   }
@@ -702,6 +798,38 @@ export class Permissions extends Context.Service<
           ),
 
         reconsider: (projectId) => run(reconsider(projectId)),
+
+        allowEverything: ({ envelope, taskId, on }) =>
+          run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [task] = yield* sql<{ projectId: ProjectId; allowEverything: number }>`
+                SELECT project_id, allow_everything FROM tasks WHERE id = ${taskId}`
+              if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+              const own = on ? 1 : 0
+              if (own === task.allowEverything) return
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const revision = yield* change('tasks', taskId, { allowEverything: own })
+                  yield* fact({
+                    projectId: task.projectId,
+                    aggregateType: 'task',
+                    aggregateId: taskId,
+                    revision,
+                    type: 'task.allow_everything_set',
+                    payload: { allowEverything: on },
+                    actorId: envelope.actorId,
+                    commandId: envelope.commandId,
+                  })
+                }),
+              )
+              yield* touchCard(taskId)
+              // What its agents wait on is decided again: it goes ahead, short of what the project never allows.
+              if (on) yield* reconsider(task.projectId)
+            }).pipe(
+              Effect.catchTags({ SqlError: Effect.die, SchemaError: Effect.die, RowNotFound: Effect.die, RevisionConflict: Effect.die }),
+            ),
+          ),
 
         withdrawAll: (sessionId) =>
           run(

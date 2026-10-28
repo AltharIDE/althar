@@ -11,7 +11,8 @@ import s from './Connections.module.css'
  * you are signed in as there, or the one press that connects it. Connecting
  * is a walk of its own (ConnectCard), which the consumer opens: Connect for
  * a service, Sign in again for a connection whose sign-in stopped working,
- * and Add a server for a company's own, once the service has a connection.
+ * Add a server for a company's own, and Add a workspace for another of a
+ * service whose sign-in reaches one, once the service has a connection.
  */
 
 export interface ServiceOption {
@@ -23,6 +24,8 @@ export interface ServiceOption {
   what?: string
   /** A company's own server can be connected too. */
   selfHosted?: boolean
+  /** A sign-in reaches one of its workspaces, and another can be connected beside it: Linear's. */
+  workspaces?: boolean
 }
 
 export interface ServiceConnection {
@@ -33,6 +36,8 @@ export interface ServiceConnection {
   account: string
   /** Its server, when it isn't the hosted service. */
   instance?: string
+  /** The workspace it reaches, by its name, where a sign-in reaches one. */
+  workspace?: string
   /** Its token stopped working: it needs signing in again. */
   needsSignIn?: boolean
 }
@@ -44,6 +49,7 @@ export interface ConnectionsText {
   connect: string
   signInAgain: string
   addServer: string
+  addWorkspace: string
   disconnect: string
 }
 
@@ -54,6 +60,7 @@ export const connectionsText: ConnectionsText = {
   connect: 'Connect',
   signInAgain: 'Sign in again',
   addServer: 'Add a server',
+  addWorkspace: 'Add a workspace',
   disconnect: 'Disconnect',
 }
 
@@ -68,6 +75,8 @@ export interface ConnectionsProps {
   onSignInAgain: (connectionId: string) => void
   /** Opens a service's walk in at a company's own server. Without it, a connected service offers none. */
   onAddServer?: (service: string) => void
+  /** Opens a service's walk in for another of its workspaces. Without it, a connected service offers none. */
+  onAddWorkspace?: (service: string) => void
   onDisconnect: (connectionId: string) => void
   className?: string
   text?: Partial<ConnectionsText>
@@ -89,6 +98,7 @@ export function Connections({
   onConnect,
   onSignInAgain,
   onAddServer,
+  onAddWorkspace,
   onDisconnect,
   className,
   text,
@@ -115,8 +125,15 @@ export function Connections({
               )}
               {mine.length > 0 && service.selfHosted === true && onAddServer !== undefined && (
                 <span className={s.actions}>
-                  <ActionButton icon="plus" onClick={() => onAddServer(service.id)}>
+                  <ActionButton icon="plus" flush="end" onClick={() => onAddServer(service.id)}>
                     {t.addServer}
+                  </ActionButton>
+                </span>
+              )}
+              {mine.length > 0 && service.selfHosted !== true && service.workspaces === true && onAddWorkspace !== undefined && (
+                <span className={s.actions}>
+                  <ActionButton icon="plus" flush="end" onClick={() => onAddWorkspace(service.id)}>
+                    {t.addWorkspace}
                   </ActionButton>
                 </span>
               )}
@@ -128,10 +145,13 @@ export function Connections({
                   <span className={cx(s.line, connection.needsSignIn && s.calls)}>
                     {connection.needsSignIn ? t.needsSignIn : t.signedInAs(connection.account)}
                     {connection.instance && <span className={s.instance}> · {hostOf(connection.instance)}</span>}
+                    {connection.workspace && <span className={s.instance}> · {connection.workspace}</span>}
                   </span>
                 </span>
                 <span className={s.actions}>
-                  <ActionButton onClick={() => onDisconnect(connection.id)}>{t.disconnect}</ActionButton>
+                  <ActionButton {...(connection.needsSignIn ? {} : { flush: 'end' as const })} onClick={() => onDisconnect(connection.id)}>
+                    {t.disconnect}
+                  </ActionButton>
                   {connection.needsSignIn && (
                     <Button variant="signal" onClick={() => onSignInAgain(connection.id)}>
                       {t.signInAgain}

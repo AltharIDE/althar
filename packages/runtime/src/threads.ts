@@ -17,8 +17,11 @@ import {
   printedIn,
   together,
 } from './handed'
+import { diagnosticIn, diagnosticOf } from './diagnostics'
+import { changeLinesWords } from './issueChangeWords'
 import { change, timestamp } from './records'
-import { essentials } from './rules'
+import { commandIn, essentials } from './rules'
+import { indexThread } from './Search'
 
 /*
  * The thread's items: what the person reads (docs/architecture/01). An
@@ -59,9 +62,34 @@ export const addItem = (
             ${kind}, ${links.userInputId ?? null}, ${place.deliveryId ?? null}, ${place.sessionId ?? null}, ${links.toolCallId ?? null},
             ${JSON.stringify(content)}, ${yield* timestamp})`
         yield* ledger.notify({ projectId: place.projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: 1 })
+        // What the person asks of a task, and what its lead reports, are what it is found by.
+        if (kind === 'user_message' || kind === 'step_result') yield* indexThread(place.threadId)
       }),
     )
     return id
+  })
+
+/**
+ * Moves an item to the end of its thread, unless nothing but `after`
+ * follows it already. It keeps when it was made; windows read it again,
+ * and place it by its new sequence.
+ */
+export const moveToEnd = (projectId: ProjectId, threadId: string, id: string, after: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const ledger = yield* Ledger
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        const [behind] = yield* sql<{ count: number; last: number }>`
+          SELECT count(*) AS count, (SELECT max(sequence) FROM thread_items WHERE thread_id = ${threadId}) AS last
+          FROM thread_items
+          WHERE thread_id = ${threadId} AND sequence > (SELECT sequence FROM thread_items WHERE id = ${id})
+            AND id NOT IN ${sql.in([id, ...after])}`
+        if (behind === undefined || behind.count === 0) return
+        const revision = yield* change('thread_items', id, { sequence: behind.last + 1 })
+        yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: revision })
+      }),
+    )
   })
 
 /** Replaces an item's content. */
@@ -255,17 +283,28 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         // OpenCode says a command's output as the tool's own words, whole each time, and whole in its raw output's metadata where it has it.
         // Its error report is the error, not its output: what it printed stays, and the error is kept beside it.
         const words = content.flatMap((entry) => (entry._tag === 'Text' ? [entry.text] : []))
-        const raw = event._tag === 'ToolCallUpdate' ? event.rawOutput : undefined
+        const raw = event.rawOutput
         const whole = printedIn(raw)
         const failed = event.status === 'failed'
         if (whole !== null) output.replace(whole)
         else if (!failed && words.length > 0) output.replace(words.join('\n'))
         if (failed) output.error = errorIn(raw) ?? (words.length > 0 ? words.join('\n') : null)
       }
-      const exit = event.terminal?.exit?.code ?? (event._tag === 'ToolCallUpdate' ? exitIn(event.rawOutput) : null)
+      const exit = event.terminal?.exit?.code ?? exitIn(event.rawOutput)
       if (exit !== null) output.exit = exit
       if (event.status !== 'completed' && event.status !== 'failed') return extras
-      return { ...extras, ...(yield* ended(toolCallId, output)) }
+      // What a failed command printed goes on its item with its status, in short, before the agent says anything of it.
+      const diagnostic =
+        event.status === 'failed'
+          ? diagnosticOf({
+              command: commandIn(stored.rawInput),
+              printed: output.text,
+              error: output.error,
+              exit: output.exit,
+              rawOutput: event.rawOutput,
+            })
+          : undefined
+      return { ...extras, ...(yield* ended(toolCallId, output)), ...(diagnostic === undefined ? {} : { diagnostic }) }
     })
 
   /** Ends what the turn left open: a command's output, kept as far as it came, as when the turn was stopped. */
@@ -295,7 +334,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
           yield* flush
           // The call's command and paths are kept, not what it writes or what came back (docs/architecture/07).
           const kept = event.rawInput === undefined ? undefined : essentials(event.rawInput)
-          const output = event._tag === 'ToolCallUpdate' && event.rawOutput !== undefined
+          const output = event.rawOutput !== undefined
           const content = defined({
             title: event.title,
             kind: event._tag === 'ToolCall' ? event.kind : undefined,
@@ -331,8 +370,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         return event.byAgent
           ? notice({ source: 'runtime', severity: 'info', title: `The agent moved to its ${event.modeId} mode.` })
           : Effect.void
+      // The agent is told why; the person reads it on the refused call, not as a notice of its own.
       case 'Resumed':
-        return notice({ source: 'runtime', severity: 'info', title: 'Resumed after a rejection.', description: event.reason })
+        return Effect.void
       default:
         return Effect.void
     }
@@ -443,6 +483,8 @@ export const transcript = (
       agentId: string | null
       task: string | null
       draft: string | null
+      review: string | null
+      changes: string | null
       asked: string | null
       askedState: string | null
     }>`
@@ -450,6 +492,9 @@ export const transcript = (
         (SELECT k.slug || ': ' || k.title FROM tasks k WHERE k.id = json_extract(i.content, '$.taskId')) AS task,
         (SELECT d.title || ' (' || d.state || CASE WHEN d.issue_key IS NULL THEN '' ELSE ', ' || d.issue_key || ' ' || d.issue_url END || ')'
           FROM issue_drafts d WHERE d.id = json_extract(i.content, '$.draftId')) AS draft,
+        (SELECT 'of #' || r.number || ', suggesting ' || r.suggested || ' (' || r.state || CASE WHEN r.review_url IS NULL THEN '' ELSE ', ' || r.review_url END || ')'
+          FROM review_drafts r WHERE i.kind = 'review_draft' AND r.id = json_extract(i.content, '$.draftId')) AS review,
+        (SELECT c.state FROM issue_changes c WHERE i.kind = 'issue_changes' AND c.id = json_extract(i.content, '$.changesId')) AS changes,
         a.payload AS asked, a.state AS asked_state
       FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
@@ -465,12 +510,22 @@ export const transcript = (
           // Images the person sent are said, though only the agent they went to saw them.
           const pictures = Array.isArray(content['pictures']) ? content['pictures'].length : 0
           const sent = pictures === 0 ? '' : ` [sent ${pictures === 1 ? 'an image' : `${pictures} images`}]`
-          return [`[person] ${text('text')}${sent}`]
+          // Files they sent are said by where their copies are, so an agent taking over can open them too.
+          const files = (Array.isArray(content['files']) ? (content['files'] as ReadonlyArray<unknown>) : []).flatMap((file) =>
+            typeof file === 'object' && file !== null && typeof (file as { path?: unknown }).path === 'string'
+              ? [(file as { path: string }).path]
+              : [],
+          )
+          const filed = files.length === 0 ? '' : ` [sent ${files.length === 1 ? 'a file' : `${files.length} files`}: ${files.join(', ')}]`
+          return [`[person] ${text('text')}${sent}${filed}`]
         }
         case 'agent_message':
           return [`[${agent}] ${text('text')}`]
-        case 'tool_call':
-          return [`[tool] ${text('title')} (${text('status')})`]
+        case 'tool_call': {
+          // What a failed command printed, in short: what the tool reported, not why it failed.
+          const printed = diagnosticIn(content['diagnostic'])
+          return [`[tool] ${text('title')} (${text('status')})${printed === null ? '' : `\n[it printed] ${printed.text}`}`]
+        }
         case 'notice':
           return [`[note] ${text('title')}${text('description') === '' ? '' : `: ${text('description')}`}`]
         case 'step_result':
@@ -479,6 +534,18 @@ export const transcript = (
           return item.task === null ? [] : [`[task] ${item.task}`]
         case 'issue_draft':
           return item.draft === null ? [] : [`[issue draft] ${item.draft}`]
+        // Changes to issues, and where they stand: an agent that takes the thread over doesn't propose again what was applied.
+        case 'issue_changes': {
+          const said = Array.isArray(content['issues'])
+            ? (content['issues'] as ReadonlyArray<{ readonly key?: unknown; readonly changes?: unknown }>)
+                .map((issue) => `${typeof issue.key === 'string' ? issue.key : ''}: ${changeLinesWords(issue.changes)}`)
+                .join('; ')
+            : ''
+          return item.changes === null ? [] : [`[issue changes] ${said} (${item.changes})`]
+        }
+        // The lead's review draft, and where it stands: an agent that takes the thread over doesn't draft again what was posted.
+        case 'review_draft':
+          return item.review === null ? [] : [`[review draft] ${item.review}`]
         case 'question': {
           // What was asked of the person, and what they answered: an agent that takes the thread over knows both.
           const fields = Array.isArray(content['fields']) ? (content['fields'] as ReadonlyArray<QuestionField>) : []

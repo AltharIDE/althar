@@ -6,7 +6,10 @@
  *
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
- * item that was missed. Before launch, open every source and check the date
+ * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters; pure
+ * feature launches were dropped, since a shift is a change that costs
+ * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
  * post where there is one.
  */
@@ -53,6 +56,57 @@ export interface Upcoming extends Shift {
 
 export const SHIFTS: readonly Shift[] = [
   {
+    id: 'claude-api-sampling-removed',
+    date: '2026-10-21',
+    kind: ShiftKind.Tools,
+    who: 'Anthropic',
+    title: 'Claude API 2026-10-21 rejects temperature, top_p and top_k',
+    what: 'Sending any of them returns a 400, even at the default. The new major SDK and CLI releases use this version, so upgrading breaks code that still sets them.',
+    source: { name: 'Claude Platform docs', url: 'https://platform.claude.com/docs/en/api/migration-2026-10-21' },
+  },
+  {
+    id: 'cursor-new-plans',
+    date: '2026-10-18',
+    kind: ShiftKind.Pricing,
+    who: 'Cursor',
+    title: 'Cursor’s plans are rebuilt around one subscription',
+    what: 'Individual plans are now Free, Plus $8, Premium $30, Super $100 and Ultra $200, sold with Grok and X. Pro at $20 maps to Premium at $30. Legacy plans keep working; moving to the new ones is permanent.',
+    source: { name: 'Cursor docs', url: 'https://cursor.com/docs/account/pricing/legacy-cursor-plans' },
+  },
+  {
+    id: 'copilot-six-models-left',
+    date: '2026-10-19',
+    kind: ShiftKind.Access,
+    who: 'GitHub',
+    title: 'Six models leave Copilot, GPT-5.5 and GPT-5.4 among them',
+    what: 'Also GPT-5.4 mini, GPT-5 mini, Gemini 3.7 Flash and Grok 4.5. Replacements are GPT-6.1 Sol, GPT-6 Luna, Gemini 3.8 Flash and Grok 4.7; admins may need to enable them.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-10-19-github-copilot-models-deprecated-on-october-19-2026',
+    },
+  },
+  {
+    id: 'openai-legacy-models-left',
+    date: '2026-10-23',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'o1, o3-mini, GPT-4 and gpt-3.5-turbo leave the API',
+    what: 'Also o4-mini and the fine-tuned versions of these models, announced on 22 April. OpenAI’s replacements are GPT-5.6 models.',
+    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'gpt-5-5-retired',
+    date: '2026-10-14',
+    kind: ShiftKind.Access,
+    who: 'OpenAI',
+    title: 'GPT-5.5 retired from ChatGPT and Codex',
+    what: 'Gone on every plan, announced on 16 September. The API is not affected, but Codex settings that pinned it had to move to a GPT-6 model.',
+    source: {
+      name: 'BusinessToday',
+      url: 'https://www.businesstoday.in/technology/artificial-intelligence/story/openai-to-retire-gpt-5-5-from-chatgpt-work-and-codex-on-october-14-what-changes-to-expect-555782-2026-09-16',
+    },
+  },
+  {
     id: 'gpt-5-4-cyber-removed',
     date: '2026-10-01',
     kind: ShiftKind.Access,
@@ -92,15 +146,6 @@ export const SHIFTS: readonly Shift[] = [
     source: { name: 'Claude Platform docs', url: 'https://platform.claude.com/docs/en/about-claude/model-deprecations' },
   },
   {
-    id: 'managed-agents-dynamic-workflows',
-    date: '2026-10-09',
-    kind: ShiftKind.Tools,
-    who: 'Anthropic',
-    title: 'Dynamic workflows for Managed Agents, in beta',
-    what: 'An agent can write a program that runs many agents in phases and combines their results, for work like reviewing hundreds of documents.',
-    source: { name: 'Claude Platform release notes', url: 'https://platform.claude.com/docs/en/release-notes/overview' },
-  },
-  {
     id: 'usage-policy-november',
     date: '2026-10-09',
     kind: ShiftKind.Access,
@@ -111,15 +156,6 @@ export const SHIFTS: readonly Shift[] = [
       name: 'The Register',
       url: 'https://www.theregister.com/ai-and-ml/2026/10/09/anthropic-asks-users-to-stop-being-mean-to-claude/5302218',
     },
-  },
-  {
-    id: 'gemini-universal-agent',
-    date: '2026-10-08',
-    kind: ShiftKind.Tools,
-    who: 'Google',
-    title: 'Gemini, a universal agent for the workplace',
-    what: 'Works in Gmail, Docs, Drive and Sheets, generates and runs code, and can start sub-agents that work for days. Availability is not yet stated.',
-    source: { name: 'CBS News', url: 'https://www.cbsnews.com/news/google-gemini-ai-workplace-agent/' },
   },
   {
     id: 'claude-haiku-5-5-api',
@@ -159,18 +195,6 @@ export const SHIFTS: readonly Shift[] = [
     title: 'Some organisations wrongly paused at spend limit',
     what: 'Requests were refused across the API, Claude.ai, Claude Code and Cowork. The incident is marked resolved.',
     source: { name: 'Claude Status', url: 'https://status.claude.com/incidents/vmys9qn874h4' },
-  },
-  {
-    id: 'copilot-local-sandbox',
-    date: '2026-10-07',
-    kind: ShiftKind.Tools,
-    who: 'GitHub',
-    title: 'Local sandboxing for Copilot is generally available',
-    what: 'Commands that Copilot agents start get limited access to files, network and credentials, under policies admins can lock. No extra cost.',
-    source: {
-      name: 'GitHub Changelog',
-      url: 'https://github.blog/changelog/2026-10-07-local-sandboxing-for-github-copilot-now-generally-available',
-    },
   },
   {
     id: 'mistral-large-4',
@@ -269,18 +293,6 @@ export const SHIFTS: readonly Shift[] = [
     source: {
       name: 'Enterprise DNA',
       url: 'https://enterprisedna.co/resources/ai-pulse/ai-pulse-2026-09-19-claude-code-adopts-agents-md-standard/',
-    },
-  },
-  {
-    id: 'gpt-5-5-retires',
-    date: '2026-09-16',
-    kind: ShiftKind.Access,
-    who: 'OpenAI',
-    title: 'GPT-5.5 leaves ChatGPT and Codex on 14 October',
-    what: 'Retired from ChatGPT, ChatGPT Work and Codex on every plan. The API is not affected, but Codex settings that pin it need to move first.',
-    source: {
-      name: 'BusinessToday',
-      url: 'https://www.businesstoday.in/technology/artificial-intelligence/story/openai-to-retire-gpt-5-5-from-chatgpt-work-and-codex-on-october-14-what-changes-to-expect-555782-2026-09-16',
     },
   },
   {
@@ -388,37 +400,17 @@ export const SHIFTS: readonly Shift[] = [
  */
 export const UPCOMING: readonly Upcoming[] = [
   {
-    id: 'gpt-5-5-leaves',
-    date: '2026-10-14',
-    announced: '2026-09-16',
-    kind: ShiftKind.Access,
-    who: 'OpenAI',
-    title: 'GPT-5.5 leaves ChatGPT and Codex',
-    what: 'Retired from ChatGPT, ChatGPT Work and Codex on every plan. The API is not affected, but Codex settings that pin it need to move first.',
-    source: {
-      name: 'BusinessToday',
-      url: 'https://www.businesstoday.in/technology/artificial-intelligence/story/openai-to-retire-gpt-5-5-from-chatgpt-work-and-codex-on-october-14-what-changes-to-expect-555782-2026-09-16',
-    },
-  },
-  {
-    id: 'openai-legacy-models-leave',
-    date: '2026-10-23',
-    announced: '2026-04-22',
-    kind: ShiftKind.Access,
-    who: 'OpenAI',
-    title: 'o1, o3-mini, GPT-4 and gpt-3.5-turbo leave the API',
-    what: 'Also o4-mini and the fine-tuned versions of these models. OpenAI’s replacements are GPT-5.6 models.',
-    source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
-  },
-  {
     id: 'chatgpt-pro-allowance-ends',
-    date: '2026-10-29',
+    date: '2026-10-30',
     announced: '2026-09-29',
     kind: ShiftKind.Limits,
     who: 'OpenAI',
     title: 'ChatGPT Pro $200 subscribers lose the old allowance',
-    what: 'People already on the plan keep their old allowance until this day, then get the reopened plan’s, which is roughly half.',
-    source: { name: 'Kingy AI', url: 'https://kingy.ai/news/chatgpt-pro-200-usage-cut/' },
+    what: 'People already on the plan keep 20x Plus usage through 29 October, then get the reopened plan’s 10x, roughly half, in Codex and Work.',
+    source: {
+      name: 'Engadget',
+      url: 'https://www.engadget.com/2272106/openai-adds-dollar500-pro-subscription-nerfs-its-existing-dollar200-tier/',
+    },
   },
   {
     id: 'usage-policy-takes-effect',
@@ -444,6 +436,19 @@ export const UPCOMING: readonly Upcoming[] = [
     source: { name: 'CNBC', url: 'https://www.cnbc.com/2026/08/29/openai-cursor-spacex-model-access.html' },
   },
   {
+    id: 'copilot-opus-5-terra-leave',
+    date: '2026-11-16',
+    announced: '2026-10-15',
+    kind: ShiftKind.Access,
+    who: 'GitHub',
+    title: 'Claude Opus 5, Opus 4.8 and GPT-5.6 Terra leave Copilot',
+    what: 'Replacements are Claude Opus 5.5 and GPT-6.1 Sol or GPT-6 Luna. Anthropic’s API is not affected.',
+    source: {
+      name: 'GitHub Changelog',
+      url: 'https://github.blog/changelog/2026-10-15-upcoming-deprecation-of-selected-github-copilot-models-in-mid-november',
+    },
+  },
+  {
     id: 'sonnet-4-5-retires',
     date: '2026-11-30',
     announced: '2026-09-30',
@@ -462,6 +467,16 @@ export const UPCOMING: readonly Upcoming[] = [
     title: 'Evals, reusable prompts and Agent Builder shut down',
     what: 'Existing evals turn read-only on 31 October. OpenAI points to Promptfoo for evals and the Agents SDK for Agent Builder.',
     source: { name: 'OpenAI API deprecations', url: 'https://developers.openai.com/api/docs/deprecations' },
+  },
+  {
+    id: 'gemini-4-argon-price-doubles',
+    date: '2026-12-01',
+    announced: '2026-10-13',
+    kind: ShiftKind.Pricing,
+    who: 'Google',
+    title: 'Gemini 4 Argon’s API price doubles',
+    what: 'Opened to paying users on 13 October at an introductory $2 in and $10 out per million tokens; from 1 December it is $4 and $20.',
+    source: { name: 'SmartScope', url: 'https://smartscope.blog/en/blog/gemini-4-argon-access-introductory-pricing-2026/' },
   },
   {
     id: 'gpt-5-o3-snapshots-leave',

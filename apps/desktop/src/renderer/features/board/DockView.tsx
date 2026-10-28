@@ -6,7 +6,7 @@ import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, W
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
 import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
@@ -17,7 +17,8 @@ import { PermissionCall } from '../task/PermissionCall'
 import { StuckCall } from '../task/StuckCall'
 import { text as boardText, type DockTarget, trackOf } from './BoardView'
 import s from './Board.module.css'
-import type { BoardModel } from './useBoard'
+import { startsWhenFree, waitsUpNext } from './lanes'
+import { type BoardModel, headVersion } from './useBoard'
 
 /*
  * The dock beside the board: what you opened from it, to answer or accept
@@ -36,11 +37,13 @@ export const text = {
     waiting: 'Running',
     stopped: 'Stopped',
     ready: 'Ready',
+    kept: 'Kept for later',
     settled: 'Settled',
   } satisfies Record<BoardTask['phase'], string>,
   openTask: 'Open the task',
   review: 'Review the changes',
   openChange: 'Open a pull request',
+  openNewChange: 'Open a new pull request',
   stepNote: { now: 'now', done: 'done' },
 }
 
@@ -48,8 +51,8 @@ export const text = {
 const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
   const { steps, at } = trackOf(task)
   const finished = task.phase === 'ready' || task.phase === 'settled'
-  // A plan that hasn't started has all its steps to come.
-  const waiting = task.phase === 'planned' || task.phase === 'held'
+  // A plan that hasn't started has all its steps to come; one under way that waits to go on still has the one it is on.
+  const waiting = task.phase === 'planned' || task.phase === 'held' || startsWhenFree(task)
   return steps.map((label, index) => ({
     label,
     state: waiting ? TrackStep.Next : finished || index < at ? TrackStep.Done : index === at ? TrackStep.Now : TrackStep.Next,
@@ -57,12 +60,12 @@ const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
 }
 
 /**
- * A task's head as the board stood (`version`): its files, for accepting.
+ * A task's head as the board stood (`headVersion`): its files, for accepting.
  * Read ahead with the board (`useBoard`), so the dock opens with it; until a
  * newer one is read, the last one shows, or the thread as the window last
  * read it.
  */
-export const useHead = (threadId: string | null, version: number) => {
+export const useHead = (threadId: string | null, version: string) => {
   const { client, cache } = useServices()
   const read = useQuery({
     ...reads(client).head(threadId ?? '', version),
@@ -107,7 +110,10 @@ export function DockView({
   const board = model.board
   const call = target.kind === 'call' ? board?.calls.find((candidate) => candidate.id === target.id) : undefined
   const task = target.kind === 'task' ? board?.tasks.find((candidate) => candidate.taskId === target.id) : undefined
-  const head = useHead(task?.phase === 'ready' && task.change !== null ? task.threadId : null, board?.cursor ?? 0)
+  const head = useHead(
+    task?.phase === 'ready' && task.change?.state === 'open' ? task.threadId : null,
+    board === null || task === undefined ? '' : headVersion(board, task),
+  )
   useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
@@ -125,7 +131,8 @@ export function DockView({
       <Dock label={label} name={callKindOf(call)} sub={`${whereOf(call)} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
         {/* A question is answered where it was asked: the task opens to it. */}
         {call.kind === 'question' ? null : stuck === null ? (
-          <PermissionCall request={call} project={project} onAnswer={model.answer} />
+          // Opened on the call, to answer it: Enter does.
+          <PermissionCall request={call} project={project} onAnswer={model.answer} focusOnMount />
         ) : (
           <StuckCall
             request={call}
@@ -146,7 +153,8 @@ export function DockView({
   const sub = task.branch ?? task.slug
   const change = task.change
 
-  if (task.phase === 'ready' && change !== null) {
+  // Ready with its pull request open, it is accepted here; one merged or closed, with commits after it, opens a new one below.
+  if (task.phase === 'ready' && change !== null && change.state === 'open') {
     const brand = productBrand(change.product)
     return (
       <Dock label={label} name={text.phase.ready} sub={sub} onClose={onClose}>
@@ -166,17 +174,23 @@ export function DockView({
           // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
           unpushed={change.localHead === null ? 0 : change.unpushed}
           onPush={() => void model.push(task.taskId, change.localHead ?? '', change.url)}
-          pushing={model.pushing === task.taskId}
+          pushing={model.pushing.has(task.taskId)}
           onOpenFile={(path) => onChanges(task, path)}
-          accepting={model.merging === task.taskId}
-          sendingBack={model.sending === task.taskId}
+          accepting={model.merging.has(task.taskId)}
+          sendingBack={model.sending.has(task.taskId)}
           {...(model.error === null ? {} : { error: model.error })}
           text={{ number: (n: number) => `${change.prefix}${n}` }}
         />
         <div className={s.actions}>
+          {/* Another of its repositories, whose last pull request merged with commits after it, opens a new one. */}
+          {task.unshipped != null && (
+            <ActionButton icon="pr" disabled={model.opening.has(task.taskId)} onClick={() => void model.openChange(task.taskId)}>
+              {text.openNewChange}
+            </ActionButton>
+          )}
           {/* A repository of the task that ended on its branch merges here, beside the pull request of the rest. */}
           {task.here.length > 0 && (
-            <ActionButton icon="branch" disabled={model.merging === task.taskId} onClick={() => void model.mergeHere(task)}>
+            <ActionButton icon="branch" disabled={model.merging.has(task.taskId)} onClick={() => void model.mergeHere(task)}>
               {mergeHereLabel(task.here, true)}
             </ActionButton>
           )}
@@ -195,7 +209,7 @@ export function DockView({
         ? boardText.startsIn(Math.ceil((new Date(task.plan.startsAt).getTime() - new Date(now).getTime()) / 1000))
         : null
   return (
-    <Dock label={label} name={text.phase[task.phase]} sub={sub} onClose={onClose}>
+    <Dock label={label} name={waitsUpNext(task) ? text.phase.planned : text.phase[task.phase]} sub={sub} onClose={onClose}>
       <WorkPeek
         title={task.title}
         {...(waiting !== null
@@ -203,20 +217,24 @@ export function DockView({
           : task.queued !== null
             ? { note: queuedWords(task.queued) }
             : task.waits !== null
-              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
-              : task.summary === null
-                ? {}
-                : { note: task.summary.split('\n')[0] ?? '' })}
+              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until), task.step, task.waits.left) }
+              : task.reconnects != null
+                ? { note: reconnectsWords(task.reconnects, clock) }
+                : task.summary === null
+                  ? {}
+                  : { note: task.summary.split('\n')[0] ?? '' })}
         status={
           task.phase === 'waiting'
             ? TaskStatus.Yours
             : task.queued !== null
               ? TaskStatus.Queued
-              : task.phase === 'stopped'
-                ? TaskStatus.Stopped
-                : task.phase === 'running'
-                  ? TaskStatus.Running
-                  : TaskStatus.Done
+              : task.waits !== null || task.reconnects != null
+                ? TaskStatus.Paused
+                : task.phase === 'stopped'
+                  ? TaskStatus.Stopped
+                  : task.phase === 'running'
+                    ? TaskStatus.Running
+                    : TaskStatus.Done
         }
         steps={stepsOf(task)}
         lead={lead}
@@ -234,13 +252,19 @@ export function DockView({
         )}
         {/* Work that ended on its branch merges here, or can still open its pull request, as the person says. */}
         {task.phase === 'ready' && change === null && task.here.length > 0 && (
-          <ActionButton icon="branch" disabled={model.merging === task.taskId} onClick={() => void model.mergeHere(task)}>
+          <ActionButton icon="branch" disabled={model.merging.has(task.taskId)} onClick={() => void model.mergeHere(task)}>
             {mergeHereLabel(task.here)}
           </ActionButton>
         )}
         {task.phase === 'ready' && change === null && (
-          <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+          <ActionButton icon="pr" disabled={model.opening.has(task.taskId)} onClick={() => void model.openChange(task.taskId)}>
             {text.openChange}
+          </ActionButton>
+        )}
+        {/* Its last pull request merged or closed, the commits after it go in a new one (ADR-034). */}
+        {task.phase === 'ready' && change !== null && task.unshipped != null && (
+          <ActionButton icon="pr" disabled={model.opening.has(task.taskId)} onClick={() => void model.openChange(task.taskId)}>
+            {text.openNewChange}
           </ActionButton>
         )}
         <ActionButton icon="arrow" onClick={() => onTask(task.threadId)}>

@@ -5,6 +5,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
 import { Instance } from './Instance'
+import { changeWords, type Said } from './issueChangeWords'
 import { Models } from './Models'
 import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
 
@@ -14,7 +15,9 @@ import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
  * or declined it, or its time came and it started. And of the issues it
  * drafted: the person changed one, filed it or discarded it, or filing it
  * failed. And of the issues tasks came from: Althar moved one to In
- * Progress as its task started, or couldn't. The coordinator proposed each plan and drafted each issue and moved
+ * Progress as its task started, or couldn't. And of quick tasks the person
+ * had their leads make changes, with a review and a pull request to end in.
+ * The coordinator proposed each plan and drafted each issue and moved
  * on; the cards are the person's, and nothing else tells it. Read before
  * what the person says next, it speaks of each as it now is, not as it
  * proposed or drafted it.
@@ -95,9 +98,11 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       SELECT aggregate_id AS plan_id, type, actor_id FROM record_events
       WHERE project_id = ${projectId} AND aggregate_type = 'task_plan' AND sequence > ${last.sequence} AND type IN ${sql.in(HEARD)}
       ORDER BY sequence`
-    const drafts = yield* draftNews(projectId, last.sequence)
+    // What became of its issue drafts, and of changes to issues in its thread, are told together.
+    const drafts = [...(yield* draftNews(projectId, last.sequence)), ...(yield* changeNews(projectId, last.sequence))]
     const started = yield* startedNews(projectId, last.sequence)
-    if (events.length === 0 && drafts.length === 0 && started.length === 0) return null
+    const made = yield* madeNews(projectId, last.sequence, modelOf)
+    if (events.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0) return null
 
     /** Who does a plan's steps; each step's effort too where it isn't what the other plan gives it, as its ending is said only where it changed. */
     const team = (parameters: PlanParameters, other: PlanParameters) =>
@@ -147,16 +152,18 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       else if (plan.state === 'proposed' && plan.startsAt === null) said.push('The person is holding it: it waits until they start it.')
       if (said.length > 0) lines.push(`- ${plan.slug} (${plan.title}): ${said.join(' ')}`)
     }
-    if (lines.length === 0 && drafts.length === 0 && started.length === 0) return null
+    if (lines.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0) return null
     const close =
       lines.length === 0 && drafts.length === 0
-        ? 'Speak of these issues as they are now.'
+        ? started.length === 0
+          ? null
+          : 'Speak of these issues as they are now.'
         : drafts.length === 0
           ? 'Speak of these plans as they are now, not as they were proposed.'
           : lines.length === 0
             ? 'Speak of these issues as they are now, not as you drafted them.'
             : 'Speak of these plans and issues as they are now, not as you proposed or drafted them.'
-    return `Since you last spoke, in Althar:\n${[...lines, ...started, ...drafts].join('\n')}\n${close}`
+    return `Since you last spoke, in Althar:\n${[...lines, ...started, ...made, ...drafts, ...(close === null ? [] : [close])].join('\n')}`
   })
 
 /** The issue draft events the coordinator hears of: the person changed one, filed it, or discarded it; or filing it failed, or may have. */
@@ -195,7 +202,9 @@ const draftNews = (projectId: string, since: number) =>
           (SELECT json_extract(payload, '$.title') FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.drafted') AS drafted,
           -- Whether a try to file it ever ended unsure: that issue may be on the tracker, whatever became of the draft since.
           EXISTS (SELECT 1 FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.uncertain') AS doubted
-        FROM issue_drafts d WHERE d.id = ${draftId}`
+        FROM issue_drafts d WHERE d.id = ${draftId}
+          -- A lead's drafts are its own: it hears of them, and the coordinator didn't draft them.
+          AND d.thread_id IN (SELECT id FROM threads WHERE kind = 'coordinator')`
       if (draft === undefined) continue
       const tracker = draft.trackerName
       // Changed by the person, it is told by what it says now, and what it said when drafted.
@@ -226,6 +235,47 @@ const draftNews = (projectId: string, since: number) =>
     return lines
   })
 
+/** The events on changes to issues the coordinator hears of: Althar offered some in its thread; the person applied or discarded them; or they didn't all apply. */
+const CHANGED = ['issue_change.proposed', 'issue_change.applied', 'issue_change.failed', 'issue_change.discarded'] as const
+
+/**
+ * What became of the changes to issues in the coordinator's thread, since a
+ * place in the ledger: a line for each card, as it now stands. Its own it
+ * heard as it proposed them, and what applied at once then; Althar's are
+ * said as they are offered. A lead's are its own.
+ */
+const changeNews = (projectId: string, since: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    const events = yield* sql<{ changesId: string; type: (typeof CHANGED)[number]; actorId: string }>`
+      SELECT aggregate_id AS changes_id, type, actor_id FROM record_events
+      WHERE project_id = ${projectId} AND aggregate_type = 'issue_change' AND sequence > ${since} AND type IN ${sql.in(CHANGED)}
+      ORDER BY sequence`
+    const lines: Array<string> = []
+    for (const changesId of new Set(events.map((event) => event.changesId))) {
+      const mine = events.filter((event) => event.changesId === changesId)
+      const [card] = yield* sql<{ changes: string; note: string | null; state: string; error: string | null; proposedBy: string }>`
+        SELECT c.changes, c.note, c.state, c.error, c.proposed_by FROM issue_changes c
+        WHERE c.id = ${changesId} AND c.thread_id IN (SELECT id FROM threads WHERE kind = 'coordinator')`
+      if (card === undefined) continue
+      // What it did itself, it heard from its tool.
+      if (mine.every((event) => event.actorId === instance.coordinatorId)) continue
+      const said = changeWords(JSON.parse(card.changes) as ReadonlyArray<Said>)
+      const whose = card.proposedBy === 'althar' ? `Althar's change${card.note === null ? '' : ` (${card.note})`}` : 'your change'
+      const Whose = `${whose.charAt(0).toUpperCase()}${whose.slice(1)}`
+      if (card.state === 'applied') lines.push(`- ${Whose} to issues is applied: ${said}.`)
+      else if (card.state === 'discarded') lines.push(`- The person discarded ${whose} to issues: ${said}. Nothing changed.`)
+      else if (card.state === 'failed')
+        lines.push(`- ${Whose} to issues didn't all apply: ${card.error ?? ''} The person can apply it again from its card.`)
+      else if (card.proposedBy === 'althar')
+        lines.push(
+          `- Althar offers, on a card in your thread: ${said}${card.note === null ? '' : ` (${card.note})`}. It waits on the person; don't propose it again.`,
+        )
+    }
+    return lines
+  })
+
 /** What Althar did with the issues tasks came from as they started, since a place in the ledger: moved one to In Progress, or couldn't. */
 const startedNews = (projectId: string, since: number) =>
   Effect.gen(function* () {
@@ -249,5 +299,25 @@ const startedNews = (projectId: string, since: number) =>
       return [
         `- ${event.slug} (${event.title}): Althar couldn’t move its issue ${said.key ?? ''} to In Progress on ${tracker}: ${said.error ?? ''}. It is as it was; the person can move it themselves.`,
       ]
+    })
+  })
+
+/**
+ * The quick tasks made changes since a place in the ledger, as the person
+ * asked their leads (make_it_a_change): a line for each, with what it is
+ * called now and was called, who reviews it, and how it ends.
+ */
+const madeNews = (projectId: string, since: number, modelOf: ModelNamer) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const events = yield* sql<{ payload: string; slug: string; title: string }>`
+      SELECT e.payload, k.slug, k.title FROM record_events e JOIN tasks k ON k.id = e.aggregate_id
+      WHERE e.project_id = ${projectId} AND e.aggregate_type = 'task' AND e.sequence > ${since} AND e.type = 'task.made_change'
+      ORDER BY e.sequence`
+    return events.map((event) => {
+      const made = JSON.parse(event.payload) as { was?: string; review?: PlanStep | null; end?: TaskEnd | null }
+      const was = made.was === undefined || made.was === event.title ? '' : ` (it was “${made.was}”)`
+      const who = made.review == null ? 'no review' : `${modelOf(made.review)} reviews it`
+      return `- ${event.slug} (${event.title})${was}: the person asked its lead to make this quick task a change, and it is one now: ${who}, and ${endWords(made.end)}.`
     })
   })

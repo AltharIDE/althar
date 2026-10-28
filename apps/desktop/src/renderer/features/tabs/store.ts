@@ -1,6 +1,7 @@
 import type { Room } from '@althar/ui'
 
 import type { Client } from '../../data/client'
+import type { Section } from '../settings/sections'
 import { type Kept, keptFrom, type Place } from './tabs'
 
 /*
@@ -87,7 +88,10 @@ const make = (): TabsStore => {
       if (state.kept !== null) keep(next(state.kept))
     },
     visit: (threadId, projectId) => {
-      if (state.threads[threadId] !== projectId) set({ ...state, threads: { ...state.threads, [threadId]: projectId } })
+      if (state.threads[threadId] === projectId) return
+      // The threads visited last: one for every thread ever opened would grow for as long as the window is open.
+      const before = Object.entries(state.threads).filter(([id]) => id !== threadId)
+      set({ ...state, threads: { ...Object.fromEntries(before.slice(1 - THREADS_KEPT)), [threadId]: projectId } })
     },
     view: (projectId, room) => {
       if (state.kept === null) return set({ ...state, pending: { ...state.pending, [projectId]: room } })
@@ -95,6 +99,9 @@ const make = (): TabsStore => {
     },
   }
 }
+
+/** How many visited threads' projects are kept. */
+const THREADS_KEPT = 200
 
 const stores = new WeakMap<Client, TabsStore>()
 
@@ -128,3 +135,25 @@ export const closed =
     open: kept.open.filter((id) => id !== projectId),
     places: Object.fromEntries(Object.entries(kept.places).filter(([id]) => id !== projectId)),
   })
+
+/** Going into the settings gives them a tab, beside the home's, and keeps which section they are on. */
+export const settingsOn =
+  (section: Section) =>
+  (kept: Kept): Kept => ({ ...kept, settings: section })
+
+/** The settings' tab closes, and forgets its section. */
+export const settingsClosed = (kept: Kept): Kept => {
+  const { settings: _closed, ...rest } = kept
+  return rest
+}
+
+/** A tab moves: before another's, or to the end. Only the projects' tabs are ordered; the home's stays first. */
+export const moved =
+  (projectId: string, beforeId: string | null) =>
+  (kept: Kept): Kept => {
+    if (!kept.open.includes(projectId)) return kept
+    const rest = kept.open.filter((id) => id !== projectId)
+    const at = beforeId === null ? -1 : rest.indexOf(beforeId)
+    const open = at < 0 ? [...rest, projectId] : [...rest.slice(0, at), projectId, ...rest.slice(at)]
+    return open.every((id, i) => id === kept.open[i]) ? kept : { ...kept, open }
+  }

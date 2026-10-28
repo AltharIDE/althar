@@ -1,6 +1,6 @@
 import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join, win32 } from 'node:path'
+import { delimiter, dirname, isAbsolute, posix, win32 } from 'node:path'
 
 import type { AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
 
@@ -25,17 +25,22 @@ export const usualDirs = (
     return [
       at(home, '.local', 'bin'),
       at(home, '.opencode', 'bin'),
+      at(home, '.grok', 'bin'),
+      at(home, '.kimi-code', 'bin'),
       at(home, '.bun', 'bin'),
       at(home, 'scoop', 'shims'),
       ...(env.APPDATA === undefined ? [] : [at(env.APPDATA, 'npm')]),
     ]
   }
+  const at = (...parts: ReadonlyArray<string>) => posix.join(...parts)
   return [
     ...(platform === 'darwin' ? ['/opt/homebrew/bin'] : ['/home/linuxbrew/.linuxbrew/bin']),
     '/usr/local/bin',
-    join(home, '.local', 'bin'),
-    join(home, '.opencode', 'bin'),
-    join(home, '.bun', 'bin'),
+    at(home, '.local', 'bin'),
+    at(home, '.opencode', 'bin'),
+    at(home, '.grok', 'bin'),
+    at(home, '.kimi-code', 'bin'),
+    at(home, '.bun', 'bin'),
   ]
 }
 
@@ -108,11 +113,11 @@ export const locate = (
   const env = options.env ?? process.env
   const isExecutable = options.isExecutable ?? executable
   const names = namesOf(command, platform, env, options.scripts === true)
-  const separator = platform === 'win32' ? ';' : delimiter
-  const at = (dir: string, name: string) => (platform === 'win32' ? win32.join(dir, name) : join(dir, name))
+  // Each system's own: the one asked about, not necessarily this one.
+  const paths = platform === 'win32' ? win32 : posix
   const inDirs = (dirs: ReadonlyArray<string>) =>
-    dirs.flatMap((dir) => (dir === '' ? [] : names.map((name) => at(dir, name)))).find(isExecutable)
-  const onPath = inDirs((env.PATH ?? env.Path ?? '').split(separator))
+    dirs.flatMap((dir) => (dir === '' ? [] : names.map((name) => paths.join(dir, name)))).find(isExecutable)
+  const onPath = inDirs((env.PATH ?? env.Path ?? '').split(paths.delimiter))
   if (onPath !== undefined) return { command: platform === 'win32' ? onPath : command, whose: 'theirs' }
   const usual = inDirs(options.dirs ?? usualDirs(platform, homedir(), env))
   if (usual !== undefined) return { command: usual, whose: 'theirs' }
@@ -131,12 +136,29 @@ export const quoted = (path: string, platform: string = process.platform): strin
       : `'${path.replaceAll("'", `'\\''`)}'`
 
 /**
+ * How a person's own terminal runs the copy the agent's commands point at:
+ * its path, where this system can reach it. A copy that lives inside the
+ * sandbox — the one that ships with the app in a Flatpak, under `/app` — is
+ * reached through the installed app instead, by the id the sandbox names.
+ */
+const inATerminal = (found: Located, flatpakId: string | undefined): string =>
+  found.whose === 'bundled' && flatpakId !== undefined && flatpakId !== ''
+    ? `flatpak run --command=${quoted(found.command)} ${quoted(flatpakId)}`
+    : quoted(found.command)
+
+/**
  * The agent, with every command it runs pointed at where its command is,
  * looked up each time, so a copy downloaded while Althar runs is used at
- * once; and what the person runs to sign in names the same copy. An agent
- * without a named command, or whose command is nowhere, is as it was.
+ * once; and what the person runs to sign in names the same copy — through
+ * the app where the copy lives inside its sandbox. An agent without a named
+ * command, or whose command is nowhere, is as it was.
  */
-export const usingLocated = (definition: AgentDefinition, find: () => Located | null): AgentDefinition => {
+export const usingLocated = (
+  definition: AgentDefinition,
+  find: () => Located | null,
+  /** The app that carries a bundled copy, in a Flatpak (`FLATPAK_ID`); none elsewhere. */
+  flatpakId?: string,
+): AgentDefinition => {
   const cli = definition.cli
   if (cli === undefined) return definition
   const pointed =
@@ -145,7 +167,17 @@ export const usingLocated = (definition: AgentDefinition, find: () => Located | 
       const spec = make(...args)
       const found = spec.command === cli.name ? find() : null
       if (found === null) return spec
-      const named = { ...spec, command: found.command }
+      // An npm-installed Node script found off the PATH finds the Node beside it, as it would in the terminal that installed it.
+      const path =
+        cli.node === true && found.whose === 'theirs' && isAbsolute(found.command)
+          ? {
+              env: {
+                ...spec.env,
+                PATH: [dirname(found.command), process.env.PATH].filter((part) => part !== undefined && part !== '').join(delimiter),
+              },
+            }
+          : {}
+      const named = { ...spec, command: found.command, ...path }
       return found.out === undefined ? named : { ...named, onDevice: found.out(named) }
     }
   const { signIn } = definition
@@ -156,14 +188,16 @@ export const usingLocated = (definition: AgentDefinition, find: () => Located | 
       ...signIn,
       get login() {
         const found = find()
-        return found === null || found.command === cli.name || !signIn.login.startsWith(`${cli.name} `)
+        return found === null || !signIn.login.startsWith(`${cli.name} `)
           ? signIn.login
-          : `${quoted(found.command)}${signIn.login.slice(cli.name.length)}`
+          : `${inATerminal(found, flatpakId)}${signIn.login.slice(cli.name.length)}`
       },
-      status: pointed(signIn.status),
+      ...(signIn.status === undefined ? {} : { status: pointed(signIn.status) }),
+      ...(signIn.credentials === undefined ? {} : { credentials: pointed(signIn.credentials) }),
       ...(signIn.inApp === undefined ? {} : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
       ...(signIn.logout === undefined ? {} : { logout: { ...signIn.logout, run: pointed(signIn.logout.run) } }),
     },
     ...(definition.version === undefined ? {} : { version: pointed(definition.version) }),
+    ...(definition.usage === undefined ? {} : { usage: { ...definition.usage, run: pointed(definition.usage.run) } }),
   }
 }

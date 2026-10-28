@@ -1,13 +1,14 @@
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import type { ChangeRequest, CodeHost, Tracker } from '../src/model'
+import { type ChangeRequest, type CodeHost, fromOutside, type Tracker } from '../src/model'
 
 /*
  * The models' contracts (docs/architecture/06), written once and run against
  * the fake in CI and against real accounts on demand. A code host opens a
  * change from a branch the subject prepares, finds it again rather than
- * opening a second, reads it back, marks it ready, and hears a reply. A
+ * opening a second, reads it back, marks it ready, and hears a reply; where
+ * it takes reviews, reads it as a change to review and posts one on it. A
  * tracker reads an issue it is given, lists the account's, and comments.
  */
 
@@ -69,6 +70,19 @@ export const hostContract = (subject: HostSubject) =>
           assert.isTrue(after.cursor >= before.cursor)
           const head = (yield* host.change(repository, opened.number)).headSha
           if (head !== null) assert.isArray(yield* host.checks(repository, head))
+          // Where the host takes reviews: the change read as one to review is the account's own, from inside; a comment posts.
+          if (host.capabilities.reviews) {
+            const toReview = yield* host.changeToReview(repository, opened.number)
+            assert.strictEqual(toReview.number, opened.number)
+            assert.isFalse(fromOutside(toReview))
+            const posted = yield* host.postReview(repository, opened.number, {
+              event: 'comment',
+              body: 'A review from the contract.',
+              commit: toReview.headSha,
+              comments: [],
+            })
+            assert.isNotEmpty(posted.id)
+          }
         } finally {
           if (subject.cleanup !== undefined) yield* Effect.ignore(subject.cleanup(opened))
         }
@@ -96,6 +110,7 @@ export const trackerContract = (subject: TrackerSubject) =>
         assert.isArray(yield* tracker.mine({ limit: 5 }))
         yield* tracker.comment(issue, 'A comment from the Althar connectors contract.')
         if (tracker.capabilities.links) yield* tracker.link(issue, { url: 'https://example.com/althar-contract', title: 'Althar contract' })
+        if (tracker.capabilities.changes.includes('status')) assert.isNotEmpty(yield* tracker.choices(issue, 'status'))
       }),
     )
   })

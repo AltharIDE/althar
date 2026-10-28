@@ -12,6 +12,7 @@ export const revisionedTables = [
   'projects',
   'project_settings',
   'project_notes',
+  'runnables',
   'tasks',
   'task_repository_requirements',
   'task_plans',
@@ -39,7 +40,11 @@ export const revisionedTables = [
   'connections',
   'external_links',
   'issue_drafts',
+  'issue_changes',
   'conflict_resolutions',
+  'review_drafts',
+  'automations',
+  'automation_occurrences',
 ] as const
 export type RevisionedTable = (typeof revisionedTables)[number]
 
