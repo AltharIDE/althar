@@ -640,10 +640,9 @@ export class Projects extends Context.Service<
                 createdByActorId: envelope.actorId,
                 createdAt,
               })}`
-              // The messages it was asked in, whose images and files it opens with, referred to where they are kept.
-              if (input.request !== undefined && input.request.trim() !== '')
-                for (const [index, userInputId] of (input.requestInputs ?? []).entries())
-                  yield* sql`INSERT INTO task_request_inputs ${sql.insert({ projectId: first.projectId, taskId, position: index + 1, userInputId })}`
+              // The messages it was asked in, whose images and files it opens with, referred to where they are kept, whether or not they said anything.
+              for (const [index, userInputId] of (input.requestInputs ?? []).entries())
+                yield* sql`INSERT INTO task_request_inputs ${sql.insert({ projectId: first.projectId, taskId, position: index + 1, userInputId })}`
               const threadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId: first.projectId, kind: 'task', taskId, createdAt })}`
               // Planned by the rule, else Althar's own until the repository's docs are read.

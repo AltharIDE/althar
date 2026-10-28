@@ -313,6 +313,27 @@ describe('a task', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy()
   })
 
+  it('opens its thread with the screenshot the person sent with no words', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [items.says('On it.', 'codex')],
+          task: {
+            ...base.task,
+            request: null,
+            requestPictures: [
+              { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 2048, width: 640, height: 400, name: 'bug.png', unkept: null },
+            ],
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const shot = await screen.findByRole('button', { name: 'View bug.png' })
+    expect(shot.compareDocumentPosition(screen.getByText('On it.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('reviews someone else’s pull request: opens with it, says what its lead can reach, and posts its draft only as the person says', async () => {
     const base = snapshot()
     const review = {

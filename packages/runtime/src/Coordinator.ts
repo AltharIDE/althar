@@ -577,6 +577,7 @@ export class Coordinator extends Context.Service<
               draft: true,
               ...(issue === undefined ? {} : { issueKey: issue.key }),
               ...(repositories === undefined ? {} : { repositories }),
+              // Sent with no words, its images and files are still what they asked for.
               ...(request === undefined ? {} : { request, requestInputs: said.map((input) => input.id) }),
               ...(plain ? { plain } : {}),
             })

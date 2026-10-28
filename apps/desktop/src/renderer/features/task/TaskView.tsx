@@ -511,13 +511,15 @@ export function TaskView({
   const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
-    ...(snapshot.task.request === null || snapshot.earlier
+    // Sent with no words, the images and files they sent are what they asked for.
+    ...((snapshot.task.request === null && snapshot.task.requestPictures === undefined && snapshot.task.requestFiles === undefined) ||
+    snapshot.earlier
       ? []
       : [
           {
             kind: 'you' as const,
             id: REQUEST,
-            text: snapshot.task.request,
+            text: snapshot.task.request ?? '',
             at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
             delivery: Delivery.Delivered,
             // A review's thread opens with the pull request it reviews, under what the person asked.
