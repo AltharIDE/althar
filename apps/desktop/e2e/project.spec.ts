@@ -163,7 +163,7 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     const read = page.getByRole('region', { name: 'What Althar read' })
     await expect(read.getByText(/is on GitLab, which isn’t connected/)).toBeVisible()
     await expect(read.getByRole('button', { name: 'Connect GitHub' })).toBeVisible()
-    await expect(page.getByText('2 repositories')).toBeVisible()
+    await expect(folders.getByRole('listitem')).toHaveCount(2)
     await page.waitForTimeout(400)
     await page.screenshot({ path: 'test-results/new-project.png' })
 

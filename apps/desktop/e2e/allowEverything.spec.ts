@@ -120,8 +120,8 @@ test('allows everything on a task or a project, clearing what waits, and says so
     // Its own screen shows what went ahead.
     await cardOf('Tag the release').getByRole('button', { name: 'Tag the release' }).click()
     await toConversation(page)
-    await expect(page.getByText('chosen=allow_once,allow_once')).toBeVisible()
-    await expect(page.getByText('Needs your permission')).toHaveCount(0)
+    await expect(page.getByText('chosen=allow_once,allow_once', { exact: true })).toBeVisible()
+    await expect(page.getByText('Needs your permission').filter({ visible: true })).toHaveCount(0)
     await shoot(page, 'app-project-allowed-task.png')
   } finally {
     await electronApp.close()

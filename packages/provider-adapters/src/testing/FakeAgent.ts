@@ -1382,8 +1382,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
       // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
-      // nothing. Cancelled, it stops.
-      const slowly = /\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/.exec(text)
+      // nothing. Cancelled, it stops. The last one said is the one it goes by: what the person said in a turn that failed comes
+      // again ahead of what they say next, and it answers the newest, as an agent would once its API is back.
+      const slowly = [...text.matchAll(/\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/g)].at(-1)
       if (slowly?.[2] !== undefined) {
         const waitOut = async (ms: number) => {
           for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)

@@ -33,7 +33,7 @@ const startWhileOut = async (out: string, { asks = false, waits = false }: { rea
     await expect(planning.page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await planTask(planning.page, 'Add a retry to the checkout call')
     await planning.page.getByRole('button', { name: 'Hold' }).click()
-    await expect(planning.page.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(planning.page.getByRole('region', { name: 'Conversation' }).getByText('Held. Starts when you say')).toBeVisible()
   } finally {
     await planning.electronApp.close()
   }
@@ -95,10 +95,10 @@ test('waits for the reset where no other agent is free, and says so on its card,
   try {
     // Althar learns an agent is out when it tries it: Claude Code first, then Codex, which it waits for.
     const held = /Codex is out of usage until /
-    await expect(page.getByText(held)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible({ timeout: 15_000 })
     await page.screenshot({ path: 'test-results/limit-waits-card.png', animations: 'disabled' })
     await page.getByRole('radio', { name: /^Board/ }).click()
-    await expect(page.getByText(held)).toBeVisible()
+    await expect(page.getByRole('region', { name: 'The project’s work' }).getByText(held)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-board.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
     await expect(
@@ -111,7 +111,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
       ),
     ).toBeVisible()
     // Its header says so too, rather than that it is idle.
-    await expect(page.getByText(held)).toBeVisible()
+    await expect(page.getByText(held).filter({ visible: true })).toBeVisible()
     await expect(page.getByText('Idle', { exact: true })).toHaveCount(0)
     // And the task offers what could carry it on, though nothing is free now.
     await expect(
@@ -167,10 +167,12 @@ test('asks the person where the project says to, on the home too, and moves the 
     // In the task: the models free now, and waiting for the reset.
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
     await expect(page.getByRole('button', { name: /^Wait until / })).toBeVisible()
+    // The home's screen, kept and hidden, has the same call.
     await page
       .getByText(
         /^Claude Code ran out of usage while working on the task\. It's back at .+\. Pick another model to carry on now, or wait until then\.$/,
       )
+      .filter({ visible: true })
       .locator('xpath=ancestor::div[1]')
       .screenshot({ path: 'test-results/limit-ask-call.png', scale: 'css' })
     await page.getByRole('button', { name: 'Choose another model' }).click()
@@ -190,14 +192,14 @@ test('lets the person hand a step held for the reset to another model, from the 
   try {
     // The project waits for resets: the step is held, and its card says what ran out, on which step, and until when.
     const held = /Claude Code is out of usage until /
-    await expect(page.getByText(held)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible({ timeout: 15_000 })
     await page
       .getByRole('article', { name: /Add a retry to the checkout call/ })
       .first()
       .screenshot({ path: 'test-results/limit-held-card.png', scale: 'css' })
     await page.getByRole('button', { name: /^Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
-    await expect(page.getByText(held)).toBeVisible()
+    await expect(page.getByText(held).filter({ visible: true })).toBeVisible()
     await page
       .locator('header[aria-label="Add a retry to the checkout call"]')
       .screenshot({ path: 'test-results/limit-held-header.png', scale: 'css' })
@@ -225,7 +227,7 @@ test('lets the person hand a step held for the reset to another model, from the 
     await page.getByRole('button', { name: /^Continue with/ }).click()
     // Handed to Codex, it carries on there now, and the reset brings nothing back.
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(held)).toHaveCount(0)
+    await expect(page.getByText(held).filter({ visible: true })).toHaveCount(0)
   } finally {
     await electronApp.close()
   }

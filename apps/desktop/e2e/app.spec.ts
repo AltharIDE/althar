@@ -83,12 +83,12 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     // A deploy is kept for the person: it waits in the thread as a call until it is answered.
     await say(page, 'command-choices')
-    await expect(page.getByText('Needs you', { exact: true })).toBeVisible()
-    await expect(page.getByText('Needs your permission')).toBeVisible()
+    await expect(page.getByText('Needs you', { exact: true }).filter({ visible: true })).toBeVisible()
+    await expect(page.getByText('Needs your permission').filter({ visible: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
     await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
-    await expect(page.getByText('Needs you', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Needs you', { exact: true }).filter({ visible: true })).toHaveCount(0)
 
     await say(page, 'think')
     await expect(page.getByText('Done', { exact: true })).toBeVisible()
@@ -158,12 +158,13 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:finish] [review:findings]')
     await box.press('Enter')
 
-    // The plan, with the time it starts on its own; held, it waits.
-    await expect(page.getByText(/^Starts in \d+s$/)).toBeVisible({ timeout: 20_000 })
+    // The plan, with the time it starts on its own; held, it waits. Up next on the board beside says the same.
+    const conversation = page.getByRole('region', { name: 'Conversation' })
+    await expect(conversation.getByText(/^Starts in \d+s$/)).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('It knows the code.')).toBeVisible()
     await page.screenshot({ path: 'test-results/plan.png' })
     await page.getByRole('button', { name: 'Hold' }).click()
-    await expect(page.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()
     await page.getByRole('button', { name: 'Start', exact: true }).click()
 
     // Implement, a review with a finding, settling it, and a review that passes: the card says it is ready.

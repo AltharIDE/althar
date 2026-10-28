@@ -27,25 +27,25 @@ test('stops, resumes, abandons and reopens a task from its menu', async () => {
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await startTask(page, 'Keep the session alive', '[lead:wait]')
-    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Running', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 })
     await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Implementing', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 })
 
     // Working: stop it, or abandon it; nothing to resume.
     let items = await menu(page)
     await expect(items.getByRole('menuitem', { name: /Resume/ })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/course-working-menu.png', animations: 'disabled' })
     await items.getByRole('menuitem', { name: /Stop the task/ }).click()
-    await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Stopped', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 })
     // Nothing waits on the person for it.
-    await expect(page.getByText('Needs you', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Needs you', { exact: true }).filter({ visible: true })).toHaveCount(0)
 
     // Stopped in the middle of its step: resume it, and the lead carries it on.
     items = await menu(page)
     await expect(items.getByRole('menuitem', { name: /Stop the task/ })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/course-stopped-menu.png', animations: 'disabled' })
     await items.getByRole('menuitem', { name: /Resume/ }).click()
-    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Implementing', { exact: true }).filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 })
 
     // Abandoned after saying what stays, it says so where it stood.
     items = await menu(page)
@@ -56,14 +56,14 @@ test('stops, resumes, abandons and reopens a task from its menu', async () => {
     await page.screenshot({ path: 'test-results/course-abandon-dialog.png', animations: 'disabled' })
     await asked.getByRole('button', { name: 'Abandon task' }).click()
     await expect(asked).toHaveCount(0)
-    await expect(page.getByText('Abandoned', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Abandoned', { exact: true }).filter({ visible: true }).first()).toBeVisible()
 
     // Reopened, it is stopped where it was, ready to resume.
     items = await menu(page)
     await expect(items.getByRole('menuitem', { name: /Abandon/ })).toHaveCount(0)
     await page.screenshot({ path: 'test-results/course-abandoned-menu.png', animations: 'disabled' })
     await items.getByRole('menuitem', { name: /Reopen/ }).click()
-    await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Stopped', { exact: true }).filter({ visible: true }).first()).toBeVisible()
     items = await menu(page)
     await expect(items.getByRole('menuitem', { name: /Resume/ })).toBeVisible()
     await page.keyboard.press('Escape')

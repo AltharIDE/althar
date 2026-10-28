@@ -100,8 +100,8 @@ test('sends images dropped on a composer to the coordinator and to a lead, which
     await expect(page.getByRole('list', { name: '1 attachment to send' }).getByRole('img', { name: 'wide.png' })).toBeVisible()
     await page.screenshot({ path: 'test-results/images-task-composer.png' })
     await say(page, 'What is off here?')
-    // What the lead was sent: the picture as drawn smaller, in its thread alone.
-    await expect(page.getByText(/saw images: image\/png \d+ B/)).toBeVisible()
+    // What the lead was sent: the picture as drawn smaller, in its thread alone. The coordinator's, kept hidden, has its own.
+    await expect(page.getByText(/saw images: image\/png \d+ B/).filter({ visible: true })).toBeVisible()
     // On the message, from the store, it opens full size, as wide as it was sent.
     await page.getByRole('button', { name: 'View wide.png' }).click()
     const dialog = page.getByRole('dialog')
