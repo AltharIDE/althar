@@ -79,8 +79,12 @@ export interface Tracker {
   readonly bound?: true
 }
 
-/** What tells a tracker from the rest: its server, its workspace there (in its link) and its team's key. */
-export const trackerIdOf = (tracker: Tracker): string => `${tracker.product}:${tracker.at ?? ''}:${tracker.url ?? ''}:${tracker.key ?? ''}`
+/**
+ * What tells a tracker from the rest: its server, its workspace there (in its link), its team's key, and whether it is the bound one. Trello's bound
+ * board and the cards learned from its issues share the first three (a card names no board), so the bound one is told apart by that.
+ */
+export const trackerIdOf = (tracker: Tracker): string =>
+  `${tracker.product}:${tracker.at ?? ''}:${tracker.url ?? ''}:${tracker.key ?? ''}${tracker.bound === true ? ':bound' : ''}`
 
 /** A key's space on the web, from the link of one of its issues: linear.app/acme/team/MER, acme.atlassian.net/browse/MER. */
 export const trackerUrlOf = (product: Product, key: string | null, issueUrl: string): string | null => {

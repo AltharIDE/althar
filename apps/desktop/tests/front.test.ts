@@ -11,6 +11,7 @@ import {
   partsOf,
   rulesLineOf,
   trackersOf,
+  trackerIdOf,
   trackersWithBinding,
   trackerUrlOf,
 } from '../src/renderer/features/project/front'
@@ -240,7 +241,10 @@ describe('a project’s front page', () => {
     const card = { product: 'trello', at: 'trello.com', key: null, url: 'https://trello.com', connections: ['conn_t'] } as const
     const trello = {
       ...list,
-      connections: [...list.connections, { ...conn('conn_t', 't'), product: 'trello' as const, webUrl: 'https://trello.com' }],
+      connections: [
+        ...list.connections,
+        { ...conn('conn_t', 't'), product: 'trello' as const, webUrl: 'https://trello.com', workspace: undefined },
+      ],
     }
     expect(
       trackersWithBinding([card], { connectionId: 'conn_t', container: { id: 'list', name: 'Doing' } }, trello).map((tracker) => [
@@ -251,6 +255,9 @@ describe('a project’s front page', () => {
       [['conn_t'], true],
       [['conn_t'], undefined],
     ])
+    // Real Trello has no workspace: the two share product, host, link and no key, yet are told apart, so rows never share a React key.
+    const rows = trackersWithBinding([card], { connectionId: 'conn_t', container: { id: 'list', name: 'Doing' } }, trello)
+    expect(new Set(rows.map(trackerIdOf)).size).toBe(2)
     // Two workspaces with the same team key are two trackers, and the bound link is its own.
     const issue = (connectionId: string, workspace: string) =>
       ({
