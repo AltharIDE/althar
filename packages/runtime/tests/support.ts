@@ -315,7 +315,9 @@ export const runtime = (
     ...(more.load === undefined ? {} : { load: more.load }),
     // No test reads a real sign-in: a provider's usage endpoint answers that there is none, unless a test says.
     usage: { readEndpoint: () => Promise.resolve({ kind: 'none' as const }), ...more.usage },
-    ...(more.idle === undefined ? {} : { idle: more.idle }),
+    // A round waits a moment, not two seconds, for its lead to report what it left running after its turn: the fake
+    // agents report it within the turn, but where a test says.
+    idle: { reports: Duration.millis(300), ...more.idle },
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     busy: { machine: ROOMY, ...more.busy },
