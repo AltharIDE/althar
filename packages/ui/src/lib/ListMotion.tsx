@@ -247,6 +247,8 @@ const enter = (el: HTMLElement, how: ListEnter, reduced: boolean) => {
 
 /** Fades where it stood: no longer the page's, it is its own copy. */
 const leave = (el: HTMLElement, at: DOMRect, reduced: boolean) => {
+  // A move of ours under way puts back what it changed now, not later over the copy.
+  running.get(el)?.stop()
   for (const one of el.getAnimations()) one.cancel()
   lay(el, at)
   const one = el.animate(

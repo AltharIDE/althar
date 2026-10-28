@@ -38,7 +38,8 @@ function stubAnimations() {
       )
       for (const one of listeners[type] ?? []) one()
     }
-    const cancel = vi.fn(() => fire('cancel'))
+    // As in a browser, the cancel event comes later.
+    const cancel = vi.fn(() => queueMicrotask(() => fire('cancel')))
     const animation = {
       id: '',
       cancel,
@@ -199,6 +200,19 @@ describe('ListMotion', () => {
     expect(fade.timing).toEqual(MOTION.exit)
     fade.finish()
     expect(b.isConnected).toBe(false)
+  })
+
+  it('fades an item gone mid-slide where it showed, its slide put away first', async () => {
+    const { rerender } = render(<Lists lists={[['a', 'b', 'c']]} />)
+    rerender(<Lists lists={[['c', 'a', 'b']]} />)
+    const c = item('c')
+    rerender(<Lists lists={[['a', 'b']]} />)
+    await Promise.resolve()
+    expect(c.parentElement).toBe(layer())
+    // The slide's own cancel, coming after, changes nothing of the copy.
+    expect(c.style.position).toBe('absolute')
+    expect(c.style.zIndex).toBe('')
+    expect(of(c).at(-1)!.keyframes.at(-1)).toEqual({ opacity: 0, scale: '0.96' })
   })
 
   it('lets a whole list go at once: its items leave with it', () => {
