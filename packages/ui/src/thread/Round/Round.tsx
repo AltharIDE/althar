@@ -36,7 +36,7 @@ export type RoundProps = RootProps<
  */
 export function Round({ model, at, part, children, copy, text, className, ...rest }: RoundProps) {
   return (
-    <article className={cx(s.round, className)} aria-label={model.name} {...rest}>
+    <article className={cx(s.round, className)} aria-label={model.name} data-arrivals="" {...rest}>
       <header className={s.head}>
         <Model model={model} strong />
         {part !== undefined && <span className={s.part}>{part}</span>}

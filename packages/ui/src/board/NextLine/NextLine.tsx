@@ -1,6 +1,7 @@
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { cx } from '../../lib/cx'
+import { ListMotion } from '../../lib/ListMotion'
 import { useReorder } from '../../lib/useReorder'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import b from '../Board/Board.module.css'
@@ -17,7 +18,9 @@ import s from './NextLine.module.css'
  * a click on it, or Enter on it, opens the same moves as a menu, the way
  * without dragging, and ⌥⇧↑ and ⌥⇧↓ on a row's grip move it a place. Escape
  * while dragging puts the row back. How the row is followed is the project
- * tabs' (`useReorder`), down a column instead of along a bar.
+ * tabs' (`useReorder`), down a column instead of along a bar. Moved by its
+ * menu or by key, or put back where a move failed, a row slides to its place
+ * (ListMotion, the board's where it is in one); dragged, it is the drag's.
  */
 
 export interface NextLineText {
@@ -167,75 +170,78 @@ export function NextLine({ rows, render, onMove, text }: NextLineProps) {
   }
 
   return (
-    <ol ref={list} className={cx(b.list, s.list, dragging !== null && s.sorting)}>
-      {shown.map((id, index) => {
-        const row = byId.get(id)
-        if (row === undefined) return null
-        const held = movable ? bind(id) : undefined
-        const lifted = dragging?.id === id
-        return (
-          <li
-            key={id}
-            data-row={id}
-            className={cx(s.item, lifted && s.lifted, lifted && dragging.settling && s.settling)}
-            style={shifted(id)}
-            {...(held === undefined
-              ? {}
-              : {
-                  onPointerDown: held.onPointerDown,
-                  onPointerMove: held.onPointerMove,
-                  onPointerUp: held.onPointerUp,
-                  onPointerCancel: held.onPointerCancel,
-                  onLostPointerCapture: held.onLostPointerCapture,
-                  onClickCapture: held.onClickCapture,
-                  // Ahead of the grip's own: ⌥⇧↓ must not open its menu.
-                  onKeyDownCapture: (event: KeyboardEvent<HTMLElement>) => {
-                    // Not the menu's, which React sends up through its portal.
-                    if (!event.currentTarget.contains(event.target as Node)) return
-                    held.onKeyDown(event)
-                    if (!event.defaultPrevented) return
-                    event.stopPropagation()
-                    refocus.current = id
-                  },
-                })}
-          >
-            {movable && (
-              <Menu
-                label={t.menu}
-                open={menu === id}
-                onOpenChange={(open) => setMenu(open ? id : null)}
-                placement="below"
-                align="start"
-                trigger={
-                  <button
-                    type="button"
-                    data-grip=""
-                    className={s.grip}
-                    aria-label={t.grip(row.title)}
-                    // Opened by its click, which a drag from it doesn't make, rather than by the press that may start one.
-                    onPointerDown={(event: PointerEvent<HTMLElement>) => event.button === 0 && event.preventDefault()}
-                    onClick={() => setMenu(id)}
-                  />
-                }
-              >
-                <MenuItem icon="up" disabled={index === 0} onSelect={() => move(id, 0)}>
-                  {t.front}
-                </MenuItem>
-                <MenuItem disabled={index === 0} onSelect={() => move(id, index - 1)}>
-                  {t.up}
-                </MenuItem>
-                <MenuItem disabled={index === shown.length - 1} onSelect={() => move(id, index + 1)}>
-                  {t.down}
-                </MenuItem>
-                <MenuItem icon="down" disabled={index === shown.length - 1} onSelect={() => move(id, shown.length - 1)}>
-                  {t.back}
-                </MenuItem>
-              </Menu>
-            )}
-            {render(id, index + 1)}
-          </li>
-        )
-      })}
-    </ol>
+    <ListMotion within={list} still={dragging !== null}>
+      <ol ref={list} className={cx(b.list, s.list, dragging !== null && s.sorting)}>
+        {shown.map((id, index) => {
+          const row = byId.get(id)
+          if (row === undefined) return null
+          const held = movable ? bind(id) : undefined
+          const lifted = dragging?.id === id
+          return (
+            <li
+              key={id}
+              data-row={id}
+              data-move={id}
+              className={cx(s.item, lifted && s.lifted, lifted && dragging.settling && s.settling)}
+              style={shifted(id)}
+              {...(held === undefined
+                ? {}
+                : {
+                    onPointerDown: held.onPointerDown,
+                    onPointerMove: held.onPointerMove,
+                    onPointerUp: held.onPointerUp,
+                    onPointerCancel: held.onPointerCancel,
+                    onLostPointerCapture: held.onLostPointerCapture,
+                    onClickCapture: held.onClickCapture,
+                    // Ahead of the grip's own: ⌥⇧↓ must not open its menu.
+                    onKeyDownCapture: (event: KeyboardEvent<HTMLElement>) => {
+                      // Not the menu's, which React sends up through its portal.
+                      if (!event.currentTarget.contains(event.target as Node)) return
+                      held.onKeyDown(event)
+                      if (!event.defaultPrevented) return
+                      event.stopPropagation()
+                      refocus.current = id
+                    },
+                  })}
+            >
+              {movable && (
+                <Menu
+                  label={t.menu}
+                  open={menu === id}
+                  onOpenChange={(open) => setMenu(open ? id : null)}
+                  placement="below"
+                  align="start"
+                  trigger={
+                    <button
+                      type="button"
+                      data-grip=""
+                      className={s.grip}
+                      aria-label={t.grip(row.title)}
+                      // Opened by its click, which a drag from it doesn't make, rather than by the press that may start one.
+                      onPointerDown={(event: PointerEvent<HTMLElement>) => event.button === 0 && event.preventDefault()}
+                      onClick={() => setMenu(id)}
+                    />
+                  }
+                >
+                  <MenuItem icon="up" disabled={index === 0} onSelect={() => move(id, 0)}>
+                    {t.front}
+                  </MenuItem>
+                  <MenuItem disabled={index === 0} onSelect={() => move(id, index - 1)}>
+                    {t.up}
+                  </MenuItem>
+                  <MenuItem disabled={index === shown.length - 1} onSelect={() => move(id, index + 1)}>
+                    {t.down}
+                  </MenuItem>
+                  <MenuItem icon="down" disabled={index === shown.length - 1} onSelect={() => move(id, shown.length - 1)}>
+                    {t.back}
+                  </MenuItem>
+                </Menu>
+              )}
+              {render(id, index + 1)}
+            </li>
+          )
+        })}
+      </ol>
+    </ListMotion>
   )
 }

@@ -41,18 +41,24 @@
   border-radius: var(--r-lg);
   box-shadow: var(--lift-pop);
   text-align: left;
-  animation: pop var(--fast) var(--ease);
+  transform-origin: var(--radix-popper-transform-origin);
+  animation: pop var(--enter) var(--ease-out);
 }
-.preview[data-side='top'] {
-  --from: 3px;
-}
-.preview[data-side='bottom'] {
-  --from: -3px;
+/* it grows from the count, and goes back into it quicker than it came */
+.preview[data-state='closed'] {
+  animation: shut var(--exit) var(--ease-out) forwards;
+  pointer-events: none;
 }
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translateY(var(--from, 0));
+    transform: scale(var(--scale-pop));
+  }
+}
+@keyframes shut {
+  to {
+    opacity: 0;
+    transform: scale(var(--scale-pop));
   }
 }
 

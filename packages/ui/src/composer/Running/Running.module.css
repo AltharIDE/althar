@@ -41,7 +41,7 @@
   gap: 5px;
   min-width: 0;
   overflow: hidden;
-  animation: in var(--slow) var(--ease) both;
+  animation: in var(--enter) var(--ease-out) both;
 }
 @keyframes in {
   from {

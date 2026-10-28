@@ -10,7 +10,8 @@
   border-radius: var(--r-lg);
   box-shadow: var(--lift-pop);
   text-align: left;
-  animation: pop var(--fast) var(--ease);
+  transform-origin: var(--radix-popper-transform-origin);
+  animation: pop var(--enter) var(--ease-out);
 }
 .panel:focus-visible {
   outline: none;
@@ -19,16 +20,20 @@
   padding: 11px 12px;
 }
 
-/* it comes in from the side it opens toward */
-.panel[data-side='top'] {
-  --from: 3px;
-}
-.panel[data-side='bottom'] {
-  --from: -3px;
+/* it grows from what opened it, and goes back into it quicker than it came */
+.panel[data-state='closed'] {
+  animation: shut var(--exit) var(--ease-out) forwards;
+  pointer-events: none;
 }
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translateY(var(--from, 0));
+    transform: scale(var(--scale-pop));
+  }
+}
+@keyframes shut {
+  to {
+    opacity: 0;
+    transform: scale(var(--scale-pop));
   }
 }

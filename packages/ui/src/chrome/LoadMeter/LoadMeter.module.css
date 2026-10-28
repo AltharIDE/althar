@@ -9,7 +9,9 @@
   height: 26px;
   padding: 0 7px;
   border-radius: var(--r);
-  transition: background var(--fast) var(--ease);
+  transition:
+    background var(--fast) var(--ease),
+    transform var(--press) var(--ease-out);
 }
 .button:hover {
   background: var(--line);
@@ -17,6 +19,9 @@
 .button:active,
 .button[aria-expanded='true'] {
   background: var(--line-2);
+}
+.button:active {
+  transform: scale(var(--scale-press));
 }
 
 .gauge {
@@ -45,7 +50,20 @@
   height: 9px;
   border-radius: 1px;
   background: var(--track);
-  transition: background var(--slow) var(--ease);
+  transition: background var(--enter) var(--ease-out);
+}
+/* one after another from the left, so a change reads as a sweep, not a flash */
+.steps i:nth-child(2) {
+  transition-delay: 35ms;
+}
+.steps i:nth-child(3) {
+  transition-delay: 70ms;
+}
+.steps i:nth-child(4) {
+  transition-delay: 105ms;
+}
+.steps i:nth-child(5) {
+  transition-delay: 140ms;
 }
 /* on a pressed or open button's fill, the unlit steps go a shade deeper */
 .button:active .steps i:not([data-lit]),
