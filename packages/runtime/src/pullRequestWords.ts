@@ -218,9 +218,21 @@ export const checksSpentForLead = (sum: ChecksSum, name: string, logs: ReadonlyA
 export const checksUnsettledForLead = (name: string, failing: ReadonlyArray<string>) =>
   `Your turn ended, but the checks on ${name} still fail (${failing.length === 0 ? 'checks' : failing.join(', ')}), and you haven't pushed a fix, run them again or brought them to the person. Do one of those now: push_to_pull_request for a fix you've committed, rerun_check for one that failed by chance, or hand_checks_to_person with a line on why they're the person's. Ending your turn again without one, the change goes to the person with only that they still fail.`
 
-/** Why the checks that fail on a change are the person's, as its card says, where its lead ended its turns without a fix or a reason. */
-export const unsettledLine = (failing: ReadonlyArray<string>) =>
-  `${failing.length === 0 ? 'Checks' : failing.join(', ')} still ${failing.length === 1 ? 'fails' : 'fail'}, and the lead stopped without a fix or a reason. Tell it what to do.`
+/**
+ * What the lead is told, started again, when its agent went on its own
+ * after it was told the checks it was to see through failed, before it did
+ * anything with them (ADR-068). Once.
+ */
+export const checksGoneForLead = (name: string, failing: ReadonlyArray<string>) =>
+  `Your agent stopped on its own before you dealt with the checks on ${name}, which still fail (${failing.length === 0 ? 'checks' : failing.join(', ')}). Do one of these now: push_to_pull_request for a fix you've committed, rerun_check for one that failed by chance, or hand_checks_to_person with a line on why they're the person's. If your agent stops again first, the change goes to the person with only that they still fail.`
+
+/**
+ * Why the checks that fail on a change are the person's, as its card says,
+ * where its lead ended its turns, or its agent stopped on its own, without a
+ * fix or a reason.
+ */
+export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'gone' = 'ended') =>
+  `${failing.length === 0 ? 'Checks' : failing.join(', ')} still ${failing.length === 1 ? 'fails' : 'fail'}, and ${how === 'gone' ? "the lead's agent stopped on its own" : 'the lead stopped'} without a fix or a reason. Tell it what to do.`
 
 /** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
 export const spentLine = (failing: ReadonlyArray<string>, tries: number) =>

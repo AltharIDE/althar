@@ -65,7 +65,13 @@
     do one of those. Ending its turn so again, the failure is the person's,
     and the card says "test still fails, and the lead stopped without a fix
     or a reason. Tell it what to do." Not where the person spoke since the
-    failure came: they are at it together.
+    failure came: they are at it together. **Its agent stopping on its own**
+    before it did any of those, mid-turn or after, is looked at as it goes:
+    the lead is started again on the same agent and asked once; stopping so
+    again, or not starting, the card says "test still fails, and the lead's
+    agent stopped on its own without a fix or a reason. Tell it what to do."
+    A lead the person stopped stays stopped, and one another agent took over
+    from carries on there.
   - **It comes to the person only with a reason:** its card is ready
     (Needs you, Stuck) with the lead's line, or, where its tries are spent
     and it said nothing, "test still fails after 3 fixes by the lead"; never

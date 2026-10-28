@@ -92,6 +92,7 @@ import {
   bodyOf,
   checksForLead,
   checksForLeadAlone,
+  checksGoneForLead,
   checksLine,
   checksOf,
   checksSpentForLead,
@@ -4685,26 +4686,34 @@ export class Changes extends Context.Service<
        * something, nor where the person interrupted it. It is asked once to
        * fix them, run them again or say why they are the person's; ending so
        * again, they are the person's, and the card says so, never only that
-       * they fail.
+       * they fail. Its agent going on its own meanwhile, before or after its
+       * turn ended, is looked at at once, the same: it is started again to
+       * be asked, once. One the person stopped was theirs to stop (`taken`),
+       * and one another agent took over from carries on in that one.
        */
       const lookAtChecks = (event: LiveEvent, waited: boolean): Effect.Effect<void, unknown, Store> =>
         Effect.gen(function* () {
-          if (event._tag !== 'TurnEnded' || event.state === 'interrupted' || event.errorClass === 'usage_limit') return
+          const gone = event._tag === 'SessionEnded' && event.state === 'lost'
+          if (!gone && (event._tag !== 'TurnEnded' || event.state === 'interrupted' || event.errorClass === 'usage_limit')) return
+          // Started again already, it is that session's turn ending that counts.
+          if (gone && Option.isSome(yield* sessions.running(event.threadId))) return
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ taskId: string }>`
             SELECT t.task_id FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${event.threadId} AND t.kind = 'task'
               AND k.state = 'open'`
           if (thread === undefined) return
           const taskId = thread.taskId
+          // What waits on the thread comes in its next turn; with its agent gone, there is none until it is started again.
           const [queued] = yield* sql<{ id: string }>`
             SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
-          if (queued !== undefined) return
+          if (queued !== undefined && !gone) return
           const [asking] = yield* sql<{ id: string }>`
             SELECT id FROM attention_requests WHERE task_id = ${taskId} AND kind = 'question' AND state = 'open' LIMIT 1`
           if (asking !== undefined || (yield* roundUnderWay(taskId))) return
           if ((yield* unsettledChecks(taskId)).length === 0) return
-          // Not at once: a lead may say what it did just after its turn, and one at work still is waited for.
-          if (!waited) {
+          // Not at once: a lead may say what it did just after its turn, and one at work still is waited for. Its agent going
+          // meanwhile is looked at as it goes.
+          if (!waited && !gone) {
             if (holdingChecks.has(event.threadId)) return
             holdingChecks.add(event.threadId)
             return yield* Effect.forkIn(
@@ -4722,12 +4731,23 @@ export class Changes extends Context.Service<
             Effect.gen(function* () {
               for (const { link, snapshot, told } of yield* unsettledChecks(taskId)) {
                 const failing = snapshot.checks?.failing ?? []
-                // Asked once for each time it was told, it is asked to finish; asked, and ending so again, they are the person's.
+                // Asked once for each time it was told, it is asked to finish, started again where its agent went; asked, and
+                // ending so again, or not started again, they are the person's.
                 if (yield* heard(link, 'checks_nudged', `nudged:${told.id}`, { sha: snapshot.headSha })) {
-                  yield* tellLead(link, [checksUnsettledForLead(nameOf(snapshot), failing)], true)
-                  continue
+                  const name = nameOf(snapshot)
+                  const asked = yield* tellLead(
+                    link,
+                    [gone ? checksGoneForLead(name, failing) : checksUnsettledForLead(name, failing)],
+                    true,
+                  ).pipe(
+                    Effect.as(true),
+                    Effect.catchCause((cause) =>
+                      Effect.as(Effect.logWarning('Could not start the lead again to see its checks through', cause), false),
+                    ),
+                  )
+                  if (asked) continue
                 }
-                const why = unsettledLine(failing)
+                const why = unsettledLine(failing, gone ? 'gone' : 'ended')
                 yield* heard(link, 'checks_handed', `handed:${snapshot.headSha}:${yield* timestamp}`, { sha: snapshot.headSha, why })
                 yield* sayOn(link, why)
                 yield* touchCard(taskId)

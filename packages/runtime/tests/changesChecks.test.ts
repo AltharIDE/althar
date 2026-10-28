@@ -245,6 +245,34 @@ describe('a change whose checks Althar sees through', () => {
     },
   )
 
+  it.live('starts its lead again once when its agent goes after it is told of a failure, then brings it to the person with why', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [failing] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      // A lead whose agent goes each time it hears of the failure, before it does anything with it.
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-gone]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null, Duration.seconds(40))
+      assert.strictEqual(ready?.phase, 'ready')
+      assert.strictEqual(
+        ready?.checksBack,
+        "test still fails, and the lead's agent stopped on its own without a fix or a reason. Tell it what to do.",
+      )
+      const threadId = ready?.threadId ?? ''
+      // Started again once, between, to be asked to see them through.
+      const sql = yield* SqlClient.SqlClient
+      const asked = yield* sql<{ id: string }>`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Your agent stopped%'`
+      assert.lengthOf(asked, 1)
+      const lost = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${threadId} AND state = 'lost'`
+      assert.lengthOf(lost, 2)
+      assert.lengthOf(fixesOn(bare), 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('leaves a fix to the person to push where the branch had commits not pushed yet when its checks failed', () => {
     const { working, bare } = hosted()
     let first: 'running' | 'failed' = 'running'
