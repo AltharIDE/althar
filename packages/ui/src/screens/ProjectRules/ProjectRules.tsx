@@ -39,8 +39,8 @@ import s from './ProjectRules.module.css'
  *
  * Over the sentences, one switch allows everything: what asks, what goes
  * ahead and the rest say they are off while it is on, and are kept for
- * when it's off again. Never still holds, and what could lose work still
- * asks (docs/plans/safety-pass.md).
+ * when it's off again. Never still holds, and what can't be undone still
+ * asks (ADR-066).
  */
 
 /** Where a command rule can sit: never with the rest, which is for what no rule names. */
@@ -260,7 +260,7 @@ export const projectRulesText: ProjectRulesText = {
   allowAll: {
     title: 'Allow everything',
     note: (project) =>
-      `Nothing in ${project} waits for you but what could lose work, such as a force push or deleting outside the task, and the rules below are kept for when it’s off. Never still holds: while it lists anything, a command Althar can’t read is refused too.`,
+      `Nothing in ${project} waits for you but what can’t be undone, such as a force push or deleting outside the task, and the rules below are kept for when it’s off. Never still holds: while it lists anything, a command Althar can’t read is refused too.`,
   },
   add: {
     [RulePlace.Never]: 'Add a command to Never',

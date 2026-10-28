@@ -1487,6 +1487,21 @@ describe('what could lose work or a secret (DEV-69)', () => {
       assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'allow', command)
   })
 
+  it('lets tags through with everything allowed whichever branch is checked out, and asks where the branch goes too', () => {
+    const { currentBranch: _, ...detached } = context
+    for (const at of [{ ...context, currentBranch: 'main' }, detached]) {
+      const allowing = (command: string) => decide(request({ title: command }), { ...at, ...rules({ mode: 'allow' }) })
+      for (const command of ['git push --tags', 'git push --tags origin', 'git push origin --tags'])
+        assert.strictEqual(allowing(command).verdict, 'allow', command)
+      // `--follow-tags` pushes the checked-out branch as well, and so does naming it.
+      for (const command of ['git push --follow-tags', 'git push --tags origin HEAD', 'git push --tags --delete origin'])
+        assert.deepInclude(allowing(command), { verdict: 'ask', held: false }, command)
+    }
+    // Every other mode still asks before pushing tags.
+    for (const mode of ['rules', 'coordinator', 'ask'] as const)
+      assert.strictEqual(run('git push --tags origin', { currentBranch: 'main', ...rules({ mode }) }).verdict, 'ask', mode)
+  })
+
   it('is never judged by the coordinator, and goes ahead only where the person always allows its kind', () => {
     const coordinator = { mode: 'coordinator' as const, ask: [] }
     assert.strictEqual(verdictOf('npm test', coordinator), 'judge')

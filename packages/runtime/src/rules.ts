@@ -1743,7 +1743,8 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
   }
   const [, ...refspecs] = positional
   const destinations: Array<{ readonly branch: string; readonly deletes: boolean }> = []
-  if (refspecs.length === 0) {
+  // `--tags` alone pushes the tags and no branch, whichever is checked out.
+  if (refspecs.length === 0 && (deleting || !args.includes('--tags'))) {
     if (deleting) found.push(kept(`Althar can't tell which branch this deletes, so it asks.`, 'unclear', 'irreversible'))
     else if (context.currentBranch === undefined)
       found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear', 'irreversible'))
