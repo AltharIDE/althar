@@ -7,7 +7,7 @@ import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { DESCRIBED } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -77,11 +77,17 @@ const runsOf = (taskId: string) =>
       SELECT state, plan_id, end_reason, parameters FROM runs WHERE task_id = ${taskId} ORDER BY created_at, rowid`
   })
 
-/** What the person says to the task's lead. */
+/**
+ * What the person says to the task's lead, as the task's screen says it: with no agent on the thread, as once its task
+ * settled, it starts its lead after queuing what they said.
+ */
 const say = (threadId: string, body: string) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
+    const held = Option.isSome(yield* sessions.running(threadId))
     yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
+    // Started already by settling, where it was stopping as it was written to.
+    if (!held) yield* Effect.ignore(sessions.startLast(threadId))
   })
 
 const results = (threadId: string) =>

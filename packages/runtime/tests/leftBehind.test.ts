@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -64,13 +64,11 @@ const alive = (pid: number) => {
 const loner = (work: string | null) => {
   const env = { ...process.env }
   delete env[WORK]
-  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
-    detached: true,
-    stdio: 'ignore',
+  // Started by a shell that exits at once, so launchd is its parent, as for what outlived an Althar that quit.
+  const pid = execFileSync('/bin/sh', ['-c', `"${process.execPath}" -e "setInterval(() => {}, 1000)" >/dev/null 2>&1 & echo $!`], {
     env: work === null ? env : { ...env, [WORK]: work },
   })
-  child.unref()
-  return child.pid ?? 0
+  return Number(pid.toString().trim())
 }
 
 /** A command that runs until stopped, as a run of the project. */

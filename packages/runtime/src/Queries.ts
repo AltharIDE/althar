@@ -1,6 +1,6 @@
 import { HOSTED, newPullRequestLink } from '@althar/connectors'
-import { existsSync, realpathSync } from 'node:fs'
-import { isAbsolute, join, sep } from 'node:path'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { isAbsolute, join, resolve, sep } from 'node:path'
 
 import {
   AllowedBy,
@@ -2050,9 +2050,24 @@ export class Queries extends Context.Service<
       const EVENTS = 50
       /*
        * Settled work doesn't change, so its card is worked out once, by when it settled: but for its pull requests, which its host
-       * may close or merge after (an abandoned task's left open), so it is worked out again once what was seen of them moves on.
+       * may close or merge after (an abandoned task's left open), and its worktrees, where the person may commit after it merged
+       * with no agent on it (LeftBehind.ts), so it is worked out again once what was seen of them moves on.
        */
       const settledCards = new Map<string, { readonly seen: string; readonly card: BoardSnapshot['tasks'][number] }>()
+
+      /** When a worktree's head last moved, as its reflog was last written: a commit there writes it. Nothing where it can't be read. */
+      const committedAt = (path: string) => {
+        if (path === '') return ''
+        try {
+          // A worktree's `.git` is a file naming its folder in the repository's; a repository's own, that folder.
+          const dotGit = join(path, '.git')
+          const pointer = statSync(dotGit).isFile() ? /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1] : undefined
+          const gitDir = pointer === undefined ? dotGit : resolve(path, pointer.trim())
+          return String(statSync(join(gitDir, 'logs', 'HEAD')).mtimeMs)
+        } catch {
+          return ''
+        }
+      }
 
       /** A task as the board shows it: its card, and, ready, what it changed and what of it merges here. None where it has no card. */
       const onBoard = (row: {
@@ -2064,9 +2079,11 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           // A settled task whose lead works on it again isn't as it settled (ADR-034).
           const working = (yield* (yield* Sessions).onTasks).some((session) => session.taskId === row.id)
-          const [links] = yield* (yield* SqlClient.SqlClient)<{ seen: string | null }>`
-            SELECT max(updated_at) AS seen FROM external_links WHERE task_id = ${row.id} AND kind = 'change'`
-          const seen = links?.seen ?? ''
+          const [links] = yield* (yield* SqlClient.SqlClient)<{ seen: string | null; paths: string | null }>`
+            SELECT (SELECT max(updated_at) FROM external_links WHERE task_id = ${row.id} AND kind = 'change') AS seen,
+              (SELECT group_concat(path, char(10)) FROM workspaces
+                WHERE task_id = ${row.id} AND device_id = ${instance.deviceId} AND state = 'ready') AS paths`
+          const seen = `${links?.seen ?? ''} ${(links?.paths ?? '').split('\n').map(committedAt).join(' ')}`
           const settled = row.settledAt === null || working ? undefined : settledCards.get(`${row.id}:${row.settledAt}`)
           if (settled !== undefined && settled.seen === seen) return [settled.card]
           const card = yield* cardFor(row.id)

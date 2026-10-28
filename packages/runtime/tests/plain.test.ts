@@ -234,7 +234,11 @@ describe('a plain task', () => {
       yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(
       Effect.provide(
-        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { blank: [2] }, { idle: { blank: Duration.millis(100) } }))),
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(':memory:', { blank: (prompt) => prompt.endsWith('And the v2 ones?') }, { idle: { blank: Duration.millis(100) } }),
+          ),
+        ),
       ),
     ),
   )

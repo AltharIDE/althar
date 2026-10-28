@@ -289,10 +289,10 @@ export interface FakeAgentOptions {
   /**
    * How many of each session's first prompts end at once, having said nothing
    * and used no tokens, as Claude Code's do while another of its processes
-   * renews the sign-in they share, or which, by their number from 1. It reads
-   * them all the same.
+   * renews the sign-in they share, or which, by their number from 1, or
+   * those whose words end as a function says. It reads them all the same.
    */
-  readonly blank?: number | ReadonlyArray<number>
+  readonly blank?: number | ReadonlyArray<number> | ((prompt: string) => boolean)
   /** An option that would approve every request while on, as Copilot's `allow_all`, starting at this value. */
   readonly allowAll?: 'on' | 'off'
   /** Once it turns `allow_all` on itself, it won't be turned off again: setting it back fails. */
@@ -343,6 +343,9 @@ interface SessionState {
   /** What the prompts it did nothing with said (`blank`). */
   unread: string
 }
+
+/** What a lead's brief says where it is started again on a task that settled (the runtime's Sessions.ts). */
+const SETTLED_AGAIN = 'This task is settled:'
 
 /** What `bun dev` prints, coloured as Vite colours it. */
 const SERVING =
@@ -1356,7 +1359,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
       session.prompts += 1
       const blank = options.blank ?? 0
-      if (typeof blank === 'number' ? session.prompts <= blank : blank.includes(session.prompts)) {
+      if (
+        typeof blank === 'number'
+          ? session.prompts <= blank
+          : typeof blank === 'function'
+            ? blank(prompted)
+            : blank.includes(session.prompts)
+      ) {
         session.unread = `${prompted}\n\n`
         return { stopReason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }
       }
@@ -1365,7 +1374,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
       const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
-      const text = filled === null ? prompted : prompted.slice(0, filled.index)
+      const whole = filled === null ? prompted : prompted.slice(0, filled.index)
+      // Started again on a task that settled, it does what it is asked now, after its brief, as its brief tells it: what the task
+      // first asked, the lead before it did. It plays the role its brief gives it all the same.
+      const again = whole.includes(SETTLED_AGAIN)
+      if (again) for (const marker of whole.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
+      const text = again ? whole.slice(whole.lastIndexOf('\n\n') + 2) : whole
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(

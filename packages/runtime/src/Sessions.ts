@@ -2683,6 +2683,8 @@ export class Sessions extends Context.Service<
           const [quick] = yield* sql<{
             quick: number
           }>`SELECT ${sql.unsafe(quickIn('k'))} AS quick FROM tasks k WHERE k.id = ${thread.taskId}`
+          // Settled, its lead was stopped as it settled (LeftBehind.ts): started again, it is told so, so it answers rather than redo it.
+          const [standing] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${thread.taskId}`
           const unbranched = thread.repositories.filter((repository) => repository.branched === 0)
           const [plainFirst] = unbranched
           const [first] = thread.repositories
@@ -2699,6 +2701,11 @@ export class Sessions extends Context.Service<
                 ? `You are carrying on a task an earlier session of yours worked on, in the same ${several ? 'worktrees' : 'worktree'}: Althar started you afresh to keep your context small. Its record so far is below.`
                 : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+            ...(why.kind === 'start' && standing?.state === 'done'
+              ? [
+                  "This task is settled: it is done, in the person's Settled, and the session that worked on it stopped as it settled. Don't do it again: what they ask now is a round of work of its own, on the work as it stands.",
+                ]
+              : []),
             ...askedFor(thread),
             ...(yield* alongside(thread.taskId)),
             several
