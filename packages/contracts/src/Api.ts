@@ -2272,6 +2272,10 @@ export const ThreadSnapshot = Schema.Struct({
     description: Schema.String,
     /** What the person asked for, in their words, which its thread opens with; null for a task made before Althar kept it. */
     request: Schema.NullOr(Schema.String),
+    /** The images the person sent with it, as their message to the coordinator shows them; none where they sent none. */
+    requestPictures: Schema.optional(Schema.Array(Picture)),
+    /** The files and folders they sent with it, as that message shows them. */
+    requestFiles: Schema.optional(Schema.Array(AttachedFile)),
     slug: Schema.String,
     state: Schema.String,
     branch: Schema.NullOr(Schema.String),

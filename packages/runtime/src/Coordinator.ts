@@ -556,8 +556,9 @@ export class Coordinator extends Context.Service<
                   )
           // What the person said in the turn the coordinator is on is what they asked for, not what they sent since: the task's thread starts with it.
           const sql = yield* SqlClient.SqlClient
-          const said = yield* sql<{ body: string }>`
-            SELECT u.body FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id JOIN user_inputs u ON u.id = di.user_input_id
+          // The images and files they sent with it are the task's too, referred to where their messages keep them.
+          const said = yield* sql<{ id: string; body: string }>`
+            SELECT u.id, u.body FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id JOIN user_inputs u ON u.id = di.user_input_id
             WHERE d.provider_session_id = ${access.sessionId}
               AND d.requested_at = (SELECT max(requested_at) FROM turn_deliveries WHERE provider_session_id = ${access.sessionId})
             ORDER BY di.position`
@@ -576,7 +577,7 @@ export class Coordinator extends Context.Service<
               draft: true,
               ...(issue === undefined ? {} : { issueKey: issue.key }),
               ...(repositories === undefined ? {} : { repositories }),
-              ...(request === undefined ? {} : { request }),
+              ...(request === undefined ? {} : { request, requestInputs: said.map((input) => input.id) }),
               ...(plain ? { plain } : {}),
             })
             .pipe(

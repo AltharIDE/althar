@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort, MESSAGE_FILES, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
-import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
+import { type FakeAgentOptions, SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -27,7 +27,7 @@ import { SqlClient } from 'effect/sql'
 import { connection, services } from '../src/Api'
 import { copyTo, measure, wordsOf } from '../src/attachments'
 import { Folders } from '../src/Folders'
-import { promptFor } from '../src/Sessions'
+import { promptFor, sentWithWords } from '../src/Sessions'
 import { Secrets } from '../src/Secrets'
 import { transcript } from '../src/threads'
 
@@ -346,6 +346,79 @@ describe('promptFor', () => {
     assert.strictEqual(
       promptFor([{ body: 'Look', disposition: 'after_current', filesGone: 2 }], undefined),
       "Look\n\n(The person sent 2 files with this whose copy isn't there any more. Ask for it if you need it.)",
+    )
+  })
+})
+
+describe('what the person sent with a message a task is made from', () => {
+  /** A screenshot and a file, sent to the coordinator with words that have it make a task, and the task it made, once its lead has read its brief. */
+  const madeFrom = (body: string) =>
+    Effect.gen(function* () {
+      const { client, grant, sql } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+      const from = downloads()
+      yield* client.Send({
+        commandId: commandId(),
+        threadId: coordinator.threadId,
+        body,
+        disposition: 'after_current',
+        images: [{ data: SCREENSHOT_PNG, name: 'bug.png' }],
+        files: [{ grant: yield* grant(join(from, 'build.log')) }],
+      })
+      const [made] = yield* eventually(
+        sql<{ threadId: string }>`SELECT id AS thread_id FROM threads WHERE kind = 'task'`,
+        (rows) => rows.length === 1,
+      )
+      const threadId = made?.threadId ?? ''
+      // A plan the coordinator proposed waits for the person to start it.
+      if (body.includes('[coordinator:plan]')) {
+        const [plan] = yield* eventually(sql<{ id: string }>`SELECT id FROM task_plans`, (rows) => rows.length === 1)
+        yield* client.StartPlan({ commandId: commandId(), planId: plan?.id ?? '' })
+      }
+      const thread = yield* eventually(client.GetThread({ threadId }), (value) =>
+        said(value.items).some((text) => text.includes('saw files')),
+      )
+      const sent = messages((yield* client.GetCoordinator({ projectId: project.id })).items)[0]?.content
+      const [brief] = yield* sql<{
+        prompt: string
+      }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at LIMIT 1`
+      const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces`
+      return { thread, sent, brief: brief?.prompt ?? '', worktree: worktree?.path ?? '' }
+    })
+
+  const opensWithThem = ({ thread, sent, brief, worktree }: Effect.Success<ReturnType<typeof madeFrom>>) => {
+    // Its thread opens with them, as the coordinator's chat shows them.
+    assert.deepStrictEqual(thread.task.requestPictures, sent?.pictures)
+    assert.strictEqual(thread.task.requestPictures?.[0]?.name, 'bug.png')
+    assert.deepStrictEqual(thread.task.requestFiles, sent?.files)
+    // Its lead's first turn is sent them with its brief: the image as an image, the file copied into its worktree and linked there.
+    const heard = said(thread.items).join('\n')
+    assert.include(heard, `saw images: image/png ${Buffer.from(SCREENSHOT_PNG, 'base64').length} B`)
+    assert.include(heard, 'build.log (linked, text/plain, 33 B): error: the build broke')
+    assert.include(brief, 'The person sent an image and a file with what they asked for: they come with this message.')
+    assert.isTrue(existsSync(join(worktree, '.althar', 'attachments', 'request', 'build.log')))
+  }
+
+  it.live('go with a task the coordinator drafts and plans from it', () =>
+    Effect.scoped(
+      madeFrom('Did we fix this already. [coordinator:plan] [coordinator:plan-no-review] [lead:finish]').pipe(Effect.map(opensWithThem)),
+    ),
+  )
+
+  it.live('go with a task the coordinator starts from it at once', () =>
+    Effect.scoped(madeFrom('Try this. [coordinator:start] [lead:finish]').pipe(Effect.map(opensWithThem))),
+  )
+
+  it('are said in the lead’s brief, and so are those it can’t be given', () => {
+    assert.strictEqual(sentWithWords({ images: [], files: [], withheld: 0, gone: 0 }), '')
+    assert.strictEqual(
+      sentWithWords({ images: [1, 2], files: [], withheld: 0, gone: 0 }),
+      'The person sent 2 images with what they asked for: they come with this message.',
+    )
+    assert.strictEqual(
+      sentWithWords({ images: [], files: [1], withheld: 1, gone: 2 }),
+      "The person sent a file with what they asked for: it comes with this message.\n\n(The person sent an image with what they asked for, which Althar couldn't pass on to you.)\n\n(The person sent 2 files with what they asked for whose copy isn't there any more. Ask for it if you need it.)",
     )
   })
 })

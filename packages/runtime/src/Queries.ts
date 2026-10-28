@@ -2502,6 +2502,14 @@ export class Queries extends Context.Service<
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
+          // The images and files the person sent with what they asked for, as the coordinator's chat shows them.
+          const sentWith = yield* sql<{ content: string }>`
+            SELECT ti.content FROM task_request_inputs r JOIN thread_items ti ON ti.user_input_id = r.user_input_id AND ti.kind = 'user_message'
+            WHERE r.task_id = ${head.taskId} ORDER BY r.position, ti.sequence`
+          const requestPictures = sentWith.flatMap((row) => picturesOf(field(parse(row.content), 'pictures')))
+          const requestFiles = sentWith.flatMap((row) =>
+            Option.getOrElse(decodeAttached(field(parse(row.content), 'files') ?? []), () => []),
+          )
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier } = yield* pageOf(threadId, page, true)
           // Its steps' reports, whatever page they're on: the task's finished view is read from the lead's, its graph from all.
@@ -2560,6 +2568,8 @@ export class Queries extends Context.Service<
               title: head.title,
               description: head.description,
               request: head.request,
+              ...(requestPictures.length === 0 ? {} : { requestPictures }),
+              ...(requestFiles.length === 0 ? {} : { requestFiles }),
               slug: head.slug,
               state: head.state,
               branch: head.branch,
