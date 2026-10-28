@@ -108,6 +108,7 @@ import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
@@ -432,6 +433,7 @@ type Store =
   | Live
   | Busy
   | IssueChanges
+  | LeftBehind
 
 /** Where a task's conflict round stands, as its card says it (`Changes.conflictStanding`). */
 export type ConflictStanding =
@@ -708,6 +710,7 @@ export class Changes extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const sessions = yield* Sessions
+      const leftBehind = yield* LeftBehind
       const busy = yield* Busy
       const toolServer = yield* ToolServer
       const agents = yield* Agents
@@ -3444,6 +3447,8 @@ export class Changes extends Context.Service<
               })
             }),
           )
+          // Its agents, what they left running and its runs stop, in the background: the merge never waits on them.
+          yield* leftBehind.settled(taskId)
           yield* touchCard(taskId)
         })
 
@@ -3503,6 +3508,8 @@ export class Changes extends Context.Service<
             description: `The task stays merged. ${commits === 1 ? 'The commit stays' : 'They stay'} on ${after.map((one) => one.branch).join(' and ')}, in the task's worktree; what's committed after counts again.`,
           })
           if (task.state === 'open') yield* settleIfDone(input.taskId, { actorId: input.envelope.actorId })
+          // Done already, it settles again without them: what its lead did since stops.
+          else yield* leftBehind.settled(input.taskId)
           yield* touchCard(input.taskId)
         })
 

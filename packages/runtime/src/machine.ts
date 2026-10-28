@@ -389,6 +389,10 @@ const processesOn = (platform: NodeJS.Platform): Effect.Effect<Pick<Reading, 'pr
     return { processes: text === null ? null : listingOf(text), reaped: false }
   })
 
+/** Every process as it is now, by its pid; null where they can't be listed, as on Windows. */
+export const listProcesses = (platform: NodeJS.Platform = process.platform): Effect.Effect<ReadonlyMap<number, Listed> | null> =>
+  Effect.map(processesOn(platform), (listed) => listed.processes)
+
 /** This computer as it is now. */
 export const readMachine = (platform: NodeJS.Platform = process.platform): Effect.Effect<Reading> =>
   Effect.gen(function* () {

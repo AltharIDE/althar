@@ -58,6 +58,7 @@ import {
   unverifiedOf,
 } from './evidence'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
@@ -311,6 +312,7 @@ type Store =
   | Questions
   | Artifacts
   | Connectivity
+  | LeftBehind
 
 /**
  * Why a step needs the person (docs/architecture/05): its agent didn't report
@@ -548,6 +550,7 @@ export class Runs extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const sessions = yield* Sessions
+      const leftBehind = yield* LeftBehind
       const questions = yield* Questions
       const toolServer = yield* ToolServer
       const live = yield* Live
@@ -1893,6 +1896,8 @@ export class Runs extends Context.Service<
             payload: { round: run.runId, back: true },
             actorId: instance.systemId,
           })
+          // Settled again, its lead stops once its turn ends, with what it left running (LeftBehind.ts).
+          yield* leftBehind.settled(run.taskId)
         })
 
       /**

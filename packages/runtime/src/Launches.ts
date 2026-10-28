@@ -179,13 +179,16 @@ export class Launches extends Context.Service<
      * that ended: the project is removed, or the task settled, and nothing is
      * left to stop them from.
      */
-    stopAll(projectId: string, taskId?: string): Effect.Effect<void>
+    stopAll(projectId: string, taskId?: string, startedBy?: string): Effect.Effect<void>
     /** The project's runs, in the order they started. */
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
     /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
     processes(): Effect.Effect<ReadonlyArray<{ readonly pid: number; readonly projectId: string; readonly taskId: string | null }>>
-    /** Whether something runs from the task's folder, or is starting to: it stays while it does (ADR-056). */
-    using(taskId: string): Effect.Effect<boolean>
+    /**
+     * Whether something runs from the task's folder, or is starting to: it stays while it does (ADR-056). With `since`, only
+     * what started then or after counts: what a settled task ran from before it settled holds nothing.
+     */
+    using(taskId: string, since?: string): Effect.Effect<boolean>
     /** What the project runs, in its order, as run for the task or the default branch: those that say how they run there. */
     runnables(projectId: string, taskId: string | null): Effect.Effect<ReadonlyArray<ShownRunnable>, unknown>
     /** Keeps how a repository runs, or, with null, goes back to working it out. Says which repository. */
@@ -846,8 +849,11 @@ export class Launches extends Context.Service<
           yield* told(launch.projectId)
         })
 
-      const stopAll = (projectId: string, taskId?: string) => {
-        const ours = (launch: Launch) => launch.projectId === projectId && (taskId === undefined || launch.taskId === taskId)
+      const stopAll = (projectId: string, taskId?: string, startedBy?: string) => {
+        const ours = (launch: Launch) =>
+          launch.projectId === projectId &&
+          (taskId === undefined || launch.taskId === taskId) &&
+          (startedBy === undefined || launch.startedAt <= startedBy)
         const stopping = Effect.suspend(() =>
           Effect.forEach([...launches.values()].filter(ours), (launch) => (launch.ended === null ? stop(launch.id) : clear(launch.id)), {
             discard: true,
@@ -1425,9 +1431,13 @@ export class Launches extends Context.Service<
               launch.ended === null ? [{ pid: launch.pid, projectId: launch.projectId, taskId: launch.taskId }] : [],
             ),
           ),
-        using: (taskId) =>
+        using: (taskId, since) =>
           Effect.sync(
-            () => startingFrom.has(taskId) || [...launches.values()].some((launch) => launch.ended === null && launch.taskId === taskId),
+            () =>
+              startingFrom.has(taskId) ||
+              [...launches.values()].some(
+                (launch) => launch.ended === null && launch.taskId === taskId && (since === undefined || launch.startedAt >= since),
+              ),
           ),
         runnables,
         keep,

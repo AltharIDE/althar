@@ -498,6 +498,9 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual(tagOf(yield* Effect.flip(reviews.post(`rdr_${'0'.repeat(32)}`, instance.personId))), 'NotFound')
 
         // Posted, it goes as it stands: the verdict chosen, the comment kept, of the commit the lead read.
+        const sessions = yield* Sessions
+        if (Option.isNone(yield* sessions.running(threadId))) yield* sessions.startLast(threadId)
+        assert.isTrue(Option.isSome(yield* sessions.running(threadId)))
         const posted = yield* reviews.post(draftId, instance.personId)
         assert.strictEqual(posted.state, 'posted')
         assert.deepStrictEqual(github.reviewsPosted, [
@@ -519,6 +522,12 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
         const [settled] = (yield* Effect.orDie(queries.board(projectId))).tasks.filter((one) => one.taskId === task?.id)
         assert.deepStrictEqual([settled?.phase, settled?.kind], ['settled', 'review'])
+        // Its lead stops, its task settled.
+        yield* until(
+          Effect.map(sessions.running(threadId), (running) => (Option.isNone(running) ? [true] : [])),
+          (gone) => gone.length === 1,
+          Duration.seconds(10),
+        )
         assert.deepInclude(yield* reviewBriefOf(task?.id ?? ''), {
           verdict: 'changes',
           posted: { url: folded?.review?.url ?? '', at: folded?.review?.at ?? '' },
