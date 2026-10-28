@@ -325,7 +325,7 @@ export class FolderCleanup extends Context.Service<
 
       /**
        * Something runs from a task's folder that the person started since it settled, or is starting to; an agent works in it;
-       * or it is coming back, not set up again yet. What it ran before it settled holds nothing: settling stops it (Settled.ts),
+       * or it is coming back, not set up again yet. What it ran before it settled holds nothing: settling stops it (LeftBehind.ts),
        * and one that outlived that goes with the folder.
        */
       const runningFrom = (candidate: Candidate) =>
