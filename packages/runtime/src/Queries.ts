@@ -1864,6 +1864,14 @@ export class Queries extends Context.Service<
               ? []
               : yield* sql<{ id: string }>`
                   SELECT id FROM review_drafts WHERE task_id = ${taskId} AND state IN ('pending', 'failed', 'uncertain') LIMIT 1`
+          // Its lead's last turn was cut short (the person interrupted it, or declined a call) and nothing took it up again: the
+          // session stays attached, but no agent is on it, so it is stopped, not under way.
+          const [lastTurn] =
+            busy || queued || Option.isNone(lead)
+              ? []
+              : yield* sql<{ state: string }>`
+                  SELECT state FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+          const cutShort = lastTurn?.state === 'interrupted' && task.held === null
           const ready = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
@@ -1879,10 +1887,34 @@ export class Queries extends Context.Service<
             if (task.runState === 'succeeded') return seeing && hands.running ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
-            return working || task.held !== null ? 'running' : 'stopped'
+            return (working && !cutShort) || task.held !== null ? 'running' : 'stopped'
           })()
           // Finished and kept for later by the person: out of Needs you as it is, until they write to it or settle it.
           const phase: TaskPhase = ready === 'ready' && task.keptAt !== null ? 'kept' : ready
+          // Stopped with no agent on it: what stopped its lead (the person declining a call, or interrupting; else Althar, or
+          // nothing says), and when, so the board puts it among what waits on the person and says so.
+          const stopped =
+            phase !== 'stopped'
+              ? undefined
+              : yield* Effect.gen(function* () {
+                  const [turn] = yield* sql<{ state: string; startedAt: string; endedAt: string | null }>`
+                    SELECT state, requested_at AS startedAt, ended_at AS endedAt FROM turn_deliveries
+                    WHERE thread_id = ${task.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+                  const [run] = yield* sql<{ endedAt: string | null }>`
+                    SELECT ended_at AS endedAt FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1`
+                  const at = turn?.endedAt ?? run?.endedAt ?? task.runAt ?? task.firstSession ?? ''
+                  if (turn === undefined || turn.state !== 'interrupted')
+                    return { by: run?.endedAt == null ? null : ('althar' as const), at }
+                  // Interrupted in a turn in which the person refused a call: they declined it; else they interrupted.
+                  const [refused] = yield* sql<{ id: string }>`
+                    SELECT d.id FROM decisions d JOIN permission_requests r ON r.id = d.permission_request_id
+                      JOIN provider_sessions s ON s.id = r.provider_session_id
+                    WHERE s.thread_id = ${task.threadId} AND d.outcome = 'reject'
+                      AND d.decided_by_actor_id NOT IN (${instance.systemId}, ${instance.coordinatorId})
+                      AND d.decided_at >= ${turn.startedAt} AND d.decided_at <= ${turn.endedAt ?? at}
+                    LIMIT 1`
+                  return { by: refused === undefined ? ('interrupted' as const) : ('declined' as const), at }
+                })
           const parameters = parse(task.parameters)
           const steps = field(parameters, 'steps')
           const planned = (Array.isArray(steps) ? steps : []).map((step) => {
@@ -1923,6 +1955,7 @@ export class Queries extends Context.Service<
             title: task.title,
             slug: task.slug,
             phase,
+            ...(stopped === undefined ? {} : { stopped }),
             kind,
             // What a plain task handed back, small on its card while it waits for the person.
             handed: kind === 'plain' ? yield* handedFor(task.threadId, latest?.content ?? null, task.runAt) : null,

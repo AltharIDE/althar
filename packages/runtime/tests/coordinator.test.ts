@@ -928,6 +928,25 @@ describe('a step that needs the person', () => {
       assert.strictEqual(card?.title, 'Long one')
       const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
       assert.strictEqual(run?.state, 'cancelled')
+      // Stopped with no agent on it, the card says what stopped its lead (the turn was cut short) and when.
+      assert.strictEqual(card?.stopped?.by, 'interrupted')
+      assert.isTrue((card?.stopped?.at ?? '') > '')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live("is stopped, not running, when the lead's turn is interrupted and its session stays", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { projectId, task } = yield* planned('Cut short', '[lead:wait]', [{ key: 'implement', agentId: 'codex' }])
+      yield* until(
+        Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'Some' && running.value.turnRunning ? [running] : [])),
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'running')
+      // The window's interrupt: no task.stop, so the session stays attached with its turn over.
+      yield* sessions.interrupt(task.threadId)
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'stopped')
+      assert.strictEqual(card?.stopped?.by, 'interrupted')
     }).pipe(Effect.provide(withQueries())),
   )
 
