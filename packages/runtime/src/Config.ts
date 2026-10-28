@@ -85,6 +85,12 @@ export interface RuntimeOptions {
   /** When finished tasks' folders are first swept after Althar starts, and how often after: 2 minutes and an hour unless a test says otherwise (ADR-056). */
   readonly foldersFirst?: Duration.Duration
   readonly foldersEvery?: Duration.Duration
+  /**
+   * When Althar first looks for what settled tasks left running after it starts, and how often after: 20 seconds and 5
+   * minutes unless a test says otherwise (LeftBehind.ts).
+   */
+  readonly leftFirst?: Duration.Duration
+  readonly leftEvery?: Duration.Duration
   /** How full the disk a folder is on is read, in bytes: the system's own figures unless a test says, so none depends on the Mac it runs on. */
   readonly disk?: (path: string) => Effect.Effect<{ readonly total: number; readonly free: number; readonly used: number } | null>
   /**

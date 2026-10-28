@@ -23,6 +23,7 @@ import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { Setups } from './Setups'
 
 /*
@@ -151,7 +152,7 @@ export const standingOf = (taskId: string) =>
 const stoppedOutput = (output: string | null) =>
   JSON.stringify({ ...(JSON.parse(output ?? '{}') as Readonly<Record<string, unknown>>), stopped: true })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups | Changes
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups | Changes | LeftBehind
 
 export class Tasks extends Context.Service<
   Tasks,
@@ -189,7 +190,8 @@ export class Tasks extends Context.Service<
      * or a review posted and answered since,
      * or is the round its lead is in, with no pull request, nothing waiting on
      * the person and no plan to start. What its agents left running, such as
-     * a page, stops. Writing to its lead later opens it again (ADR-034).
+     * a page, stops, and its agents once their turns end (LeftBehind.ts).
+     * Writing to its lead later opens it again (ADR-034), and starts it again.
      * Whether it settled; refused (`left_running`), and not settled, where
      * something it left running wouldn't stop.
      */
@@ -222,6 +224,7 @@ export class Tasks extends Context.Service<
       const setups = yield* Setups
       const changes = yield* Changes
       const launches = yield* Launches
+      const leftBehind = yield* LeftBehind
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /*
        * A task's course changes one at a time, through stopping its agents
@@ -404,6 +407,8 @@ export class Tasks extends Context.Service<
           // Its run is suspended, so no step answers an agent going: each one on it stops, and what it runs with them.
           yield* stopAgents(input.taskId)
           yield* launches.stopAll(standing.projectId, input.taskId)
+          // What its agents left that outlived them, in the background.
+          yield* leftBehind.settled(input.taskId)
           yield* touchCard(input.taskId)
         })
 
@@ -641,8 +646,9 @@ export class Tasks extends Context.Service<
             }),
           )
           if (!settled) return false
-          // What it runs stops too: nothing is left to stop it from.
+          // What it runs stops too: nothing is left to stop it from. Its agents stop once their turns end, in the background.
           yield* launches.stopAll(ready.projectId, input.taskId)
+          yield* leftBehind.settled(input.taskId)
           yield* touchCard(input.taskId)
           return true
         })

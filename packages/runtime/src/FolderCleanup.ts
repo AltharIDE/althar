@@ -323,10 +323,14 @@ export class FolderCleanup extends Context.Service<
         })
       })
 
-      /** Something runs from a task's folder, or is starting to; an agent works in it; or it is coming back, not set up again yet. */
+      /**
+       * Something runs from a task's folder that the person started since it settled, or is starting to; an agent works in it;
+       * or it is coming back, not set up again yet. What it ran before it settled holds nothing: settling stops it (Settled.ts),
+       * and one that outlived that goes with the folder.
+       */
       const runningFrom = (candidate: Candidate) =>
         Effect.gen(function* () {
-          if (yield* launches.using(candidate.taskId)) return true
+          if (yield* launches.using(candidate.taskId, candidate.settledAt)) return true
           const working = (yield* sessions.onTasks).some(
             (session) => session.taskId === candidate.taskId && (session.turnRunning || session.background),
           )
@@ -542,6 +546,8 @@ export class FolderCleanup extends Context.Service<
                   return new ChangedSinceSeen({ taskId: now.taskId, what: 'folder' })
               } else if ((yield* runningFrom(now)) || holdOf(false, lost, openedLately(now)) !== null || (yield* unshippedOf(now)))
                 return null
+              // What still runs from them, from before it settled, stops first.
+              yield* launches.stopAll(now.projectId, now.taskId)
               yield* removeFolders(now, why === 'hand' && lost?.why === 'unreadable', why, bytes, actorId)
               facts.delete(now.taskId)
               const thread = yield* taskThreadOf(now.taskId)

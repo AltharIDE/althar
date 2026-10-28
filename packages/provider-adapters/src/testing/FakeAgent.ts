@@ -129,6 +129,9 @@ export const scenarios = {
    * where it serves. Some other background work, which isn't a command, too.
    * Stopping it ends it. `[lead:serve]` does the same for a lead, and
    * `[lead:serve-exits]` has it end by itself just after the turn, failing.
+   * `[lead:serve-apart]` runs a real server for it as Claude Code runs one:
+   * under a shell in a process group of its own, which stopping the agent's
+   * group misses, and stopping it ends the shell, not the server.
    */
   background: 'background',
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
@@ -355,7 +358,7 @@ const leaveRunning = async (
   session: SessionState,
   client: acp.AgentContext,
   as: 'claude' | 'codex',
-  options: { readonly exits?: boolean; readonly quiet?: boolean } = {},
+  options: { readonly exits?: boolean; readonly quiet?: boolean; readonly apart?: boolean } = {},
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -391,7 +394,16 @@ const leaveRunning = async (
   const outputPath = join(folder, `${sessionId}-${id}.output`)
   writeFileSync(outputPath, options.quiet === true ? '' : SERVING)
   let server: ChildProcess | undefined
-  if (options.quiet === true) {
+  if (options.apart === true) {
+    // As Claude Code starts one: a shell in a process group of its own, which runs the server; stopping it stops the shell only.
+    const out = openSync(outputPath, 'a')
+    server = spawn('/bin/sh', ['-c', `"${process.execPath}" -e "require('net').createServer().listen(0, '127.0.0.1')" & wait`], {
+      stdio: ['ignore', out, out],
+      detached: true,
+    })
+    server.unref()
+    closeSync(out)
+  } else if (options.quiet === true) {
     // A server whose output says nothing: its own process holds the file open and listens on a port it chose.
     const out = openSync(outputPath, 'a')
     server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: ['ignore', out, out] })
@@ -728,7 +740,7 @@ const leaveTests = async (
 const playRole = async (
   session: SessionState,
   text: string,
-  serve: (exits: boolean) => Promise<void>,
+  serve: (how: { readonly exits: boolean; readonly apart: boolean }) => Promise<void>,
   tests: (plan: {
     readonly lasts?: number
     readonly commits?: () => void
@@ -816,7 +828,7 @@ const playRole = async (
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
-        await serve(text.includes('[lead:serve-exits]'))
+        await serve({ exits: text.includes('[lead:serve-exits]'), apart: text.includes('[lead:serve-apart]') })
       }
       // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
       // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),
@@ -1575,7 +1587,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         const after = await playRole(
           session,
           text,
-          (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+          (how) => leaveRunning(params.sessionId, session, client, 'claude', how),
           (plan) => leaveTests(params.sessionId, session, client, plan),
         )
         if (after !== undefined) await say(after)
@@ -1600,7 +1612,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         : await playRole(
             session,
             text,
-            (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+            (how) => leaveRunning(params.sessionId, session, client, 'claude', how),
             (plan) => leaveTests(params.sessionId, session, client, plan),
           )
       // Stopped while it played its part, the turn was cancelled, as an agent says.

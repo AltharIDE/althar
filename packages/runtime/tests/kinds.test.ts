@@ -445,15 +445,17 @@ describe('settling a task that isn’t a change', () => {
       const project = yield* open
       const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
       yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
-      // What the window does as the person writes to it.
+      // What the window does as the person writes to it: with no agent on the thread, as once the task is done, it starts its lead.
       const write = (body: string) =>
         Effect.gen(function* () {
           yield* tasks.bringBack(question.taskId)
+          const held = Option.isSome(yield* sessions.running(question.threadId))
           yield* sessions.send({
             envelope: yield* Runtime.envelope('thread.send', { threadId: question.threadId, body }),
             threadId: question.threadId,
             body,
           })
+          if (!held) yield* sessions.startLast(question.threadId)
         })
       const roundsEnded = (n: number) =>
         until(
@@ -464,6 +466,12 @@ describe('settling a task that isn’t a change', () => {
 
       // Done, then written to: it goes back to work as a round, which makes nothing, and it waits in Needs you.
       assert.isTrue(yield* markDone(question.taskId))
+      // Settled, its lead stops.
+      yield* until(
+        Effect.map(sessions.running(question.threadId), (running) => (Option.isNone(running) ? [true] : [])),
+        (gone) => gone.length === 1,
+        Duration.seconds(10),
+      )
       yield* write('And the v2 ones? [lead:slowly]')
       yield* roundsEnded(1)
       yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
