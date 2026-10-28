@@ -8,9 +8,9 @@
 
 /** The blockquote under the name: what Althar is, in one breath. */
 export const SUMMARY =
-  'Althar is a free, open-source desktop app that turns the coding agents you already pay for into one crew. A coordinator plans the work, one agent builds it, a model from another maker reviews it, and when one runs out of usage the next takes over. You come back to pull requests, not prompts.'
+  'Althar is a free, open-source desktop app that runs the coding agents you already pay for together. A coordinator plans the work, one agent builds it, a model from another maker reviews it, and when one runs out of usage the next takes over. You come back to pull requests, not prompts.'
 
-export const TAGLINE = 'Every coding agent. One crew. No babysitting.'
+export const TAGLINE = 'Every coding agent, together. No babysitting.'
 
 /** Why it exists, as paragraphs. */
 export const WHY = [

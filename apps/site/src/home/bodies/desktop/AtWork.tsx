@@ -1,11 +1,11 @@
 import { ChromeButton, Room, RoomSwitch, WorkStatus } from '@althar/ui'
 import { useEffect, useRef, useState } from 'react'
 
-import { CrewBoard, Tabs } from '../kit/app'
+import { BoardAtWork, Tabs } from '../kit/app'
 import { useInView } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import app from '../kit/app.module.css'
-import s from './CrewAtWork.module.css'
+import s from './AtWork.module.css'
 
 /*
  * Meridian's board at night, four tasks running at once, each led by
@@ -20,7 +20,7 @@ const none = () => {}
 /** How long a beat is, in ms. */
 const BEAT = 2400
 
-export function CrewAtWork() {
+export function AtWork() {
   const box = useRef<HTMLDivElement>(null)
   const watched = useInView(box, 0.2)
   const [beat, setBeat] = useState(0)
@@ -51,7 +51,7 @@ export function CrewAtWork() {
             }
           />
           <div className={app.board}>
-            <CrewBoard beat={beat} />
+            <BoardAtWork beat={beat} />
           </div>
         </div>
       </Shot>

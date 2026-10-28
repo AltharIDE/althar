@@ -6,7 +6,7 @@ import { LightUnder } from '../../../shared/lightUnder'
 import { EdgeTour } from '../kit/EdgeTour'
 import t from '../kit/type.module.css'
 import { AskOnce } from './AskOnce'
-import { CrewAtWork } from './CrewAtWork'
+import { AtWork } from './AtWork'
 import s from './DesktopBody.module.css'
 import { Flow } from './Flow'
 import { Trio } from './Trio'
@@ -14,10 +14,10 @@ import { Trio } from './Trio'
 /*
  * Desktop: the product, shown. One claim a screen, in the first screen's
  * type, each over a large picture of the app drawn by its own components:
- * first the crew at work on a panel as dark and warm as the first screen's
- * cabin, then whole windows on a Mac's screen and single pieces up close
- * in Althar's light. Pictures of the app framed as pictures, so nothing
- * looks like it is part of this page.
+ * first the agents at work side by side, on a panel as dark and warm as
+ * the first screen's cabin, then its windows and single pieces up close in
+ * Althar's light. Pictures of the app framed as pictures, so nothing looks
+ * like it is part of this page.
  */
 
 function Scene({
@@ -59,17 +59,17 @@ export function DesktopBody() {
   return (
     <main id="main" tabIndex={-1} className={s.body}>
       <Scene
-        id="crew"
+        id="side-by-side"
         tone="cabin"
-        kicker="Right now"
+        kicker="Side by side"
         title={
           <>
-            The whole crew. <b>All at once.</b>
+            Stop waiting <b>on one agent.</b>
           </>
         }
-        lead="Each task gets its own crew and its own branch, and they all run side by side. You step in only where you’re needed."
+        lead="Each task runs on its own branch, led by the model that suits it, on whichever of your plans has room. They all go at once; you step in only where you’re needed."
       >
-        <CrewAtWork />
+        <AtWork />
       </Scene>
 
       <Scene
@@ -82,7 +82,7 @@ export function DesktopBody() {
             <b>It plans the rest.</b>
           </>
         }
-        lead="Every project has a coordinator that knows its repositories and your rules. Ask it in a sentence: it drafts the issue, splits the work into tasks and gives each step the model that suits it."
+        lead="Every project has a coordinator that knows its repositories and your rules. Ask it in a sentence: it splits the work into tasks, gives each step the model that suits it, and drafts issues for what it finds on the way."
       >
         <AskOnce />
       </Scene>

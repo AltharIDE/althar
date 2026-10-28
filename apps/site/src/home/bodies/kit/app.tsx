@@ -109,7 +109,7 @@ export function Growing({ children, whole }: { children: ReactNode; whole: React
   )
 }
 
-/* ---- the crew at work: Meridian's board with four tasks running at once, each led by another lab ---- */
+/* ---- at work: Meridian's board with four tasks running at once, each led by another lab ---- */
 
 /** A task running, and how it goes on: a step every `every` beats, and a minute a beat. */
 interface AtWork extends Omit<WorkCardProps, 'elapsed' | 'onOpen' | 'text' | 'current'> {
@@ -166,7 +166,7 @@ const AT_WORK: readonly AtWork[] = [
 const ran = (minutes: number) => (minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`)
 
 /** Meridian's board `beat` beats on: each running task a step further at its own pace, and staying on its last. */
-export function CrewBoard({ beat }: { beat: number }) {
+export function BoardAtWork({ beat }: { beat: number }) {
   return (
     <Board label="Meridian’s work">
       <BoardColumn lane={BoardLane.Next} count={NEXT.length}>

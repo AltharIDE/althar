@@ -245,7 +245,7 @@
 }
 .lead { max-width: 44em; font-size: 14px; line-height: 1.55; letter-spacing: -0.006em; text-wrap: pretty; color: rgba(255, 248, 240, 0.86); text-shadow: 0 1px 14px rgba(0, 0, 0, 0.8); }
 
-/* The console: the crew, the install and the download, side by side on smoked glass. */
+/* The console: the agents, the install and the download, side by side on smoked glass. */
 .console {
   display: grid;
   grid-auto-flow: column;
@@ -258,8 +258,8 @@
 .cell { display: grid; align-content: center; justify-items: start; gap: 10px; padding: 14px 20px; }
 .cell + .cell { border-left: 1px solid rgba(255, 255, 255, 0.1); }
 .ways { justify-items: center; }
-.crew { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; color: rgba(255, 248, 240, 0.9); }
-.crew li { display: grid; place-items: center; width: 18px; height: 18px; }
+.agents { display: flex; gap: 10px; margin: 0; padding: 0; list-style: none; color: rgba(255, 248, 240, 0.9); }
+.agents li { display: grid; place-items: center; width: 18px; height: 18px; }
 .command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
 .command code { font: 13px/1 var(--mono); color: rgba(255, 248, 240, 0.92); white-space: nowrap; }
 .command code span { color: rgba(255, 248, 240, 0.45); }
@@ -269,7 +269,7 @@
 .command button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-/* Narrower, the download takes a row of its own under the crew and the install. */
+/* Narrower, the download takes a row of its own under the agents and the install. */
 @media (max-width: 1120px) {
   .console { grid-auto-flow: row; grid-template-columns: auto auto; }
   .cell.ways { grid-column: 1 / -1; border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
@@ -285,7 +285,7 @@
   /* In the window above the astronauts' heads: the line near its top, the word under it. */
   .line { top: calc(var(--py) + (var(--wy) + 110) * var(--u)); font-size: clamp(26px, 7.4vw, 32px); }
   .fast { top: calc(var(--py) + (var(--wy) + 400) * var(--u)); font-size: 30vw; }
-  /* No room in the window for the readouts, and no installing from a phone: the crew over the download. */
+  /* No room in the window for the readouts, and no installing from a phone: the agents over the download. */
   .hud, .install { display: none; }
   .console { width: 100%; grid-template-columns: 1fr; }
   .cell { justify-items: center; }

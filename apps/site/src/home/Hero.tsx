@@ -32,7 +32,7 @@ import skyUrl from './hero/plate/sky.webp'
  * the word cooling to white. Then everything comes to rest: from then on
  * nothing is drawn, and the browser keeps it gently moving. In the window's
  * top corners the flight deck reads the capsule slowing and falling; under
- * the lead, a console holds the crew, the install and the download.
+ * the lead, a console holds the agents, the install and the download.
  *
  * The cabin is a photograph with its window keyed out (hero/plate.ts),
  * wide, or tall on a phone, laid over the page to cover it. Behind it, the
@@ -159,9 +159,9 @@ const say = (el: HTMLElement | null, text: string) => {
 }
 
 /** Every agent Althar runs, as its mark, named on hover and to a screen reader. */
-function Crew() {
+function Agents() {
   return (
-    <ul className={s.crew} aria-label={HERO.crewName}>
+    <ul className={s.agents} aria-label={HERO.agentsName}>
       {AGENTS.map((agent) => (
         <li key={agent.id} title={agent.name}>
           <AgentMark agent={agent.id} size={17} />
@@ -473,8 +473,8 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
         </p>
         <div className={s.console} data-arrive={120}>
           <div className={s.cell}>
-            <span className={s.label}>{HERO.crew}</span>
-            <Crew />
+            <span className={s.label}>{HERO.agents}</span>
+            <Agents />
           </div>
           <div className={cx(s.cell, s.install)}>
             <span className={s.label}>{HERO.install}</span>
