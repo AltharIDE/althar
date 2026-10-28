@@ -1,6 +1,8 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { MESSAGE_FILES } from './files'
+import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
 
 /*
@@ -61,6 +63,91 @@ export const AccountStatus = Schema.Struct({
   adoptedFrom: Schema.NullOr(Schema.String),
 })
 export type AccountStatus = typeof AccountStatus.Type
+
+/** A plan's window by its length: five hours, a week, a month; anything else, with the agent's name for it. */
+export const UsageWindowKind = Schema.Literals(['five_hour', 'weekly', 'monthly', 'other'])
+export type UsageWindowKind = typeof UsageWindowKind.Type
+
+/** How much of one window of a plan is used, and when it resets. */
+export const UsageWindow = Schema.Struct({
+  kind: UsageWindowKind,
+  /** The agent's name for it where it gave one: a model's window, or extra usage. */
+  label: Schema.NullOr(Schema.String),
+  /** 0 to 100. */
+  usedPercent: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.String),
+})
+export type UsageWindow = typeof UsageWindow.Type
+
+/**
+ * Why an account's usage is missing or old, a fault to fix (docs/plans/plan-usage.md):
+ * it is signed out, its sign-in has expired (the agent renews it when it next
+ * runs), the provider answered in another shape or can't be reached, the
+ * source isn't allowed, the agent has not been read yet, or its sign-ins
+ * can't be told plan from key. An agent that reports no usage anyone can
+ * read is not a fault: it says so in `noReading`.
+ */
+export const UsageFaultKind = Schema.Literals([
+  'sign_in_again',
+  'expired',
+  'source_changed',
+  'unreachable',
+  'no_source',
+  'no_data_yet',
+  'cannot_classify',
+])
+export type UsageFaultKind = typeof UsageFaultKind.Type
+
+/** One account's plan usage: its windows as last read, from where, and how old; or the fault. */
+export const AccountUsage = Schema.Struct({
+  agentId: Schema.String,
+  agentName: Schema.String,
+  accountId: Schema.String,
+  accountName: Schema.String,
+  paidBy: Schema.Literals(['plan', 'key', 'unknown']),
+  /** Where the windows came from: ACP, an adapter's extension, the agent's own channel, or the provider's endpoint; null before any. */
+  source: Schema.NullOr(Schema.Literals(['acp', 'acp_extension', 'agent', 'endpoint'])),
+  /** When Althar last saw these numbers; null before any. */
+  observedAt: Schema.NullOr(Schema.String),
+  /** The plan as the agent names it: plus, pro, max. */
+  plan: Schema.NullOr(Schema.String),
+  windows: Schema.Array(UsageWindow),
+  /** Why the numbers are missing or old, where they are; the windows shown are the last ones then. */
+  fault: Schema.NullOr(Schema.Struct({ kind: UsageFaultKind, message: Schema.String })),
+  /** Why Althar reads no usage for it, where the agent reports none anyone can read: shown calmly, not as a fault. */
+  noReading: Schema.NullOr(Schema.String),
+})
+export type AccountUsage = typeof AccountUsage.Type
+
+/** Every account's plan usage. */
+export const PlanUsage = Schema.Struct({ accounts: Schema.Array(AccountUsage) })
+export type PlanUsage = typeof PlanUsage.Type
+
+/**
+ * How much room a model has where work on it would start: on the account
+ * the runtime picks for it (the most room first, as the project moves work
+ * through an agent's accounts), that account's tightest window as last read,
+ * a model's own window (Opus's week) counted. Only a model on a plan whose
+ * usage is read has one.
+ */
+export const ModelRoom = Schema.Struct({
+  agentId: Schema.String,
+  /** The model's id at the agent. */
+  model: Schema.String,
+  accountId: Schema.String,
+  accountName: Schema.String,
+  /** The agent has more than one account here, so the account is worth naming. */
+  several: Schema.Boolean,
+  /** 0 to 100. */
+  leftPercent: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.String),
+  kind: UsageWindowKind,
+  label: Schema.NullOr(Schema.String),
+})
+export type ModelRoom = typeof ModelRoom.Type
+
+/** The percent of a plan left at which a warning is told. */
+export const USAGE_WARN_AT = [50, 25, 10, 5] as const
 
 export const AgentStatus = Schema.Struct({
   id: Schema.String,
@@ -193,6 +280,8 @@ export const AppSettings = Schema.Struct({
   agentsAtOnce: AgentsAtOnce,
   /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
   postTeamReviews: Schema.Boolean,
+  /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
+  automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
   folderWait: FolderWait,
 })
@@ -295,6 +384,31 @@ export const ProjectSummary = Schema.Struct({
 export type ProjectSummary = typeof ProjectSummary.Type
 
 export const ProjectList = Schema.Struct({ cursor: Cursor, projects: Schema.Array(ProjectSummary) })
+
+/** Where issues are filed on a tracker, by its own id and its name: a Linear team, a Jira project, a Trello list, a repository. */
+export const TrackerContainer = Schema.Struct({
+  id: Schema.String,
+  /** A short name a person may type for it, where the tracker has one: a team's key (MER). */
+  key: Schema.NullOr(Schema.String),
+  name: Schema.String,
+})
+export type TrackerContainer = typeof TrackerContainer.Type
+
+/**
+ * The tracker a project is bound to (ADR-059): one connection, and where its
+ * issues are filed there, null to be asked. Its drafts go there unless
+ * another is named, its issues are listed from it alone, and a bare key is
+ * looked for there first.
+ */
+export const ProjectTracker = Schema.Struct({
+  connectionId: Schema.String,
+  container: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** Where it was bound to a connection removed since and not made again: its service and server, and the workspace it reached. */
+  gone: Schema.optional(
+    Schema.NullOr(Schema.Struct({ product: Schema.String, webUrl: Schema.String, workspace: Schema.NullOr(Schema.String) })),
+  ),
+})
+export type ProjectTracker = typeof ProjectTracker.Type
 
 /** What a repository is to its project. The runtime's vocabulary, said again here, as the contract stands alone. */
 export const RepositoryRole = Schema.Literals(['service', 'frontend', 'infrastructure', 'library', 'docs', 'other'])
@@ -470,6 +584,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved to its tracker's In Progress as the task starts. */
   moveIssues: Schema.Boolean,
+  /** Whether changes to issues (status, priority, assignee, labels, closing) apply without waiting on the person's card. */
+  changeIssues: Schema.Boolean,
   /** What each of the project's repositories says, in the project's order. */
   conventions: Schema.Array(RepositoryConventions),
   /** What its leads' sandboxes let through from the start. */
@@ -527,6 +643,12 @@ export const ConnectionSummary = Schema.Struct({
   auth: Schema.Literals(['device_flow', 'pkce', 'token']),
   /** Ready, or its token stopped working and it needs signing in again. */
   state: Schema.Literals(['ready', 'reauth_required']),
+  /**
+   * The workspace its sign-in reaches, where it reaches only one (ADR-059):
+   * Linear's, by the key its links carry and its name. Null, or left out,
+   * where it reaches more, or isn't known yet.
+   */
+  workspace: Schema.optional(Schema.NullOr(Schema.Struct({ key: Schema.String, name: Schema.String }))),
 })
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
@@ -546,6 +668,8 @@ export const ProductOption = Schema.Struct({
   hostedUrl: Schema.NullOr(Schema.String),
   /** An instance on a company's own server can be connected, by its address. */
   selfHosted: Schema.Boolean,
+  /** A sign-in reaches one of its workspaces, and another is connected beside it (ADR-059): Linear's. Left out for none. */
+  workspaces: Schema.optional(Schema.Boolean),
   /** The service's own sign-in, in the browser, is set up here; otherwise a pasted token. */
   browserSignIn: Schema.Boolean,
   /** What a pasted token goes with: the account's email, or the API key it was made for. */
@@ -891,12 +1015,50 @@ export type SentImage = typeof SentImage.Type
 /** The images sent with one message, in the order they show: at most `MESSAGE_IMAGES.count`. */
 export const SentImages = Schema.Array(SentImage).check(Schema.isMaxLength(MESSAGE_IMAGES.count))
 
+/**
+ * A file or folder the person sends with a message: by the grant the app
+ * gave for it as it was dropped, pasted or picked, the window never naming a
+ * path; or one Althar keeps a copy of already, by that copy's id, as when a
+ * message waiting its turn is taken back to change and sent again. Each is
+ * copied where the thread's agent reads, and the prompt links the copy.
+ */
+export const SentFile = Schema.Union([Schema.Struct({ grant: Schema.String }), Schema.Struct({ kept: Schema.String })])
+export type SentFile = typeof SentFile.Type
+
+/** The files and folders sent with one message, in the order they show: at most `MESSAGE_FILES.count`. */
+export const SentFiles = Schema.Array(SentFile).check(Schema.isMaxLength(MESSAGE_FILES.count))
+
+/**
+ * A file or folder the person sent with a message, as Althar copied it for
+ * the agent: its name, what it is, how large (a folder, all its files, and
+ * how many), and where the copy is, which the agent was sent a link to.
+ */
+export const AttachedFile = Schema.Struct({
+  /** The copy's id, by which it is sent again (`SentFile`'s `kept`). */
+  id: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['file', 'folder']),
+  /** What it is, as its name says; null for a folder, or a name that says nothing. */
+  mediaType: Schema.NullOr(Schema.String),
+  bytes: Schema.Number,
+  /** A folder's files, at every depth; null for a file. */
+  entries: Schema.NullOr(Schema.Number),
+  /** Where its copy is, in the thread's folder, for the agent to read. */
+  path: Schema.String,
+})
+export type AttachedFile = typeof AttachedFile.Type
+
 /** What the person said, and where it stands with the lead. */
 export const UserMessageItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('user_message'),
-  /** What they said, the links in it Althar could unfurl, and the images they sent with it. */
-  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl), pictures: Schema.Array(Picture) }),
+  /** What they said, the links in it Althar could unfurl, and the images, files and folders they sent with it. */
+  content: Schema.Struct({
+    text: Schema.String,
+    links: Schema.Array(Unfurl),
+    pictures: Schema.Array(Picture),
+    files: Schema.Array(AttachedFile),
+  }),
   input: Schema.NullOr(
     Schema.Struct({
       state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']),
@@ -963,6 +1125,9 @@ export const ToolCallItem = Schema.Struct({
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
+    /** For a refused call: who refused it, and the reason they gave where they gave one. */
+    declinedBy: Schema.optional(Schema.Literals(['rules', 'coordinator', 'person'])),
+    declinedWhy: Schema.optional(Schema.String),
     /** The agent asking the person something: its question stands in the thread in its place. */
     asks: Schema.optional(Schema.Boolean),
     /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
@@ -1175,6 +1340,8 @@ export type PlanStep = typeof PlanStep.Type
 export const BackgroundCommand = Schema.Struct({
   id: Schema.String,
   command: Schema.String,
+  /** What the agent says it does, where it named it apart from the command: "Site dev server". Absent where it only gave the command. */
+  name: Schema.optional(Schema.String),
   /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
   label: Schema.optional(Schema.String),
   /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
@@ -1323,8 +1490,26 @@ export const HeldForLimit = Schema.Struct({
   accountId: Schema.optional(Schema.NullOr(Schema.String)),
   why: Schema.optional(Schema.Literals(['waits', 'nothing_free', 'asked'])),
   choices: Schema.optional(Schema.Array(LimitChoice)),
+  /** Held before it ran out, as a new step on an agent nearly out: the share of its tightest limit left, 0 to 100. */
+  left: Schema.optional(Schema.Number),
 })
 export type HeldForLimit = typeof HeldForLimit.Type
+
+/**
+ * A step held for the connection (ADR-060): its agent, and its service by
+ * name; `offline` while the computer is offline or its service doesn't
+ * answer, when it carries on once it does; else when its service, which
+ * failed, is tried again, and what it said.
+ */
+export const HeldForConnection = Schema.Struct({
+  agentId: Schema.String,
+  service: Schema.String,
+  offline: Schema.Boolean,
+  /** When it is tried again; null while it waits for the connection. */
+  next: Schema.NullOr(Schema.String),
+  failure: Schema.NullOr(Schema.String),
+})
+export type HeldForConnection = typeof HeldForConnection.Type
 
 /**
  * A task as its card shows it, in the coordinator's thread and on the board:
@@ -1387,12 +1572,26 @@ export const TaskCard = Schema.Struct({
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(HeldForLimit),
+  /** The step is held for the connection: absent or null otherwise (ADR-060). */
+  reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
   /**
    * Ready, but its lead couldn't resolve the conflict its branch has with its
    * default branch, or fix the checks that failed on the merge Althar pushed,
    * so it's the person's: why, in a sentence. Without it, nothing is.
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Its branch conflicts with its default branch, and Althar didn't ask its
+   * lead to resolve it though the rules say it resolves conflicts: why, in a
+   * sentence, beside Resolve now (ADR-030). Without it, nothing is unsaid.
+   */
+  conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Althar couldn't look here for whether its branch conflicts with its
+   * default branch, and its host doesn't say it does, where the rules say it
+   * resolves conflicts: why, in a sentence, beside Look again (ADR-030).
+   */
+  conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
   /** When the person kept it for later, while it is (`kept`); null or absent otherwise. */
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
@@ -1405,10 +1604,23 @@ export const TaskCard = Schema.Struct({
    * turn): it is in its project's line, up next.
    */
   inLine: Schema.optional(Schema.Boolean),
-  /** With `inLine`: its place in its project's line, in the order the line starts; 1 starts first. */
+  /**
+   * It is under way and none of its agents is at work, and it goes on by
+   * itself (ADR-065): its next turn waits for a place (`queued`), or its step
+   * is held for a usage limit (`waits`) or the connection (`reconnects`). It
+   * is up next, not running.
+   */
+  continues: Schema.optional(Schema.Boolean),
+  /**
+   * With `inLine`, or `continues` and `queued`: its place in its project's
+   * Up next, in the order it gets one, what continues first, then the line;
+   * 1 gets one first.
+   */
   place: Schema.optional(Schema.Int),
   /** With `inLine`: the line is in an order the person gave it, not the oldest first. */
   reordered: Schema.optional(Schema.Boolean),
+  /** The automation whose run it is, where one started it; null or absent otherwise. */
+  automation: Schema.optional(Schema.NullOr(FromAutomation)),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1493,6 +1705,10 @@ export const PushRequestItem = Schema.Struct({
   }),
 })
 
+/** An issue's priority, as every tracker's fall into. */
+export const IssuePriority = Schema.Literals(['urgent', 'high', 'medium', 'low', 'none'])
+export type IssuePriority = typeof IssuePriority.Type
+
 /** Where an issue the coordinator drafted stands: waiting on you, being filed, filed, not filed and why, perhaps filed (its answer was lost), or discarded. */
 export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
@@ -1514,6 +1730,8 @@ export const IssueDraftCard = Schema.Struct({
   /** Markdown. */
   body: Schema.String,
   labels: Schema.Array(Schema.String),
+  /** The priority it is filed with, where the tracker has priorities; null for none, or the tracker's default. */
+  priority: Schema.NullOr(IssuePriority),
   state: IssueDraftState,
   /** Why it wasn't filed, while it stands failed, or why it may have been, while uncertain: in the tracker's words, or Althar's. */
   error: Schema.NullOr(Schema.String),
@@ -1526,6 +1744,64 @@ export const IssueDraftItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('issue_draft'),
   content: IssueDraftCard,
+})
+
+/** Where changes to issues stand: waiting on you, being applied, applied, not all applied (each issue says why), or discarded. */
+export const IssueChangeState = Schema.Literals(['pending', 'applying', 'applied', 'failed', 'discarded'])
+export type IssueChangeState = typeof IssueChangeState.Type
+
+/**
+ * One thing changed on an issue, in the tracker's words: its status, closed,
+ * its priority, who it is assigned to (null for nobody), its project or
+ * milestone (null for none), its title; labels added and taken off; or,
+ * applied at once, a comment and a link.
+ */
+export const IssueChangeLine = Schema.Union([
+  Schema.Struct({
+    field: Schema.Literals(['status', 'close', 'priority', 'assignee', 'project', 'title', 'comment', 'link']),
+    to: Schema.NullOr(Schema.String),
+  }),
+  Schema.Struct({ field: Schema.Literal('labels'), add: Schema.Array(Schema.String), remove: Schema.Array(Schema.String) }),
+])
+export type IssueChangeLine = typeof IssueChangeLine.Type
+
+/**
+ * Changes to one or more issues on the person's trackers, in the thread of
+ * whoever proposed them (docs/architecture/06, "Changing issues"): each
+ * issue, what changes on it, and how applying it went. Status, priority,
+ * assignee, labels and closing wait on the person to apply them here, unless
+ * the project lets them through; a comment and a link are applied already.
+ * Althar posts it and keeps it current.
+ */
+export const IssueChangesCard = Schema.Struct({
+  changesId: Schema.String,
+  /** Why, in a sentence, where whoever proposed it said: its pull request merged. */
+  note: Schema.NullOr(Schema.String),
+  state: IssueChangeState,
+  /** Why not all of it applied, while it stands failed. */
+  error: Schema.NullOr(Schema.String),
+  /** Whether the project's rules applied it without asking. */
+  direct: Schema.Boolean,
+  issues: Schema.Array(
+    Schema.Struct({
+      product: Product,
+      tracker: Schema.String,
+      key: Schema.String,
+      url: Schema.String,
+      title: Schema.String,
+      changes: Schema.Array(IssueChangeLine),
+      /** Applied, or not and why; null until it was tried. */
+      applied: Schema.NullOr(Schema.Boolean),
+      error: Schema.NullOr(Schema.String),
+    }),
+  ),
+})
+export type IssueChangesCard = typeof IssueChangesCard.Type
+
+export const IssueChangesItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('issue_changes'),
+  content: IssueChangesCard,
 })
 
 /** How much a comment in a review matters, as its lead says: blocking it, a major or minor point, or a nit. */
@@ -1587,6 +1863,12 @@ export const ReviewDraftCard = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   /** The review, once posted: its link and when. */
   review: Schema.NullOr(Schema.Struct({ url: Schema.String, at: Schema.String })),
+  /**
+   * The automation whose run drafted it, where one did, and whether its
+   * reviews post themselves now: its first waits for the person, who can let
+   * the next ones post. Null or absent otherwise.
+   */
+  automation: Schema.optional(Schema.NullOr(Schema.Struct({ ...FromAutomation.fields, postsReviews: Schema.Boolean }))),
 })
 export type ReviewDraftCard = typeof ReviewDraftCard.Type
 
@@ -1628,6 +1910,17 @@ export const SetupItem = Schema.Struct({
   }),
 })
 
+/**
+ * An automation in the coordinator's thread: as the coordinator proposed or
+ * changed it, or asking the person to resume it or run it now. The person
+ * turns it on there. Althar posts it and keeps it current.
+ */
+export const AutomationItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('automation'),
+  content: AutomationCard,
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -1643,6 +1936,8 @@ export const ThreadItem = Schema.Union([
   SetupItem,
   PushRequestItem,
   ReviewDraftItem,
+  IssueChangesItem,
+  AutomationItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -1744,6 +2039,8 @@ export const LimitCall = Schema.Struct({
   accountId: Schema.NullOr(Schema.String),
   resetsAt: Schema.NullOr(Schema.String),
   choices: Schema.Array(LimitChoice),
+  /** Asked before it ran out, as a new step on an agent nearly out: the share of its tightest limit left, 0 to 100. */
+  left: Schema.optional(Schema.Number),
 })
 export type LimitCall = typeof LimitCall.Type
 
@@ -1766,6 +2063,8 @@ export const StuckStep = Schema.Struct({
     'looping',
     'over_budget',
     'refused',
+    // Its agent's service kept failing while the computer was online (ADR-060).
+    'transient',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),
@@ -1779,6 +2078,8 @@ export const StuckStep = Schema.Struct({
   tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
   /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
   limit: Schema.optional(LimitCall),
+  /** For a service that kept failing: its name. */
+  service: Schema.optional(Schema.String),
 })
 export type StuckStep = typeof StuckStep.Type
 
@@ -1990,14 +2291,22 @@ export const ThreadSnapshot = Schema.Struct({
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why its conflict with its default branch wasn't asked of its lead, as its card says, beside Resolve now. */
+    conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why Althar couldn't look for a conflict with its default branch, as its card says, beside Look again. */
+    conflictUnchecked: Schema.optional(Schema.NullOr(Schema.String)),
     /** When its lead made it a change, where it began as a quick task: what it showed before was a prototype's, not the change's. */
     madeChangeAt: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
     waits: Schema.NullOr(HeldForLimit),
+    /** Its step held for the connection: absent or null otherwise (ADR-060). */
+    reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
-    /** Its place in its project's line, waiting before any agent has worked on it, as its card says: 1 starts first; absent out of it. */
+    /** Its place in its project's Up next, waiting for a place, as its card says: 1 gets one first; absent out of it. */
     place: Schema.optional(Schema.Int),
+    /** It waits in its project's line behind another of its tasks, so the person can put it at the line's front. */
+    front: Schema.optional(Schema.Boolean),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
     /** Its rounds of work as its graph had them, oldest first: what its Graph face draws. Absent from a runtime before it. */
@@ -2234,6 +2543,8 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
   /** What Althar runs of a project itself, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
+  /** Every account's plan usage, whole each time it changes. */
+  Schema.Struct({ _tag: Schema.Literal('PlanUsage'), usage: PlanUsage }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -2406,6 +2717,14 @@ export const LoadShare = Schema.Struct({
 })
 export type LoadShare = typeof LoadShare.Type
 
+/** Althar itself and its part of this computer: the app, its windows and the runtime, without the work they started. */
+export const LoadOwn = Schema.Struct({
+  cpu: Part,
+  memory: Bytes,
+  processes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+})
+export type LoadOwn = typeof LoadOwn.Type
+
 /** A reading of how hard this computer works: the whole of it, and Althar's work's part. */
 export const LoadPoint = Schema.Struct({ cpu: Part, work: Part })
 export type LoadPoint = typeof LoadPoint.Type
@@ -2425,6 +2744,8 @@ export const Load = Schema.Struct({
   pressure: Schema.NullOr(MemoryPressure),
   /** Althar's work, most CPU first; null where its processes can't be read, as on Windows. */
   shares: Schema.NullOr(Schema.Array(LoadShare)),
+  /** Althar itself, part of Althar's work as the bar counts it; null where its processes can't be read. */
+  althar: Schema.NullOr(LoadOwn),
   /** The readings of the last two minutes, oldest first, the last of them this one's. A gap of more than a few readings starts them afresh. */
   history: Schema.Array(LoadPoint),
 })
@@ -2472,6 +2793,12 @@ export const Api = RpcGroup.make(
   command('RenameProject', { projectId: Schema.String, name: Schema.String }, Schema.Void),
   /** Draws a project's mark in another ink, wherever it shows. The drawing, which comes from its id, stays. */
   command('SetProjectInk', { projectId: Schema.String, ink: ProjectInk }, Schema.Void),
+  /** The tracker a project is bound to, through a connection still there; null where its issues' tracker is learned. */
+  call('GetProjectTracker', { projectId: Schema.String }, Schema.NullOr(ProjectTracker)),
+  /** Binds a project to a tracker, and where its issues are filed there, or, with null, leaves it to be learned again. */
+  command('SetProjectTracker', { projectId: Schema.String, tracker: Schema.NullOr(ProjectTracker) }, Schema.Void),
+  /** Where issues can be filed on a connected tracker: its teams, projects or lists, as it says them. */
+  call('ListContainers', { connectionId: Schema.String }, Schema.Array(TrackerContainer)),
   /**
    * Removes a project from Althar: its agents stop, its plans don't start and
    * its runs end. Its folders, its tasks' worktrees and their branches stay.
@@ -2558,6 +2885,8 @@ export const Api = RpcGroup.make(
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
+  /** What a command a thread's session left running has printed so far, while its session lives. */
+  call('ReadBackgroundOutput', { threadId: Schema.String, id: Schema.String }, OutputText),
   /**
    * A markdown document an agent in a thread wrote, as it is now in the
    * task's worktree: by the path the thread names it by. Only a markdown
@@ -2624,13 +2953,24 @@ export const Api = RpcGroup.make(
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   command(
     'ChangeIssueDraft',
-    { draftId: Schema.String, title: Schema.String, body: Schema.String, labels: Schema.Array(Schema.String) },
+    {
+      draftId: Schema.String,
+      title: Schema.String,
+      body: Schema.String,
+      labels: Schema.Array(Schema.String),
+      /** Left out, it stays as it is; null files it at the tracker's default. */
+      priority: Schema.optional(Schema.NullOr(IssuePriority)),
+    },
     Schema.Void,
   ),
   /** Files an issue the coordinator drafted, on its tracker; or one that wasn't filed, again. Its card says how it went. */
   command('FileIssueDraft', { draftId: Schema.String }, Schema.Void),
   /** Discards an issue the coordinator drafted: nothing is filed. */
   command('DiscardIssueDraft', { draftId: Schema.String }, Schema.Void),
+  /** Applies changes to issues on their trackers; or what didn't apply, again. Its card says how it went. */
+  command('ApplyIssueChanges', { changesId: Schema.String }, Schema.Void),
+  /** Discards changes to issues: nothing changes on the tracker. */
+  command('DiscardIssueChanges', { changesId: Schema.String }, Schema.Void),
   /**
    * Changes a review the lead drafted, before it is posted: the verdict it
    * posts with, its summary, and which of its comments are kept, or what
@@ -2668,6 +3008,8 @@ export const Api = RpcGroup.make(
       body: Schema.optional(Schema.String),
       /** Images sent with what the person said. */
       images: Schema.optional(SentImages),
+      /** Files and folders sent with what the person said. */
+      files: Schema.optional(SentFiles),
       /** Any of what the person said came from dictation. */
       dictated: Schema.optional(Schema.Boolean),
     },
@@ -2687,6 +3029,32 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
+  /** A project's automations, for its Automations tab. */
+  call('GetAutomations', { projectId: Schema.String }, AutomationsSnapshot),
+  /** One automation, for its own page: its definition, its limits and its runs. */
+  call('GetAutomation', { automationId: Schema.String }, AutomationSnapshot),
+  /** Makes an automation in a project, on this computer: proposed, waiting for the person to turn it on, unless `on`. */
+  command(
+    'MakeAutomation',
+    { projectId: Schema.String, definition: AutomationDefinition, on: Schema.optional(Schema.Boolean) },
+    Schema.Struct({ automationId: Schema.String }),
+  ),
+  /** The person changes an automation: it holds from its next run, and stays on where it is. */
+  command('ChangeAutomation', { automationId: Schema.String, definition: AutomationDefinition }, Schema.Void),
+  /** Turns an automation on, or back on: no time before now counts. `itemId`, where the person did it from the coordinator's card asking it. */
+  command('TurnOnAutomation', { automationId: Schema.String, itemId: Schema.optional(Schema.String) }, Schema.Void),
+  /** Pauses an automation: nothing of it starts until it is turned on again. A run under way finishes. */
+  command('PauseAutomation', { automationId: Schema.String }, Schema.Void),
+  /** Runs an automation once now, with every limit a run has, whether it is on or not yet. */
+  command('RunAutomationNow', { automationId: Schema.String, itemId: Schema.optional(Schema.String) }, Schema.Void),
+  /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
+  command('DeleteAutomation', { automationId: Schema.String }, Schema.Void),
+  /** Puts back what the coordinator changed an automation from, as the card in its thread shows it. */
+  command('UndoAutomationChange', { itemId: Schema.String }, Schema.Void),
+  /** Whether an automation's reviews post themselves once drafted, as the person said on its first; an outside pull request's still waits. */
+  command('SetAutomationPostsReviews', { automationId: Schema.String, on: Schema.Boolean }, Schema.Void),
+  /** Pauses every automation, or lets them run again. Runs under way finish. */
+  command('SetAutomationsPaused', { paused: Schema.Boolean }, Schema.Void),
   /**
    * How many agents may be at work at once on this machine, from now on:
    * the person's number, or, null, the default again. What waits starts if
@@ -2718,6 +3086,11 @@ export const Api = RpcGroup.make(
   command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   /**
+   * Tries the thread's last turn again, where it failed, as on the
+   * connection: what the person said in it goes to its agent again (ADR-060).
+   */
+  command('TryAgain', { threadId: Schema.String }, Schema.Void),
+  /**
    * Asks the thread's agent to compact its context, as a turn of its own after
    * what was said before; it never waits for a place among the agents at work.
    */
@@ -2732,6 +3105,15 @@ export const Api = RpcGroup.make(
    * conflict.
    */
   command('SetTaskResolveConflicts', { taskId: Schema.String, resolveConflicts: Schema.NullOr(Schema.Boolean) }, Schema.Void),
+  /**
+   * Resolve now: the task is merged with its default branch here, fetched
+   * again, and what conflicts is asked of its lead, though the rules leave
+   * it to the person, they stopped it, or its last round was handed back.
+   * Done apart.
+   */
+  command('ResolveConflictsNow', { taskId: Schema.String }, Schema.Void),
+  /** Each open task of the project looked at now for a conflict with its default branch, fetched again, under its rules. Done apart. */
+  command('LookForConflicts', { projectId: Schema.String }, Schema.Void),
   /** Allows everything its agents ask on one task, short of what its project never allows; turned on, what waits on the person is decided again. */
   command('SetTaskAllowEverything', { taskId: Schema.String, allowEverything: Schema.Boolean }, Schema.Void),
   /**
@@ -2773,7 +3155,7 @@ export const Api = RpcGroup.make(
   command('RenameTask', { taskId: Schema.String, title: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
   command('ReopenTask', { taskId: Schema.String }, Schema.Void),
-  /** Says something to a thread's agent, with any images: empty words with images are a message too. */
+  /** Says something to a thread's agent, with any images, files and folders: empty words with any of them are a message too. */
   command(
     'Send',
     {
@@ -2781,6 +3163,7 @@ export const Api = RpcGroup.make(
       body: Schema.String,
       disposition: Disposition,
       images: Schema.optional(SentImages),
+      files: Schema.optional(SentFiles),
       /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
       dictated: Schema.optional(Schema.Boolean),
     },
@@ -2941,6 +3324,7 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      changeIssues: Schema.optional(Schema.Boolean),
       /** What the person changed of what leads' sandboxes let through, each list whole. */
       sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
       /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */
@@ -3000,6 +3384,10 @@ export const Api = RpcGroup.make(
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
   /** How hard this computer works now, and Althar's work's part, for the window's bar while it shows it. */
   call('GetLoad', {}, Load),
+  /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
+  call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
+  /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
+  call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */

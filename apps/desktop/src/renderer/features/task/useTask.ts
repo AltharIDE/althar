@@ -21,7 +21,7 @@ import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsen
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
-import { type Outgoing, sentWith } from '../../shared/useImages'
+import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
@@ -108,6 +108,8 @@ export interface TaskModel {
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
+  /** Resolve now: its conflict with its default branch asked of its lead, whatever kept it from being asked. */
+  readonly resolveConflictsNow: () => Promise<void>
   /** Allows everything its agents ask, short of what its project never allows, or takes it back: what waits goes ahead. */
   readonly setAllowEverything: (on: boolean) => Promise<void>
   /**
@@ -184,6 +186,8 @@ export interface TaskModel {
   ) => Promise<void>
   /** Posts that review, as it stands; or again, after it wasn't posted. */
   readonly postReview: (draftId: string) => Promise<void>
+  /** An automation's review: lets its next reviews post themselves, then posts this one. */
+  readonly postReviewsFromNow: (draftId: string, automationId: string) => Promise<void>
   readonly discardReview: (draftId: string) => Promise<void>
   /** Files an issue the lead drafted, as the person says; changes it before; or throws it away. */
   readonly fileIssueDraft: (draftId: string) => Promise<void>
@@ -192,6 +196,9 @@ export interface TaskModel {
     edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
   ) => Promise<void>
   readonly discardIssueDraft: (draftId: string) => Promise<void>
+  /** Applies changes to the task's issue its lead or Althar proposed, or throws them away. */
+  readonly applyIssueChanges: (changesId: string) => Promise<void>
+  readonly discardIssueChanges: (changesId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
@@ -321,8 +328,8 @@ export const useTask = (threadId: string): TaskModel => {
   }, [readHead, readItems])
 
   useWatch((event) => {
-    // A command's output as far as it has come is useOutputs'.
-    if (event._tag === 'Output') return
+    // A command's output as far as it has come is useOutputs'; plan usage is the plan gauge's and the pickers'.
+    if (event._tag === 'Output' || event._tag === 'PlanUsage') return
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>
@@ -431,7 +438,7 @@ export const useTask = (threadId: string): TaskModel => {
         queued,
         interrupting: disposition === 'interrupt_and_continue',
         ...(images?.dictated === true ? { dictated: true } : {}),
-        ...(images === undefined ? {} : { pictures: images.pictures }),
+        ...(images === undefined ? {} : { pictures: images.pictures, files: images.attached }),
       })
       id = next.id
       return { ...current, items: next.items }
@@ -525,6 +532,7 @@ export const useTask = (threadId: string): TaskModel => {
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
+    resolveConflictsNow: () => onTask((taskId) => client.resolveConflictsNow(taskId)),
     setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
     abandon: async (close = []) => {
       let abandoned = false
@@ -665,10 +673,17 @@ export const useTask = (threadId: string): TaskModel => {
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
     changeReview: (draftId, edit) => act(() => client.changeReviewDraft(draftId, edit)),
     postReview: (draftId) => act(() => client.postReviewDraft(draftId)),
+    postReviewsFromNow: (draftId, automationId) =>
+      act(async () => {
+        await client.setAutomationPostsReviews(automationId, true)
+        await client.postReviewDraft(draftId)
+      }),
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
+    applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
+    discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),

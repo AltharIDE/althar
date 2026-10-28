@@ -24,7 +24,9 @@ import s from './ReviewDraft.module.css'
  * buttons. Nothing reaches the code host until you post it. The verdict is
  * yours: the lead's is only a suggestion, and on a pull request from outside
  * the team Approve is never chosen for you. Each comment is kept or dropped,
- * and Edit rewords the summary and the comments. If posting fails the card
+ * and Edit rewords the summary and the comments. One an automation's run
+ * drafted can also post this one and let that automation's next ones post
+ * themselves, the one way to say so. If posting fails the card
  * says why and can post again; perhaps posted, it says to look first. Posted,
  * it folds to a line with the review's link; discarded, to a quiet line.
  */
@@ -66,6 +68,8 @@ export interface ReviewDraftText {
   discard: string
   edit: string
   post: string
+  /** For an automation's review: post this one, and its next ones without asking. */
+  postFromNow: string
   postAgain: string
   /** The edit form's name. */
   editing: string
@@ -111,6 +115,7 @@ export const reviewDraftText: ReviewDraftText = {
   discard: 'Discard',
   edit: 'Edit',
   post: 'Post review',
+  postFromNow: 'Post this automation’s reviews from now on',
   postAgain: 'Post again',
   editing: 'Edit the review draft',
   summaryLabel: 'Summary',
@@ -182,6 +187,8 @@ export type ReviewDraftProps = RootProps<
     onChange?: (edit: ReviewDraftEdit) => void
     /** Post it, or post it again after it failed or may have. */
     onPost?: () => void
+    /** An automation drafted it: post it, and let the automation's next reviews post themselves. Only before it is first posted. */
+    onPostFromNow?: () => void
     onDiscard?: () => void
     /** Shows what the lead could reach, for a card from outside. */
     onReach?: () => void
@@ -218,6 +225,7 @@ export function ReviewDraft({
   onKeep,
   onChange,
   onPost,
+  onPostFromNow,
   onDiscard,
   onReach,
   saving = false,
@@ -288,7 +296,7 @@ export function ReviewDraft({
             error,
           }}
           state={state}
-          actions={{ onVerdict, onKeep, onChange, onPost, onDiscard, onReach }}
+          actions={{ onVerdict, onKeep, onChange, onPost, onPostFromNow, onDiscard, onReach }}
           saving={saving}
           headingLevel={headingLevel}
           t={t}
@@ -335,7 +343,7 @@ interface CardProps {
     | 'error'
   >
   state: ReviewDraftState
-  actions: Pick<ReviewDraftProps, 'onVerdict' | 'onKeep' | 'onChange' | 'onPost' | 'onDiscard' | 'onReach'>
+  actions: Pick<ReviewDraftProps, 'onVerdict' | 'onKeep' | 'onChange' | 'onPost' | 'onPostFromNow' | 'onDiscard' | 'onReach'>
   saving: boolean
   headingLevel: HeadingLevel
   t: ReviewDraftText
@@ -360,7 +368,7 @@ function DraftCard({ root, draft, state, actions, saving, headingLevel, t }: Car
     verdict,
     error,
   } = draft
-  const { onVerdict, onKeep, onChange, onPost, onDiscard, onReach } = actions
+  const { onVerdict, onKeep, onChange, onPost, onPostFromNow, onDiscard, onReach } = actions
   const { className, ...rest } = root
   const kickerId = useId()
   const titleId = useId()
@@ -383,6 +391,15 @@ function DraftCard({ root, draft, state, actions, saving, headingLevel, t }: Car
   if (missing && verdict !== null) setMissing(false)
   const edit = useRefocus<HTMLButtonElement>(open)
   const kept = comments.filter((comment) => comment.kept).length
+  /* posting needs a verdict: with none chosen, it says so beside the choice, and focus goes there */
+  const chosen = (post: () => void) => {
+    if (verdict === null) {
+      setMissing(true)
+      choice.current?.querySelector<HTMLElement>('[role="radio"]')?.focus()
+      return
+    }
+    post()
+  }
 
   return (
     <article
@@ -490,21 +507,13 @@ function DraftCard({ root, draft, state, actions, saving, headingLevel, t }: Car
                 {t.edit}
               </Button>
             )}
+            {onPostFromNow && state === ReviewDraftState.Pending && (
+              <Button aria-describedby={missing ? missingId : undefined} onClick={() => chosen(onPostFromNow)}>
+                {t.postFromNow}
+              </Button>
+            )}
             {onPost && (
-              <Button
-                variant="signal"
-                busy={posting}
-                aria-describedby={missing ? missingId : undefined}
-                onClick={() => {
-                  /* with no verdict chosen, it says so beside the choice, and focus goes there */
-                  if (verdict === null) {
-                    setMissing(true)
-                    choice.current?.querySelector<HTMLElement>('[role="radio"]')?.focus()
-                    return
-                  }
-                  onPost()
-                }}
-              >
+              <Button variant="signal" busy={posting} aria-describedby={missing ? missingId : undefined} onClick={() => chosen(onPost)}>
                 {failed || unsure ? t.postAgain : t.post}
               </Button>
             )}

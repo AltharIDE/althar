@@ -17,11 +17,13 @@ import {
   PAGE,
   Product,
   type SentImage,
+  SentFiles,
   SentImages,
   TaskCard,
   ThreadItem,
   WatchEvent,
 } from '../src/Api'
+import { MESSAGE_FILES } from '../src/files'
 import { MESSAGE_IMAGES } from '../src/pictures'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
@@ -50,7 +52,7 @@ describe('the API', () => {
       decode({
         ...base,
         kind: 'user_message',
-        content: { text: 'Hi', links: [], pictures: [] },
+        content: { text: 'Hi', links: [], pictures: [], files: [] },
         input: { state: 'queued', interrupting: false },
       }).kind,
       'user_message',
@@ -63,6 +65,7 @@ describe('the API', () => {
         text: '',
         links: [],
         pictures: [{ digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }],
+        files: [],
       },
       input: null,
     })
@@ -209,6 +212,7 @@ describe('the API', () => {
           },
         ],
         pictures: [],
+        files: [],
       },
       input: null,
     })
@@ -351,7 +355,7 @@ describe('the API', () => {
   })
 
   it('takes a load only as parts of the whole and bytes', () => {
-    const load = { cpu: 0.5, memoryUsed: 8e9, memoryTotal: 16e9, pressure: null, shares: [], history: [] }
+    const load = { cpu: 0.5, memoryUsed: 8e9, memoryTotal: 16e9, pressure: null, shares: [], althar: null, history: [] }
     const share = {
       kind: 'task',
       projectId: 'p1',
@@ -370,6 +374,13 @@ describe('the API', () => {
     assert.throws(() => decode({ ...load, pressure: 'high' }))
     // A share has at least the one process it is.
     assert.throws(() => decode({ ...load, shares: [{ ...share, agent: null, processes: 0 }] }))
+    // Althar itself, as its own part.
+    assert.deepStrictEqual(decode({ ...load, althar: { cpu: 0.03, memory: 1e9, processes: 9 } }).althar, {
+      cpu: 0.03,
+      memory: 1e9,
+      processes: 9,
+    })
+    assert.throws(() => decode({ ...load, althar: { cpu: 1.5, memory: 1e9, processes: 9 } }))
   })
 
   it('takes images sent with a message as bytes or a digest, as many as a message carries', () => {
@@ -385,6 +396,55 @@ describe('the API', () => {
     const one = { data: 'iVBORw0KGgo=', name: null }
     assert.strictEqual(decode(Array.from({ length: MESSAGE_IMAGES.count }, () => one)).length, MESSAGE_IMAGES.count)
     assert.throws(() => decode(Array.from({ length: MESSAGE_IMAGES.count + 1 }, () => one)))
+  })
+
+  it('takes files sent with a message by a grant or a kept copy, as many as a message carries', () => {
+    const decode = Schema.decodeUnknownSync(SentFiles)
+    const sent = [{ grant: 'grant_ab' }, { kept: 'ifile_1' }]
+    assert.deepStrictEqual(decode(sent), sent)
+    // Never a path: the window names what the person dropped by its grant.
+    assert.throws(() => decode([{ path: '/Users/me/Downloads/spec.pdf' }]))
+    assert.strictEqual(decode(Array.from({ length: MESSAGE_FILES.count }, () => ({ grant: 'g' }))).length, MESSAGE_FILES.count)
+    assert.throws(() => decode(Array.from({ length: MESSAGE_FILES.count + 1 }, () => ({ grant: 'g' }))))
+  })
+
+  it('keeps a message’s files and folders on its item, where their copies are', () => {
+    const decode = Schema.decodeUnknownSync(ThreadItem)
+    const item = {
+      id: 'ti1',
+      sequence: 1,
+      agentId: null,
+      createdAt: '2026-10-26T09:00:00.000Z',
+      kind: 'user_message' as const,
+      content: {
+        text: 'Read these',
+        links: [],
+        pictures: [],
+        files: [
+          {
+            id: 'ifile_1',
+            name: 'spec.pdf',
+            kind: 'file' as const,
+            mediaType: 'application/pdf',
+            bytes: 48_000,
+            entries: null,
+            path: '/w/t/.althar/attachments/in_1/spec.pdf',
+          },
+          {
+            id: 'ifile_2',
+            name: 'logs',
+            kind: 'folder' as const,
+            mediaType: null,
+            bytes: 9_000,
+            entries: 3,
+            path: '/w/t/.althar/attachments/in_1/logs',
+          },
+        ],
+      },
+      input: null,
+    }
+    assert.deepStrictEqual(decode(item), item)
+    assert.throws(() => decode({ ...item, content: { ...item.content, files: [{ ...item.content.files[0], kind: 'link' }] } }))
   })
 
   it.live('runs over a port, checking what is sent on the way', () =>
@@ -444,8 +504,11 @@ describe('the API', () => {
                   memoryTotal: 16e9,
                   pressure: 'normal' as const,
                   shares: null,
+                  althar: null,
                   history: [{ cpu: 0.4, work: 0.1 }],
                 }),
+              GetPlanUsage: () => Effect.succeed({ accounts: [] }),
+              GetModelRooms: () => Effect.succeed([]),
               InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
@@ -455,6 +518,17 @@ describe('the API', () => {
               GetSettings: () => Effect.die('unused'),
               SetCoAuthor: () => Effect.die('unused'),
               SetPostTeamReviews: () => Effect.die('unused'),
+              GetAutomations: () => Effect.die('unused'),
+              GetAutomation: () => Effect.die('unused'),
+              MakeAutomation: () => Effect.die('unused'),
+              ChangeAutomation: () => Effect.die('unused'),
+              TurnOnAutomation: () => Effect.die('unused'),
+              PauseAutomation: () => Effect.die('unused'),
+              RunAutomationNow: () => Effect.die('unused'),
+              DeleteAutomation: () => Effect.die('unused'),
+              UndoAutomationChange: () => Effect.die('unused'),
+              SetAutomationPostsReviews: () => Effect.die('unused'),
+              SetAutomationsPaused: () => Effect.die('unused'),
               SetAgentsAtOnce: () => Effect.die('unused'),
               SetFolderWait: () => Effect.die('unused'),
               GetTaskFolders: () => Effect.die('unused'),
@@ -480,6 +554,8 @@ describe('the API', () => {
               ChangeIssueDraft: () => Effect.void,
               FileIssueDraft: () => Effect.void,
               DiscardIssueDraft: () => Effect.void,
+              ApplyIssueChanges: () => Effect.void,
+              DiscardIssueChanges: () => Effect.void,
               ChangeReviewDraft: () => Effect.void,
               PostReviewDraft: () => Effect.void,
               DiscardReviewDraft: () => Effect.void,
@@ -489,10 +565,13 @@ describe('the API', () => {
               SwitchAgent: () => Effect.die('unused'),
               SetModel: () => Effect.void,
               Interrupt: () => Effect.void,
+              TryAgain: () => Effect.void,
               CompactContext: () => Effect.void,
               StopSession: () => Effect.void,
               StopTask: () => Effect.void,
               SetTaskResolveConflicts: () => Effect.void,
+              ResolveConflictsNow: () => Effect.void,
+              LookForConflicts: () => Effect.void,
               SetTaskAllowEverything: () => Effect.void,
               ResumeTask: () => Effect.void,
               LeaveOutCommits: () => Effect.void,
@@ -539,6 +618,9 @@ describe('the API', () => {
               GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
               SetProjectInk: () => Effect.die('unused'),
+              GetProjectTracker: () => Effect.die('unused'),
+              SetProjectTracker: () => Effect.die('unused'),
+              ListContainers: () => Effect.die('unused'),
               RemoveProject: () => Effect.die('unused'),
               GetRepositories: () => Effect.die('unused'),
               AddRepositories: () => Effect.die('unused'),
@@ -558,6 +640,7 @@ describe('the API', () => {
               StopListening: () => Effect.void,
               AttachPullRequest: () =>
                 Effect.succeed({ kind: 'attached' as const, name: 'PR #1', source: 'main', started: false, kept: 0, own: 0 }),
+              ReadBackgroundOutput: () => Effect.succeed({ text: '', dropped: 0 }),
               StopBackground: () => Effect.void,
               ClearBackground: () => Effect.void,
               RunProject: () => Effect.die('unused'),

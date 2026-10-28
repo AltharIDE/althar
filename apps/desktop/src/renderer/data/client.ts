@@ -5,6 +5,9 @@ import {
   type AlwaysScope,
   type AppSettings,
   type Attachment,
+  type AutomationDefinition,
+  type AutomationSnapshot,
+  type AutomationsSnapshot,
   type BoardTask,
   type FieldAnswer,
   type FoundAccount,
@@ -36,10 +39,13 @@ import {
   type FolderWait,
   type IssueList,
   type Load,
+  type ModelRoom,
+  type PlanUsage,
   type OutputText,
   type Product,
   type ChangeTarget,
   type ProjectInk,
+  type ProjectTracker,
   type ProjectList,
   type ProjectRepository,
   type ProjectSummary,
@@ -50,6 +56,7 @@ import {
   type SignInStart,
   type SignInState,
   type Status,
+  type SentFile,
   type SentImage,
   type TaskEnd,
   type TaskFolders,
@@ -57,6 +64,7 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
+  type TrackerContainer,
   type WatchEvent,
   type Launch,
   type RepositoryScript,
@@ -124,6 +132,8 @@ export interface Client {
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
   /** What a command in a thread printed, as kept once it ended. */
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
+  /** What a command a thread's session left running has printed so far. */
+  readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** One file a task changed, as a diff from its base to its worktree. */
@@ -148,7 +158,12 @@ export interface Client {
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
   readonly switchAgent: (
-    input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage>; readonly dictated?: boolean },
+    input: Start & {
+      readonly body?: string
+      readonly images?: ReadonlyArray<SentImage>
+      readonly files?: ReadonlyArray<SentFile>
+      readonly dictated?: boolean
+    },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
@@ -179,13 +194,45 @@ export interface Client {
   readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
+  /** A project's automations, for its Automations tab. */
+  readonly getAutomations: (projectId: string) => Promise<AutomationsSnapshot>
+  /** One automation, for its own page: its definition, its limits and its runs. */
+  readonly getAutomation: (automationId: string) => Promise<AutomationSnapshot>
+  /** Makes an automation in a project, on this Mac: proposed, waiting for the person to turn it on, unless `on`. Its id. */
+  readonly makeAutomation: (input: {
+    readonly projectId: string
+    readonly definition: AutomationDefinition
+    readonly on?: boolean
+  }) => Promise<string>
+  /** The person changes an automation, the whole of it: it holds from its next run, and stays on where it is. */
+  readonly changeAutomation: (automationId: string, definition: AutomationDefinition) => Promise<void>
+  /** Turns an automation on, or back on; `itemId`, where the person did it from the coordinator's card asking it. */
+  readonly turnOnAutomation: (automationId: string, itemId?: string) => Promise<void>
+  /** Pauses an automation: nothing of it starts until it is turned on again. A run under way finishes. */
+  readonly pauseAutomation: (automationId: string) => Promise<void>
+  /** Runs an automation once now, with every limit a run has, whether it is on or not yet; `itemId`, from the coordinator's card asking it. */
+  readonly runAutomationNow: (automationId: string, itemId?: string) => Promise<void>
+  /** Deletes an automation: nothing of it starts again. The tasks its runs made stay. */
+  readonly deleteAutomation: (automationId: string) => Promise<void>
+  /** Puts back what the coordinator changed an automation from, as its card in the thread shows it. */
+  readonly undoAutomationChange: (itemId: string) => Promise<void>
+  /** Whether an automation's reviews post themselves once drafted; an outside pull request's still waits. */
+  readonly setAutomationPostsReviews: (automationId: string, on: boolean) => Promise<void>
+  /** Pauses every automation, or lets them run again. Runs under way finish. */
+  readonly setAutomationsPaused: (paused: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
+  /** Tries the thread's last turn again, where it failed: what the person said in it goes again. */
+  readonly tryAgain: (threadId: string) => Promise<void>
   /** Asks the thread's agent to compact its context, after what it was told before. */
   readonly compact: (threadId: string) => Promise<void>
   /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
   readonly stopTask: (taskId: string) => Promise<void>
   /** Whether a task's lead resolves conflicts on its own otherwise than its project says; null goes back to the project. */
   readonly setTaskResolveConflicts: (input: { readonly taskId: string; readonly resolveConflicts: boolean | null }) => Promise<void>
+  /** Resolve now: a task's conflict with its default branch asked of its lead, whatever kept it from being asked. */
+  readonly resolveConflictsNow: (taskId: string) => Promise<void>
+  /** Each open task of a project looked at now for a conflict with its default branch, under the project's rules. */
+  readonly lookForConflicts: (projectId: string) => Promise<void>
   /** Allows everything its agents ask on one task, short of what its project never allows, or takes it back. */
   readonly setTaskAllowEverything: (input: { readonly taskId: string; readonly allowEverything: boolean }) => Promise<void>
   /** Carries a stopped task on from the step it was on: with its last lead, or the agent picked. */
@@ -213,6 +260,8 @@ export interface Client {
     readonly disposition: 'after_current' | 'interrupt_and_continue'
     /** Images sent with it, in order. */
     readonly images?: ReadonlyArray<SentImage>
+    /** Files and folders sent with it, in order, by their grants or kept copies. */
+    readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
   }) => Promise<void>
@@ -255,6 +304,9 @@ export interface Client {
   /** Files an issue the coordinator drafted, or one that wasn't filed, again: its card says how it went. */
   readonly fileIssueDraft: (draftId: string) => Promise<void>
   readonly discardIssueDraft: (draftId: string) => Promise<void>
+  /** Applies changes to issues, or what of them didn't apply, again: their card says how it went. */
+  readonly applyIssueChanges: (changesId: string) => Promise<void>
+  readonly discardIssueChanges: (changesId: string) => Promise<void>
   /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
   readonly changeReviewDraft: (
     draftId: string,
@@ -296,6 +348,12 @@ export interface Client {
   readonly renameProject: (projectId: string, name: string) => Promise<void>
   /** Draws a project's mark in another ink, wherever it shows. */
   readonly setProjectInk: (projectId: string, ink: ProjectInk) => Promise<void>
+  /** The tracker a project is bound to (ADR-059), or null where where its issues go is learned. */
+  readonly getProjectTracker: (projectId: string) => Promise<ProjectTracker | null>
+  /** Binds a project to a tracker and where its issues are filed there, or, with null, unbinds it. */
+  readonly setProjectTracker: (projectId: string, tracker: ProjectTracker | null) => Promise<void>
+  /** Where issues can be filed on a connected tracker: its teams, projects or lists. */
+  readonly listContainers: (connectionId: string) => Promise<ReadonlyArray<TrackerContainer>>
   /** Removes a project from Althar: its agents stop; its folders, worktrees and branches stay. */
   readonly removeProject: (projectId: string) => Promise<void>
   readonly getRepositories: (projectId: string) => Promise<ReadonlyArray<ProjectRepository>>
@@ -357,6 +415,10 @@ export interface Client {
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
   /** How hard this computer works now, and Althar's work's part, for the bar while it shows it. */
   readonly getLoad: () => Promise<Load>
+  /** Every account's plan usage; with `refresh`, each account is read again first rather than as kept. */
+  readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
+  /** Each model's room where work on it would start, in a project (its rule for moving work through accounts) or anywhere. */
+  readonly getModelRooms: (projectId: string | null) => Promise<ReadonlyArray<ModelRoom>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -527,6 +589,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
+    readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
@@ -554,6 +617,22 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getSettings: () => settle(api.GetSettings({})),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
+    getAutomations: (projectId) => settle(api.GetAutomations({ projectId })),
+    getAutomation: (automationId) => settle(api.GetAutomation({ automationId })),
+    makeAutomation: ({ projectId, definition, on }) =>
+      command((commandId) => api.MakeAutomation({ commandId, projectId, definition, ...(on === undefined ? {} : { on }) })).then(
+        (made) => made.automationId,
+      ),
+    changeAutomation: (automationId, definition) => command((commandId) => api.ChangeAutomation({ commandId, automationId, definition })),
+    turnOnAutomation: (automationId, itemId) =>
+      command((commandId) => api.TurnOnAutomation({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
+    pauseAutomation: (automationId) => command((commandId) => api.PauseAutomation({ commandId, automationId })),
+    runAutomationNow: (automationId, itemId) =>
+      command((commandId) => api.RunAutomationNow({ commandId, automationId, ...(itemId === undefined ? {} : { itemId }) })),
+    deleteAutomation: (automationId) => command((commandId) => api.DeleteAutomation({ commandId, automationId })),
+    undoAutomationChange: (itemId) => command((commandId) => api.UndoAutomationChange({ commandId, itemId })),
+    setAutomationPostsReviews: (automationId, on) => command((commandId) => api.SetAutomationPostsReviews({ commandId, automationId, on })),
+    setAutomationsPaused: (paused) => command((commandId) => api.SetAutomationsPaused({ commandId, paused })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
@@ -562,9 +641,12 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     moveInLine: (taskId, to) => command((commandId) => api.MoveInLine({ commandId, taskId, to })),
     lineOldestFirst: (projectId) => command((commandId) => api.LineOldestFirst({ commandId, projectId })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
+    tryAgain: (threadId) => command((commandId) => api.TryAgain({ commandId, threadId })),
     compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
+    resolveConflictsNow: (taskId) => command((commandId) => api.ResolveConflictsNow({ commandId, taskId })),
+    lookForConflicts: (projectId) => command((commandId) => api.LookForConflicts({ commandId, projectId })),
     setTaskAllowEverything: (input) => command((commandId) => api.SetTaskAllowEverything({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
     leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
@@ -586,6 +668,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
     discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),
+    applyIssueChanges: (changesId) => command((commandId) => api.ApplyIssueChanges({ commandId, changesId })),
+    discardIssueChanges: (changesId) => command((commandId) => api.DiscardIssueChanges({ commandId, changesId })),
     changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
     postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
     discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),
@@ -610,6 +694,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
     setProjectInk: (projectId, ink) => command((commandId) => api.SetProjectInk({ commandId, projectId, ink })),
+    getProjectTracker: (projectId) => settle(api.GetProjectTracker({ projectId })),
+    setProjectTracker: (projectId, tracker) => command((commandId) => api.SetProjectTracker({ commandId, projectId, tracker })),
+    listContainers: (connectionId) => settle(api.ListContainers({ connectionId })),
     removeProject: (projectId) => command((commandId) => api.RemoveProject({ commandId, projectId })),
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
@@ -642,6 +729,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
     getLoad: () => settle(api.GetLoad({})),
+    getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
+    getModelRooms: (projectId) => settle(api.GetModelRooms(projectId === null ? {} : { projectId })),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),

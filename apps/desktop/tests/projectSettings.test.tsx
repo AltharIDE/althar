@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type BoardTask, type ConnectionSummary, type ProjectSummary, type Service } from '@althar/contracts'
+import { ApiError, type BoardTask, type ConnectionSummary, type ProjectSummary, type ProjectTracker, type Service } from '@althar/contracts'
 
 import { type Host, ServicesProvider } from '../src/renderer/data/services'
 import { projectRoute } from '../src/renderer/features/project/route'
@@ -220,6 +220,10 @@ describe('a project’s settings', () => {
     // On at once, and kept as a revision of the rules, with nothing else in it.
     expect(conflicts.getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', resolveConflicts: true }))
+    // On, every open task can be looked at now, rather than as each default branch moves.
+    await userEvent.click(tasks.getByRole('button', { name: 'Look for conflicts now' }))
+    expect(client.lookForConflicts).toHaveBeenCalledWith('p1')
+    expect(descriptionOf(conflicts)).toContain('Looking at each open task now.')
     await userEvent.click(conflicts)
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', resolveConflicts: false }))
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
@@ -229,15 +233,30 @@ describe('a project’s settings', () => {
     const { client } = windowAt('/projects/p1')
     await openSettings()
     const move = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
-      name: 'Move issues to In Progress',
+      name: 'Move issues along with their tasks',
     })
     expect(move.getAttribute('aria-checked')).toBe('true')
-    expect(descriptionOf(move)).toBe('When a task starts from a Linear, Jira or Trello issue.')
+    expect(descriptionOf(move)).toBe(
+      'To In Progress when a task starts from an issue; to In Review and Done as its pull request opens and merges.',
+    )
     await userEvent.click(move)
     // Off at once, before the runtime has said so.
     expect(move.getAttribute('aria-checked')).toBe('false')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', moveIssues: false }))
     expect(move.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('lets changes to issues apply without a card once switched on, off until then', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings()
+    const change = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', { name: 'Change issues without asking' })
+    expect(change.getAttribute('aria-checked')).toBe('false')
+    expect(descriptionOf(change)).toBe(
+      'Status, priority, assignee, labels and closing apply at once, instead of waiting for you on a card.',
+    )
+    await userEvent.click(change)
+    expect(change.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', changeIssues: true }))
   })
 
   it('switches back, saying why under the one that didn’t hold, and the other says nothing of it', async () => {
@@ -248,7 +267,7 @@ describe('a project’s settings', () => {
     })
     await openSettings()
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
-    const move = tasks.getByRole('switch', { name: 'Move issues to In Progress' })
+    const move = tasks.getByRole('switch', { name: 'Move issues along with their tasks' })
     await userEvent.click(move)
     expect(await tasks.findByRole('alert')).toHaveProperty('textContent', 'The rules changed meanwhile.')
     await waitFor(() => expect(move.getAttribute('aria-checked')).toBe('true'))
@@ -436,6 +455,23 @@ describe('a project’s trackers, in its settings', () => {
     expect(within(screen.getByRole('region', { name: 'Trackers' })).getByText('Connected as balazs')).toBeTruthy()
   })
 
+  it('says one key that reaches several teams of a workspace is connected for each team its issues are on', async () => {
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({
+        cursor: 1,
+        tasks: [taskFrom('DEV-74', 'conn_key'), taskFrom('OPS-3', 'conn_key')],
+        calls: [],
+        settledTotal: 2,
+      })),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, linear('ready', 'conn_key', 'mate')] })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings' })).toBeTruthy()
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getAllByText('Connected as mate')).toHaveLength(2)
+    expect(trackers.queryByText('Not connected')).toBeNull()
+  })
+
   it('says a tracker isn’t connected once the account its issues go through is removed, though another is signed in there', async () => {
     // Work's account was removed, so listing connections leaves it out; a personal one is signed in on the same Linear.
     windowAt('/projects/p1', {
@@ -518,6 +554,84 @@ describe('a project’s trackers, in its settings', () => {
     await userEvent.click(trackers.getByRole('button', { name: 'Open on Linear' }))
     expect(opened).toHaveBeenCalledWith('https://linear.app/northwind/team/MER', '_blank')
     opened.mockRestore()
+  })
+
+  it('sends its issues to one of two Linear workspaces, and a team there, once the person binds it (ADR-059)', async () => {
+    const althar = { ...linear('ready', 'conn_althar', 'mate'), workspace: { key: 'althar', name: 'althar' } }
+    const fnt = { ...linear('ready', 'conn_fnt', 'mate'), workspace: { key: 'fnt', name: 'FNT' } }
+    let bound: ProjectTracker | null = null
+    const { client } = windowAt('/projects/p1', {
+      ...onLinear(althar, fnt),
+      getProjectTracker: vi.fn(async () => bound),
+      setProjectTracker: vi.fn(async (_projectId: string, next: ProjectTracker | null) => {
+        bound = next
+      }),
+      listContainers: vi.fn(async (connectionId: string) =>
+        connectionId === 'conn_fnt' ? [{ id: 'team-f', key: 'FNT', name: 'Fintech' }] : [],
+      ),
+    })
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    // Unset, where its issues already are, as before.
+    const goTo = await trackers.findByRole('combobox', { name: 'Issues go to' })
+    expect(goTo.textContent).toContain('Where its issues are')
+    expect(trackers.queryByRole('combobox', { name: 'Team' })).toBeNull()
+
+    await userEvent.click(goTo)
+    await userEvent.click(await screen.findByRole('option', { name: 'Linear · FNT' }))
+    expect(client.setProjectTracker).toHaveBeenCalledWith('p1', { connectionId: 'conn_fnt', container: null })
+    const team = await trackers.findByRole('combobox', { name: 'Team' })
+    await waitFor(() => expect(team.hasAttribute('disabled')).toBe(false))
+    await userEvent.click(team)
+    await userEvent.click(await screen.findByRole('option', { name: 'FNT (Fintech)' }))
+    expect(client.setProjectTracker).toHaveBeenLastCalledWith('p1', {
+      connectionId: 'conn_fnt',
+      container: { id: 'team-f', name: 'Fintech' },
+    })
+    await waitFor(() => expect(team.textContent).toContain('FNT (Fintech)'))
+
+    // Unbound again, it goes back to where its issues are.
+    await userEvent.click(goTo)
+    await userEvent.click(await screen.findByRole('option', { name: 'Where its issues are' }))
+    expect(client.setProjectTracker).toHaveBeenLastCalledWith('p1', null)
+  })
+
+  it('says the workspace it is bound to was disconnected, rather than going back to where its issues are', async () => {
+    const althar = { ...linear('ready', 'conn_althar', 'mate'), workspace: { key: 'althar', name: 'althar' } }
+    const listContainers = vi.fn(async () => [])
+    windowAt('/projects/p1', {
+      ...onLinear(althar),
+      getProjectTracker: vi.fn(async (): Promise<ProjectTracker> => ({
+        connectionId: 'conn_fnt',
+        container: { id: 'team-f', name: 'Fintech' },
+        gone: { product: 'linear', webUrl: 'https://linear.app', workspace: 'FNT' },
+      })),
+      listContainers,
+    })
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    const goTo = await trackers.findByRole('combobox', { name: 'Issues go to' })
+    await waitFor(() => expect(goTo.textContent).toContain('Linear · FNT (disconnected)'))
+    expect(trackers.getByText(/^Disconnected\./)).toBeTruthy()
+    expect(trackers.queryByRole('combobox', { name: 'Team' })).toBeNull()
+    expect(listContainers).not.toHaveBeenCalled()
+  })
+
+  it('says why a binding didn’t hold, and puts it back', async () => {
+    const fnt = { ...linear('ready', 'conn_fnt', 'mate'), workspace: { key: 'fnt', name: 'FNT' } }
+    windowAt('/projects/p1', {
+      ...onLinear(fnt),
+      setProjectTracker: vi.fn(async () => {
+        throw new ApiError({ reason: 'NotFound', message: 'That connection is gone.' })
+      }),
+    })
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    const goTo = await trackers.findByRole('combobox', { name: 'Issues go to' })
+    await userEvent.click(goTo)
+    await userEvent.click(await screen.findByRole('option', { name: 'Linear · FNT' }))
+    expect(await trackers.findByRole('alert')).toBeTruthy()
+    await waitFor(() => expect(goTo.textContent).toContain('Where its issues are'))
   })
 
   it('says none has been named yet, offers to connect one, and leads to Althar’s own connections', async () => {

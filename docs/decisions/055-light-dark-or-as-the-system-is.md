@@ -43,7 +43,7 @@
   - **The system's scheme is the one switch.** Settings › Appearance offers
     Light, Dark and Match the system, in each system's words: Match the Mac,
     Match the PC, Match the computer. It is kept as the app preference
-    `appearance` (`light`, `dark` or `system`, starting at `system`). The
+    `appearance` (`light`, `dark` or `system`, starting at `light`: a person who never chose is light whatever their system is, and only a written `system` follows it). The
     main process sets Electron's `nativeTheme.themeSource` from it as soon
     as the preferences are read (`themeSourceFor`): on a Mac and on Windows,
     as the system is is `system`, which nativeTheme follows by itself (the

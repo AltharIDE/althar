@@ -1,4 +1,4 @@
-import type { AllowedBy, FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -9,7 +9,8 @@ import { took } from './time'
  * A thread's items as the blocks the kit draws, in order: what the person
  * said, each turn of the agent (its messages, thoughts, tool calls and plan,
  * grouped under one name), what a step reported when it ended, a task's card
- * in the coordinator's thread, and the lines that mark a change of scene.
+ * and an automation's in the coordinator's thread, and the lines that mark a
+ * change of scene.
  * Text still streaming replaces the stored text of its item.
  *
  * A turn's work folds (docs/plans/mvp.md, "Work is collapsed"): its tool
@@ -40,6 +41,8 @@ export type Part =
       readonly command: string | null
       /** The command as it reads at a glance, which the row shows in its place, where it can be said shorter. */
       readonly label?: string
+      /** For a refused call: who refused it and why, as the row says it; absent where the person refused it. */
+      readonly why?: string
       /** The project's rule that let it through without asking (ADR-018), where one did. */
       readonly allowedBy?: AllowedBy
       /** For a command: its output so far, or how much it printed once it ended (handed.ts). */
@@ -62,9 +65,11 @@ export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
+export type IssueChangesContent = Extract<ThreadItem, { kind: 'issue_changes' }>['content']
 export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
 export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['content']
 export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['content']
+export type AutomationCardContent = Extract<ThreadItem, { kind: 'automation' }>['content']
 
 export type Block =
   | {
@@ -77,6 +82,8 @@ export type Block =
       readonly links: ReadonlyArray<Unfurl>
       /** The images the person sent with it. */
       readonly pictures: ReadonlyArray<Picture>
+      /** The files and folders the person sent with it. */
+      readonly files: ReadonlyArray<AttachedFile>
     }
   | {
       readonly kind: 'turn'
@@ -109,12 +116,16 @@ export type Block =
   | { readonly kind: 'run'; readonly id: string; readonly run: RunContent }
   /** An issue the coordinator drafted, filed only when the person says. */
   | { readonly kind: 'draft'; readonly id: string; readonly draft: IssueDraftContent }
+  /** Changes to issues the coordinator, a lead or Althar proposed, applied only when the person says; or a comment or link, applied at once. */
+  | { readonly kind: 'changes'; readonly id: string; readonly changes: IssueChangesContent }
   /** Althar setting up the task's worktree, before its lead starts (ADR-023). */
   | { readonly kind: 'setup'; readonly id: string; readonly setup: SetupContent }
   /** The lead asking the person to push its new commits to the task's pull request: when it asked, or when it settled. */
   | { readonly kind: 'push'; readonly id: string; readonly at: string; readonly request: PushRequestContent }
   /** A review the lead drafted of someone else's pull request, posted only when the person says. */
   | { readonly kind: 'review'; readonly id: string; readonly review: ReviewDraftContent }
+  /** An automation the coordinator proposed or changed, or asks the person to resume or run now: turned on, undone or answered where it is. */
+  | { readonly kind: 'automation'; readonly id: string; readonly automation: AutomationCardContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -209,6 +220,14 @@ export const toolStateOf = (status: string, turnRunning: boolean, declined = fal
   }
 }
 
+/** Who refused a call and why, in a few words for its row. The person's own refusal needs none. */
+export const declinedWords = (by?: 'rules' | 'coordinator' | 'person', why?: string): string | undefined => {
+  if (by !== 'rules' && by !== 'coordinator') return undefined
+  const who = by === 'rules' ? 'Althar’s rules' : 'The coordinator'
+  const reason = why?.replace(/`/g, '').replace(/\.$/, '').trim()
+  return reason ? `${who}: ${reason}` : who
+}
+
 /** A plan step's status, as the kit's. A step still in progress when its turn has ended waits for the next. */
 export const planStateOf = (status: string, turnRunning: boolean): PlanState =>
   status === 'completed' ? PlanState.Done : status === 'in_progress' && turnRunning ? PlanState.Running : PlanState.Queued
@@ -285,6 +304,7 @@ const partOf = (
     case 'tool_call': {
       const toolKind = toolKindOf(item.content.toolKind)
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
+      const why = declinedWords(item.content.declinedBy, item.content.declinedWhy)
       return {
         kind: 'tool',
         id: item.id,
@@ -295,6 +315,7 @@ const partOf = (
         command: item.content.command,
         ...(item.content.label === undefined ? {} : { label: item.content.label }),
         ...(item.content.allowedBy === undefined ? {} : { allowedBy: item.content.allowedBy }),
+        ...(state === ToolState.Declined && why !== undefined ? { why } : {}),
         ran: ranOf(item.content, state, outputs.get(item.id)),
         exit: item.content.exit,
         touches: [...item.content.locations.map((location) => location.path), ...item.content.files.map((file) => file.path)],
@@ -452,6 +473,7 @@ export const blocksOf = (
           delivery,
           links: item.content.links,
           pictures: item.content.pictures,
+          files: item.content.files,
         })
         if (delivery === Delivery.Delivered) {
           asked = item
@@ -483,6 +505,9 @@ export const blocksOf = (
       case 'issue_draft':
         blocks.push({ kind: 'draft', id: item.id, draft: item.content })
         continue
+      case 'issue_changes':
+        blocks.push({ kind: 'changes', id: item.id, changes: item.content })
+        continue
       case 'setup':
         blocks.push({ kind: 'setup', id: item.id, setup: item.content })
         continue
@@ -491,6 +516,9 @@ export const blocksOf = (
         continue
       case 'review_draft':
         blocks.push({ kind: 'review', id: item.id, review: item.content })
+        continue
+      case 'automation':
+        blocks.push({ kind: 'automation', id: item.id, automation: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

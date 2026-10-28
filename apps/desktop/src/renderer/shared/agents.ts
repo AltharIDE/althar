@@ -1,4 +1,4 @@
-import type { AgentStatus, Queued } from '@althar/contracts'
+import type { AgentStatus, HeldForConnection, Queued } from '@althar/contracts'
 import { Brand, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
@@ -33,14 +33,29 @@ const heldWork: Readonly<Record<string, string>> = { review: 'The review waits',
  * What a step held for a usage limit waits for: the agent that ran out, and
  * when it is back; with the step, what waits too, where there is room for it,
  * as in the task's header. A card says Paused and shows its step already.
+ * Held before it ran out (`left`, a new step steered clear of an agent nearly
+ * out), it says it waits for the agent, which isn't out yet.
  */
-export const waitsWords = (agent: string, at: string, step?: string | null) =>
-  `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
+export const waitsWords = (agent: string, at: string, step?: string | null, left?: number) => {
+  if (left !== undefined && left > 0)
+    return step === undefined ? `Waiting for ${agent} until ${at}` : `${heldWork[step ?? ''] ?? 'The work waits'} for ${agent} until ${at}`
+  return `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
+}
+
+/**
+ * What a step held for the connection waits for (ADR-060): the connection,
+ * while the computer is offline or its service out of reach; else the try
+ * again at its service, which failed, and when. `at` says a time as the
+ * window does.
+ */
+export const reconnectsWords = (held: HeldForConnection, at: (iso: string) => string) =>
+  held.offline || held.next === null ? 'Waiting for the connection' : `${held.service} failed: trying again at ${at(held.next)}`
 
 /**
  * What work waiting for a free agent waits for (ADR-032): every agent this
- * computer runs at once is busy. More busy than that, after the person
- * lowered the number, says both.
+ * computer runs at once is busy, its own task's left out. More busy than
+ * that, by what the person started or after they lowered the number, says
+ * how many more.
  */
 export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting: ${busyWords(queued, where)}`
 
@@ -55,9 +70,12 @@ const ordinal = (n: number) => {
 /** Where a task waiting for a free agent stands in its project's line: Next in line, 2nd in line. */
 export const inLineWords = (place: number) => `${ordinal(place)} in line`
 
+/** Where a task waiting for a free agent stands in its project's line, as the chip over its composer says it: First in Up next, 2nd in Up next. */
+export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal(place)} in Up next`
+
 /** How busy this computer's agents are, as work that waits for one says it. */
 export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
-  busy > atOnce ? `${busy} agents busy on ${where}, which runs ${atOnce} at once` : `${busy} of ${atOnce} agents busy on ${where}`
+  `${Math.min(busy, atOnce)} of ${atOnce} agents busy on ${where}${busy > atOnce ? `, and ${busy - atOnce} more` : ''}`
 
 /**
  * The same, short, for a project's tasks on the home, which is this
@@ -65,7 +83,7 @@ export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this)
  * project's name.
  */
 export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
-  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${busy > atOnce ? `${busy} agents busy, ${atOnce} at once` : `${busy} of ${atOnce} agents busy`}`
+  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${Math.min(busy, atOnce)} of ${atOnce} agents busy${busy > atOnce ? `, and ${busy - atOnce} more` : ''}`
 
 /** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {

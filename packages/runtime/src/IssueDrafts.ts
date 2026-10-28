@@ -1,4 +1,4 @@
-import { type Container, ConnectorFailed, type Issue, type Product, products, type Tracker } from '@althar/connectors'
+import { type Container, ConnectorFailed, type Issue, type Priority, type Product, products, type Tracker } from '@althar/connectors'
 import { type ActorId, Ids, type IssueDraftState, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -9,6 +9,7 @@ import { envelope } from './envelope'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { projectRepository } from './Issues'
+import { projectTracker } from './projectTracker'
 import { change, fact, timestamp } from './records'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
@@ -46,6 +47,8 @@ export interface DraftCard {
   readonly title: string
   readonly body: string
   readonly labels: ReadonlyArray<string>
+  /** Its priority, where the tracker has priorities; null for the tracker's default. */
+  readonly priority: Priority | null
   readonly state: IssueDraftState
   /** Why it wasn't filed, in the tracker's words, while it stands failed. */
   readonly error: string | null
@@ -60,7 +63,15 @@ export interface DraftCard {
  * was that it hasn't). `choices` are what can be named instead.
  */
 export class IssueTargetNeeded extends Schema.TaggedError<IssueTargetNeeded>()('IssueTargetNeeded', {
-  reason: Schema.Literals(['no_tracker', 'tracker_needed', 'unknown_tracker', 'container_needed', 'unknown_container']),
+  reason: Schema.Literals([
+    'no_tracker',
+    'tracker_needed',
+    'unknown_tracker',
+    'container_needed',
+    'unknown_container',
+    'tracker_gone',
+    'tracker_signed_out',
+  ]),
   /** What was named and not found. */
   named: Schema.NullOr(Schema.String),
   /** The tracker the draft would go to, for a container to name. */
@@ -108,6 +119,14 @@ export const refusedDraft = (error: unknown): unknown => {
       return new ToolRefused({ message: `Say which tracker it goes on, as tracker: ${choices}.` })
     case 'unknown_tracker':
       return new ToolRefused({ message: `No tracker called ${error.named ?? ''} is connected. Connected: ${choices}.` })
+    case 'tracker_gone':
+      return new ToolRefused({
+        message: `This project's issues go to ${where}, which is no longer connected. The person connects it again in Settings, or binds the project to another in its settings; or name another tracker for this one${choices === '' ? '' : `, as tracker: ${choices}`}.`,
+      })
+    case 'tracker_signed_out':
+      return new ToolRefused({
+        message: `This project's issues go to ${where}, which needs signing in again. The person signs in to it again in Settings; or name another tracker for this one${choices === '' ? '' : `, as tracker: ${choices}`}.`,
+      })
     case 'container_needed':
       return new ToolRefused({ message: `Say where on ${where} it goes, as container: ${choices}.` })
     case 'unknown_container':
@@ -134,6 +153,7 @@ interface Row {
   readonly title: string
   readonly body: string
   readonly labels: string
+  readonly priority: Priority | null
   readonly state: IssueDraftState
   readonly error: string | null
   readonly issueKey: string | null
@@ -151,6 +171,7 @@ export const cardOf = (row: Row): DraftCard => ({
   title: row.title,
   body: row.body,
   labels: Schema.decodeUnknownSync(Labels)(row.labels),
+  priority: row.priority,
   state: row.state,
   error: row.error,
   issue: row.issueKey === null || row.issueUrl === null ? null : { key: row.issueKey, url: row.issueUrl },
@@ -188,10 +209,16 @@ interface Candidate {
   readonly connectionId: string
   readonly product: Product
   readonly tracker: Tracker
-  /** Its product's name, and its site, or its site and account, where another connection would share the name: Jira (acme.atlassian.net). */
+  /**
+   * Its product's name, and its workspace, its site, or its site and account,
+   * where another connection would share the name: Linear (FNT), Jira
+   * (acme.atlassian.net).
+   */
   readonly label: string
   readonly host: string
   readonly login: string
+  /** The workspace its sign-in reaches, by its key and name, where it reaches one (ADR-059). */
+  readonly workspace: { readonly key: string; readonly name: string } | null
 }
 
 /**
@@ -206,6 +233,7 @@ const trackerNamed = (candidate: Candidate, typed: string) =>
   same(candidate.label, typed) ||
   same(candidate.connectionId, typed) ||
   same(candidate.login, typed) ||
+  (candidate.workspace !== null && (same(candidate.workspace.key, typed) || same(candidate.workspace.name, typed))) ||
   hostOf(typed) === candidate.host
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | Sessions
@@ -228,14 +256,21 @@ export class IssueDrafts extends Context.Service<
       readonly title: string
       readonly body: string
       readonly labels: ReadonlyArray<string>
+      /** Its priority; left out, or on a tracker without priorities, it has none, and is filed at the tracker's default. */
+      readonly priority?: Priority
       /** The task whose lead drafts it: where its own issue came from is where an unnamed draft goes. */
       readonly taskId?: string
       readonly actorId: ActorId
     }): Effect.Effect<DraftCard, unknown>
-    /** Changes what a draft says, before it is filed: `DraftClosed` after, `DraftUntitled` without a title. */
+    /** Changes what a draft says, before it is filed: `DraftClosed` after, `DraftUntitled` without a title. A priority left out stays; null takes it off. */
     change(
       draftId: string,
-      draft: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+      draft: {
+        readonly title: string
+        readonly body: string
+        readonly labels: ReadonlyArray<string>
+        readonly priority?: Priority | null
+      },
       actorId: ActorId,
     ): Effect.Effect<void, unknown>
     /** Files a draft on its tracker, because the person said to; one that failed, again. The card says how it went; `DraftClosed` once filed or discarded. */
@@ -257,8 +292,8 @@ export class IssueDrafts extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<Row>`
-            SELECT id, project_id, thread_id, connection_id, product, tracker_name, container, container_name, title, body, labels, state, error,
-              issue_key, issue_url
+            SELECT id, project_id, thread_id, connection_id, product, tracker_name, container, container_name, title, body, labels, priority,
+              state, error, issue_key, issue_url
             FROM issue_drafts WHERE id = ${draftId} AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
           return row === undefined ? yield* new NotFound({ kind: 'issue draft', id: draftId }) : row
         })
@@ -346,14 +381,23 @@ export class IssueDrafts extends Context.Service<
         const told = known.map((one): Candidate => {
           const named = known.filter((other) => other.name === one.name)
           const hosted = named.filter((other) => other.host === one.host)
+          const workspace = one.workspace
+          const inWorkspace = workspace === null ? [] : named.filter((other) => other.workspace?.name === workspace.name)
           return {
             connectionId: one.connectionId,
             product: one.product,
             tracker: one.tracker,
             host: one.host,
             login: one.login,
+            workspace,
             label:
-              named.length === 1 ? one.name : hosted.length === 1 ? `${one.name} (${one.host})` : `${one.name} (${one.host}, ${one.login})`,
+              named.length === 1
+                ? one.name
+                : workspace !== null && inWorkspace.length === 1
+                  ? `${one.name} (${workspace.name})`
+                  : hosted.length === 1
+                    ? `${one.name} (${one.host})`
+                    : `${one.name} (${one.host}, ${one.login})`,
           }
         })
         return told.toSorted((a, b) => a.label.localeCompare(b.label))
@@ -369,11 +413,28 @@ export class IssueDrafts extends Context.Service<
         Effect.gen(function* () {
           const trackers = yield* candidates
           const home = yield* projectRepository(projectId).pipe(Effect.orElseSucceed(() => null))
-          // A lead's task came from an issue, perhaps: its follow-ups go beside it.
-          const before = [...(taskId === undefined ? [] : yield* ownOf(taskId)), ...(yield* usual(projectId))]
+          // The tracker the project is bound to comes first (ADR-059); then, as where a project's issues go is learned, a
+          // lead's task came from an issue, perhaps: its follow-ups go beside it.
+          const bound = yield* projectTracker(projectId)
+          const before = [
+            ...(bound === null ? [] : [{ connectionId: bound.connectionId, container: bound.container?.name ?? '', at: '' }]),
+            ...(taskId === undefined ? [] : yield* ownOf(taskId)),
+            ...(yield* usual(projectId)),
+          ]
           const labels = trackers.map((one) => one.label)
           const typed = named.tracker?.trim() === '' ? undefined : named.tracker?.trim()
           const wanted = named.container?.trim() === '' ? undefined : named.container?.trim()
+          // Bound to a workspace no longer connected, or needing sign-in again, it waits for that one, never going to another unasked.
+          if (bound !== null && typed === undefined && !trackers.some((one) => one.connectionId === bound.connectionId)) {
+            const workspace =
+              bound.gone?.workspace ?? (yield* connections.list).find((one) => one.id === bound.connectionId)?.workspace?.name ?? null
+            return yield* new IssueTargetNeeded({
+              reason: bound.gone === null ? 'tracker_signed_out' : 'tracker_gone',
+              named: null,
+              tracker: workspace === null ? products[bound.product].name : `${products[bound.product].name} (${workspace})`,
+              choices: labels,
+            })
+          }
           const matching = typed === undefined ? trackers : trackers.filter((one) => trackerNamed(one, typed))
           if (matching.length === 0)
             return yield* new IssueTargetNeeded({
@@ -382,7 +443,7 @@ export class IssueDrafts extends Context.Service<
               tracker: null,
               choices: labels,
             })
-          /** Of several, the one the project's issues come from, then the one its repository is on. */
+          /** Of several, the one the project is bound to or its issues come from, then the one its repository is on. */
           const preferred = (among: ReadonlyArray<Candidate>) =>
             before.flatMap((one) => among.filter((candidate) => candidate.connectionId === one.connectionId))[0] ??
             among.find((one) => one.connectionId === home?.connectionId)
@@ -441,6 +502,9 @@ export class IssueDrafts extends Context.Service<
             })
           const containers = yield* chosen.tracker.containers()
           const found =
+            (bound?.connectionId === chosen.connectionId && bound.container !== null
+              ? (containers.find((one) => one.id === bound.container?.id) ?? containerNamed(containers, bound.container.name))
+              : undefined) ??
             (home?.connectionId === chosen.connectionId ? containerNamed(containers, home.path.join('/')) : undefined) ??
             before
               .filter((one) => one.connectionId === chosen.connectionId && one.container !== '')
@@ -480,6 +544,11 @@ export class IssueDrafts extends Context.Service<
             if (waiting !== undefined) return cardOf(yield* load(waiting.id))
             const draftId = yield* newId(Ids.issueDraft)
             const labels = labelsOf(input.labels)
+            // A tracker without priorities files it at its own default: none is kept to show.
+            const priority =
+              input.priority === undefined || input.priority === 'none' || !where.tracker.capabilities.changes.includes('priority')
+                ? null
+                : input.priority
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const at = yield* timestamp
@@ -495,6 +564,7 @@ export class IssueDrafts extends Context.Service<
                   title,
                   body: input.body.trim(),
                   labels: JSON.stringify(labels),
+                  priority,
                   state: 'pending',
                   draftedByActorId: input.actorId,
                   createdAt: at,
@@ -506,7 +576,7 @@ export class IssueDrafts extends Context.Service<
                   aggregateId: draftId,
                   revision: 1,
                   type: 'issue_draft.drafted',
-                  payload: { product: where.product, tracker: where.label, container: where.container.name, title, labels },
+                  payload: { product: where.product, tracker: where.label, container: where.container.name, title, labels, priority },
                   actorId: input.actorId,
                 })
                 yield* addItem({ projectId: input.projectId, threadId: input.threadId }, 'issue_draft', cardOf(yield* load(draftId)))
@@ -528,7 +598,12 @@ export class IssueDrafts extends Context.Service<
             const result = yield* transition(
               draftId,
               open,
-              () => ({ title, body: next.body.trim(), labels: JSON.stringify(labelsOf(next.labels)) }),
+              () => ({
+                title,
+                body: next.body.trim(),
+                labels: JSON.stringify(labelsOf(next.labels)),
+                ...(next.priority === undefined ? {} : { priority: next.priority === 'none' ? null : next.priority }),
+              }),
               'issue_draft.changed',
               actorId,
               (row) => ({ title: row.title }),
@@ -610,6 +685,7 @@ export class IssueDrafts extends Context.Service<
                         title: row.title,
                         body: row.body,
                         labels: Schema.decodeUnknownSync(Labels)(row.labels),
+                        ...(row.priority === null ? {} : { priority: row.priority }),
                       }),
               ),
               Effect.result,

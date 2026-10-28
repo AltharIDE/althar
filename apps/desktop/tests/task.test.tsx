@@ -405,7 +405,55 @@ describe('a task', () => {
     expect(client.fileIssueDraft).toHaveBeenCalledTimes(3)
     expect(screen.getByRole('link', { name: /MER-3/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-3')
     // The header says what it waits for, though no call does.
-    expect(statusOf(thread({ task: { ...base.task, phase: 'waiting' } }))).toEqual({ status: TaskStatus.Yours, state: 'Issues to file' })
+    expect(statusOf(thread({ items: [items.draft()], task: { ...base.task, phase: 'waiting' } }))).toEqual({
+      status: TaskStatus.Yours,
+      state: 'Issues to file',
+    })
+  })
+
+  it('applies or discards a change to its issue from its card, comments show as a line, and the header says it waits', async () => {
+    const base = snapshot()
+    const one = (key: string, changes: ReadonlyArray<{ field: 'status' | 'comment'; to: string }>) => ({
+      product: 'linear' as const,
+      tracker: 'Linear',
+      key,
+      url: `https://linear.app/m/issue/${key}`,
+      title: 'Rate-limit refunds like charges',
+      changes,
+      applied: null,
+      error: null,
+    })
+    const waiting = thread({
+      items: [
+        items.changes({
+          changesId: 'ich_1',
+          note: 'PR #1 opened.',
+          issues: [one('MER-231', [{ field: 'status', to: 'In Review' }])],
+        }),
+        items.changes({
+          changesId: 'ich_2',
+          state: 'applied',
+          direct: true,
+          issues: [one('MER-231', [{ field: 'comment', to: 'Refunds share the charge limiter now.' }])],
+        }),
+      ],
+      task: { ...base.task, phase: 'waiting' },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => waiting) })
+    withServices(<Task />, client)
+    const card = within(await screen.findByRole('article', { name: 'Issue changes · Linear' }))
+    expect(card.getByText('PR #1 opened.')).toBeTruthy()
+    expect(
+      card.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === 'Status In Review' && node.childElementCount > 0),
+    ).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Apply' }))
+    expect(client.applyIssueChanges).toHaveBeenCalledWith('ich_1')
+    await userEvent.click(card.getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueChanges).toHaveBeenCalledWith('ich_1')
+    // The lead's comment, posted at once: a line.
+    expect(screen.getByText('Commented on')).toBeTruthy()
+    expect(screen.getByText('Refunds share the charge limiter now.')).toBeTruthy()
+    expect(statusOf(waiting)).toEqual({ status: TaskStatus.Yours, state: 'Issue changes to apply' })
   })
 
   it('posts a review draft whose verdict stands chosen, and folds a posted one to its link', async () => {
@@ -435,6 +483,39 @@ describe('a task', () => {
     )
     // Not a review task: no reach under its header.
     expect(screen.queryByLabelText('What this review’s lead can reach')).toBeNull()
+  })
+
+  it('offers an automation’s first review to post with its next ones posting themselves, and only that first time', async () => {
+    const base = snapshot()
+    const review = { outside: false, fork: false, suggested: 'comment' as const, verdict: 'comment' as const, drafter: null, account: null }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.review({ ...review, automation: { id: 'auto1', name: 'Morning review', postsReviews: false } }),
+            items.review({ ...review, draftId: 'rdr_2', automation: { id: 'auto1', name: 'Morning review', postsReviews: true } }),
+            items.review({
+              ...review,
+              draftId: 'rdr_3',
+              state: 'failed',
+              error: 'GitHub didn’t answer.',
+              automation: { id: 'auto2', name: 'Night', postsReviews: false },
+            }),
+          ],
+          task: { ...base.task, request: null },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const fromNow = await screen.findAllByRole('button', { name: 'Post this automation’s reviews from now on' })
+    // Once its reviews post themselves, or once one is on its way or failed, only Post is offered.
+    expect(fromNow).toHaveLength(1)
+    await userEvent.click(fromNow[0] as HTMLElement)
+    await waitFor(() => expect(client.postReviewDraft).toHaveBeenCalledWith('rdr_1'))
+    expect(client.setAutomationPostsReviews).toHaveBeenCalledWith('auto1', true)
+    expect(vi.mocked(client.setAutomationPostsReviews).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(client.postReviewDraft).mock.invocationCallOrder[0] ?? 0,
+    )
   })
 
   it('starts a stopped task on its last lead and model, and not on an agent signed out since', async () => {
@@ -938,6 +1019,52 @@ describe('a task', () => {
     await waitFor(() => expect(client.send).toHaveBeenLastCalledWith({ threadId: 'th1', body: 'And this', disposition: 'after_current' }))
   })
 
+  it('sends a PDF and a folder dropped on its composer as files: chips in the tray, granted by main, and on the message at once', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    const host = fakeHost()
+    withServices(<Task />, client, host)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    const pdf = new File(['%PDF-1.7 the spec'], 'refund-spec.pdf', { type: 'application/pdf' })
+    // A folder, as a drop hands it: no kind, no size of its own.
+    const folder = new File([], 'fixtures')
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [pdf, folder] } })
+    const tray = await screen.findByRole('list', { name: '2 attachments to send' })
+    await waitFor(() => expect(within(tray).getByText('3 files · 0 B')).toBeTruthy())
+    expect(within(tray).getByText('17 B')).toBeTruthy()
+    expect(host.attach).toHaveBeenCalledWith(pdf)
+    expect(host.attach).toHaveBeenCalledWith(folder)
+    await userEvent.type(box, 'Read these{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Read these',
+        disposition: 'after_current',
+        files: [{ grant: 'grant_refund-spec.pdf' }, { grant: 'grant_fixtures' }],
+      }),
+    )
+    // Out of the composer, and on the message in the thread, a chip each.
+    expect(screen.queryByRole('list', { name: /to send/ })).toBeNull()
+    expect(screen.getByText('refund-spec.pdf')).toBeTruthy()
+    expect(screen.getByText('fixtures')).toBeTruthy()
+  })
+
+  it('refuses a folder too large to send in a line over the field, and keeps the rest', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    const host = fakeHost({
+      attach: vi.fn(async (file: File) =>
+        file.name === 'Downloads'
+          ? { ok: false as const, name: 'Downloads', why: 'too_large' as const }
+          : { ok: true as const, grant: 'grant_log', name: file.name, kind: 'file' as const, bytes: 2048, entries: null },
+      ),
+    })
+    withServices(<Task />, client, host)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([], 'Downloads'), new File(['x'], 'run.log')] } })
+    expect(await screen.findByText('Downloads is larger than 50 MB, so it can’t be sent.')).toBeTruthy()
+    expect(await screen.findByRole('list', { name: '1 attachment to send' })).toBeTruthy()
+    expect(screen.getByText('2 KB')).toBeTruthy()
+  })
+
   it('puts a message Althar didn’t take back in the composer, its words and its images, to send again', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     vi.mocked(client.send).mockRejectedValueOnce(
@@ -950,7 +1077,7 @@ describe('a task', () => {
     await userEvent.type(box, 'Look at this{Enter}')
     expect(await screen.findByRole('alert')).toBeTruthy()
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Look at this'))
-    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: '1 attachment to send' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'View shot.png' })).toBeNull()
     // Sent again, it goes as it was.
     await userEvent.type(box, '{Enter}')
@@ -1033,7 +1160,7 @@ describe('a task', () => {
     ).toBeTruthy()
     expect(client.takeBack).not.toHaveBeenCalled()
     expect(screen.getByRole('region', { name: 'Queued; the lead reads it next' })).toBeTruthy()
-    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: '1 attachment to send' })).toBeTruthy()
   })
 
   it('takes no images for a lead that doesn’t take them, and holds back those added before another was picked', async () => {
@@ -1044,11 +1171,20 @@ describe('a task', () => {
         session: base.session === null ? null : { ...base.session, agentId: 'codex', agentName: 'Codex' },
       })),
     })
-    withServices(<Task />, client)
+    // A picture with no file behind it, as a pasted one: it can't go as a file either.
+    const view = withServices(<Task />, client, fakeHost({ attach: vi.fn(async () => null) }))
     const box = await screen.findByRole('textbox', { name: 'Tell Codex something' })
     await waitFor(() => expect(client.getModels).toHaveBeenCalled())
     fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
     expect(await screen.findByText('Codex doesn’t take images, so they can’t be sent to it.')).toBeTruthy()
+    expect(screen.queryByRole('img', { name: 'shot.png' })).toBeNull()
+    // One with a file behind it goes to it as a file, which it opens by its path.
+    view.unmount()
+    withServices(<Task />, client)
+    const again = await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    await waitFor(() => expect(client.getModels).toHaveBeenCalled())
+    fireEvent.drop(again, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await within(await screen.findByRole('list', { name: '1 attachment to send' })).findByText('shot.png')).toBeTruthy()
     expect(screen.queryByRole('img', { name: 'shot.png' })).toBeNull()
   })
 
@@ -1247,6 +1383,33 @@ describe('a task', () => {
     expect(screen.getByText('Stopped')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /Resume/ }))
     await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
+  })
+
+  it('says why its conflict wasn’t asked of its lead, over the composer, and Resolve now asks it', async () => {
+    const why = 'Its folder isn’t on this computer, so Althar can’t merge main into it here.'
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, conflictUnsent: why } })) })
+    withServices(<Task />, client)
+    expect(
+      await screen.findByText(`It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`, { exact: false }),
+    ).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Resolve now' }))
+    await waitFor(() => expect(client.resolveConflictsNow).toHaveBeenCalledWith('t1'))
+  })
+
+  it('offers Resolve now where its lead couldn’t resolve its conflict, and Look again where Althar couldn’t look', async () => {
+    const handed = 'The lead couldn’t resolve the conflict with main. change.txt still conflicts.'
+    const first = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, handedBack: handed } })) })
+    const view = withServices(<Task />, first.client)
+    expect(await screen.findByText(handed, { exact: false })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Resolve now' }))
+    await waitFor(() => expect(first.client.resolveConflictsNow).toHaveBeenCalledWith('t1'))
+    view.unmount()
+    const why = 'Althar couldn’t fetch main to merge it with the branch here.'
+    const second = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, conflictUnchecked: why } })) })
+    withServices(<Task />, second.client)
+    expect(await screen.findByText(`Althar couldn’t look for a conflict with its default branch. ${why}`, { exact: false })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Look again' }))
+    await waitFor(() => expect(second.client.resolveConflictsNow).toHaveBeenCalledWith('t1'))
   })
 
   it('offers how its conflicts go, as its project says or otherwise, and nothing on the menu’s button while it goes by the project', async () => {
@@ -1718,11 +1881,7 @@ describe('a task', () => {
       within(pinned)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual([
-      'Claude Opus, via Claude Codenot pinned',
-      'Claude Code default, via Claude Code',
-      'gpt-5.2-codex, via Codexhands the task to Codex',
-    ])
+    ).toEqual(['Claude Opus, via Claude Codenot pinned', 'Claude Code default, via Claude Code', 'gpt-5.2-codex, via Codex'])
     // High is not what Claude Code is on; the person makes it Opus's.
     expect(screen.getByText(/default Medium/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Make this default' }))
@@ -2032,7 +2191,7 @@ describe('a task', () => {
       ),
     ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Review again' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Review with another agent' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Claude Code/ }))
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'retry', agentId: 'claude-code' } }),
@@ -2105,7 +2264,7 @@ describe('a task', () => {
     const at = (why: StuckStep['why'], detail: string | null = null, open = 0) =>
       stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
-      'Codex closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      'Codex closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       'Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, start Codex again.',
       "Codex couldn't start. Check that it's installed and signed in, or hand the step to another agent.",
       "The work has been reviewed three times, and the lead's last changes haven't been reviewed yet. One finding is still open. Review it again, or accept it as it is.",
@@ -2115,7 +2274,7 @@ describe('a task', () => {
     const inReview = (why: StuckStep['why']) =>
       stuckWords.what({ step: 'review', why, detail: null, agentId: null, round: 0, open: 0 }, 'Codex')
     expect([inReview('session_ended'), inReview('restarted'), inReview('refused')]).toEqual([
-      'Codex closed before finishing the step. This is usually harmless: review again, or skip the review.',
+      'Codex closed before finishing the step. This is usually harmless: try again, or skip the review.',
       'Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, review again.',
       'Codex refused to go on with this step. Review again with another agent, or skip the review.',
     ])
@@ -2438,7 +2597,7 @@ describe('a task', () => {
       task: { ...base.task, phase: 'stopped', actions: ['abandon'], lead: { agentId: 'codex', model: 'gpt-5.2-codex', account: null } },
     })
     const { client } = fakeClient({ getThread: vi.fn(async () => stale) })
-    withServices(<Task />, client)
+    withServices(<Task />, client, fakeHost({ attach: vi.fn(async () => null) }))
     await waitFor(() => expect(client.status).toHaveBeenCalled())
     expect(await screen.findByText('Stopped')).toBeTruthy()
     const box = await screen.findByRole('textbox', { name: 'Tell Codex something' })

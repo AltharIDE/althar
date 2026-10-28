@@ -526,6 +526,30 @@ describe('the Settings tab', () => {
     await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
   })
 
+  it('opens Althar at login, in the background, and pauses every automation, saying when that can’t be kept', async () => {
+    const host = fakeHost()
+    const { client } = fakeClient()
+    withServices(<Settings at="this-mac" />, client, host)
+    const page = screen.getByRole('main')
+    const login = await within(page).findByRole('switch', { name: 'Open Althar at login, in the background' })
+    expect(login.getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(login)
+    expect(host.setPreference).toHaveBeenLastCalledWith('openAtLogin', true)
+    await waitFor(() => expect(login.getAttribute('aria-checked')).toBe('true'))
+    const paused = await within(page).findByRole('switch', { name: 'Pause all automations' })
+    expect(paused.getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(paused)
+    expect(client.setAutomationsPaused).toHaveBeenLastCalledWith(true)
+    await waitFor(() => expect(paused.getAttribute('aria-checked')).toBe('true'))
+    // One the runtime couldn't keep says so, and shows what it kept.
+    vi.mocked(client.setAutomationsPaused).mockRejectedValueOnce(new Error('disk full'))
+    const reads = vi.mocked(client.getSettings).mock.calls.length
+    await userEvent.click(paused)
+    expect(await alert()).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
+    await waitFor(() => expect(paused.getAttribute('aria-checked')).toBe('false'))
+  })
+
   it('says when a number of agents at once can’t be kept, and shows what was kept', async () => {
     const { client } = fakeClient()
     vi.mocked(client.setAgentsAtOnce).mockRejectedValue(new Error('disk full'))
@@ -741,7 +765,7 @@ describe('how Althar looks, on the Settings tab', () => {
     ])
   })
 
-  it('offers light, dark or as the Mac is, as the Mac is to begin with, and keeps a choice', async () => {
+  it('offers light, dark or as the Mac is, light to begin with, and keeps a choice', async () => {
     const host = fakeHost()
     withServices(<Settings at="appearance" />, fakeClient().client, host)
     const choice = await screen.findByRole('radiogroup', { name: 'Light or dark' })
@@ -755,8 +779,10 @@ describe('how Althar looks, on the Settings tab', () => {
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
     ).toEqual(['Light', 'Dark', 'Match the Mac'])
-    expect(checked()).toEqual(['Match the Mac'])
-    expect(screen.getByText('Match the Mac turns dark when the Mac does.')).toBeTruthy()
+    expect(checked()).toEqual(['Light'])
+    await userEvent.click(within(choice).getByRole('radio', { name: 'Match the Mac' }))
+    await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'system'))
+    expect(await screen.findByText('Match the Mac turns dark when the Mac does.')).toBeTruthy()
     await userEvent.click(within(choice).getByRole('radio', { name: 'Dark' }))
     await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'dark'))
     await waitFor(() => expect(checked()).toEqual(['Dark']))

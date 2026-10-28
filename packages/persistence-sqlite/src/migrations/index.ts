@@ -41,6 +41,12 @@ import { statements as taskKept } from './0036_task_kept'
 import { statements as attachedChangeSets } from './0037_attached_change_sets'
 import { statements as roundOpeners } from './0038_round_openers'
 import { statements as taskOpened } from './0039_task_opened'
+import { statements as issueChanges } from './0040_issue_changes'
+import { statements as trackerWorkspaces } from './0041_tracker_workspaces'
+import { statements as automations } from './0042_automations'
+import { statements as planUsage } from './0043_plan_usage'
+import { statements as lookupIndexes } from './0044_lookup_indexes'
+import { statements as inputFiles } from './0045_input_files'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -99,6 +105,12 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0037_attached_change_sets', statements: attachedChangeSets },
   { key: '0038_round_openers', statements: roundOpeners },
   { key: '0039_task_opened', statements: taskOpened },
+  { key: '0040_issue_changes', statements: issueChanges },
+  { key: '0041_tracker_workspaces', statements: trackerWorkspaces },
+  { key: '0042_automations', statements: automations },
+  { key: '0043_plan_usage', statements: planUsage },
+  { key: '0044_lookup_indexes', statements: lookupIndexes },
+  { key: '0045_input_files', statements: inputFiles },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
 
+import type { Priority } from '@althar/connectors'
 import { type CommandEnvelope, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
-import { knownModelName } from '@althar/contracts'
+import { AUTOMATION_DEFAULTS, type AutomationDefinition, knownModelName, Schedule, scheduleInLine } from '@althar/contracts'
 import { Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -13,6 +14,8 @@ import { Changes } from './Changes'
 import { modelNamer } from './coordinatorNews'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
+import { AutomationRefused, Automations } from './Automations'
+import { localZone } from './slots'
 import { Agents } from './Config'
 import { AttachRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
@@ -39,8 +42,10 @@ import { fact } from './records'
 import { type PlanStep, Runs } from './Runs'
 import { type Disposition, passedOn, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
+import type { InputFile } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
+import { alsoPlanned, siblingsOf } from './siblings'
 import { Tasks } from './Tasks'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -97,6 +102,7 @@ type Store =
   | Tasks
   | Runs
   | Connections
+  | Automations
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -119,7 +125,11 @@ const DraftedIssue = Schema.Struct({
   tracker: Schema.optional(Schema.String),
   container: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
+  priority: Schema.optional(Schema.String),
 })
+
+/** A priority as an agent may write it: Low, low, none. */
+const PRIORITY = /^(urgent|high|medium|low|none)$/
 /*
  * A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. And how hard it
  * thinks, where named: one of the model's efforts as list_models writes them.
@@ -147,6 +157,37 @@ const ToReview = Schema.Struct({
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
 })
 const Named = Schema.Struct({ task: Schema.String })
+/* When an automation runs, as the coordinator says it: on days of the week at a time, or every hour at a minute past. */
+const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const
+const When = Schema.Struct({
+  days: Schema.optional(Schema.Array(Schema.Literals(DAY_NAMES))),
+  at: Schema.optional(Schema.String),
+  every_hour_at: Schema.optional(Schema.Int),
+})
+/* What each run ends in: nothing outside this computer, a draft pull request, one ready for review, or a review of each new pull request. */
+const EndsIn = Schema.Literals(['nothing', 'draft', 'ready', 'reviews'])
+/* An automation the coordinator proposes. */
+const ProposedAutomation = Schema.Struct({
+  name: Schema.String,
+  prompt: Schema.String,
+  when: When,
+  lead: StepPick,
+  review: Schema.optional(Schema.NullOr(StepPick)),
+  ends_in: EndsIn,
+  minutes: Schema.optional(Schema.Int),
+})
+/* A change to an automation: what changes, the rest as it is. */
+const ChangedAutomation = Schema.Struct({
+  automation: Schema.String,
+  name: Schema.optional(Schema.String),
+  prompt: Schema.optional(Schema.String),
+  when: Schema.optional(When),
+  lead: Schema.optional(StepPick),
+  review: Schema.optional(Schema.NullOr(StepPick)),
+  ends_in: Schema.optional(EndsIn),
+  minutes: Schema.optional(Schema.Int),
+})
+const NamedAutomation = Schema.Struct({ automation: Schema.String })
 /* A task, by its slug or id, and the title it is given now. */
 const Retitled = Schema.Struct({ task_id: Schema.String, title: Schema.String })
 /* A quick task made a change, as its lead names it: what it does now, the model that reviews it or none, and its pull request. */
@@ -197,6 +238,8 @@ export class Coordinator extends Context.Service<
       readonly disposition: Disposition
       /** Images the person sent with it, in the store already: sent to the coordinator with its words. */
       readonly images?: ReadonlyArray<InputImage>
+      /** Files and folders the person sent with it, copied into the coordinator's folder already: linked with its words. */
+      readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: the coordinator is told it may have been misheard. */
       readonly dictated?: boolean
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
@@ -219,6 +262,7 @@ export class Coordinator extends Context.Service<
       const issues = yield* Issues
       const issueDrafts = yield* IssueDrafts
       const reviews = yield* Reviews
+      const automations = yield* Automations
       /* How a task's pull requests stand: set by Queries, which can read them (it needs this service, so this can't need it). */
       let pullRequests: (taskId: string) => Effect.Effect<PullRequestFacts | undefined> = () =>
         Effect.succeed({ changes: [], merged: [], unmerged: 0 })
@@ -248,6 +292,7 @@ export class Coordinator extends Context.Service<
         readonly body: string
         readonly disposition: Disposition
         readonly images?: ReadonlyArray<InputImage>
+        readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
         readonly quiet?: boolean
       }) =>
@@ -519,6 +564,9 @@ export class Coordinator extends Context.Service<
           const request = said.length === 0 ? undefined : said.map((input) => input.body).join('\n\n')
           // The same title from the same session is the same command: an agent that calls again, unsure the first worked, gets the first task.
           const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000${title.trim().toLowerCase()}`).digest('hex').slice(0, 32)}`
+          // Called again, it makes no task and tells nobody of one.
+          const [again] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM command_receipts WHERE actor_id = ${instance.coordinatorId} AND command_id = ${commandId}`
           const created = yield* projects
             .createTask({
               envelope: yield* envelope('task.create', { title: title.trim().toLowerCase() }, commandId, instance.coordinatorId),
@@ -546,6 +594,21 @@ export class Coordinator extends Context.Service<
             )
           if (issue !== undefined && from !== undefined)
             yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
+          // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
+          if (again === undefined && request !== undefined) {
+            const task = yield* taskOf(access, created.taskId)
+            const body = alsoPlanned([task], true)
+            for (const other of yield* siblingsOf(created.taskId)) {
+              if (other.heard === 0 || other.state !== 'open') continue
+              yield* sessions.send({
+                envelope: yield* envelope('thread.send', { threadId: other.threadId, body }, undefined, instance.coordinatorId),
+                threadId: other.threadId,
+                body: passedOn(body),
+                disposition: 'after_current',
+                quiet: true,
+              })
+            }
+          }
           return { created, issue }
         })
 
@@ -1083,6 +1146,15 @@ export class Coordinator extends Context.Service<
       const draftIssue = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(DraftedIssue, input)
+          const priority = asked.priority
+            ?.trim()
+            .toLowerCase()
+            .replace(/\s+priority$/, '')
+            .replace(/^no$/, 'none')
+          if (priority !== undefined && !PRIORITY.test(priority))
+            return yield* new ToolRefused({
+              message: `A priority is one of urgent, high, medium, low or none, not “${asked.priority ?? ''}”.`,
+            })
           const card = yield* issueDrafts
             .draft({
               projectId: access.projectId as ProjectId,
@@ -1092,6 +1164,7 @@ export class Coordinator extends Context.Service<
               title: asked.title,
               body: asked.description ?? '',
               labels: asked.labels ?? [],
+              ...(priority === undefined ? {} : { priority: priority as Priority }),
               ...(access.taskId === null ? {} : { taskId: access.taskId }),
               actorId: access.role === 'coordinator' ? instance.coordinatorId : instance.systemId,
             })
@@ -1105,7 +1178,204 @@ export class Coordinator extends Context.Service<
               ? `Drafted the issue “${filed.title}”, but it wasn't filed: ${filed.error ?? 'the tracker did not take it'}. The person can file it again from its card.`
               : `Filed the issue “${filed.title}” on ${filed.tracker}, in ${filed.container}, as ${filed.issue.key}: ${filed.issue.url}`
           }
-          return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}. Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
+          // A tracker without priorities files it at its own default: the agent hears so, rather than writing it in the description.
+          const unprioritised =
+            priority !== undefined && priority !== 'none' && card.priority === null
+              ? ` ${card.tracker}'s issues have no priority, so it has none.`
+              : ''
+          return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}.${unprioritised} Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
+        })
+
+      /* ---- Automations (docs/plans/automations.md) ---- */
+
+      /** A refusal of the automations' own, said to the coordinator as any tool's is. */
+      const toldOf = <A, R>(effect: Effect.Effect<A, unknown, R>) =>
+        Effect.catch(effect, (error) =>
+          Effect.fail(error instanceof AutomationRefused ? new ToolRefused({ message: error.message }) : error),
+        )
+
+      /** When it runs, from what the coordinator says: days at a time, or every hour at a minute past. */
+      const scheduleOf = (when: typeof When.Type) =>
+        Effect.gen(function* () {
+          const asked =
+            when.every_hour_at !== undefined
+              ? { every: 'hour', minute: when.every_hour_at }
+              : {
+                  every: 'week',
+                  days: (when.days ?? DAY_NAMES).map((day) => DAY_NAMES.indexOf(day) + 1),
+                  at: /^\d:/.test(when.at ?? '') ? `0${when.at ?? ''}` : (when.at ?? ''),
+                }
+          return yield* Schema.decodeUnknownEffect(Schedule)(asked).pipe(
+            Effect.mapError(
+              () =>
+                new ToolRefused({
+                  message:
+                    'Say when as days and a time, such as days ["monday", "friday"] and at "09:00" (leave days out for every day), or as every_hour_at, the minutes past the hour.',
+                }),
+            ),
+          )
+        })
+
+      /** A step as an automation keeps it, from the model the coordinator names, as a plan's are named. */
+      const keptStep = (projectId: string, pick: typeof StepPick.Type, use: string) =>
+        Effect.map(stepOf(projectId, pick, use), (step) => ({
+          agentId: step.agentId,
+          model: step.model,
+          ...(step.effort === undefined ? {} : { effort: step.effort }),
+        }))
+
+      /** What each run does, from what it ends in and its reviewer. A review is led only by an agent held to reading. */
+      const workOf = (
+        projectId: string,
+        endsIn: typeof EndsIn.Type,
+        lead: { readonly agentId: string },
+        review: typeof StepPick.Type | null,
+      ) =>
+        Effect.gen(function* () {
+          if (endsIn === 'reviews') {
+            const leading = agents.list.find((entry) => entry.definition.id === lead.agentId)
+            if (leading?.definition.reviewing?.outside !== true) {
+              const held = agents.list.filter((entry) => entry.definition.reviewing?.outside === true).map((entry) => entry.definition.name)
+              return yield* new ToolRefused({
+                message: `${nameOf(lead.agentId)} can't be held to reading only, so it can't lead a review. Name a model on ${held.join(' or ')}.`,
+              })
+            }
+            return { kind: 'review' } as const
+          }
+          return {
+            kind: 'task',
+            review: review === null ? null : yield* keptStep(projectId, review, 'its reviewer'),
+            end: endsIn === 'nothing' ? null : endsIn,
+          } as const
+        })
+
+      const minutesOf = (minutes: number | undefined) => {
+        if (minutes === undefined) return Effect.succeed(AUTOMATION_DEFAULTS.minutes)
+        if (minutes < 5 || minutes > 240) return Effect.fail(new ToolRefused({ message: 'minutes is between 5 and 240.' }))
+        return Effect.succeed(minutes)
+      }
+
+      const nameChecked = (name: string) =>
+        name.trim().length === 0 || name.trim().length > 60
+          ? Effect.fail(new ToolRefused({ message: 'Give it a name of a few words, at most 60 characters: “Morning review”.' }))
+          : Effect.succeed(name.trim())
+
+      /** An automation in a line, for the coordinator to read. */
+      const automationLine = (one: {
+        readonly id: string
+        readonly name: string
+        readonly schedule: AutomationDefinition['schedule']
+        readonly work: 'task' | 'review'
+        readonly state: string
+        readonly pausedBy: string | null
+        readonly pauseReason: string | null
+        readonly nextAt: string | null
+        readonly latest: ReadonlyArray<{ readonly state: string; readonly reason: string | null; readonly subject: string | null }>
+      }) => {
+        const stands =
+          one.state === 'on'
+            ? `on${one.nextAt === null ? '' : `, next at ${one.nextAt}`}`
+            : one.state === 'paused'
+              ? one.pausedBy === 'itself'
+                ? `paused itself: ${one.pauseReason ?? ''}`
+                : 'paused by the person'
+              : 'waiting for the person to turn it on'
+        const last = one.latest[0]
+        return `- “${one.name}” (${one.id}): ${scheduleInLine(one.schedule)}, ${one.work === 'review' ? 'a review of each new pull request' : 'a task from its prompt'}; ${stands}${last === undefined ? '' : `; last run ${last.state}${last.reason === null ? '' : `: ${last.reason}`}`}`
+      }
+
+      const listAutomations = (access: ToolAccess) =>
+        Effect.gen(function* () {
+          const all = yield* automations.list(access.projectId)
+          if (all.length === 0) return 'The project has no automations.'
+          return ['The project’s automations, on this computer:', ...all.map(automationLine)].join('\n')
+        })
+
+      const proposeAutomation = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ProposedAutomation, input)
+          const name = yield* nameChecked(asked.name)
+          const schedule = yield* scheduleOf(asked.when)
+          const lead = yield* keptStep(access.projectId, asked.lead, 'its lead')
+          const work = yield* workOf(access.projectId, asked.ends_in, lead, asked.review ?? null)
+          const definition: AutomationDefinition = {
+            name,
+            prompt: asked.prompt.trim(),
+            schedule,
+            zone: localZone(),
+            lead,
+            work,
+            allowEverything: AUTOMATION_DEFAULTS.allowEverything,
+            minutes: yield* minutesOf(asked.minutes),
+            late: AUTOMATION_DEFAULTS.late,
+          }
+          yield* automations.propose({
+            projectId: access.projectId as ProjectId,
+            threadId: access.threadId,
+            definition,
+            actorId: instance.coordinatorId,
+          })
+          return `Proposed the automation “${name}”, ${scheduleInLine(schedule)}. Nothing runs until the person turns it on from its card, where they can change it first or try it once; they see it there, so don't repeat it. Say in a sentence what each run will do.`
+        })
+
+      const changeAutomation = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ChangedAutomation, input)
+          const now = yield* toldOf(automations.find(access.projectId, asked.automation))
+          const lead = asked.lead === undefined ? now.definition.lead : yield* keptStep(access.projectId, asked.lead, 'its lead')
+          const endsIn =
+            asked.ends_in ??
+            (now.definition.work.kind === 'review' ? 'reviews' : now.definition.work.end === null ? 'nothing' : now.definition.work.end)
+          const reviewer =
+            asked.review !== undefined
+              ? asked.review
+              : now.definition.work.kind === 'task' && now.definition.work.review !== null
+                ? {
+                    agent: now.definition.work.review.agentId,
+                    ...(now.definition.work.review.model === null ? {} : { model: now.definition.work.review.model }),
+                  }
+                : null
+          const definition: AutomationDefinition = {
+            ...now.definition,
+            name: asked.name === undefined ? now.definition.name : yield* nameChecked(asked.name),
+            prompt: asked.prompt?.trim() ?? now.definition.prompt,
+            schedule: asked.when === undefined ? now.definition.schedule : yield* scheduleOf(asked.when),
+            lead,
+            work:
+              asked.ends_in === undefined && asked.review === undefined && asked.lead === undefined
+                ? now.definition.work
+                : yield* workOf(access.projectId, endsIn, lead, reviewer),
+            minutes: asked.minutes === undefined ? now.definition.minutes : yield* minutesOf(asked.minutes),
+          }
+          const { again } = yield* automations.changeFor({
+            automationId: now.id,
+            threadId: access.threadId,
+            definition,
+            actorId: instance.coordinatorId,
+          })
+          return again
+            ? `Changed “${definition.name}”. It reaches further than before, so it waits for the person to turn it on again from its card, which shows what changed, with Undo.`
+            : `Changed “${definition.name}”: it holds from its next run. Its card shows what changed, with Undo; there's no need to repeat it.`
+        })
+
+      const pauseAutomation = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(NamedAutomation, input)
+          const now = yield* toldOf(automations.find(access.projectId, asked.automation))
+          if (now.state !== 'on') return `“${now.name}” isn't on, so there's nothing to pause.`
+          yield* automations.pause(now.id, instance.coordinatorId)
+          return `Paused “${now.name}”: nothing of it starts until the person turns it on again. A run under way finishes.`
+        })
+
+      const askOf = (what: 'resume' | 'run') => (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(NamedAutomation, input)
+          const now = yield* toldOf(automations.find(access.projectId, asked.automation))
+          if (what === 'resume' && now.state === 'on') return `“${now.name}” is on already.`
+          yield* automations.ask({ automationId: now.id, threadId: access.threadId, what })
+          return what === 'resume'
+            ? `Asked the person to resume “${now.name}” on a card: it runs again once they do. Say so in a sentence.`
+            : `Asked the person to run “${now.name}” now on a card: it starts once they do. Say so in a sentence.`
         })
 
       const tool = (
@@ -1168,32 +1438,47 @@ export class Coordinator extends Context.Service<
                 "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a repository as owner/name.",
             },
             labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; others are left off.' },
+            priority: {
+              type: 'string',
+              enum: ['urgent', 'high', 'medium', 'low', 'none'],
+              description: 'Its priority, where the tracker has priorities: set it here, not in the description.',
+            },
           },
           required: ['title'],
         },
         draftIssue,
       )
 
+      const listTasksTool = tool(
+        'list_tasks',
+        "The project's tasks, newest first: what each is, where it stands, who leads it, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
+        nothing,
+        (access) => list(access),
+      )
+      const findTasksTool = tool(
+        'find_tasks',
+        "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands, its pull request and its id, and the words that matched. For a task asked about by what it did rather than its name.",
+        {
+          type: 'object',
+          properties: { text: { type: 'string', description: 'What to look for, in a few words.' } },
+          required: ['text'],
+        },
+        find,
+      )
+
+      // A lead sees the project's tasks as the coordinator does, read-only (a review's lead is refused them with every tool not marked
+      // for a review), and checks them before it drafts: work the person asked for may be another task's already.
+      const leadDraftIssueTool: Tool = {
+        ...draftIssueTool,
+        description: `${draftIssueTool.description} Before drafting an issue for something the person asked for that is outside your brief, check find_tasks: when a task covers it, say so in your report instead of drafting.`,
+      }
+
       yield* toolServer.serve('coordinator', [
         tool('project_overview', 'The project: its repositories, how many tasks it has, its rules, and its notes.', nothing, (access) =>
           overview(access),
         ),
-        tool(
-          'list_tasks',
-          "The project's tasks, newest first: what each is, where it stands, who leads it, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
-          nothing,
-          (access) => list(access),
-        ),
-        tool(
-          'find_tasks',
-          "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands, its pull request and its id, and the words that matched. For a task asked about by what it did rather than its name.",
-          {
-            type: 'object',
-            properties: { text: { type: 'string', description: 'What to look for, in a few words.' } },
-            required: ['text'],
-          },
-          find,
-        ),
+        listTasksTool,
+        findTasksTool,
         tool(
           'read_task',
           "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
@@ -1355,6 +1640,100 @@ export class Coordinator extends Context.Service<
           review,
         ),
         tool(
+          'list_automations',
+          "The project's automations on this computer: work Althar starts by itself on a schedule. Each with its id, when it runs, what each run does, where it stands (on with its next time, paused, paused itself and why, or waiting for the person to turn it on), and how its last run went.",
+          nothing,
+          (access) => listAutomations(access),
+        ),
+        tool(
+          'propose_automation',
+          'Proposes an automation, when the person asks for work that should start by itself on a schedule ("every weekday at 9, review the new pull requests", "every Friday write release notes from what merged"). It runs on this computer while Althar is open, each run an ordinary task, starting after the person\'s own work. Give it a name of a few words; the prompt each run is asked, as the person said it, with what a lead needs; when (days and a time where the computer is, or every hour at a minute, never more often); the lead, as list_models writes it; and what each run ends in: nothing outside this computer (a report), a draft pull request, one ready for review, or reviews (one review of each pull request opened by anyone but the person and not reviewed yet, its lead only reading, its review waiting for the person until they let it post). Nothing runs until the person turns it on from its card. Its task allows everything but pushing to the default branch.',
+          {
+            type: 'object',
+            properties: {
+              name: { type: 'string', maxLength: 60, description: 'A few words: “Morning review”.' },
+              prompt: { type: 'string', description: "What each run's lead is asked, as the person would say it." },
+              when: {
+                type: 'object',
+                description: 'Days and a time, or every hour at a minute past.',
+                properties: {
+                  days: {
+                    type: 'array',
+                    items: { type: 'string', enum: [...DAY_NAMES] },
+                    description: 'The days it runs; every day when left out.',
+                  },
+                  at: { type: 'string', description: 'The time it runs on those days, on a 24-hour clock: "09:00".' },
+                  every_hour_at: {
+                    type: 'integer',
+                    minimum: 0,
+                    maximum: 59,
+                    description: 'Instead of days and a time: every hour, at these minutes past.',
+                  },
+                },
+              },
+              lead: {
+                type: 'object',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+                required: ['model'],
+              },
+              review: {
+                type: ['object', 'null'],
+                description: "A run's reviewer, which only reads, for a run that ends in a pull request; null or left out for none.",
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+                required: ['model'],
+              },
+              ends_in: { type: 'string', enum: ['nothing', 'draft', 'ready', 'reviews'] },
+              minutes: { type: 'integer', minimum: 5, maximum: 240, description: 'How long a run may work at most; 45 when left out.' },
+            },
+            required: ['name', 'prompt', 'when', 'lead', 'ends_in'],
+          },
+          proposeAutomation,
+        ),
+        tool(
+          'change_automation',
+          "Changes one of the project's automations, by its id or its name, as the person asks: only what you give changes. Its card shows what it was, with Undo. A change that reaches further than before (anything but a shorter time) needs the person to turn it on again.",
+          {
+            type: 'object',
+            properties: {
+              automation: { type: 'string', description: 'Its id, as list_automations gives it, or its name.' },
+              name: { type: 'string', maxLength: 60 },
+              prompt: { type: 'string' },
+              when: {
+                type: 'object',
+                properties: {
+                  days: { type: 'array', items: { type: 'string', enum: [...DAY_NAMES] } },
+                  at: { type: 'string' },
+                  every_hour_at: { type: 'integer', minimum: 0, maximum: 59 },
+                },
+              },
+              lead: { type: 'object', properties: { model: { type: 'string' }, effort }, required: ['model'] },
+              review: { type: ['object', 'null'], properties: { model: { type: 'string' }, effort }, required: ['model'] },
+              ends_in: { type: 'string', enum: ['nothing', 'draft', 'ready', 'reviews'] },
+              minutes: { type: 'integer', minimum: 5, maximum: 240 },
+            },
+            required: ['automation'],
+          },
+          changeAutomation,
+        ),
+        tool(
+          'pause_automation',
+          'Pauses one of the project’s automations, by its id or its name, when the person asks: nothing of it starts until they turn it on again. A run under way finishes.',
+          { type: 'object', properties: { automation: { type: 'string' } }, required: ['automation'] },
+          pauseAutomation,
+        ),
+        tool(
+          'resume_automation',
+          'Asks the person to turn a paused automation on again, by its id or its name: a small card they press, since a run spends their plan. Only when they ask for it.',
+          { type: 'object', properties: { automation: { type: 'string' } }, required: ['automation'] },
+          askOf('resume'),
+        ),
+        tool(
+          'run_automation_now',
+          'Asks the person to run one of the project’s automations once now, by its id or its name: a small card they press, since a run spends their plan. Only when they ask for it.',
+          { type: 'object', properties: { automation: { type: 'string' } }, required: ['automation'] },
+          askOf('run'),
+        ),
+        tool(
           'rename_task',
           `Gives a task another title, at most ${TITLE_LENGTH} characters, as the person can, when its title no longer says what it does: say what it does now, in a few words. What the person asked stays in its thread, and its slug and branch stay as they are.`,
           {
@@ -1395,8 +1774,10 @@ export class Coordinator extends Context.Service<
       // A quick task's lead makes it a change when the person asks: the one lead tool that plans, as the coordinator's do. Offered
       // only on a quick task not made one yet; refused, with why, on any other.
       yield* toolServer.serve('lead', [
+        listTasksTool,
+        findTasksTool,
         findIssuesTool,
-        draftIssueTool,
+        leadDraftIssueTool,
         tool(
           'make_it_a_change',
           `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request.`,

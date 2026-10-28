@@ -217,11 +217,39 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308])
 /** How many redirects a call follows: GitHub's and Bitbucket's logs take one, to the storage that keeps them. */
 const REDIRECTS_FOLLOWED = 5
 
+/*
+ * How many answers are kept by their ETags, and how much of their text in
+ * all. Some URLs are asked for only a while, such as a commit's checks until
+ * the next push, or comments since a time until there are newer ones: the
+ * answers asked for least lately go first, so those stop being kept once
+ * they aren't asked for, and what is polled now stays.
+ */
+export const ETAGS_KEPT = 500
+export const ETAG_TEXT_KEPT = 16_000_000
+
 export const makeHttp = (options: HttpOptions): Http => {
   const { product } = options
   const timeout = options.timeout ?? Duration.seconds(30)
-  /** Answers by URL, with their ETags. */
+  /** Answers by URL, with their ETags, the one asked for least lately first. */
   const etags = new Map<string, { readonly etag: string; readonly body: string }>()
+  let etagText = 0
+  const forget = (url: string) => {
+    const known = etags.get(url)
+    if (known === undefined) return
+    etags.delete(url)
+    etagText -= known.body.length
+  }
+  const keep = (url: string, answer: { readonly etag: string; readonly body: string }) => {
+    forget(url)
+    // An answer bigger than all that is kept is asked for whole each time.
+    if (answer.body.length > ETAG_TEXT_KEPT) return
+    etags.set(url, answer)
+    etagText += answer.body.length
+    for (const oldest of etags.keys()) {
+      if (etags.size <= ETAGS_KEPT && etagText <= ETAG_TEXT_KEPT) break
+      forget(oldest)
+    }
+  }
 
   const invalid = (detail: string) => new ConnectorFailed({ product, reason: 'invalid_response', message: detail.slice(0, MESSAGE_KEPT) })
 
@@ -298,10 +326,14 @@ export const makeHttp = (options: HttpOptions): Http => {
       Effect.gen(function* () {
         const known = etags.get(url)
         const answer = yield* call('GET', url, known === undefined ? {} : { etag: known.etag })
-        if (answer.status === 304 && known !== undefined) return yield* decode(schema, known.body)
+        if (answer.status === 304 && known !== undefined) {
+          keep(url, known)
+          return yield* decode(schema, known.body)
+        }
         const ok = yield* success(answer)
         const etag = ok.headers.get('etag')
-        if (etag !== null) etags.set(url, { etag, body: ok.body })
+        if (etag === null) forget(url)
+        else keep(url, { etag, body: ok.body })
         return yield* decode(schema, ok.body)
       }),
     text: (url) =>

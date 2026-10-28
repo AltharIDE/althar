@@ -3,6 +3,7 @@ import {
   createContext,
   type CSSProperties,
   isValidElement,
+  type PointerEvent,
   type ReactNode,
   type RefObject,
   useContext,
@@ -36,7 +37,8 @@ import s from './Board.module.css'
  * Needs you never collapses while something waits in it. The person collapses
  * a lane from the chevron its head shows on hover, and opens one from its
  * rail; one they opened stays open, and another collapses instead. Each lane
- * scrolls on its own.
+ * scrolls on its own. It says which lane the pointer is in, for a consumer
+ * that keeps a card from moving out from under the person's hand.
  */
 
 export interface BoardText {
@@ -167,12 +169,29 @@ export interface BoardProps {
   defaultFolds?: BoardFolds
   /** Each time the person collapses or opens a lane. */
   onFoldsChange?: (folds: BoardFolds) => void
+  /** Each time the pointer goes into a lane, or out of the board (null); while a row is dragged, it stays in the lane the drag began in. */
+  onPointerLane?: (lane: BoardLane | null) => void
   className?: string
 }
 
-export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFoldsChange, className }: BoardProps) {
+const LANES: ReadonlySet<string> = new Set(Object.values(BoardLane))
+
+/** The lane an element is in, by its column's `data-lane`; null outside any. */
+const laneUnder = (target: EventTarget | null): BoardLane | null => {
+  const lane = target instanceof Element ? target.closest('[data-lane]')?.getAttribute('data-lane') : null
+  return lane != null && LANES.has(lane) ? (lane as BoardLane) : null
+}
+
+export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFoldsChange, onPointerLane, className }: BoardProps) {
   const [chosen, setChosen] = useControlled(folds, defaultFolds, onFoldsChange)
   const ref = useRef<HTMLElement>(null)
+  // The lane last said, so each crossing is said once.
+  const pointed = useRef<BoardLane | null>(null)
+  const point = (lane: BoardLane | null) => {
+    if (pointed.current === lane) return
+    pointed.current = lane
+    onPointerLane?.(lane)
+  }
   const room = useRoom(ref)
   const lanes: ReadonlyArray<LaneCount> = Children.toArray(children).flatMap((child) =>
     isValidElement<BoardColumnProps>(child) && child.type === BoardColumn
@@ -189,7 +208,15 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
             .join(' '),
         }
   return (
-    <section ref={ref} aria-label={label} className={cx(s.board, className)} style={style}>
+    <section
+      ref={ref}
+      aria-label={label}
+      className={cx(s.board, className)}
+      style={style}
+      {...(onPointerLane === undefined
+        ? {}
+        : { onPointerOver: (event: PointerEvent) => point(laneUnder(event.target)), onPointerLeave: () => point(null) })}
+    >
       <FoldingContext.Provider
         value={{ rail: (lane) => rails.has(lane), fold: (lane, collapse) => setChosen(chose(chosen, lane, collapse)) }}
       >
@@ -307,7 +334,7 @@ export function BoardColumn({ lane, count, filled = count > 0, shelves, children
 
   if (rail)
     return (
-      <section ref={self} aria-labelledby={id} className={cx(s.column, s[lane], s.collapsed)}>
+      <section ref={self} aria-labelledby={id} data-lane={lane} className={cx(s.column, s[lane], s.collapsed)}>
         <span className={s.railGlyph}>
           <Glyph lane={lane} />
         </span>
@@ -327,7 +354,7 @@ export function BoardColumn({ lane, count, filled = count > 0, shelves, children
     )
 
   return (
-    <section ref={self} aria-labelledby={id} className={cx(s.column, s[lane])}>
+    <section ref={self} aria-labelledby={id} data-lane={lane} className={cx(s.column, s[lane])}>
       <header className={s.head}>
         {shown?.icon === undefined ? <Glyph lane={lane} /> : <Icon name={shown.icon} size={11} className={s.settledGlyph} />}
         {shelves === undefined ? (

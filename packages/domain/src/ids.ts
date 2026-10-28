@@ -59,8 +59,11 @@ export const Ids = {
   connection: kind('conn', 'ConnectionId'),
   externalLink: kind('xlink', 'ExternalLinkId'),
   issueDraft: kind('idr', 'IssueDraftId'),
+  issueChange: kind('ich', 'IssueChangeId'),
   conflictResolution: kind('cres', 'ConflictResolutionId'),
   reviewDraft: kind('rdr', 'ReviewDraftId'),
+  automation: kind('auto', 'AutomationId'),
+  automationOccurrence: kind('occ', 'AutomationOccurrenceId'),
 } as const
 
 export type IdKind = keyof typeof Ids
@@ -151,10 +154,16 @@ export const ExternalLinkId = Ids.externalLink.schema
 export type ExternalLinkId = typeof ExternalLinkId.Type
 export const IssueDraftId = Ids.issueDraft.schema
 export type IssueDraftId = typeof IssueDraftId.Type
+export const IssueChangeId = Ids.issueChange.schema
+export type IssueChangeId = typeof IssueChangeId.Type
 export const ConflictResolutionId = Ids.conflictResolution.schema
 export type ConflictResolutionId = typeof ConflictResolutionId.Type
 export const ReviewDraftId = Ids.reviewDraft.schema
 export type ReviewDraftId = typeof ReviewDraftId.Type
+export const AutomationId = Ids.automation.schema
+export type AutomationId = typeof AutomationId.Type
+export const AutomationOccurrenceId = Ids.automationOccurrence.schema
+export type AutomationOccurrenceId = typeof AutomationOccurrenceId.Type
 
 interface IdDefinition<S> {
   readonly prefix: string

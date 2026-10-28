@@ -1,7 +1,8 @@
-import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
+import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import * as acp from '@agentclientprotocol/sdk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -9,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import type { InProcessAgent } from '../AgentConnection'
 import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
+import { recorded } from './recorded'
 
 /*
  * A scripted ACP agent for tests, so the adapter's contract runs in CI without
@@ -16,8 +18,27 @@ import { stopBackgroundMethod, type StopBackgroundResponse } from '../background
  * use. The prompt's text picks a scenario. It starts every session in a bypass
  * mode, so tests show the adapter always moves a session out of it. It takes
  * images in a prompt unless told not to, and says first what images it was
- * sent: `saw images: image/png 68 B, …`.
+ * sent: `saw images: image/png 68 B, …`. Then what files and folders: one
+ * linked it opens by its path, as an agent does with its own tools, and says
+ * its first line, or a folder's files; one whose words came in the prompt it
+ * says so of (`saw files: notes.log (linked, 2 KB): first line …`).
  */
+
+/** What it makes of a file sent in a prompt: a linked one opened by its path, its first line or a folder's files; one embedded, its words. */
+const sawFile = (block: acp.ContentBlock): string => {
+  if (block.type === 'resource') {
+    const words = 'text' in block.resource ? block.resource.text : ''
+    return `${block.resource.uri.split('/').pop() ?? ''} (embedded): ${words.split('\n')[0] ?? ''}`
+  }
+  if (block.type !== 'resource_link') return ''
+  try {
+    const path = fileURLToPath(block.uri)
+    if (statSync(path).isDirectory()) return `${block.name} (linked folder): ${readdirSync(path).sort().join(', ')}`
+    return `${block.name} (linked, ${block.mimeType ?? 'no type'}, ${block.size ?? '?'} B): ${readFileSync(path, 'utf8').split('\n')[0] ?? ''}`
+  } catch {
+    return `${block.name} (linked): couldn't open it`
+  }
+}
 
 export const scenarios = {
   /** Two message chunks, then the turn ends with usage. */
@@ -34,6 +55,8 @@ export const scenarios = {
   bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
   updates: 'updates',
+  /** Usage updates that carry Claude Code's rate-limit event in `_meta`: the five-hour window at 82 percent, then the weekly at 40. */
+  planUsage: 'plan-usage',
   /** One chunk, then waits until cancelled. */
   slow: 'slow',
   /** Fails with Claude Code's usage-limit message. */
@@ -70,6 +93,8 @@ export const scenarios = {
   choice: 'choice',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
+  /** Copilot's usage limit, said as a message, `Error: …`, and the turn ending as if done. */
+  limitInText: 'limit-in-text',
   /** Claude's structured report of a full context. */
   contextFull: 'context-full',
   /** Claude's structured warning of a short rate limit, then a normal reply. */
@@ -108,6 +133,18 @@ export const scenarios = {
   background: 'background',
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
   backgroundCodex: 'background-codex',
+  /**
+   * Leaves `bun dev` running as `background` does, but its output says
+   * nothing of where it serves: a real process, started with its output going
+   * to that file, listens on a port of its own. Stopping it ends it.
+   */
+  backgroundQuiet: 'background-quiet',
+  /**
+   * As `backgroundQuiet`, but as Codex reports one: no file its output goes
+   * to, and said only after the turn, when its server is already listening.
+   * Only when the agent runs as a process, for the server is then in its tree.
+   */
+  backgroundCodexQuiet: 'background-codex-quiet',
   /**
    * Commands the agent starts of its own, with no tool call: `npm run watch`
    * keeps running, `npm test` ends well and `npm run lint` badly, neither
@@ -223,6 +260,14 @@ export interface FakeAgentOptions {
    */
   readonly outOfUsage?: { readonly until?: number }
   /**
+   * Its connection, asked as each prompt starts: while it is down, every
+   * prompt ends as the agents' did when theirs was (`recorded.ts`): offline
+   * or given a server error, as Claude Code ends its turn, having used
+   * nothing; `waits`, as Codex waits for the network, its turn not ending
+   * until the connection is back, when it carries on, or it is cancelled.
+   */
+  readonly connection?: () => 'offline' | 'server' | 'waits' | undefined
+  /**
    * Offer effort as OpenCode does: as a model's variants, with a `default`
    * that leaves it at its own. The small model has none, and a third, huge
    * model levels of its own. Put on another model, a session takes its first.
@@ -236,6 +281,8 @@ export interface FakeAgentOptions {
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
+  /** Whether it says it takes a file's words in a prompt, as Claude Code and Codex do. False unless true. */
+  readonly embeddedContext?: boolean
   /**
    * How many of each session's first prompts end at once, having said nothing
    * and used no tokens, as Claude Code's do while another of its processes
@@ -277,7 +324,7 @@ interface SessionState {
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
   /** What it left running, by its task's id. */
-  background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
+  background: Map<string, { readonly toolCallId: string; readonly outputPath?: string; readonly process?: ChildProcess }>
   /** How many commands it has left running, so each has an id of its own. */
   served: number
   /** Its approve-everything option, where it has one (`allowAll`). */
@@ -308,7 +355,7 @@ const leaveRunning = async (
   session: SessionState,
   client: acp.AgentContext,
   as: 'claude' | 'codex',
-  options: { readonly exits?: boolean } = {},
+  options: { readonly exits?: boolean; readonly quiet?: boolean } = {},
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -324,19 +371,33 @@ const leaveRunning = async (
     rawInput: { command: 'bun dev' },
   })
   if (as === 'codex') {
-    session.background.set(id, { toolCallId })
+    let server: ChildProcess | undefined
+    if (options.quiet === true)
+      server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: 'ignore' })
+    session.background.set(id, { toolCallId, ...(server === undefined ? {} : { process: server }) })
     // Codex says it once its list of background terminals names it, after the turn, and streams its output on its tool call.
-    setTimeout(() => {
-      void notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: id, name: 'bun dev', taskType: 'shell', canStop: true, toolCallId })
-      void notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: SERVING } } })
-    }, 20)
+    setTimeout(
+      () => {
+        void notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: id, name: 'bun dev', taskType: 'shell', canStop: true, toolCallId })
+        if (options.quiet !== true)
+          void notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: SERVING } } })
+      },
+      options.quiet === true ? 1500 : 20,
+    )
     return
   }
   const folder = join(tmpdir(), 'althar-fake-agent')
   mkdirSync(folder, { recursive: true })
   const outputPath = join(folder, `${sessionId}-${id}.output`)
-  writeFileSync(outputPath, SERVING)
-  session.background.set(id, { toolCallId, outputPath })
+  writeFileSync(outputPath, options.quiet === true ? '' : SERVING)
+  let server: ChildProcess | undefined
+  if (options.quiet === true) {
+    // A server whose output says nothing: its own process holds the file open and listens on a port it chose.
+    const out = openSync(outputPath, 'a')
+    server = spawn(process.execPath, ['-e', "require('net').createServer().listen(0, '127.0.0.1')"], { stdio: ['ignore', out, out] })
+    closeSync(out)
+  }
+  session.background.set(id, { toolCallId, outputPath, ...(server === undefined ? {} : { process: server }) })
   await notify({
     sessionUpdate: 'async_task_spawned',
     asyncTaskId: id,
@@ -459,8 +520,9 @@ const playStall = async (
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
  * `[coordinator:review]` starts a review of the pull request whose link the
- * person gave, and `[coordinator:keep-note]` keeps what the person said
- * before it as one of the project's notes; a review's lead, `[lead:review]`, drafts asking for changes with a
+ * person gave, `[coordinator:keep-note]` keeps what the person said
+ * before it as one of the project's notes, and `[coordinator:automate]`
+ * proposes the release notes automation, every Friday at 16:00; a review's lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; asked to, `[lead:make-change]` makes its quick task a change
@@ -472,6 +534,7 @@ const playStall = async (
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
+ * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
@@ -694,6 +757,7 @@ const playRole = async (
         for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         return 'Stopped reviewing.'
       }
+      if (session.markers.has('[review:slowly]')) for (let waited = 0; !session.cancelled && waited < 3_000; waited += 10) await pause(10)
       if (session.markers.has('[review:always]'))
         return await call('report_review', {
           verdict: 'changes_requested',
@@ -971,6 +1035,16 @@ const playRole = async (
       const said = (text.slice(0, text.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
       return await call('keep_note', { note: said.trim() })
     }
+    // Asked for work on a schedule, it proposes an automation: the release notes, every Friday.
+    if (available.has('propose_automation') && text.includes('[coordinator:automate]')) {
+      return await call('propose_automation', {
+        name: 'Release notes',
+        prompt: 'Write release notes from what merged this week.',
+        when: { days: ['friday'], at: '16:00' },
+        lead: { agent: 'claude-code' },
+        ends_in: 'nothing',
+      })
+    }
     // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
     if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
       const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
@@ -1135,7 +1209,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
               loadSession: false,
               mcpCapabilities: { http: true, sse: false },
               sessionCapabilities: { close: {} },
-              promptCapabilities: { image: options.images !== false },
+              promptCapabilities: { image: options.images !== false, embeddedContext: options.embeddedContext === true },
             },
             authMethods: [],
             agentInfo: { name: 'fake-agent', version: '0.0.0' },
@@ -1229,6 +1303,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (session === undefined || left === undefined) return { stopped: false }
         if (options.refusesStop?.() === true) throw new Error('The agent could not stop it.')
         session.background.delete(params.asyncTaskId)
+        left.process?.kill()
         options.stoppedBackground?.(params.asyncTaskId)
         await client.notify(acp.methods.client.session.update, {
           sessionId: params.sessionId,
@@ -1271,6 +1346,19 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         )
       const update = (value: acp.SessionUpdate) =>
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
+      const down = options.connection?.()
+      // The agent keeps what it was sent, though its service never answered it, as the real ones do: its role's markers too.
+      if (down !== undefined) for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
+      if (down === 'offline' || down === 'server') {
+        const said = down === 'offline' ? recorded.claude.offline : recorded.claude.serverError
+        await update(said.retrying)
+        return said.ended
+      }
+      if (down === 'waits') {
+        await update(recorded.codex.waiting)
+        while (!session.cancelled && options.connection?.() === 'waits') await pause(10)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+      }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
@@ -1336,6 +1424,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
       if (images.length > 0)
         await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
+      // What files it was sent, in order: each linked one opened by its path, as an agent reads one with its own tools.
+      const sent = params.prompt.flatMap((block) => (block.type === 'resource_link' || block.type === 'resource' ? [block] : []))
+      if (sent.length > 0) await say(`saw files: ${sent.map(sawFile).join('; ')}\n\n`)
 
       // How many asks wait at once, as several do from `run each`: they share one abort, let go as the last is answered.
       let asking = 0
@@ -1596,6 +1687,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
+        case scenarios.limitInText:
+          await say(
+            "Error: You've hit your rate limit. Please wait for your limit to reset in 3 hours 20 minutes or switch to auto model to continue. Learn More (https://docs.github.com/copilot/concepts/rate-limits).",
+          )
+          return ended()
         case scenarios.quota:
           await update({
             sessionUpdate: 'session_info_update',
@@ -1644,7 +1740,15 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.background:
         case scenarios.backgroundCodex:
-          await leaveRunning(params.sessionId, session, client, scenario === scenarios.background ? 'claude' : 'codex')
+        case scenarios.backgroundQuiet:
+        case scenarios.backgroundCodexQuiet:
+          await leaveRunning(
+            params.sessionId,
+            session,
+            client,
+            scenario === scenarios.backgroundCodex || scenario === scenarios.backgroundCodexQuiet ? 'codex' : 'claude',
+            { quiet: scenario === scenarios.backgroundQuiet || scenario === scenarios.backgroundCodexQuiet },
+          )
           await say('serving')
           return ended()
         case scenarios.backgroundOwn: {
@@ -1731,6 +1835,32 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'tool_call', ...described, status: 'pending' })
           const chosen = await ask({ toolCallId: 'call-4' }, permissionOptions(false))
           await say(`chosen=${chosen}`)
+          return ended()
+        }
+        case scenarios.planUsage: {
+          // Resets ahead of now, as the CLI gives them: one that has passed is shown as reset.
+          const inSeconds = (seconds: number) => Math.floor(Date.now() / 1000) + seconds
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 10,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': {
+                status: 'allowed_warning',
+                rateLimitType: 'five_hour',
+                utilization: 0.82,
+                resetsAt: inSeconds(3 * 3600),
+              },
+            },
+          })
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 20,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: inSeconds(5 * 86_400) },
+            },
+          })
           return ended()
         }
         case scenarios.updates:

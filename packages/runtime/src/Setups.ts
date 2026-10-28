@@ -3,15 +3,17 @@ import { basename, isAbsolute, join } from 'node:path'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { type LaunchSpec, spawnOwned } from '@althar/provider-adapters'
-import { Cause, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Scope, Semaphore } from 'effect'
+import { Cause, Context, type Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
+import { makeKeyedLock } from './keyedLock'
 import { Instance } from './Instance'
 import { printedMore, uncoloured } from './leftRunning'
 import { change, fact, timestamp } from './records'
 import { installIn } from './runCommand'
 import { addItem, updateItem } from './threads'
+import { type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
 /*
  * A task's worktree set up by Althar itself, outside any agent's sandbox,
@@ -32,6 +34,12 @@ import { addItem, updateItem } from './threads'
  * thread shows it as it goes, and the end of what it printed if it failed;
  * the lead is told how it went. A setup that fails never holds the task up:
  * the lead starts all the same, told what failed.
+ *
+ * The lead can have it run again, as it ran then, with install_dependencies:
+ * where its sandbox refuses an install (a lock in `.git`, the package
+ * manager's cache), or something it changed needs installing. Only the setup
+ * runs, never a command the lead names, and it is kept on the workspace as
+ * the first was.
  */
 
 /** How a worktree's setup went, as its workspace keeps it. */
@@ -115,6 +123,11 @@ interface Unset {
 
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | RuntimeConfig
 
+/** A worktree of the task's, set up already or not, to set up again. */
+interface Again extends Unset {
+  readonly bindingSlug: string
+}
+
 export class Setups extends Context.Service<
   Setups,
   {
@@ -130,7 +143,7 @@ export class Setups extends Context.Service<
     told(taskId: string): Effect.Effect<string | null>
   }
 >()('@althar/runtime/Setups') {
-  static readonly layer: Layer.Layer<Setups, never, Store> = Layer.effect(
+  static readonly layer: Layer.Layer<Setups, never, Store | ToolServer> = Layer.effect(
     Setups,
     Effect.gen(function* () {
       const context = yield* Effect.context<Store>()
@@ -203,7 +216,8 @@ export class Setups extends Context.Service<
                 onNone: () => Cause.pretty(spawned.cause),
                 onSome: (error) => error.reason,
               })
-              return { code: null, timedOut: false, last: `Althar couldn't start it: ${reason}` }
+              const last = `Althar couldn't start it: ${reason}`
+              return { code: null, timedOut: false, last, printed: last }
             }
             const owned = spawned.value
             yield* change('processes', id, {
@@ -241,9 +255,9 @@ export class Setups extends Context.Service<
             )
             const code = Option.isSome(exit) ? exit.value.code : null
             // What the line printed, both streams; what the shell said on its own before it, such as an interactive sh's
-            // "no job control", isn't the setup's.
+            // "no job control", isn't the setup's. Kept only where it failed; the lead that asked for it reads it either way.
             const last = lastLinesOf(printed)
-            return { code, timedOut: Option.isNone(exit), last: code === 0 || last === '' ? null : last }
+            return { code, timedOut: Option.isNone(exit), last: code === 0 || last === '' ? null : last, printed: last }
           }),
         )
 
@@ -253,33 +267,36 @@ export class Setups extends Context.Service<
           const folder = unset.within === null ? unset.worktree : join(unset.worktree, unset.within)
           // The install itself, not one that skips a `node_modules` there already: one an install cut short left isn't set up.
           const command = unset.kept ?? installIn(folder, unset.worktree)
-          if (command === null) return yield* kept(unset, { at: yield* timestamp, command: null, code: null, timedOut: false, last: null })
+          if (command === null) {
+            yield* kept(unset, { at: yield* timestamp, command: null, code: null, timedOut: false, last: null })
+            return undefined
+          }
           const shown: Shown = { repository: unset.name, command, kept: unset.kept !== null, startedAt: yield* timestamp, ended: null }
           const item = yield* addItem({ projectId: unset.projectId, threadId: unset.threadId }, 'setup', shown)
-          const ran = yield* run(unset.projectId, folder, command)
+          const { printed, ...ran } = yield* run(unset.projectId, folder, command)
           const done: SetUp = { at: yield* timestamp, command, ...ran }
           yield* kept(unset, done)
           yield* updateItem(unset.projectId, item, {
             ...shown,
             ended: { at: done.at, code: done.code, timedOut: done.timedOut, stopped: false, last: done.last },
           } satisfies Shown)
+          return { setUp: done, printed }
         })
 
       /*
        * One worktree is set up at a time: a second asking waits for the first,
        * then finds it set up. What isn't set up is read under the lock.
        */
-      const locks = new Map<string, Semaphore.Semaphore>()
+      const locks = makeKeyedLock()
+      const locked = locks.withLock
       const settle = (workspaceId: string) =>
-        Effect.suspend(() => {
-          const lock = locks.get(workspaceId) ?? Semaphore.makeUnsafe(1)
-          locks.set(workspaceId, lock)
-          return lock.withPermits(1)(
-            provide(
-              Effect.gen(function* () {
-                const sql = yield* SqlClient.SqlClient
-                // Not for an abandoned task, but one whose folder came back once it was removed (ADR-056); nor one whose project was removed.
-                const [unset] = yield* sql<Unset>`
+        locked(
+          workspaceId,
+          provide(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              // Not for an abandoned task, but one whose folder came back once it was removed (ADR-056); nor one whose project was removed.
+              const [unset] = yield* sql<Unset>`
                   SELECT w.id, w.project_id, t.id AS thread_id, w.path AS worktree, b.folder AS within, b.display_name AS name,
                     b.run_setup AS kept
                   FROM workspaces w
@@ -288,11 +305,10 @@ export class Setups extends Context.Service<
                   JOIN projects p ON p.id = w.project_id AND p.archived_at IS NULL
                   JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
                   WHERE w.id = ${workspaceId} AND w.state = 'ready' AND w.access = 'write' AND w.setup IS NULL`
-                if (unset !== undefined) yield* setUp(unset)
-              }),
-            ),
-          )
-        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not set up a task’s worktree', cause)))
+              if (unset !== undefined) yield* setUp(unset)
+            }),
+          ),
+        ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not set up a task’s worktree', cause)))
 
       const ready = (taskId: string) =>
         provide(
@@ -324,6 +340,75 @@ export class Setups extends Context.Service<
             return ran.length === 0 ? null : toldOf(ran, several)
           }),
         ).pipe(Effect.orElseSucceed(() => null))
+
+      /* ---- What the lead can do about it ---- */
+
+      /** The task's worktrees here a lead can set up again, the one named alone; set up already or not. */
+      const againOf = (taskId: string, named: string | undefined) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const all = yield* sql<Again>`
+            SELECT w.id, w.project_id, t.id AS thread_id, w.path AS worktree, b.folder AS within, b.display_name AS name,
+              b.run_setup AS kept, b.slug AS binding_slug
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write'
+            ORDER BY b.created_at, b.rowid`
+          if (named === undefined) return all
+          const wanted = named.trim().toLowerCase()
+          const found = all.filter((one) => one.name.toLowerCase() === wanted || one.bindingSlug === wanted)
+          if (found.length === 0)
+            return yield* new ToolRefused({
+              message: `This task has no worktree of a repository called ${named}. Its repositories: ${all.map((one) => one.name).join(', ') || 'none'}.`,
+            })
+          return found
+        })
+
+      /** How a setup the lead asked for went, in words for it, with the end of what it printed either way. */
+      const saidOf = (name: string, several: boolean, ran: { readonly setUp: SetUp; readonly printed: string } | undefined) => {
+        const where = several ? `${name}'s worktree` : 'the worktree'
+        if (ran === undefined || ran.setUp.command === null)
+          return `${several ? name : 'The repository'} has no setup kept, and nothing Althar can tell to install: there is no lockfile or manifest it knows. If it needs one, keep it with set_run_command.`
+        const { setUp, printed } = ran
+        const ended = failedSetUp(setUp) ? howItFailed(setUp) : 'it went through'
+        return [
+          `Althar ran \`${setUp.command}\` in ${where}, outside your sandbox, and ${ended}.`,
+          ...(printed === '' ? [] : [`The end of what it printed:\n\`\`\`\n${printed}\n\`\`\``]),
+        ].join(' ')
+      }
+
+      const installTool = {
+        name: 'install_dependencies',
+        description:
+          "Runs the project's setup again in your worktree, outside your sandbox, as Althar ran it when the worktree was made: the setup kept for the repository (set_run_command keeps it), else the install its lockfile names, which never changes the lockfile. Use it where an install fails in your sandbox (a lock in .git, the package manager's cache or its temporary folders), or once what you changed needs installing, such as a dependency added to package.json with its lockfile. It runs only that setup, never a command you give, for ten minutes at most, and returns once it ends, with how it went and the end of what it printed; the task's thread shows it too. In a task of several repositories, repository names the one; without, each is set up.",
+        input: { type: 'object', properties: { repository: { type: 'string' } } },
+        call: (input: unknown, access: ToolAccess) =>
+          Effect.gen(function* () {
+            const taskId = access.taskId
+            if (taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
+            const asked = (typeof input === 'object' && input !== null ? input : {}) as { readonly repository?: unknown }
+            const named = typeof asked.repository === 'string' && asked.repository.trim() !== '' ? asked.repository : undefined
+            const again = yield* provide(againOf(taskId, named))
+            if (again.length === 0)
+              return yield* new ToolRefused({
+                message: "The task's worktree isn't on this computer, so Althar can't set it up. Tell the person.",
+              })
+            // One at a time in a worktree: one being set up as it was made is waited for, then this runs after it.
+            const ran = yield* Effect.forEach(again, (one) => locked(one.id, provide(setUp(one))))
+            return again.map((one, at) => saidOf(one.name, again.length > 1, ran[at])).join('\n\n')
+          }).pipe(
+            Effect.catch((error) =>
+              error instanceof ToolRefused
+                ? Effect.fail(error)
+                : Effect.andThen(
+                    Effect.logWarning('install_dependencies did not succeed', error),
+                    Effect.fail(new ToolRefused({ message: 'Althar could not run the setup. Try again, or tell the person.' })),
+                  ),
+            ),
+          ),
+      }
+      yield* (yield* ToolServer).serve('lead', [installTool])
 
       return Setups.of({
         begin: (taskId) => Effect.asVoid(Effect.forkIn(ready(taskId), setupsScope)),
@@ -359,7 +444,7 @@ export const toldOf = (ran: ReadonlyArray<{ readonly name: string; readonly setU
     ...(failed.length === 0
       ? []
       : [
-          "Its dependencies may not all be installed: see why first, and install what's missing. If the setup is wrong for the repository, keep the right one with set_run_command, so the next task's worktree gets it.",
+          "Its dependencies may not all be installed: see why first, then install what's missing, or, where your sandbox was in the way, have Althar run the setup again with install_dependencies. If the setup is wrong for the repository, keep the right one with set_run_command, so the next task's worktree gets it.",
         ]),
   ].join('\n\n')
 }

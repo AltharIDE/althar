@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { CommandEnvelope } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
@@ -523,6 +525,45 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('lets go of a session that started but could not take over its thread', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { task: created } = yield* task('Add the retry helper')
+      yield* begin(created.threadId, 'claude-code')
+      // What the person said comes again under a command id already used for something else: the switch fails once the new
+      // agent has started, before it takes over.
+      const envelope = yield* Runtime.envelope('thread.send', { threadId: created.threadId, body: 'first' })
+      yield* sessions.send({ envelope, threadId: created.threadId, body: 'first', disposition: 'after_current' })
+      yield* ended(created.threadId, 1)
+      const { commandType, schemaVersion, actorId, deviceId, issuedAt, payload } = yield* Runtime.envelope('thread.send', {
+        threadId: created.threadId,
+        body: 'second',
+      })
+      const reused = new CommandEnvelope({
+        commandId: envelope.commandId,
+        commandType,
+        schemaVersion,
+        actorId,
+        deviceId,
+        issuedAt,
+        payload,
+      })
+      const exit = yield* Effect.exit(
+        sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode', message: { envelope: reused, body: 'second' } }),
+      )
+      assert.isTrue(Exit.isFailure(exit))
+      const [started] = yield* sql<{ id: string; state: string }>`
+        SELECT id, state FROM provider_sessions WHERE thread_id = ${created.threadId} AND agent_id = 'opencode'`
+      // It is recorded as failed, not left starting, and its process as ended: nothing of it holds a place.
+      assert.strictEqual(started?.state, 'failed')
+      const processes = yield* sql<{ state: string; endedAt: string | null }>`
+        SELECT state, ended_at FROM processes WHERE provider_session_id = ${started?.id}`
+      assert.isTrue(processes.every((process) => process.state !== 'running' && process.endedAt !== null))
+      assert.isTrue(Option.isNone(yield* sessions.running(created.threadId)))
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('records a usage limit against the account, with when it resets', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -627,7 +668,7 @@ describe('sessions', () => {
           yield* ended(created.threadId, 1)
           // By its tool call's command, not by what the call says it does; where it answers, from what it printed, colours and all.
           const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
-          assert.deepInclude(serving, { command: 'bun dev', url: 'http://localhost:5173/', ended: null })
+          assert.deepInclude(serving, { command: 'bun dev', name: 'Start the dev server', url: 'http://localhost:5173/', ended: null })
           // Background work that isn't a command isn't kept.
           assert.lengthOf(yield* shown(created.threadId), 1)
           yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
@@ -642,6 +683,65 @@ describe('sessions', () => {
           assert.strictEqual(exited?.ended?.code, 1)
           yield* sessions.clearBackground(created.threadId, exited?.id ?? '')
           assert.lengthOf(yield* shown(created.threadId), 0)
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('finds where one answers from its port when its output never says, and it keeps its name', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'claude-code')
+        yield* say(created.threadId, scenarios.backgroundQuiet)
+        yield* ended(created.threadId, 1)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+        assert.strictEqual(serving?.name, 'Start the dev server')
+        yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('finds a silent server in the agent’s tree that was already listening when the agent reported it', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        // A process, so its tree is known; no file its output goes to, so that is all there is to tell it by.
+        yield* begin(created.threadId, 'process')
+        yield* say(created.threadId, scenarios.backgroundCodexQuiet)
+        yield* ended(created.threadId, 1)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+        yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live.skipIf(process.platform === 'win32')(
+      'finds a silent server started while the lookup of what listened before is still slow',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          // `lsof` answers late, from the machine as it is then: the server the agent starts as its turn begins is listening by
+          // then, and is in what listened before unless the turn waited for that to be read before the agent was told.
+          const real = execFileSync('which', ['lsof'], { encoding: 'utf8' }).trim()
+          const dir = mkdtempSync(join(tmpdir(), 'slow-lsof-'))
+          writeFileSync(join(dir, 'lsof'), `#!/bin/sh\nsleep 1\nexec ${real} "$@"\n`, { mode: 0o755 })
+          const path = process.env.PATH
+          process.env.PATH = `${dir}:${path ?? ''}`
+          yield* Effect.gen(function* () {
+            yield* begin(created.threadId, 'process')
+            yield* say(created.threadId, scenarios.backgroundCodexQuiet)
+            yield* ended(created.threadId, 1)
+            const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+            assert.match(serving?.url ?? '', /^http:\/\/localhost:\d{4,5}\/$/)
+            yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                process.env.PATH = path
+                rmSync(dir, { recursive: true, force: true })
+              }),
+            ),
+          )
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     )
 

@@ -14,6 +14,7 @@ import {
   serverProtocol,
   type WatchEvent,
   type ProjectRulesView,
+  type SentFile,
   type SentImage,
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
@@ -25,6 +26,7 @@ import { SqlClient } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
+import { Automations } from './Automations'
 import { Changes } from './Changes'
 import { codeRootOf } from './code'
 import { NotFound } from './errors'
@@ -40,6 +42,8 @@ import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
 import { MachineLoad } from './MachineLoad'
+import { modelRooms } from './modelRooms'
+import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
@@ -48,6 +52,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  changesIssues,
   Policies,
   type ProjectRules,
   resolvesConflicts,
@@ -61,6 +66,7 @@ import { dropNote, editNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
+import { projectTracker } from './projectTracker'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { Busy } from './Busy'
@@ -69,6 +75,7 @@ import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
 import { Coordinator } from './Coordinator'
+import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
 import { Plans } from './Plans'
@@ -76,6 +83,7 @@ import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
+import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
@@ -144,6 +152,7 @@ export const handlers = Api.toLayer(
     const sessions = yield* Sessions
     const launches = yield* Launches
     const machine = yield* MachineLoad
+    const planUsage = yield* PlanUsage
     const permissions = yield* Permissions
     const questions = yield* Questions
     const queries = yield* Queries
@@ -158,6 +167,7 @@ export const handlers = Api.toLayer(
     const policies = yield* Policies
     const plans = yield* Plans
     const issueDrafts = yield* IssueDrafts
+    const issueChanges = yield* IssueChanges
     const reviews = yield* Reviews
     const runs = yield* Runs
     const tasks = yield* Tasks
@@ -188,6 +198,12 @@ export const handlers = Api.toLayer(
     const issues = yield* Issues
     const pullRequests = yield* Changes
     const busy = yield* Busy
+    const automations = yield* Automations
+    /** Where the change feed stands, read before what a snapshot shows, so a client watching from it misses nothing. */
+    const cursorNow = Effect.map(
+      sql<{ cursor: number }>`SELECT coalesce(max(cursor), 0) AS cursor FROM change_log`,
+      ([row]) => row?.cursor ?? 0,
+    )
     const envelope = (type: string, payload: unknown, commandId: string) =>
       Effect.provideContext(Runtime.envelope(type, payload, commandId), context)
     const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
@@ -200,6 +216,18 @@ export const handlers = Api.toLayer(
       }).pipe(Effect.provideService(Artifacts, artifacts), Effect.provideService(SqlClient.SqlClient, sql))
     /** What a message's command says of its images: their digests, in order, where it has any; nothing where it has none, as before images. */
     const imagesSaid = (kept: ReadonlyArray<InputImage>) => (kept.length === 0 ? {} : { images: kept.map((image) => image.sha256) })
+    /** The files sent with a message to a thread, measured and copied where its agent reads, in order. */
+    const filesFor = (threadId: string, files: ReadonlyArray<SentFile> | undefined) =>
+      files === undefined || files.length === 0
+        ? Effect.succeed([])
+        : keepFiles(threadId, files).pipe(
+            Effect.provideService(Folders, folders),
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.provideService(RuntimeConfig, config),
+            Effect.provideService(Instance, instance),
+          )
+    /** What a message's command says of its files: how many, never their names or paths; nothing where it has none. */
+    const filesSaid = (kept: ReadonlyArray<InputFile>) => (kept.length === 0 ? {} : { files: kept.length })
 
     const failures = yield* Failures
     /** The call being answered, by the name the RPC server gives its span: `Status`, `ListProjects`. */
@@ -256,6 +284,7 @@ export const handlers = Api.toLayer(
       account: { login: info.account.login, name: info.account.name },
       auth: info.auth,
       state: info.state,
+      workspace: info.workspace,
     })
 
     /**
@@ -339,6 +368,7 @@ export const handlers = Api.toLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        changeIssues: changesIssues(rules),
       }
     }
 
@@ -487,7 +517,9 @@ export const handlers = Api.toLayer(
                     ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
                     : event._tag === 'Launches'
                       ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
-                      : Stream.empty,
+                      : event._tag === 'PlanUsage'
+                        ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
+                        : Stream.empty,
           ),
         ),
       ),
@@ -580,6 +612,38 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      GetProjectTracker: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const [project] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            const bound = yield* projectTracker(projectId)
+            if (bound === null) return null
+            return {
+              connectionId: bound.connectionId,
+              container: bound.container,
+              gone: bound.gone === null ? null : { product: bound.product, ...bound.gone },
+            }
+          }),
+        ),
+      SetProjectTracker: ({ commandId, projectId, tracker }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.set_tracker', { projectId, tracker }, commandId)
+              yield* projects.setTracker(projectId, tracker, said.commandId)
+            }),
+          ),
+        ),
+      ListContainers: ({ connectionId }) =>
+        api(
+          Effect.gen(function* () {
+            const found = (yield* connections.trackers).find((one) => one.connectionId === connectionId)
+            if (found === undefined) return yield* new NotFound({ kind: 'connection', id: connectionId })
+            return yield* found.tracker.containers()
+          }),
+        ),
       RemoveProject: ({ commandId, projectId }) =>
         once(
           commandId,
@@ -589,6 +653,8 @@ export const handlers = Api.toLayer(
               const threads = yield* projects.remove(projectId, said.commandId)
               // Its runs are over, so no step answers an agent going: each one still on it stops, the coordinator too.
               yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
+              // And what it runs stops, with no project left to stop it from.
+              yield* launches.stopAll(projectId)
             }),
           ),
         ),
@@ -689,13 +755,14 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, dictated }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              // Its images are read and kept first, outside any transaction; one that can't be sent refuses the switch.
+              // Its images and files are read and kept first, outside any transaction; one that can't be sent refuses the switch.
               const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
+              const copied = body === undefined ? [] : yield* filesFor(threadId, files)
               // What the person said with it is said to the thread, under a command of its own.
               const message =
                 body === undefined
@@ -704,11 +771,19 @@ export const handlers = Api.toLayer(
                       // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
                       envelope: yield* envelope(
                         'thread.send',
-                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
+                        {
+                          threadId,
+                          body,
+                          disposition: 'after_current',
+                          ...imagesSaid(kept),
+                          ...filesSaid(copied),
+                          ...(dictated === true ? { dictated } : {}),
+                        },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
                       ...(kept.length === 0 ? {} : { images: kept }),
+                      ...(copied.length === 0 ? {} : { files: copied }),
                       ...(dictated === true ? { dictated: true } : {}),
                     }
               // Written to again with the switch, a task kept for later is back, as when it is sent on its own.
@@ -746,6 +821,7 @@ export const handlers = Api.toLayer(
             return {
               coAuthor: { on, line: coAuthorLine },
               postTeamReviews: yield* postTeamReviews,
+              automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
               agentsAtOnce: {
                 count: atOnce.count,
@@ -765,9 +841,46 @@ export const handlers = Api.toLayer(
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      GetAutomations: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const cursor = yield* cursorNow
+            return { cursor, automations: yield* automations.list(projectId), allPaused: yield* automations.allPaused }
+          }),
+        ),
+      GetAutomation: ({ automationId }) =>
+        api(
+          Effect.gen(function* () {
+            const cursor = yield* cursorNow
+            return { cursor, automation: yield* automations.read(automationId) }
+          }),
+        ),
+      MakeAutomation: ({ commandId, projectId, definition, on }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              automations.make({ projectId, definition, ...(on === undefined ? {} : { on }), actorId: instance.personId }),
+              (automationId) => ({ automationId }),
+            ),
+          ),
+        ),
+      ChangeAutomation: ({ commandId, automationId, definition }) =>
+        once(commandId, api(automations.change(automationId, definition, instance.personId))),
+      TurnOnAutomation: ({ commandId, automationId, itemId }) =>
+        once(commandId, api(automations.turnOn(automationId, instance.personId, itemId))),
+      PauseAutomation: ({ commandId, automationId }) => once(commandId, api(automations.pause(automationId, instance.personId))),
+      RunAutomationNow: ({ commandId, automationId, itemId }) =>
+        once(commandId, api(automations.runNow(automationId, instance.personId, itemId))),
+      DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
+      UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),
+      SetAutomationPostsReviews: ({ commandId, automationId, on }) =>
+        once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),
+      SetAutomationsPaused: ({ commandId, paused }) => once(commandId, api(automations.setAllPaused(paused))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+      TryAgain: ({ commandId, threadId }) => once(commandId, api(Effect.asVoid(sessions.tryAgain(threadId)))),
       CompactContext: ({ commandId, threadId }) =>
         once(
           commandId,
@@ -787,6 +900,9 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
+      // The person's Resolve now: asked of its lead whatever stood in the way (ADR-030).
+      ResolveConflictsNow: ({ commandId, taskId }) => once(commandId, api(pullRequests.resolveNow({ taskId }, true))),
+      LookForConflicts: ({ commandId, projectId }) => once(commandId, api(pullRequests.resolveNow({ projectId }))),
       SetTaskAllowEverything: ({ commandId, taskId, allowEverything }) =>
         once(
           commandId,
@@ -859,22 +975,24 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images, dictated }) =>
+      Send: ({ commandId, threadId, body, disposition, images, files, dictated }) =>
         api(
           Effect.gen(function* () {
-            // Its images are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
+            // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
             const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
+            const copied = yield* filesFor(threadId, files)
             const message = {
-              // The command says its images by their digests, never their bytes.
+              // The command says its images by their digests, never their bytes, and how many files, never their paths.
               envelope: yield* envelope(
                 'thread.send',
-                { threadId, body, disposition, ...imagesSaid(kept), ...(dictated === true ? { dictated } : {}) },
+                { threadId, body, disposition, ...imagesSaid(kept), ...filesSaid(copied), ...(dictated === true ? { dictated } : {}) },
                 commandId,
               ),
               threadId,
               body,
               disposition,
               ...(kept.length === 0 ? {} : { images: kept }),
+              ...(copied.length === 0 ? {} : { files: copied }),
               ...(dictated === true ? { dictated } : {}),
             }
             // What the person says to the coordinator starts it, if it isn't running.
@@ -932,10 +1050,22 @@ export const handlers = Api.toLayer(
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
-      ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
-        once(commandId, api(issueDrafts.change(draftId, { title, body, labels }, instance.personId))),
+      ChangeIssueDraft: ({ commandId, draftId, title, body, labels, priority }) =>
+        once(
+          commandId,
+          api(
+            issueDrafts.change(
+              draftId,
+              { title, body, labels, ...(priority === undefined ? {} : { priority: priority ?? 'none' }) },
+              instance.personId,
+            ),
+          ),
+        ),
       FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, instance.personId)))),
       DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, instance.personId))),
+      ApplyIssueChanges: ({ commandId, changesId }) =>
+        once(commandId, api(Effect.asVoid(issueChanges.apply(changesId, instance.personId)))),
+      DiscardIssueChanges: ({ commandId, changesId }) => once(commandId, api(issueChanges.discard(changesId, instance.personId))),
       ChangeReviewDraft: ({ commandId, draftId, verdict, summary, comments }) =>
         once(
           commandId,
@@ -1047,6 +1177,7 @@ export const handlers = Api.toLayer(
                   tracker: info.tracker,
                   hostedUrl: info.hosted?.webUrl ?? null,
                   selfHosted: info.selfHosted,
+                  workspaces: info.workspaces === true,
                   browserSignIn: info.browserSignIn,
                   tokenNeeds: info.token.needs,
                   tokenPrefixes: info.token.prefixes,
@@ -1250,6 +1381,18 @@ export const handlers = Api.toLayer(
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
+      GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
+      GetModelRooms: ({ projectId }) =>
+        api(
+          modelRooms(projectId).pipe(
+            Effect.provideService(Agents, agents),
+            Effect.provideService(Models, models),
+            Effect.provideService(SignIns, signIns),
+            Effect.provideService(Installs, installs),
+            Effect.provideService(Limits, limits),
+            Effect.provideService(Accounts, accounts),
+          ),
+        ),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(
@@ -1321,6 +1464,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
+      ReadBackgroundOutput: ({ threadId, id }) => api(sessions.backgroundOutput(threadId, id)),
       ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
       RunProject: ({ commandId, projectId, taskId, threadId, runnableId }) =>
         once(commandId, api(launches.start({ projectId, taskId, threadId, ...(runnableId === undefined ? {} : { runnableId }) }))),

@@ -18,6 +18,7 @@ import {
   together,
 } from './handed'
 import { diagnosticIn, diagnosticOf } from './diagnostics'
+import { changeLinesWords } from './issueChangeWords'
 import { change, timestamp } from './records'
 import { commandIn, essentials } from './rules'
 import { indexThread } from './Search'
@@ -369,8 +370,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         return event.byAgent
           ? notice({ source: 'runtime', severity: 'info', title: `The agent moved to its ${event.modeId} mode.` })
           : Effect.void
+      // The agent is told why; the person reads it on the refused call, not as a notice of its own.
       case 'Resumed':
-        return notice({ source: 'runtime', severity: 'info', title: 'Resumed after a rejection.', description: event.reason })
+        return Effect.void
       default:
         return Effect.void
     }
@@ -482,6 +484,7 @@ export const transcript = (
       task: string | null
       draft: string | null
       review: string | null
+      changes: string | null
       asked: string | null
       askedState: string | null
     }>`
@@ -491,6 +494,7 @@ export const transcript = (
           FROM issue_drafts d WHERE d.id = json_extract(i.content, '$.draftId')) AS draft,
         (SELECT 'of #' || r.number || ', suggesting ' || r.suggested || ' (' || r.state || CASE WHEN r.review_url IS NULL THEN '' ELSE ', ' || r.review_url END || ')'
           FROM review_drafts r WHERE i.kind = 'review_draft' AND r.id = json_extract(i.content, '$.draftId')) AS review,
+        (SELECT c.state FROM issue_changes c WHERE i.kind = 'issue_changes' AND c.id = json_extract(i.content, '$.changesId')) AS changes,
         a.payload AS asked, a.state AS asked_state
       FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
@@ -506,7 +510,14 @@ export const transcript = (
           // Images the person sent are said, though only the agent they went to saw them.
           const pictures = Array.isArray(content['pictures']) ? content['pictures'].length : 0
           const sent = pictures === 0 ? '' : ` [sent ${pictures === 1 ? 'an image' : `${pictures} images`}]`
-          return [`[person] ${text('text')}${sent}`]
+          // Files they sent are said by where their copies are, so an agent taking over can open them too.
+          const files = (Array.isArray(content['files']) ? (content['files'] as ReadonlyArray<unknown>) : []).flatMap((file) =>
+            typeof file === 'object' && file !== null && typeof (file as { path?: unknown }).path === 'string'
+              ? [(file as { path: string }).path]
+              : [],
+          )
+          const filed = files.length === 0 ? '' : ` [sent ${files.length === 1 ? 'a file' : `${files.length} files`}: ${files.join(', ')}]`
+          return [`[person] ${text('text')}${sent}${filed}`]
         }
         case 'agent_message':
           return [`[${agent}] ${text('text')}`]
@@ -523,6 +534,15 @@ export const transcript = (
           return item.task === null ? [] : [`[task] ${item.task}`]
         case 'issue_draft':
           return item.draft === null ? [] : [`[issue draft] ${item.draft}`]
+        // Changes to issues, and where they stand: an agent that takes the thread over doesn't propose again what was applied.
+        case 'issue_changes': {
+          const said = Array.isArray(content['issues'])
+            ? (content['issues'] as ReadonlyArray<{ readonly key?: unknown; readonly changes?: unknown }>)
+                .map((issue) => `${typeof issue.key === 'string' ? issue.key : ''}: ${changeLinesWords(issue.changes)}`)
+                .join('; ')
+            : ''
+          return item.changes === null ? [] : [`[issue changes] ${said} (${item.changes})`]
+        }
         // The lead's review draft, and where it stands: an agent that takes the thread over doesn't draft again what was posted.
         case 'review_draft':
           return item.review === null ? [] : [`[review draft] ${item.review}`]

@@ -52,6 +52,10 @@ export const text = {
   atOnceValue: (n: number, { count }: { count: number }) => (n === count ? `${n}, ${device.this}’s default` : String(n)),
   loadTitle: `Show how hard ${device.this} works`,
   loadNote: 'CPU and memory in the bar, and how much of each Althar’s work uses.',
+  atLoginTitle: 'Open Althar at login, in the background',
+  atLoginNote: `So automations run after a restart, with no window open. Off, they run while Althar is open.`,
+  pauseAllTitle: 'Pause all automations',
+  pauseAllNote: 'None starts until you turn this off. Runs under way finish.',
   /* Reviews and pull requests. */
   postTeamTitle: 'Post reviews of my team’s pull requests without asking',
   postTeamNote: 'As soon as a review’s lead drafts one. A review of a pull request from outside the team always waits for you to post it.',

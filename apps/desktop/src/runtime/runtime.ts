@@ -4,7 +4,8 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import { backupsIn, connection, databaseIn, Failures, Folders, Nudges, Secrets, services, UsageData } from '@althar/runtime'
+import type { EndpointRead } from '@althar/provider-adapters'
+import { backupsIn, connection, Connectivity, databaseIn, Failures, Folders, Nudges, Secrets, services, UsageData } from '@althar/runtime'
 import { Cause, Context, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { appFetchOf } from './appFetch'
@@ -14,6 +15,7 @@ import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { profileInUse } from './profileInUse'
+import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
 
@@ -36,6 +38,22 @@ type Port = Parameters<typeof emitterPort>[0]
 interface ParentMessage {
   readonly data: unknown
   readonly ports: ReadonlyArray<Port>
+}
+
+/** What a fake usage endpoint answers: nothing, or one five-hour window at the share used a test names. */
+const fakePlan = (used: string | undefined): EndpointRead => {
+  const usedPercent = Number(used)
+  if (used === undefined || used === '' || !Number.isFinite(usedPercent)) return { kind: 'none' }
+  const now = Date.now()
+  return {
+    kind: 'usage',
+    stale: false,
+    usage: {
+      source: 'endpoint',
+      observedAt: new Date(now).toISOString(),
+      windows: [{ kind: 'five_hour', minutes: 300, usedPercent, resetsAt: new Date(now + 2 * 3_600_000).toISOString() }],
+    },
+  }
 }
 
 const parent = (
@@ -87,6 +105,9 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
   open: (sealed) => askMain('open', sealed),
 })
 
+/* Screenshots agents ask for, which the main process draws, with Chromium (screenshots.ts). */
+const screenshots = screenshotsWith((message) => parent.postMessage(message))
+
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const appFetch: Fetch = appFetchOf(net)
 
@@ -118,6 +139,7 @@ const options = {
   agentsRoot: join(profile, 'agents'),
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
+  screenshot: screenshots.ask,
   editors: {
     list: () =>
       device === undefined
@@ -137,6 +159,8 @@ const options = {
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
   ...(agents === null ? {} : { agentStderr: agents.stderr }),
+  // Althar itself, on the load meter, is the app's main process and what it started: its windows, its GPU and this runtime.
+  load: { app: process.ppid },
 }
 
 /** The machine the end-to-end tests name in `ALTHAR_MACHINE`, as `cores,GB`; without one, a large one: 64 cores and 256 GB. */
@@ -174,6 +198,14 @@ const program = Effect.gen(function* () {
   // The Codex its adapter drives, out on the device, where Codex's own sandbox works (flatpak/codex-host.sh says why, and what to do without one).
   if (process.env.FLATPAK_ID !== undefined) process.env.CODEX_PATH = '/app/bin/althar-host-codex'
   // The end-to-end tests drive the app against a scripted agent and a fake code host, keeping tokens in memory. Packaged builds leave this out.
+  // A real agent against the fake GitHub, for a test of what a real lead does on a pull request (e2e/real-tools.spec.ts).
+  const fakeHost =
+    __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS !== '1' && process.env.ALTHAR_FAKE_CONNECTORS === 'github'
+      ? {
+          connectors: (yield* Effect.promise(() => import('./fakeConnectors'))).fakeConnectors,
+          secrets: Secrets.memory(),
+        }
+      : undefined
   const fake =
     __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
       ? {
@@ -190,6 +222,9 @@ const program = Effect.gen(function* () {
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
+          // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
+          // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
+          usage: { readEndpoint: () => Promise.resolve(fakePlan(process.env.ALTHAR_FAKE_PLAN)) },
         }
       : undefined
   const context = yield* Layer.build(
@@ -203,6 +238,7 @@ const program = Effect.gen(function* () {
             fetch: appFetch,
             // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
             modelFacts: { url: MODEL_LIST, cache: join(profile, 'model-facts.json'), fetch: appFetch },
+            ...fakeHost,
           }
         : { ...options, ...fake },
     ),
@@ -287,6 +323,9 @@ const allowFolder = (requestId: string, path: string) =>
     ),
   )
 
+/** Whether the computer is online, as the main process reads it (ADR-060): the last said, once the store is open. */
+const tellOnline = (online: boolean) => void ready.then((context) => Effect.runPromise(Context.get(context, Connectivity).set(online)))
+
 parent.on('message', (message) => {
   const data = message.data as {
     readonly type?: string
@@ -295,16 +334,21 @@ parent.on('message', (message) => {
     readonly value?: string
     readonly error?: string
     readonly keyring?: boolean
+    readonly unreadable?: boolean
     readonly threadId?: string
+    readonly shot?: unknown
+    readonly online?: boolean
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
     answerSealed(data.requestId, data)
   }
+  if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
   if (data?.type === 'names' && data.requestId !== undefined) tellNames(data.requestId)
+  if (data?.type === 'online' && typeof data.online === 'boolean') tellOnline(data.online)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
   if (data?.type === 'shutdown') {
     Effect.runFork(Effect.logInfo('Runtime stopping').pipe(Effect.provide(Logger.layer([stdoutLogger]))))

@@ -97,6 +97,14 @@ export const ThreadItemKind = Schema.Literals([
   'push_request',
   /** A review the lead drafted of someone else's pull request, in the task's thread: the person posts it, changes it or discards it there. */
   'review_draft',
+  /**
+   * Changes to issues on the person's trackers, in the thread of whoever
+   * proposed them: a card the person applies or discards, or, applied
+   * already (a comment, a link, or a change the project lets through), a line.
+   */
+  'issue_changes',
+  /** An automation the coordinator proposed or changed, or asks the person to resume or run now, in its thread: the person turns it on there. Althar posts it and keeps it current. */
+  'automation',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -232,6 +240,14 @@ export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'f
 export type IssueDraftState = typeof IssueDraftState.Type
 
 /**
+ * Where changes to issues stand: waiting on the person, being applied,
+ * applied, not all applied (each issue says why; applying again is safe,
+ * since a change made twice changes nothing more), or discarded.
+ */
+export const IssueChangeState = Schema.Literals(['pending', 'applying', 'applied', 'failed', 'discarded'])
+export type IssueChangeState = typeof IssueChangeState.Type
+
+/**
  * Where a review the lead drafted of someone else's pull request stands:
  * waiting on the person, being posted, posted, not posted for a reason the
  * host gave, perhaps posted (its answer was lost, so the pull request is
@@ -239,6 +255,32 @@ export type IssueDraftState = typeof IssueDraftState.Type
  */
 export const ReviewDraftState = Schema.Literals(['pending', 'posting', 'posted', 'failed', 'uncertain', 'discarded'])
 export type ReviewDraftState = typeof ReviewDraftState.Type
+
+/**
+ * Where an automation stands (docs/plans/automations.md): proposed, waiting
+ * for the person to turn it on, which a change they didn't make puts it back
+ * to; on; paused, by the person or by itself; or deleted.
+ */
+export const AutomationState = Schema.Literals(['proposed', 'on', 'paused', 'deleted'])
+export type AutomationState = typeof AutomationState.Type
+
+/** Who paused an automation: the person, or the automation itself, once its runs kept failing. */
+export const AutomationPausedBy = Schema.Literals(['person', 'itself'])
+export type AutomationPausedBy = typeof AutomationPausedBy.Type
+
+/** What made an automation run once: its schedule's time, or the person asking it to run now. */
+export const AutomationOccurrenceCause = Schema.Literals(['schedule', 'now'])
+export type AutomationOccurrenceCause = typeof AutomationOccurrenceCause.Type
+
+/**
+ * One time an automation ran, or didn't: starting (its task being made),
+ * running (its task under way), made something, nothing to do (it found
+ * nothing, so no task), failed, missed (the computer was asleep or Althar closed
+ * past its window), or skipped (paused, busy, its last run still going, or
+ * too many of its pull requests open).
+ */
+export const AutomationOccurrenceState = Schema.Literals(['starting', 'running', 'made', 'nothing', 'failed', 'missed', 'skipped'])
+export type AutomationOccurrenceState = typeof AutomationOccurrenceState.Type
 
 /** What a review says of a pull request as a whole: approve it, ask for changes, or only comment. */
 export const ReviewVerdict = Schema.Literals(['approve', 'changes', 'comment'])
@@ -303,5 +345,8 @@ export const AggregateType = Schema.Literals([
   'conflict_resolution',
   'project_note',
   'review_draft',
+  'issue_change',
+  'automation',
+  'automation_occurrence',
 ])
 export type AggregateType = typeof AggregateType.Type

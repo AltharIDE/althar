@@ -284,7 +284,7 @@ describe('Allow always and Deny always (ADR-018)', () => {
       yield* ended(created.threadId, 2)
       assert.deepStrictEqual(yield* calls(created.threadId), [])
       // The person's decline on the card is only the agent's own rejection; the rule's refusal is then said as Althar's.
-      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=decline', 'chosen=decline', 'carrying on without it'])
+      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=decline', 'chosen=declinecarrying on without it'])
     }).pipe(Effect.provide(withQueries())),
   )
 

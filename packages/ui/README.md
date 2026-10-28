@@ -69,5 +69,6 @@ A new component gets a folder under its layer with the component (`Name.tsx`), i
 ## More
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the principles every component follows, the layers and what may import what, the public API, and the known gaps.
+- [DESIGN.md](../../DESIGN.md): the design taste every screen, word and motion follows. Read it before changing what someone sees.
 - [The repository's engineering standards](../../ARCHITECTURE.md).
 - [The glossary](../../docs/glossary.md): the words the interface uses. Check it before naming anything on screen.

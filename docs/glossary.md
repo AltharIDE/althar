@@ -25,7 +25,10 @@ say the right. When something new needs a name on screen, add it here first.
 | Account | `AgentAccount`, its home | One sign-in of an agent, kept in a folder of its own. The agent's usual sign-in is its first account; the person can add more, or bring in folders a switcher made. Named by the person ("work"), it shows after the agent's name: "Codex (work)". |
 | Signed in as | `ProviderPrincipal` | Who the agent says you are, for an account. The agent keeps its own sign-in; Althar never holds the credential. |
 | Sign in | vendor login, `auth_required` | Opens the agent's own sign-in, for an account. |
-| Out of usage | usage limit, `transient_provider` | The account has used its allowance until a reset. Depending on the project rules, the task is Paused, moves to another of the agent's accounts, then to another agent, or waits on the person, who moves it to a model that is free or waits for the reset. A call for it has the kind Out of usage. |
+| Out of usage | usage limit (`usage_limit`) | The account has used its allowance until a reset. Depending on the project rules, the task is Paused, moves to another of the agent's accounts, then to another agent, or waits on the person, who moves it to a model that is free or waits for the reset. A call for it has the kind Out of usage. |
+| Waiting for the connection | a step held for `agent_unavailable`, after a `transient` failure (ADR-060) | The step lost its connection, offline or its agent's service out of reach: the task is Paused, and carries on by itself once the computer is back and the service answers. While the service answers with errors, it says when it tries again instead; after a few tries, Stuck. Not Stuck, and no reminder is spent. |
+| Offline | the app's reading of the network, `Connectivity` | One word in the window's bar while the computer is offline. Work under way carries on once it is back; new work waits rather than start. |
+| Try again | the person's answer `retry`, on the agent the step was on; `TryAgain` in a chat | On every Stuck call: runs the step's turn again in the session it was in. First where the connection or the session failed. A review's is Review again. Under a coordinator's turn that ended in an error, it sends what the person said again. |
 
 ## Who does the work
 
@@ -61,8 +64,8 @@ say the right. When something new needs a name on screen, add it here first.
 | Queue, "Enter queues it; the lead reads it next" | `after_current` | What you write while the lead works. It waits for the lead's current turn to end. |
 | Send now | `interrupt_and_continue` | Stops the lead's turn to read your message, then it carries on with both. |
 | Interrupt the lead | turn interrupt | The composer's square. Ends the lead's turn; the task stays open. The line in the thread reads "Interrupted by you". |
-| Listening to | `external_links.listening` | Over a task's composer: the pull requests Althar asks for news while it runs, what they last said, and, for a moment, what just came. Stop stops it: nothing said there after reaches the thread or the lead. |
-| Running, Ran | what an agent left running (`LeftRunning`, ADR-022), and Althar's own runs (`Launches`, ADR-023) | Over a task's composer: commands its lead sent to the background, such as a dev server, and what Althar runs of the task itself; over the coordinator's, every run Althar has going in the project, each saying where it runs. Each with where it answers, which opens in your browser. Stop stops one. One that ended by itself says how ("exited 1") until you clear it. What a lead left runs as long as its session does; Althar's runs until you stop it or quit. |
+| Listening to | `external_links.listening` | In the chip over a task's composer: the pull requests Althar asks for news while it runs, what they last said, and, for a moment, what just came. Stop stops it: nothing said there after reaches the thread or the lead. |
+| Running, Ran | what an agent left running (`LeftRunning`, ADR-022), and Althar's own runs (`Launches`, ADR-023) | In the chip over a task's composer, with why it waits and what it listens to: commands its lead sent to the background, such as a dev server, and what Althar runs of the task itself; over the coordinator's, in a pill of its own, every run Althar has going in the project, each saying where it runs. Each with where it answers, which opens in your browser. Stop stops one. One that ended by itself says how ("exited 1") until you clear it; in the task's chip, only one that failed is named, and those that finished well fold away in its list, or, with nothing else to show, are a quiet count that opens them. What a lead left runs as long as its session does; Althar's runs until you stop it or quit. |
 | Run card | a `run` thread item (`RunCard`, ADR-023) | What a run of the project leaves in the thread it was asked for in: where it runs, the command, where it answers, as a link, and how long it has been up, with Stop. It stays once the run is over, saying how it ended, with Run again. |
 | Installing dependencies in meridian…, Installed dependencies in meridian | a `setup` thread item (`Setups.ts`, ADR-023) | A line across a task's thread: Althar setting up the task's worktree before its lead starts, with the install its lockfile names, or "Setting up meridian…" with the setup kept for it. Once it went through, the line goes, and it is a line inside the lead's first round's work (ADR-042). Failed, the end of what it printed stands under it, and the lead is told. Not "bootstrap" or "provision". |
 | Worked 12m · edited 3 files, ran 6 commands; Working · 2m | a round's work (`rounds.ts`, `WorkLine`, ADR-042) | One faint line in a task's thread for all the work of a round, between what its lead says first and what it says last: how long, and what it did, counted. It opens to every step in order, what the lead said on the way among them and the pictures it looked at, small. While the lead works, it says what it is on, in the lead's own last words. A round that said nothing is the line alone, after who worked. Not "turn", "trace" or "log" on screen. |
@@ -97,6 +100,21 @@ say the right. When something new needs a name on screen, add it here first.
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
+## Automations
+
+| On screen | In the model | What it is |
+|---|---|---|
+| Automations | `Room.Automations`, `automations` (ADR-061) | A project's view between Board and Settings: the work that starts by itself on a schedule, on this computer while Althar is open, as cards, the one that paused itself first, with a violet dot on the view's name. A card opens its automation's own page there. |
+| Automation | an automation and its definitions | A kept request and a schedule: what each run is asked, its lead, what it ends in (nothing outside this computer, a draft or ready pull request, or a review of each new pull request), when it runs (days at a time where the computer is, or every hour), and its limits. Made by asking the coordinator, on its card, or with New automation. |
+| Run, Runs, Run now | an automation's occurrence, and the task it started | One time an automation ran, or didn't: made something, nothing to do, failed, missed while the computer slept, or skipped and why. Its page lists them, its card shows the last seven as marks. The one place "run" is said on screen. Run now runs it once, with every limit a run has. |
+| Try it once now | `RunAutomationNow` on a proposed automation | On an automation not turned on yet: one run as it would run. |
+| Turn on, Off until you turn it on | `TurnOnAutomation`, an automation `proposed` | Nothing of an automation runs until the person turns it on. A change the coordinator makes that reaches further than before puts it back to waiting for them. |
+| Paused, Paused itself | `paused_by` the person, or itself | The switch on its page pauses it; nothing of it starts until it is on again, and a run under way finishes. After three failures in a row it pauses itself and says why, violet. |
+| Pause all automations | the `automations_paused` setting | In Settings and the Automations view's menu: nothing of any automation starts until they are resumed; runs under way finish. |
+| Post this automation's reviews from now on | `posts_reviews` | On an automation's first review draft, beside Post: posts it, and lets its next reviews post themselves; on its page, a switch. A pull request from outside the team always waits. |
+| Open Althar at login | the desktop's `openAtLogin` preference | Offered on the Automations view while it is off, and in Settings: Althar opens with no window when the computer starts, so automations run after a restart. |
+| From Althar's morning review | a review or pull request signed with the automation's name | How what an automation's run posts on the code host is signed, by the automation and the agent that wrote it. |
+
 ## Updates
 
 | On screen | In the model | What it is |
@@ -125,7 +143,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Findings | review findings | What a review step found. By default the lead settles them. |
 | Artifacts | artifacts | What a task wrote that is worth keeping and isn't in a repository. |
 | Screenshots, Image | artifact of kind `image` | Pictures an agent hands back, under what it said, full size on a click. One without a name is "Image 1". |
-| Add images, Drop to add them to your message | `user_input_images`, artifacts of kind `image` | Images you send with a message: dropped on the composer, pasted, or picked with Add images; shown small above what you write, each with Remove, and above your message once sent. PNG, JPEG, GIF or WebP, up to ten a message; one wider than 2000 pixels or over 5 MB is made smaller first. An agent that doesn't take images gets none: the composer says so. One copied with no name is "Pasted image". |
+| Add files, Drop to add to your message | `user_input_images`, artifacts of kind `image`; `user_input_files`, `.althar/attachments` | Images, files and folders you send with a message: dropped on the composer, pasted (a file copied in the file manager too), or picked with Add files; shown above what you write, an image small and anything else as a chip with its size, each with Remove, and above your message once sent. Images are PNG, JPEG, GIF or WebP, up to ten a message; one wider than 2000 pixels or over 5 MB is made smaller first. An agent that doesn't take images gets an image as a file where there is one behind it, else none: the composer says so. One copied with no name is "Pasted image". Files and folders go up to ten a message, each up to 50 MB (a folder, 2,000 files), copied into the task's or the coordinator's folder for the agent to open (ADR-064). |
 | Document | a markdown file an agent wrote or pointed at | Its card stands under what it said; "Read in the panel" opens it beside the thread, as it is now in the worktree. |
 | Output | artifact of kind `log` | What a command printed, in its tool call: its last lines, "N earlier lines" a click away. |
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |
@@ -149,13 +167,14 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Althar 0.1.1 is ready, Restart | an update Squirrel has in place (`main/updates.ts`) | A newer Althar, downloaded in the background, said in one quiet line in the window's bar and in Settings' About Althar. Restart is there only while no work runs; otherwise the line says it installs when you quit. Checking and downloading never show. |
 | Check for Updates… | `checkNow` | In the app menu: looks now, and says in a dialog what it found. |
 | What's new | a release's notes | In the quick settings' foot and Settings' About Althar, beside the version: that version's GitHub Release, in the browser. |
-| Light or dark: Light, Dark, Match the system | the `appearance` preference, `light`, `dark` or `system` (ADR-055) | In Settings › Appearance: Althar light, dark, or turning with the system, said in each system's words: Match the Mac, Match the PC (Windows), Match the computer (Linux). It starts matching the system. |
-| CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
+| Light or dark: Light, Dark, Match the system | the `appearance` preference, `light`, `dark` or `system` (ADR-055) | In Settings › Appearance: Althar light, dark, or turning with the system, said in each system's words: Match the Mac, Match the PC (Windows), Match the computer (Linux). It starts light; Match the system is for whoever picks it. |
+| CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses, and Althar itself. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
 
 ## Words the interface doesn't use
 
-Worker, session, run, attempt, node, graph patch, compensation, attention
-request, canonical, episodic, binding and failed. Each has an entry above.
+Worker, session, run (but an automation's, above), attempt, node, graph
+patch, compensation, attention request, canonical, episodic, binding and
+failed. Each has an entry above.
 If one of them turns up on screen, treat it as a bug.
 
 ## Still to align

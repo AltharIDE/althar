@@ -5,7 +5,8 @@
  * key holds reads as where it starts. Settings reads and changes them
  * through the main process, which is where they take effect: keeping the
  * Mac awake while work runs, which notifications show, the Dock's count and
- * a sound, and whether anonymous usage data is sent. Which editor files
+ * a sound, whether anonymous usage data is sent, and whether Althar opens at
+ * login. Which editor files
  * open in, and whether the bar shows how hard the computer works, are the
  * window's to use. Nothing here touches Node, so the window may read the
  * defaults and keys too.
@@ -34,7 +35,7 @@ const editor: Kind<string | null> = {
 export type Appearance = 'light' | 'dark' | 'system'
 
 const appearance: Kind<Appearance> = {
-  starts: 'system',
+  starts: 'light',
   holds: (value): value is Appearance => value === 'light' || value === 'dark' || value === 'system',
 }
 
@@ -65,6 +66,8 @@ export const PREFERENCES = {
   crashReports: onOff(true),
   /** Light or dark, or as the system is. The main process sets Electron's nativeTheme by it, and the windows follow the scheme that gives. */
   appearance,
+  /** Althar opens at login, in the background, with no window, so automations run after a restart (loginItem.ts). */
+  openAtLogin: onOff(false),
 } as const
 
 type Kinds = typeof PREFERENCES

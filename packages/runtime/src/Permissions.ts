@@ -22,6 +22,7 @@ import { Instance } from './Instance'
 import { Live } from './Live'
 import { PermissionJudge } from './PermissionJudge'
 import { Policies, type Remembered, ruleSetOf } from './Policies'
+import { runRules } from './automated'
 import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import {
@@ -70,11 +71,19 @@ export interface RequestContext {
    * A task's lead works under the project rules; a role that only reads,
    * under the reader's rules, which never ask: `offline`, as the lead of a
    * review of a pull request from outside is, with no fetch allowed either;
-   * `cwd`, the folder a reader works in, which the paths it names are read from.
+   * `cwd`, the folder a reader works in, which the paths it names are read from;
+   * `trusted`, the coordinator in its own copies (ADR-058), never a review's lead;
+   * `reads`, where a trusted reader's own tools for reading may reach.
    */
   readonly rules:
     | { readonly role: 'task'; readonly context: RuleContext }
-    | { readonly role: 'reader'; readonly offline?: boolean; readonly cwd?: string }
+    | {
+        readonly role: 'reader'
+        readonly offline?: boolean
+        readonly cwd?: string
+        readonly trusted?: boolean
+        readonly reads?: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
+      }
 }
 
 interface Waiting {
@@ -301,7 +310,10 @@ export class Permissions extends Context.Service<
       /**
        * The rules a task's requests are decided by now, and the revision they
        * are: its project's, everything allowed where the task itself allows
-       * everything (ADR-043). A change the person makes applies to the next request.
+       * everything (ADR-043). An automation's run (docs/plans/automations.md)
+       * allows everything where its automation says, and never pushes to the
+       * default branch, which no switch goes past. A change the person makes
+       * applies to the next request.
        */
       const rulesNow = (projectId: ProjectId, taskId: string | null) =>
         Effect.gen(function* () {
@@ -309,7 +321,16 @@ export class Permissions extends Context.Service<
           const policy = yield* policies.current(projectId)
           const project = ruleSetOf(policy.rules)
           const [task] =
-            taskId === null ? [] : yield* sql<{ allowEverything: number }>`SELECT allow_everything FROM tasks WHERE id = ${taskId}`
+            taskId === null
+              ? []
+              : yield* sql<{ allowEverything: number; automated: number | null }>`
+                  SELECT k.allow_everything,
+                    (SELECT json_extract(d.parts, '$.allowEverything') FROM automation_occurrences o
+                      JOIN automation_definitions d ON d.automation_id = o.automation_id AND d.number = o.definition
+                      WHERE o.task_id = k.id LIMIT 1) AS automated
+                  FROM tasks k WHERE k.id = ${taskId}`
+          if (task !== undefined && task.automated !== null)
+            return { policy, project: runRules(project, task.automated === 1 || task.allowEverything === 1) }
           return { policy, project: task?.allowEverything === 1 ? { ...project, mode: 'allow' as const } : project }
         })
 
@@ -453,14 +474,16 @@ export class Permissions extends Context.Service<
                   ...(judgment.decision === 'deny' ? { decidedBy: 'coordinator' as const } : {}),
                 }
                 yield* recordDecision({ context: requestContext, request, requestId, digest, decision, actorId: instance.coordinatorId })
-                yield* addItem(requestContext, 'notice', {
-                  source: 'runtime',
-                  severity: 'info',
-                  about: 'permission',
-                  requestId,
-                  title: `${judgment.decision === 'allow' ? 'Allowed' : 'Denied'} ${receiptLine(request.title, 120)}`,
-                  description: receiptLine(`By the coordinator: ${judgment.reason}`),
-                })
+                // A denial is read on the refused call's own row, so it gets no receipt of its own.
+                if (judgment.decision === 'allow')
+                  yield* addItem(requestContext, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    about: 'permission',
+                    requestId,
+                    title: `Allowed ${receiptLine(request.title, 120)}`,
+                    description: receiptLine(`By the coordinator: ${judgment.reason}`),
+                  })
                 return { decision }
               }
               // Left to the person: not held, so their card offers the always answers, and an allow rule they keep answers next time first.
@@ -515,8 +538,13 @@ export class Permissions extends Context.Service<
             )
             // A role that only reads is answered at once: allowed, or refused with a reason it reads.
             if (requestContext.rules.role === 'reader') {
-              const { offline, cwd } = requestContext.rules
-              const read = decideReader(request, { offline: offline === true, ...(cwd === undefined ? {} : { cwd }) })
+              const { offline, cwd, trusted, reads } = requestContext.rules
+              const read = decideReader(request, {
+                offline: offline === true,
+                ...(cwd === undefined ? {} : { cwd }),
+                ...(trusted === true ? { trusted } : {}),
+                ...(reads === undefined ? {} : { reads }),
+              })
               const decision: PermissionDecision =
                 read.verdict === 'allow'
                   ? { decision: 'allow', reason: 'This role may do this.' }

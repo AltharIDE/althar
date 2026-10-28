@@ -11,7 +11,29 @@ import type { Machine } from './atOnce'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
+import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
+
+/** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
+export interface Shot {
+  readonly url: string
+  readonly width: number
+  readonly height: number
+  /** The whole page, as tall as it is, not only what the viewport shows. */
+  readonly fullPage: boolean
+  /** A CSS selector: only the first element it finds. */
+  readonly selector: string | null
+  /** The origins of Althar's runs it may be of beside this computer's: a page it goes on to, by a redirect or itself, must be at one of them too (screenshots.ts, mayDraw). */
+  readonly origins: ReadonlyArray<string>
+}
+
+/** A screenshot taken: a PNG at 1×, as base64, its size, and the page's title. */
+export interface Screenshot {
+  readonly png: string
+  readonly width: number
+  readonly height: number
+  readonly title: string
+}
 
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
@@ -40,6 +62,12 @@ export interface RuntimeOptions {
   readonly probeRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
+  /**
+   * Takes a screenshot, headless, where something can draw a page: the
+   * desktop app's main process, with Chromium. It fails with why, in words
+   * for the agent. Without it, the screenshot tool says this Althar can't.
+   */
+  readonly screenshot?: (shot: Shot) => Effect.Effect<Screenshot, string>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */
@@ -91,12 +119,44 @@ export interface RuntimeOptions {
   readonly agentStderr?: AgentStderr
   /** How this computer's load is read, and how often at most (`MachineLoad.ts`). */
   readonly load?: LoadOptions
+  /** How plan usage is read from each agent, and how often on its own (`PlanUsage.ts`). */
+  readonly usage?: PlanUsageOptions
   /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
   readonly setups?: SetupOptions
   /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't (`leftRunning.ts`, `conflicts.ts`). */
   readonly idle?: IdleOptions
   /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
   readonly busy?: BusyOptions
+  /** When automations run, and the clock and zone they are read by (`Automations.ts`). */
+  readonly automations?: AutomationOptions
+  /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
+  readonly connectivity?: ConnectivityOptions
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface AutomationOptions {
+  /** The time now, in epoch milliseconds: the wall clock's. */
+  readonly now?: () => number
+  /** The zone the computer is in now: its clock's. */
+  readonly zone?: () => string
+  /** How often the clock is looked at, besides whenever an automation changes: every 30 seconds. */
+  readonly tick?: Duration.Duration
+  /** How long a run the computer slept through, or Althar was closed for, waits after waking or launching: two minutes. */
+  readonly settle?: Duration.Duration
+  /** Whether each automation starts its few minutes after its time: yes. */
+  readonly stagger?: boolean
+  /** Pull requests a review automation lists at a time, reading back from the latest: 100, as many as GitHub gives at once. */
+  readonly listed?: number
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface ConnectivityOptions {
+  /** Whether a service answers at its address: whether a light request there gets any answer within five seconds. */
+  readonly answers?: (url: string) => Effect.Effect<boolean>
+  /** How long a step waits before each try again at a service that keeps failing while the computer is online: 15 s, 1 min, 4 min. */
+  readonly pauses?: ReadonlyArray<Duration.Duration>
+  /** How often a step waiting for the connection asks again whether its service answers, while the computer says it is online: 30 s. */
+  readonly every?: Duration.Duration
 }
 
 /** Each is the default unless a test says otherwise. */
@@ -124,6 +184,8 @@ export interface BusyOptions {
   readonly quiet?: Duration.Duration
   /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
   readonly askGrace?: Duration.Duration
+  /** How many automations' tasks may be at work at once: one. */
+  readonly automations?: number
   /**
    * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
    * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:

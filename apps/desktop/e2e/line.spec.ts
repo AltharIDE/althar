@@ -177,20 +177,21 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
       .nth(3)
       .getByRole('button', { name: `Review #3: ${PULLS[2] ?? ''}`, exact: true })
       .click()
-    const front = page.getByRole('button', { name: 'Move to the front of the line' })
-    await expect(front).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: /^Waiting for a place/ }).click({ timeout: 15_000 })
+    const behind = page.getByRole('dialog', { name: 'Behind this task' })
+    const front = behind.getByRole('button', { name: 'Move to the front of the line' })
+    await expect(front).toBeVisible()
     await page.waitForTimeout(300)
-    await front.locator('xpath=../..').screenshot({ path: 'test-results/line-task.png', scale: 'css', animations: 'disabled' })
+    await behind.screenshot({ path: 'test-results/line-task.png', scale: 'css', animations: 'disabled' })
     await front.click()
     await expect(front).toHaveCount(0)
 
     // The place frees: the line starts in the person's order, the review they put first (which reads in a turn), then the quick
     // task, which keeps the place; the two older reviews wait on, oldest first.
-    await page
-      .getByRole('button', { name: /^Keeping a place/ })
+    await behind
+      .getByRole('button', { name: /^Stop what/ })
       .first()
       .click()
-    await page.getByRole('dialog', { name: 'Keeping a place' }).getByRole('button', { name: /^Stop/ }).click()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
     await expect(running.getByRole('button', { name: `Review #3: ${PULLS[2] ?? ''}`, exact: true })).toBeVisible({ timeout: 20_000 })

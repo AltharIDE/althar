@@ -31,6 +31,8 @@ const issue = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+const organization = { name: 'Meridian', urlKey: 'meridian' }
+
 describe('Linear', () => {
   it('reads a state’s type as a category', () => {
     assert.deepStrictEqual(['triage', 'backlog', 'unstarted', 'started', 'completed', 'canceled', 'other'].map(categoryOf), [
@@ -46,16 +48,42 @@ describe('Linear', () => {
 
   it.effect('sends a personal key as it is, and an OAuth token as a bearer', () =>
     Effect.gen(function* () {
-      const viewer: Route = ['POST', URL, { json: { data: { viewer: { id: 'u1', name: 'You Person', displayName: 'you' } } } }]
+      const viewer: Route = [
+        'POST',
+        URL,
+        { json: { data: { viewer: { id: 'u1', name: 'You Person', displayName: 'you' }, organization } } },
+      ]
       const key = linear([viewer])
-      assert.deepStrictEqual(yield* key.tracker.account, { id: 'u1', login: 'you', name: 'You Person' })
+      assert.deepStrictEqual(yield* key.tracker.account, {
+        id: 'u1',
+        login: 'you',
+        name: 'You Person',
+        workspace: { key: 'meridian', name: 'Meridian' },
+      })
       assert.strictEqual(key.sent[0]?.headers.authorization, 'lin_api_k')
-      const oauth = linear([['POST', URL, { json: { data: { viewer: { id: 'u1', name: 'You Person' } } } }]], {
+      const oauth = linear([['POST', URL, { json: { data: { viewer: { id: 'u1', name: 'You Person' }, organization } } }]], {
         kind: 'bearer',
         token: 'oauth',
       })
       assert.strictEqual((yield* oauth.tracker.account).login, 'You Person')
       assert.strictEqual(oauth.sent[0]?.headers.authorization, 'Bearer oauth')
+    }),
+  )
+
+  it.effect('reads the one workspace a token reaches, by the key its links carry', () =>
+    Effect.gen(function* () {
+      const fnt = linear([
+        [
+          'POST',
+          URL,
+          { json: { data: { viewer: { id: 'u9', name: 'Mate', displayName: 'mate' }, organization: { name: 'FNT', urlKey: 'fnt' } } } },
+        ],
+      ])
+      assert.deepStrictEqual((yield* fnt.tracker.account).workspace, { key: 'fnt', name: 'FNT' })
+      assert.match(JSON.stringify(fnt.sent[0]?.body), /organization \{ name urlKey \}/)
+      // An answer without its workspace isn't one Althar can tell apart from another's.
+      const bare = linear([['POST', URL, { json: { data: { viewer: { id: 'u9', name: 'Mate' } } } }]])
+      assert.strictEqual((yield* Effect.flip(bare.tracker.account)).reason, 'invalid_response')
     }),
   )
 
@@ -180,6 +208,42 @@ describe('Linear', () => {
         { issueId: 'uuid-231', url: 'https://github.com/meridian/api/pull/12', title: 'PR #12' },
       ])
       assert.isTrue(tracker.capabilities.links)
+    }),
+  )
+
+  it.effect('refuses a comment or a link Linear says it didn’t take, never taking it as done', () =>
+    Effect.gen(function* () {
+      const { tracker } = linear([
+        [
+          'POST',
+          URL,
+          (request) => ({
+            json: {
+              data: String((request.body as { query: string }).query).includes('commentCreate')
+                ? { commentCreate: { success: false } }
+                : { attachmentLinkURL: { success: false } },
+            },
+          }),
+        ],
+      ])
+      const found = {
+        id: 'uuid-231',
+        ref: 'MER-231',
+        key: 'MER-231',
+        title: 't',
+        body: '',
+        url: '',
+        status: { name: 'Todo', category: 'todo' as const },
+        priority: null,
+        assignees: [],
+        labels: [],
+        container: null,
+        updatedAt: '',
+      }
+      const commented = yield* Effect.flip(tracker.comment(found, 'Picked up'))
+      assert.deepInclude(commented, { reason: 'rejected', message: 'Linear did not post the comment' })
+      const linked = yield* Effect.flip(tracker.link(found, { url: 'https://github.com/meridian/api/pull/12', title: 'PR #12' }))
+      assert.deepInclude(linked, { reason: 'rejected', message: 'Linear did not link it' })
     }),
   )
 
@@ -464,6 +528,233 @@ describe('Linear', () => {
       const failing = linear([['POST', URL, { status: 500, json: { errors: [{ message: 'Internal error' }] } }]])
       yield* Effect.flip(failing.tracker.create('team-mer', { title: 'A title', body: '', labels: ['payments'] }))
       assert.lengthOf(failing.sent, 1)
+    }),
+  )
+
+  describe('changing an issue', () => {
+    const found = {
+      id: 'uuid-231',
+      ref: 'MER-231',
+      key: 'MER-231',
+      title: 'Rate-limit refunds like charges',
+      body: '',
+      url: 'https://linear.app/meridian/issue/MER-231',
+      status: { name: 'In Progress', category: 'started' as const },
+      priority: { level: 'high' as const, name: 'High' },
+      assignees: [],
+      labels: ['payments'],
+      container: 'Meridian',
+      updatedAt: '2026-10-01T08:00:00.000Z',
+    }
+    const queryOf = (request: { readonly body: unknown }) => String((request.body as { query: string }).query)
+    const team = (items: ReadonlyArray<Record<string, unknown>>, next?: string) => ({
+      json: {
+        data: {
+          issue: {
+            team: {
+              id: 'team-mer',
+              items: { nodes: items, pageInfo: next === undefined ? { hasNextPage: false } : { hasNextPage: true, endCursor: next } },
+            },
+          },
+        },
+      },
+    })
+    const states = [
+      { id: 'state-done', name: 'Done', type: 'completed', position: 4 },
+      { id: 'state-todo', name: 'Todo', type: 'unstarted', position: 1 },
+      { id: 'state-review', name: 'In Review', type: 'started', position: 3 },
+      { id: 'state-progress', name: 'In Progress', type: 'started', position: 2 },
+      { id: 'state-shipped', name: 'Shipped', type: 'completed', position: 5 },
+    ]
+
+    it('says it changes every field the model has', () => {
+      const { tracker } = linear([])
+      assert.deepStrictEqual(tracker.capabilities.changes, ['status', 'close', 'priority', 'assignee', 'labels', 'project', 'title'])
+    })
+
+    it.effect('lists its team’s states in their order on the board, its people still active, its projects and its labels', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([
+          [
+            'POST',
+            URL,
+            (request) =>
+              queryOf(request).includes('issueLabels')
+                ? {
+                    json: {
+                      data: {
+                        issueLabels: {
+                          nodes: [
+                            { id: 'label-bug', name: 'Bug' },
+                            { id: 'label-area', name: 'Area', isGroup: true },
+                          ],
+                          pageInfo: { hasNextPage: false },
+                        },
+                      },
+                    },
+                  }
+                : queryOf(request).includes('states(')
+                  ? team(states)
+                  : queryOf(request).includes('members(')
+                    ? team([
+                        { id: 'u1', name: 'You Person', displayName: 'you', email: 'you@meridian.dev', active: true },
+                        { id: 'u2', name: 'Gone Person', displayName: 'gone', active: false },
+                      ])
+                    : team([{ id: 'project-q4', name: 'Q4 launch' }]),
+          ],
+        ])
+        assert.deepStrictEqual(
+          (yield* tracker.choices(found, 'status')).map((one) => one.name),
+          ['Todo', 'In Progress', 'In Review', 'Done', 'Shipped'],
+        )
+        assert.deepStrictEqual(yield* tracker.choices(found, 'assignee'), [
+          { id: 'u1', name: 'You Person', also: ['you', 'you@meridian.dev'] },
+        ])
+        assert.deepStrictEqual(yield* tracker.choices(found, 'project'), [{ id: 'project-q4', name: 'Q4 launch' }])
+        // Its team's labels and the workspace's: a group holds labels, and takes none.
+        assert.deepStrictEqual(yield* tracker.choices(found, 'labels'), [{ id: 'label-bug', name: 'Bug' }])
+        assert.deepStrictEqual(variablesOf(sent[0]), { id: 'uuid-231', after: null })
+        assert.deepStrictEqual(variablesOf(sent.at(-1)), { teamId: 'team-mer', after: null })
+      }),
+    )
+
+    it.effect('reads its team’s people and projects page by page, so one past the first page is there', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([
+          [
+            'POST',
+            URL,
+            (request) => {
+              const after = (variablesOf(request) as { after?: string | null }).after ?? null
+              if (queryOf(request).includes('members('))
+                return after === null
+                  ? team([{ id: 'u1', name: 'You Person', active: true }], 'cursor-1')
+                  : team([{ id: 'u251', name: 'Ana Ruiz', displayName: 'ana', active: true }])
+              return after === null ? team([{ id: 'project-q4', name: 'Q4 launch' }], 'cursor-1') : team([{ id: 'project-q5', name: 'Q5' }])
+            },
+          ],
+        ])
+        assert.deepStrictEqual(
+          (yield* tracker.choices(found, 'assignee')).map((one) => one.name),
+          ['You Person', 'Ana Ruiz'],
+        )
+        assert.deepStrictEqual(
+          (yield* tracker.choices(found, 'project')).map((one) => one.name),
+          ['Q4 launch', 'Q5'],
+        )
+        assert.deepStrictEqual(sent.map(variablesOf), [
+          { id: 'uuid-231', after: null },
+          { id: 'uuid-231', after: 'cursor-1' },
+          { id: 'uuid-231', after: null },
+          { id: 'uuid-231', after: 'cursor-1' },
+        ])
+      }),
+    )
+
+    it.effect('changes every field at once, by Linear’s own ids, and reads the issue as Linear answers', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([
+          [
+            'POST',
+            URL,
+            {
+              json: {
+                data: {
+                  issueUpdate: {
+                    success: true,
+                    issue: issue({
+                      state: { name: 'In Review', type: 'started' },
+                      priority: 4,
+                      priorityLabel: 'Low',
+                      title: 'Refunds, rate-limited',
+                    }),
+                  },
+                },
+              },
+            },
+          ],
+        ])
+        const changed = yield* tracker.update(found, {
+          status: { id: 'state-review', name: 'In Review' },
+          priority: 'low',
+          assignee: null,
+          labels: { add: [{ id: 'label-bug', name: 'Bug' }], remove: [{ id: 'label-payments', name: 'payments' }] },
+          project: { id: 'project-q4', name: 'Q4 launch' },
+          title: 'Refunds, rate-limited',
+        })
+        assert.deepStrictEqual(
+          [changed.status, changed.priority, changed.title],
+          [{ name: 'In Review', category: 'started' }, { level: 'low', name: 'Low' }, 'Refunds, rate-limited'],
+        )
+        assert.lengthOf(sent, 1)
+        assert.deepStrictEqual(variablesOf(sent[0]), {
+          id: 'uuid-231',
+          input: {
+            title: 'Refunds, rate-limited',
+            stateId: 'state-review',
+            priority: 4,
+            assigneeId: null,
+            projectId: 'project-q4',
+            addedLabelIds: ['label-bug'],
+            removedLabelIds: ['label-payments'],
+          },
+        })
+      }),
+    )
+
+    it.effect('closes it into its team’s first completed state on the board, and takes no priority as 0', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([
+          [
+            'POST',
+            URL,
+            (request) =>
+              queryOf(request).includes('states(')
+                ? team(states)
+                : { json: { data: { issueUpdate: { success: true, issue: issue({ state: { name: 'Done', type: 'completed' } }) } } } },
+          ],
+        ])
+        const closed = yield* tracker.update(found, { close: true, priority: 'none' })
+        assert.deepStrictEqual(closed.status, { name: 'Done', category: 'done' })
+        assert.deepStrictEqual(variablesOf(sent[1]), { id: 'uuid-231', input: { stateId: 'state-done', priority: 0 } })
+      }),
+    )
+
+    it.effect('reads it again where Linear changed it without saying how it stands, and fails where it didn’t change it', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([
+          [
+            'POST',
+            URL,
+            (request) =>
+              queryOf(request).includes('issueUpdate')
+                ? { json: { data: { issueUpdate: { success: true, issue: null } } } }
+                : { json: { data: { issue: issue({ title: 'Retitled' }) } } },
+          ],
+        ])
+        assert.strictEqual((yield* tracker.update(found, { title: 'Retitled' })).title, 'Retitled')
+        assert.deepStrictEqual(variablesOf(sent[1]), { id: 'MER-231' })
+        const refusing = linear([['POST', URL, { json: { data: { issueUpdate: { success: false } } } }]])
+        const refused = yield* Effect.flip(refusing.tracker.update(found, { title: 'Retitled' }))
+        assert.deepStrictEqual([refused.reason, refused.message], ['rejected', 'Linear did not change it'])
+        // A team with no completed state has nowhere to close it into: nothing is changed.
+        const open = linear([['POST', URL, team(states.filter((state) => state.type !== 'completed'))]])
+        assert.strictEqual((yield* Effect.flip(open.tracker.update(found, { close: true }))).message, 'Its team has no completed state')
+        assert.lengthOf(open.sent, 1)
+      }),
+    )
+  })
+
+  it.effect('files an issue with a priority, as Linear numbers it, and none for no priority', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([
+        ['POST', URL, { json: { data: { issueCreate: { success: true, issue: issue({ priority: 4, priorityLabel: 'Low' }) } } } }],
+      ])
+      const filed = yield* tracker.create('team-mer', { title: 'A title', body: '', labels: [], priority: 'low' })
+      assert.deepStrictEqual(filed.priority, { level: 'low', name: 'Low' })
+      assert.deepStrictEqual(variablesOf(sent[0]), { input: { teamId: 'team-mer', title: 'A title', description: '', priority: 4 } })
+      yield* tracker.create('team-mer', { title: 'A title', body: '', labels: [], priority: 'none' })
+      assert.deepStrictEqual(variablesOf(sent[1]), { input: { teamId: 'team-mer', title: 'A title', description: '' } })
     }),
   )
 })

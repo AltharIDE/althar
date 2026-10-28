@@ -316,6 +316,41 @@ export const DiscardedFromTheCard: Story = {
   },
 }
 
+/**
+ * An automation's first review waits for you, as any does; beside Post, the
+ * one way to let its next reviews post themselves. It needs a verdict too.
+ */
+export const AnAutomationsFirst: Story = {
+  args: { outside: undefined, onPostFromNow: fn() },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Post this automation’s reviews from now on' }))
+    await expect(args.onPostFromNow).toHaveBeenCalled()
+    await expect(args.onPost).not.toHaveBeenCalled()
+  },
+}
+
+/** With no verdict chosen, posting from now on asks for one first, as Post does. */
+export const AnAutomationsFirstWithNoVerdict: Story = {
+  args: { outside: undefined, verdict: null, onPostFromNow: fn() },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Post this automation’s reviews from now on' }))
+    await expect(c.getByText('Choose a verdict first')).toBeInTheDocument()
+    await expect(args.onPostFromNow).not.toHaveBeenCalled()
+  },
+}
+
+/** Once it is on its way or failed, only posting it again is offered. */
+export const AnAutomationsPosting: Story = {
+  args: { outside: undefined, state: ReviewDraftState.Failed, onPostFromNow: fn() },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByRole('button', { name: 'Post this automation’s reviews from now on' })).toBeNull()
+    await expect(c.getByRole('button', { name: 'Post again' })).toBeInTheDocument()
+  },
+}
+
 /** Where a draft comes from: the lead's words, then its card. */
 export const InTheConversation: Story = {
   render: (args) => (
@@ -344,6 +379,7 @@ export const AllStates: Story = {
           node: <ReviewDraft {...args} comments={args.comments.map((comment) => ({ ...comment, kept: comment.id !== 'c3' }))} />,
         },
         { state: 'no comments, a team’s', node: <ReviewDraft {...args} comments={[]} outside={undefined} /> },
+        { state: 'an automation’s first', node: <ReviewDraft {...args} outside={undefined} onPostFromNow={() => {}} /> },
         { state: 'hover', node: <ReviewDraft {...args} /> },
         { state: 'focus', node: <ReviewDraft {...args} /> },
         { state: 'pressed', node: <ReviewDraft {...args} /> },

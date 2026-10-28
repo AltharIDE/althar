@@ -149,7 +149,7 @@ describe('the edge', () => {
     const stalled = await screen.findByRole('article', { name: 'Spike the cache' })
     expect(
       within(stalled).getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       ),
     ).toBeTruthy()
     expect(within(screen.getByRole('article', { name: 'Name the limits better' })).getByText(/#1191 · .+ · \+212 −41$/)).toBeTruthy()
@@ -313,7 +313,12 @@ describe('the edge’s reads', () => {
     vi.useFakeTimers()
     try {
       const listeners: Array<(event: WatchEvent) => void> = []
-      const feed: Feed = { listen: (listener) => (listeners.push(listener), () => {}), rewatched: () => () => {}, stop: () => {} }
+      const feed: Feed = {
+        listen: (listener) => (listeners.push(listener), () => {}),
+        rewatched: () => () => {},
+        remembered: () => 0,
+        stop: () => {},
+      }
       const cache = new QueryClient()
       const invalidate = vi.spyOn(cache, 'invalidateQueries')
       followEdge(feed, cache)

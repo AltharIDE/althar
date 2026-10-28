@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url'
+
 import * as acp from '@agentclientprotocol/sdk'
 import type { ToolKind } from '@althar/domain'
 import { Cause, Data, DateTime, Deferred, Duration, Effect, Exit, Option, PubSub, Queue, Ref, Scope, Stream } from 'effect'
@@ -150,6 +152,8 @@ export interface AgentInfo {
   readonly authMethods: ReadonlyArray<string>
   /** It takes images in a prompt (ACP's `promptCapabilities.image`); without it, a prompt is text only. */
   readonly images: boolean
+  /** It takes a file's words in a prompt (ACP's `promptCapabilities.embeddedContext`); without it, a file goes as a link alone. */
+  readonly embeddedContext: boolean
 }
 
 /** An image sent in a prompt, after its text: its bytes in base64, and what they are. */
@@ -157,6 +161,63 @@ export interface PromptImage {
   readonly data: string
   readonly mimeType: string
 }
+
+/**
+ * A file or folder sent in a prompt, after its text, by its path on this
+ * computer: the agent opens it with its own tools. A text file's words, where
+ * the caller read them, go in the prompt too, to an agent that takes them.
+ */
+export interface PromptFile {
+  readonly path: string
+  readonly name: string
+  readonly mimeType: string | null
+  readonly bytes: number
+  readonly folder: boolean
+  /** Its words, for a small text file. */
+  readonly text?: string
+}
+
+/** What goes after a prompt's text, in order. */
+export type PromptPart = PromptImage | PromptFile
+
+/** A folder's media type, as a link to it says. */
+const FOLDER_TYPE = 'inode/directory'
+
+/**
+ * A prompt's blocks: its text, then what goes with it, in order. An image
+ * goes only to an agent that takes images (ACP's baseline is text), and the
+ * caller says what became of it otherwise. A file or folder goes to every
+ * agent as a `resource_link` to its `file://` address, which ACP has every
+ * agent take, for it to open: Claude Code and Codex both show it to the model
+ * as `[@name](file:///…)`. A small text file goes as a `resource` with its
+ * words instead, to an agent that takes them: Claude Code puts the words at
+ * the end of the message, and Codex under the link, each as a `<context>`
+ * with the address. Never a file's bytes as a `blob`: Claude Code drops one,
+ * and Codex pastes it in as base64.
+ */
+export const promptBlocks = (
+  text: string,
+  parts: ReadonlyArray<PromptPart>,
+  takes: Pick<AgentInfo, 'images' | 'embeddedContext'>,
+): Array<acp.ContentBlock> => [
+  { type: 'text', text },
+  ...parts.flatMap((part): ReadonlyArray<acp.ContentBlock> => {
+    if (!('path' in part)) return takes.images ? [{ type: 'image', data: part.data, mimeType: part.mimeType }] : []
+    const uri = pathToFileURL(part.path).href
+    const mimeType = part.folder ? FOLDER_TYPE : (part.mimeType ?? undefined)
+    if (part.text !== undefined && !part.folder && takes.embeddedContext)
+      return [{ type: 'resource', resource: { uri, text: part.text, ...(mimeType === undefined ? {} : { mimeType }) } }]
+    return [
+      {
+        type: 'resource_link',
+        uri,
+        name: part.name,
+        ...(mimeType === undefined ? {} : { mimeType }),
+        ...(part.folder ? {} : { size: part.bytes }),
+      },
+    ]
+  }),
+]
 
 /** An MCP server a session may use. Althar gives every session its own tools this way. */
 export type McpServer =
@@ -206,15 +267,15 @@ export interface AgentSession {
    * Sends a prompt and streams the turn, ending with `TurnEnded`. One turn
    * runs at a time: a prompt while one is running fails with
    * `TurnInProgress`. A turn reads to its own end even if the stream is
-   * stopped early, so nothing it says reaches a later turn. Images go after
-   * the text, in their order, only to an agent that takes them
-   * (`AgentInfo.images`): the caller says what became of any it can't.
-   * `started` runs once the prompt is sent and the turn can be interrupted,
-   * so what it sets off may stop the turn at once.
+   * stopped early, so nothing it says reaches a later turn. Images, files
+   * and folders go after the text, in their order (`promptBlocks`); an image
+   * only to an agent that takes them (`AgentInfo.images`): the caller says
+   * what became of any it can't. `started` runs once the prompt is sent and
+   * the turn can be interrupted, so what it sets off may stop the turn at once.
    */
   prompt(
     text: string,
-    images?: ReadonlyArray<PromptImage>,
+    parts?: ReadonlyArray<PromptPart>,
     started?: Effect.Effect<void>,
   ): Stream.Stream<SessionEvent, Failure | TurnInProgress>
   /** Updates that arrive between turns, such as the agent changing its own mode. */
@@ -253,6 +314,8 @@ export interface ConnectOptions {
   readonly onPermission: (request: PermissionRequest) => Effect.Effect<PermissionDecision>
   /** What the agent's permission options mean: the registry's `permissions`. */
   readonly permissions?: PermissionMeanings
+  /** The words that open a failure it says as a message rather than an error: the registry's `failsInText`. */
+  readonly failsInText?: string
   /**
    * Answers a question the agent asks the person. Without it the agent is
    * offered no way to ask (no form elicitation), so it asks in what it says
@@ -498,6 +561,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
      * What each tool call said about itself, by session and call. Codex asks
      * permission for an MCP tool with no title or input of its own; the call
      * it asks about said both when it began, so the request takes them from it.
+     * A call is kept until it ends, or its session does: what it said, the
+     * whole file of a write among it, is asked about only while it runs.
      */
     const calls = new Map<string, { title?: string; kind?: string; rawInput?: unknown }>()
     /**
@@ -519,6 +584,10 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     const remember = (sessionId: string, update: acp.SessionUpdate) => {
       if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return
       const key = `${sessionId}\u0000${update.toolCallId}`
+      if (update.status === 'completed' || update.status === 'failed') {
+        calls.delete(key)
+        return
+      }
       const known = calls.get(key) ?? {}
       calls.set(key, {
         ...known,
@@ -604,7 +673,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         return yield* new AgentRequestFailed({ method, ...classified })
       })
 
-    const call = <A>(method: string, run: () => Promise<A>): Effect.Effect<A, Failure> =>
+    /*
+     * `run` is given a signal that aborts when the call is cut off, as by a
+     * timeout: a request sent with it as its `cancellationSignal` asks the
+     * agent to drop it, and its answer to that lets the request go.
+     */
+    const call = <A>(method: string, run: (signal: AbortSignal) => Promise<A>): Effect.Effect<A, Failure> =>
       Effect.tryPromise({ try: run, catch: (cause) => new RawFailure({ cause }) }).pipe(
         Effect.catchTag('RawFailure', (raw) => failure(method, raw.cause)),
       )
@@ -642,13 +716,18 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       mcp: { http: capabilities.mcpCapabilities?.http === true, sse: capabilities.mcpCapabilities?.sse === true },
       authMethods: (init.authMethods ?? []).map((method) => method.id),
       images: capabilities.promptCapabilities?.image === true,
+      embeddedContext: capabilities.promptCapabilities?.embeddedContext === true,
     }
 
     /** Asks the agent to stop a command a session left running; whether it did. */
     const stopBackground = (sessionId: string, id: string) =>
       Effect.map(
-        call(stopBackgroundMethod, () =>
-          connection.agent.request<StopBackgroundResponse>(stopBackgroundMethod, { sessionId, asyncTaskId: id }),
+        call(stopBackgroundMethod, (signal) =>
+          connection.agent.request<StopBackgroundResponse>(
+            stopBackgroundMethod,
+            { sessionId, asyncTaskId: id },
+            { cancellationSignal: signal },
+          ),
         ),
         (response) => response.stopped === true,
       )
@@ -695,6 +774,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               leftRunning.delete(response.sessionId)
               sessions.delete(response.sessionId)
               waiting.delete(response.sessionId)
+              said.delete(response.sessionId)
+              for (const key of calls.keys()) if (key.startsWith(`${response.sessionId}\u0000`)) calls.delete(key)
               yield* Queue.shutdown(state.inbox)
               if (info.closeSession && !connection.signal.aborted) {
                 yield* Effect.ignore(
@@ -719,8 +800,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             if (option === undefined || (option.type === 'select' && !option.values.includes(value))) {
               return yield* new OptionUnavailable({ configId, value, available: option?.values ?? [] })
             }
-            const response = yield* call('session/set_config_option', () =>
-              connection.agent.request(acp.methods.agent.session.setConfigOption, { sessionId, configId, value }),
+            const response = yield* call('session/set_config_option', (signal) =>
+              connection.agent.request(
+                acp.methods.agent.session.setConfigOption,
+                { sessionId, configId, value },
+                { cancellationSignal: signal },
+              ),
             )
             const updated = normalizeOptions(response.configOptions)
             yield* Ref.set(current, updated)
@@ -754,7 +839,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         } else if (legacy !== null && legacy !== undefined) {
           const modeId = sessionOptions.mode
           if (!legacyIds.includes(modeId)) return yield* new OptionUnavailable({ configId: 'mode', value: modeId, available: legacyIds })
-          yield* call('session/set_mode', () => connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId }))
+          yield* call('session/set_mode', (signal) =>
+            connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId }, { cancellationSignal: signal }),
+          )
           yield* Ref.set(mode, modeId)
         } else {
           return yield* new OptionUnavailable({ configId: 'mode', value: sessionOptions.mode, available: [] })
@@ -811,7 +898,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           Effect.gen(function* () {
             const event = normalize(update)
             const events: Array<SessionEvent> = [event]
-            if (event._tag === 'OptionsChanged') {
+            const failsInText = options.failsInText
+            if (event._tag === 'AgentMessage' && failsInText !== undefined && event.text.startsWith(failsInText)) {
+              // A failure it says as a message, its turn ending as if done: the turn fails with it, as with an error.
+              const classified = classify(event.text.slice(failsInText.length), yield* DateTime.nowAsDate)
+              const turn = yield* Ref.get(state.current)
+              if (Option.isSome(turn) && classified.failure !== 'unknown') turn.value.failure = classified
+            } else if (event._tag === 'OptionsChanged') {
               yield* Ref.set(current, event.options)
               // A held option the agent moved goes back before anything else it says is read, for as long as an agent
               // that answers one request at a time may take; nothing Althar answers waits on this reader meanwhile.
@@ -834,8 +927,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               if (event.modeId === (yield* Ref.get(mode))) return []
               if (heldMode !== undefined && event.modeId !== heldMode) {
                 const restored = yield* Effect.exit(
-                  call('session/set_mode', () =>
-                    connection.agent.request(acp.methods.agent.session.setMode, { sessionId, modeId: heldMode }),
+                  call('session/set_mode', (signal) =>
+                    connection.agent.request(
+                      acp.methods.agent.session.setMode,
+                      { sessionId, modeId: heldMode },
+                      { cancellationSignal: signal },
+                    ),
                   ).pipe(Effect.timeout(Duration.seconds(10))),
                 )
                 if (Exit.isSuccess(restored)) {
@@ -876,15 +973,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           })
 
         /** Sends a prompt; how it ends arrives in the inbox, after every update it produced. */
-        const send = (text: string, images: ReadonlyArray<PromptImage> = []) =>
+        const send = (text: string, parts: ReadonlyArray<PromptPart> = []) =>
           Effect.sync(() => {
-            const prompt: Array<acp.ContentBlock> = [
-              { type: 'text', text },
-              // An agent that doesn't say it takes images is never sent one: ACP's baseline is text.
-              ...(info.images
-                ? images.map((image): acp.ContentBlock => ({ type: 'image', data: image.data, mimeType: image.mimeType }))
-                : []),
-            ]
+            const prompt = promptBlocks(text, parts, info)
             connection.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt }).then(
               (response) => receive(sessionId, { _tag: 'Stopped', response }),
               (cause: unknown) => receive(sessionId, { _tag: 'PromptFailed', cause }),
@@ -903,6 +994,9 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               return
             }
             const usage = normalizeUsage(response.usage)
+            // Claude Code and Codex end a turn that failed as any other, `end_turn`, with the failure on the response itself.
+            const reported = structuredFailure(response._meta, yield* DateTime.nowAsDate)
+            if (reported?.severity === 'error') turn.failure = reported.classified
             yield* endTurn(
               turn,
               Effect.gen(function* () {
@@ -949,7 +1043,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
 
         const prompt = (
           text: string,
-          images?: ReadonlyArray<PromptImage>,
+          parts?: ReadonlyArray<PromptPart>,
           started: Effect.Effect<void> = Effect.void,
         ): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
           Stream.unwrap(
@@ -974,7 +1068,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               if (!idle) return yield* new TurnInProgress({ sessionId })
               // A new turn: what it says before a question is of this turn only.
               said.delete(sessionId)
-              yield* send(text, images)
+              yield* send(text, parts)
               yield* started
               return Stream.fromQueue(turn.queue)
             }),

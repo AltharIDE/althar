@@ -29,6 +29,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
   'chrome/ProjectFront/ProjectFront.tsx': 'a repository’s or tracker’s mark and name, which opens it',
   'thread/StepGraph/StepGraph.tsx': 'a step’s card, the whole of which opens its report; a round’s marker, a pill over the lanes',
+  'screens/Automations/Automations.tsx': 'an automation’s name, stretched over its card, which opens its page',
+  'screens/Automations/AutomationPage.tsx': 'a run’s row, which opens its task',
   'setup/TaskFolders/TaskFolders.tsx':
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   /* opens and closes what is below it */
@@ -44,6 +46,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Code/CodeLines.tsx': 'a gap in a file’s lines, stretched across them, which shows more of them in place',
   'thread/Evidence/Evidence.tsx': 'the row of a run or a response, which folds what it printed',
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
+  'chrome/PlanGauge/PlanPeek.tsx': 'an agent’s row, which folds its accounts; the line of agents with no reading, which folds why',
   /* an option in a list or a rail */
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
@@ -54,6 +57,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
+  'chrome/PlanGauge/PlanGauge.tsx': 'the plan gauge, drawn in steps as the load meters are',
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
   'thread/Gallery/Gallery.tsx': 'a screenshot, large, which opens full size',
@@ -63,8 +67,9 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/You/You.tsx': 'an attachment’s chip',
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',
   'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
+  'coordinator/AutomationCard/AutomationCard.tsx': 'a day of the week, toggled in a row of seven',
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
-  'composer/Listening/Listening.tsx': 'the listening pill, and stop on its sunk bar',
+  'composer/Behind/Behind.tsx': 'the chip over a task’s composer, its parts parted by hairlines, which opens all of it',
   'composer/DictationPill/DictationPill.tsx': 'the words carried in the pill, stretched across it, which open it',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
   'setup/ControlCenter/ControlCenter.tsx': 'a module, the whole of which opens it out, and a round switch',

@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 
@@ -10,10 +11,11 @@ import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
 import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
-import { useBoard } from '../src/renderer/features/board/useBoard'
+import { readHeadsAhead, useBoard } from '../src/renderer/features/board/useBoard'
 import { useClosePullRequests } from '../src/renderer/features/board/useClosePullRequests'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
+import { makeQueryClient } from '../src/renderer/data/reads'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
 import { useSettingsOf, withServices } from './render'
@@ -196,11 +198,94 @@ describe('the board’s lanes', () => {
       expect(lanes.running).toEqual([])
     })
 
-    it('stays running when it is mid-work and a later turn waits for a place', () => {
+    it('stays running when an agent of it is at work and another turn of it waits for a place', () => {
       const midWork = task({ taskId: 'm', phase: 'running', step: 'implement', queued })
       const lanes = lanesOf(board({ tasks: [midWork, waiting('a', 1)], calls: [] }))
       expect(lanes.next.map((work) => work.taskId)).toEqual(['a'])
       expect(lanes.running.map((work) => work.taskId)).toEqual(['m'])
+      expect(lanes.atWork).toBe(1)
+    })
+
+    describe('under way, none of its agents at work (ADR-065)', () => {
+      const continuing = (taskId: string, place: number, overrides: Partial<BoardTask> = {}) =>
+        task({
+          taskId,
+          threadId: `th-${taskId}`,
+          title: `Going on ${taskId}`,
+          phase: 'running',
+          step: 'implement',
+          queued,
+          continues: true,
+          place,
+          ...overrides,
+        })
+      const paused = task({
+        taskId: 'z',
+        threadId: 'th-z',
+        title: 'Offline z',
+        phase: 'running',
+        step: 'review',
+        queued: null,
+        continues: true,
+        reconnects: { agentId: 'claude-code', service: 'Claude', offline: true, next: null, failure: null },
+      })
+      const working = task({ taskId: 'w', phase: 'running', step: 'implement', startedAt: '2026-10-01T09:00:00.000Z' })
+      const busy = [working, waiting('b', 4), paused, continuing('y', 2), waiting('a', 3), continuing('x', 1), planned]
+
+      it('continues up next ahead of the line, then what is paused, then plans; Running counts only work at it', () => {
+        const lanes = lanesOf(board({ tasks: busy, calls: [] }))
+        expect(lanes.next.map((work) => work.taskId)).toEqual(['x', 'y', 'a', 'b', 'z', 'p'])
+        expect([lanes.continuing, lanes.free, lanes.paused, lanes.upNext]).toEqual([2, 2, 1, 6])
+        expect(lanes.running.map((work) => work.taskId)).toEqual(['w'])
+        expect(lanes.atWork).toBe(1)
+      })
+
+      it('says what continues and why it waits, with no grip, and counts it ahead of the line’s places', () => {
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null }
+        withServices(
+          <BoardView lanes={lanesOf(board({ tasks: busy, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
+          fakeClient().client,
+        )
+        const next = within(screen.getByRole('region', { name: 'Up next' }))
+        expect(next.getAllByText('Continues · Implement')).toHaveLength(2)
+        expect(next.getByText('Continues · Review')).toBeTruthy()
+        expect(next.getAllByText(/^4 of 4 agents busy on /)).toHaveLength(2)
+        expect(next.getByText('Waiting for the connection')).toBeTruthy()
+        expect(next.getByText('Paused')).toBeTruthy()
+        // The line's places come after what continues; only its rows have grips.
+        expect(next.getByText('3rd in line')).toBeTruthy()
+        expect(next.getByText('4th in line')).toBeTruthy()
+        expect(next.getAllByRole('button', { name: /in the line$/ }).map((grip) => grip.getAttribute('aria-label'))).toEqual([
+          'Move Waiting a in the line',
+          'Move Waiting b in the line',
+        ])
+        const running = within(screen.getByRole('region', { name: 'Running' }))
+        expect(running.queryByText(/^Going on|^Offline/)).toBeNull()
+      })
+
+      it('stays in the lane it was in while the person points at the board, and moves once they look away', async () => {
+        const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
+        // Its turn has its place: it is at work.
+        const after = lanesOf(
+          board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
+        )
+        let change: (lanes: typeof before) => void = () => undefined
+        function Changing() {
+          const [lanes, setLanes] = useState(before)
+          change = setLanes
+          return <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
+        }
+        withServices(<Changing />, fakeClient().client)
+        const region = (name: string) => within(screen.getByRole('region', { name }))
+        await userEvent.hover(region('Up next').getByText('Going on x'))
+        act(() => change(after))
+        expect(region('Up next').getByText('Going on x')).toBeTruthy()
+        expect(region('Running').queryByText('Going on x')).toBeNull()
+        await userEvent.unhover(screen.getByRole('region', { name: 'Up next' }))
+        await userEvent.hover(document.body)
+        await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
+        expect(region('Up next').queryByText('Going on x')).toBeNull()
+      })
     })
 
     it('moves to running by itself once an agent frees and it starts', () => {
@@ -548,6 +633,37 @@ describe('the board', () => {
     const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
     expect(front?.textContent).toMatch(/3 need you·1 in progress·PR 7 merged \S/)
     expect(screen.queryByText(/running/)).toBeNull()
+  })
+
+  it('says on a task’s card which automation’s run it is, whichever lane it is in, and nothing on one of the person’s own', async () => {
+    const from = { id: 'auto1', name: 'Morning review' }
+    const { client } = fakeClient({
+      getBoard: vi.fn(async () =>
+        board({
+          tasks: [
+            task({ taskId: 't2', threadId: 'th2', title: 'Review #264', slug: 'review-264', phase: 'running', automation: from }),
+            task({ taskId: 't3', threadId: 'th3', title: 'Ship it', slug: 'ship-it', phase: 'waiting', automation: from }),
+            task({
+              taskId: 't4',
+              threadId: 'th4',
+              title: 'Bump zod',
+              slug: 'bump-zod',
+              phase: 'ready',
+              automation: { id: 'auto2', name: 'Nightly bump' },
+            }),
+            task({ taskId: 't5', threadId: 'th5', title: 'Mine', slug: 'mine', phase: 'running', automation: null }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const work = await screen.findByRole('region', { name: 'The project’s work' })
+    const cardOf = (title: string) => within(within(work).getByRole('button', { name: title }).closest('article') as HTMLElement)
+    expect(cardOf('Review #264').getByText('From Morning review')).toBeTruthy()
+    expect(cardOf('Ship it').getByText('From Morning review')).toBeTruthy()
+    expect(cardOf('Bump zod').getByText('From Nightly bump')).toBeTruthy()
+    expect(cardOf('Mine').queryByText(/^From /)).toBeNull()
   })
 
   it('counts every settled task, loads only the latest, and loads the older ones on request', async () => {
@@ -1009,7 +1125,7 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Conversation')).toBeTruthy()
     expect(
       screen.getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       ),
     ).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
@@ -1445,7 +1561,7 @@ describe('each kind’s card', () => {
     expect(stuck.getByText('Stuck')).toBeTruthy()
     expect(
       stuck.getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       ),
     ).toBeTruthy()
     // Merged, with commits after it: its branch, with what is in no pull request yet.
@@ -1489,7 +1605,9 @@ describe('what stands between a ready change and merging', () => {
         ready('s3', 'Checks still running', { checks: { ...passed, outcome: 'running', passed: 3, running: 2 } }),
         ready('s4', 'In conflict', { conflicts: true, target: 'main' }),
         ready('s5', 'Commits to push', { localHead: 'def456', unpushed: 3 }),
-        // Commits here and a check that failed on what is pushed: the push first, as it runs the checks again.
+        // Commits here and a check that failed on what is pushed: the failure is read first, the push is offered first, as it runs the checks again.
+        // Commits beside a conflict: pushing them is what clears it.
+        ready('s11', 'Push clears it', { localHead: 'def456', unpushed: 5, conflicts: true, target: 'main', checks: passed }),
         ready('s6', 'Two at once', { localHead: 'def456', unpushed: 2, checks: change().checks }),
         // Commits counted before the branch's head here is known aren't said.
         ready('s7', 'Head not read yet', { unpushed: 2 }),
@@ -1518,8 +1636,14 @@ describe('what stands between a ready change and merging', () => {
     expect(said('Checks still running')).toContain('Checks running, 3 of 5 passed')
     expect(within(cardOf('Checks still running')).queryByText(/Accept and merge|Push/)).toBeNull()
     expect(said('In conflict')).toMatch(/Conflicts with main\s*Ask the lead to resolve it/)
-    expect(said('Commits to push')).toMatch(/3 commits not on the PR\s*Push 3 commits/)
-    expect(said('Two at once')).toMatch(/2 commits not on the PR\s*·\s*test failed\s*Push 2 commits/)
+    // A conflict or a failed check in the way: not ready to accept.
+    expect(said('In conflict')).toContain('Not ready to accept')
+    expect(said('Two at once')).toContain('Not ready to accept')
+    expect(said('Commits to push')).toContain('Ready to accept')
+    expect(said('Push clears it')).toContain('Ready once pushed')
+    expect(said('Push clears it')).toContain('The push should resolve the conflict with main')
+    expect(said('Commits to push')).toMatch(/checks passed\s*Push 3 commits/)
+    expect(said('Two at once')).toMatch(/test failed\s*Push 2 commits/)
     expect(said('Head not read yet')).toMatch(/All 5 checks passed\s*Accept and merge/)
     // Cancelled: said in place of a pass, and nothing to do from here but open the task.
     expect(said('A check cancelled')).toContain('check 4 cancelled')
@@ -1601,9 +1725,9 @@ describe('a ready card’s next step, done from the card', () => {
     })
     withServices(<Board onOpen={vi.fn()} />, client)
     const card = await cardOf('Commits to push')
-    expect(card.getByText(/3 commits not on the PR/)).toBeTruthy()
+    expect(card.getByRole('button', { name: 'Push 3 commits to #12' })).toBeTruthy()
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
-    await waitFor(() => expect(card.queryByText(/not on the PR/)).toBeNull())
+    await waitFor(() => expect(card.queryByRole('button', { name: /^Push/ })).toBeNull())
     expect(card.getByText(/\+20/)).toBeTruthy()
     // It was pushed and nothing is left to push: what is next is to merge, at the new head.
     expect(card.queryByRole('button', { name: /^Push/ })).toBeNull()
@@ -1642,7 +1766,7 @@ describe('a ready card’s next step, done from the card', () => {
     await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
     expect((await card.findByRole('alert')).textContent).toContain('Push failed: GitHub says: the branch is protected')
     // The commits are still not on it, and the button now tries again.
-    expect(card.getByText(/3 commits not on the PR/)).toBeTruthy()
+    expect(card.getByRole('button', { name: 'Try pushing 3 commits to #12 again' })).toBeTruthy()
     // Another card pushes, and goes through: the first still says why it failed.
     await userEvent.click((await cardOf('More commits to push')).getByRole('button', { name: 'Push 2 commits to #12' }))
     await waitFor(() => expect(push).toHaveBeenCalledTimes(2))
@@ -1670,6 +1794,53 @@ describe('a ready card’s next step, done from the card', () => {
     expect((await cardOf('In conflict')).getByText('Ask the lead to resolve it')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'In conflict' }))
     expect(onOpen).toHaveBeenCalledWith('th-s4')
+  })
+
+  it('says why a conflict wasn’t asked of its lead, and Resolve now asks it from the card', async () => {
+    const why = 'You stopped it, so Althar doesn’t start its lead for a conflict.'
+    // Stopped, it is among the running work, not ready: its card says it there.
+    tasks = [
+      {
+        ...ready('s9', 'Stopped in conflict', { conflicts: true, target: 'main' }),
+        phase: 'stopped' as const,
+        startedAt: '2026-10-01T07:30:00.000Z',
+        conflictUnsent: why,
+      },
+    ]
+    const onOpen = vi.fn()
+    const resolveConflictsNow = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
+    const card = await cardOf('Stopped in conflict')
+    // Still stopped, with why its lead wasn't asked in one line, in place of its foot.
+    expect(card.getByText('Stopped')).toBeTruthy()
+    expect(card.getByText(why)).toBeTruthy()
+    expect(card.queryByText(/Ask the lead to resolve it/)).toBeNull()
+    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
+    expect(resolveConflictsNow).toHaveBeenCalledWith('s9')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('offers Resolve now where the lead couldn’t resolve a conflict, though neither branch moved', async () => {
+    const why = 'The lead couldn’t resolve the conflict with main. change.txt still conflicts.'
+    tasks = [{ ...ready('s10', 'Handed back', { conflicts: true, target: 'main' }), handedBack: why }]
+    const resolveConflictsNow = vi.fn(async () => {})
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ resolveConflictsNow, getBoard: getBoard() }).client)
+    const card = await cardOf('Handed back')
+    expect(card.getByText('Merge conflict')).toBeTruthy()
+    expect(card.getByText(why)).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Resolve now' }))
+    expect(resolveConflictsNow).toHaveBeenCalledWith('s10')
+  })
+
+  it('says where Althar couldn’t look for a conflict, and keeps its next step', async () => {
+    const why = 'Its folder isn’t on this computer, so Althar can’t merge main into it here.'
+    tasks = [{ ...ready('s12', 'Not looked at', {}), conflictUnchecked: why }]
+    withServices(<Board onOpen={vi.fn()} />, fakeClient({ getBoard: getBoard() }).client)
+    const card = await cardOf('Not looked at')
+    expect(card.getByText(why)).toBeTruthy()
+    // Not said to conflict: Althar doesn't know.
+    expect(card.queryByText('Merge conflict')).toBeNull()
+    expect(card.getByRole('button', { name: 'Accept and merge #12' })).toBeTruthy()
   })
 })
 
@@ -1775,5 +1946,35 @@ describe('collapsing lanes', () => {
     expect(stays.getAttribute('aria-disabled')).toBe('true')
     await userEvent.click(stays)
     expect(within(work).getByRole('button', { name: 'Ship it' })).toBeTruthy()
+  })
+})
+
+describe('a ready task’s head, read ahead', () => {
+  it('is read again when its task changes, not when another on the board does', async () => {
+    const getThread = vi.fn(async () => snapshot())
+    const { client } = fakeClient({ getThread })
+    const cache = makeQueryClient()
+    const first = board()
+    readHeadsAhead(client, cache, first)
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(1))
+    expect(getThread).toHaveBeenLastCalledWith('th4', { limit: 0 })
+    // Another task starts: the board moves on, but the ready task's head is as it was.
+    const moved = board({ cursor: 4, tasks: first.tasks.map((one) => (one.taskId === 't1' ? { ...one, phase: 'running' } : one)) })
+    readHeadsAhead(client, cache, moved)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(getThread).toHaveBeenCalledTimes(1)
+    // A call now waits in the ready task: its head is read again.
+    const called = board({ cursor: 5, tasks: moved.tasks, calls: [{ ...first.calls[0]!, id: 'a9', taskId: 't4', threadId: 'th4' }] })
+    readHeadsAhead(client, cache, called)
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(2))
+    // Its pull request moves on: read again.
+    readHeadsAhead(client, cache, {
+      ...called,
+      cursor: 6,
+      tasks: called.tasks.map((one) =>
+        one.taskId === 't4' && one.change !== null ? { ...one, change: { ...one.change, head: 'def456' } } : one,
+      ),
+    })
+    await waitFor(() => expect(getThread).toHaveBeenCalledTimes(3))
   })
 })

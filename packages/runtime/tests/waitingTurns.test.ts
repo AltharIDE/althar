@@ -12,6 +12,7 @@ import { Busy } from '../src/Busy'
 import type { BusyOptions } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Questions } from '../src/Questions'
@@ -25,7 +26,8 @@ import { items, repository, runtime, until } from './support'
  * Work waiting for a place among the agents at work (Busy.ts), where
  * busy.test.ts and placesKept.test.ts don't go: a turn Althar's word to an
  * idle lead waits for, as the person switches that lead to another agent,
- * two such that wait together, and one that waited as Althar stopped; the
+ * two such that wait together, and one that waited as Althar stopped; a task
+ * under way whose turn waits, up next ahead of new work (ADR-065); the
  * line where two tasks waited since the same moment; an answer kept for a place whose lead has gone since; and a review that
  * waits for a place of its own, skipped.
  */
@@ -33,8 +35,8 @@ import { items, repository, runtime, until } from './support'
 const GB = 1024 ** 3
 
 /** The runtime on a machine that runs one agent at once, with the queries the screens read. */
-const oneAtOnce = (busy: BusyOptions = {}, file = ':memory:') =>
-  Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { busy: { machine: { cores: 3, memory: 7 * GB }, ...busy } })))
+const oneAtOnce = (busy: BusyOptions = {}, file = ':memory:', more: Parameters<typeof runtime>[2] = {}) =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { ...more, busy: { machine: { cores: 3, memory: 7 * GB }, ...busy } })))
 
 /** A task whose plan, its lead Codex with no review unless said, the person starts now. */
 const started = (
@@ -213,6 +215,61 @@ describe('a turn Althar’s word waited for when it stopped', () => {
   )
 })
 
+describe('a task under way whose next turn waits for a place', () => {
+  it.live('continues up next ahead of new work, and leaves it once its turn starts', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const tasks = yield* Tasks
+      const queries = yield* Queries
+      const instance = yield* Instance
+      const projectId = yield* opened
+      /** The cards waiting for a place, by title, in the order the board's Up next lists them, and whether each continues. */
+      const upNext = Effect.gen(function* () {
+        const board = yield* Effect.orDie(queries.board(projectId))
+        return board.tasks
+          .filter((task) => task.phase === 'running' && task.place !== undefined)
+          .toSorted((a, b) => (a.place ?? 0) - (b.place ?? 0))
+          .map((task) => [task.title, task.place, task.continues === true ? 'continues' : task.inLine === true ? 'line' : '?'])
+      })
+      const first = yield* started(projectId, 'Under way', 'Do it. [lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      const holder = yield* started(projectId, 'Holding the place', 'Work on it. [lead:wait]')
+      yield* until(attempts(holder.taskId), (rows) => rows[0]?.state === 'running')
+      const fresh = yield* started(projectId, 'New work', 'Work on it. [lead:wait]')
+      yield* until(attempts(fresh.taskId), (rows) => rows[0]?.holdReason === 'machine_busy')
+      // Althar tells the first's lead its checks failed: its next turn waits, though it waited after the new work began to.
+      const envelope = yield* Runtime.envelope('thread.send', {}, undefined, instance.systemId)
+      yield* sessions.send({
+        envelope,
+        threadId: first.threadId,
+        body: 'The checks failed. [answers-after:3s]',
+        disposition: 'after_current',
+        quiet: true,
+      })
+      yield* until(
+        Effect.map(waitsOn(first.threadId), (since) => (since === null ? [] : [since])),
+        (rows) => rows.length === 1,
+      )
+      // It continues first, as work under way (ADR-037), then the line: the holder, at work, is in neither.
+      assert.deepStrictEqual(yield* until(upNext, (rows) => rows.length === 2), [
+        ['Under way', 1, 'continues'],
+        ['New work', 2, 'line'],
+      ])
+      const card = (taskId: string) =>
+        Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.tasks.find((task) => task.taskId === taskId))
+      assert.strictEqual((yield* card(first.taskId))?.phase, 'running')
+      assert.isUndefined((yield* card(holder.taskId))?.continues)
+      // The place frees: its turn has it before the new work, and it leaves Up next, which the new work leads.
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: holder.taskId })
+      assert.deepStrictEqual(yield* until(upNext, (rows) => rows.length === 1), [['New work', 1, 'line']])
+      const going = yield* card(first.taskId)
+      assert.strictEqual(going?.phase, 'running')
+      assert.isUndefined(going?.continues)
+      assert.isUndefined(going?.place)
+    }).pipe(Effect.provide(oneAtOnce())),
+  )
+})
+
 describe('the line, where two tasks waited since the same moment', () => {
   it.live('keeps them apart when the person puts another first, each after the one before it', () =>
     Effect.gen(function* () {
@@ -308,21 +365,30 @@ describe('an answer kept for a place, as answers once were', () => {
 })
 
 describe('a review that waits for a place of its own', () => {
-  it.live('is gone on without when the person skips it, and its reviewer never starts', () =>
-    Effect.gen(function* () {
+  it.live('is gone on without when the person skips it, and its reviewer never starts again', () => {
+    const back = Date.now() + 5_000
+    return Effect.gen(function* () {
       const runs = yield* Runs
       const sql = yield* SqlClient.SqlClient
+      const policies = yield* Policies
+      const instance = yield* Instance
       const projectId = yield* opened
-      // The lead leaves its server running, so its review waits for a place of its own.
-      const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:pass]', [
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
+      // Its reviewer is out of usage until its reset; meanwhile another task's lead takes the one place.
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+      yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
+      // At the reset there is none: the review waits for a place of its own.
       yield* until(
         attempts(task.taskId),
         (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.holdReason === 'machine_busy',
         Duration.seconds(15),
       )
+      const reviewers = sql`SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.task_id = ${task.taskId} AND t.kind = 'step'`
+      const before = (yield* reviewers).length
       yield* runs.skipReview({ envelope: yield* Runtime.envelope('run.skip_review', {}), taskId: task.taskId })
       const [run] = yield* sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`
       assert.strictEqual(run?.state, 'succeeded')
@@ -333,7 +399,8 @@ describe('a review that waits for a place of its own', () => {
           ['review', 'cancelled'],
         ],
       )
-      assert.lengthOf(yield* sql`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`, 0)
-    }).pipe(Effect.provide(oneAtOnce())),
-  )
+      yield* Effect.sleep('300 millis')
+      assert.lengthOf(yield* reviewers, before)
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: { until: back } } } })))
+  })
 })

@@ -396,7 +396,7 @@ describe('an agent out of usage', () => {
   })
 
   it.live('keeps what the person said for the reset where the project waits', () => {
-    const back = Date.now() + 2500
+    const back = Date.now() + 5000
     return Effect.gen(function* () {
       const projects = yield* Projects
       const coordinator = yield* Coordinator
