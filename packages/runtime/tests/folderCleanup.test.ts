@@ -200,21 +200,24 @@ describe('finished tasks’ folders', () => {
     }).pipe(Effect.provide(withCleanup())),
   )
 
-  it.live("lists a folder part of which can't be read as of a size not known, not as what the rest takes", () =>
-    Effect.gen(function* () {
-      const task = yield* finished('done', 1, 'Add a retry', (root) => {
-        writeFileSync(join(root, '.gitignore'), 'cache\n')
-        git(root, 'add', '.')
-        git(root, 'commit', '-q', '-m', 'Ignore')
-      })
-      const locked = join(task.worktree, 'cache')
-      mkdirSync(locked)
-      writeFileSync(join(locked, 'big'), Buffer.alloc(1024 ** 2, 1))
-      chmodSync(locked, 0o000)
-      const listed = yield* measured.pipe(Effect.ensuring(Effect.sync(() => chmodSync(locked, 0o755))))
-      assert.strictEqual(listed.folders.length, 1)
-      assert.isNull(listed.folders[0]?.bytes)
-    }).pipe(Effect.provide(withCleanup())),
+  // Windows reads a folder whatever its mode, and root reads any: neither can lock one.
+  it.live.skipIf(windows || process.getuid?.() === 0)(
+    "lists a folder part of which can't be read as of a size not known, not as what the rest takes",
+    () =>
+      Effect.gen(function* () {
+        const task = yield* finished('done', 1, 'Add a retry', (root) => {
+          writeFileSync(join(root, '.gitignore'), 'cache\n')
+          git(root, 'add', '.')
+          git(root, 'commit', '-q', '-m', 'Ignore')
+        })
+        const locked = join(task.worktree, 'cache')
+        mkdirSync(locked)
+        writeFileSync(join(locked, 'big'), Buffer.alloc(1024 ** 2, 1))
+        chmodSync(locked, 0o000)
+        const listed = yield* measured.pipe(Effect.ensuring(Effect.sync(() => chmodSync(locked, 0o755))))
+        assert.strictEqual(listed.folders.length, 1)
+        assert.isNull(listed.folders[0]?.bytes)
+      }).pipe(Effect.provide(withCleanup())),
   )
 
   it.live('holds back a folder with changes not committed, which goes by hand', () =>
@@ -636,7 +639,7 @@ describe('the words for a folder going', () => {
     assert.isBelow(bytes, MB + 64 * 1024)
   })
 
-  it("can't say what a folder holds where part of it can't be read", async () => {
+  it.skipIf(windows || process.getuid?.() === 0)("can't say what a folder holds where part of it can't be read", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'althar-owned-')))
     const locked = join(root, 'locked')
     mkdirSync(locked)
