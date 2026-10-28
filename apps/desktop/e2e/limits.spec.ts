@@ -121,7 +121,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
         /^Codex ran out of usage while working on the task\. No other model was free, so the work waits until .+, when it's back\./,
       ),
     ).toBeVisible()
-    await expect(page.getByText('No other model is free now.')).toBeVisible()
+    await expect(shown(page, 'No other model is free now.')).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
@@ -131,20 +131,21 @@ test('waits for the reset where no other agent is free, and says so on its card,
 test('asks the person when the reset isn’t known and no other agent is free', async () => {
   const { electronApp, page } = await startWhileOut('claude-code,codex')
   try {
-    await expect(page.getByText('Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     await openTask(page)
     await expect(
-      page.getByText(/^Claude Code ran out of usage while working on the task\. Codex takes the work over(, on .+)?\.$/),
+      shown(page, /^Claude Code ran out of usage while working on the task\. Codex takes the work over(, on .+)?\.$/),
     ).toBeVisible()
     await expect(
-      page.getByText(
+      shown(
+        page,
         "Codex ran out of usage while working on the task and didn't say when it's back. Pick another model to carry on, or try Codex again.",
       ),
     ).toBeVisible()
     // Telling an agent that is out anything would hit the same limit. Claude Code ran out first, and nothing else is free: it is tried again.
-    await expect(page.getByText('Out of usage', { exact: true })).toBeVisible()
+    await expect(shown(page, 'Out of usage', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Tell the lead' })).toHaveCount(0)
-    await expect(page.getByText('No other model is free now.')).toBeVisible()
+    await expect(shown(page, 'No other model is free now.')).toBeVisible()
     await expect(page.getByRole('button', { name: /^Continue with/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Try Codex again' })).toBeVisible()
     await expect(page.getByRole('button', { name: /^Wait until/ })).toHaveCount(0)
@@ -157,7 +158,7 @@ test('asks the person when the reset isn’t known and no other agent is free', 
 test('asks the person where the project says to, on the home too, and moves the step to the model they pick', async () => {
   const { electronApp, page } = await startWhileOut('claude-code:3600', { asks: true })
   try {
-    await expect(page.getByText('Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
     // The home lists it, for a person who is elsewhere.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     const call = page.getByRole('article', { name: 'Add a retry to the checkout call' })
