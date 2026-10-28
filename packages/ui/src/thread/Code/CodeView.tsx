@@ -408,8 +408,8 @@ export interface CodePeekProps {
   where?: CodeWhere
   /** Its lines as it first shows (firstMode): undefined while read, null where they couldn't be. */
   read?: CodeRead | null
-  /** The whole file, in the panel beside the conversation. */
-  onBeside: () => void
+  /** The whole file, in the panel beside the conversation; without it, no way there from the peek, as for the coordinator's. */
+  onBeside?: () => void
   /** The person's editor, which opens it at its line. */
   editor?: { readonly name: string; readonly onOpen: () => void }
   /** Opens another file in the panel: one of several of a name, one of nearly the name of one that isn't there. */
@@ -451,7 +451,7 @@ export function CodePeek({ found, where, read, onBeside, editor, onGo, text }: C
         </span>
         <span className={s.peekActions}>
           {/* Beside, where it shows more than this does: not for a file that isn't there and has none like it. */}
-          {(found.kind !== 'missing' || found.near.length > 0) && (
+          {onBeside !== undefined && (found.kind !== 'missing' || found.near.length > 0) && (
             <Button size="small" variant="quiet" onClick={onBeside}>
               {t.beside}
             </Button>

@@ -563,7 +563,7 @@ export const ProjectRulesView = Schema.Struct({
    * While everything is allowed, what comes back once it isn't.
    */
   permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
-  /** Everything is allowed: nothing waits for the person, what always asks included; only `never` still holds. */
+  /** Everything is allowed, what always asks included: only what can't be undone from the task still asks (ADR-067), and `never` holds. */
   allowEverything: Schema.Boolean,
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
@@ -1541,6 +1541,10 @@ export const TaskCard = Schema.Struct({
   title: Schema.String,
   slug: Schema.String,
   phase: TaskPhase,
+  /** Stopped, no agent on it: what stopped its lead, and when. Absent while it isn't stopped; `by` is null where nothing says. */
+  stopped: Schema.optional(
+    Schema.NullOr(Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.String })),
+  ),
   /** What it makes, read from what it has now: its card's word, and what the card shows. */
   kind: TaskKind,
   /** A plain task's pictures and files, while it has some; null or absent otherwise. */
@@ -1557,6 +1561,12 @@ export const TaskCard = Schema.Struct({
       reason: Schema.NullOr(Schema.String),
       /** What happens when the work is done; null where nothing reaches the repository's host. */
       end: Schema.NullOr(TaskEnd),
+      /**
+       * Only these agents may take its steps, by id: a review of someone
+       * else's pull request's, those whose session can be held to reading
+       * only. Absent where any may.
+       */
+      agents: Schema.optional(Schema.Array(Schema.String)),
     }),
   ),
   /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
@@ -2329,6 +2339,10 @@ export const ThreadSnapshot = Schema.Struct({
     description: Schema.String,
     /** What the person asked for, in their words, which its thread opens with; null for a task made before Althar kept it. */
     request: Schema.NullOr(Schema.String),
+    /** The images the person sent with it, as their message to the coordinator shows them; none where they sent none. */
+    requestPictures: Schema.optional(Schema.Array(Picture)),
+    /** The files and folders they sent with it, as that message shows them. */
+    requestFiles: Schema.optional(Schema.Array(AttachedFile)),
     slug: Schema.String,
     state: Schema.String,
     branch: Schema.NullOr(Schema.String),

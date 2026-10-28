@@ -233,6 +233,7 @@ export const words = (
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
       case 'LaunchRefused':
       case 'AttachRefused':
+      case 'ReviewRefused':
         return text(error, 'message')
       case 'AutomationRefused':
         return text(error, 'message')
@@ -406,6 +407,7 @@ export const expected = new Set([
   'ChangesClosed',
   'ReviewDraftClosed',
   'ReviewDraftIncomplete',
+  'ReviewRefused',
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',

@@ -6,7 +6,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, say, shown, startTask, toConversation } from './support'
 
 /*
  * Images dropped on a composer, in a real window with the fake agents: shown
@@ -96,12 +96,19 @@ test('sends images dropped on a composer to the coordinator and to a lead, which
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
+    // Its thread opens with what the person said and the screenshot they sent with it, and its lead was sent it with its brief.
+    const asked = page.getByRole('article', { name: 'You' }).filter({ hasText: 'Fix the refunds layout' })
+    await expect(asked).toBeVisible()
+    await asked.screenshot({ path: 'test-results/images-task-opens-with.png', scale: 'css' })
+    await expect(asked.getByRole('button', { name: 'View refunds.png' })).toBeVisible()
+    // What its first turn said is folded into its work, out of sight.
+    await expect(page.getByText(/saw images: image\/png \d+ B/).first()).toBeAttached()
     await drop(page, composer(page), [{ name: 'wide.png', type: 'image/png', bytes: png(3000, 1500) }])
     await expect(page.getByRole('list', { name: '1 attachment to send' }).getByRole('img', { name: 'wide.png' })).toBeVisible()
     await page.screenshot({ path: 'test-results/images-task-composer.png' })
     await say(page, 'What is off here?')
-    // What the lead was sent: the picture as drawn smaller, in its thread alone.
-    await expect(page.getByText(/saw images: image\/png \d+ B/)).toBeVisible()
+    // What the lead was sent: the picture as drawn smaller, in its thread alone. The coordinator's, kept hidden, has its own.
+    await expect(shown(page, /saw images: image\/png \d+ B/).last()).toBeVisible()
     // On the message, from the store, it opens full size, as wide as it was sent.
     await page.getByRole('button', { name: 'View wide.png' }).click()
     const dialog = page.getByRole('dialog')

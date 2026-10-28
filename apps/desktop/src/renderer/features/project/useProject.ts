@@ -132,7 +132,15 @@ export const useProject = (projectId: string): ProjectModel => {
     [cache, projectId],
   )
 
-  useEffect(() => () => clearTimeout(timer.current), [])
+  // Hidden while its screen is kept (`KeptScreens`) as well as gone: the read it gathered for goes, and so does the timer,
+  // or shown again it would gather what it hears for a read that never comes.
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current)
+      timer.current = undefined
+    },
+    [],
+  )
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 

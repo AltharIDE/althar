@@ -15,6 +15,7 @@ import {
 } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
+import { useMerge } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
@@ -221,6 +222,8 @@ export interface TaskModel {
 
 export const useTask = (threadId: string): TaskModel => {
   const { client, cache } = useServices()
+  // Kept by the window: back on the board meanwhile, its card says Merging, and why it didn't, if it doesn't.
+  const merge = useMerge()
   const read = reads(client)
   const thread = useQuery(read.thread(threadId))
   const snapshot = thread.data ?? null
@@ -265,7 +268,15 @@ export const useTask = (threadId: string): TaskModel => {
     if (phase === 'ready' && taskId !== null && document.visibilityState === 'visible') client.seeTask(taskId).catch(() => undefined)
   }, [client, taskId, phase])
 
-  useEffect(() => () => clearTimeout(timer.current), [])
+  // Hidden while its screen is kept (`KeptScreens`) as well as gone: the read it gathered for goes, and so does the timer,
+  // or shown again it would gather what it hears for a read that never comes.
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current)
+      timer.current = undefined
+    },
+    [],
+  )
 
   // What a code host or tracker said as it stopped taking Althar's sign-in, so the error offers signing in to it again.
   const [hostSaid, setHostSaid] = useState<string | null>(null)
@@ -647,7 +658,7 @@ export const useTask = (threadId: string): TaskModel => {
     accept: (changes) =>
       act(async () => {
         if (snapshot === null) return
-        for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
+        for (const change of changes) await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
       }, doing.accept),
     push: (head, url) =>
       act(

@@ -24,6 +24,19 @@ import { recorded } from './recorded'
  * says so of (`saw files: notes.log (linked, 2 KB): first line …`).
  */
 
+/** The markers in the words of the files a prompt links, after a blank line; nothing where there are none. */
+const cuesIn = (prompt: ReadonlyArray<acp.ContentBlock>): string => {
+  const cues = prompt.flatMap((block) => {
+    if (block.type !== 'resource_link') return []
+    try {
+      return readFileSync(fileURLToPath(block.uri), 'utf8').match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []
+    } catch {
+      return []
+    }
+  })
+  return cues.length === 0 ? '' : `\n\n${cues.join(' ')}`
+}
+
 /** What it makes of a file sent in a prompt: a linked one opened by its path, its first line or a folder's files; one embedded, its words. */
 const sawFile = (block: acp.ContentBlock): string => {
   if (block.type === 'resource') {
@@ -1358,7 +1371,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
       const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
-      const text = filled === null ? prompted : prompted.slice(0, filled.index)
+      // The markers in a linked file's words play as a message's do, for what the person sends with no words.
+      const text = `${filled === null ? prompted : prompted.slice(0, filled.index)}${cuesIn(params.prompt)}`
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(
@@ -1382,13 +1396,14 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
+      if (text.includes('[signed-out]')) throw acp.RequestError.authRequired()
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
       // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
-      // nothing. Cancelled, it stops.
-      // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
-      if (text.includes('[signed-out]')) throw acp.RequestError.authRequired()
-      const slowly = /\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/.exec(text)
+      // nothing. Cancelled, it stops. The last one said is the one it goes by: what the person said in a turn that failed comes
+      // again ahead of what they say next, and it answers the newest, as an agent would once its API is back.
+      const slowly = [...text.matchAll(/\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/g)].at(-1)
       if (slowly?.[2] !== undefined) {
         const waitOut = async (ms: number) => {
           for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)

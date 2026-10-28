@@ -426,6 +426,13 @@ export function TaskView({
     showed.current = { task: showsTask, outputs: showsOutputs, changes: showsChanges }
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
+  // Hidden while its screen is kept (`KeptScreens`), it opens again as it shows: a commit made meanwhile with nothing to say so shows.
+  useEffect(
+    () => () => {
+      showed.current = { task: false, outputs: false, changes: false }
+    },
+    [],
+  )
   // c, o and g switch the faces, and Escape goes back to the project: never while typing, or with something else open.
   const open = changes.open || abandoning || attaching !== null
   const hasGraph = (model.snapshot?.task.graph?.length ?? 0) > 0
@@ -520,19 +527,22 @@ export function TaskView({
   const outputShown = leftRunning.find((one) => one.id === outputOf)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
-    ...(snapshot.task.request === null || snapshot.earlier
+    // Sent with no words, the images and files they sent are what they asked for.
+    ...((snapshot.task.request === null && snapshot.task.requestPictures === undefined && snapshot.task.requestFiles === undefined) ||
+    snapshot.earlier
       ? []
       : [
           {
             kind: 'you' as const,
             id: REQUEST,
-            text: snapshot.task.request,
+            text: snapshot.task.request ?? '',
             at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
             delivery: Delivery.Delivered,
             // A review's thread opens with the pull request it reviews, under what the person asked.
             links: snapshot.task.review == null ? [] : [reviewedUnfurl(snapshot.task.review)],
-            pictures: [],
-            files: [],
+            // With the images and files they sent with it, as the coordinator's chat shows them.
+            pictures: snapshot.task.requestPictures ?? [],
+            files: snapshot.task.requestFiles ?? [],
           },
         ]),
     // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).

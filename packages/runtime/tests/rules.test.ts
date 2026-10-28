@@ -234,7 +234,11 @@ describe('reading commands', () => {
       ['git', 'push', '--force', 'origin', 'main'],
     ])
     for (const line of ["echo x # '\ngit push --force origin main\n'", "echo $'\\''; git push --force origin main"])
-      assert.deepStrictEqual(run(line), { verdict: 'ask', reason: 'A force push always asks.', held: true }, line)
+      assert.deepStrictEqual(
+        run(line),
+        { verdict: 'ask', reason: 'A force push always asks: it can throw away commits on the remote.', held: true },
+        line,
+      )
   })
 
   it('reads the command from the raw input when the agent gives one', () => {
@@ -286,24 +290,27 @@ describe('the always-ask list', () => {
   })
 
   it.each([
-    ['git push origin main', 'A push to main always asks.'],
-    ['git push origin HEAD:main', 'A push to main always asks.'],
-    ['git push origin HEAD:refs/heads/main', 'A push to main always asks.'],
-    [`git -C ${worktree} push origin main`, 'A push to main always asks.'],
-    ['cd sub && git push origin main', 'A push to main always asks.'],
-    ['bash -lc "git push origin main"', 'A push to main always asks.'],
+    ['git push origin main', "A push to main always asks: once others have it, it can't be taken back."],
+    ['git push origin HEAD:main', "A push to main always asks: once others have it, it can't be taken back."],
+    ['git push origin HEAD:refs/heads/main', "A push to main always asks: once others have it, it can't be taken back."],
+    [`git -C ${worktree} push origin main`, "A push to main always asks: once others have it, it can't be taken back."],
+    ['cd sub && git push origin main', "A push to main always asks: once others have it, it can't be taken back."],
+    ['bash -lc "git push origin main"', "A push to main always asks: once others have it, it can't be taken back."],
     ['git push --all origin', 'Pushing every branch always asks.'],
     ['git push --mirror', 'Pushing every branch always asks.'],
-    ['git push origin :main', 'Deleting main always asks.'],
-    ['git push origin --delete main', 'Deleting main always asks.'],
-    ['git push origin --delete someone/feature', "Deleting someone/feature, which isn't this task's branch, always asks."],
-    ['git push --force', 'A force push always asks.'],
-    ['git push -uf origin althar/retry', 'A force push always asks.'],
-    ['git push --force-with-lease', 'A force push always asks.'],
-    ['git push origin +althar/retry', 'A force push always asks.'],
+    ['git push origin :main', "Deleting main always asks: everyone's work starts from it."],
+    ['git push origin --delete main', "Deleting main always asks: everyone's work starts from it."],
+    [
+      'git push origin --delete someone/feature',
+      "Deleting someone/feature, which isn't this task's branch, always asks: its commits may be nowhere else.",
+    ],
+    ['git push --force', 'A force push always asks: it can throw away commits on the remote.'],
+    ['git push -uf origin althar/retry', 'A force push always asks: it can throw away commits on the remote.'],
+    ['git push --force-with-lease', 'A force push always asks: it can throw away commits on the remote.'],
+    ['git push origin +althar/retry', 'A force push always asks: it can throw away commits on the remote.'],
     ['git push --tags', 'Pushing tags always asks; they often start a release.'],
     ['git push origin v1.2.0:refs/tags/v1.2.0', 'Pushing tags always asks; they often start a release.'],
-    ['git push --prune origin', 'A push that deletes remote branches always asks.'],
+    ['git push --prune origin', 'A push that deletes remote branches always asks: their commits may be nowhere else.'],
     ['git push origin "refs/heads/*"', 'A push to a pattern of branches always asks.'],
     ['git push origin :', 'A push of matching branches always asks.'],
     ['git push origin HEAD:refs/notes/x', "Althar can't tell what `refs/notes/x` is, so it asks."],
@@ -325,12 +332,12 @@ describe('the always-ask list', () => {
     ['dd if=/dev/zero of=/etc/x', "Writing outside the task's worktree always asks: /etc/x"],
     ['git worktree add ../elsewhere', "Writing outside the task's worktree always asks: ../elsewhere"],
     // Wherever a redirect stands, the command is what it runs.
-    ['> /dev/null git push --force origin main', 'A force push always asks.'],
-    ['git > /dev/null push origin main', 'A push to main always asks.'],
-    ['2>&1 git push origin main', 'A push to main always asks.'],
-    ['FOO=1 > out.log git push origin main', 'A push to main always asks.'],
-    ['sudo > /dev/null git push origin main', 'A push to main always asks.'],
-    ['bash -lc "> /dev/null git push origin main"', 'A push to main always asks.'],
+    ['> /dev/null git push --force origin main', 'A force push always asks: it can throw away commits on the remote.'],
+    ['git > /dev/null push origin main', "A push to main always asks: once others have it, it can't be taken back."],
+    ['2>&1 git push origin main', "A push to main always asks: once others have it, it can't be taken back."],
+    ['FOO=1 > out.log git push origin main', "A push to main always asks: once others have it, it can't be taken back."],
+    ['sudo > /dev/null git push origin main', "A push to main always asks: once others have it, it can't be taken back."],
+    ['bash -lc "> /dev/null git push origin main"', "A push to main always asks: once others have it, it can't be taken back."],
     ['>/dev/null npm publish', 'Deploying or publishing always asks.'],
     ['> ~/.zshrc echo x', "Writing outside the task's worktree always asks: ~/.zshrc"],
   ])('asks about %s', (command, reason) => {
@@ -1368,49 +1375,106 @@ describe('what could lose work or a secret (DEV-69)', () => {
     decide(request({ kind: 'read', title: `Read ${path}`, paths: [path] }), { ...context, ...rules(project) })
   const reasonOf = (verdict: ReturnType<typeof decide>) => ('reason' in verdict ? verdict.reason : '')
 
-  it('asks even with everything allowed, without holding it, and says so', () => {
+  /** What can't be undone from the task (ADR-067): it asks even with everything allowed. */
+  const irreversible = [
+    'git push --force origin althar/retry',
+    'git push --force-with-lease',
+    'git push origin +althar/retry',
+    'git push origin main',
+    'git push origin HEAD:refs/heads/main',
+    'git push origin :main',
+    'git push origin --delete main',
+    'git push origin --delete old-spike',
+    'git push origin :old-spike',
+    'git push --prune origin',
+    'git push --mirror origin',
+    'git push origin $(git branch --show-current)',
+    'git branch -D spike',
+    'git branch -f main HEAD~3',
+    'git branch -M main',
+    'git checkout -B main origin/main',
+    'git switch -C release',
+    'git update-ref -d refs/heads/spike',
+    'git -C /Users/someone/code/app reset --hard',
+    'git -C /Users/someone/code/app stash',
+    'cd /Users/someone/code/app && git clean -fdx',
+    'git --git-dir=/Users/someone/code/app/.git --work-tree=/Users/someone/code/app checkout -- .',
+    'rm -rf /Users/someone/code/app',
+    'rm -rf ~/Documents',
+    'mv /Users/someone/code/app/src /tmp/src',
+    'find /Users/someone/code -name "*.log" -delete',
+    'git worktree remove --force /work/meridian/other/app',
+  ]
+  /** What could lose work or a secret but can be got back from the task: it asks only while everything isn't allowed. */
+  const undoable = [
+    'git stash clear',
+    'git stash drop',
+    'git stash pop stash@{1}',
+    'git reflog expire --expire=now --all',
+    'git reflog delete HEAD@{1}',
+    'git gc --prune=now',
+    'git prune',
+    'cat /Users/someone/code/app/.env',
+  ]
+
+  it('asks even with everything allowed before what can’t be undone, without holding it, and says why', () => {
     const allow = { mode: 'allow' as const }
-    for (const command of [
-      'git push --force origin althar/retry',
-      'git push origin main',
-      'git push origin HEAD:refs/heads/main',
-      'git push origin --delete old-spike',
-      'git push --prune origin',
-      'git push --mirror origin',
-      'git push origin $(git branch --show-current)',
-      'git branch -D spike',
-      'git branch -f main HEAD~3',
-      'git branch -M main',
-      'git checkout -B main origin/main',
-      'git switch -C release',
-      'git update-ref -d refs/heads/spike',
-      'git stash clear',
-      'git stash drop',
-      'git stash pop stash@{1}',
-      'git reflog expire --expire=now --all',
-      'git gc --prune=now',
-      'git -C /Users/someone/code/app reset --hard',
-      'cd /Users/someone/code/app && git clean -fdx',
-      'git --git-dir=/Users/someone/code/app/.git --work-tree=/Users/someone/code/app checkout -- .',
-      'rm -rf /Users/someone/code/app',
-      'rm -rf ~/Documents',
-      'mv /Users/someone/code/app/src /tmp/src',
-      'find /Users/someone/code -name "*.log" -delete',
-      'git worktree remove --force /work/meridian/other/app',
-      'cat /Users/someone/code/app/.env',
-    ])
-      assert.deepInclude(run(command, rules(allow)), { verdict: 'ask', held: false }, command)
-    assert.include(reasonOf(run('git push --force origin althar/retry', rules(allow))), 'even with everything allowed')
+    for (const command of irreversible) assert.deepInclude(run(command, rules(allow)), { verdict: 'ask', held: false }, command)
+    assert.strictEqual(
+      reasonOf(run('git push --force origin althar/retry', rules(allow))),
+      'A force push asks even with everything allowed: it can throw away commits on the remote.',
+    )
+    assert.strictEqual(
+      reasonOf(run('git push origin main', rules(allow))),
+      "A push to main asks even with everything allowed: once others have it, it can't be taken back.",
+    )
+    assert.strictEqual(
+      reasonOf(run('git push origin $(git branch --show-current)', rules(allow))),
+      "Althar can't tell what this command does until it runs, so it asks even with everything allowed: it could do what can't be undone.",
+    )
+    // Every card that still asks says why, in one line.
+    for (const command of irreversible) {
+      const reason = reasonOf(run(command, rules(allow)))
+      assert.include(reason, 'even with everything allowed:', command)
+      assert.notInclude(reason, '\n', command)
+    }
     // No "always allow" would hold for it while everything is allowed.
     assert.deepStrictEqual(alwaysOf(request({ title: 'git push --force origin althar/retry' }), { ...context, ...rules(allow) }).allow, [])
     // Only Never settles it otherwise.
     assert.strictEqual(verdictOf('git push --force origin main', { mode: 'allow', never: ['force-push'] }), 'deny')
   })
 
+  it('lets through with everything allowed what can be got back: the stash, what git keeps to recover work, a .env outside', () => {
+    for (const command of undoable) assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'allow', command)
+    // Read as a file too, not only in a command.
+    assert.strictEqual(reading('/Users/someone/code/app/.env.local', { mode: 'allow' }).verdict, 'allow')
+    // Wrapped or not.
+    for (const command of ['eval git stash drop', 'bash -lc "git stash pop"'])
+      assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'allow', command)
+    // Never still refuses it, and reading keys is refused whatever the switch says.
+    assert.strictEqual(verdictOf('git stash clear', { mode: 'allow', never: ['outside'] }), 'deny')
+    assert.strictEqual(verdictOf('cat ~/.ssh/id_rsa', { mode: 'allow' }), 'deny')
+  })
+
+  it('keeps the floor in every other mode: what can be got back asks there as before', () => {
+    for (const mode of ['rules', 'coordinator', 'ask'] as const)
+      for (const command of [...irreversible, ...undoable]) assert.strictEqual(verdictOf(command, { mode }), 'ask', `${mode}: ${command}`)
+    // Nor does the coordinator answer it, where nothing is on the always-ask list.
+    for (const command of undoable)
+      assert.deepInclude(run(command, rules({ mode: 'coordinator', ask: [] })), { verdict: 'ask', held: false }, command)
+  })
+
   it('lets through with everything allowed what loses nothing: the task’s own branch and files, writes, tags, deploys', () => {
     for (const command of [
       'git push origin althar/retry',
       'git push --tags',
+      'git push --follow-tags origin althar/retry',
+      'git push origin v1.2.0:refs/tags/v1.2.0',
+      'git push --all origin',
+      'git push origin "refs/heads/*"',
+      'git push origin :',
+      'git stash push -m wip',
+      'git stash list',
       'git branch -D althar/retry',
       'git reset --hard HEAD~1',
       'git clean -fdx',
@@ -1428,6 +1492,21 @@ describe('what could lose work or a secret (DEV-69)', () => {
       'cat /Users/someone/code/app/.env.example',
     ])
       assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'allow', command)
+  })
+
+  it('lets tags through with everything allowed whichever branch is checked out, and asks where the branch goes too', () => {
+    const { currentBranch: _, ...detached } = context
+    for (const at of [{ ...context, currentBranch: 'main' }, detached]) {
+      const allowing = (command: string) => decide(request({ title: command }), { ...at, ...rules({ mode: 'allow' }) })
+      for (const command of ['git push --tags', 'git push --tags origin', 'git push origin --tags'])
+        assert.strictEqual(allowing(command).verdict, 'allow', command)
+      // `--follow-tags` pushes the checked-out branch as well, and so does naming it.
+      for (const command of ['git push --follow-tags', 'git push --tags origin HEAD', 'git push --tags --delete origin'])
+        assert.deepInclude(allowing(command), { verdict: 'ask', held: false }, command)
+    }
+    // Every other mode still asks before pushing tags.
+    for (const mode of ['rules', 'coordinator', 'ask'] as const)
+      assert.strictEqual(run('git push --tags origin', { currentBranch: 'main', ...rules({ mode }) }).verdict, 'ask', mode)
   })
 
   it('is never judged by the coordinator, and goes ahead only where the person always allows its kind', () => {
@@ -1555,7 +1634,7 @@ describe('what could lose work or a secret (DEV-69)', () => {
       'cp ../../../../Users/someone/code/app/.env.production .env',
       'source ~/code/app/.env',
     ])
-      assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'ask', command)
+      assert.strictEqual(verdictOf(command, { mode: 'coordinator' }), 'ask', command)
     assert.strictEqual(verdictOf('cp .env.example .env'), 'allow')
   })
 
@@ -1686,9 +1765,10 @@ describe('on Windows (DEV-69)', () => {
       'git -C C:\\Users\\alice\\code\\app reset --hard',
       'cd C:\\Users\\alice\\code\\app; git clean -fdx',
       'Set-Location D:\\work\\app; git checkout -- .',
-      'type C:\\Users\\alice\\code\\app\\.env',
     ])
       assert.deepInclude(runOn(command, allow), { verdict: 'ask', held: false }, command)
+    // A .env outside can be read: it asks only while everything isn't allowed.
+    assert.strictEqual(runOn('type C:\\Users\\alice\\code\\app\\.env', allow).verdict, 'allow')
     const deleting = request({ kind: 'delete', title: 'Delete', paths: ['D:\\work\\app\\main.ts'] })
     assert.deepInclude(decide(deleting, on(allow)), { verdict: 'ask', held: false })
   })
@@ -1979,7 +2059,11 @@ describe('what could lose work or a secret, after review of #216 (DEV-69)', () =
 
   it('reads what `eval` runs as git reads it: dropping the stash asks however it’s wrapped', () => {
     for (const command of ['eval git stash drop', 'eval "git stash pop"', 'eval "cd /Users/someone/code/app && git reset --hard"'])
-      assert.deepInclude(decide(runs(command), rules(allow)), { verdict: 'ask', held: false }, command)
+      assert.deepInclude(decide(runs(command), rules({ mode: 'coordinator', ask: [] })), { verdict: 'ask', held: false }, command)
+    assert.deepInclude(decide(runs('eval "cd /Users/someone/code/app && git reset --hard"'), rules(allow)), {
+      verdict: 'ask',
+      held: false,
+    })
     assert.strictEqual(decide(runs('eval git status'), rules(allow)).verdict, 'allow')
   })
 
