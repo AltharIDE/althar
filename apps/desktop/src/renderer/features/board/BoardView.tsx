@@ -643,6 +643,7 @@ export function BoardView({
     return (
       <NextRow
         key={work.taskId}
+        data-move={work.taskId}
         place={index + 1}
         task={work.slug}
         {...(kind === undefined ? {} : { kind })}
@@ -708,7 +709,12 @@ export function BoardView({
 
       <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
         {shown.running.map((work) => (
-          <BoardCard key={work.taskId} {...runningCardOf(work, now, name, actions)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard
+            key={work.taskId}
+            data-move={work.taskId}
+            {...runningCardOf(work, now, name, actions)}
+            onOpen={() => onOpen(work.threadId)}
+          />
         ))}
       </BoardColumn>
 
@@ -717,15 +723,16 @@ export function BoardView({
           ask.waiting !== null ? (
             <BoardCard
               key={ask.waiting.task.taskId}
+              data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name)}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
           ) : (
-            <CallCard key={ask.call.id} {...callCardOf(ask.call, name)} onOpen={() => onOpen(ask.call.threadId)} />
+            <CallCard key={ask.call.id} data-move={ask.call.id} {...callCardOf(ask.call, name)} onOpen={() => onOpen(ask.call.threadId)} />
           ),
         )}
         {lanes.ready.map((work) => (
-          <BoardCard key={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} data-move={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 
@@ -766,6 +773,7 @@ export function BoardView({
                 return (
                   <SettledRow
                     key={work.taskId}
+                    data-move={work.taskId}
                     outcome={outcome}
                     task={work.slug}
                     {...(kind === undefined ? {} : { kind })}
@@ -822,6 +830,7 @@ function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; on
   const failed = actions?.failed[work.taskId]
   return (
     <KeptRow
+      data-move={work.taskId}
       title={work.title}
       at={work.keptAt == null ? '' : text.keptAt(ago(work.keptAt, new Date(now)))}
       onOpen={onOpen}

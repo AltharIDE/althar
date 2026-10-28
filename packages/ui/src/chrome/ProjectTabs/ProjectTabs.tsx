@@ -5,6 +5,7 @@ import { Logo } from '../../foundations/Logo/Logo'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import type { ProjectInk } from '../../foundations/ProjectMark/drawing'
 import { cx } from '../../lib/cx'
+import { ListMotion } from '../../lib/ListMotion'
 import type { RootProps } from '../../lib/props'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
@@ -271,32 +272,36 @@ export function ProjectTabs({
             </li>
           )}
         </ul>
-        <ul className={cx(s.tabs, dragging !== null && s.sorting, more.before && s.moreBefore, more.after && s.moreAfter)} ref={list}>
-          {tabs.map((tab) => (
-            <li
-              key={tab.id}
-              className={cx(s.tab, s.project, tab.id === current && s.current, dragging?.id === tab.id && s.lifted)}
-              style={tabShift(dragging, tab.id)}
-            >
-              <button
-                type="button"
-                className={s.select}
-                aria-current={tab.id === current ? 'page' : undefined}
-                onClick={() => onSelect(tab.id)}
-                onPointerEnter={() => onPreview?.(tab.id)}
-                onFocus={() => onPreview?.(tab.id)}
-                {...bind(tab.id)}
+        {/* A tab opened grows in, a closed one fades, and the rest close up; dragged, a tab moves itself. */}
+        <ListMotion within={list} enter="grow">
+          <ul className={cx(s.tabs, dragging !== null && s.sorting, more.before && s.moreBefore, more.after && s.moreAfter)} ref={list}>
+            {tabs.map((tab) => (
+              <li
+                key={tab.id}
+                data-move={tab.id}
+                className={cx(s.tab, s.project, tab.id === current && s.current, dragging?.id === tab.id && s.lifted)}
+                style={tabShift(dragging, tab.id)}
               >
-                {/* The dot after its name says what waits; the mark says only that work runs. */}
-                <ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} className={s.mark} />
-                <span className={s.name}>{tab.name}</span>
-                {tab.running && <VisuallyHidden>, {t.running}</VisuallyHidden>}
-                <Yours n={tab.yours} text={t} />
-              </button>
-              <IconButton icon="close" label={t.close(tab.name)} size="small" className={s.close} onClick={() => onClose(tab.id)} />
-            </li>
-          ))}
-        </ul>
+                <button
+                  type="button"
+                  className={s.select}
+                  aria-current={tab.id === current ? 'page' : undefined}
+                  onClick={() => onSelect(tab.id)}
+                  onPointerEnter={() => onPreview?.(tab.id)}
+                  onFocus={() => onPreview?.(tab.id)}
+                  {...bind(tab.id)}
+                >
+                  {/* The dot after its name says what waits; the mark says only that work runs. */}
+                  <ProjectMark seed={tab.seed} ink={tab.ink} size={15} running={tab.running} className={s.mark} />
+                  <span className={s.name}>{tab.name}</span>
+                  {tab.running && <VisuallyHidden>, {t.running}</VisuallyHidden>}
+                  <Yours n={tab.yours} text={t} />
+                </button>
+                <IconButton icon="close" label={t.close(tab.name)} size="small" className={s.close} onClick={() => onClose(tab.id)} />
+              </li>
+            ))}
+          </ul>
+        </ListMotion>
         {(more.before || more.after) && (
           <Menu label={t.all} align="end" width={260} trigger={<ChromeButton icon="list" label={t.all} compact className={s.plus} />}>
             {tabs.map((tab) => (

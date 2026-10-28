@@ -1,6 +1,7 @@
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { Outcome, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
+import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
@@ -49,29 +50,46 @@ export const settledRowText: SettledRowText = {
   task: (task) => `Task ${task}`,
 }
 
-export interface SettledRowProps {
-  outcome: Outcome
-  task: string
-  kind?: string
-  title: string
-  /** What it left, in a line: PR 1184 · 2 review cycles. */
-  meta?: string
-  /** When it settled. */
-  at: string
-  current?: boolean
-  onOpen?: () => void
-  /** What it left to put right, as one button: Close PR #145. */
-  action?: { readonly label: string; readonly onAction: () => void; readonly busy?: boolean }
-  /** What went wrong doing it, in words. */
-  error?: string
-  text?: Partial<SettledRowText>
-}
+export type SettledRowProps = RootProps<
+  'article',
+  {
+    outcome: Outcome
+    task: string
+    kind?: string
+    title: string
+    /** What it left, in a line: PR 1184 · 2 review cycles. */
+    meta?: string
+    /** When it settled. */
+    at: string
+    current?: boolean
+    onOpen?: () => void
+    /** What it left to put right, as one button: Close PR #145. */
+    action?: { readonly label: string; readonly onAction: () => void; readonly busy?: boolean }
+    /** What went wrong doing it, in words. */
+    error?: string
+    text?: Partial<SettledRowText>
+  }
+>
 
 /** One row of the settled ledger. Put it in a BoardList. */
-export function SettledRow({ outcome, task, kind, title, meta, at, current, onOpen, action, error, text }: SettledRowProps) {
+export function SettledRow({
+  outcome,
+  task,
+  kind,
+  title,
+  meta,
+  at,
+  current,
+  onOpen,
+  action,
+  error,
+  text,
+  className,
+  ...rest
+}: SettledRowProps) {
   const t = { ...settledRowText, ...text }
   return (
-    <article className={cx(b.row, s[outcome])} aria-current={current || undefined}>
+    <article className={cx(b.row, s[outcome], className)} aria-current={current || undefined} {...rest}>
       <div className={b.top}>
         <span className={s.outcome}>
           <Icon name={glyph(outcome)} size={11} />
