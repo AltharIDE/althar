@@ -1,6 +1,6 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -36,7 +36,8 @@ describe('finding a command with this computer’s own defaults', () => {
   })
 
   it('looks in the person’s usual folders where it is told of none, and on no PATH where the environment has none', () => {
-    const installed = join(homedir(), '.local', 'bin', 'opencode')
+    // Linux's usual folder, joined as Linux joins it, whatever system this is.
+    const installed = posix.join(homedir(), '.local', 'bin', 'opencode')
     expect(locate('opencode', none, { env: {}, platform: 'linux', isExecutable: (path) => path === installed })).toEqual({
       command: installed,
       whose: 'theirs',

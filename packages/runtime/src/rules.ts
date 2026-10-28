@@ -1592,9 +1592,10 @@ const places = (context: RuleContext): Places => {
     folder,
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
-    scratch: [...(context.scratch ?? (system.windows ? [tmpdir()] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr']))].map(
-      real,
-    ),
+    // On Windows the null device too, as Git Bash names it, where agents' commands run: `2>/dev/null` writes nothing.
+    scratch: [
+      ...(context.scratch ?? (system.windows ? [tmpdir(), '/dev/null'] : [tmpdir(), '/tmp', '/dev/null', '/dev/stdout', '/dev/stderr'])),
+    ].map(real),
   }
 }
 
@@ -3696,6 +3697,12 @@ const heldFrom = (path: string, cwd: string, reads: NonNullable<ReaderOptions['r
 const GLOB_CHARACTER = /[*?[{]/
 
 /**
+ * A pattern that starts at a root: `/`, or on Windows a drive's (`C:\`, `C:/`). Not a bare backslash, which starts many a
+ * regex Grep is given (`\bretry`).
+ */
+const ROOTED = /^(\/|[A-Za-z]:[/\\])/
+
+/**
  * Where a search starts: the folder it names, or the working folder, and the
  * folder a pattern of paths names before its first glob character where it
  * leaves that folder (absolute, from home, or up with `..`), as Glob's
@@ -3707,14 +3714,14 @@ const searchRootsOf = (request: PermissionRequest, cwd: string): ReadonlyArray<s
   const patterns = ['pattern', 'glob']
     .map((key) => field(request.rawInput, key))
     .filter((value): value is string => typeof value === 'string')
-    .filter((value) => value.startsWith('/') || HOME_WORD.test(value) || /(^|[/\\])\.\.($|[/\\])/.test(value))
+    .filter((value) => ROOTED.test(value) || HOME_WORD.test(value) || /(^|[/\\])\.\.($|[/\\])/.test(value))
     .map((value) => {
       const glob = value.search(GLOB_CHARACTER)
       const fixed = glob === -1 ? value : value.slice(0, glob)
       const folder = fixed.slice(0, Math.max(fixed.lastIndexOf('/'), fixed.lastIndexOf('\\')) + 1)
       return folder === '' ? fixed : folder
     })
-    .map((folder) => (folder.startsWith('/') || HOME_WORD.test(folder) ? folder : `${from}/${folder}`))
+    .map((folder) => (ROOTED.test(folder) || HOME_WORD.test(folder) ? folder : `${from}/${folder}`))
   return [...(named.length === 0 ? [cwd] : named), ...patterns]
 }
 

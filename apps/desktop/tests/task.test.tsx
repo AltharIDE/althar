@@ -2787,13 +2787,13 @@ describe('a task', () => {
       status: TaskStatus.Paused,
       state: `The work waits: Codex is out of usage until ${clock(until)}`,
     })
-    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, both.
+    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, how many more.
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
       status: TaskStatus.Queued,
       state: 'Waiting: 4 of 4 agents busy on this Mac',
     })
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
-      'Waiting: 6 agents busy on this Mac, which runs 2 at once',
+      'Waiting: 2 of 2 agents busy on this Mac, and 4 more',
     )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })

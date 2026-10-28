@@ -533,7 +533,8 @@ const playStall = async (
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
- * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
+ * until it is stopped, for five seconds at most, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its
+ * second round;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part.
@@ -769,10 +770,11 @@ const playRole = async (
             { severity: 'nit', file: 'README.md', claim: 'A typo.' },
           ],
         })
-      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found.
+      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found: by its absolute
+      // path, a Windows one (`D:\…`) too.
       const looked = session.markers.has('[review:evidence]')
-        ? ` Read: ${[...text.matchAll(/^- [^\n]*: (\/[^\n]+)$/gm)]
-            .map(([, path = '']) => `${path.split('/').at(-1) ?? ''} (${statSync(path).size} bytes)`)
+        ? ` Read: ${[...text.matchAll(/^- [^\n]*: ((?:\/|[A-Za-z]:\\)[^\n]+)$/gm)]
+            .map(([, path = '']) => `${path.split(/[\\/]/).at(-1) ?? ''} (${statSync(path).size} bytes)`)
             .join(', ')}.`
         : ''
       if (text.includes('[review:findings]') && !text.startsWith('Round '))

@@ -1,6 +1,6 @@
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
@@ -127,7 +127,8 @@ describe('a file a tool wrote whole', () => {
       const byPath = yield* handedByTool(place, [], { path: 'docs/a.md', content: '# A\n' }, 'edit')
       assert.deepStrictEqual(
         byPath.files.map((file) => [file.path, file.how]),
-        [['/w/docs/a.md', 'wrote']],
+        // Resolved in its folder the way this system writes a path: `D:\w\docs\a.md` on Windows.
+        [[resolve('/w', 'docs', 'a.md'), 'wrote']],
       )
       assert.deepStrictEqual(yield* handedByTool(place, [], { file_path: '', content: '# A\n' }, 'edit'), { pictures: [], files: [] })
     }).pipe(Effect.provide(runtime())),

@@ -335,7 +335,8 @@ describe('copyTo', () => {
     symlinkSync('/etc', join(tools, 'etc'))
     const target = join(folder, 'copy')
     assert.deepStrictEqual(await copyTo(tools, target), { ok: true, kind: 'folder', bytes: 10, entries: 1 })
-    assert.strictEqual(statSync(join(target, 'bin', 'run.sh')).mode & 0o777, 0o755)
+    // Windows keeps no modes of this kind: a file there reads 0o666 whatever it was given.
+    if (process.platform !== 'win32') assert.strictEqual(statSync(join(target, 'bin', 'run.sh')).mode & 0o777, 0o755)
     assert.isFalse(existsSync(join(target, 'hosts')))
     assert.isFalse(existsSync(join(target, 'etc')))
   })

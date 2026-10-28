@@ -33,7 +33,8 @@ describe('connecting', () => {
     }),
   )
 
-  it.live('fails, rather than reading no sign-in, where gh didn’t get to answer', () =>
+  // Not on Windows: the stand-in gh is a shell script that kills itself, and Windows runs neither the script nor the signal.
+  it.live.skipIf(process.platform === 'win32')('fails, rather than reading no sign-in, where gh didn’t get to answer', () =>
     Effect.gen(function* () {
       // A gh that is ended before it answers, as one timed out is.
       const bin = mkdtempSync(join(tmpdir(), 'althar-bin-'))
