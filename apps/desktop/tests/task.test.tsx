@@ -275,6 +275,44 @@ describe('a task', () => {
     expect(screen.getAllByText('gpt-5.2-codex').length).toBeGreaterThan(0)
   })
 
+  it('opens its thread with the screenshot and file the person sent with what they asked for, as the coordinator’s chat shows them', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [items.says('On it.', 'codex')],
+          task: {
+            ...base.task,
+            request: 'did we fix this already',
+            requestPictures: [
+              { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 2048, width: 640, height: 400, name: 'bug.png', unkept: null },
+            ],
+            requestFiles: [
+              {
+                id: 'inp_1:1',
+                name: 'build.log',
+                kind: 'file',
+                mediaType: 'text/plain',
+                bytes: 33,
+                entries: null,
+                path: '/tmp/coordinator/.althar/attachments/abc/build.log',
+              },
+            ],
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await screen.findByText('did we fix this already')
+    const shot = screen.getByRole('button', { name: 'View bug.png' })
+    // With the person's words, before anything the lead did.
+    expect(shot.compareDocumentPosition(screen.getByText('On it.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText('build.log')).toBeTruthy()
+    // The screenshot opens in the lightbox.
+    await userEvent.click(shot)
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+  })
+
   it('reviews someone else’s pull request: opens with it, says what its lead can reach, and posts its draft only as the person says', async () => {
     const base = snapshot()
     const review = {

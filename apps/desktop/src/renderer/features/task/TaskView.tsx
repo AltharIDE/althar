@@ -522,8 +522,9 @@ export function TaskView({
             delivery: Delivery.Delivered,
             // A review's thread opens with the pull request it reviews, under what the person asked.
             links: snapshot.task.review == null ? [] : [reviewedUnfurl(snapshot.task.review)],
-            pictures: [],
-            files: [],
+            // With the images and files they sent with it, as the coordinator's chat shows them.
+            pictures: snapshot.task.requestPictures ?? [],
+            files: snapshot.task.requestFiles ?? [],
           },
         ]),
     // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).
