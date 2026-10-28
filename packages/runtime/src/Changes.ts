@@ -56,6 +56,7 @@ import {
   onlyTheResolution,
   type Place,
   unresolved,
+  shortWhereLine,
   whereLine,
 } from './conflicts'
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
@@ -3636,7 +3637,8 @@ export class Changes extends Context.Service<
           const left = yield* decodeEnded(round.ended)
           const now = yield* endedOf(taskId, conflicts)
           if (!left.every((one) => now.some((head) => head.repository === one.repository && head.head === one.head))) return null
-          const couldnt = round.pushedHead === null ? `resolve the conflict with ${whereLine(conflicts)}` : 'fix the checks on the merge'
+          const couldnt =
+            round.pushedHead === null ? `resolve the conflict with ${shortWhereLine(conflicts)}` : 'fix the checks on the merge'
           return { state: 'handed_back', why: `The lead couldn’t ${couldnt}. ${round.failure}` }
         })
 
