@@ -240,7 +240,7 @@ export const needsOf = ({
         kind: readyKindOf(task),
         project,
         title: task.title,
-        brief: task.handedBack ?? briefOf(task),
+        brief: task.checksBack ?? task.handedBack ?? briefOf(task),
         ...(next === null ? {} : { ready: { task, next } }),
       },
     ]

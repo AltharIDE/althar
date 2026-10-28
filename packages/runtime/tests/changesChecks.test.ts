@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { FIX_ROUNDS } from '../src/Changes'
+import { Changes, FIX_ROUNDS } from '../src/Changes'
 import { Queries } from '../src/Queries'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
@@ -163,38 +163,145 @@ describe('a change whose checks Althar sees through', () => {
           ),
           `The checks on PR #1 still fail after ${FIX_ROUNDS} fixes by its lead, so the change is yours now.`,
         )
-        // The fix after that is the person's to push.
-        yield* until(pushRequests(threadId), (asked) => asked.length === 1, Duration.seconds(20))
+        // Its lead says what it tried, and tries no more: the card says why, and nothing is asked of the person to push.
+        const [why] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null, Duration.seconds(20))
+        assert.strictEqual(
+          why?.checksBack,
+          'Tried three fixes to the retry limit; the test still fails. The test expects a limit the brief doesn’t give.',
+        )
+        assert.strictEqual(why?.phase, 'ready')
+        assert.lengthOf(yield* pushRequests(threadId), 0)
         assert.lengthOf(fixesOn(bare), FIX_ROUNDS)
       }).pipe(Effect.provide(runtimeWith({ github })))
     },
     150_000,
   )
 
-  it.live('asks the person to push once they have opened the task', () => {
+  it.live(
+    'wakes its lead for a failure after the person has opened the task: under way, and its fix pushed without asking',
+    () => {
+      const { working, bare } = hosted()
+      let first: 'running' | 'failed' = 'running'
+      let second: 'running' | 'passed' = 'running'
+      const github = makeFakeService({
+        pushUrl: () => bare,
+        headOf: tipOf(bare),
+        checksFor: byCommit((index) => (index === 0 ? [{ ...failing, state: first }] : [{ ...passing, state: second }])),
+      })
+      github.addRepository(['meridian', 'api'])
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+        )
+        const [running] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks_running', Duration.seconds(20))
+        const threadId = running?.threadId ?? ''
+        // Opened by the person, it is theirs while its checks run; its lead's session ends.
+        yield* (yield* Tasks).see({ taskId: running?.taskId ?? '' })
+        yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+        yield* (yield* Sessions).stop(threadId)
+        first = 'failed'
+        // The failure goes to its lead all the same, started again; its fix goes up, and the card is under way while its checks run.
+        const [fixing] = yield* until(
+          cards(projectId),
+          (all) => all[0]?.phase === 'running' && all[0].step === 'checks_running' && fixesOn(bare).length === 1,
+          Duration.seconds(30),
+        )
+        assert.isNull(fixing?.checksBack ?? null)
+        assert.lengthOf(yield* pushRequests(threadId), 0)
+        second = 'passed'
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+        assert.isNull(ready?.checksBack ?? null)
+        const sql = yield* SqlClient.SqlClient
+        const started = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${threadId}`
+        assert.lengthOf(started, 2)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+    60_000,
+  )
+
+  it.live('brings a failure that is broken on main to the person with its lead’s line, changing nothing', () => {
     const { working, bare } = hosted()
-    let first: 'running' | 'failed' = 'running'
     const github = makeFakeService({
       pushUrl: () => bare,
       headOf: tipOf(bare),
-      checksFor: byCommit((index) => (index === 0 ? [{ ...failing, state: first }] : [passing])),
+      checksFor: () => [failing],
+      // Main's latest commit fails the same check.
+      checksOn: (sha) => (sha === git(bare, 'rev-parse', 'main') ? [failing, { name: 'lint', state: 'passed' }] : undefined),
     })
     github.addRepository(['meridian', 'api'])
     return Effect.gen(function* () {
       yield* connect('github', HOST)
       const projectId = yield* ask(
         working,
-        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:checks-main]',
       )
-      const [running] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks_running', Duration.seconds(20))
-      // Opened by the person, it is theirs: ready though its checks run, and a fix waits for them to push it.
-      yield* (yield* Tasks).see({ taskId: running?.taskId ?? '' })
-      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
-      first = 'failed'
-      yield* until(pushRequests(running?.threadId ?? ''), (asked) => asked.length === 1, Duration.seconds(30))
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null, Duration.seconds(30))
+      assert.strictEqual(ready?.phase, 'ready')
+      assert.strictEqual(ready?.checksBack, 'Fails on main too: `test` fails in limit.test.ts. Fixing it on main brings this one green.')
+      const threadId = ready?.threadId ?? ''
+      assert.include(yield* notices(threadId), 'Fails on main too: `test` fails in limit.test.ts')
       assert.lengthOf(fixesOn(bare), 0)
+      assert.lengthOf(yield* pushRequests(threadId), 0)
+      // What it read of main.
+      const lead = { role: 'lead' as const, projectId, threadId, sessionId: 'none', taskId: ready?.taskId ?? '' }
+      const main = yield* callTool(lead, 'read_default_branch_checks', {})
+      assert.match(
+        main,
+        /^The checks on main's latest commit, [0-9a-f]{7}: 1 passed, 1 failed, 0 running\.\n\n- test: failed\n- lint: passed\n\nThe end of test's log:/,
+      )
+      // Its line stands: the same failure isn't the lead's again.
+      yield* Effect.sleep('500 millis')
+      assert.strictEqual((yield* cards(projectId))[0]?.phase, 'ready')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
+
+  it.live(
+    'leaves a failure to the person once they stop its lead, and wakes it again only for a new one on a new commit',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [failing] })
+      github.addRepository(['meridian', 'api'])
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-hold]',
+        )
+        // Told its checks failed, its lead commits a fix and works on, until the person stops it.
+        const sql = yield* SqlClient.SqlClient
+        const [card] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks', Duration.seconds(30))
+        const threadId = card?.threadId ?? ''
+        const taskId = card?.taskId ?? ''
+        const sessions = yield* Sessions
+        const changes = yield* Changes
+        yield* sessions.stop(threadId)
+        yield* changes.leadStopped({ threadId })
+        const [stopped] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+        assert.isNull(stopped?.checksBack ?? null)
+        const sessionsOf = sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${threadId}`
+        const before = (yield* sessionsOf).length
+        // The same failure, run again and failing again, doesn't start it again.
+        const lead = { role: 'lead' as const, projectId, threadId, sessionId: 'none', taskId }
+        yield* callTool(lead, 'rerun_check', {})
+        yield* until(
+          sql<{ id: string }>`SELECT id FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.id') LIKE '%:rerun:%'`,
+          (heard) => heard.length > 0,
+          Duration.seconds(20),
+        )
+        yield* Effect.sleep('300 millis')
+        assert.lengthOf(yield* sessionsOf, before)
+        assert.strictEqual((yield* cards(projectId))[0]?.phase, 'ready')
+        // The person pushes its fix: a new commit, and its failure is the lead's again.
+        const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${taskId}`
+        const head = git(worktree?.path ?? '', 'rev-parse', 'HEAD')
+        yield* changes.push(taskId, head, card?.change?.url ?? '')
+        yield* until(sessionsOf, (now) => now.length > before, Duration.seconds(30))
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+    60_000,
+  )
 })
 
 /*

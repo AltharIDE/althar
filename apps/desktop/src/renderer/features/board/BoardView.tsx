@@ -545,6 +545,12 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
             {unchecked}
           </Fact>
         )}
+        {/* Its failing checks brought to the person by its lead (ADR-068): why, before what fails. */}
+        {work.checksBack != null && (
+          <Fact key="checks" icon="close" tone="danger">
+            {work.checksBack}
+          </Fact>
+        )}
         {facts}
       </FactLine>
       {next !== null &&

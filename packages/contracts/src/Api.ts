@@ -1594,6 +1594,13 @@ export const TaskCard = Schema.Struct({
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
   /**
+   * Ready, its pull request's checks failing, and its lead brought them to the
+   * person rather than fixing them (broken on its default branch, say), or
+   * spent its tries (ADR-068): why, in a line, with what would fix it. Without
+   * it, its lead sees them through, or they don't fail.
+   */
+  checksBack: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
    * Its branch conflicts with its default branch, and Althar didn't ask its
    * lead to resolve it though the rules say it resolves conflicts: why, in a
    * sentence, beside Resolve now (ADR-030). Without it, nothing is unsaid.
@@ -2342,6 +2349,8 @@ export const ThreadSnapshot = Schema.Struct({
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
+    /** Why the checks failing on its pull request are the person's, as its card says (ADR-068). */
+    checksBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Why its conflict with its default branch wasn't asked of its lead, as its card says, beside Resolve now. */
     conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),
     /** Why Althar couldn't look for a conflict with its default branch, as its card says, beside Look again. */

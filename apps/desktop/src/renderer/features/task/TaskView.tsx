@@ -200,8 +200,10 @@ export const statusOf = (
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
-  // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
-  if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
+  // Ready, but its lead couldn't resolve a conflict with its default branch, or brought its failing checks to the person (ADR-068):
+  // it needs the person before it can be accepted.
+  if (phase === 'ready' && (snapshot.task.handedBack != null || snapshot.task.checksBack != null))
+    return { status: TaskStatus.Yours, state: text.needsYou }
   // A review drafted is the person's to post (DEV-96).
   if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
     return { status: TaskStatus.Yours, state: text.drafted }

@@ -1,6 +1,6 @@
 # ADR-040: Until the person has looked, a change's checks are Althar's to see through
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-068](068-failing-checks-go-to-the-lead-whoever-has-looked.md): failures go to the lead after the person has looked too
 - **Date:** 2026-10-15
 - **Owner:** Repository maintainers
 - **Context:** A change came to the person (Needs you) as soon as its pull
@@ -40,6 +40,9 @@
     to the person, and from there its fixes wait for their push, as before.
   - **Once the person has the change, nothing changes from before:** a
     failure reaches a running lead only, and every push is theirs.
+    Superseded by ADR-068: a failure goes to its lead, started again where it
+    must be, whether or not the person has looked, and its fix pushes at
+    once.
   - What Althar writes to an agent quietly is now authored by Althar, not
     by the person whose command it came with, so the person's words are only
     what they said.
