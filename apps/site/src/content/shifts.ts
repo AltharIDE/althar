@@ -7,7 +7,7 @@
  * Collected on 1 October 2026 from search results, covering 1 August to 30
  * September. Topped up on 8 October with 1 to 8 October, and one September
  * item that was missed. Topped up on 19 October with 9 to 19 October, and on 20 October with the
- * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters; pure
+ * Copilot removals that landed on the 19th, and on 21 October with Cursor's new plans, and on 24 October with OpenAI's legacy models leaving the API, and on 25 October with the date of the ChatGPT Pro cut corrected to 30 October, and on 26 October with Anthropic's API dropping sampling parameters, and on 28 October with GitLab.com's new rate limits; pure
  * feature launches were dropped, since a shift is a change that costs
  * developers something or moves the whole field. Before launch, open every source and check the date
  * and the line against it; replace secondary sources with the company's own
@@ -55,6 +55,15 @@ export interface Upcoming extends Shift {
 }
 
 export const SHIFTS: readonly Shift[] = [
+  {
+    id: 'gitlab-rate-limits',
+    date: '2026-10-19',
+    kind: ShiftKind.Limits,
+    who: 'GitLab',
+    title: 'GitLab.com caps unauthenticated requests at 60 an hour',
+    what: 'Per IP address, on any tier; Free accounts get 5,000 an hour. Agents and scripts that call GitLab without a token get 429s. Premium and Ultimate limits change in January 2027.',
+    source: { name: 'DevOps.com', url: 'https://devops.com/gitlab-tightens-rate-limits-as-coding-agents-drive-demand' },
+  },
   {
     id: 'claude-api-sampling-removed',
     date: '2026-10-21',
