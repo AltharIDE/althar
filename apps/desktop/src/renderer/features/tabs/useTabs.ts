@@ -11,6 +11,7 @@ import { draftActions, draftsOf, inkOf } from '../newProject/draft'
 import { FIRST_SECTION, type Section } from '../settings/sections'
 import { arrived, closed, moved, settingsClosed, settingsOn, tabsStoreOf } from './store'
 import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './tabs'
+import { useWarmTabs } from './warm'
 
 /*
  * The window's tabs: one for each project the person keeps open, with where
@@ -43,13 +44,15 @@ export interface TabsModel {
   /** Althar's settings: whether they have a tab, and whether it has the window. */
   readonly settings: { readonly open: boolean; readonly current: boolean }
   readonly select: (id: string | null) => void
+  /** A project's tab is pointed at: what it shows is read ahead, where the window doesn't hold it as it is. */
+  readonly preview: (id: string) => void
   readonly close: (id: string) => void
   readonly open: (id: string) => void
   /** A project's tab moves before another's, or to the end: the order is kept. */
   readonly reorder: (id: string, beforeId: string | null) => void
   /** Starts a new project in a tab of its own, or goes to the one being made; folders dropped are added to it. */
   readonly newProject: (files?: ReadonlyArray<File>) => void
-  /** The new project was made: its tab is the project's own, open on its conversation. */
+  /** The new project was made: its tab is the project's own, open on Home, as a project with no kept view is. */
   readonly made: (projectId: string) => void
   /** The new project's tab closes, and nothing is made. */
   readonly closeNew: () => void
@@ -132,6 +135,8 @@ export const useTabs = (): TabsModel => {
     return project === undefined ? [] : [tabOf(project)]
   })
   const places = kept?.places ?? {}
+  // Every open tab's place stays in the window's cache, read ahead, so going to one never waits on the runtime.
+  const preview = useWarmTabs(open, places)
   // The project being made, at the end; once made, its own tab has its id, and stands in its place.
   const making: ProjectTab | null =
     draft === null || draft.made || open.includes(draft.id)
@@ -171,6 +176,9 @@ export const useTabs = (): TabsModel => {
       if (id !== null && id === making?.id) return void navigate({ to: '/new' })
       void go(id, places)
     },
+    preview: (id) => {
+      if (id !== making?.id) preview(id)
+    },
     close: (id) => {
       if (id === making?.id) return closeNew()
       store.change(closed(id))
@@ -189,7 +197,7 @@ export const useTabs = (): TabsModel => {
     made: (projectId) => {
       store.change(arrived(projectId, { kind: 'project' }))
       drafts.change(projectId, (now) => ({ ...now, made: true }))
-      leaving(projectId, navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } }))
+      leaving(projectId, navigate({ to: '/projects/$projectId', params: { projectId } }))
     },
     closeNew,
     visit: store.visit,

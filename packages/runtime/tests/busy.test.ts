@@ -529,9 +529,10 @@ describe('Agents at once', () => {
       yield* tell(first.threadId, 'The checks failed.')
       yield* queuedOn(projectId, first.taskId)
       assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
-      // Its lead has worked on it: a turn that waits leaves it under way, not in the line.
+      // Its lead has worked on it: it continues up next, first, ahead of any line, and the person can't move it (ADR-065).
       assert.isUndefined((yield* cardOf(projectId, first.taskId))?.inLine)
-      assert.isUndefined((yield* cardOf(projectId, first.taskId))?.place)
+      assert.isTrue((yield* cardOf(projectId, first.taskId))?.continues)
+      assert.strictEqual((yield* cardOf(projectId, first.taskId))?.place, 1)
       assert.isFalse(yield* (yield* Busy).move(first.taskId, 0))
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* turnsOn(first.threadId), turns)

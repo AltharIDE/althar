@@ -31,6 +31,11 @@ export interface ProductInfo {
   readonly hosted: { readonly webUrl: string; readonly apiUrl: string } | null
   /** An instance on a company's own server can be connected, by its address. */
   readonly selfHosted: boolean
+  /**
+   * A sign-in reaches one workspace of it, and another is connected beside
+   * it, each told apart by its account's workspace (ADR-059): Linear's.
+   */
+  readonly workspaces?: boolean
   /** An instance's API root, from its address. */
   readonly apiFor: (webUrl: string) => string
   /** The address a connection keeps, from what the person typed, where the product says more than trimming it. */
@@ -228,6 +233,7 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     tracker: true,
     hosted: { webUrl: 'https://linear.app', apiUrl: 'https://api.linear.app' },
     selfHosted: false,
+    workspaces: true,
     apiFor: () => 'https://api.linear.app',
     browser: {
       kind: 'pkce',

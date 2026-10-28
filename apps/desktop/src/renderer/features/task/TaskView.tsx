@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
@@ -11,14 +11,13 @@ import {
   Delivery,
   DiffLineKind,
   type FileView,
+  Behind,
   Composer,
   DictationTray,
   Issue,
   TaskActivity,
   LinkButton,
-  Listening,
   type ModelInfo,
-  Running,
   TaskFace,
   TaskHeader,
   type TaskHeaderStep,
@@ -39,10 +38,9 @@ import { isAnswered, isSettleable, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
 import { device, platform } from '../../shared/device'
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
-import { Holders } from '../../shared/Holders'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
@@ -60,12 +58,12 @@ import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { roundsOf } from '../../shared/rounds'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
-import { type Outgoing, outgoingOf, takesImages, useImages } from '../../shared/useImages'
+import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
-import { behindText, listeningOf, useHeard } from './behind'
+import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
 import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
@@ -84,7 +82,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
-import { chosenFaces } from './chosenFaces'
+import { chooseFace, chosenFaces } from './chosenFaces'
 import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
@@ -120,9 +118,14 @@ export const text = {
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
   needsAgent: 'No agent is signed in, so nothing can pick this up. Sign one in from Settings; what you send waits for it.',
-  handsOver: (agent: string) => `hands the task to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
   handingOver: (to: string, from: string) => `${to} takes over from ${from} when you send.`,
+  /** A conflict with its default branch Althar didn't ask its lead to resolve, and why; the button asks it anyway (ADR-030). */
+  conflictUnsent: (why: string) => `It conflicts with its default branch, and its lead wasn’t asked to resolve it. ${why}`,
+  resolveNow: 'Resolve now',
+  /** Althar couldn't look for a conflict here, whatever its host says, and why; the button looks again, fetching anew. */
+  conflictUnchecked: (why: string) => `Althar couldn’t look for a conflict with its default branch. ${why}`,
+  lookAgain: 'Look again',
   keep: (from: string) => `Keep ${from}`,
   /** What the lead is asked when merging its branch here conflicts: in each repository, the branch it merges into and where. */
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
@@ -186,7 +189,10 @@ export const statusOf = (
         : text.issueChanges,
     }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step) }
+  if (waits !== null)
+    return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step, waits.left) }
+  // Held for the connection, it carries on by itself once it is back (ADR-060).
+  if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
   if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
@@ -328,8 +334,8 @@ export function TaskView({
             take: text.carriedTake,
           },
   })
-  // Images to send with what the person says, and which agents take them.
-  const images = useImages(kept)
+  // Images and files to send with what the person says, and which agents take images.
+  const images = useAttachments(kept, useServices().host)
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
@@ -361,7 +367,7 @@ export function TaskView({
   const taskId = model.snapshot?.task.id
   const setFace = useCallback(
     (value: Face) => {
-      if (taskId !== undefined) chosenFaces.set(taskId, value)
+      if (taskId !== undefined) chooseFace(taskId, value)
       showFace(value)
     },
     [taskId],
@@ -496,6 +502,7 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
   const listening = listeningOf(snapshot)
+  const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself: one list, each stopped its own way.
   const running = [...(session?.background ?? []), ...snapshot.task.launches]
   const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
@@ -516,6 +523,7 @@ export function TaskView({
             // A review's thread opens with the pull request it reviews, under what the person asked.
             links: snapshot.task.review == null ? [] : [reviewedUnfurl(snapshot.task.review)],
             pictures: [],
+            files: [],
           },
         ]),
     // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).
@@ -602,12 +610,12 @@ export function TaskView({
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
     const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
-    // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
-    if (said === undefined || !images.fits(said.pictures)) return
+    // One whose images or files wouldn't fit beside those waiting stays in the queue, and the composer says why.
+    if (said === undefined || !images.fits(said)) return
     if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(kept, true)
-      images.restore(said.pictures)
+      images.restore(said)
     }
   }
 
@@ -619,7 +627,7 @@ export function TaskView({
     // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
     setDraft((current) => withQueued(current, said.text))
     if (said.dictated === true) setDraftDictated(kept, true)
-    images.restore(said.pictures)
+    images.restore(said)
   }
 
   const issue = snapshot.task.issue
@@ -729,28 +737,28 @@ export function TaskView({
     </>
   )
 
+  // A conflict that is the person's (its lead couldn't resolve it, or wasn't asked), or one Althar couldn't look for: why, and what asks again.
+  const conflict =
+    snapshot.task.handedBack != null
+      ? { words: snapshot.task.handedBack, act: text.resolveNow }
+      : snapshot.task.conflictUnsent != null
+        ? { words: text.conflictUnsent(snapshot.task.conflictUnsent), act: text.resolveNow }
+        : snapshot.task.conflictUnchecked != null
+          ? { words: text.conflictUnchecked(snapshot.task.conflictUnchecked), act: text.lookAgain }
+          : null
+
+  const line: ReactNode =
+    waiting !== null ? (
+      <>
+        {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
+        <LinkButton onClick={() => setHandover(null)}>{text.keep(lead.name)}</LinkButton>
+      </>
+    ) : (session === null || !session.held) && model.agentsKnown && model.agents.length === 0 ? (
+      text.needsAgent
+    ) : null
+
   const composer = (
     <div className={s.composer}>
-      {model.error !== null && (
-        <p className={s.failure} role="alert">
-          {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-        </p>
-      )}
-      {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
-        <p className={s.handover}>{text.needsAgent}</p>
-      )}
-      <Holders
-        holders={snapshot.task.queued?.holders}
-        onStop={(holder, id) => void model.stopHolding(holder, id)}
-        // 2nd or later in its project's line, it can go first from here.
-        {...((snapshot.task.place ?? 0) > 1 ? { onFront: () => void model.moveToFront() } : {})}
-      />
-      {waiting !== null && (
-        <p className={s.handover}>
-          {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
-          <LinkButton onClick={() => setHandover(null)}>{text.keep(lead.name)}</LinkButton>
-        </p>
-      )}
       <Composer
         value={draft}
         onChange={setDraft}
@@ -761,27 +769,50 @@ export function TaskView({
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
         carried={<CarriedOver here={kept} />}
-        text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
-        // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
-        above={
-          (listening.length > 0 || leftRunning.length > 0) && (
+        // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
+        notice={
+          model.error !== null || conflict !== null || line !== null ? (
             <>
-              {listening.length > 0 && (
-                <Listening sources={listening} heard={heard} onStop={(url) => void model.stopListening(url)} note={behindText.note} />
+              {model.error !== null && (
+                <div className={s.failure} role="alert">
+                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                </div>
               )}
-              <Running
-                processes={leftRunning}
-                onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
-                onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
-                onOutput={setOutputOf}
-                // Where it answers opens in the person's browser.
-                onOpenUrl={(id) => {
-                  const url = running.find((command) => command.id === id)?.url
-                  if (url != null) window.open(url, '_blank')
-                }}
-              />
+              {conflict !== null && (
+                <div>
+                  {conflict.words} <LinkButton onClick={() => void model.resolveConflictsNow()}>{conflict.act}</LinkButton>
+                </div>
+              )}
+              {line !== null && <div>{line}</div>}
             </>
-          )
+          ) : null
+        }
+        text={{ sendNowKey: platform === 'darwin' ? '⌘↵' : 'Ctrl+Enter' }}
+        // What goes on outside the conversation, as one chip over its end: why it waits, what its lead left running, the pull requests it listens to.
+        above={
+          <Behind
+            wait={wait}
+            onStopHeld={(taskId) => {
+              // Stopping what a task left running frees its place.
+              const holder = snapshot.task.queued?.holders?.find((one) => one.taskId === taskId)
+              if (holder?.threadId != null) for (const command of holder.running) void model.stopHolding(holder.threadId, command.id)
+            }}
+            // Behind another in its project's line, it can go first in it from here; what continues keeps its order (ADR-065).
+            {...(snapshot.task.front === true ? { onFront: () => void model.moveToFront() } : {})}
+            processes={leftRunning}
+            onStop={(id) => void (launched.has(id) ? model.stopLaunch(id) : model.stopBackground(id))}
+            onDismiss={(id) => void (launched.has(id) ? model.clearLaunch(id) : model.clearBackground(id))}
+            onOutput={setOutputOf}
+            // Where it answers opens in the person's browser.
+            onOpenUrl={(id) => {
+              const url = running.find((command) => command.id === id)?.url
+              if (url != null) window.open(url, '_blank')
+            }}
+            sources={listening}
+            heard={heard}
+            onStopListening={(url) => void model.stopListening(url)}
+            text={listeningText}
+          />
         }
         onSubmit={(body) => submit(body, false)}
         onSendNow={(body) => submit(body, true)}
@@ -798,14 +829,7 @@ export function TaskView({
         picker={
           model.agents.length > 0 &&
           choice !== null && (
-            <ModelChoice
-              owner={text.lead}
-              agents={model.agents}
-              value={choice}
-              onChange={choose}
-              // Another agent's model hands the task over, once the person says something.
-              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
-            />
+            <ModelChoice owner={text.lead} agents={model.agents} projectId={snapshot.project.id} value={choice} onChange={choose} />
           )
         }
       />
@@ -1048,6 +1072,7 @@ export function TaskView({
                     actions={{
                       onChange: model.changeReview,
                       onPost: (draftId) => void model.postReview(draftId),
+                      onPostFromNow: (draftId, automationId) => void model.postReviewsFromNow(draftId, automationId),
                       onDiscard: (draftId) => void model.discardReview(draftId),
                     }}
                   />

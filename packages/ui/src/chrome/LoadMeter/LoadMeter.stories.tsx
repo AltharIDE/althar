@@ -46,7 +46,7 @@ export const Idle: Story = { args: { load: LOAD_IDLE } }
 export const OneTask: Story = { args: { load: LOAD_ONE_TASK } }
 /** Four pieces of work across two projects. */
 export const Busy: Story = {}
-/** Every core busy and memory tight: both meters in full ink, and the one word the meter says. */
+/** Every core busy and memory tight: both meters in full ink. */
 export const NearMax: Story = { args: { load: LOAD_NEAR_MAX } }
 /** macOS moving memory to disk. */
 export const MemoryShort: Story = { args: { load: LOAD_MEMORY_SHORT } }
@@ -158,14 +158,6 @@ export const EscapeReturnsFocus: Story = {
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await expect(meter).toHaveFocus()
-  },
-}
-
-/** Memory running short is said beside the meter, as a live status. */
-export const SaysMemoryShort: Story = {
-  args: { load: LOAD_MEMORY_SHORT },
-  play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByRole('status')).toHaveTextContent('Memory is short')
   },
 }
 

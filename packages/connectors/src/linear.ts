@@ -51,6 +51,21 @@ const LinearIssue = Schema.Struct({
 })
 type LinearIssue = typeof LinearIssue.Type
 
+/** Who a token signs in as, and the workspace it reaches: its name, and the key its links carry. */
+const VIEWER = 'viewer { id name displayName } organization { name urlKey }'
+
+const Viewer = Schema.Struct({
+  viewer: Schema.Struct({ id: Schema.String, name: Schema.String, displayName: Schema.optional(Schema.String) }),
+  organization: Schema.Struct({ name: Schema.String, urlKey: Schema.String }),
+})
+
+const accountOf = ({ viewer, organization }: typeof Viewer.Type): Account => ({
+  id: viewer.id,
+  login: viewer.displayName ?? viewer.name,
+  name: viewer.name,
+  workspace: { key: organization.urlKey, name: organization.name },
+})
+
 /** A state's type, as every tracker's statuses fall into. */
 export const categoryOf = (type: string): StatusCategory => {
   switch (type) {
@@ -174,14 +189,8 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
   const url = `${options.apiUrl.replace(/\/+$/, '')}/graphql`
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
 
-  const account: Effect.Effect<Account, ConnectorFailed> = Effect.map(
-    http.graphql(
-      Schema.Struct({ viewer: Schema.Struct({ id: Schema.String, name: Schema.String, displayName: Schema.optional(Schema.String) }) }),
-      url,
-      'query { viewer { id name displayName } }',
-    ),
-    ({ viewer }) => ({ id: viewer.id, login: viewer.displayName ?? viewer.name, name: viewer.name }),
-  )
+  // A token reaches one workspace: who it is there, and which, as its links name it.
+  const account: Effect.Effect<Account, ConnectorFailed> = Effect.map(http.graphql(Viewer, url, `query { ${VIEWER} }`), accountOf)
 
   /** A team's labels and the workspace's, which any of its issues may take: page after page. */
   const teamLabels = (teamId: string) =>
@@ -415,11 +424,6 @@ const Envelope = Schema.Struct({
   ),
 })
 
-const Viewer = Schema.Struct({
-  viewer: Schema.Struct({ id: Schema.String, name: Schema.String, displayName: Schema.optional(Schema.String) }),
-  organization: Schema.Struct({ name: Schema.String }),
-})
-
 const Teams = Schema.Struct({ teams: Schema.Struct({ nodes: Schema.Array(Schema.Struct({ key: Schema.String })) }) })
 
 /** A query's data, read by a schema, or why there is none: Linear says a credential it didn't take in a 400 as often as a 401. */
@@ -438,13 +442,13 @@ const dataOf = <A>(schema: Schema.Codec<A, unknown>, answer: Answer): { readonly
 export const accessLinear: Access = (input) =>
   Effect.gen(function* () {
     const url = `${input.apiUrl.replace(/\/+$/, '')}/graphql`
-    const me = dataOf(Viewer, yield* probe(input, url, { query: 'query { viewer { id name displayName } organization { name } }' }))
+    const me = dataOf(Viewer, yield* probe(input, url, { query: `query { ${VIEWER} }` }))
     if ('reason' in me) return stopped([line('account', 'no', { reason: me.reason })])
     const { viewer, organization } = me.data
     const teams = dataOf(Teams, yield* probe(input, url, { query: 'query { teams(first: 100) { nodes { key } } }' }))
     const signedIn = input.auth === 'pkce'
     return {
-      account: { id: viewer.id, login: viewer.displayName ?? viewer.name, name: viewer.name },
+      account: accountOf(me.data),
       lines: [
         line('account', 'ok', { fact: `${viewer.name} · ${organization.name}` }),
         'reason' in teams ? line('read', 'no', { reason: teams.reason }) : line('read', 'ok', { count: teams.data.teams.nodes.length }),

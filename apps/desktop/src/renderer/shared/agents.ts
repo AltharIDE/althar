@@ -1,4 +1,4 @@
-import type { AgentStatus, Queued } from '@althar/contracts'
+import type { AgentStatus, HeldForConnection, Queued } from '@althar/contracts'
 import { Brand, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
@@ -33,9 +33,23 @@ const heldWork: Readonly<Record<string, string>> = { review: 'The review waits',
  * What a step held for a usage limit waits for: the agent that ran out, and
  * when it is back; with the step, what waits too, where there is room for it,
  * as in the task's header. A card says Paused and shows its step already.
+ * Held before it ran out (`left`, a new step steered clear of an agent nearly
+ * out), it says it waits for the agent, which isn't out yet.
  */
-export const waitsWords = (agent: string, at: string, step?: string | null) =>
-  `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
+export const waitsWords = (agent: string, at: string, step?: string | null, left?: number) => {
+  if (left !== undefined && left > 0)
+    return step === undefined ? `Waiting for ${agent} until ${at}` : `${heldWork[step ?? ''] ?? 'The work waits'} for ${agent} until ${at}`
+  return `${step === undefined ? '' : `${heldWork[step ?? ''] ?? 'The work waits'}: `}${agent} is out of usage until ${at}`
+}
+
+/**
+ * What a step held for the connection waits for (ADR-060): the connection,
+ * while the computer is offline or its service out of reach; else the try
+ * again at its service, which failed, and when. `at` says a time as the
+ * window does.
+ */
+export const reconnectsWords = (held: HeldForConnection, at: (iso: string) => string) =>
+  held.offline || held.next === null ? 'Waiting for the connection' : `${held.service} failed: trying again at ${at(held.next)}`
 
 /**
  * What work waiting for a free agent waits for (ADR-032): every agent this
@@ -55,6 +69,9 @@ const ordinal = (n: number) => {
 
 /** Where a task waiting for a free agent stands in its project's line: Next in line, 2nd in line. */
 export const inLineWords = (place: number) => `${ordinal(place)} in line`
+
+/** Where a task waiting for a free agent stands in its project's line, as the chip over its composer says it: First in Up next, 2nd in Up next. */
+export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal(place)} in Up next`
 
 /** How busy this computer's agents are, as work that waits for one says it. */
 export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>

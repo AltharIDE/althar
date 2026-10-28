@@ -359,6 +359,9 @@ service's model.
 - **A pull request that conflicts with its target** is read from the host,
   once it has worked it out: GitHub's mergeable state, GitLab's merge
   status, Bitbucket Data Center's merge result. Bitbucket Cloud doesn't say.
+  A host that hasn't worked it out yet (GitHub's `null`) is asked again each
+  turn for a few turns, not taken for a no. Where the project resolves
+  conflicts, Althar doesn't go by the host alone (below).
 
 **Resolving a conflict, where the project says so** (ADR-030). A project's
 rules can have its leads resolve a conflict with the default branch on their
@@ -378,10 +381,20 @@ for the person, as above.
   conflict: its repositories merging here are merged with their default
   branches without anything moving, whatever the person's own checkout
   holds, and a conflict starts a round as a Merge pressed would; its
-  listened pull requests are asked about now, and one whose host says it
-  conflicts starts one as ever. The rules below hold for each: a run that
-  succeeded, one round at a time, and the same push. Turned off, a round
-  under way carries on; the next conflict waits for the person.
+  listened pull requests are asked about now, each target fetched again and
+  merged here, whatever the host says. The rules below hold for each: its
+  lead idle, one round at a time, and the same push. Turned off, a round
+  under way carries on; the next conflict waits for the person. While on,
+  "Look for conflicts now" beside the switch does the same at any time.
+- **Found as the default branch moves, not only as the host says.** A
+  host works out whether a pull request conflicts lazily, and needn't say
+  so again when only the branch it goes into moved: GitHub's answer can
+  stay "mergeable" against a base several merges old. So every few
+  listening turns (two minutes), and at once when Althar sees a pull request
+  merge, each open task is looked at here: a listened pull request's target
+  is fetched (at most that often per repository, at once where its host says
+  it conflicts) and merged with the task's branch without anything moving;
+  a branch with no pull request, with its default branch here.
 
 - **Found either way, asked the same way.** A merge here that conflicts, or
   a pull request its host says conflicts, has Althar send the lead the note
@@ -395,11 +408,26 @@ for the person, as above.
   the task's branch conflicts with it here too; one that merges cleanly is
   from before the target moved, or merged already and not yet pushed. A
   lead that isn't running is started, on the agent last on the thread.
-- **Only where the task is open and its run succeeded,** and one round at a
+- **Only where the task is open and its lead idle,** and one round at a
   time: not while the run runs, nor where the person stopped it, which an
-  agent starting would go against. The thread says Althar asked, and why:
-  the project's rules, or the task's own say. A merge here pressed
-  meanwhile says the lead is resolving it.
+  agent starting would go against. A run that failed or was cancelled
+  leaves its lead idle, and it is asked. The thread says Althar asked, and
+  why: the project's rules, or the task's own say. A merge here pressed
+  meanwhile says the lead is resolving it. Rounds wait their turn for a
+  place among the agents at work on this computer, in Up next, so many
+  conflicts at once start one after another.
+- **Never skipped without a word.** A task that conflicts and isn't asked
+  of its lead says why on its card and over its composer, in one line, with
+  Resolve now: the person stopped it, it has no lead yet, its folder isn't
+  on this computer, or its target couldn't be fetched or merged here. A
+  round the lead couldn't resolve offers Resolve now too. Where Althar
+  couldn't look here at all (no folder, a fetch that failed, git that
+  couldn't merge), for a pull request or a branch merging here, that is
+  said whatever the host says, as the host's "merges cleanly" may be out
+  of date, with Look again, and the card keeps its next step. Each reason is logged once. Resolve now looks again, its
+  target fetched anew, at a task without a folder here too, and asks the
+  lead whatever the rules, a stop, or a round handed back say; only a run
+  still going, or a round under way, holds it.
 - **Althar looks at the branch, not at what the lead said,** once the lead
   is done: its turn over, and nothing it left running in the background
   still going (the full tests, say) or at work after, as Claude Code starts
@@ -417,7 +445,8 @@ for the person, as above.
   not committed, commit it; not asked to resolve it again. Then, or where
   the person stopped it, it is the person's: the thread says why, the task
   is back in Needs you, and merging again offers the person's press, as
-  before, until the branch moves.
+  before, until the branch moves, or the default branch moves on from what
+  it conflicted with, which is a conflict of its own, the lead's again.
 - **No review round.** The checks are enough: the lead runs the quick ones
   and commits the merge before the slow ones, and if the full tests then
   find something, fixes it in one follow-up commit on top of the merge; on
@@ -454,7 +483,10 @@ for the person, as above.
   Its brief says what Althar pushes for it where the task, or else its
   project, has it resolve conflicts.
 - **A round under way when Althar stopped** is looked at as it starts again,
-  by what the branch holds, and is the person's if it isn't resolved.
+  by what the branch holds: resolved, it goes on as resolved; still
+  conflicting, its lead is asked again once it has a place, and the thread
+  says so, since Althar's stop isn't the lead failing. One fixing the checks
+  on what Althar pushed, or whose worktree is gone, is the person's.
 
 ### Trackers
 
@@ -508,13 +540,17 @@ now. Nothing reaches the tracker on its word:
   `leadsNeedTheCard` in `IssueDrafts.ts`. A review's lead has no such tool,
   and a reviewer only reads.
 - **Where it goes** is what the coordinator names, a tracker by its name and
-  a container by its id, key or name; or, without them, where the project's
+  a container by its id, key or name; or, without them, the tracker and
+  container the project is bound to in its settings
+  ([ADR-059](../decisions/059-a-tracker-s-workspaces-side-by-side-and-a-project-bound-to-one.md));
+  or, unbound, where the project's
   issues already come from (the newest issue a task came from, or a draft
   filed), then its repository's issues, then the one tracker or container
   there is. Where none of that decides, the tool says what to name.
-- **Two connections of one tracker** (two Jira sites, two GitLab servers,
-  two accounts) are told apart by site, and by account where they share
-  one: `Jira (acme.atlassian.net)`. The coordinator names one so, or by its
+- **Two connections of one tracker** (two of Linear's workspaces, two Jira
+  sites, two GitLab servers, two accounts) are told apart by workspace, by
+  site, and by account where they share one: `Linear (FNT)`,
+  `Jira (acme.atlassian.net)`. The coordinator names one so, or by its
   site's address; a container named without a tracker, or with a name
   several share, is looked for on each, and one found on more than one is
   asked about, never guessed. The card names the tracker the same way.

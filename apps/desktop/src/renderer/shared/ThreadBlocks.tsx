@@ -27,6 +27,7 @@ import {
 import { CommandOutput } from './CommandOutput'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
+import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { keyOf, pastedIn } from './pasted'
@@ -36,6 +37,7 @@ import { issuePriority, issueStatus, productBrand, productName } from './product
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
 import type {
   ArrivalContent,
+  AutomationCardContent,
   Block,
   IssueChangesContent,
   IssueDraftContent,
@@ -65,6 +67,8 @@ const LONG_COMMAND = 72
 
 export const text = {
   thought: 'Thought',
+  /** Under a last turn that failed, as on the connection: what the person said in it goes again. */
+  tryAgain: 'Try again',
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
     StepResult['step'],
@@ -173,6 +177,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
       verb={part.verb}
       target={part.target}
       state={part.state}
+      {...(part.why === undefined ? {} : { why: part.why })}
       {...(part.command === null ? {} : { copy: part.command })}
       {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}
       open={open}
@@ -394,7 +399,9 @@ export function ThreadBlocks({
   changes,
   push,
   review,
+  automation,
   queued,
+  onTryAgain,
   onPassOn,
   onAnswerQuestion,
   focusQuestion,
@@ -429,8 +436,12 @@ export function ThreadBlocks({
   push?: (request: PushRequestContent, at: string) => ReactNode
   /** Draws a review the lead drafted of someone else's pull request, in a review task's thread. */
   review?: (review: ReviewDraftContent) => ReactNode
+  /** Draws an automation's card in the coordinator's thread, by its item, which turning it on, undoing and answering it name. */
+  automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
+  /** Tries the last turn again, where it ended in an error, as on the connection: Try again under it. Without it, none. */
+  onTryAgain?: () => void
 }) {
   const named = useModelNames()
   // What each document was last changed by, so it is read again after an edit.
@@ -441,6 +452,10 @@ export function ThreadBlocks({
   // A turn of the thread's own agent, on its session's model and account; another's, on its own model.
   const turnModel = (agentId: string | null) =>
     session != null && agentId === session.agentId ? named(agentId, session.model, session.account) : named(agentId)
+  // The thread's last turn, where an error ended it: it can be tried again. What the person said in it may wait after it.
+  const last = blocks.findLast((block) => block.kind === 'turn' || block.kind === 'waiting')
+  const ending = last?.kind === 'turn' && !last.live ? last.said.at(-1) : undefined
+  const failed = ending?.kind === 'notice' && ending.tone === 'error' ? last?.id : undefined
   return blocks.map((block) => {
     switch (block.kind) {
       case 'you':
@@ -451,8 +466,10 @@ export function ThreadBlocks({
             at={block.at}
             delivery={block.delivery}
             {...(queued === undefined ? {} : { text: { queued } })}
-            // The images sent with it, each opening full size with the others.
-            {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
+            // The images sent with it, each opening full size with the others; then its files and folders, a chip each.
+            {...(block.pictures.length + block.files.length === 0
+              ? {}
+              : { attach: [...sentAttachments(block.pictures), ...fileAttachments(block.files)] })}
             // The links in it that unfurled, in the bubble under the words, so they read as part of what the person said.
             {...(block.links.length === 0 ? {} : { unfurl: block.links.map((link) => <LinkView key={link.url} link={link} />) })}
           >
@@ -493,6 +510,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
       case 'review':
         return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
+      case 'automation':
+        return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'waiting':
         return (
           <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
@@ -515,6 +534,7 @@ export function ThreadBlocks({
             {block.said.map((part) => (
               <PartView key={part.id} part={part} threadId={threadId} />
             ))}
+            {block.id === failed && onTryAgain !== undefined && <LinkButton onClick={onTryAgain}>{text.tryAgain}</LinkButton>}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>
         )

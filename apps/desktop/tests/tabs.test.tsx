@@ -272,7 +272,7 @@ describe('the window’s tabs', () => {
     expect(drafts.get()).toBeNull()
   })
 
-  it('make the new project’s tab the project’s own, open on its conversation', async () => {
+  it('make the new project’s tab the project’s own, open on Home', async () => {
     const { client, emit, router } = windowAt('/', [project, halyard, tessera])
     const drafts = draftsOf(client)
     // With other projects to open, New project is the + menu's last.
@@ -287,7 +287,8 @@ describe('the window’s tabs', () => {
     await waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(2))
     await userEvent.click(screen.getByRole('button', { name: 'Made' }))
     await waitFor(() => expect(where()).toBe(`/projects/${id}`))
-    expect(router.state.location.search).toEqual({ room: Room.Talk })
+    // No view is named: a project with none kept opens on Home.
+    expect(router.state.location.search).toEqual({})
     expect(drafts.get()).toBeNull()
     expect(names()).toEqual(['Home, 2 calls wait on you', 'meridian, work running', 'tessera, 2 calls wait on you', 'Northwind'])
     expect(tab('Northwind').getAttribute('aria-current')).toBe('page')
@@ -466,15 +467,20 @@ describe('how hard the Mac works, in the bar', () => {
     ])
     const glance = glanceOf(load)
     expect(glance).toMatchObject({ cpu: 0.42, memory: 12.5 / 32, memoryUsed: '12.5 GB', memoryTotal: '32 GB', pressure: 'normal' })
-    expect(glance.work).toBeCloseTo(0.33)
-    expect(glance.workMemory).toBeCloseTo((1.5 * 1024 + 520) / (32 * 1024))
-    expect(glance.rows?.map((row) => [row.id, row.title, row.agent, row.mark, row.memory])).toEqual([
-      ['task t1', 'Add a retry', 'Claude Code', brandOf('claude-code'), '1.5 GB'],
-      ['coordinator p1', 'Coordinator', 'Codex', brandOf('codex'), '300 MB'],
-      ['run p1', 'Default branch', undefined, undefined, '220 MB'],
+    // Althar itself counts in its part, as a row of its own among its work's by its CPU, which opens nothing.
+    expect(glance.work).toBeCloseTo(0.345)
+    expect(glance.workMemory).toBeCloseTo((1.5 * 1024 + 520 + 700) / (32 * 1024))
+    expect(glance.rows?.map((row) => [row.id, row.title, row.project, row.agent, row.mark, row.memory, row.opens])).toEqual([
+      ['task t1', 'Add a retry', 'meridian', 'Claude Code', brandOf('claude-code'), '1.5 GB', undefined],
+      ['coordinator p1', 'Coordinator', 'meridian', 'Codex', brandOf('codex'), '300 MB', undefined],
+      ['althar', 'Althar', undefined, undefined, undefined, '700 MB', false],
+      ['run p1', 'Default branch', 'meridian', undefined, undefined, '220 MB', undefined],
     ])
+    // Without its work's processes, nor Althar's own: the rows are what there is.
+    expect(glanceOf({ ...load, althar: null }).rows?.map((row) => row.id)).toEqual(['task t1', 'coordinator p1', 'run p1'])
+    expect(glanceOf({ ...load, shares: [] }).rows?.map((row) => row.id)).toEqual(['althar'])
     // Where Althar's processes can't be read, its part is unknown, not none; and a computer that says no memory has none in use.
-    const unknown = glanceOf({ ...load, shares: null, pressure: null, memoryTotal: 0 })
+    const unknown = glanceOf({ ...load, shares: null, althar: null, pressure: null, memoryTotal: 0 })
     expect(unknown).toMatchObject({ work: null, workMemory: null, rows: null, pressure: null, memory: 0 })
     expect(glanceOf({ ...load, pressure: 'critical' }).pressure).toBe('critical')
     expect(glanceOf({ ...load, pressure: 'warning' }).pressure).toBe('warning')

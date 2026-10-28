@@ -37,6 +37,7 @@ import {
   topLevel,
 } from './git'
 import { Instance } from './Instance'
+import { linkTask } from './automated'
 import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
 import { Setups } from './Setups'
@@ -324,6 +325,8 @@ export class Projects extends Context.Service<
       readonly request?: string
       /** A plain task's, started with no plan: its worktrees have no branch until its lead changes the repository. */
       readonly plain?: boolean
+      /** The automation's occurrence it is the run of, named in the transaction that makes it, so a restart never makes a second. */
+      readonly occurrence?: string
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | GitFailed | Failure>
     /** A project's repositories, as this device has them: each one's branch, remote, role, and the fork it is. */
     repositories(projectId: string): Effect.Effect<ReadonlyArray<ProjectRepository>, NotFound | Failure>
@@ -331,6 +334,19 @@ export class Projects extends Context.Service<
     rename(projectId: string, name: string, commandId?: CommandId): Effect.Effect<void, NotFound | ProjectRefused | Failure>
     /** Draws a project's mark in another ink, as the person picked. Another project may have the same one. */
     setInk(projectId: string, ink: ProjectInk, commandId?: CommandId): Effect.Effect<void, NotFound | Failure>
+    /**
+     * Binds a project to one of the connected trackers, and where its issues
+     * are filed there, or leaves it unbound, null, for where its issues go to
+     * be learned from those it has (ADR-059).
+     */
+    setTracker(
+      projectId: string,
+      tracker: {
+        readonly connectionId: string
+        readonly container: { readonly id: string; readonly name: string } | null
+      } | null,
+      commandId?: CommandId,
+    ): Effect.Effect<void, NotFound | Failure>
     /**
      * Adds the repositories at a folder to a project, as opening it would find
      * them: the repository it is or is in, whole, or those directly inside it.
@@ -554,6 +570,7 @@ export class Projects extends Context.Service<
         readonly repositories?: ReadonlyArray<string>
         readonly request?: string
         readonly plain?: boolean
+        readonly occurrence?: string
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -665,6 +682,7 @@ export class Projects extends Context.Service<
                 commandId: envelope.commandId,
               })
               yield* indexTask(taskId)
+              if (input.occurrence !== undefined) yield* linkTask(input.occurrence, taskId, envelope.actorId)
               // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
               if (input.draft !== true) yield* postCard(first.projectId, taskId)
               const [made] = workspaces
@@ -851,6 +869,41 @@ export class Projects extends Context.Service<
                 revision,
                 type: 'project.ink_set',
                 payload: { ink },
+                actorId: instance.personId,
+                ...(commandId === undefined ? {} : { commandId }),
+              })
+            }),
+          )
+        })
+
+      const setTracker = (
+        projectId: string,
+        tracker: { readonly connectionId: string; readonly container: { readonly id: string; readonly name: string } | null } | null,
+        commandId?: CommandId,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const project = yield* projectOf(projectId)
+              if (tracker !== null) {
+                const [connection] = yield* sql<{ id: string }>`
+                  SELECT id FROM connections WHERE id = ${tracker.connectionId} AND device_id = ${instance.deviceId} AND state <> 'removed'`
+                if (connection === undefined) return yield* new NotFound({ kind: 'connection', id: tracker.connectionId })
+              }
+              const revision = yield* change('projects', project.id, {
+                trackerConnectionId: tracker?.connectionId ?? null,
+                trackerContainerId: tracker?.container?.id ?? null,
+                trackerContainerName: tracker?.container?.name ?? null,
+              })
+              yield* fact({
+                projectId: project.id,
+                aggregateType: 'project',
+                aggregateId: project.id,
+                revision,
+                type: 'project.tracker_set',
+                payload:
+                  tracker === null ? { tracker: null } : { connectionId: tracker.connectionId, container: tracker.container?.name ?? null },
                 actorId: instance.personId,
                 ...(commandId === undefined ? {} : { commandId }),
               })
@@ -1058,6 +1111,7 @@ export class Projects extends Context.Service<
         repositories: (projectId) => run(repositories(projectId)),
         rename: (projectId, name, commandId) => run(rename(projectId, name, commandId)),
         setInk: (projectId, ink, commandId) => run(setInk(projectId, ink, commandId)),
+        setTracker: (projectId, tracker, commandId) => run(setTracker(projectId, tracker, commandId)),
         addRepositories: (projectId, path, commandId) => run(addRepositories(projectId, real(path), commandId)),
         leaveOut: (projectId, repositoryId, commandId) => run(leaveOut(projectId, repositoryId, commandId)),
         setRepository: (input) => run(setRepository(input)),

@@ -185,7 +185,7 @@ describe('the home', () => {
     expect(within(needs).getByText('npm publish')).toBeTruthy()
     expect(
       within(needs).getByText(
-        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+        'Claude Code closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       ),
     ).toBeTruthy()
     // A change on its branch says its size; tasks are named by their titles alone, never their slugs.
@@ -197,7 +197,7 @@ describe('the home', () => {
     expect(within(needs).getByText('api #13 · No checks ran')).toBeTruthy()
     expect(
       within(needs).getByText(
-        'The agent closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+        'The agent closed before finishing the step. This is usually harmless: try again, or hand the step to another agent.',
       ),
     ).toBeTruthy()
     expect(within(needs).getAllByText('Write outside the worktree')).toHaveLength(2)
@@ -307,7 +307,7 @@ describe('the home', () => {
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     const line = (title: string) => within(within(needs).getByRole('article', { name: title }))
     expect(line('Good to merge').getByText('api #21 · All 5 checks passed · +12 −3')).toBeTruthy()
-    expect(line('Commits to push').getByText('api #22 · 3 commits not on the PR · +12 −3')).toBeTruthy()
+    expect(line('Commits to push').getByText('api #22 · All 5 checks passed · +12 −3')).toBeTruthy()
     expect(line('In conflict').getByText('api #23 · Conflicts with main · +12 −3')).toBeTruthy()
     expect(line('Checks still running').getByText('api #25 · Checks running, 3 of 5 passed · +12 −3')).toBeTruthy()
 

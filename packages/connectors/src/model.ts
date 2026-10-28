@@ -29,8 +29,21 @@ export const Person = Schema.Struct({
 })
 export type Person = typeof Person.Type
 
-/** Who a connection signs in as. */
-export const Account = Schema.Struct({ id: Schema.String, login: Schema.String, name: Schema.NullOr(Schema.String) })
+/**
+ * The one part of a service a sign-in reaches, where it reaches only one
+ * (ADR-059): a Linear workspace. Its key is the one its links carry
+ * (linear.app/<key>/issue/…); its name is what the person calls it.
+ */
+export const Workspace = Schema.Struct({ key: Schema.String, name: Schema.String })
+export type Workspace = typeof Workspace.Type
+
+/** Who a connection signs in as, and in which workspace, where a sign-in reaches only one. */
+export const Account = Schema.Struct({
+  id: Schema.String,
+  login: Schema.String,
+  name: Schema.NullOr(Schema.String),
+  workspace: Schema.optional(Workspace),
+})
 export type Account = typeof Account.Type
 
 // ---- Code hosts -----------------------------------------------------------
@@ -119,6 +132,12 @@ export interface ChangeQuery {
   readonly reviewRequested?: boolean
   /** Only drafts, or only those ready for review. */
   readonly draft?: boolean
+  /**
+   * Only those last updated at or before this time, to read on past the
+   * last of a listing that had more: where the host can (GitHub). A host
+   * that can't lists from the newest again.
+   */
+  readonly updatedUntil?: string
   /** How many at most, newest change first. */
   readonly limit: number
 }

@@ -5,7 +5,19 @@ import type { ProjectList, ThreadSnapshot } from '@althar/contracts'
 
 import { follow, GATHER } from '../src/renderer/data/feed'
 import { continued, homeSince, keys, makeQueryClient, readFirst, reads, recheckStatus } from '../src/renderer/data/reads'
-import { changed, coordinatorSnapshot, fakeClient, items, project, snapshot, status, streamed } from './fixtures'
+import {
+  automationView,
+  changed,
+  coordinatorSnapshot,
+  fakeClient,
+  items,
+  planUsage,
+  project,
+  snapshot,
+  status,
+  streamed,
+  usageAccount,
+} from './fixtures'
 
 /*
  * The window's cache and its one watch: what a change ends, read again
@@ -47,6 +59,33 @@ describe('the window’s watch', () => {
     stop()
     emit(changed('task', 't2'))
     expect(heard).toEqual(['t1', 'i1'])
+  })
+
+  it('puts plan usage in the cache as it comes, whole, tells whoever listens, and marks each model’s room to read again', async () => {
+    const { client, cache, feed, emit, read } = opened()
+    const heard: Array<string> = []
+    feed.listen((event) => heard.push(event._tag))
+    await cache.fetchQuery(read.modelRooms('p1'))
+    const usage = planUsage([usageAccount({ accountName: 'side' })])
+    emit({ _tag: 'PlanUsage', usage })
+    expect(cache.getQueryState(keys.modelRooms('p1'))?.isInvalidated).toBe(true)
+    expect(cache.getQueryData(keys.planUsage)).toEqual(usage)
+    emit({ _tag: 'PlanUsage', usage: planUsage() })
+    expect(cache.getQueryData(keys.planUsage)).toEqual(planUsage())
+    expect(heard).toEqual(['PlanUsage', 'PlanUsage'])
+    // Nothing is read: what it carries is all there is.
+    expect(client.getPlanUsage).not.toHaveBeenCalled()
+  })
+
+  it('reads plan usage again when the watch starts listening again, not the first time', async () => {
+    const { client, cache, rewatch, read } = opened()
+    await cache.fetchQuery(read.planUsage())
+    expect(client.getPlanUsage).toHaveBeenCalledTimes(1)
+    rewatch()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(client.getPlanUsage).toHaveBeenCalledTimes(1)
+    // Off screen it is only marked, for its next visit.
+    expect(cache.getQueryState(keys.planUsage)?.isInvalidated).toBe(true)
   })
 
   it('reads again what a change ends, gathered, on screen or not; and nothing else', async () => {
@@ -196,6 +235,45 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.rules('p1'))?.isInvalidated).toBe(true)
   })
 
+  it('reads a project’s automations again as one changes or runs, and the page of the one it is, only while they show', async () => {
+    const { client, cache, emit, read } = opened()
+    vi.mocked(client.getAutomation).mockImplementation(async (automationId: string) => ({
+      cursor: 6,
+      automation: automationView({ id: automationId, projectId: automationId === 'auto9' ? 'p2' : 'p1' }),
+    }))
+    await cache.fetchQuery(read.automations('p1'))
+    await cache.fetchQuery(read.automation('auto1'))
+    await cache.fetchQuery(read.automation('auto2'))
+    await cache.fetchQuery(read.automation('auto9'))
+    await cache.fetchQuery(read.coordinator('p1'))
+    const showing = [
+      new QueryObserver(cache, read.automations('p1')),
+      new QueryObserver(cache, read.automation('auto1')),
+      new QueryObserver(cache, read.automation('auto2')),
+      new QueryObserver(cache, read.automation('auto9')),
+    ].map((observer) => observer.subscribe(() => undefined))
+    const pages = () => vi.mocked(client.getAutomation).mock.calls.map(([id]) => id)
+    // One changed: the tab, and its own page.
+    emit(changed('automation', 'auto1', null, 'p1'))
+    await settle()
+    expect(client.getAutomations).toHaveBeenCalledTimes(2)
+    expect(pages()).toEqual(['auto1', 'auto2', 'auto9', 'auto1'])
+    // The coordinator's cards of it say where it stands.
+    expect(cache.getQueryState(keys.coordinator('p1'))?.isInvalidated).toBe(true)
+    // One ran: the tab, and every page of the project's, as a run is said by its occurrence.
+    emit(changed('automation_occurrence', 'occ1', null, 'p1'))
+    await settle()
+    expect(client.getAutomations).toHaveBeenCalledTimes(3)
+    expect(pages().slice(4).toSorted()).toEqual(['auto1', 'auto2'])
+    for (const stop of showing) stop()
+    // Off screen, only marked for the next visit.
+    emit(changed('automation', 'auto1', null, 'p1'))
+    await settle()
+    expect(client.getAutomations).toHaveBeenCalledTimes(3)
+    expect(cache.getQueryState(keys.automations('p1'))?.isInvalidated).toBe(true)
+    expect(cache.getQueryState(keys.automation('auto1'))?.isInvalidated).toBe(true)
+  })
+
   it('marks a project’s threads when its rules change, by whose switch its tasks allow everything', async () => {
     const { client, cache, emit, read } = opened()
     await cache.fetchQuery(read.thread('th1'))
@@ -227,6 +305,19 @@ describe('the window’s watch', () => {
     emit(changed('project', 'p1', null, 'p1'))
     await settle()
     expect(client.listProjects).toHaveBeenCalledTimes(3)
+  })
+
+  it('forgets a read the cache lets go, so reads keyed anew each time don’t pile up', async () => {
+    const { cache, emit, feed, read } = opened()
+    for (const id of ['p1', 'p2', 'p3']) await cache.fetchQuery(read.board(id))
+    emit(changed('task', 't1', 'th1', 'p1'))
+    await settle()
+    const all = feed.remembered()
+    expect(all).toBeGreaterThanOrEqual(3)
+    for (const id of ['p1', 'p2', 'p3']) cache.removeQueries({ queryKey: read.board(id).queryKey, exact: true })
+    expect(feed.remembered()).toBe(all - 3)
+    cache.removeQueries()
+    expect(feed.remembered()).toBe(0)
   })
 
   it('marks a thread again when it was being read as a change touched it', async () => {

@@ -37,10 +37,12 @@ export function TaskFace({ children, composer, panel, panelWidth, unseen, text, 
   const sized = panel != null && panelWidth !== undefined ? ({ ...style, '--panel-width': `${panelWidth}px` } as CSSProperties) : style
   return (
     <div className={cx(s.face, panel != null && s.hasPanel, className)} style={sized} {...rest}>
-      <div className={s.main}>
+      <div className={s.main} data-floats-host="">
         <div className={s.scrollArea}>
           <div ref={scroll} className={s.scroll}>
             <ThreadMeasure>{children}</ThreadMeasure>
+            {/* room for what floats on the composer's edge; a child of the scroller, so growing it is followed like the thread growing */}
+            <div className={s.clear} aria-hidden="true" />
           </div>
           {!atBottom && <JumpToLatest count={unseen} onJump={toBottom} className={s.jump} text={text?.jump} />}
         </div>

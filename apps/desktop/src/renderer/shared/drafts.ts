@@ -6,9 +6,9 @@ import { type Dispatch, type SetStateAction, useCallback, useSyncExternalStore }
  * screen, so it is there again when they come back to it: from the home,
  * from another tab, or after their words were written down while they were
  * away. The words are kept in the window's storage too, so they outlive a
- * restart; the images only as long as the window, since their bytes can be
- * megabytes. Sending clears it; a message Althar didn't take comes back to
- * it.
+ * restart; the images and files only as long as the window, since an
+ * image's bytes can be megabytes and a file's grant lasts the launch.
+ * Sending clears it; a message Althar didn't take comes back to it.
  *
  * A draft also remembers whether any of its words were dictated, even if
  * the person edited them after: the message is sent marked, so the agent
@@ -20,16 +20,18 @@ const STORED = 'althar.drafts'
 /** Where the threads whose draft holds dictated words are kept, as a list. */
 const STORED_DICTATED = 'althar.drafts.dictated'
 
-export interface Draft<Image> {
+export interface Draft<Image, File = unknown> {
   readonly text: string
   readonly images: ReadonlyArray<Image>
+  /** Files and folders added, after the images. */
+  readonly files: ReadonlyArray<File>
   /** Some of the words were dictated. */
   readonly dictated: boolean
 }
 
-const EMPTY: Draft<never> = { text: '', images: [], dictated: false }
+const EMPTY: Draft<never, never> = { text: '', images: [], files: [], dictated: false }
 
-const drafts = new Map<string, Draft<unknown>>()
+const drafts = new Map<string, Draft<unknown, unknown>>()
 const listeners = new Map<string, Set<() => void>>()
 /* The words kept in storage, read once a window. */
 let stored: Record<string, string> | null = null
@@ -65,12 +67,12 @@ const keep = (key: string, text: string) => {
 }
 
 /** A thread's draft as it stands. */
-export const draftOf = <Image>(key: string): Draft<Image> => {
+export const draftOf = <Image, File = unknown>(key: string): Draft<Image, File> => {
   const draft = drafts.get(key)
-  if (draft !== undefined) return draft as Draft<Image>
+  if (draft !== undefined) return draft as Draft<Image, File>
   const text = readStored()[key] ?? ''
   if (text === '') return EMPTY
-  const read = { text, images: [], dictated: readDictated().includes(key) }
+  const read = { text, images: [], files: [], dictated: readDictated().includes(key) }
   drafts.set(key, read)
   return read
 }
@@ -97,12 +99,12 @@ const keepDictated = (key: string, dictated: boolean) => {
   }
 }
 
-const put = (key: string, next: Draft<unknown>) => {
+const put = (key: string, next: Draft<unknown, unknown>) => {
   const was = draftOf(key)
   // No words, nothing dictated.
   const now = next.text === '' && next.dictated ? { ...next, dictated: false } : next
-  if (now.text === was.text && now.images === was.images && now.dictated === was.dictated) return
-  if (now.text === '' && now.images.length === 0) drafts.delete(key)
+  if (now.text === was.text && now.images === was.images && now.files === was.files && now.dictated === was.dictated) return
+  if (now.text === '' && now.images.length === 0 && now.files.length === 0) drafts.delete(key)
   else drafts.set(key, now)
   if (now.text !== was.text) keep(key, now.text)
   if (now.dictated !== was.dictated) keepDictated(key, now.dictated)
@@ -127,6 +129,12 @@ export const setDraftImages = <Image>(key: string, change: (now: ReadonlyArray<I
   put(key, { ...was, images: change(was.images) })
 }
 
+/** Changes a thread's files and folders, on screen or not. */
+export const setDraftFiles = <File>(key: string, change: (now: ReadonlyArray<File>) => ReadonlyArray<File>) => {
+  const was = draftOf<unknown, File>(key)
+  put(key, { ...was, files: change(was.files) })
+}
+
 export const subscribeDraft = (key: string, listener: () => void) => {
   const set = listeners.get(key) ?? new Set()
   listeners.set(key, set)
@@ -138,10 +146,10 @@ export const subscribeDraft = (key: string, listener: () => void) => {
 }
 
 /** A thread's draft, as it changes. */
-export const useDraftOf = <Image>(key: string): Draft<Image> =>
+export const useDraftOf = <Image, File = unknown>(key: string): Draft<Image, File> =>
   useSyncExternalStore(
     useCallback((listener: () => void) => subscribeDraft(key, listener), [key]),
-    () => draftOf<Image>(key),
+    () => draftOf<Image, File>(key),
   )
 
 /** A thread's words, and the way to change them: as useState, but kept by the thread. */

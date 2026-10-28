@@ -68,11 +68,14 @@ export interface Finished {
   readonly key: string
   readonly shown: string
   readonly failed: boolean
+  /** A digest of what it gave back, as far as it is compared: never the output itself, which may be a whole file. */
   readonly output: string
 }
 
 interface Watch {
   turn: string | null
+  /** When the thread was last heard from, as one quiet for long enough is let go. */
+  heardAt: number
   /** When the turn last showed life. */
   lifeAt: number
   /** The CPU its processes had used at the last look. */
@@ -129,6 +132,13 @@ const changesIn = (content: ReadonlyArray<ToolContent> | undefined) => {
 const digestOf = (input: unknown) =>
   input === undefined || input === null ? null : createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 16)
 
+/** What a finished call gave back, as two are compared: its first 4,000 characters, as a digest that holds nothing of it. */
+const outputOf = (output: unknown) =>
+  createHash('sha256')
+    .update((JSON.stringify(output ?? null) ?? '').slice(0, 4_000))
+    .digest('hex')
+    .slice(0, 16)
+
 /** A duration in words: 6 hours, 90 minutes. */
 export const spanOf = (ms: number) => {
   const minutes = Math.max(1, Math.round(ms / 60_000))
@@ -165,6 +175,7 @@ export const makeStallWatch = (limits: StallLimits) => {
     if (known !== undefined) return known
     const made: Watch = {
       turn: null,
+      heardAt: now,
       lifeAt: now,
       cpu: null,
       calls: new Map(),
@@ -218,7 +229,7 @@ export const makeStallWatch = (limits: StallLimits) => {
       return []
     }
     watch.running.delete(event.toolCallId)
-    const output = event._tag === 'ToolCallUpdate' ? (JSON.stringify(event.rawOutput ?? null) ?? '').slice(0, 4_000) : ''
+    const output = event._tag === 'ToolCallUpdate' ? outputOf(event.rawOutput) : ''
     watch.finished = [
       ...watch.finished,
       { key: keyOf(call), shown: call.command ?? call.title, failed: event.status === 'failed', output },
@@ -234,8 +245,11 @@ export const makeStallWatch = (limits: StallLimits) => {
   /** What happened, at `now`: what to do about it. */
   const observe = (event: LiveEvent, now: number): ReadonlyArray<StallAction> => {
     // What Althar runs of a project itself is no thread's, and no turn's work.
-    if (event._tag === 'Launches') return []
+    if (event._tag === 'Launches' || event._tag === 'PlanUsage') return []
+    // Nor is the computer's connection.
+    if (event._tag === 'Connection') return []
     const watch = watchOf(event.threadId, now)
+    watch.heardAt = now
     switch (event._tag) {
       case 'TurnStarted': {
         if (event.byPerson === true) fresh(watch)
@@ -262,6 +276,7 @@ export const makeStallWatch = (limits: StallLimits) => {
         return []
       case 'SessionEnded':
         watch.turn = null
+        watch.calls.clear()
         watch.running.clear()
         watch.stopAskedAt = null
         // What it asked waits on the person no longer through it: a question outlives its session (ADR-021), but the next one's turns aren't waiting.
@@ -326,6 +341,9 @@ export const makeStallWatch = (limits: StallLimits) => {
     lastLook = now
     const actions: Array<StallAction> = []
     for (const [threadId, watch] of watches) {
+      // A thread with no turn, waiting on no one, and quiet for as long as a whole budget of work is let go:
+      // one kept for every thread ever watched would grow for as long as Althar runs.
+      if (watch.turn === null && watch.asking.size === 0 && now - watch.heardAt >= limits.work) watches.delete(threadId)
       if (watch.turn === null) continue
       const cpu = cpuOf(threadId)
       const busy = cpu !== null && watch.cpu !== null && cpu - watch.cpu >= limits.busyShare * since
@@ -373,9 +391,15 @@ export const makeStallWatch = (limits: StallLimits) => {
     observe,
     look,
     /** Work on the thread starts afresh, as a step does: its budget is whole again. */
-    fresh: (threadId: string, now: number) => fresh(watchOf(threadId, now)),
+    fresh: (threadId: string, now: number) => {
+      const watch = watchOf(threadId, now)
+      watch.heardAt = now
+      fresh(watch)
+    },
     /** The threads with a turn running, as far as it has been told. */
     turning: () => [...watches].flatMap(([threadId, watch]) => (watch.turn === null ? [] : [threadId])),
+    /** How many threads it keeps. */
+    size: () => watches.size,
   }
 }
 
