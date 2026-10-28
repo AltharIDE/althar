@@ -7,12 +7,11 @@
   background: var(--n-2);
   color: #1f35c8;
 }
-.land, .glow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-/* Drawn off the page's thread, the landscape comes in when it is ready. */
-.land { opacity: 0; transition: opacity 900ms ease; }
-.land[data-drawn] { opacity: 1; }
+/* The engraving, placed by the script, comes in when it has loaded, and the light with it. */
+.land { position: absolute; max-width: none; pointer-events: none; opacity: 0; transition: opacity 900ms ease; }
 /* The light's canvas is as wide as the light; the script places it. */
-.glow { right: auto; }
+.glow { position: absolute; top: 0; height: 100%; pointer-events: none; opacity: 0; transition: opacity 900ms ease 300ms; }
+.land[data-loaded], .glow[data-loaded] { opacity: 1; }
 
 .words {
   position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 48px;
@@ -38,5 +37,5 @@
   .links { padding-top: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .land { transition: none; }
+  .land, .glow { transition: none; }
 }

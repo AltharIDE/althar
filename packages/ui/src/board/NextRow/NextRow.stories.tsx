@@ -24,6 +24,13 @@ export const AfterATask: Story = {}
 export const ForAWorker: Story = { args: { ...WORKERS, place: 1 } }
 /** Held on a call of yours: violet, like the call. */
 export const HeldOnYou: Story = { args: { ...HELD, place: 1 } }
+/** Under way already, waiting for a free worker to go on with its review: it continues, ahead of the line. */
+export const Continuing: Story = {
+  args: { ...WORKERS, place: 1, kind: 'Change', continues: 'Review', reason: '6 of 6 agents busy on this Mac' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Continues · Review')).toBeInTheDocument()
+  },
+}
 export const Current: Story = { args: { current: true } }
 
 /** The queue as it stands, in order. */
@@ -53,6 +60,10 @@ export const AllStates: Story = {
         { state: 'after a task', node: <NextRow {...args} /> },
         { state: 'for a worker', node: <NextRow {...args} {...WORKERS} place={1} /> },
         { state: 'held on you', node: <NextRow {...args} {...HELD} place={1} /> },
+        {
+          state: 'continues',
+          node: <NextRow {...args} {...WORKERS} place={1} continues="Follow-up" reason="6 of 6 agents busy on this Mac" />,
+        },
         { state: 'current', node: <NextRow {...args} current /> },
         { state: 'hover', node: <NextRow {...args} /> },
         { state: 'focus', node: <NextRow {...args} /> },

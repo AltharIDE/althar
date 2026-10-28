@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 
@@ -197,11 +198,94 @@ describe('the board’s lanes', () => {
       expect(lanes.running).toEqual([])
     })
 
-    it('stays running when it is mid-work and a later turn waits for a place', () => {
+    it('stays running when an agent of it is at work and another turn of it waits for a place', () => {
       const midWork = task({ taskId: 'm', phase: 'running', step: 'implement', queued })
       const lanes = lanesOf(board({ tasks: [midWork, waiting('a', 1)], calls: [] }))
       expect(lanes.next.map((work) => work.taskId)).toEqual(['a'])
       expect(lanes.running.map((work) => work.taskId)).toEqual(['m'])
+      expect(lanes.atWork).toBe(1)
+    })
+
+    describe('under way, none of its agents at work (ADR-065)', () => {
+      const continuing = (taskId: string, place: number, overrides: Partial<BoardTask> = {}) =>
+        task({
+          taskId,
+          threadId: `th-${taskId}`,
+          title: `Going on ${taskId}`,
+          phase: 'running',
+          step: 'implement',
+          queued,
+          continues: true,
+          place,
+          ...overrides,
+        })
+      const paused = task({
+        taskId: 'z',
+        threadId: 'th-z',
+        title: 'Offline z',
+        phase: 'running',
+        step: 'review',
+        queued: null,
+        continues: true,
+        reconnects: { agentId: 'claude-code', service: 'Claude', offline: true, next: null, failure: null },
+      })
+      const working = task({ taskId: 'w', phase: 'running', step: 'implement', startedAt: '2026-10-01T09:00:00.000Z' })
+      const busy = [working, waiting('b', 4), paused, continuing('y', 2), waiting('a', 3), continuing('x', 1), planned]
+
+      it('continues up next ahead of the line, then what is paused, then plans; Running counts only work at it', () => {
+        const lanes = lanesOf(board({ tasks: busy, calls: [] }))
+        expect(lanes.next.map((work) => work.taskId)).toEqual(['x', 'y', 'a', 'b', 'z', 'p'])
+        expect([lanes.continuing, lanes.free, lanes.paused, lanes.upNext]).toEqual([2, 2, 1, 6])
+        expect(lanes.running.map((work) => work.taskId)).toEqual(['w'])
+        expect(lanes.atWork).toBe(1)
+      })
+
+      it('says what continues and why it waits, with no grip, and counts it ahead of the line’s places', () => {
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null }
+        withServices(
+          <BoardView lanes={lanesOf(board({ tasks: busy, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
+          fakeClient().client,
+        )
+        const next = within(screen.getByRole('region', { name: 'Up next' }))
+        expect(next.getAllByText('Continues · Implement')).toHaveLength(2)
+        expect(next.getByText('Continues · Review')).toBeTruthy()
+        expect(next.getAllByText(/^4 of 4 agents busy on /)).toHaveLength(2)
+        expect(next.getByText('Waiting for the connection')).toBeTruthy()
+        expect(next.getByText('Paused')).toBeTruthy()
+        // The line's places come after what continues; only its rows have grips.
+        expect(next.getByText('3rd in line')).toBeTruthy()
+        expect(next.getByText('4th in line')).toBeTruthy()
+        expect(next.getAllByRole('button', { name: /in the line$/ }).map((grip) => grip.getAttribute('aria-label'))).toEqual([
+          'Move Waiting a in the line',
+          'Move Waiting b in the line',
+        ])
+        const running = within(screen.getByRole('region', { name: 'Running' }))
+        expect(running.queryByText(/^Going on|^Offline/)).toBeNull()
+      })
+
+      it('stays in the lane it was in while the person points at the board, and moves once they look away', async () => {
+        const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
+        // Its turn has its place: it is at work.
+        const after = lanesOf(
+          board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
+        )
+        let change: (lanes: typeof before) => void = () => undefined
+        function Changing() {
+          const [lanes, setLanes] = useState(before)
+          change = setLanes
+          return <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
+        }
+        withServices(<Changing />, fakeClient().client)
+        const region = (name: string) => within(screen.getByRole('region', { name }))
+        await userEvent.hover(region('Up next').getByText('Going on x'))
+        act(() => change(after))
+        expect(region('Up next').getByText('Going on x')).toBeTruthy()
+        expect(region('Running').queryByText('Going on x')).toBeNull()
+        await userEvent.unhover(screen.getByRole('region', { name: 'Up next' }))
+        await userEvent.hover(document.body)
+        await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
+        expect(region('Up next').queryByText('Going on x')).toBeNull()
+      })
     })
 
     it('moves to running by itself once an agent frees and it starts', () => {
