@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type CoordinatorSnapshot, type WatchEvent } from '@althar/contracts'
+import { ApiError, type CodeFound, type CoordinatorSnapshot, type WatchEvent } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import type { Client } from '../src/renderer/data/client'
@@ -388,6 +388,67 @@ describe('the conversation beside the board', () => {
     window.localStorage.setItem('althar.both', '200')
     withServices(<Project room={Room.Both} />, client)
     expect((await screen.findByRole('separator', { name: 'Width of the conversation' })).getAttribute('aria-valuenow')).not.toBe('200')
+  })
+
+  /** The window `width` wide, the coordinator naming a file; its peek with no Open beside, and the name pressed: the panel's edge. */
+  const openBeside = async (width: number) => {
+    window.localStorage.removeItem('althar.both')
+    window.localStorage.setItem('althar.bench', '420')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    const retry: CodeFound = {
+      kind: 'file',
+      name: 'src/retry.ts:2',
+      path: 'src/retry.ts',
+      line: 2,
+      byName: false,
+      bytes: 40,
+      lines: 3,
+      content: 'text',
+      changed: null,
+      since: null,
+    }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('The retry is in `src/retry.ts:2`.')] })),
+      findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<unknown>) => ({
+        place: { kind: 'default' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'main' }] },
+        messages: messages.map(() => ({ found: [retry] })),
+      })),
+      readCode: vi.fn(async (_threadId: string, path: string) => ({
+        path,
+        text: 'export function retry() {\n  return 3\n}\n',
+        from: 1,
+        total: 3,
+        cut: false,
+      })),
+    })
+    withServices(<Project room={Room.Both} />, client)
+    const name = await screen.findByRole('button', { name: 'Open src/retry.ts:2' })
+    await userEvent.hover(name)
+    const peek = await screen.findByRole('dialog', { name: 'src/retry.ts:2' })
+    await waitFor(() => expect(peek.textContent).toContain('return 3'))
+    expect(within(peek).queryByRole('button', { name: 'Open beside' })).toBeNull()
+    await userEvent.click(name)
+    const panel = await screen.findByRole('complementary', { name: 'retry.ts' })
+    await waitFor(() => expect(panel.textContent).toContain('return 3'))
+    return within(panel.closest('[data-workbench]') as HTMLElement).getByRole('separator', { name: 'Width of the panel' })
+  }
+
+  it('opens a file the coordinator names over the board, against the conversation, as wide as it was left', async () => {
+    try {
+      const edge = await openBeside(1600)
+      expect(edge.getAttribute('aria-valuenow')).toBe('420')
+      // Dragged no wider than leaves a lane of the board beside it.
+      expect(edge.getAttribute('aria-valuemax')).toBe(String(1600 - 560 - 240))
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
+    }
+  })
+
+  it('in a small window, opens it over the whole board to the window’s edge, not in the middle with a sliver of board beside it', async () => {
+    const edge = await openBeside(1024)
+    // The conversation as wide as leaves the board its room; the file, all the rest.
+    expect(edge.getAttribute('aria-valuenow')).toBe(String(1024 - 544))
+    expect(edge.getAttribute('aria-valuemax')).toBe(String(1024 - 544))
   })
 })
 
