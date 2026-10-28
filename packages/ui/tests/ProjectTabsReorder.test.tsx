@@ -84,6 +84,14 @@ const layOut = (shown: number) => {
     }
     return rect(0, 0)
   })
+  // Where each tab is laid out in the list, whatever moves it.
+  const place = (one: HTMLElement) => (one.parentElement === element ? Array.from(element.children).indexOf(one) : -1)
+  vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (this: HTMLElement) {
+    return Math.max(0, place(this)) * STEP
+  })
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+    return place(this) < 0 ? 0 : WIDTH
+  })
 }
 
 const pointer = (
@@ -398,6 +406,33 @@ describe('moving a project’s tab by key', () => {
 
 describe('more tabs open than fit', () => {
   const MANY = [...FOUR.map((one, i) => (i === 1 ? { ...one, yours: 2 } : one)), extra('ledger', 'Ledger'), extra('infra', 'Infra')]
+
+  it('keeps the tab with the window in sight by where it is laid out, not where it shows while it slides', () => {
+    const tabs = (current: string) => <ProjectTabs tabs={MANY} current={current} lights="none" onSelect={vi.fn()} onClose={vi.fn()} />
+    const { rerender } = render(tabs('meridian'))
+    layOut(250)
+    const element = list()
+    rerender(tabs('infra'))
+    expect(element.scrollLeft).toBe(5 * STEP + WIDTH - 250)
+    rerender(tabs('meridian'))
+    expect(element.scrollLeft).toBe(0)
+  })
+
+  it('leaves tabs that all fit unscrolled, though one sliding into its place shows past the end', () => {
+    const tabs = (current: string) => <ProjectTabs tabs={MANY} current={current} lights="none" onSelect={vi.fn()} onClose={vi.fn()} />
+    const { rerender } = render(tabs('meridian'))
+    layOut(600)
+    const element = list()
+    // The last tab slides in from 100 px further on; the bar stops clear of its fading edge where it can.
+    Object.defineProperty(element, 'scrollWidth', { configurable: true, get: () => 700 })
+    const style = window.getComputedStyle
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((one, pseudo) =>
+      one === element ? ({ scrollPaddingInlineStart: '32px' } as CSSStyleDeclaration) : style(one, pseudo),
+    )
+    rerender(tabs('infra'))
+    expect(element.scrollLeft).toBe(0)
+    expect(screen.queryByRole('button', { name: 'All open projects' })).toBeNull()
+  })
 
   it('offers every open project in a menu once they scroll, with what waits on you in each', async () => {
     const onSelect = vi.fn()

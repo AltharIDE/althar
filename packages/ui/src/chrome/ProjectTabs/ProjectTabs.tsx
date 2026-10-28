@@ -152,6 +152,12 @@ function Yours({ n, text }: { n: number; text: ProjectTabsText }) {
   )
 }
 
+/** Where the tabs end as laid out: a tab still sliding into its place shows further on, and makes no more room to scroll. */
+const laidOutEnd = (list: HTMLElement) => {
+  const last = list.lastElementChild
+  return last instanceof HTMLElement ? last.offsetLeft + last.offsetWidth : 0
+}
+
 /** How far a tab is from its place while one is dragged: the dragged one by the pointer, the others as they give way. */
 const tabShift = (dragging: Dragging | null, id: string): CSSProperties | undefined => {
   if (dragging === null) return undefined
@@ -194,7 +200,7 @@ export function ProjectTabs({
     if (element === null) return
     const measure = () => {
       const before = element.scrollLeft > 1
-      const after = element.scrollLeft + element.clientWidth < element.scrollWidth - 1
+      const after = element.scrollLeft + element.clientWidth < laidOutEnd(element) - 1
       setMore((was) => (was.before === before && was.after === after ? was : { before, after }))
     }
     // A wheel that turns up and down moves them across, as a trackpad does.
@@ -214,11 +220,17 @@ export function ProjectTabs({
       resized?.disconnect()
     }
   }, [tabs.length])
-  // The tab with the window is kept in sight.
+  // The tab with the window is kept in sight, clear of the fading edge: by where it is laid out, not where it shows while it
+  // slides there (a tab closed before it), so the bar isn't left scrolled to where the tab was.
   useEffect(() => {
-    list.current
-      ?.querySelector<HTMLElement>('[aria-current="page"]')
-      ?.parentElement?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    const element = list.current
+    const tab = element?.querySelector<HTMLElement>('[aria-current="page"]')?.parentElement
+    if (element == null || tab == null) return
+    const clear = Number.parseFloat(getComputedStyle(element).scrollPaddingInlineStart) || 0
+    const from = Math.max(0, tab.offsetLeft - clear)
+    const to = Math.min(laidOutEnd(element) - element.clientWidth, tab.offsetLeft + tab.offsetWidth + clear - element.clientWidth)
+    if (element.scrollLeft > from) element.scrollLeft = from
+    else if (element.scrollLeft < to) element.scrollLeft = to
   }, [current, tabs.length])
   const movable = tabs.findIndex((tab) => tab.fixed === true)
   const { dragging, bind } = useReorder({
