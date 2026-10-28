@@ -563,7 +563,7 @@ export const ProjectRulesView = Schema.Struct({
    * While everything is allowed, what comes back once it isn't.
    */
   permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
-  /** Everything is allowed: nothing waits for the person, what always asks included; only `never` still holds. */
+  /** Everything is allowed, what always asks included: only what can't be undone from the task still asks (ADR-066), and `never` holds. */
   allowEverything: Schema.Boolean,
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
