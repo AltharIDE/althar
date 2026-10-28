@@ -391,6 +391,39 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('asks again soon about a merge its host took but hasn’t landed, through a read that fails, and settles it once it has', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const changes = yield* Changes
+      // Taken, as Bitbucket answers one that takes long, but not landed yet: it isn't settled.
+      github.landLater()
+      yield* changes.merge(ready?.taskId ?? '', ready?.change?.head ?? '')
+      const [taken] = yield* cards(projectId)
+      assert.strictEqual(taken?.change?.state, 'open')
+      // The next read fails, and the one after hears it landed: settled within a few seconds, not a listen's half-minute.
+      const before = github.calls.length
+      github.failNext('change', 'unreachable')
+      yield* until(
+        Effect.sync(() => github.calls.slice(before)),
+        (since) => since.includes('change'),
+      )
+      github.mergeByHand(ready?.change?.number ?? 0)
+      const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(8))
+      assert.strictEqual(settled?.change?.state, 'merged')
+      yield* Effect.sleep(Duration.seconds(3))
+      assert.lengthOf(
+        (yield* arrivals(ready?.threadId ?? '')).filter((arrival) => arrival.kind === 'merged'),
+        1,
+      )
+      // Listening as ever, every minute here, isn't what heard it.
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+  })
+
   it.live('pushes the branch only, when that is how the task ends', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })

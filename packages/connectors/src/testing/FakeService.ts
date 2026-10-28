@@ -155,6 +155,8 @@ export interface FakeControls {
    */
   lagReads(): void
   catchUp(): void
+  /** Merges are taken but left open, as Bitbucket answers one that takes long, until `mergeByHand` lands it. */
+  landLater(): void
   /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Althar's included. */
@@ -257,6 +259,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
 
   /** Changes as reading them answers while reads lag: as they stood when they began to. */
   let lagged: ReadonlyArray<ChangeRequest> | null = null
+  /** Whether a merge is taken but not landed yet. */
+  let landsLater = false
 
   /** Records a call, taking as long as the test said, and fails it if a test asked. */
   const called = (method: string) =>
@@ -454,7 +458,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           )
         if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
           return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
-        update(change.number, { state: 'merged' })
+        if (!landsLater) update(change.number, { state: 'merged' })
         return Effect.succeed(changeNumbered(change.number))
       }),
     closeChange: (_repository, change) =>
@@ -804,6 +808,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     readyByHand: (number) => update(number, { draft: false }),
     lagReads: () => void (lagged = [...changes]),
     catchUp: () => void (lagged = null),
+    landLater: () => void (landsLater = true),
     failNext: (method, reason, retryAt, status) =>
       void failures.set(method, {
         reason,

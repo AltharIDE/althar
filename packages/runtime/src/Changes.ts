@@ -2172,14 +2172,21 @@ export class Changes extends Context.Service<
           if (now !== undefined) yield* poll(now)
         })
 
-      /** A merge its host took but hasn't landed yet, asked about every few seconds for a while, so its task settles once it has. */
+      /**
+       * A merge its host took but hasn't landed yet, asked about every few
+       * seconds for a while, so its task settles once it has. A read that
+       * fails is asked again next turn; past the minute, listening as ever
+       * hears it land.
+       */
       const landing = (taskId: string, linkId: string) =>
         Effect.gen(function* () {
           for (let turn = 0; turn < LANDING_TURNS; turn++) {
             yield* Effect.sleep(LANDING_EVERY)
             const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === linkId)
             if (now === undefined || (yield* decodeSnapshot(now.snapshot)).state !== 'open') return
-            yield* locked(taskId)(poll(now))
+            yield* locked(taskId)(poll(now)).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not hear whether a merge landed', cause)),
+            )
           }
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hear whether a merge landed', cause)))
 
