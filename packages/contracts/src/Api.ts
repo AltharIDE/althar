@@ -1535,6 +1535,10 @@ export const TaskCard = Schema.Struct({
   title: Schema.String,
   slug: Schema.String,
   phase: TaskPhase,
+  /** Stopped, no agent on it: what stopped its lead, and when. Absent while it isn't stopped; `by` is null where nothing says. */
+  stopped: Schema.optional(
+    Schema.NullOr(Schema.Struct({ by: Schema.NullOr(Schema.Literals(['declined', 'interrupted', 'althar'])), at: Schema.String })),
+  ),
   /** What it makes, read from what it has now: its card's word, and what the card shows. */
   kind: TaskKind,
   /** A plain task's pictures and files, while it has some; null or absent otherwise. */

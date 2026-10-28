@@ -220,6 +220,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
+  margin-top: 20px;
+}
+.folders + .chooseRow,
+.empty + .chooseRow {
+  margin-top: 0;
 }
 .below {
   display: grid;
