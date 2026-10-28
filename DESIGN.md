@@ -74,6 +74,7 @@ Rules marked "prefer" are leanings; follow them unless the screen gives a reason
 - **Switch instantly.** Changing project or view shows what was there last time and refreshes quietly; no skeleton flash for something already seen.
 - **Lose nothing on leaving a screen:** composer text, dictation, scroll position.
 - **Show a validation error at its field, and scroll to it.** A message at the top of a form only for an error that belongs to no field.
+- **Make every error recoverable.** Say what went wrong in plain words ("Claude Code is signed out.", not "Authentication required"), and offer the action that fixes it: sign in, reconnect, switch model, compact, retry. That action takes the person to exactly the place it's fixed, opened and focused there (Settings on that agent's sign-in, already started), and once it is fixed, Try again picks up where it stopped. Offer "Try again" alone only where trying again can work.
 - **Don't ask the person to decide what Althar can decide.** After a restart, carry on.
 - **Make state changes explicit.** Nothing moves between places silently; say where it went.
 - **Make every element earn its place.** For each piece, ask what the person does with it. No duplicates, no labels repeating their content, no tallies, nothing placed at random.
@@ -103,5 +104,6 @@ The project's notes on prototyping, kept by the coordinator, hold the details. I
 - Overlapping or overflowing text, widths that shift, a page that jumps.
 - A skeleton flash for something already seen.
 - Errors gathered at the top of a form.
+- A dead-end error: one with no way out, or only a "Try again" that can't fix it.
 - Sending someone to another screen for a one-click action.
 - A bleak empty state, or plain text standing in for a banner.
