@@ -1,4 +1,4 @@
-# ADR-066: Allow everything asks only before what can't be undone
+# ADR-067: Allow everything asks only before what can't be undone
 
 - **Status:** Accepted
 - **Date:** 2026-10-28

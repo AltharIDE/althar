@@ -38,7 +38,7 @@ export const ProjectRules = Schema.Struct({
   permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
   /**
    * Everything is allowed (ADR-043), what always asks included: only what can't be undone from the task still waits for the
-   * person (ADR-066), and what is never allowed is refused. Off without it; turned off, `permissions` is what holds again.
+   * person (ADR-067), and what is never allowed is refused. Off without it; turned off, `permissions` is what holds again.
    */
   allowEverything: Schema.optional(Schema.Boolean),
   /** The kinds of request that always ask the person, by id (rules.ts). The MVP's first revisions held them in words, which read as every kind. */

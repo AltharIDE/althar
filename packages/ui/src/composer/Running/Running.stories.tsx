@@ -145,6 +145,53 @@ export const LongUnshortened: Story = {
     processes: [{ id: 'sh', command: 'python3 -c "print(' + '1234567890'.repeat(12) + ')"', since: '1m' }],
   },
 }
+/** A branch Althar fetched and runs in a copy of its own, with no task: the pill names it beside what runs, and so does its row. */
+export const OnABranch: Story = {
+  args: {
+    defaultOpen: true,
+    processes: [
+      {
+        id: 'branch',
+        command: 'npm run dev',
+        label: 'npm run dev',
+        url: 'localhost:5199',
+        since: '1m',
+        where: 'feature/find-a-pro',
+        branch: 'feature/find-a-pro',
+        output: false,
+      },
+      { ...DEV, id: 'main', url: 'localhost:5174', since: '40m', where: 'main', output: false },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(document.body)
+    // The row says the branch, where another says where it runs.
+    await expect(page.getByTitle('feature/find-a-pro')).toBeVisible()
+    await expect(page.getByText('main')).toBeVisible()
+    await userEvent.keyboard('{Escape}')
+    await expect(within(canvasElement).getByRole('button', { name: /Running/ })).toHaveTextContent('Running2 processes')
+  },
+}
+/** One branch running alone: the pill says it. */
+export const OneBranch: Story = {
+  args: {
+    processes: [
+      {
+        id: 'branch',
+        command: 'npm run dev',
+        label: 'npm run dev',
+        url: 'localhost:5199',
+        since: '1m',
+        branch: 'PR #12 · feature/find-a-pro',
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: /Running/ })).toHaveTextContent(
+      'Runningnpm run dev· PR #12 · feature/find-a-pro· localhost:5199',
+    )
+  },
+}
 /** Ended by itself, with no exit code to say: it ended, no more. */
 export const EndedUnknown: Story = { args: { processes: [{ ...CRASHED, exited: null }] } }
 /** Nothing running: nothing shows. */

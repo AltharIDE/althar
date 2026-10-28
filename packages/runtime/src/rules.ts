@@ -69,7 +69,7 @@ const RULE_WORDS: Readonly<Record<RuleId, string>> = {
  * worktree. The coordinator never answers it; only Never, or a kind the
  * person always allows while everything isn't allowed, settles it otherwise.
  *
- * `irreversible` marks what can't be undone from the task (ADR-066): a force
+ * `irreversible` marks what can't be undone from the task (ADR-067): a force
  * push, a push to or a deletion of the default branch, deleting or moving by
  * force a branch that isn't the task's, git discarding work in another
  * checkout, deleting or moving away what's outside the task's worktree,
@@ -2717,7 +2717,7 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
  * - with everything allowed, anything else is allowed, short of what the
  *   rules can't read where the project never allows something: that is
  *   refused, with how to run it so they can; and short of what can't be
- *   undone from the task (`Kept`'s `irreversible`, ADR-066), which asks the
+ *   undone from the task (`Kept`'s `irreversible`, ADR-067), which asks the
  *   person;
  * - a kind on the always-ask list, or a command the project asks about, is
  *   held for the person, whatever else would answer;

@@ -1368,7 +1368,7 @@ describe('what could lose work or a secret (DEV-69)', () => {
     decide(request({ kind: 'read', title: `Read ${path}`, paths: [path] }), { ...context, ...rules(project) })
   const reasonOf = (verdict: ReturnType<typeof decide>) => ('reason' in verdict ? verdict.reason : '')
 
-  /** What can't be undone from the task (ADR-066): it asks even with everything allowed. */
+  /** What can't be undone from the task (ADR-067): it asks even with everything allowed. */
   const irreversible = [
     'git push --force origin althar/retry',
     'git push --force-with-lease',

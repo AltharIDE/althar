@@ -26,7 +26,7 @@ export const LongScript: Story = {
   args: { what: 'Prototype: tasks waiting for a free agent', cmd: SCRIPT },
 }
 
-/** With everything allowed, only what can't be undone asks (ADR-066): it says why in one line, and offers no always allow. */
+/** With everything allowed, only what can't be undone asks (ADR-067): it says why in one line, and offers no always allow. */
 export const EverythingAllowed: Story = {
   args: {
     id: 'push-main',

@@ -15,6 +15,7 @@ import { Instance } from './Instance'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { Issues } from './Issues'
+import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
@@ -93,15 +94,17 @@ export const layer = (options: RuntimeLayerOptions) => {
   )
   const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
   // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
+  // Runs fetch the branch or pull request they run through the person's connections to code hosts, as leads ask Althar to (ADR-066).
   const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
-    Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer).pipe(Layer.provideMerge(judging))),
+    Layer.provideMerge(Fetches.layer),
+    Layer.provideMerge(
+      Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer, Connections.layer).pipe(Layer.provideMerge(judging)),
+    ),
   )
   // How many tasks are at work at once on this machine, and what waits for a place among them.
   const busy = Busy.layer.pipe(Layer.provideMerge(core))
   // A task's issue, and changes to issues on the person's trackers, which its pull request offers as it opens and merges.
-  const tracked = IssueChanges.layer.pipe(
-    Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(busy))))),
-  )
+  const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, IssueDrafts.layer, Reviews.layer).pipe(Layer.provideMerge(tracked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.

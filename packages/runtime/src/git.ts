@@ -287,6 +287,38 @@ export const fetchRefs = (
     Effect.orElseSucceed(() => false),
   )
 
+/**
+ * Where git fetches from: a URL with the header that signs Althar in, or a
+ * remote by name, with no header, as the person's own git reaches it.
+ */
+export interface FetchSource {
+  readonly url: string
+  readonly header: string | null
+}
+
+/** The branches a remote has, each with its commit, as it says now: null where it can't be asked. */
+export const remoteHeads = (cwd: string, source: FetchSource) =>
+  run(60_000, cwd, ['ls-remote', '--heads', source.url], signedIn(source)).pipe(
+    Effect.map((listed) =>
+      listed.split('\n').flatMap((line) => {
+        const found = /^([0-9a-f]{40,64})\trefs\/heads\/(.+)$/.exec(line)
+        return found === null ? [] : [{ name: found[2] ?? '', commit: found[1] ?? '' }]
+      }),
+    ),
+    Effect.orElseSucceed(() => null),
+  )
+
+/**
+ * Fetches refspecs as written, a `+` before one that may move however it
+ * likes: whether git could. Tags come only where a refspec names them, and
+ * nothing is written to FETCH_HEAD.
+ */
+export const fetchSpecs = (cwd: string, source: FetchSource, refspecs: ReadonlyArray<string>) =>
+  run(120_000, cwd, ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', source.url, ...refspecs], signedIn(source)).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
+
 /** The top of the repository a path is in. */
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
 

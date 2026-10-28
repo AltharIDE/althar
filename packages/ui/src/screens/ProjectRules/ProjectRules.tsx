@@ -40,7 +40,7 @@ import s from './ProjectRules.module.css'
  * Over the sentences, one switch allows everything: what asks, what goes
  * ahead and the rest say they are off while it is on, and are kept for
  * when it's off again. Never still holds, and what can't be undone still
- * asks (ADR-066).
+ * asks (ADR-067).
  */
 
 /** Where a command rule can sit: never with the rest, which is for what no rule names. */

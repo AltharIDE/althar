@@ -13,7 +13,7 @@
   the switch off and always allowing the kind, settles it otherwise.
 - **Amended:** 2026-10-28: with everything allowed, only what can't be
   undone from the task still asks
-  ([ADR-066](066-allow-everything-asks-only-before-what-can-t-be-undone.md)):
+  ([ADR-067](067-allow-everything-asks-only-before-what-can-t-be-undone.md)):
   the stash, git forgetting what it keeps to recover lost work, and
   reading a `.env` outside the task's worktree go ahead. The other modes
   keep the whole floor.
