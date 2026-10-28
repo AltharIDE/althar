@@ -52,7 +52,7 @@ import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { builtIn, descriptionsIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
+import { builtIn, descriptionsIn, evidenceOf, evidencePaths, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
@@ -530,6 +530,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         },
       }
     }
+    case 'pictures':
+      return { ...base, kind: 'pictures', content: { pictures: shownOf(field(content, 'pictures')) } }
     case 'question': {
       const payload = parse(row.questionPayload ?? '{}')
       const state = row.questionState === 'answered' ? 'answered' : row.questionState === 'open' ? 'open' : 'withdrawn'

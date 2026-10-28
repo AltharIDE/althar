@@ -542,6 +542,8 @@ const playStall = async (
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
  * the worktree, uncommitted, and finishes with it, a test run and something
  * it couldn't try, and settling, a new run and nothing left untried.
+ * Asked in words with `[lead:show]`, it shows two screenshots in the thread
+ * with show_pictures, whether a step is open or not.
  * Finishing, it says what the task built, and says it again settling a
  * review that changed the work (with `[lead:built-unsaid]`, only once told
  * to); set aside, it leaves what it said standing;
@@ -841,6 +843,20 @@ const playRole = async (
       // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
       const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
       if (moved !== undefined && available.has('settle_task')) return await call('settle_task', { how: moved })
+      // Asked to show something, `[lead:show]`, it takes two screenshots into a folder git ignores and shows them in the thread,
+      // step or no step.
+      if (text.includes('[lead:show]') && available.has('show_pictures')) {
+        mkdirSync(join(session.cwd, '.althar', 'scratch', 'shots'), { recursive: true })
+        for (const name of ['before.png', 'after.png'])
+          writeFileSync(join(session.cwd, '.althar', 'scratch', 'shots', name), Buffer.from(SCREENSHOT_PNG, 'base64'))
+        await call('show_pictures', {
+          pictures: [
+            { path: '.althar/scratch/shots/before.png', caption: 'Checkout before the retry: the payment fails once' },
+            { path: '.althar/scratch/shots/after.png', caption: 'Checkout after the retry: it goes through' },
+          ],
+        })
+        return 'Those are the two states.'
+      }
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')

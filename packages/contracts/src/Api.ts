@@ -1279,6 +1279,21 @@ export const StepResultItem = Schema.Struct({
   }),
 })
 
+/** A picture a lead showed in the thread, with what it shows. */
+export const ShownPicture = Schema.Struct({ caption: Schema.String, picture: Picture })
+export type ShownPicture = typeof ShownPicture.Type
+
+/**
+ * Pictures a lead showed the person in its thread, at any time, step or no
+ * step (show_pictures): in order, each with a caption, kept as a step's
+ * screenshots are, so they stay once the worktree is gone.
+ */
+export const PicturesItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('pictures'),
+  content: Schema.Struct({ pictures: Schema.Array(ShownPicture) }),
+})
+
 /** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
 export const CheckLogShown = Schema.Struct({
   name: Schema.String,
@@ -1939,6 +1954,7 @@ export const ThreadItem = Schema.Union([
   ReviewDraftItem,
   IssueChangesItem,
   AutomationItem,
+  PicturesItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 

@@ -5,6 +5,7 @@ import {
   Arrived,
   CodeBlock,
   FailedLogs,
+  Gallery,
   Issue,
   IssueRef,
   LinkButton,
@@ -25,6 +26,7 @@ import {
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { shotsOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
 import { fileAttachments } from './files'
@@ -213,6 +215,8 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
       return <Plan steps={part.steps} />
     case 'notice':
       return <p className={s[part.tone]}>{part.text}</p>
+    case 'pictures':
+      return <Gallery shots={shotsOf(part.id, part.pictures)} />
   }
 }
 

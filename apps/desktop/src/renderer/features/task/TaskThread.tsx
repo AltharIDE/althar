@@ -18,11 +18,11 @@ import {
   type ModelInfo,
 } from '@althar/ui'
 
-import { piecesOf } from '../../shared/evidence'
+import { piecesOf, shotsOf } from '../../shared/evidence'
 import { handedBy } from '../../shared/handed'
 import { HandedBack } from '../../shared/HandedBack'
 import { useModelNames } from '../../shared/modelNames'
-import { type Round as RoundModel, type RoundBlock, type Said, type WorkStep, withoutShotList } from '../../shared/rounds'
+import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type WorkStep, withoutShotList } from '../../shared/rounds'
 import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
@@ -132,9 +132,21 @@ const RoundView = memo(function RoundView({ block, model, retakes, versions, thr
     </Fragment>
   )
 
+  // Pictures it showed the person, each set where it showed it.
+  const pictures = (sets: ReadonlyArray<Shown>) =>
+    sets.map((shown) => <Gallery key={shown.id} data-item={shown.id} shots={shotsOf(shown.id, shown.pictures)} />)
+
   const work = block.work
   // A round that said nothing is its line alone, with who worked.
-  if (block.ack === null && block.result === null && block.report === null && block.failed === null && work !== null && !block.live)
+  if (
+    block.ack === null &&
+    block.result === null &&
+    block.report === null &&
+    block.failed === null &&
+    block.shown.before.length === 0 &&
+    work !== null &&
+    !block.live
+  )
     return (
       <WorkLine who={model} took={work.took} summary={work.counts}>
         {work.steps.map((step) => (
@@ -171,6 +183,7 @@ const RoundView = memo(function RoundView({ block, model, retakes, versions, thr
         </WorkLine>
       )}
       <RuleReceipt parts={block.parts} {...(project === undefined ? {} : { project })} />
+      {pictures(block.shown.before)}
       {/* what it handed over along the way, with no result yet to stand with */}
       {block.result === null && (
         <>
@@ -186,6 +199,7 @@ const RoundView = memo(function RoundView({ block, model, retakes, versions, thr
               {showing}
             </>
           )}
+      {pictures(block.shown.after)}
       {block.failed !== null && <AltharLine tone="warning">{block.failed}</AltharLine>}
     </Round>
   )
