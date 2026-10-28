@@ -357,7 +357,7 @@ describe('the conversation beside the board', () => {
     expect((await screen.findByRole('separator', { name: 'Width of the conversation' })).getAttribute('aria-valuenow')).not.toBe('200')
   })
 
-  /** The window `width` wide, the coordinator naming a file; its peek's Open beside pressed: the panel's edge. */
+  /** The window `width` wide, the coordinator naming a file; its peek with no Open beside, and the name pressed: the panel's edge. */
   const openBeside = async (width: number) => {
     window.localStorage.removeItem('althar.both')
     window.localStorage.setItem('althar.bench', '420')
@@ -389,9 +389,12 @@ describe('the conversation beside the board', () => {
       })),
     })
     withServices(<Project room={Room.Both} />, client)
-    await userEvent.hover(await screen.findByRole('button', { name: 'Open src/retry.ts:2' }))
+    const name = await screen.findByRole('button', { name: 'Open src/retry.ts:2' })
+    await userEvent.hover(name)
     const peek = await screen.findByRole('dialog', { name: 'src/retry.ts:2' })
-    await userEvent.click(await within(peek).findByRole('button', { name: 'Open beside' }))
+    await waitFor(() => expect(peek.textContent).toContain('return 3'))
+    expect(within(peek).queryByRole('button', { name: 'Open beside' })).toBeNull()
+    await userEvent.click(name)
     const panel = await screen.findByRole('complementary', { name: 'retry.ts' })
     await waitFor(() => expect(panel.textContent).toContain('return 3'))
     return within(panel.closest('[data-workbench]') as HTMLElement).getByRole('separator', { name: 'Width of the panel' })
