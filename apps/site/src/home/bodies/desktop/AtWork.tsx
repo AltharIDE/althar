@@ -8,7 +8,7 @@ import app from '../kit/app.module.css'
 import s from './AtWork.module.css'
 
 /*
- * Meridian's board at night, four tasks running at once, each led by
+ * Tally's board at night, four tasks running at once, each led by
  * another lab. While it is watched the work goes on: a beat every couple of
  * seconds, a minute on each task's clock and, at its own pace, a step on.
  * Still with motion reduced or a moment held (`?t=`); on a phone, the
@@ -36,12 +36,12 @@ export function AtWork() {
         w={1440}
         h={780}
         phone={{ x: 378, y: 56, w: 346, h: 620 }}
-        label="Meridian’s board: four tasks running at once, led by Opus, Codex, Gemini and Qwen, beside what is next, what needs you and what has settled"
+        label="Tally’s board: four tasks running at once, led by Opus, Codex, Gemini and Qwen, beside what is next, what needs you and what has settled"
         frame={s.frame}
       >
         <div className={`${app.window} ${s.window}`} data-theme="dark">
           <Tabs
-            current="meridian"
+            current="tally"
             end={
               <>
                 <RoomSwitch value={Room.Board} onChange={none} text={{ key: () => '' }} />

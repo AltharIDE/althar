@@ -22,19 +22,30 @@ import {
 } from '@althar/ui'
 import type { ReactNode } from 'react'
 
-// Prototype: the kit's demo world, read from its source. Ported, the site would keep its own copy.
-import { CALLS, NEXT, READY_TWO_REPOS, SETTLED } from '../../../../../../packages/ui/src/fixtures/board'
-import { FROM_231, PLAN_432 } from '../../../../../../packages/ui/src/fixtures/coordinator'
-import { EDGE_NEEDS, EDGE_WORK, edgeLineOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
-import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
-import { FINDINGS, PROJECT, reviewDoc, STEPS } from '../../../../../../packages/ui/src/fixtures/meridian'
 import { CODEX, GEMINI_PRO, OPUS, QWEN, SONNET } from '../../../../../../packages/ui/src/fixtures/models'
 import s from './app.module.css'
+import {
+  CALLS,
+  EDGE_NEEDS,
+  EDGE_WORK,
+  edgeLineOf,
+  FINDINGS,
+  FROM_231,
+  MARKED,
+  NEXT,
+  NOTCH,
+  PLAN_432,
+  PROJECT,
+  READY_TWO_REPOS,
+  reviewDoc,
+  SETTLED,
+  STEPS,
+} from './world'
 
 /*
  * The app, as the pictures show it: whole windows and single pieces, drawn
- * by @althar/ui's own components with the kit's demo world (Meridian, a
- * payments API, and task 432, the refunds backfill from Linear's MER-231),
+ * by @althar/ui's own components with the kit's demo world (Tally, a
+ * payments API, and task 432, the refunds backfill from Linear's TAL-231),
  * touched up where a picture wants it.
  */
 
@@ -109,7 +120,7 @@ export function Growing({ children, whole }: { children: ReactNode; whole: React
   )
 }
 
-/* ---- at work: Meridian's board with four tasks running at once, each led by another lab ---- */
+/* ---- at work: Tally's board with four tasks running at once, each led by another lab ---- */
 
 /** A task running, and how it goes on: a step every `every` beats, and a minute a beat. */
 interface AtWork extends Omit<WorkCardProps, 'elapsed' | 'onOpen' | 'text' | 'current'> {
@@ -165,10 +176,10 @@ const AT_WORK: readonly AtWork[] = [
 /** How long a task has run, as the board says it: 6m, 1h 12m. */
 const ran = (minutes: number) => (minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`)
 
-/** Meridian's board `beat` beats on: each running task a step further at its own pace, and staying on its last. */
+/** Tally's board `beat` beats on: each running task a step further at its own pace, and staying on its last. */
 export function BoardAtWork({ beat }: { beat: number }) {
   return (
-    <Board label="Meridian’s work">
+    <Board label="Tally’s work">
       <BoardColumn lane={BoardLane.Next} count={NEXT.length}>
         <BoardList>
           {NEXT.map((x, i) => (

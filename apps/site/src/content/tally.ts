@@ -1,7 +1,7 @@
 import { Brand } from '@althar/ui'
 
 /*
- * The made-up project the site shows: Meridian, a payments service, and
+ * The made-up project the site shows: Tally, a payments service, and
  * one task in it, 418, followed from the ticket to the note it leaves. The
  * same project the app's welcome and the brief use, so the story is one
  * story wherever it's told.
@@ -70,11 +70,11 @@ export const STORY: readonly StoryStep[] = [
     name: 'Verify',
     who: 'Gemini CLI · Gemini 3 Pro',
     mark: Brand.Google,
-    what: 'A fresh agent that never saw the code tests it by hand, as a tester would: it runs Meridian, changes a user’s role and checks what they can still reach. All three criteria pass.',
+    what: 'A fresh agent that never saw the code tests it by hand, as a tester would: it runs Tally, changes a user’s role and checks what they can still reach. All three criteria pass.',
   },
 ]
 
-/** Notes Meridian already holds. */
+/** Notes Tally already holds. */
 export const NOTES: readonly { id: string; title: string; meta: string }[] = [
   { id: 'n1', title: 'All money values are integer minor units', meta: 'Convention · 24 tasks' },
   { id: 'n2', title: 'Webhook deliveries must stay idempotent', meta: 'Decision · 9 tasks' },

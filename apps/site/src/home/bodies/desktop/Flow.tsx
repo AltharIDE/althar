@@ -35,10 +35,10 @@ const ROUTES: Route[] = [
       <Issue
         mark={Brand.Linear}
         source="Linear"
-        id="MER-231"
+        id="TAL-231"
         tone="linear"
         title="Backfill idempotency keys on refunds created before PR 1184"
-        href="https://linear.app/meridian/issue/MER-231"
+        href="https://linear.app/tally/issue/TAL-231"
         status={{ state: IssueStatus.Todo, label: 'Todo' }}
         priority={{ level: IssuePriority.High, label: 'High' }}
         meta="Partner success"
@@ -50,7 +50,7 @@ const ROUTES: Route[] = [
       branch: 'ch/432-backfill-idempotency',
       steps: ['Implement', 'Dry run', 'Review', 'Security review', 'Draft PR'],
     },
-    pr: { repo: 'meridian-api', number: 1191, add: 212, del: 41, checks: 3 },
+    pr: { repo: 'tally-api', number: 1191, add: 212, del: 41, checks: 3 },
   },
   {
     tracker: { brand: Brand.Jira, name: 'Jira' },
@@ -61,7 +61,7 @@ const ROUTES: Route[] = [
         source="Jira"
         id="PAY-88"
         title="Partners see a 500 when a webhook signature has expired"
-        href="https://meridian.atlassian.net/browse/PAY-88"
+        href="https://tally.atlassian.net/browse/PAY-88"
         status={{ state: IssueStatus.InProgress, label: 'In Progress' }}
         priority={{ level: IssuePriority.Urgent, label: 'Highest' }}
         meta="Payments · Sprint 41"
@@ -73,7 +73,7 @@ const ROUTES: Route[] = [
       branch: 'ch/439-expired-signature',
       steps: ['Implement', 'Review', 'Verify', 'Draft PR'],
     },
-    pr: { repo: 'meridian-web', number: 412, add: 38, del: 6, checks: 5 },
+    pr: { repo: 'tally-web', number: 412, add: 38, del: 6, checks: 5 },
   },
   {
     tracker: { brand: Brand.Trello, name: 'Trello' },

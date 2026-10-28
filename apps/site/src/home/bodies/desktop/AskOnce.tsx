@@ -1,15 +1,15 @@
 import { Composer, IssueDraft, IssueDraftState, Turn, WorkedFor, You } from '@althar/ui'
 import { useEffect, useRef, useState } from 'react'
 
-import { DRAFT_LINEAR, PLAN_432 } from '../../../../../../packages/ui/src/fixtures/coordinator'
 import { Growing, Launch } from '../kit/app'
 import { useNarrow } from '../kit/Narrow'
 import { useInView } from '../kit/seen'
 import { Shot } from '../kit/Shot'
+import { DRAFT_LINEAR, PLAN_432 } from '../kit/world'
 import s from './AskOnce.module.css'
 
 /*
- * The coordinator, asked once. Your ask is typed into Meridian's
+ * The coordinator, asked once. Your ask is typed into Tally's
  * conversation and sent; the coordinator works on it, and on the way finds
  * something else wrong, a separate piece of work, so it drafts an issue for
  * that on Linear, which is filed; then it says what it will do with what
@@ -26,7 +26,7 @@ const ASK = 'Backfill idempotency keys on the refunds made before PR 1184.'
 /** What it found on the way, as it says it, and the issue it drafts for it. */
 const FOUND =
   'One more thing I found in src/refunds: refund webhooks retry without honouring Retry-After. That’s a separate fix, so I drafted an issue for it.'
-const FILED_AS = 'MER-238'
+const FILED_AS = 'TAL-238'
 
 /** When each thing happens, in ms from the start of a play. */
 const TYPE_FROM = 600
@@ -89,18 +89,18 @@ export function AskOnce() {
         h={720}
         phoneW={400}
         maxScale={1.15}
-        label={`Meridian’s coordinator: you ask “${ASK}” It reads the code and the project’s rules, finds that refund webhooks retry too fast, a separate fix, and files ${FILED_AS} on Linear for it; then it answers with task 432’s plan for your ask, its team step by step`}
+        label={`Tally’s coordinator: you ask “${ASK}” It reads the code and the project’s rules, finds that refund webhooks retry too fast, a separate fix, and files ${FILED_AS} on Linear for it; then it answers with task 432’s plan for your ask, its team step by step`}
         frame={s.frame}
       >
         <div className={s.talk}>
           <div className={s.thread}>
             {f.sent && <You at="11:01">{ASK}</You>}
             {(f.working || f.worked) && (
-              <Turn voice="Meridian’s coordinator" at="11:01">
+              <Turn voice="Tally’s coordinator" at="11:01">
                 <WorkedFor
                   took={`${f.took}s`}
                   live={f.working}
-                  summary={f.working ? 'Reading src/refunds and PR 1184' : 'Read meridian-api, PR 1184 and Meridian’s rules'}
+                  summary={f.working ? 'Reading src/refunds and PR 1184' : 'Read tally-api, PR 1184 and Tally’s rules'}
                 >
                   <p className={s.said}>Read 2 repositories, PR 1184 and the project’s rules.</p>
                 </WorkedFor>
@@ -134,7 +134,7 @@ export function AskOnce() {
               value={f.sent ? '' : ASK.slice(0, f.typed)}
               onChange={none}
               onSubmit={none}
-              placeholder="Tell Meridian what you want done"
+              placeholder="Tell Tally what you want done"
             />
           </div>
         </div>
