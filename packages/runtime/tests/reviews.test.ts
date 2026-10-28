@@ -498,7 +498,6 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual(tagOf(yield* Effect.flip(reviews.post(`rdr_${'0'.repeat(32)}`, instance.personId))), 'NotFound')
 
         // Posted, it goes as it stands: the verdict chosen, the comment kept, of the commit the lead read.
-        const sessions = yield* Sessions
         if (Option.isNone(yield* sessions.running(threadId))) yield* sessions.startLast(threadId)
         assert.isTrue(Option.isSome(yield* sessions.running(threadId)))
         const posted = yield* reviews.post(draftId, instance.personId)
