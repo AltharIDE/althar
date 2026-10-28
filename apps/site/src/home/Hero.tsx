@@ -1,16 +1,21 @@
+import { CopyButton } from '@althar/ui'
 import { drawGrain } from '@althar/ui/opening'
 import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { preload } from 'react-dom'
 
+import { AGENTS } from '../content/agents'
+import { INSTALL } from '../content/facts'
 import { HERO } from '../content/home'
 import { useHydrated } from '../lib/browser'
+import { cx } from '../lib/cx'
+import { AgentMark } from '../shared/AgentMark'
 import { Get } from '../shared/Close'
 import { seeded } from '../shared/footer/random'
 import { LightUnder } from '../shared/lightUnder'
 import { addDisplay } from './display'
 import s from './Hero.module.css'
 import { type Fire, makeFire } from './hero/fire'
-import { AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt } from './hero/journey'
+import { altitudeAt, AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt, velocityAt } from './hero/journey'
 import { clamp, flare, inOut, ring, smooth, wobble } from './hero/motion'
 import { PHONE, type Plate, TALL, WIDE } from './hero/plate'
 import plasmaUrl from './hero/plate/plasma.webp'
@@ -24,8 +29,10 @@ import skyUrl from './hero/plate/sky.webp'
  * harder and pressed down, the cabin lit by it; at its height the headline's
  * last word is forged in it, "fast."; and then the fire breaks, torn away,
  * the glass flashing white, and there is the sky and the cloud far below,
- * the word cooling to white. Then everything comes to rest, and from then on
- * nothing is drawn.
+ * the word cooling to white. Then everything comes to rest: from then on
+ * nothing is drawn, and the browser keeps it gently moving. In the window's
+ * top corners the flight deck reads the capsule slowing and falling; under
+ * the lead, a console holds the crew, the install and the download.
  *
  * The cabin is a photograph with its window keyed out (hero/plate.ts),
  * wide, or tall on a phone, laid over the page to cover it. Behind it, the
@@ -140,6 +147,31 @@ const put = (el: HTMLElement | null, name: string, value: string) => {
   if (el && el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value)
 }
 
+/** The flight deck's readouts at second `t`, as they read. */
+const READ = {
+  velocity: (t: number) => `${velocityAt(t).toFixed(2)} km/s`,
+  altitude: (t: number) => `${Math.round(altitudeAt(t))} km`,
+}
+
+/** Writes a readout only when it changes. */
+const say = (el: HTMLElement | null, text: string) => {
+  if (el && el.textContent !== text) el.textContent = text
+}
+
+/** Every agent Althar runs, as its mark, named on hover and to a screen reader. */
+function Crew() {
+  return (
+    <ul className={s.crew} aria-label={HERO.crewName}>
+      {AGENTS.map((agent) => (
+        <li key={agent.id} title={agent.name}>
+          <AgentMark agent={agent.id} size={17} />
+          <span className={s.sr}>{agent.name}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** The developer page's first screen, coming in from orbit. */
 export function Hero({ nav }: { nav?: ReactNode } = {}) {
   const root = useRef<HTMLDivElement>(null)
@@ -152,6 +184,8 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
   const flash = useRef<HTMLDivElement>(null)
   const fast = useRef<HTMLSpanElement>(null)
   const grain = useRef<HTMLDivElement>(null)
+  const velocity = useRef<HTMLElement>(null)
+  const altitude = useRef<HTMLElement>(null)
   const [drawn, setDrawn] = useState(false)
   const hydrated = useHydrated()
   // The sky and the fire, asked for with the page rather than once its script has run.
@@ -222,6 +256,8 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       put(word, 'opacity', smooth(AT.peak + 0.1, AT.peak + 0.4, t).toFixed(3))
       put(word, '--cool', smooth(AT.break, AT.broken + 0.7, t).toFixed(3))
       put(word, '--punch', (1 - smooth(AT.peak + 0.1, AT.peak + 0.55, t)).toFixed(3))
+      say(velocity.current, READ.velocity(t))
+      say(altitude.current, READ.altitude(t))
       direct(t, heat, broken)
     }
 
@@ -416,16 +452,40 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
                 {HERO.last}
               </span>
             </h1>
+            {/* The flight deck's readouts, at rest until the clock runs them. */}
+            <div className={s.hud} aria-hidden="true">
+              <span>
+                <i>{HERO.velocity}</i>
+                <b ref={velocity}>{READ.velocity(AT.settled)}</b>
+              </span>
+              <span>
+                <i>{HERO.altitude}</i>
+                <b ref={altitude}>{READ.altitude(AT.settled)}</b>
+              </span>
+            </div>
           </div>
         </div>
       </div>
-      {/* In front of the camera, so its shaking leaves them be: the lead and the ways in. */}
-      <footer className={s.foot}>
+      {/* In front of the camera, so its shaking leaves them be: the lead, and the console under it. */}
+      <footer className={s.deck}>
         <p className={s.lead} data-arrive={0}>
           {HERO.lead}
         </p>
-        <div className={s.ways} data-arrive={120}>
-          <Get tone="blue" />
+        <div className={s.console} data-arrive={120}>
+          <div className={s.cell}>
+            <span className={s.label}>{HERO.crew}</span>
+            <Crew />
+          </div>
+          <div className={cx(s.cell, s.install)}>
+            <span className={s.label}>{HERO.install}</span>
+            <div className={s.command}>
+              <code>{INSTALL.brew}</code>
+              <CopyButton value={INSTALL.brew} tone="onDark" ghost />
+            </div>
+          </div>
+          <div className={cx(s.cell, s.ways)}>
+            <Get tone="blue" />
+          </div>
         </div>
       </footer>
       {nav}

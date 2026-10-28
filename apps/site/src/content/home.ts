@@ -15,6 +15,12 @@ export const HERO = {
   title: 'Building software has never felt so',
   last: 'fast.',
   lead: 'Althar runs Claude Code, Codex, GitHub Copilot, OpenCode and more as one crew, on the plans you already pay for. One plans, one builds, another reviews, and when one runs out the next takes over.',
+  /** The flight deck: its readouts in the window's top corners, and the console under the lead. */
+  velocity: 'Velocity',
+  altitude: 'Altitude',
+  crew: 'Crew',
+  crewName: 'The agents Althar runs',
+  install: 'Install',
 } as const
 
 export const PLANS = {

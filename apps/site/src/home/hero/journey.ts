@@ -6,8 +6,8 @@ import { clamp, out, smooth } from './motion'
  * glass, faster and faster, the capsule shaking harder and pressed down, the
  * cabin lit by it; at its height "fast." is forged in it; and then it
  * breaks, torn away, and there is the sky and the cloud far below. Then the
- * capsule settles, the sky drifts to a stop, and nothing moves: from then on
- * nothing is drawn.
+ * capsule settles and the sky drifts to a stop: from then on nothing is
+ * drawn, and what still moves, the browser moves (Hero.module.css).
  *
  * Everything is read from the clock, never added up frame by frame, so `?t=`
  * shows the same frame every time.
@@ -67,3 +67,9 @@ export const driftAt = (t: number) => 160 * out((t - AT.break) / (AT.settled - A
 
 /** How much the camera still sways, 1 to 0: freely until the sky opens, then coming to rest by the end. */
 export const swayAt = (t: number) => 1 - smooth(AT.broken, AT.settled, t)
+
+/** The capsule's speed in km/s, for the flight deck: orbit's, still most of it at the fire's height, shed once it breaks, and what is left under the sky. */
+export const velocityAt = (t: number) => 7.8 - 1.2 * smooth(AT.ignite, AT.peak, t) - 6.36 * smooth(AT.peak, AT.settled - 2, t)
+
+/** Its height in km: from where the air begins, falling all the way to rest. */
+export const altitudeAt = (t: number) => 122 - 84 * smooth(AT.open, AT.settled, t)

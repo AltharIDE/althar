@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt } from '../src/home/hero/journey'
+import { altitudeAt, AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt, velocityAt } from '../src/home/hero/journey'
 import { TALL, WIDE } from '../src/home/hero/plate'
 
 describe('the first screen’s clock', () => {
@@ -33,6 +33,20 @@ describe('the first screen’s clock', () => {
     expect(driftAt(AT.settled)).toBe(driftAt(AT.settled + 60))
     // Its last moment of drift is already near still.
     expect(driftAt(AT.settled) - driftAt(AT.settled - 0.1)).toBeLessThan(0.05)
+  })
+
+  it('reads the capsule only ever slowing and falling, from orbit to rest', () => {
+    expect(velocityAt(0)).toBeCloseTo(7.8, 5)
+    expect(altitudeAt(0)).toBeCloseTo(122, 5)
+    for (let t = 0.05; t < AT.settled; t += 0.05) {
+      expect(velocityAt(t)).toBeLessThanOrEqual(velocityAt(t - 0.05))
+      expect(altitudeAt(t)).toBeLessThanOrEqual(altitudeAt(t - 0.05))
+    }
+    // Still fast at the fire's height, as "fast." is forged; slow under the sky.
+    expect(velocityAt(AT.peak)).toBeGreaterThan(6)
+    expect(velocityAt(AT.settled)).toBeLessThan(0.5)
+    expect(velocityAt(AT.settled)).toBe(velocityAt(AT.settled + 60))
+    expect(altitudeAt(AT.settled)).toBe(altitudeAt(AT.settled + 60))
   })
 
   it('never drifts the sky past the edge of its picture, on either photograph', () => {
