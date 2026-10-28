@@ -38,6 +38,14 @@
     for it. A process with no mark, or with work this store doesn't know (as
     another Althar's, an agent's test run), is never touched; nor is Althar
     itself or anything it runs under.
+  - **A command an agent left running stops with everything it started**,
+    whether the person stops it, settling does or its agent's session closes
+    (`stopping.ts`): while its shell still holds the file Claude Code sends its
+    output to, the shell is found with `lsof`, only among what the agent
+    started, and with it everything below it. Once the agent has stopped the
+    shell, each of those, and the shell's process group, is asked to stop and
+    then killed, as above. A dev server, Storybook or `vp preview` no longer
+    outlives its command.
   - **Reopened, a task's agents start again on demand**, as they did after
     abandoning.
   - **A settled task's folder is held only by what was started from it after
@@ -45,12 +53,20 @@
 - **Alternatives considered:**
   - **Stopping only through the agent**, as marking done did: misses the
     server under the shell, and everything once the agent has gone.
-  - **Killing by process group alone**: the group's leader is the shell, gone
-    already; its members can only be found by their mark or their tree.
+  - **Killing by process group alone, after the agent stopped the command**:
+    the group's leader is the shell, gone by then, and nothing says which
+    group was its. So the shell is found first, by the output file it holds,
+    and its tree and group are stopped after it.
+  - **Leaving a command's processes to the sweep**: it only sees settled
+    tasks' work, so a server the person stopped on an open task ran on.
   - **Sweeping every marked process whose work is unknown**: an agent's test
     run of Althar, and another Althar's work, are unknown to this store too.
 - **Trade-off:**
   - **A settled task's lead is gone until it is next asked for**: writing to
     it starts it again, with a brief, not the session it had.
-  - **Windows has no marks to read**: there, settling stops the agents and
-    runs Althar tracks, and an agent's keeper's job ends what it started.
+  - **Windows has no marks to read, no process groups and no `lsof`**:
+    there, settling stops the agents and runs Althar tracks, and an agent's
+    keeper's job ends what it started.
+  - **Codex says no output file for a command**: what it left running is
+    stopped through it alone, and the sweep finds what outlives a settled
+    task.

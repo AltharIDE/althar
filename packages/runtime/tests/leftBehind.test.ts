@@ -74,8 +74,11 @@ const loner = (work: string | null) => {
 /** A command that runs until stopped, as a run of the project. */
 const SERVE = `"${process.execPath}" -e "setInterval(() => {}, 1000)"`
 
-/** A plan for the task, on the lead run as a process, started now: a quick one, or one that opens a draft pull request. */
-const started = (title: string, more: { readonly root?: string; readonly quick?: boolean } = {}) =>
+/**
+ * A plan for the task, on the lead run as a process, started now: a quick one, or one that opens a draft pull request; with a
+ * run of its own, unless `run` is false.
+ */
+const started = (title: string, more: { readonly root?: string; readonly quick?: boolean; readonly run?: boolean } = {}) =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const plans = yield* Plans
@@ -106,11 +109,13 @@ const started = (title: string, more: { readonly root?: string; readonly quick?:
     const running = yield* (yield* Sessions).running(task.threadId)
     assert.isTrue(Option.isSome(running) && running.value.background.some((left) => left.ended === null))
     // And a run of its own, from its worktree.
-    const launches = yield* Launches
-    yield* launches.keep({ projectId: project.projectId, run: { command: SERVE, setup: null }, actorId: instance.personId })
-    yield* launches.start({ projectId: project.projectId, taskId: task.taskId, threadId: task.threadId })
+    if (more.run !== false) {
+      const launches = yield* Launches
+      yield* launches.keep({ projectId: project.projectId, run: { command: SERVE, setup: null }, actorId: instance.personId })
+      yield* launches.start({ projectId: project.projectId, taskId: task.taskId, threadId: task.threadId })
+    }
     // Its lead, the server it left and its run, each found by its mark.
-    const marked = yield* until(markedFor(task.taskId), (pids) => pids.length >= 3, Duration.seconds(10))
+    const marked = yield* until(markedFor(task.taskId), (pids) => pids.length >= (more.run === false ? 2 : 3), Duration.seconds(10))
     return { project, task, marked }
   })
 
@@ -171,6 +176,43 @@ describe('what to stop by its mark', () => {
       [],
     )
   })
+})
+
+describe.skipIf(windows)('a command an agent left running', () => {
+  it.live(
+    'stopped by the person, leaves nothing it started running, though its server is in its shell’s group, not its tree',
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
+        const running = yield* sessions.running(task.threadId)
+        assert.isTrue(Option.isSome(running))
+        if (Option.isNone(running)) return
+        const lead = running.value.pid
+        const server = (yield* markedFor(task.taskId)).filter((pid) => pid !== lead)
+        assert.isNotEmpty(server)
+        const left = running.value.background.find((one) => one.ended === null)
+        assert.isDefined(left)
+        yield* sessions.stopBackground(task.threadId, left?.id ?? '')
+        // Its lead runs on, and only its lead.
+        yield* until(markedFor(task.taskId), (pids) => pids.length === 1 && pids[0] === lead, Duration.seconds(5))
+        assert.isTrue(server.every((pid) => !alive(pid)))
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    60_000,
+  )
+
+  it.live(
+    'goes with everything it started when its agent stops',
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task, marked } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
+        yield* sessions.stop(task.threadId)
+        yield* nothingLeft(task.taskId, Duration.seconds(5))
+        assert.isTrue(marked.every((pid) => !alive(pid)))
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    60_000,
+  )
 })
 
 describe.skipIf(windows)('a task that settles', () => {
@@ -249,17 +291,18 @@ describe.skipIf(windows)('what settled tasks left running that Althar lost track
       const others = { unknown: loner('task:task_nobody_knows'), unmarked: loner(null) }
       const open: Array<number> = []
       return Effect.gen(function* () {
-        // Started, with a server left, and Althar quits: its lead stops with it, and the server, in a group of its own, doesn't.
+        // Started, with a server left, and Althar quits: its leads stop with it, and so do the servers they left.
         const { task, other } = yield* Effect.gen(function* () {
           const one = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true })
           const two = yield* started('Serve that [lead:serve-apart] [lead:finish]', { quick: true })
           return { task: one.task, other: two.task }
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(database)))))
-        const outlived = yield* until(markedFor(task.taskId), (pids) => pids.length >= 1, Duration.seconds(10))
-        assert.isTrue(outlived.every(alive))
-        const stillOpen = yield* markedFor(other.taskId)
-        assert.isNotEmpty(stillOpen)
-        open.push(...stillOpen)
+        yield* nothingLeft(task.taskId, Duration.seconds(5))
+        yield* nothingLeft(other.taskId, Duration.seconds(5))
+        // What an Althar that was killed, or one from before, left of each, outside every tree.
+        const outlived = [loner(`task:${task.taskId}`)]
+        const stillOpen = [loner(`task:${other.taskId}`)]
+        open.push(...outlived, ...stillOpen)
         // Althar starts again, the task settled as an Althar that stopped nothing settled it.
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient

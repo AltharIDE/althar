@@ -8,6 +8,7 @@ import { contained } from './Failures'
 import { Launches } from './Launches'
 import { ALTHAR, type Listed, listProcesses, marksOf, ownersOf, workIn } from './machine'
 import { Sessions } from './Sessions'
+import { stopProcesses } from './stopping'
 import { addItem } from './threads'
 
 /*
@@ -39,10 +40,6 @@ const TURN_ENDS = Duration.minutes(2)
 
 /** How long one task's stopping may take in all. */
 const WITHIN = Duration.minutes(4)
-
-/** How long a process asked to stop has before it is killed, and how long a kill is given. */
-const GRACE = Duration.seconds(3)
-const KILLED = Duration.seconds(1)
 
 /** When the sweep first looks after Althar starts, and how often after. */
 const FIRST = Duration.seconds(20)
@@ -77,50 +74,6 @@ export const forebearsOf = (listing: ReadonlyMap<number, Listed>, pid: number): 
   for (let at: number | undefined = pid; at !== undefined && !forebears.has(at); at = listing.get(at)?.parent) forebears.add(at)
   return forebears
 }
-
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** Sends a process, and the group it leads where it leads one, a signal; one gone already is fine. */
-const signal = (pid: number, sent: 'SIGTERM' | 'SIGKILL') => {
-  for (const target of [-pid, pid])
-    try {
-      process.kill(target, sent)
-    } catch {
-      // Gone already, or no group of its own.
-    }
-}
-
-/** Waits for each to end, up to `limit`; those still running. */
-const survivorsOf = (pids: ReadonlyArray<number>, limit: Duration.Duration) =>
-  Effect.gen(function* () {
-    const until = Date.now() + Duration.toMillis(limit)
-    let left = pids.filter(alive)
-    while (left.length > 0 && Date.now() < until) {
-      yield* Effect.sleep(Duration.millis(50))
-      left = left.filter(alive)
-    }
-    return left
-  })
-
-/**
- * Stops processes: each, and its group, asked to stop (TERM), then those
- * still running killed once `grace` is up. Those that outlived that.
- */
-export const stopProcesses = (pids: ReadonlyArray<number>, grace: Duration.Duration = GRACE) =>
-  Effect.gen(function* () {
-    if (pids.length === 0) return []
-    for (const pid of pids) signal(pid, 'SIGTERM')
-    const asked = yield* survivorsOf(pids, grace)
-    for (const pid of asked) signal(pid, 'SIGKILL')
-    return yield* survivorsOf(asked, KILLED)
-  })
 
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Sessions | Launches | RuntimeConfig
 
