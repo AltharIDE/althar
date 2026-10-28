@@ -1,4 +1,4 @@
-# ADR-068: Failing checks go to the lead, whoever has looked
+# ADR-069: Failing checks go to the lead, whoever has looked
 
 - **Status:** Accepted
 - **Date:** 2026-10-28

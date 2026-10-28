@@ -130,7 +130,13 @@ export const connectedAs = (list: ConnectionList | null, product: Product, at: s
   )?.account.login ?? null
 
 /** Every task on the board, in its lanes' order. */
-export const tasksOf = (lanes: Lanes): ReadonlyArray<BoardTask> => [...lanes.next, ...lanes.running, ...lanes.ready, ...lanes.settled]
+export const tasksOf = (lanes: Lanes): ReadonlyArray<BoardTask> => [
+  ...lanes.next,
+  ...lanes.running,
+  ...lanes.stopped,
+  ...lanes.ready,
+  ...lanes.settled,
+]
 
 /** How many trackers show by name; the rest are counted. */
 export const TRACKERS_SHOWN = 3

@@ -34,6 +34,7 @@ import { FolderCleanup } from './FolderCleanup'
 import { Tasks } from './Tasks'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { Setups } from './Setups'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
@@ -101,8 +102,8 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer, Connections.layer).pipe(Layer.provideMerge(judging)),
     ),
   )
-  // How many tasks are at work at once on this machine, and what waits for a place among them.
-  const busy = Busy.layer.pipe(Layer.provideMerge(core))
+  // How many tasks are at work at once on this machine, and what waits for a place among them; and a task that settles stops all it left running.
+  const busy = Layer.mergeAll(Busy.layer, LeftBehind.layer).pipe(Layer.provideMerge(core))
   // A task's issue, and changes to issues on the person's trackers, which its pull request offers as it opens and merges.
   const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.

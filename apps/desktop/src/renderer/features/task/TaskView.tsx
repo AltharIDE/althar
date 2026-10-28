@@ -200,7 +200,7 @@ export const statusOf = (
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
-  // Ready, but its lead couldn't resolve a conflict with its default branch, or brought its failing checks to the person (ADR-068):
+  // Ready, but its lead couldn't resolve a conflict with its default branch, or brought its failing checks to the person (ADR-069):
   // it needs the person before it can be accepted.
   if (phase === 'ready' && (snapshot.task.handedBack != null || snapshot.task.checksBack != null))
     return { status: TaskStatus.Yours, state: text.needsYou }
@@ -421,6 +421,13 @@ export function TaskView({
     showed.current = { task: showsTask, outputs: showsOutputs, changes: showsChanges }
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
+  // Hidden while its screen is kept (`KeptScreens`), it opens again as it shows: a commit made meanwhile with nothing to say so shows.
+  useEffect(
+    () => () => {
+      showed.current = { task: false, outputs: false, changes: false }
+    },
+    [],
+  )
   // c, o and g switch the faces, and Escape goes back to the project: never while typing, or with something else open.
   const open = changes.open || abandoning || attaching !== null
   const hasGraph = (model.snapshot?.task.graph?.length ?? 0) > 0

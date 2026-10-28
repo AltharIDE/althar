@@ -180,7 +180,7 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
 
 /**
  * What the lead is told when the checks fail on its open pull request,
- * whether or not the person has looked (ADR-040, ADR-068): the checks are its
+ * whether or not the person has looked (ADR-040, ADR-069): the checks are its
  * to see through, it decides what broke them, a fix goes up as it pushes, and
  * how many tries are left before the change is the person's.
  */
@@ -200,7 +200,7 @@ export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyA
 
 /**
  * What the lead is told when the checks fail again after its last try
- * (ADR-068): the change is the person's, and it says what it tried and why
+ * (ADR-069): the change is the person's, and it says what it tried and why
  * they still fail, rather than trying again.
  */
 export const checksSpentForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<string>, tries: number) =>
@@ -212,7 +212,7 @@ export const checksSpentForLead = (sum: ChecksSum, name: string, logs: ReadonlyA
 
 /**
  * What the lead is told when its turn ends with the checks it was to see
- * through still failing, and nothing done with them (ADR-068): no fix pushed,
+ * through still failing, and nothing done with them (ADR-069): no fix pushed,
  * no rerun, no line for the person. Once.
  */
 export const checksUnsettledForLead = (name: string, failing: ReadonlyArray<string>) =>
@@ -221,7 +221,7 @@ export const checksUnsettledForLead = (name: string, failing: ReadonlyArray<stri
 /**
  * What the lead is told, started again, when its agent went on its own
  * after it was told the checks it was to see through failed, before it did
- * anything with them (ADR-068). Once.
+ * anything with them (ADR-069). Once.
  */
 export const checksGoneForLead = (name: string, failing: ReadonlyArray<string>) =>
   `Your agent stopped on its own before you dealt with the checks on ${name}, which still fail (${failing.length === 0 ? 'checks' : failing.join(', ')}). Do one of these now: push_to_pull_request for a fix you've committed, rerun_check for one that failed by chance, or hand_checks_to_person with a line on why they're the person's. If your agent stops again first, the change goes to the person with only that they still fail.`
@@ -238,7 +238,7 @@ export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'go
 export const spentLine = (failing: ReadonlyArray<string>, tries: number) =>
   `${failing.length === 0 ? 'Checks' : failing.join(', ')} still ${failing.length === 1 ? 'fails' : 'fail'} after ${tries} fixes by the lead.`
 
-/** The checks on the default branch's latest commit, as `read_default_branch_checks` tells the lead (ADR-068). */
+/** The checks on the default branch's latest commit, as `read_default_branch_checks` tells the lead (ADR-069). */
 export const baseChecksForLead = (sum: ChecksSum, base: string, logs: ReadonlyArray<string>) =>
   [
     `The checks on ${base}'s latest commit, ${sum.sha.slice(0, 7)}: ${
