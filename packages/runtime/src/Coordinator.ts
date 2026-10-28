@@ -967,17 +967,10 @@ export class Coordinator extends Context.Service<
                     'A review settles once its draft is posted: the person posts it, or discards it, on its draft. If they asked to set it aside, keep it for later instead.',
                 })
               if (task.state === 'done') return 'It is done already: it is in Settled.'
-              {
-                // A page it left running that wouldn't stop keeps it from being done: said so, for the person to try again.
-                const marked = yield* tasks
-                  .markDone({ envelope: yield* said('task.mark_done'), taskId: task.id })
-                  .pipe(Effect.catch((error) => (error instanceof TaskRefused ? Effect.succeed('left' as const) : Effect.fail(error))))
-                if (marked === 'left')
-                  return 'Althar couldn’t stop what it left running, such as a page, so it isn’t done: it still waits in Needs you. Tell the person, so they can try Done again or keep it for later.'
-                return marked
-                  ? 'Marked it done: it is in Settled, and what it left running, such as a page, stopped. Say so in a sentence; writing to you again picks it up.'
-                  : 'Althar couldn’t mark it done: something on it waits on the person first. Tell them.'
-              }
+              // What it left running, such as a page, stops after, in the background, and this lead once its turn ends.
+              return (yield* tasks.markDone({ envelope: yield* said('task.mark_done'), taskId: task.id }))
+                ? 'Marked it done: it is in Settled, and what it left running, such as a page, stops. Say so in a sentence; writing to you again picks it up.'
+                : 'Althar couldn’t mark it done: something on it waits on the person first. Tell them.'
             case 'keep':
               if (task.state === 'done') return 'It is done already: it is in Settled, so there is nothing to keep.'
               if (task.keptAt !== null) return 'It is kept for later already.'

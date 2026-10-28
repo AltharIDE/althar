@@ -24,6 +24,7 @@ import { automationOf, linkTask } from './automated'
 import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewOf, type Reviewed, SAID_SHOWN } from './reviewing'
 import { indexTask } from './Search'
 import { Sessions } from './Sessions'
+import { LeftBehind } from './LeftBehind'
 import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 
@@ -266,6 +267,7 @@ type Store =
   | ToolServer
   | RuntimeConfig
   | Agents
+  | LeftBehind
 
 export class Reviews extends Context.Service<
   Reviews,
@@ -323,6 +325,7 @@ export class Reviews extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const sessions = yield* Sessions
+      const leftBehind = yield* LeftBehind
       const toolServer = yield* ToolServer
       const agents = yield* Agents
       const config = yield* RuntimeConfig
@@ -750,6 +753,8 @@ export class Reviews extends Context.Service<
             payload: { reviewed: row.reviewUrl },
             actorId,
           })
+          // Its lead stops once its turn ends, with what it left running (LeftBehind.ts).
+          yield* leftBehind.settled(row.taskId)
         })
 
       /** Whether a draft can still change, or be posted: waiting on the person, not posted the last time, or perhaps posted. */

@@ -98,6 +98,7 @@ import {
 } from './leftRunning'
 import { WORK, workOf } from './machine'
 import { holding, portFor, portsBelow } from './ports'
+import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -350,6 +351,9 @@ const PORTS_EVERY = 4
 
 /** The longest a turn waits to read what the agent's tree listens on before it begins. */
 const BASELINE_WITHIN = Duration.seconds(5)
+
+/** The longest a session that closes spends stopping what it left running, finding it included, before its agent stops. */
+const LEFT_STOPS_WITHIN = Duration.seconds(15)
 
 /** Keeps what the agent last said of its context, from an event it streamed. */
 const heardContext = (running: Running, event: SessionEvent) => {
@@ -852,6 +856,20 @@ export class Sessions extends Context.Service<
                   Effect.orElseSucceed(() => ''),
                 ),
             })
+
+      /** The processes a command it left running runs as, with all they started, while it runs (stopping.ts). */
+      const treeOfLeft = (running: Running, left: LeftRunning) =>
+        left.ended === null ? treeOfCommand(left.outputPath, running.connection.process?.pid) : Effect.succeed([])
+
+      /** Stops what commands it left running run as; logs what wouldn't stop. */
+      const stopTrees = (running: Running, trees: ReadonlyArray<ReadonlyArray<number>>) =>
+        Effect.gen(function* () {
+          const outlived = yield* stopProcesses(trees.flat())
+          if (outlived.length > 0)
+            yield* Effect.logWarning('What an agent left running would not stop', { pids: outlived }).pipe(
+              Effect.annotateLogs({ thread: running.thread.threadId }),
+            )
+        })
 
       /**
        * The port one listens on, found from the processes it started: those
@@ -2231,6 +2249,14 @@ export class Sessions extends Context.Service<
             atBreak: false,
           }
           threads.set(thread.threadId, running)
+          // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
+          yield* Scope.addFinalizer(
+            scope,
+            Effect.gen(function* () {
+              const open = [...running.background.values()].filter((left) => left.ended === null)
+              yield* stopTrees(running, yield* Effect.forEach(open, (left) => treeOfLeft(running, left), { concurrency: 'unbounded' }))
+            }).pipe(Effect.timeout(LEFT_STOPS_WITHIN), Effect.ignore),
+          )
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
           const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
@@ -2751,6 +2777,8 @@ export class Sessions extends Context.Service<
           const [quick] = yield* sql<{
             quick: number
           }>`SELECT ${sql.unsafe(quickIn('k'))} AS quick FROM tasks k WHERE k.id = ${thread.taskId}`
+          // Settled, its lead was stopped as it settled (LeftBehind.ts): started again, it is told so, so it answers rather than redo it.
+          const [standing] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${thread.taskId}`
           const unbranched = thread.repositories.filter((repository) => repository.branched === 0)
           const [plainFirst] = unbranched
           const [first] = thread.repositories
@@ -2767,6 +2795,11 @@ export class Sessions extends Context.Service<
                 ? `You are carrying on a task an earlier session of yours worked on, in the same ${several ? 'worktrees' : 'worktree'}: Althar started you afresh to keep your context small. Its record so far is below.`
                 : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+            ...(why.kind === 'start' && standing?.state === 'done'
+              ? [
+                  "This task is settled: it is done, in the person's Settled, and the session that worked on it stopped as it settled. Don't do it again: what they ask now is a round of work of its own, on the work as it stands.",
+                ]
+              : []),
             ...askedFor(thread),
             ...(yield* alongside(thread.taskId)),
             several
@@ -3211,7 +3244,11 @@ export class Sessions extends Context.Service<
             const left = running?.background.get(id)
             if (running === undefined || left === undefined) return
             // Ended by itself, there is nothing to stop. Gone already as the agent tells it, it goes from the list all the same.
-            if (left.ended === null) yield* running.agent.stopBackground(id)
+            // Stopped through the agent, which ends its shell only: what the shell started is stopped after it (stopping.ts).
+            if (left.ended === null) {
+              const tree = yield* treeOfLeft(running, left)
+              yield* running.agent.stopBackground(id).pipe(Effect.ensuring(stopTrees(running, [tree])))
+            }
             running.background.delete(id)
             yield* toldBackground(running)
           }),

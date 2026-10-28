@@ -363,8 +363,6 @@ const taskRefused = {
   abandoned: 'The task is abandoned. Reopen it to carry on.',
   no_title: 'Give the task a title.',
   title_too_long: 'Keep the title short: what should change, in a few words.',
-  left_running:
-    'Althar couldn’t stop what the task left running, such as a page, so it isn’t done yet. Try Done again, or keep it for later.',
   folder_in_use: 'Something runs from the task’s folder, or an agent works in it, so it stays. Stop it first, then remove the folder.',
   folder_in_way:
     'Something that isn’t the task’s worktree is where its folder goes, so the folder can’t come back there. Move it away, then try again.',

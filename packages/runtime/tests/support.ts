@@ -31,6 +31,7 @@ import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
 import type { LoadOptions } from '../src/MachineLoad'
+import { WORK } from '../src/machine'
 import type { PlanUsageOptions } from '../src/PlanUsage'
 import type { ModelFactsOptions } from '../src/ModelFacts'
 
@@ -163,8 +164,14 @@ export const fakeAgents = (
     definition: definition(agentId, signedOut, perUse, oneAccount, unsure),
     transport: (cwd, env = {}, session) => {
       launches.push({ agentId, cwd, env, options: session })
+      // As a real process, it carries whose work it is, as every agent does (machine.ts).
+      const work = env[WORK]
       return agentId === 'process'
-        ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
+        ? {
+            _tag: 'Process',
+            spec: { command: 'bun', args: [fakeAgentMain], ...(work === undefined ? {} : { env: { [WORK]: work } }) },
+            cwd,
+          }
         : agentId === 'missing'
           ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
           : // An account's own options, by its home's folder name (`codex@work`), or `@usual` for the agent's usual folder.
@@ -288,6 +295,9 @@ export const runtime = (
     readonly disk?: RuntimeOptions['disk']
     /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
     readonly connectivity?: RuntimeOptions['connectivity']
+    /** When what settled tasks left running is first looked for, and how often after; not within a test unless it says. */
+    readonly leftFirst?: Duration.Duration
+    readonly leftEvery?: Duration.Duration
   } = {},
 ) =>
   Runtime.layer({
@@ -325,6 +335,8 @@ export const runtime = (
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },
+    leftFirst: more.leftFirst ?? Duration.hours(1),
+    ...(more.leftEvery === undefined ? {} : { leftEvery: more.leftEvery }),
   })
 
 /** A disk with half of its 1 TB free: room enough that no finished task's folder goes for want of space. */
