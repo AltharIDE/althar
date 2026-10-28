@@ -44,6 +44,9 @@ export interface Merging {
 
 interface Pressed {
   readonly taskId: string
+  /** The pull request merged, by its address where it was said, or else by its head. */
+  readonly url: string | undefined
+  readonly head: string
   readonly status: 'idle' | 'pending' | 'success' | 'error'
   readonly at: number
   readonly error: unknown
@@ -51,6 +54,8 @@ interface Pressed {
 
 const pressedOf = (mutation: Mutation<unknown, unknown, unknown>): Pressed => ({
   taskId: (mutation.state.variables as Merge | undefined)?.taskId ?? '',
+  url: (mutation.state.variables as Merge | undefined)?.url,
+  head: (mutation.state.variables as Merge | undefined)?.head ?? '',
   status: mutation.state.status,
   at: mutation.state.submittedAt,
   error: mutation.state.error,
@@ -70,12 +75,17 @@ export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'chan
     return () => clearTimeout(timer)
   }, [next])
   return useMemo(() => {
-    const open = new Set((tasks ?? []).filter((task) => task.change?.state === 'open').map((task) => task.taskId))
+    // The pull request each task shows, while it is open: another of the task's, once one merged, is the person's to accept.
+    const open = new Map((tasks ?? []).flatMap((task) => (task.change?.state === 'open' ? [[task.taskId, task.change] as const] : [])))
+    const landing = (one: Pressed) => {
+      const shown = open.get(one.taskId)
+      return shown !== undefined && (one.url === undefined ? shown.head === one.head : shown.url === one.url)
+    }
     const merging = new Set<string>()
     const failed: Record<string, string> = {}
     for (const one of last.values()) {
       if (one.status === 'pending') merging.add(one.taskId)
-      else if (one.status === 'success' && open.has(one.taskId) && one.at + LANDS_WITHIN > now) merging.add(one.taskId)
+      else if (one.status === 'success' && landing(one) && one.at + LANDS_WITHIN > now) merging.add(one.taskId)
       else if (one.status === 'error') failed[one.taskId] = messageOf(one.error)
     }
     return { merging, failed }

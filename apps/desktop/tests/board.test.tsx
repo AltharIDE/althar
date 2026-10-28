@@ -900,6 +900,31 @@ describe('the board', () => {
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
     })
 
+    it('is the person’s again once its pull request merged and another of its own is open', async () => {
+      const merge = vi.fn(async () => undefined)
+      const next = change({ number: 13, url: 'https://github.com/meridian/api/pull/13', head: 'def456', draft: false })
+      const getBoard = vi.fn(async () => board())
+      const { client, emit } = fakeClient({ merge, getBoard })
+      withServices(
+        <>
+          <Project />
+          <Elsewhere />
+        </>,
+        client,
+      )
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      await lane('Needs you').findByText('Rate-limit refunds')
+      // #12 merged; the task shows #13 now, still open, which nobody is merging.
+      getBoard.mockImplementation(async () =>
+        board({ tasks: board().tasks.map((one) => (one.taskId === 't4' ? { ...one, change: next } : one)) }),
+      )
+      await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
+      await waitFor(() => expect(merge).toHaveBeenCalled())
+      emit(changed('task', 't4'))
+      expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Running').queryByText('Merging')).toBeNull()
+    })
+
     it('comes back to Needs you with why it didn’t merge, and merges again from its card', async () => {
       const merge = vi
         .fn<(taskId: string) => Promise<void>>()
