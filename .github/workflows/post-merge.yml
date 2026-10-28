@@ -28,7 +28,7 @@ concurrency:
 jobs:
   harness:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +39,6 @@ jobs:
             packages/domain,
             packages/persistence-sqlite,
             packages/provider-adapters,
-            packages/runtime,
             apps/cli,
           ]
     defaults:
@@ -57,6 +56,66 @@ jobs:
         working-directory: .
       - run: bun run check
       - run: bun run test:coverage
+
+  # The runtime's tests with coverage, in parts by file, as on a pull request: as one they took most of twenty minutes.
+  # Each part keeps what it found as a blob report; harness (packages/runtime) merges them and gates the whole coverage.
+  runtime:
+    name: harness (packages/runtime ${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    # A few times a part's usual run, so a hang fails here, not at the limit.
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/3, 2/3, 3/3]
+    defaults:
+      run:
+        working-directory: packages/runtime
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob
+      - uses: actions/upload-artifact@v6
+        with:
+          name: runtime-blob-${{ strategy.job-index }}
+          path: packages/runtime/.vitest/blob
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  harness-runtime:
+    name: harness (packages/runtime)
+    needs: runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/runtime
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run check
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: runtime-blob-*
+          path: packages/runtime/.vitest/blob
+          merge-multiple: true
+      # The parts' results and coverage as one run's: the thresholds hold for the whole suite, as before it was split.
+      - run: bun run test:coverage --merge-reports
 
   ui:
     runs-on: ubuntu-24.04
@@ -146,7 +205,7 @@ jobs:
   # on main's newest commit speaks for main: a re-run of an older commit, or one a newer push is already waiting
   # behind, leaves the issue to that newer run.
   report:
-    needs: [harness, ui, desktop, package, package-windows]
+    needs: [harness, runtime, harness-runtime, ui, desktop, package, package-windows]
     if: ${{ always() && github.ref == 'refs/heads/main' && !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
