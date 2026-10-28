@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { Activity, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type ThreadSnapshot } from '@althar/contracts'
@@ -171,6 +171,28 @@ describe('what a task hears', () => {
     })
     await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('th1', 'x1'))
     expect(client.getThread).not.toHaveBeenCalled()
+  })
+
+  it('reads what it hears once its screen shows again, though it was hidden with a read gathered (`KeptScreens`)', async () => {
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => snapshot()) })
+    const services = servicesFor(client)
+    let mode: 'visible' | 'hidden' = 'visible'
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ServicesProvider value={services}>
+        <Activity mode={mode}>{children}</Activity>
+      </ServicesProvider>
+    )
+    const { result, rerender } = renderHook(() => useTask('th1'), { wrapper })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    // Its task changes, and the person goes elsewhere before its head is read again.
+    act(() => emit(changed('task', 't1')))
+    mode = 'hidden'
+    rerender()
+    mode = 'visible'
+    rerender()
+    vi.mocked(client.getThread).mockClear()
+    act(() => emit(changed('task', 't1')))
+    await waitFor(() => expect(client.getThread).toHaveBeenCalledWith('th1', { limit: 0 }))
   })
 
   it('reads again what still waits its turn once a message is delivered', async () => {
