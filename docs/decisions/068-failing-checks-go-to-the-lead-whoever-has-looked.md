@@ -32,7 +32,7 @@
     and it changes nothing on its branch to work around it, and calls
     `hand_checks_to_person` with one short line saying so and what would
     fix it ("Fails on main too: runtime (windows) times out in
-    busy.test.ts", in plain words: the card shows no code marks, and
+    busy.test.ts", in plain words: the row shows no code marks, and
     Althar drops any); or it needs the person to decide, and says what.
     `read_default_branch_checks` shows it the checks on the default branch's
     latest commit, with the ends of the failed ones' logs.
@@ -72,10 +72,13 @@
     agent stopped on its own without a fix or a reason. Tell it what to do."
     A lead the person stopped stays stopped, and one another agent took over
     from carries on there.
-  - **It comes to the person only with a reason:** its card is ready
-    (Needs you, Stuck) with the lead's line, or, where its tries are spent
-    and it said nothing, "test still fails after 3 fixes by the lead"; never
-    a bare "Checks failed". The thread has the line too.
+  - **It comes to the person only with a reason:** it is ready (Needs you,
+    Stuck) with the lead's line, or, where its tries are spent and it said
+    nothing, "test still fails after 3 fixes by the lead"; never a bare
+    "Checks failed". The line is its Needs you row's and its task's, cut to
+    one line where it is long, and the thread has it whole. The board card
+    shows only the check that fails, as for any failure, and no "Ask the lead
+    to fix it": a card is not the place for a paragraph of red.
   - Settled tasks, reviews of someone else's pull request, and the checks on
     a merge a conflict round pushed (the round's own, ADR-030) are as
     before.

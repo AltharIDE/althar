@@ -527,10 +527,8 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
   const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
   // Not looked at for a conflict here, whatever its host says: why, first, as the host's word may be out of date.
   const unchecked = work.conflictUnchecked ?? null
-  // Only the most pressing has its glyph: why, where Althar or the lead says so, before what its host says.
-  const said = unchecked !== null || work.checksBack != null
   const facts = factsOf(change, standing).map((one, i) => (
-    <Fact key={one.words} {...(!(i === 0 && said) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+    <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
       {one.words}
     </Fact>
   ))
@@ -547,15 +545,9 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
             {unchecked}
           </Fact>
         )}
-        {/* Its failing checks brought to the person by its lead (ADR-068): why, before what fails. */}
-        {work.checksBack != null && (
-          <Fact key="checks" icon="close" tone="danger">
-            {work.checksBack}
-          </Fact>
-        )}
         {facts}
       </FactLine>
-      {/* Its lead's line says what would fix its checks: not asking it again. */}
+      {/* Failing checks its lead brought to the person (ADR-068): not asking it again. Why is in its task, not on the card. */}
       {next !== null &&
         !(next.kind === 'fix' && work.checksBack != null) &&
         (here === null || actions === undefined ? (

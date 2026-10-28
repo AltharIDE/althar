@@ -1946,18 +1946,16 @@ describe('a ready card’s next step, done from the card', () => {
     expect(resolveConflictsNow).toHaveBeenCalledWith('s10')
   })
 
-  it('says why its lead brought its failing checks to the person, before what fails', async () => {
+  it('shows only what fails where its lead brought its failing checks to the person', async () => {
     const why = 'Fails on main too: test times out in limit.test.ts. Fixing it on main brings this one green.'
     tasks = [{ ...ready('s13', 'Broken on main', { checks: change().checks }), checksBack: why }]
     withServices(<Board onOpen={vi.fn()} />, fakeClient({ getBoard: getBoard() }).client)
     const card = await cardOf('Broken on main')
-    // The problem first: its line, then the check that fails.
-    const line = card.getByText(why)
+    // One fact, with its glyph: the lead's line is in its task, not on the card.
+    expect(card.queryByText(why)).toBeNull()
     const failed = card.getByText(/ failed$/)
-    expect(line.compareDocumentPosition(failed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // Only the most pressing has its glyph.
-    expect(line.querySelector('svg')).not.toBeNull()
-    expect(failed.querySelector('svg')).toBeNull()
+    expect(failed.closest('[class*="factLine"]')?.textContent).toBe(failed.textContent)
+    expect(failed.querySelector('svg')).not.toBeNull()
     // Not a conflict: nothing offers to resolve one; nor to ask the lead to fix what it said isn't the change's.
     expect(card.queryByText('Ask the lead to fix it')).toBeNull()
     expect(card.queryByText('Merge conflict')).toBeNull()

@@ -184,8 +184,8 @@ export const ReadyChecksFailedNarrow: Story = {
   },
 }
 /**
- * Failing checks its lead brought to the person rather than fixing (ADR-068): its line first, with the glyph, then the check
- * that fails; nothing to ask of the lead, which said what would fix it. Narrow, the line wraps inside the card.
+ * Failing checks its lead brought to the person rather than fixing (ADR-068): only the check that fails, its lead's line being in
+ * its task; nothing to ask of the lead, which said what would fix it.
  */
 export const ReadyChecksBroughtBackNarrow: Story = {
   render: () => (
@@ -198,25 +198,19 @@ export const ReadyChecksBroughtBackNarrow: Story = {
         title="Drop any file or folder onto the composer"
         object={<PullChip host={GITHUB} repo="althar" number={344} add={412} del={37} />}
         foot={
-          <FactLine stacked>
+          <FactLine>
             <Fact icon="close" tone="danger">
-              Fails on main too: runtime (windows) times out in busy.test.ts. Fixing it on main brings this one green.
+              runtime (windows) failed
             </Fact>
-            <Fact tone="danger">runtime (windows) failed</Fact>
           </FactLine>
         }
       />
     </div>
   ),
   play: async ({ canvasElement }) => {
-    const items = within(canvasElement).getAllByRole('listitem')
-    await expect(items.map((item) => item.textContent)).toEqual([
-      'Fails on main too: runtime (windows) times out in busy.test.ts. Fixing it on main brings this one green.',
-      'runtime (windows) failed',
-    ])
+    await expect(canvasElement.querySelector('[class*="factLine"]')?.textContent).toBe('runtime (windows) failed')
     await expect(within(canvasElement).queryByRole('button', { name: /fix/i })).not.toBeInTheDocument()
     await noStrayDots(canvasElement)
-    for (const item of items) await expect(item.scrollWidth).toBeLessThanOrEqual(item.clientWidth)
   },
 }
 /** Everything fine: one fact, green, nothing to push. */
