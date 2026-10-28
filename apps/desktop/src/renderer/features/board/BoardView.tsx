@@ -80,8 +80,7 @@ export const text = {
   held: 'Held. Starts when you say',
   /** The quiet divider over the tasks that wait for a free agent before any has worked on them, and, under them, the plans. */
   startsWhenFree: 'Starts when an agent is free',
-  /** At the divider's end, while the line is the oldest first; once the person changed it, the way back. */
-  reorder: 'Drag to change the order',
+  /** At the divider's end, once the person changed the line: the way back. */
   oldestFirst: 'Back to oldest first',
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
@@ -669,10 +668,8 @@ export function BoardView({
         {free > 0 && (
           <BoardDivider
             end={
-              line === undefined || free < 2 ? undefined : shown.reordered ? (
+              line === undefined || free < 2 || !shown.reordered ? undefined : (
                 <LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>
-              ) : (
-                text.reorder
               )
             }
           >

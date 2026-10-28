@@ -160,6 +160,7 @@ describe('a divider in a lane', () => {
     expect(container.querySelector('p')).toHaveTextContent('When an agent is freeClear')
     expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument()
     rerender(<BoardDivider end={null}>When an agent is free</BoardDivider>)
-    expect(container.querySelector('p')?.children).toHaveLength(0)
+    expect(container.querySelector('p')?.children).toHaveLength(1)
+    expect(screen.getByTitle('When an agent is free')).toHaveTextContent('When an agent is free')
   })
 })

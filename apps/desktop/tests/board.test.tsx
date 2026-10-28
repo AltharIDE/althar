@@ -301,7 +301,7 @@ describe('the board’s lanes', () => {
       expect(screen.getByText('Starts when an agent is free')).toBeTruthy()
       expect(screen.getByText('Next in line')).toBeTruthy()
       expect(screen.getByText('Planned')).toBeTruthy()
-      expect(screen.queryByText('Drag to change the order')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Back to oldest first' })).toBeNull()
       expect(screen.queryByRole('button', { name: /in the line$/ })).toBeNull()
     })
 
@@ -320,9 +320,10 @@ describe('the board’s lanes', () => {
           .getAllByRole('button', { name: /^Waiting / })
           .map((row) => row.textContent)
 
-      it('says the line can be dragged, and gives a grip to each row in it, none to the plans under it', () => {
+      it('gives a grip to each row in it, none to the plans under it', () => {
         drawn(three)
-        expect(screen.getByText('Drag to change the order')).toBeTruthy()
+        expect(screen.queryByText('Drag to change the order')).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Back to oldest first' })).toBeNull()
         expect(screen.getByText('Next in line')).toBeTruthy()
         expect(screen.getByText('2nd in line')).toBeTruthy()
         expect(screen.getByText('3rd in line')).toBeTruthy()
@@ -362,7 +363,6 @@ describe('the board’s lanes', () => {
           waiting('b', 3, { reordered: true }),
         ])
         expect(titles()).toEqual(['Waiting c', 'Waiting a', 'Waiting b'])
-        expect(screen.queryByText('Drag to change the order')).toBeNull()
         await userEvent.click(screen.getByRole('button', { name: 'Back to oldest first' }))
         expect(line.oldestFirst).toHaveBeenCalledOnce()
       })
