@@ -17,7 +17,9 @@
 - **Decision:**
   - **A new failure on an open pull request of an open task's, its own or
     one attached to it, goes to its lead, whether or not the person has
-    looked** (`Changes.fixesOf`, read from the record each time). It is run
+    looked** (`Changes.fixesOf`, read from the record each time), while
+    Althar follows that pull request: one an attached pull request replaced
+    says nothing of the task any more. It is run
     again once first, as ADR-041 has it, then the lead is told, started
     again on the agent it was last on if its session has ended. A running
     lead, as one the person is talking to, is told. Its card is Running
@@ -29,8 +31,9 @@
     branch, or fails for a reason that has nothing to do with the change,
     and it changes nothing on its branch to work around it, and calls
     `hand_checks_to_person` with one short line saying so and what would
-    fix it ("Fails on main too: `runtime (windows)` times out in
-    busy.test.ts"); or it needs the person to decide, and says what.
+    fix it ("Fails on main too: runtime (windows) times out in
+    busy.test.ts", in plain words: the card shows no code marks, and
+    Althar drops any); or it needs the person to decide, and says what.
     `read_default_branch_checks` shows it the checks on the default branch's
     latest commit, with the ends of the failed ones' logs.
   - **A fix pushes at once,** after the person has looked too: while the
@@ -38,7 +41,13 @@
     lead's, `push_to_pull_request` pushes rather than asking. Not where the
     person said anything on the task since those checks came: what the lead
     commits may be for that, and waits for their push, as anything else it
-    commits does.
+    commits does. Nor where the branch had commits the pull request didn't
+    when the lead was told (kept with the failure, `checks_told`): a push of
+    the fix would take them up too, so fix and all wait for the person.
+  - **The checks on a fix are waited for `checksAppear`** from the push that
+    made it (kept as `pushed`), however often the pull request is looked at;
+    by then without checks, the change is the person's. Checks the host
+    won't show make it the person's at once, as ADR-041 has it.
   - **Three fixes (`FIX_ROUNDS`) a run of failures.** A run counts, by
     commit, from the end of the plan's run, the person's last push, or the
     checks last passing, whichever came last. Failing again after the third
@@ -50,6 +59,13 @@
     since a failure came, the lead isn't told that failure again, run again
     or not; a new failure on a new commit is its again. Checks that ran too
     long, or couldn't be read, end the run the same way.
+  - **A lead that ends its turn on a failure with nothing done** (no fix
+    pushed or asked to be, no rerun, no line for the person, no question
+    waiting) is waited for as a conflict round's lead is, then asked once to
+    do one of those. Ending its turn so again, the failure is the person's,
+    and the card says "test still fails, and the lead stopped without a fix
+    or a reason. Tell it what to do." Not where the person spoke since the
+    failure came: they are at it together.
   - **It comes to the person only with a reason:** its card is ready
     (Needs you, Stuck) with the lead's line, or, where its tries are spent
     and it said nothing, "test still fails after 3 fixes by the lead"; never
@@ -69,8 +85,7 @@
     goes up.
 - **Trade-off:** a lead can be woken for a failure the person was about to
   deal with themselves; stopping it keeps that failure theirs. A lead that
-  ends its turn on a failure without a fix, a rerun or a line leaves it in
-  Needs you with only the failing checks to say why.
+  shrugs a failure off costs one more turn before it is the person's.
 - **Revisit when:** a lead's tools can read other open pull requests'
   checks, so it can tell main's breakage from its own without main's
   checks; or people want a way to keep a task's failures from its lead.

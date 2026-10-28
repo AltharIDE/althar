@@ -192,7 +192,7 @@ export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyA
       'Their checks are yours to see through, without the person: work out what broke them, then',
       '- where this change broke them, fix it and commit it, then call push_to_pull_request, which pushes a fix for failing checks at once, and the checks run again;',
       '- where one failed by chance (a flaky test, a runner that went away), run it again with rerun_check, once;',
-      `- where it is broken on ${base}, or fails for a reason that has nothing to do with this change, as when the same check fails the same way on ${base}'s latest commit (read_default_branch_checks shows its checks): change nothing on the branch to work around it, and call hand_checks_to_person with one short line saying so, such as "Fails on ${base} too: \`test\` times out in limit.test.ts", and what would fix it;`,
+      `- where it is broken on ${base}, or fails for a reason that has nothing to do with this change, as when the same check fails the same way on ${base}'s latest commit (read_default_branch_checks shows its checks): change nothing on the branch to work around it, and call hand_checks_to_person with one short line saying so, such as "Fails on ${base} too: test times out in limit.test.ts", and what would fix it;`,
       '- where it needs the person to decide, call hand_checks_to_person with what they are to decide.',
     ].join('\n'),
     `${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
@@ -209,6 +209,18 @@ export const checksSpentForLead = (sum: ChecksSum, name: string, logs: ReadonlyA
     ...logs,
     `That was the last of your ${tries} tries, so the change goes to the person now. Don't change the branch: call hand_checks_to_person with what you tried and why the checks still fail, in a line or two.`,
   ].join('\n\n')
+
+/**
+ * What the lead is told when its turn ends with the checks it was to see
+ * through still failing, and nothing done with them (ADR-068): no fix pushed,
+ * no rerun, no line for the person. Once.
+ */
+export const checksUnsettledForLead = (name: string, failing: ReadonlyArray<string>) =>
+  `Your turn ended, but the checks on ${name} still fail (${failing.length === 0 ? 'checks' : failing.join(', ')}), and you haven't pushed a fix, run them again or brought them to the person. Do one of those now: push_to_pull_request for a fix you've committed, rerun_check for one that failed by chance, or hand_checks_to_person with a line on why they're the person's. Ending your turn again without one, the change goes to the person with only that they still fail.`
+
+/** Why the checks that fail on a change are the person's, as its card says, where its lead ended its turns without a fix or a reason. */
+export const unsettledLine = (failing: ReadonlyArray<string>) =>
+  `${failing.length === 0 ? 'Checks' : failing.join(', ')} still ${failing.length === 1 ? 'fails' : 'fail'}, and the lead stopped without a fix or a reason. Tell it what to do.`
 
 /** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
 export const spentLine = (failing: ReadonlyArray<string>, tries: number) =>

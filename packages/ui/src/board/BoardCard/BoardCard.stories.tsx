@@ -183,6 +183,42 @@ export const ReadyChecksFailedNarrow: Story = {
     await noStrayDots(canvasElement)
   },
 }
+/**
+ * Failing checks its lead brought to the person rather than fixing (ADR-068): its line first, with the glyph, then the check
+ * that fails; nothing to ask of the lead, which said what would fix it. Narrow, the line wraps inside the card.
+ */
+export const ReadyChecksBroughtBackNarrow: Story = {
+  render: () => (
+    <div style={{ width: 260 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word="Not ready to accept"
+        kind={TaskKind.Change}
+        at="31m"
+        title="Drop any file or folder onto the composer"
+        object={<PullChip host={GITHUB} repo="althar" number={344} add={412} del={37} />}
+        foot={
+          <FactLine stacked>
+            <Fact icon="close" tone="danger">
+              Fails on main too: runtime (windows) times out in busy.test.ts. Fixing it on main brings this one green.
+            </Fact>
+            <Fact tone="danger">runtime (windows) failed</Fact>
+          </FactLine>
+        }
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const items = within(canvasElement).getAllByRole('listitem')
+    await expect(items.map((item) => item.textContent)).toEqual([
+      'Fails on main too: runtime (windows) times out in busy.test.ts. Fixing it on main brings this one green.',
+      'runtime (windows) failed',
+    ])
+    await expect(within(canvasElement).queryByRole('button', { name: /fix/i })).not.toBeInTheDocument()
+    await noStrayDots(canvasElement)
+    for (const item of items) await expect(item.scrollWidth).toBeLessThanOrEqual(item.clientWidth)
+  },
+}
 /** Everything fine: one fact, green, nothing to push. */
 export const ReadyAllGreen: Story = {
   ...readyFoot(260, true, [{ words: 'All 12 checks passed', icon: 'check', tone: 'ok' }], 'Accept and merge'),

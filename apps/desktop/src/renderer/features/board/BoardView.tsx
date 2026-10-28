@@ -527,8 +527,10 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
   const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
   // Not looked at for a conflict here, whatever its host says: why, first, as the host's word may be out of date.
   const unchecked = work.conflictUnchecked ?? null
+  // Only the most pressing has its glyph: why, where Althar or the lead says so, before what its host says.
+  const said = unchecked !== null || work.checksBack != null
   const facts = factsOf(change, standing).map((one, i) => (
-    <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+    <Fact key={one.words} {...(!(i === 0 && said) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
       {one.words}
     </Fact>
   ))

@@ -612,7 +612,7 @@ describe('the board’s lanes', () => {
   })
 
   it('lists work whose failing checks its lead brought to the person as stuck, with its line', () => {
-    const why = 'Fails on main too: `test` times out in limit.test.ts.'
+    const why = 'Fails on main too: test times out in limit.test.ts.'
     const lanes = lanesOf(
       board({ tasks: [task({ taskId: 't9', threadId: 'th9', title: 'Add a limit', phase: 'ready', checksBack: why })], calls: [] }),
     )
@@ -1947,7 +1947,7 @@ describe('a ready card’s next step, done from the card', () => {
   })
 
   it('says why its lead brought its failing checks to the person, before what fails', async () => {
-    const why = 'Fails on main too: `test` times out in limit.test.ts. Fixing it on main brings this one green.'
+    const why = 'Fails on main too: test times out in limit.test.ts. Fixing it on main brings this one green.'
     tasks = [{ ...ready('s13', 'Broken on main', { checks: change().checks }), checksBack: why }]
     withServices(<Board onOpen={vi.fn()} />, fakeClient({ getBoard: getBoard() }).client)
     const card = await cardOf('Broken on main')
@@ -1955,6 +1955,9 @@ describe('a ready card’s next step, done from the card', () => {
     const line = card.getByText(why)
     const failed = card.getByText(/ failed$/)
     expect(line.compareDocumentPosition(failed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // Only the most pressing has its glyph.
+    expect(line.querySelector('svg')).not.toBeNull()
+    expect(failed.querySelector('svg')).toBeNull()
     // Not a conflict: nothing offers to resolve one; nor to ask the lead to fix what it said isn't the change's.
     expect(card.queryByText('Ask the lead to fix it')).toBeNull()
     expect(card.queryByText('Merge conflict')).toBeNull()
