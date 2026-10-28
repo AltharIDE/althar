@@ -72,7 +72,7 @@ import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
-import { filesForTurn, type InputFile, keptId } from './sentFiles'
+import { filesForTurn, type InputFile, keptId, requestFilesForTurn } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { alsoPlanned, siblingsOf } from './siblings'
 import { evidenceForReview } from './evidence'
@@ -517,6 +517,37 @@ export const promptFor = (
   const said = news === null ? parts : [news, ...parts]
   if (brief === undefined) return said.join('\n\n')
   return [brief.text, ...(parts.length === 0 ? [brief.closing] : said)].join('\n\n')
+}
+
+/** What a lead's brief says of the images and files the person sent with what they asked for: that they come with it, or that some couldn't. */
+export const sentWithWords = (sent: {
+  readonly images: ReadonlyArray<unknown>
+  readonly files: ReadonlyArray<unknown>
+  readonly withheld: number
+  readonly gone: number
+}) => {
+  const count = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
+  const given = [
+    ...(sent.images.length === 0 ? [] : [count(sent.images.length, 'an image', 'images')]),
+    ...(sent.files.length === 0 ? [] : [count(sent.files.length, 'a file', 'files')]),
+  ]
+  return [
+    ...(given.length === 0
+      ? []
+      : [
+          `The person sent ${given.join(' and ')} with what they asked for: ${sent.images.length + sent.files.length === 1 ? 'it comes' : 'they come'} with this message.`,
+        ]),
+    ...(sent.withheld === 0
+      ? []
+      : [
+          `(The person sent ${count(sent.withheld, 'an image', 'images')} with what they asked for, which Althar couldn't pass on to you.)`,
+        ]),
+    ...(sent.gone === 0
+      ? []
+      : [
+          `(The person sent ${count(sent.gone, 'a file', 'files')} with what they asked for whose copy isn't there any more. Ask for it if you need it.)`,
+        ]),
+  ].join('\n\n')
 }
 
 const PASSED_ON = 'The coordinator passes this on:\n\n'
@@ -1123,6 +1154,24 @@ export class Sessions extends Context.Service<
         })
 
       /**
+       * The images and files the person sent with what a task was asked for,
+       * in their messages to the coordinator, for the turn that gives its lead
+       * its brief: the images as `imagesFor` reads them, the files copied
+       * where the lead reads; and how many of each it doesn't get.
+       */
+      const sentWithRequest = (thread: TaskThread, takes: boolean) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const ids = (yield* sql<{ userInputId: string }>`
+            SELECT user_input_id FROM task_request_inputs WHERE task_id = ${thread.taskId} ORDER BY position`).map((row) => row.userInputId)
+          const sent = yield* imagesFor(ids, takes)
+          const images = ids.flatMap((id) => sent.images.get(id) ?? [])
+          const withheld = ids.reduce((sum, id) => sum + (sent.withheld.get(id) ?? 0), 0)
+          const { files, gone } = yield* requestFilesForTurn(thread.threadId, thread.taskId)
+          return { images, files, withheld, gone }
+        })
+
+      /**
        * The thread shows what a turn gives the agent where the agent reads it,
        * in the order it reads it: once the turn before has ended, not where
        * it was sent. What the person said moves to the end of the thread,
@@ -1260,7 +1309,17 @@ export class Sessions extends Context.Service<
           const brief = briefOf
           // The lead is told how its worktrees were set up, in its brief.
           const setUp = thread.role === 'task' && brief !== undefined ? yield* setups.told(thread.taskId) : null
-          const briefed = brief === undefined || setUp === null ? brief : { ...brief, text: `${brief.text}\n\n${setUp}` }
+          // And sent the images and files the person sent with what they asked for, with the brief, as with a message of theirs.
+          const asked =
+            thread.role === 'task' && brief !== undefined
+              ? yield* sentWithRequest(thread, running.connection.info.images).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.as(Effect.logWarning('Could not read what the person sent with what they asked for', cause), null),
+                  ),
+                )
+              : null
+          const added = [setUp, asked === null ? null : sentWithWords(asked)].filter((said) => said !== null && said !== '')
+          const briefed = brief === undefined || added.length === 0 ? brief : { ...brief, text: [brief.text, ...added].join('\n\n') }
           // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
           const named =
             thread.role === 'coordinator'
@@ -1373,7 +1432,7 @@ export class Sessions extends Context.Service<
           running.begun = undefined
           if (begun !== undefined) yield* begun
           // Images the agent doesn't get are said in the thread as well as to the agent, so none goes missing unsaid.
-          const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), 0)
+          const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), asked?.withheld ?? 0)
           if (withheld > 0)
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
@@ -1472,7 +1531,12 @@ export class Sessions extends Context.Service<
             )
           })
           // Each input's images, then its files, in the order the inputs are said.
-          const parts = inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])])
+          // What came with the person's request first, with the brief.
+          const parts = [
+            ...(asked?.images ?? []),
+            ...(asked?.files ?? []),
+            ...inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])]),
+          ]
           yield* notingListening(running)
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
