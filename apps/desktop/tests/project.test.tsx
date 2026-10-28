@@ -6,6 +6,7 @@ import { ApiError, type CoordinatorSnapshot, type ThreadItem } from '@althar/con
 import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
+import type { SettingsWays } from '../src/renderer/features/settings/open'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
@@ -18,11 +19,13 @@ function Project({
   room,
   newTask,
   onRoomChange,
+  ways,
 }: {
   onTask?: (threadId: string) => void
   room?: Room
   newTask?: boolean
   onRoomChange?: (room: Room) => void
+  ways?: SettingsWays
 }) {
   return (
     <ProjectView
@@ -34,6 +37,7 @@ function Project({
       {...(room === undefined ? {} : { room })}
       {...(newTask === undefined ? {} : { newTask })}
       {...(onRoomChange === undefined ? {} : { onRoomChange })}
+      {...(ways === undefined ? {} : { ways })}
     />
   )
 }
@@ -887,8 +891,12 @@ describe('what can go wrong', () => {
     const { client } = fakeClient({
       status: vi.fn(async () => ({ ...status, agents: agents.map((agent) => ({ ...agent, signIn: 'signed_out' as const })) })),
     })
-    withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText('No agent is signed in. Sign one in from Settings, then come back.')).toBeTruthy()
+    const ways = { signIn: vi.fn(), agents: vi.fn(), connections: vi.fn() }
+    withServices(<Project room={Room.Talk} ways={ways} />, client)
+    expect(await screen.findByText(/^No agent is signed in\./)).toBeTruthy()
+    // Its way out: Settings, at the agents.
+    await userEvent.click(screen.getByRole('button', { name: 'Sign one in' }))
+    expect(ways.agents).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: /^Coordinator:/ })).toBeNull()
   })
 
