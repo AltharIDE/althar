@@ -132,6 +132,35 @@ export const KeptByTheRuntime: Story = {
   },
 }
 
+const reviewStarted = fn()
+
+/** A review of someone else's pull request: one step, its lead, which reviews, with the coordinator's reason; nothing to skip and no ending to pick, as its review is posted from its own card. The person can change the lead and how hard it thinks, hold it, or start it now. */
+export const AReview: Story = {
+  render: () => (
+    <Launch
+      plan={[{ id: 'implement', label: 'Review', agents: [OPUS], why: 'Strong at reading a large change' }]}
+      task="review-1199-send-back"
+      title="Review #1199: Send back won’t restart a dead lead session"
+      from={undefined}
+      wait={25}
+      startsAt={Date.now() + 20_000}
+      hideEnd
+      estimate={undefined}
+      onStart={reviewStarted}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Review')).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: /^Lead for this task/ })).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: /When the work is done/ })).not.toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Hold' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Start now' })).toBeInTheDocument()
+    await expect(reviewStarted).not.toHaveBeenCalled()
+  },
+}
+
 const heldChanged = fn()
 const startedHeld = fn()
 

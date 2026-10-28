@@ -392,6 +392,60 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
+  it('plans a review of someone else’s pull request with its one lead, offering only agents held to reading', async () => {
+    const review = card({
+      slug: 'review-1199-send-back',
+      title: 'Review #1199: Send back won’t restart a dead lead session',
+      kind: 'review',
+      reviewing: {
+        product: 'github',
+        repository: 'meridian/api',
+        number: 1199,
+        url: 'https://github.com/meridian/api/pull/1199',
+        title: 'Send back won’t restart a dead lead session',
+        author: 'ninemate',
+        outside: true,
+        additions: 58,
+        deletions: 20,
+        findings: 0,
+        blocking: 0,
+        verdict: null,
+        posted: null,
+      },
+      plan: {
+        ...card().plan!,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: 'Strong at reading.',
+        agents: ['claude-code'],
+      },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(review)] })) })
+    withServices(<Project room={Room.Talk} />, client)
+    // One step, which reviews, with why; nothing to pick for when it is done.
+    const lead = await screen.findByRole('button', { name: /^Lead for this task: / })
+    expect(screen.getByText('Review')).toBeTruthy()
+    expect(screen.getByText('Strong at reading.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
+    expect(screen.queryByText('When the work is done')).toBeNull()
+    // Codex can't be held to reading only, so it isn't offered.
+    await userEvent.click(lead)
+    expect(await screen.findByRole('radio', { name: /Claude Code default/ })).toBeTruthy()
+    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/ })).toBeNull()
+    await userEvent.click(screen.getByRole('radio', { name: 'High' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [{ key: 'implement', agentId: 'claude-code', model: null, effort: 'high', skipped: false }],
+        null,
+      ),
+    )
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+    await userEvent.click(screen.getByRole('button', { name: 'Start now' }))
+    expect(client.startPlan).toHaveBeenCalledWith('pln1')
+  })
+
   it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })

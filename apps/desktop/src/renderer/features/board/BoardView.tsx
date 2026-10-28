@@ -33,7 +33,7 @@ import {
   unreachable,
   Wait,
 } from '@althar/ui'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
@@ -660,6 +660,8 @@ export function BoardView({
   const { continuing, free, paused } = shown
   const pointed = (lane: BoardLane | null) =>
     setHeld((was) => (lane === BoardLane.Next || lane === BoardLane.Running ? (was ?? heldOf(lanes)) : null))
+  // Hidden while its screen is kept (`KeptScreens`), with the pointer still on it, nothing says it looked away: it lets go.
+  useEffect(() => () => setHeld(null), [])
 
   const nextRow = (work: BoardTask, index: number) => {
     const startsAt = work.plan?.startsAt ?? null

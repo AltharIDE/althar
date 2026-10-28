@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type RefObject,
   useContext,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -197,6 +198,13 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
     pointed.current = lane
     onPointerLane?.(lane)
   }
+  // Hidden with the pointer on it, as a kept screen is, nothing says the pointer left: back, it is told the lane anew.
+  useEffect(
+    () => () => {
+      pointed.current = null
+    },
+    [],
+  )
   const room = useRoom(ref)
   const lanes: ReadonlyArray<LaneCount> = Children.toArray(children).flatMap((child) =>
     isValidElement<BoardColumnProps>(child) && child.type === BoardColumn

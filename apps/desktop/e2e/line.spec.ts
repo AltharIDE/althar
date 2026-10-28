@@ -188,6 +188,8 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await behind.screenshot({ path: 'test-results/line-task.png', scale: 'css', animations: 'disabled' })
     await front.click()
     await expect(front).toHaveCount(0)
+    // First in the line before the place frees, or what was first starts in it.
+    await expect(page.getByRole('button', { name: 'Waiting for a place, First in Up next' })).toBeVisible()
 
     // The place frees: the line starts in the person's order, the review they put first (which reads in a turn), then the quick
     // task, which keeps the place; the two older reviews wait on, oldest first.

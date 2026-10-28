@@ -1,4 +1,4 @@
-# ADR-068: Motion is one system, named by what happens, in CSS and the browser's own animations
+# ADR-069: Motion is one system, named by what happens, in CSS and the browser's own animations
 
 - **Status:** Accepted
 - **Date:** 2026-10-28
