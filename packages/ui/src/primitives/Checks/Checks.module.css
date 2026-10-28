@@ -21,6 +21,10 @@
   margin-top: 1px;
   border-radius: 99px;
   color: var(--t-1);
+  /* a check that settles turns, rather than flips, to how it ended */
+  transition:
+    background var(--enter) var(--ease-out),
+    color var(--enter) var(--ease-out);
 }
 .passed .mark {
   background: var(--chip);

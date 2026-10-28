@@ -390,7 +390,7 @@ export interface Hands {
 
 /**
  * Where the checks that failed on a task's open pull requests stand, whether
- * or not the person has looked (ADR-069), as `fixesOf` reads them: a run of
+ * or not the person has looked (ADR-070), as `fixesOf` reads them: a run of
  * failures its lead sees through, the checks on its fix running, and why the
  * failing checks are the person's where they are.
  */
@@ -552,7 +552,7 @@ export class Changes extends Context.Service<
     inHands(taskId: string): Effect.Effect<Hands | null, unknown>
     /**
      * Where the checks that failed on the task's open pull requests stand,
-     * whoever has looked (ADR-069): null for a settled task, or one with none
+     * whoever has looked (ADR-070): null for a settled task, or one with none
      * open.
      */
     fixing(taskId: string): Effect.Effect<Fixing | null, unknown>
@@ -2869,7 +2869,7 @@ export class Changes extends Context.Service<
 
       /**
        * Where the checks that failed on each of a task's open pull requests
-       * stand, whether or not the person has looked (ADR-069), read from the
+       * stand, whether or not the person has looked (ADR-070), read from the
        * record each time. A run of failures counts, by commit, from the end of
        * its plan's run, the person's last push, or the checks last passing,
        * whichever came last. It is its lead's to see through (`open`) while it
@@ -3046,7 +3046,7 @@ export class Changes extends Context.Service<
           const ran = (yield* Clock.currentTimeMillis) - Date.parse(since.at)
           if (ran < Duration.toMillis(stuckAfter)) return
           const hands = yield* handsOf(link.taskId)
-          // The checks on a lead's fix too, after the person has looked (ADR-069).
+          // The checks on a lead's fix too, after the person has looked (ADR-070).
           const fixing = yield* fixingOn(link)
           if ((hands === null || hands.given) && fixing?.running !== true) return
           if (!(yield* heard(link, 'checks_stuck', `stuck:${sha}`, { sha }))) return
@@ -3210,7 +3210,7 @@ export class Changes extends Context.Service<
                 logs: reads.map((read) => ({ name: read.name, url: read.url, log: read.log, missing: read.missing })),
                 url: now.url,
               })
-              // A failure its lead is to see through, whether or not the person has looked (ADR-069), is run again once before the
+              // A failure its lead is to see through, whether or not the person has looked (ADR-070), is run again once before the
               // lead is told: it may have failed by chance. Not the checks on a merge a conflict round pushed: the round sees those
               // through itself.
               const fixing = sum.outcome === 'failed' ? yield* fixingOn(link) : null
@@ -3231,7 +3231,7 @@ export class Changes extends Context.Service<
               } else if (sum.outcome === 'failed') {
                 const logs = reads.map(logForLead)
                 // Its lead sees them through alone, whether or not the person has looked, started again if it must be, and its fix
-                // goes up as it pushes (ADR-040, ADR-069). After FIX_ROUNDS fixes the change is the person's: its lead says once what
+                // goes up as it pushes (ADR-040, ADR-070). After FIX_ROUNDS fixes the change is the person's: its lead says once what
                 // it tried. Stopped by the person since the failure came, it isn't told it again; else it is told, if it runs.
                 if (fixing?.open === true) {
                   alone = true
@@ -4650,7 +4650,7 @@ export class Changes extends Context.Service<
 
       /**
        * The failing checks on a task's open pull requests its lead was told
-       * to see through (ADR-069) and did nothing with that shows: no fix
+       * to see through (ADR-070) and did nothing with that shows: no fix
        * pushed or asked to be, no rerun since, no line for the person. Not
        * where the person spoke since, when they are at it together.
        */
@@ -5135,7 +5135,7 @@ export class Changes extends Context.Service<
 
       /**
        * The checks on the latest commit of the default branch the task's pull
-       * request goes into (ADR-069), with the ends of the failed ones' logs:
+       * request goes into (ADR-070), with the ends of the failed ones' logs:
        * for the lead to tell a failure of its change's from one that is broken
        * there already.
        */
@@ -5164,7 +5164,7 @@ export class Changes extends Context.Service<
 
       /**
        * The lead brings the checks that fail on its pull request's head to the
-       * person (ADR-069): broken on the default branch, or failing for nothing
+       * person (ADR-070): broken on the default branch, or failing for nothing
        * of the change's, or spent, or for them to decide. Its line is the
        * task's card's, and the thread's; the same failure doesn't go to the
        * lead again, and its card is the person's.
@@ -5538,7 +5538,7 @@ export class Changes extends Context.Service<
                 const { link, snapshot, where, ahead, left, path } = chosen
                 const unpushed = left.length === 0 ? [] : [`Not included, since they aren't committed: ${filesWord(left)}.`]
                 // Checks that failed are the lead's to see through, whether or not the person has looked: its fix goes up at once
-                // (ADR-040, ADR-069), unless the person said something on the task since those checks came, when what it committed may
+                // (ADR-040, ADR-070), unless the person said something on the task since those checks came, when what it committed may
                 // be for that, or the branch had commits not pushed yet when the lead was told, which the fix would take up with it.
                 // Anything else waits for the person, as ever.
                 const fixing = yield* fixingOn(link)

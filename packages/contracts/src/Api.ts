@@ -1606,7 +1606,7 @@ export const TaskCard = Schema.Struct({
   /**
    * Ready, its pull request's checks failing, and its lead brought them to the
    * person rather than fixing them (broken on its default branch, say), or
-   * spent its tries (ADR-069): why, in a line, with what would fix it. Without
+   * spent its tries (ADR-070): why, in a line, with what would fix it. Without
    * it, its lead sees them through, or they don't fail.
    */
   checksBack: Schema.optional(Schema.NullOr(Schema.String)),
@@ -2359,7 +2359,7 @@ export const ThreadSnapshot = Schema.Struct({
     kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
-    /** Why the checks failing on its pull request are the person's, as its card says (ADR-069). */
+    /** Why the checks failing on its pull request are the person's, as its card says (ADR-070). */
     checksBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Why its conflict with its default branch wasn't asked of its lead, as its card says, beside Resolve now. */
     conflictUnsent: Schema.optional(Schema.NullOr(Schema.String)),

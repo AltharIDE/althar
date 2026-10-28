@@ -8,6 +8,7 @@ import { type ProjectListItem, ProjectList, type ProjectListText } from '../../h
 import type { ProjectRef } from '../../home/ProjectWord/ProjectWord'
 import { SinceRow, type SinceRowProps } from '../../home/SinceRow/SinceRow'
 import { cx } from '../../lib/cx'
+import { ListMotion } from '../../lib/ListMotion'
 import { reducedMotion } from '../../lib/motion'
 import { Button } from '../../primitives/Button/Button'
 import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
@@ -38,7 +39,9 @@ import s from './Home.module.css'
  * the calls arrive in its place.
  *
  * As the window opens, each line arrives on its own, top to bottom
- * (`data-arrive-each`, see screens/Launch).
+ * (`data-arrive-each`, see screens/Launch). After, a line given its call's
+ * key as `data-move` comes in, moves up as one above it goes, and fades
+ * once answered and gone (ListMotion).
  */
 
 export interface HomeText {
@@ -235,29 +238,32 @@ export function Home({
           />
         ) : (
           <div ref={stream} className={s.column}>
-            <section aria-labelledby={headingId} className={s.needs}>
-              <header className={s.head} data-arrive>
-                <span className={s.stack} aria-hidden="true">
-                  {whose.slice(0, MARKS_SHOWN).map((project) => (
-                    <ProjectMark key={project.seed} seed={project.seed} ink={project.ink} size={34} />
-                  ))}
-                </span>
-                <span className={s.headWords}>
-                  <Heading level={2} id={headingId} className={s.yours}>
-                    {t.yours(waiting)}
-                  </Heading>
-                  {whose.length > 0 && <span className={s.where}>{t.where(whose.map((project) => project.name))}</span>}
-                </span>
-              </header>
-              {groups.map(({ project, lines }) => (
-                <Group key={project.seed} project={project}>
-                  {lines.map((need) => (
-                    <Fragment key={need.key}>{need.line}</Fragment>
-                  ))}
-                </Group>
-              ))}
-            </section>
-            {sinceLine}
+            {/* Drawn with it: its lines arrive by their own choreography first, and move as a list after. */}
+            <ListMotion within={stream}>
+              <section aria-labelledby={headingId} className={s.needs}>
+                <header className={s.head} data-arrive>
+                  <span className={s.stack} aria-hidden="true">
+                    {whose.slice(0, MARKS_SHOWN).map((project) => (
+                      <ProjectMark key={project.seed} seed={project.seed} ink={project.ink} size={34} />
+                    ))}
+                  </span>
+                  <span className={s.headWords}>
+                    <Heading level={2} id={headingId} className={s.yours}>
+                      {t.yours(waiting)}
+                    </Heading>
+                    {whose.length > 0 && <span className={s.where}>{t.where(whose.map((project) => project.name))}</span>}
+                  </span>
+                </header>
+                {groups.map(({ project, lines }) => (
+                  <Group key={project.seed} project={project}>
+                    {lines.map((need) => (
+                      <Fragment key={need.key}>{need.line}</Fragment>
+                    ))}
+                  </Group>
+                ))}
+              </section>
+              {sinceLine}
+            </ListMotion>
           </div>
         )}
       </main>
@@ -278,7 +284,7 @@ function Group({ project, children }: { project: ProjectRef; children: ReactNode
   const id = useId()
   return (
     <section aria-labelledby={id} className={s.group}>
-      <Heading level={3} id={id} className={s.groupHead} data-arrive>
+      <Heading level={3} id={id} className={s.groupHead} data-arrive data-move={`group:${project.seed}`}>
         <ProjectMark seed={project.seed} ink={project.ink} size={20} />
         {project.name}
       </Heading>

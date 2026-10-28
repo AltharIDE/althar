@@ -591,7 +591,7 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
         )}
         {facts}
       </FactLine>
-      {/* Failing checks its lead brought to the person (ADR-069): not asking it again. Why is in its task, not on the card. */}
+      {/* Failing checks its lead brought to the person (ADR-070): not asking it again. Why is in its task, not on the card. */}
       {next !== null &&
         !(next.kind === 'fix' && work.checksBack != null) &&
         (here === null || actions === undefined ? (
@@ -691,6 +691,7 @@ export function BoardView({
     return (
       <NextRow
         key={work.taskId}
+        data-move={work.taskId}
         place={index + 1}
         task={work.slug}
         {...(kind === undefined ? {} : { kind })}
@@ -756,7 +757,12 @@ export function BoardView({
 
       <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
         {shown.running.map((work) => (
-          <BoardCard key={work.taskId} {...runningCardOf(work, now, name, actions)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard
+            key={work.taskId}
+            data-move={work.taskId}
+            {...runningCardOf(work, now, name, actions)}
+            onOpen={() => onOpen(work.threadId)}
+          />
         ))}
       </BoardColumn>
 
@@ -765,18 +771,19 @@ export function BoardView({
           ask.waiting !== null ? (
             <BoardCard
               key={ask.waiting.task.taskId}
+              data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name)}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
           ) : (
-            <CallCard key={ask.call.id} {...callCardOf(ask.call, name)} onOpen={() => onOpen(ask.call.threadId)} />
+            <CallCard key={ask.call.id} data-move={ask.call.id} {...callCardOf(ask.call, name)} onOpen={() => onOpen(ask.call.threadId)} />
           ),
         )}
         {lanes.stopped.map((work) => (
           <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} onOpen={() => onOpen(work.threadId)} />
         ))}
         {lanes.ready.map((work) => (
-          <BoardCard key={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} data-move={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 
@@ -817,6 +824,7 @@ export function BoardView({
                 return (
                   <SettledRow
                     key={work.taskId}
+                    data-move={work.taskId}
                     outcome={outcome}
                     task={work.slug}
                     {...(kind === undefined ? {} : { kind })}
@@ -873,6 +881,7 @@ function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; on
   const failed = actions?.failed[work.taskId]
   return (
     <KeptRow
+      data-move={work.taskId}
       title={work.title}
       at={work.keptAt == null ? '' : text.keptAt(ago(work.keptAt, new Date(now)))}
       onOpen={onOpen}

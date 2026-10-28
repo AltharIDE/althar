@@ -184,7 +184,7 @@ export const ReadyChecksFailedNarrow: Story = {
   },
 }
 /**
- * Failing checks its lead brought to the person rather than fixing (ADR-069): only the check that fails, its lead's line being in
+ * Failing checks its lead brought to the person rather than fixing (ADR-070): only the check that fails, its lead's line being in
  * its task; nothing to ask of the lead, which said what would fix it.
  */
 export const ReadyChecksBroughtBackNarrow: Story = {

@@ -1834,7 +1834,7 @@ export class Queries extends Context.Service<
             task.runState === 'succeeded' ? yield* (yield* Changes).inHands(taskId).pipe(Effect.orElseSucceed(() => null)) : null
           const seeing = hands !== null && !hands.given
           // Checks that failed, whoever has looked, are its lead's to see through: under way while the checks on its fix run, and
-          // why they are the person's where they are (ADR-069).
+          // why they are the person's where they are (ADR-070).
           const fixing = task.state === 'open' ? yield* (yield* Changes).fixing(taskId).pipe(Effect.orElseSucceed(() => null)) : null
           const checksRun = (seeing && hands.running) || fixing?.running === true
           const resolving = round?.state === 'resolving' ? round : undefined

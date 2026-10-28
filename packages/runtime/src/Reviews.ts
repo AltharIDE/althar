@@ -25,7 +25,7 @@ import { copyReviewed, LOGS_SHOWN, type ReviewOf, reviewOf, type Reviewed, SAID_
 import { indexTask } from './Search'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
-import { addItem, updateItem } from './threads'
+import { addItem, moveToEnd, updateItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 
 /*
@@ -907,6 +907,11 @@ export class Reviews extends Context.Service<
                       instance.systemId,
                       () => ({ verdict: asked.verdict, comments: comments.length }),
                     )
+                    // Its card moves to the end of the thread, as if drafted now, so the person finds the amended review
+                    // below the lead's words rather than far up; the one card, so there is only one to post.
+                    const cards = yield* sql<{ id: string }>`
+                      SELECT id FROM thread_items WHERE thread_id = ${access.threadId} AND kind = 'review_draft' AND json_extract(content, '$.draftId') = ${latest.id}`
+                    for (const card of cards) yield* moveToEnd(access.projectId as ProjectId, access.threadId, card.id, [])
                     return { draftId: latest.id }
                   }
                   const id = yield* newId(Ids.reviewDraft)

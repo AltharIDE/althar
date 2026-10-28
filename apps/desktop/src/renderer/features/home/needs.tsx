@@ -290,6 +290,7 @@ export function needLineOf(
     return (
       <NeedLine
         key={need.id}
+        data-move={need.id}
         kind={answer.kind}
         project={need.project}
         title={need.title}
@@ -302,6 +303,7 @@ export function needLineOf(
   return (
     <NeedLine
       key={need.id}
+      data-move={need.id}
       kind={need.kind}
       project={need.project}
       title={need.title}

@@ -152,7 +152,7 @@ its worktree, as the run the person sees; `screenshot`, as above; and
 `rerun_check` runs checks on its pull request again. For checks that fail,
 `read_default_branch_checks` reads those on its default branch's latest
 commit, and `hand_checks_to_person` brings a failure that isn't the change's
-to the person, with a line on why (ADR-069). `show_pictures` shows
+to the person, with a line on why (ADR-070). `show_pictures` shows
 the person pictures from its worktree in its thread at any time, a step open
 or none, each with a caption: checked as `finish_step`'s screenshots are
 (inside the worktree, what its name says it is, up to 20 MB), and kept in

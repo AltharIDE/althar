@@ -1,9 +1,9 @@
+/* Opened by key, many times a day: there at once, and gone at once. */
 .overlay {
   position: fixed;
   inset: 0;
   z-index: var(--z-dialog);
   background: var(--scrim);
-  animation: fade var(--fast) var(--ease);
 }
 .dialog {
   position: fixed;
@@ -21,27 +21,9 @@
   overflow: hidden;
   box-shadow: var(--lift-dialog);
   color: var(--t-1);
-  animation: in var(--base) var(--ease);
 }
 .dialog:focus {
   outline: none;
-}
-@keyframes in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 4px);
-  }
-}
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .overlay,
-  .dialog {
-    animation: none;
-  }
 }
 
 .search {
