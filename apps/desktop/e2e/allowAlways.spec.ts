@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, say, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, say, shown, startTask, toConversation } from './support'
 
 /*
  * Allow always (ADR-018), as the person meets it: under "Ask me", a lead's
@@ -57,7 +57,7 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
 
     // The lead's `git status` waits for the person, who allows commands starting so always.
     await say(page, 'run git status')
-    await expect(page.getByText('Needs your permission').filter({ visible: true })).toBeVisible()
+    await expect(shown(page, 'Needs your permission')).toBeVisible()
     await page.getByRole('radio', { name: /Yes, and always allow/ }).click()
     await page.getByRole('combobox', { name: 'What to always allow' }).click()
     await page.getByRole('option', { name: 'commands starting “git status”' }).click()
@@ -90,12 +90,12 @@ test('keeps Allow always as a rule, lets the next through by it, and asks again 
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)
     await say(page, 'run git status -s')
-    await expect(page.getByText('Needs your permission').filter({ visible: true })).toBeVisible()
+    await expect(shown(page, 'Needs your permission')).toBeVisible()
     // Another task's lead asks for something else, and waits after it.
     await backToProject(page)
     await startAndOpen(page, 'Run the tests')
     await say(page, 'run npm test')
-    await expect(page.getByText('Needs your permission').filter({ visible: true })).toBeVisible()
+    await expect(shown(page, 'Needs your permission')).toBeVisible()
 
     // On the home, its card offers the same: always allow, from beside Allow once.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()

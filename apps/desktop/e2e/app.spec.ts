@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, say, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, say, shown, startTask, toConversation } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, tell its
@@ -83,12 +83,12 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     // A deploy is kept for the person: it waits in the thread as a call until it is answered.
     await say(page, 'command-choices')
-    await expect(page.getByText('Needs you', { exact: true }).filter({ visible: true })).toBeVisible()
-    await expect(page.getByText('Needs your permission').filter({ visible: true })).toBeVisible()
+    await expect(shown(page, 'Needs you', { exact: true })).toBeVisible()
+    await expect(shown(page, 'Needs your permission')).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
     await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
-    await expect(page.getByText('Needs you', { exact: true }).filter({ visible: true })).toHaveCount(0)
+    await expect(shown(page, 'Needs you', { exact: true })).toHaveCount(0)
 
     await say(page, 'think')
     await expect(page.getByText('Done', { exact: true })).toBeVisible()

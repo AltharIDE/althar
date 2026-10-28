@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, projectSettings, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, planTask, projectSettings, say, shown, startTask, toConversation } from './support'
 
 /*
  * Allow everything (ADR-043), as the person meets it: a new project always
@@ -121,7 +121,7 @@ test('allows everything on a task or a project, clearing what waits, and says so
     await cardOf('Tag the release').getByRole('button', { name: 'Tag the release' }).click()
     await toConversation(page)
     await expect(page.getByText('chosen=allow_once,allow_once', { exact: true })).toBeVisible()
-    await expect(page.getByText('Needs your permission').filter({ visible: true })).toHaveCount(0)
+    await expect(shown(page, 'Needs your permission')).toHaveCount(0)
     await shoot(page, 'app-project-allowed-task.png')
   } finally {
     await electronApp.close()
