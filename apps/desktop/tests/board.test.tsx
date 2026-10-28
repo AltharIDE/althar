@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
+import { Activity, useState } from 'react'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 
@@ -326,6 +326,33 @@ describe('the board’s lanes', () => {
         await userEvent.hover(document.body)
         await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
         expect(region('Up next').queryByText('Going on x')).toBeNull()
+      })
+      it('lets go once its screen hides with the pointer on it, as kept (`KeptScreens`), and moves as it shows again', async () => {
+        const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
+        const after = lanesOf(
+          board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
+        )
+        let change: (lanes: typeof before) => void = () => undefined
+        let hide: (hidden: boolean) => void = () => undefined
+        function Kept() {
+          const [lanes, setLanes] = useState(before)
+          const [hidden, setHidden] = useState(false)
+          change = setLanes
+          hide = setHidden
+          return (
+            <Activity mode={hidden ? 'hidden' : 'visible'}>
+              <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
+            </Activity>
+          )
+        }
+        withServices(<Kept />, fakeClient().client)
+        const region = (name: string) => within(screen.getByRole('region', { name }))
+        // Its card pressed, its task opens: the board hides with the pointer on Up next, and the task starts meanwhile.
+        await userEvent.hover(region('Up next').getByText('Going on x'))
+        act(() => hide(true))
+        act(() => change(after))
+        act(() => hide(false))
+        await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
       })
     })
 
