@@ -145,15 +145,18 @@ const holdOf = (running: boolean, lost: FolderHeld | null, opened: boolean): Fol
  * `node_modules` as clones of its cache: `du` and Finder count them in full,
  * but removing them frees next to nothing. A file counts its private size
  * (ATTR_CMNEXT_PRIVATESIZE), what a package built or changed after it was
- * installed; the blocks clones share count once where every clone of them
- * (ATTR_CMNEXT_CLONEID, ATTR_CMNEXT_CLONE_REFCNT) is among the folders. A file
- * hardlinked from outside them counts nothing; one whose links are all
- * inside, once. What it can't read fails it: a part is not the whole.
+ * installed. Blocks a clone shares count nothing, even where every clone of
+ * them is among the folders: APFS can't say so, as editing a clone gives it
+ * a clone ID of its own and drops it from its source's count while it still
+ * shares their blocks. So clones made of each other inside the folders count
+ * short, never what removing them doesn't free. A file hardlinked from
+ * outside them counts nothing; one whose links are all inside, once. What it
+ * can't read fails it: a part is not the whole.
  */
 const PRIVATE = String.raw`
 use strict; use warnings; use File::Find;
-my $list = pack('SSLLLLL', 5, 0, 0x80000000, 0, 0, 0, 0x1108);
-my ($total, $failed, %seen, %clones) = (0, 0);
+my $list = pack('SSLLLLL', 5, 0, 0x80000000, 0, 0, 0, 0x8);
+my ($total, $failed, %seen) = (0, 0);
 local $SIG{__WARN__} = sub { $failed = 1 };
 find({ no_chdir => 1, wanted => sub {
   my @st = lstat $_;
@@ -163,19 +166,11 @@ find({ no_chdir => 1, wanted => sub {
     return if $st[3] > 1 && ++$seen{"$st[0]:$st[1]"} != $st[3];
     my $buf = "\0" x 64;
     if (syscall(220, $_, $list, $buf, 64, 0x21) == 0 && unpack('L', $buf) >= 32) {
-      my $private = unpack('q', substr($buf, 24, 8));
-      if (($private < $own) && (unpack('L', substr($buf, 20, 4)) & 0x1100) == 0x1100) {
-        my ($id, $refs) = unpack('Q L', substr($buf, 32, 12));
-        my $group = $clones{$id} ||= [0, 0, $refs];
-        $group->[0]++;
-        $group->[1] = $own - $private if $own - $private > $group->[1];
-      }
-      $own = $private;
+      $own = unpack('q', substr($buf, 24, 8));
     }
   }
   $total += $own;
 }}, @ARGV);
-for (values %clones) { $total += $_->[1] if $_->[0] >= $_->[2] }
 exit 1 if $failed;
 print "$total\n";
 `

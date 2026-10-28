@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -167,6 +167,7 @@ describe('finished tasks’ folders', () => {
       const store = realpathSync(mkdtempSync(join(tmpdir(), 'althar-store-')))
       writeFileSync(join(store, 'cloned.node'), Buffer.alloc(8 * MB, 1))
       writeFileSync(join(store, 'linked.node'), Buffer.alloc(8 * MB, 2))
+      writeFileSync(join(store, 'edited.node'), Buffer.alloc(8 * MB, 5))
       const task = yield* finished('done', 1, 'Add a retry', (root) => {
         writeFileSync(join(root, '.gitignore'), 'node_modules\n')
         git(root, 'add', '.')
@@ -178,8 +179,11 @@ describe('finished tasks’ folders', () => {
       if (process.platform === 'darwin') execFileSync('cp', ['-c', join(store, 'cloned.node'), join(modules, 'cloned.node')])
       linkSync(join(store, 'linked.node'), join(modules, 'linked.node'))
       writeFileSync(join(modules, 'built.node'), Buffer.alloc(8 * MB, 3))
-      // A clone of it inside the folder: neither holds the blocks they share alone, but removing both frees them.
-      if (process.platform === 'darwin') execFileSync('cp', ['-c', join(modules, 'built.node'), join(modules, 'built-again.node')])
+      // A clone from the store edited after: it holds its new block, not the ones it still shares with the store.
+      if (process.platform === 'darwin') {
+        execFileSync('cp', ['-c', join(store, 'edited.node'), join(modules, 'edited.node')])
+        appendFileSync(join(modules, 'edited.node'), 'patched')
+      }
       const listed = yield* measured
       const bytes = listed.folders[0]?.bytes ?? null
       assert.isNotNull(bytes)
