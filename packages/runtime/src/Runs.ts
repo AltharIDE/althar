@@ -58,7 +58,7 @@ import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { summarize } from './words'
+import { signedOutWords, summarize } from './words'
 
 /*
  * A task's run (docs/architecture/05; docs/plans/mvp.md, "The plan"): its
@@ -320,6 +320,8 @@ export type StuckWhy =
   | 'refused'
   /** Its agent's service kept failing while the computer was online, however long Althar waited between tries (ADR-060). */
   | 'transient'
+  /** Its agent's account is signed out: reminding it can't help; signing it in again can. */
+  | 'signed_out'
 
 /** What a stuck step's call says: the step, why, what went wrong in words, who was on it, the round, and the findings still open. */
 export interface StuckInfo {
@@ -1089,9 +1091,12 @@ export class Runs extends Context.Service<
        * them, and a call in the task says why. A run has one such call open at
        * a time.
        */
-      const stuck = (run: RunRow, attempt: { readonly id: string } | null, info: StuckInfo) =>
+      const stuck = (run: RunRow, attempt: { readonly id: string } | null, asked: StuckInfo) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // An agent that couldn't start because it is signed out is signed out: signing it in again is the way on.
+          const info: StuckInfo =
+            asked.why === 'failed_to_start' && asked.detail === signedOutWords ? { ...asked, why: 'signed_out' } : asked
           const opened = yield* sql.withTransaction(
             Effect.gen(function* () {
               const [open] = yield* sql<{ id: string }>`
@@ -1421,7 +1426,9 @@ export class Runs extends Context.Service<
           if (yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })) return
           // A turn that went through after its service failed starts the count of its failures again (ADR-060).
           const { tries: _tries, ...output } = JSON.parse(on.output ?? '{}') as { reminded?: boolean; continued?: number; tries?: number }
-          // Refused, it won't go on however it's reminded.
+          // Signed out, or refused, it won't go on however it's reminded.
+          if (event.errorClass === 'auth_required')
+            return yield* stuck(on.run, { id: on.attemptId }, info('signed_out', event.failure ?? null))
           if (event.stopReason === 'refusal') return yield* stuck(on.run, { id: on.attemptId }, info('refused', null))
           // Cut off by the agent's own limit on a turn, it carries on where it was, a few times, before it is reminded.
           const continued = output.continued ?? 0

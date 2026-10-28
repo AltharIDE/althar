@@ -48,6 +48,8 @@ export const text = {
         return `${agent} has worked on this step for ${stuck.detail ?? 'a long time'} since you last said anything, and isn't done. ${review ? 'Review again, or skip the review.' : 'Let it carry on if it seems to be getting somewhere, or hand the step to another agent.'}`
       case 'refused':
         return `${agent} refused to go on with this step. ${review ? 'Review again with another agent, or skip the review.' : 'Tell it what to do differently, or hand the step to another agent.'}`
+      case 'signed_out':
+        return `${agent} is signed out. Sign in again, then try again, or ${review ? 'review with another agent.' : 'hand the step to another agent.'}`
     }
   },
   /** What Althar did before it asked. */
@@ -62,6 +64,8 @@ export const text = {
     over_budget: { again: (agent: string) => `Let ${agent} carry on`, tryingAgain: (agent: string) => `${agent} carries on` },
     restarted: { again: (agent: string) => `Start ${agent} again`, tryingAgain: (agent: string) => `Starting ${agent} again` },
   },
+  /** What puts it right elsewhere: the agent's sign-in, or the repository's host, in Settings. */
+  fix: { signIn: 'Sign in again', connect: 'Connect' },
   /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
     stuck.why === 'restarted'
@@ -106,6 +110,10 @@ interface StuckCallProps {
   onAnswer: (attentionId: string, answer: StuckAnswer) => void | Promise<boolean>
   /** Report a problem about this step, with its task: Report this. Without it, none. */
   onReport?: (step: string) => void
+  /** Opens Settings at an agent's sign-in, for a step whose agent is signed out: Sign in again. */
+  onSignIn?: (agentId: string) => void
+  /** Opens the code hosts in Settings, for a pull request whose host isn't connected: Connect. */
+  onConnect?: () => void
 }
 
 /**
@@ -128,6 +136,8 @@ function StuckCard({
   agentName,
   onAnswer,
   onReport,
+  onSignIn,
+  onConnect,
 }: Omit<StuckCallProps, 'onAnswer'> & { onAnswer: (attentionId: string, answer: StuckAnswer) => void }) {
   const named = useModelNames()
   const agent = agentName(stuck.agentId) || 'The agent'
@@ -168,6 +178,7 @@ function StuckCard({
         what={stuck.why === 'not_connected' ? text.what(stuck, agent) : text.publishing(stuck)}
         tried={[]}
         onAgain={() => onAnswer(request.id, { kind: 'retry', agentId: 'althar' })}
+        {...(stuck.why === 'not_connected' && onConnect !== undefined ? { fix: { label: text.fix.connect, onFix: onConnect } } : {})}
         onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
         {...(onReport === undefined ? {} : { onReport: () => onReport(text.step.publish) })}
         text={text.publish}
@@ -183,6 +194,9 @@ function StuckCard({
       {...(review || out ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
       {...(stuck.agentId !== null ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) } : {})}
       againFirst={againFirst}
+      {...(stuck.why === 'signed_out' && stuck.agentId !== null && onSignIn !== undefined
+        ? { fix: { label: text.fix.signIn, onFix: () => onSignIn(stuck.agentId ?? '') } }
+        : {})}
       onRetry={(model) => onAnswer(request.id, { kind: 'retry', agentId: model.runtime })}
       onAbandon={() => onAnswer(request.id, { kind: 'abandon' })}
       {...(onReport === undefined ? {} : { onReport: () => onReport(text.step[stuck.step]) })}

@@ -441,7 +441,8 @@ const wedgedIn = new Set<string>()
  * stop when cancelled either, until it is started afresh. `[lead:loop]` runs a
  * failing \`npm test\` three times in a row, every turn, then waits until
  * cancelled; `[lead:loop-once]` does that once. `[lead:long-once]` stops once
- * at its output limit, and `[lead:refuse]` refuses. `[lead:explore]` reads
+ * at its output limit, `[lead:refuse]` refuses, and `[lead:signed-out]` fails
+ * as its account is signed out. `[lead:explore]` reads
  * a few files, changes none, and works on until cancelled. Otherwise, nothing: the
  * turn goes on as it would.
  */
@@ -458,6 +459,7 @@ const playStall = async (
     return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' } satisfies acp.PromptResponse
   }
   if (session.markers.has('[lead:refuse]')) return { stopReason: 'refusal' }
+  if (session.markers.has('[lead:signed-out]')) throw acp.RequestError.authRequired()
   if (once('[lead:long-once]')) return { stopReason: 'max_tokens' }
   if (session.markers.has('[lead:wedge-once]') && !wedgedIn.has(session.cwd)) {
     wedgedIn.add(session.cwd)

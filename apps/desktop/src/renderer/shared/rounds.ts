@@ -59,7 +59,7 @@ export interface Round {
   /** Its report, where it handed one in: what it built, and what it showed. */
   readonly report: { readonly id: string; readonly result: StepResult } | null
   /** The error its agent's turn ended with, said in the open: there's no answer to come. */
-  readonly failed: string | null
+  readonly failed: Extract<Part, { kind: 'notice' }> | null
   /** What it handed back along the way, where it has no result to stand with: shown under its work. */
   readonly handed: Handed
   readonly live: boolean
@@ -405,7 +405,7 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
           },
     result: result === undefined ? null : said(result, true),
     report: open.report,
-    failed: failed === undefined ? null : failed.text,
+    failed: failed === undefined ? null : failed,
     handed: handedBy(result === undefined ? files : [], worktree),
     live,
     parts: open.steps.filter((step): step is Part => step.kind !== 'aside' && step !== failed),

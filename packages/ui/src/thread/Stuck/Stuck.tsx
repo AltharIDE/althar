@@ -125,6 +125,12 @@ export interface StuckProps {
    * and the other ways after it.
    */
   againFirst?: boolean
+  /**
+   * What puts it right elsewhere, such as signing the agent in again in
+   * Settings, or connecting the repository's host: the card's own button,
+   * first. It doesn't answer the card; Try again does, once it is put right.
+   */
+  fix?: { label: string; onFix: () => void }
   /** Settle the task without finishing it. Without it, no Abandon. */
   onAbandon?: () => void
   /** Report it as a problem with Althar, at the end of its answers. Without it, no Report this. */
@@ -153,6 +159,7 @@ export function Stuck({
   onRetry,
   onAgain,
   againFirst = false,
+  fix,
   onAbandon,
   onReport,
   onUndo,
@@ -209,10 +216,12 @@ export function Stuck({
 
   const retrying = onRetry && agents.length > 0
   // Try again first, where it is the way to take; otherwise after telling the lead and handing the step on.
-  const first = againFirst && onAgain !== undefined
+  const first = againFirst && onAgain !== undefined && fix === undefined
+  // What puts it right comes before everything, as the card's own button.
+  const lead = first || fix !== undefined
   const again = onAgain && (
     <Button
-      variant={first || !(onTell || retrying) ? 'signal' : 'default'}
+      variant={first || !(onTell || retrying || fix) ? 'signal' : 'default'}
       onClick={() => {
         onAgain()
         give({ kind: StuckAnswer.Again })
@@ -269,11 +278,16 @@ export function Stuck({
           />
         </div>
       ) : (
-        (onTell || retrying || onAgain || onAbandon || onReport) && (
+        (fix || onTell || retrying || onAgain || onAbandon || onReport) && (
           <AskFoot>
+            {fix && (
+              <Button variant="signal" onClick={fix.onFix}>
+                {fix.label}
+              </Button>
+            )}
             {first && again}
             {onTell && (
-              <Button ref={tellRef} variant={first ? 'default' : 'signal'} onClick={() => setTelling(true)}>
+              <Button ref={tellRef} variant={lead ? 'default' : 'signal'} onClick={() => setTelling(true)}>
                 {t.tell}
               </Button>
             )}
@@ -283,7 +297,7 @@ export function Stuck({
                 width={300}
                 trigger={
                   // The first way on is the one to take, unless the lead can be told or it is to try again.
-                  <Button variant={onTell || first ? 'default' : 'signal'} icon="agents">
+                  <Button variant={onTell || lead ? 'default' : 'signal'} icon="agents">
                     {t.retry}
                   </Button>
                 }

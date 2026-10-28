@@ -17,8 +17,8 @@ import { withServices } from './render'
  * housekeeping with the work, and its news a line of its own.
  */
 
-function Task() {
-  return <TaskView model={useTask('th1')} onBack={vi.fn()} />
+function Task({ onSignIn }: { onSignIn?: (agentId: string) => void }) {
+  return <TaskView model={useTask('th1')} onBack={vi.fn()} {...(onSignIn === undefined ? {} : { onSignIn })} />
 }
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 9, 15, 12, minutes)).toISOString()
@@ -276,7 +276,7 @@ describe('a task’s thread in rounds', () => {
         items.notice({ title: 'Claude Code couldn’t answer.', severity: 'error' }),
       ]),
     )
-    expect(round?.failed).toBe('Claude Code couldn’t answer.')
+    expect(round?.failed?.text).toBe('Claude Code couldn’t answer.')
     expect(round?.work?.steps.at(-1)).toMatchObject({ kind: 'aside', text: 'Context is filling up' })
   })
 
@@ -317,6 +317,58 @@ describe('a task’s thread in rounds', () => {
     expect(withoutShotList(real, new Set(['A1']))).toBe(real)
     expect(withoutShotList(listed, new Set())).toBe(listed)
     expect(withoutShotList('Shots below:\n| A1 | x |\n|---|---|\n| A1 | y |', new Set(['A1']))).toBe('')
+  })
+})
+
+describe('a task’s lead that is signed out', () => {
+  const signedOut = items.notice({
+    severity: 'error',
+    title: 'Claude Code is signed out.',
+    description: 'Authentication required',
+    failure: 'auth_required',
+  })
+  const show = (overrides: Partial<ThreadSnapshot> = {}) => {
+    const onSignIn = vi.fn()
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.you('Go'), signedOut], ...overrides })) })
+    withServices(<Task onSignIn={onSignIn} />, client)
+    return { client, onSignIn }
+  }
+
+  it('says so plainly, with the agent’s words under it, and offers Sign in again first, for that agent', async () => {
+    const { onSignIn } = show()
+    expect(await screen.findByText('Claude Code is signed out.')).toBeTruthy()
+    expect(screen.getByText('Authentication required')).toBeTruthy()
+    const [first, second] = within(screen.getByText('Sign in again').closest('p') as HTMLElement).getAllByRole('button')
+    expect(first?.textContent).toBe('Sign in again')
+    expect(second?.textContent).toBe('Try again')
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('claude-code')
+  })
+
+  it('tries the turn again, once signed in, from Try again', async () => {
+    const { client } = show()
+    await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+    expect(client.tryAgain).toHaveBeenCalledWith('th1')
+  })
+
+  it('leaves the ways on to its step’s call, where the step waits on the person', async () => {
+    show({
+      attention: [
+        {
+          id: 'att1',
+          kind: 'stuck',
+          title: 'Implement',
+          reason: '',
+          command: null,
+          stuck: { step: 'implement', why: 'signed_out', detail: null, agentId: 'claude-code', round: 0, open: 0 },
+          createdAt: at(1),
+        } as never,
+      ],
+    })
+    expect(await screen.findByText(/Claude Code is signed out\. Sign in again, then try again/)).toBeTruthy()
+    // One Sign in again, the card's own, first; Try again is the card's too.
+    expect(screen.getAllByRole('button', { name: 'Sign in again' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1)
   })
 })
 

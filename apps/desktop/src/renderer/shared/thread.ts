@@ -57,7 +57,15 @@ export type Part =
       readonly id: string
       readonly steps: ReadonlyArray<{ readonly id: string; readonly label: string; readonly state: PlanState }>
     }
-  | { readonly kind: 'notice'; readonly id: string; readonly text: string; readonly tone: 'info' | 'warning' | 'error' }
+  | {
+      readonly kind: 'notice'
+      readonly id: string
+      readonly text: string
+      readonly tone: 'info' | 'warning' | 'error'
+      /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
+      readonly failure?: string
+      readonly detail?: string
+    }
 
 export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
@@ -333,8 +341,20 @@ const partOf = (
           state: planStateOf(entry.status, turnRunning),
         })),
       }
-    case 'notice':
-      return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: item.content.severity }
+    case 'notice': {
+      const { failure, title, description, severity } = item.content
+      // A failed turn's headline says what went wrong; the agent's own words stand apart, under it.
+      if (failure !== undefined)
+        return {
+          kind: 'notice',
+          id: item.id,
+          text: title,
+          tone: severity,
+          failure,
+          ...(description === null ? {} : { detail: description }),
+        }
+      return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: severity }
+    }
   }
 }
 
