@@ -27,6 +27,7 @@ import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
 import { PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
+import { WayOut } from '../../shared/WayOut'
 import { PublishedReport, ReviewReport } from './Reports'
 import s from './TaskThread.module.css'
 
@@ -113,10 +114,28 @@ interface RoundProps {
   readonly worktree: string | null
   readonly project: string | undefined
   readonly openFile: ((path: string) => void) | undefined
+  /** The ways out of the error it ended with, where it is the thread's last: Try again, and the agent to sign in again. */
+  readonly out: { readonly again: boolean; readonly compact: boolean; readonly signIn: string | null } | null
+  readonly onTryAgain: () => void
+  readonly onCompact: () => void
+  readonly onSignIn: (agentId: string) => void
 }
 
 /** One round: its ask's acknowledgement, the line of its work, and its result, with what its report showed. */
-const RoundView = memo(function RoundView({ block, model, retakes, versions, threadId, worktree, project, openFile }: RoundProps) {
+const RoundView = memo(function RoundView({
+  block,
+  model,
+  retakes,
+  versions,
+  threadId,
+  worktree,
+  project,
+  openFile,
+  out,
+  onTryAgain,
+  onCompact,
+  onSignIn,
+}: RoundProps) {
   const versionOf = (whole: string) => versions[whole] ?? ''
   const opens = openFile === undefined ? {} : { openFile }
 
@@ -200,7 +219,20 @@ const RoundView = memo(function RoundView({ block, model, retakes, versions, thr
             </>
           )}
       {pictures(block.shown.after)}
-      {block.failed !== null && <AltharLine tone="warning">{block.failed}</AltharLine>}
+      {block.failed !== null && (
+        <>
+          <AltharLine tone="warning">{block.failed.text}</AltharLine>
+          {block.failed.detail !== undefined && <p className={s.detail}>{block.failed.detail}</p>}
+          {out !== null && (
+            <WayOut
+              failure={block.failed.failure}
+              {...(out.again ? { onTryAgain } : {})}
+              {...(out.compact ? { onCompact } : {})}
+              {...(out.signIn === null ? {} : { onSignIn: () => onSignIn(out.signIn ?? '') })}
+            />
+          )}
+        </>
+      )}
     </Round>
   )
 }, same)
@@ -214,7 +246,7 @@ const YouView = memo(
 )
 
 export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
-  const { threadId, worktree = null, openFile, session, project } = shared
+  const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
   // A turn of the thread's own agent, on its session's model and account; another's, on its own model.
   const modelOf = (agentId: string | null) =>
@@ -225,6 +257,24 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
     opening.current = openFile
   })
   const open = useCallback((path: string) => opening.current?.(path), [])
+  // So do a failed round's ways out.
+  const acting = useRef({ onTryAgain, onCompact, onSignIn })
+  useLayoutEffect(() => {
+    acting.current = { onTryAgain, onCompact, onSignIn }
+  })
+  const tryAgain = useCallback(() => acting.current.onTryAgain?.(), [])
+  const compact = useCallback(() => acting.current.onCompact?.(), [])
+  const signIn = useCallback((agentId: string) => acting.current.onSignIn?.(agentId), [])
+  // The thread's last round, where an error ended it, has its ways out.
+  const last = rounds.findLast((block) => block.kind === 'round' || block.kind === 'waiting')
+  const outOf = (block: RoundModel) =>
+    block !== last || block.failed === null
+      ? null
+      : {
+          again: onTryAgain !== undefined,
+          compact: onCompact !== undefined,
+          signIn: onSignIn === undefined ? null : (block.agentId ?? session?.agentId ?? null),
+        }
   // The pictures already shown, by their names: a later report's retakes of a view aren't shown again.
   const seen = new Set<string>()
 
@@ -243,6 +293,10 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
         worktree={worktree}
         project={project}
         openFile={openFile === undefined ? undefined : open}
+        out={outOf(block)}
+        onTryAgain={tryAgain}
+        onCompact={compact}
+        onSignIn={signIn}
       />
     )
   }

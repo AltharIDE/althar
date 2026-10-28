@@ -1217,6 +1217,12 @@ export const NoticeItem = Schema.Struct({
      * back, a line across the thread (ADR-056).
      */
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    /**
+     * For an agent's turn that failed: why, as the runtime classes it
+     * (`auth_required`, `usage_limit`, `context_full`, `invalid_request`,
+     * `unknown`, `agent_exited`…), so the thread offers the way out that fits.
+     */
+    failure: Schema.optional(Schema.String),
   }),
 })
 
@@ -2122,6 +2128,8 @@ export const StuckStep = Schema.Struct({
     'refused',
     // Its agent's service kept failing while the computer was online (ADR-060).
     'transient',
+    // Its agent's account is signed out: signing it in again in Settings, then trying again, is the way on.
+    'signed_out',
   ]),
   /** What went wrong, in the agent's or Althar's words; for the last round, the lead's summary. */
   detail: Schema.NullOr(Schema.String),

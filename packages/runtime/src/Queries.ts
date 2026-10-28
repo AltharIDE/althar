@@ -258,6 +258,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const open = field(payload, 'open')
   const tried = field(payload, 'tried')
   const limit = Option.getOrUndefined(decodeLimit(field(payload, 'limit')))
+  const service = field(payload, 'service')
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -270,7 +271,9 @@ export const stuckOf = (payload: unknown): StuckStep => {
       why === 'stalled' ||
       why === 'looping' ||
       why === 'over_budget' ||
-      why === 'refused'
+      why === 'refused' ||
+      why === 'transient' ||
+      why === 'signed_out'
         ? why
         : 'failed_to_start',
     detail: typeof detail === 'string' ? detail : null,
@@ -286,6 +289,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
         }
       : {}),
     ...(limit === undefined ? {} : { limit }),
+    ...(typeof service === 'string' ? { service } : {}),
   }
 }
 
@@ -479,6 +483,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       const severity = text(content, 'severity')
       const description = text(content, 'description')
       const role = text(content, 'role')
+      // Why an agent's turn failed, so the thread offers the way out that fits.
+      const failure = text(content, 'failure')
       // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
@@ -494,6 +500,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           title: text(content, 'title'),
           description: description === '' ? null : description,
           ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
+          ...(failure === undefined || failure === '' ? {} : { failure }),
         },
       }
     }

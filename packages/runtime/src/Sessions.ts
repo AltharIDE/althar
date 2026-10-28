@@ -1636,7 +1636,11 @@ export class Sessions extends Context.Service<
               {
                 source: 'agent',
                 severity: 'error',
-                title: `${running.entry.definition.name} couldn't answer.`,
+                // Signed out, the agent's own words ("Authentication required") stay as its detail, under a headline that says it plainly.
+                title:
+                  errorClass === 'auth_required'
+                    ? `${running.entry.definition.name} is signed out.`
+                    : `${running.entry.definition.name} couldn't answer.`,
                 ...(typeof said === 'string' && said !== '' ? { description: said } : {}),
                 failure: errorClass,
               },

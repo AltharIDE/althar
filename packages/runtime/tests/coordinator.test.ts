@@ -1383,6 +1383,20 @@ describe('a step whose agent stalls or goes round in circles', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('needs the person at once when the lead is signed out, to sign it in again, without reminding it', () =>
+    Effect.gen(function* () {
+      const { task } = yield* planned('Signed out', '[lead:signed-out]', [{ key: 'implement', agentId: 'codex' }])
+      const call = yield* stuckCall(task.taskId)
+      assert.deepStrictEqual([call.step, call.why, call.agentId], ['implement', 'signed_out', 'codex'])
+      // Reminding it couldn't help: one turn, the one that failed.
+      const told = yield* turns(task.threadId)
+      assert.lengthOf(told, 1)
+      // The thread says so plainly, with the agent's words under it.
+      const said = yield* notices(task.threadId)
+      assert.deepInclude(said.at(-1), { severity: 'error', title: 'Fake codex is signed out.', failure: 'auth_required' })
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('outside a step, stops an agent that stays quiet after it was started afresh, and says so in the thread', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions

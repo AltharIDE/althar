@@ -471,7 +471,8 @@ const wedgedIn = new Set<string>()
  * stop when cancelled either, until it is started afresh. `[lead:loop]` runs a
  * failing \`npm test\` three times in a row, every turn, then waits until
  * cancelled; `[lead:loop-once]` does that once. `[lead:long-once]` stops once
- * at its output limit, and `[lead:refuse]` refuses. `[lead:explore]` reads
+ * at its output limit, `[lead:refuse]` refuses, and `[lead:signed-out]` fails
+ * as its account is signed out. `[lead:explore]` reads
  * a few files, changes none, and works on until cancelled. Otherwise, nothing: the
  * turn goes on as it would.
  */
@@ -488,6 +489,8 @@ const playStall = async (
     return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' } satisfies acp.PromptResponse
   }
   if (session.markers.has('[lead:refuse]')) return { stopReason: 'refusal' }
+  // The coordinator that plans it only passes the marker on.
+  if (session.markers.has('[lead:signed-out]') && !session.coordinator) throw acp.RequestError.authRequired()
   if (once('[lead:long-once]')) return { stopReason: 'max_tokens' }
   if (session.markers.has('[lead:wedge-once]') && !wedgedIn.has(session.cwd)) {
     wedgedIn.add(session.cwd)
@@ -1422,6 +1425,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
+      if (text.includes('[signed-out]')) throw acp.RequestError.authRequired()
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
       // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said

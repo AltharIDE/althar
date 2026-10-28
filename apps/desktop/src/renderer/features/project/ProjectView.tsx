@@ -44,6 +44,7 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
+import type { SettingsWays } from '../settings/open'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
@@ -93,7 +94,9 @@ export const text = {
   queue: (n: number) => (n === 1 ? 'Queued; the coordinator reads it next' : `${n} queued; the coordinator reads them in order`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in, so the coordinator starts on ${instead}.`,
-  needsAgent: 'No agent is signed in. Sign one in from Settings, then come back.',
+  signIn: 'Sign in again',
+  needsAgent: 'No agent is signed in.',
+  signOneIn: 'Sign one in',
   earlier: 'Earlier',
   showEarlier: 'Show',
   loadingEarlier: 'Showing…',
@@ -174,6 +177,7 @@ export function ProjectView({
   automation: openingAutomation = null,
   onAutomationChange,
   visit,
+  ways,
 }: {
   model: ProjectModel
   board: BoardModel
@@ -191,6 +195,8 @@ export function ProjectView({
   onAutomationChange?: (automation: string | null) => void
   /** Counts the times its address asked for it, the screen kept in between: each time, it goes to the view, automation or section asked. */
   visit?: number
+  /** Where in Althar's settings an error is put right: an agent's sign-in, or the agents. */
+  ways?: SettingsWays
 }) {
   const [room, setRoom] = useState<Room>(asked ?? Room.Both)
   const [automation, setAutomation] = useState<string | null>(openingAutomation)
@@ -368,9 +374,14 @@ export function ProjectView({
         <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
       </>
     ) : (session === null || !session.held) && model.agents.length === 0 ? (
-      text.needsAgent
+      <>
+        {text.needsAgent} {ways !== undefined && <LinkButton onClick={ways.agents}>{text.signOneIn}</LinkButton>}
+      </>
     ) : (session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null ? (
-      text.signedOut(suggested.agentName, agentName(chosen.agentId))
+      <>
+        {text.signedOut(suggested.agentName, agentName(chosen.agentId))}{' '}
+        {ways !== undefined && <LinkButton onClick={() => ways.signIn(suggested.agentId)}>{text.signIn}</LinkButton>}
+      </>
     ) : null
 
   const composer = (
@@ -578,7 +589,8 @@ export function ProjectView({
                         )}
                         threadId={coordinator.threadId}
                         session={session}
-                        {...(busy ? {} : { onTryAgain: () => void model.tryAgain() })}
+                        {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                        {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                         card={(card) => <Card card={card} actions={actions} />}
                         draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                         automation={(card, itemId) => (

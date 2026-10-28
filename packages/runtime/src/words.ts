@@ -46,6 +46,9 @@ const hostDenied =
 /** A sentence, with its full stop. */
 const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${words}.`)
 
+/** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
+export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
+
 /** What an agent's own error says, when the runtime can put it in words. */
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
@@ -69,7 +72,7 @@ export const agentSaid = (error: unknown): string | undefined => {
     case 'AgentRequestFailed':
       switch (fieldOf(error, 'failure')) {
         case 'auth_required':
-          return "The agent isn't signed in. Sign in with its own tool, then try again."
+          return signedOutWords
         case 'usage_limit': {
           const until = text(error, 'resetsAt')
           return until === '' ? "The agent's usage limit is reached." : `The agent's usage limit is reached until ${until}.`

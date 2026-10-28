@@ -606,9 +606,9 @@ describe('sessions', () => {
           ['completed', null],
         ],
       )
-      // The thread says why no answer came, in the agent's words.
+      // The thread says plainly that it is signed out, with the agent's own words under it.
       const notice = (yield* threadItems(created.threadId)).find((item) => item.kind === 'notice' && item.content.severity === 'error')
-      assert.deepInclude(notice?.content, { source: 'agent', title: "Fake codex couldn't answer.", failure: 'auth_required' })
+      assert.deepInclude(notice?.content, { source: 'agent', title: 'Fake codex is signed out.', failure: 'auth_required' })
       assert.isNotEmpty(notice?.content.description)
     }).pipe(Effect.provide(runtime())),
   )
