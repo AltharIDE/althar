@@ -23,9 +23,9 @@ export const PAGE_META = {
   '/': {
     path: '/',
     name: 'Althar',
-    title: 'Althar · every coding agent you pay for, in one app',
+    title: 'Althar · an open-source IDE for building with AI agents',
     description:
-      'An open-source desktop app that runs Claude Code, Codex, GitHub Copilot, OpenCode and more together, on the plans you already pay for.',
+      'An open-source IDE for building with AI agents. It runs the ones you already pay for, and keeps going whatever the labs change.',
     image: '/og/home.png',
     index: true,
   },

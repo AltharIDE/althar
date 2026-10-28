@@ -34,6 +34,11 @@
 .cabin .head p:first-child i { background: #ffae6b; box-shadow: 0 0 10px rgba(255, 150, 70, 0.8); }
 .cabin .head p:last-child { color: rgba(255, 248, 240, 0.72); }
 
+/* ---- open source: the claim, and the way to the source under it ---- */
+.source { display: flex; justify-content: center; margin: 30px 0 0; padding: 0 var(--gut); }
+.source a { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 18px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line-3); font-size: 15px; font-weight: 560; color: var(--t-1); text-decoration: none; transition: background var(--fast) var(--ease); }
+.source a:hover { background: var(--hover-paper); }
+
 /* ---- the end: one line and the download, between hairlines, as the systems' band opens the page; the footer's words are the last large ones ---- */
 .end { margin-top: 170px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
 .endRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px 40px; max-width: var(--max); margin: 0 auto; padding: 30px var(--gut); }

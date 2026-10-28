@@ -14,7 +14,8 @@ export const HERO = {
   /** "Building software has never felt so fast.": a line, then its last word, large, forged in the fire as the capsule comes in. */
   title: 'Building software has never felt so',
   last: 'fast.',
-  lead: 'Althar runs Claude Code, Codex, GitHub Copilot, OpenCode and more together, on the plans you already pay for. One plans, one builds, another reviews, and when one runs out the next takes over.',
+  /** The subhead: open source and independence from the labs, in one sentence (the positioning's second and third messages). */
+  lead: 'Althar is an open-source IDE for building with AI agents. It runs the ones you already pay for, and keeps going whatever the labs change.',
   /** The flight deck: its readouts in the window's top corners, and the console under the lead. */
   velocity: 'Velocity',
   altitude: 'Altitude',
