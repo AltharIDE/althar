@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, rmdirSync, rmSync } from 'node:fs'
-import { statfs } from 'node:fs/promises'
+import { lstat, readdir, statfs } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
@@ -139,33 +139,76 @@ const GRAVITY: ReadonlyArray<FolderHeld['why']> = ['uncommitted', 'unreadable', 
 const holdOf = (running: boolean, lost: FolderHeld | null, opened: boolean): FolderHeld | null =>
   running ? { why: 'running', count: null } : (lost ?? (opened ? { why: 'opened', count: null } : null))
 
-/** Lockfiles of package managers that install `node_modules` from a store of their own, by hardlink or clonefile. */
-const STORED = ['bun.lock', 'bun.lockb', 'pnpm-lock.yaml']
+/**
+ * On APFS, what a folder's files hold that no clone shares, in bytes: each
+ * file's private size, by getattrlist (ATTR_CMNEXT_PRIVATESIZE), through the
+ * perl every Mac has. bun installs `node_modules` as clones of its cache:
+ * `du` and Finder count them in full, but removing them frees next to
+ * nothing; what a package built or changed after it was installed, it holds.
+ * A file hardlinked from outside the folder counts nothing; one whose links
+ * are all inside it, once.
+ */
+const PRIVATE = String.raw`
+use strict; use File::Find;
+my $list = pack('SSLLLLL', 5, 0, 0x80000000, 0, 0, 0, 0x8);
+my ($total, %seen) = (0);
+find({ no_chdir => 1, wanted => sub {
+  my @st = lstat $_ or return;
+  my $own = $st[12] * 512;
+  if (-f _) {
+    my $buf = "\0" x 32;
+    $own = unpack('q', substr($buf, 24, 8)) if syscall(220, $_, $list, $buf, 32, 0x21) == 0 && unpack('L', $buf) >= 32;
+    $own = 0 if $st[3] > 1 && ++$seen{"$st[0]:$st[1]"} != $st[3];
+  }
+  $total += $own;
+}}, $ARGV[0]);
+print "$total\n";
+`
 
 /**
- * Whether a checkout's `node_modules` share their blocks with a package
- * manager's store: bun clones its cache's files on macOS and hardlinks them
- * on Linux, pnpm hardlinks them. `du` and Finder count them in full, but
- * removing them frees next to nothing: a worktree `du` puts at 2 GB frees
- * 50 MB, its own files.
+ * What a folder's files hold that nothing outside it shares, in bytes: a file
+ * hardlinked from outside it, as bun and pnpm install `node_modules` on Linux
+ * and Windows, counts nothing; one whose links are all inside it, once. Where
+ * the disk says no blocks, a file's length.
  */
-const sharesInstalls = (path: string) =>
-  STORED.some((lock) => existsSync(join(path, lock))) ||
-  existsSync(join(path, 'node_modules', '.bun')) ||
-  existsSync(join(path, 'node_modules', '.pnpm'))
+export const ownedBytes = async (root: string): Promise<number> => {
+  let total = 0
+  const seen = new Map<string, number>()
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      const path = join(dir, entry.name)
+      const stats = await lstat(path, { bigint: true }).catch(() => null)
+      if (stats === null) continue
+      if (stats.isDirectory()) await walk(path)
+      const own = Number(stats.blocks > 0n ? stats.blocks * 512n : stats.isFile() ? stats.size : 0n)
+      if (stats.nlink > 1n && stats.isFile()) {
+        const key = `${stats.dev}:${stats.ino}`
+        const count = (seen.get(key) ?? 0) + 1
+        seen.set(key, count)
+        if (BigInt(count) !== stats.nlink) continue
+      }
+      total += own
+    }
+  }
+  await walk(root)
+  return total
+}
 
-/**
- * What removing a folder frees, in bytes, as `du` counts it, but for
- * `node_modules` installed from a store, which stays; null where it can't say.
- */
+/** What removing a folder frees, in bytes, by what its files hold that nothing outside it shares; null where it can't say. */
 const sizeOf = (path: string) =>
-  Effect.callback<number | null>((resume) => {
-    const skip = !sharesInstalls(path) ? [] : process.platform === 'darwin' ? ['-I', 'node_modules'] : ['--exclude=node_modules']
-    execFile('du', ['-sk', ...skip, path], { timeout: 120_000 }, (error, stdout) => {
-      const kb = /^(\d+)/.exec(stdout)?.[1]
-      resume(Effect.succeed(error !== null && kb === undefined ? null : kb === undefined ? null : Number(kb) * 1024))
-    })
-  })
+  process.platform !== 'darwin'
+    ? Effect.tryPromise(() => ownedBytes(path)).pipe(Effect.orElseSucceed(() => null))
+    : Effect.callback<number | null>((resume) => {
+        execFile('/usr/bin/perl', ['-e', PRIVATE, path], { timeout: 300_000 }, (error, stdout) => {
+          const bytes = /^(\d+)\s*$/.exec(stdout)?.[1]
+          resume(
+            error === null && bytes !== undefined
+              ? Effect.succeed(Number(bytes))
+              : Effect.tryPromise(() => ownedBytes(path)).pipe(Effect.orElseSucceed(() => null)),
+          )
+        })
+      })
 
 /** The disk a folder is on, in bytes: its size and what is free; null where it can't be read. */
 export const diskOf = (path: string) =>
@@ -543,13 +586,12 @@ export class FolderCleanup extends Context.Service<
        * open them or start running from them: by itself, one held stays; by
        * hand, one something runs from is refused, as is one where more would
        * be lost than the person was told. An idle lead held on it stops
-       * first. What went, its size as measured, null where it couldn't be;
-       * null where nothing did, as when the task went back to work meanwhile;
-       * the refusal, by hand.
+       * first. What went, its size measured just before it went, null where it
+       * couldn't be; null where nothing did, as when the task went back to
+       * work meanwhile; the refusal, by hand.
        */
       const removeTask = ({ candidate, why, days, seen = null }: Chosen, actorId: ActorId) =>
         Effect.gen(function* () {
-          const bytes = facts.get(candidate.taskId)?.bytes ?? (yield* sizeOfAll(candidate))
           const held = (yield* sessions.onTasks).filter((session) => session.taskId === candidate.taskId)
           if (held.some((session) => session.turnRunning || session.background))
             return why === 'hand' ? new TaskRefused({ taskId: candidate.taskId, why: 'folder_in_use' }) : null
@@ -567,6 +609,8 @@ export class FolderCleanup extends Context.Service<
                   return new ChangedSinceSeen({ taskId: now.taskId, what: 'folder' })
               } else if ((yield* runningFrom(now)) || holdOf(false, lost, openedLately(now)) !== null || (yield* unshippedOf(now)))
                 return null
+              // Measured again, as it is now: what it holds may have changed since it was listed.
+              const bytes = yield* sizeOfAll(now)
               yield* removeFolders(now, why === 'hand' && lost?.why === 'unreadable', why, bytes, actorId)
               facts.delete(now.taskId)
               const thread = yield* taskThreadOf(now.taskId)

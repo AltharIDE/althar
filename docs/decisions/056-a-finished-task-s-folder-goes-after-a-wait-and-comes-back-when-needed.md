@@ -98,10 +98,11 @@
       Clean up takes, then, below a hairline, what is held back, each with
       why and its own Remove.
     - **Clean up:** it takes what nothing holds, whatever its wait, and
-      says what it freed: the sizes of what went, as they were measured. A
-      size leaves out `node_modules` installed from bun's or pnpm's store,
-      clones or hardlinks of it that `du` and Finder count in full but that
-      free next to nothing. The disk's free space after is no measure: other
+      says what it freed: the sizes of what went, measured just before each
+      went. A size is what a folder's files hold that nothing outside it
+      shares: on APFS each file's private size, so the clones bun installs
+      `node_modules` as count nothing, though `du` and Finder count them in
+      full; elsewhere a file hardlinked from outside counts nothing. The disk's free space after is no measure: other
       writes move it by as much as a worktree frees.
     - **Nothing in Needs you, and no notifications:** it is housekeeping.
 - **Alternatives considered:**

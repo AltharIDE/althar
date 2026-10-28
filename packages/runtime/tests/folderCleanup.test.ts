@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -9,7 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { attachmentsIn } from '../src/attachments'
 import { bringBack, folderOf, KEPT } from '../src/bringBack'
-import { FolderCleanup, goneWords, sizeWords, waitDays } from '../src/FolderCleanup'
+import { FolderCleanup, goneWords, ownedBytes, sizeWords, waitDays } from '../src/FolderCleanup'
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
@@ -161,26 +161,36 @@ describe('finished tasks’ folders', () => {
     }).pipe(Effect.provide(withCleanup())),
   )
 
-  it.live('measures what removing a folder frees, not the installs it shares with bun’s store, and says it freed that', () =>
+  it.live('measures what removing a folder frees, not installs it shares with a store outside it, and says it freed what went', () =>
     Effect.gen(function* () {
+      const MB = 1024 ** 2
+      const store = realpathSync(mkdtempSync(join(tmpdir(), 'althar-store-')))
+      writeFileSync(join(store, 'cloned.node'), Buffer.alloc(8 * MB, 1))
+      writeFileSync(join(store, 'linked.node'), Buffer.alloc(8 * MB, 2))
       const task = yield* finished('done', 1, 'Add a retry', (root) => {
         writeFileSync(join(root, '.gitignore'), 'node_modules\n')
-        writeFileSync(join(root, 'bun.lock'), '{}\n')
         git(root, 'add', '.')
-        git(root, 'commit', '-q', '-m', 'Install with bun')
+        git(root, 'commit', '-q', '-m', 'Install')
       })
-      // What bun installs, clones or hardlinks of its store: removing them frees next to nothing.
-      mkdirSync(join(task.worktree, 'node_modules', '.bun'), { recursive: true })
-      writeFileSync(join(task.worktree, 'node_modules', '.bun', 'big.node'), Buffer.alloc(8 * 1024 ** 2, 1))
+      // Installs from the store: a clone where the disk has them, a hardlink; and what a package built, which is the folder's own.
+      const modules = join(task.worktree, 'node_modules', 'pkg')
+      mkdirSync(modules, { recursive: true })
+      if (process.platform === 'darwin') execFileSync('cp', ['-c', join(store, 'cloned.node'), join(modules, 'cloned.node')])
+      linkSync(join(store, 'linked.node'), join(modules, 'linked.node'))
+      writeFileSync(join(modules, 'built.node'), Buffer.alloc(8 * MB, 3))
       const listed = yield* measured
       const bytes = listed.folders[0]?.bytes ?? null
       assert.isNotNull(bytes)
-      assert.isAbove(bytes!, 0)
-      assert.isBelow(bytes!, 1024 ** 2)
-      // The disk this runtime reads never moves: what it freed is what was measured of what went.
+      assert.isAbove(bytes!, 8 * MB)
+      assert.isBelow(bytes!, 9 * MB)
+      // Built after it was listed: what it freed is what went, measured as it went.
+      writeFileSync(join(modules, 'later.node'), Buffer.alloc(4 * MB, 4))
       const freed = yield* (yield* FolderCleanup).cleanUp(yield* person)
-      assert.deepStrictEqual(freed, { freed: bytes!, failed: 0 })
+      assert.strictEqual(freed.failed, 0)
+      assert.isAbove(freed.freed, bytes! + 4 * MB - 1)
+      assert.isBelow(freed.freed, bytes! + 5 * MB)
       assert.isFalse(existsSync(task.worktree))
+      rmSync(store, { recursive: true, force: true })
     }).pipe(Effect.provide(withCleanup())),
   )
 
@@ -583,5 +593,20 @@ describe('the words for a folder going', () => {
     assert.strictEqual(sizeWords(300 * 1024), 'under 1 MB')
     assert.strictEqual(sizeWords(0), '0 MB')
     assert.strictEqual(goneWords('hand', 7, 300 * 1024), 'You removed its folder · under 1 MB')
+  })
+
+  it('counts a file hardlinked from outside a folder as nothing, and one linked only inside it once', async () => {
+    const MB = 1024 ** 2
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'althar-owned-')))
+    const folder = join(root, 'folder')
+    mkdirSync(folder)
+    writeFileSync(join(root, 'outside'), Buffer.alloc(2 * MB, 1))
+    linkSync(join(root, 'outside'), join(folder, 'shared'))
+    writeFileSync(join(folder, 'own'), Buffer.alloc(MB, 2))
+    linkSync(join(folder, 'own'), join(folder, 'own-again'))
+    const bytes = await ownedBytes(folder)
+    rmSync(root, { recursive: true, force: true })
+    assert.isAtLeast(bytes, MB)
+    assert.isBelow(bytes, MB + 64 * 1024)
   })
 })
