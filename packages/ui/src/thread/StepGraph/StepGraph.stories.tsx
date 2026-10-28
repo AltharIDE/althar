@@ -192,6 +192,59 @@ export const Keyboard: Story = {
   },
 }
 
+const MANY_ROUNDS: StepGraphRound[] = [
+  ASKED,
+  { id: 'r2', by: 'You followed up', after: '57m later', said: 'Also keep the retry count in the log.' },
+  { id: 'r3', by: 'You followed up', after: '17h later', said: 'Make it three tries, not five.' },
+  { id: 'r4', by: 'From the coordinator', after: '2d later', said: 'The reviewer found a conflict on main.' },
+]
+const roundStep = (id: string, lane: string, round: string, state: GraphNodeState) => step(id, lane, id, state, { round, corner: '3m' })
+const ROUND_STEPS: StepGraphStep[] = [
+  step('implement', 'lead', 'Implement', GraphNodeState.Done, { corner: '55m' }),
+  step('review-1', 'reviewer', 'Review 1', GraphNodeState.Done, { corner: '2m' }),
+  step('settle-1', 'lead', 'Settle', GraphNodeState.Done, { corner: '6m' }),
+  step('review-2', 'reviewer', 'Review 2', GraphNodeState.Done, { corner: '2m' }),
+  step('publish', 'althar', 'Pull request', GraphNodeState.Done, { corner: '9s' }),
+  roundStep('fix-a', 'lead', 'r2', GraphNodeState.Done),
+  roundStep('check-a', 'reviewer', 'r2', GraphNodeState.Done),
+  roundStep('fix-b', 'lead', 'r3', GraphNodeState.Done),
+  roundStep('fix-c', 'lead', 'r4', GraphNodeState.Now),
+]
+
+/** Panned so the first round's start is off to the left: its marker holds at the edge until the next one pushes it out. */
+export const PinnedMeetsNext: Story = {
+  args: { rounds: MANY_ROUNDS, steps: ROUND_STEPS },
+  play: async ({ canvasElement }) => {
+    const canvas = await within(canvasElement).findByRole('region', { name: 'The task’s steps' })
+    canvas.focus()
+    await userEvent.keyboard('0++')
+    await userEvent.keyboard('{ArrowRight}'.repeat(6))
+  },
+}
+
+/** One-card rounds, narrower than their labels: each label is cut with an ellipsis, none overlaps. */
+export const NarrowRounds: Story = {
+  args: {
+    rounds: [
+      ASKED,
+      { id: 'r2', by: 'You followed up', after: '17h later', said: 'One.' },
+      { id: 'r3', by: 'You followed up', after: '17h later', said: 'Two.' },
+      { id: 'r4', by: 'From the coordinator', after: '2d later', said: 'Three.' },
+    ],
+    steps: [
+      roundStep('a', 'lead', 'r1', GraphNodeState.Done),
+      roundStep('b', 'lead', 'r2', GraphNodeState.Done),
+      roundStep('c', 'lead', 'r3', GraphNodeState.Done),
+      roundStep('d', 'lead', 'r4', GraphNodeState.Now),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await within(canvasElement).findByRole('region', { name: 'The task’s steps' })
+    canvas.focus()
+    await userEvent.keyboard('0--')
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States

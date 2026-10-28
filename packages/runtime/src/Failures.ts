@@ -103,7 +103,9 @@ export const keptGoing = <E, R>(where: string, loop: Effect.Effect<never, E, R>,
  * A loop's items that failed, each kept apart for a while (ADR-047): one
  * that failed is tried again `first` after, twice as long after each time it
  * fails again, at most `most`, so the loop doesn't pick it again at once
- * and goes on with the rest meanwhile. One that goes through is forgotten.
+ * and goes on with the rest meanwhile. One that goes through is forgotten,
+ * and so is one not tried again long after its wait: an item the loop no
+ * longer has, which would otherwise stay for as long as Althar runs.
  */
 export const backoff = (first: Duration.Input = Duration.seconds(10), most: Duration.Input = Duration.minutes(10)) => {
   const failed = new Map<string, { readonly times: number; readonly until: number }>()
@@ -117,6 +119,7 @@ export const backoff = (first: Duration.Input = Duration.seconds(10), most: Dura
         contained(where, () => false, agent),
         Effect.flatMap((passed) =>
           Effect.map(Clock.currentTimeMillis, (now) => {
+            for (const [known, { until }] of failed) if (now - until > Duration.toMillis(most)) failed.delete(known)
             if (passed) return void failed.delete(key)
             const times = (failed.get(key)?.times ?? 0) + 1
             const wait = Math.min(Duration.toMillis(first) * 2 ** (times - 1), Duration.toMillis(most))

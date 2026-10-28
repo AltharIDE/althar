@@ -1,11 +1,14 @@
-import { cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
 
 import { loadLocalCatalog } from '../../../packages/skills/src/local'
+import { ADAPTER_PATCH_MARKER, adapterPatchFor, applyAdapterPatch, assertAdapterPatched, PATCHED_FILE } from '../scripts/adapterPatch'
 import { binariesFor, speechPackage } from '../scripts/binaries'
 import { stageSkillsCatalog } from '../scripts/catalog'
 import { entitlementsFor } from '../scripts/entitlements'
@@ -105,5 +108,38 @@ describe('the packaged app', () => {
 
   it('refuses a platform it has no Node for, before fetching anything', async () => {
     await expect(fetchNode(mkdtempSync(join(tmpdir(), 'althar-node-')), 'plan9', 'mips')).rejects.toThrow(/no Node for plan9-mips/)
+  })
+})
+
+describe('the patch to Claude Code’s adapter, in the packaged app', () => {
+  const version = (
+    JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8')) as {
+      readonly dependencies: Record<string, string>
+    }
+  ).dependencies['@agentclientprotocol/claude-agent-acp']
+  const patch = adapterPatchFor(join(import.meta.dirname, '..', '..', '..'), version)
+
+  /** The adapter as npm installs it, unpatched, staged in a repository as apps/desktop/out is. */
+  const stagedInARepository = () => {
+    const repository = mkdtempSync(join(tmpdir(), 'althar-stage-'))
+    execFileSync('git', ['init', '-q'], { cwd: repository })
+    const adapter = join(repository, 'out', 'stage', 'node_modules', '@agentclientprotocol', 'claude-agent-acp')
+    mkdirSync(join(adapter, 'dist'), { recursive: true })
+    const workspace = dirname(createRequire(import.meta.url).resolve('@agentclientprotocol/claude-agent-acp/package.json'))
+    cpSync(join(workspace, PATCHED_FILE), join(adapter, PATCHED_FILE))
+    // The workspace's copy is bun's, patched: undone outside any repository, it is npm's.
+    execFileSync('git', ['apply', '-R', patch], { cwd: adapter, env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(adapter) } })
+    return adapter
+  }
+
+  it('is applied to a copy staged inside a repository, where git apply would skip it and succeed', () => {
+    const adapter = stagedInARepository()
+    expect(() => assertAdapterPatched(adapter)).toThrow(/is not patched/)
+    applyAdapterPatch(adapter, patch)
+    expect(readFileSync(join(adapter, PATCHED_FILE), 'utf8')).toContain(ADAPTER_PATCH_MARKER)
+  })
+
+  it('stops packaging when the adapter has no patch for its version', () => {
+    expect(() => applyAdapterPatch(stagedInARepository(), adapterPatchFor(tmpdir(), '0.0.0'))).toThrow(/no patch for the Claude adapter/)
   })
 })

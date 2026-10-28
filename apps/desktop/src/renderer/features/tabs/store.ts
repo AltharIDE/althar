@@ -88,7 +88,10 @@ const make = (): TabsStore => {
       if (state.kept !== null) keep(next(state.kept))
     },
     visit: (threadId, projectId) => {
-      if (state.threads[threadId] !== projectId) set({ ...state, threads: { ...state.threads, [threadId]: projectId } })
+      if (state.threads[threadId] === projectId) return
+      // The threads visited last: one for every thread ever opened would grow for as long as the window is open.
+      const before = Object.entries(state.threads).filter(([id]) => id !== threadId)
+      set({ ...state, threads: { ...Object.fromEntries(before.slice(1 - THREADS_KEPT)), [threadId]: projectId } })
     },
     view: (projectId, room) => {
       if (state.kept === null) return set({ ...state, pending: { ...state.pending, [projectId]: room } })
@@ -96,6 +99,9 @@ const make = (): TabsStore => {
     },
   }
 }
+
+/** How many visited threads' projects are kept. */
+const THREADS_KEPT = 200
 
 const stores = new WeakMap<Client, TabsStore>()
 

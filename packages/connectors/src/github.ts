@@ -317,6 +317,7 @@ export const searchOf = (path: ReadonlyArray<string>, query: ChangeQuery): strin
     author === undefined || author === '' ? '' : `author:${author.endsWith('[bot]') ? `app/${author.slice(0, -'[bot]'.length)}` : author}`,
     query.reviewRequested === true ? 'review-requested:@me' : '',
     query.draft === undefined ? '' : `draft:${query.draft}`,
+    query.updatedUntil === undefined ? '' : `updated:<=${query.updatedUntil.replace(/\.\d+Z$/, 'Z')}`,
     ...words.map((word) => `"${word}"`),
     words.length === 0 ? '' : 'in:title',
     'sort:updated-desc',
@@ -639,6 +640,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           return pull._tag === 'Some' ? [listedOf(pull.value)] : []
         })
         const list: ChangeList = { changes, more: search.issueCount > changes.length }
+        // A search asked a minute ago or more is asked again, so it goes, rather than stay for each cursor or query once asked.
+        for (const [asked, listing] of listings) if (now - listing.at >= LISTING_KEPT_MS) listings.delete(asked)
         listings.set(key, { at: now, list })
         return list
       }),

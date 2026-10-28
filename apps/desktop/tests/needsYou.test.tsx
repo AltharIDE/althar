@@ -187,7 +187,7 @@ describe('what needs the person', () => {
     expect(line('Accept the retry').getByRole('button', { name: /^Accept and merge/ })).toBeTruthy()
     expect(line('Fix the failing checks').getByText(/test failed/)).toBeTruthy()
     expect(line('Fix the failing checks').getByRole('button', { name: 'Ask the lead to fix it' })).toBeTruthy()
-    expect(line('Push the last commits').getByText(/2 commits not on the/)).toBeTruthy()
+    expect(line('Push the last commits').getByText(/checks passed/)).toBeTruthy()
     expect(line('Push the last commits').getByRole('button', { name: /^Push 2 commits/ })).toBeTruthy()
     expect(line('Merged, then more').getByText('Ready for a new pull request')).toBeTruthy()
     expect(line('Merged, then more').getByText('3 commits in no pull request · +40 −2')).toBeTruthy()

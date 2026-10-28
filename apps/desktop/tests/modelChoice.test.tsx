@@ -23,7 +23,7 @@ const show = (props: Partial<ModelChoiceProps> = {}) => {
       agents={offered}
       value={{ agentId: 'claude-code', model: 'opus', effort: 'high' }}
       onChange={onChange}
-      handover={{ note: (agent) => `hands it to ${agent}`, ask: (to, from) => `${to} takes over from ${from}, stopping its turn.` }}
+      handover={{ ask: (to, from) => `${to} takes over from ${from}, stopping its turn.` }}
       {...props}
     />,
     fakeClient().client,

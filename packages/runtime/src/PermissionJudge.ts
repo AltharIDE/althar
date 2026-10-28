@@ -81,7 +81,12 @@ export class PermissionJudge extends Context.Service<
             const entry = yield* agents.get(choice.agentId)
             const isolation = entry.definition.permissionJudge
             if (isolation === undefined) return ask('This coordinator’s agent cannot judge without tools. Please decide this request.')
-            const account = yield* limits.pick({ agentId, projectId: input.projectId, threadId: choice.threadId })
+            const account = yield* limits.pick({
+              agentId,
+              projectId: input.projectId,
+              threadId: choice.threadId,
+              ...(choice.model === null ? {} : { model: choice.model }),
+            })
             accountId = account.id
             if ((yield* signIns.account(account)).status === 'signed_out' || Option.isSome(yield* limits.outAccount(account.id)))
               return ask('The coordinator’s account is unavailable. Please decide this request.')

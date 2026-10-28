@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { type CSSProperties, useState } from 'react'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { CALLS, NEXT, READY, RUNNING, SETTLED } from '../../fixtures/board'
 import {
@@ -19,21 +19,34 @@ import { AcceptCard } from '../AcceptCard/AcceptCard'
 import { BoardCard } from '../BoardCard/BoardCard'
 import { CallCard } from '../CallCard/CallCard'
 import { KeptRow } from '../KeptRow/KeptRow'
+import { NextLine } from '../NextLine/NextLine'
 import { NextRow } from '../NextRow/NextRow'
 import { SettledRow } from '../SettledRow/SettledRow'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { WorkCard } from '../WorkCard/WorkCard'
-import { Board, BoardColumn, type BoardFolds, BoardList, boardText } from './Board'
+import { Board, BoardColumn, BoardDivider, type BoardFolds, BoardList, boardText } from './Board'
 
 /* Meridian's board, with the one you open ringed, as it is while the dock shows it; with lanes collapsed where the person did. */
-function Meridian({ empty = false, defaultFolds }: { empty?: boolean; defaultFolds?: BoardFolds }) {
+function Meridian({
+  empty = false,
+  defaultFolds,
+  onPointerLane,
+}: {
+  empty?: boolean
+  defaultFolds?: BoardFolds
+  onPointerLane?: (lane: BoardLane | null) => void
+}) {
   const [open, setOpen] = useState<string | null>(null)
   const next = empty ? [] : NEXT
   const running = empty ? [] : RUNNING
   const calls = empty ? [] : CALLS
   const settled = empty ? [] : SETTLED
   return (
-    <Board label="Meridian’s work" {...(defaultFolds === undefined ? {} : { defaultFolds })}>
+    <Board
+      label="Meridian’s work"
+      {...(defaultFolds === undefined ? {} : { defaultFolds })}
+      {...(onPointerLane === undefined ? {} : { onPointerLane })}
+    >
       <BoardColumn lane={BoardLane.Next} count={next.length}>
         <BoardList>
           {next.map((x, i) => (
@@ -65,6 +78,118 @@ function Meridian({ empty = false, defaultFolds }: { empty?: boolean; defaultFol
 
 /* A row names its task by its title alone, as the desktop's board does. */
 const UNNAMED = { task: () => '' }
+
+const BUSY = '6 of 6 agents busy on this Mac'
+
+/* The line on a busy machine: new work, in the person's order. */
+const LINE = [
+  { id: 'l1', title: 'Shorten long commands in running pills' },
+  { id: 'l2', title: 'Review ninemate’s pull request #88', kind: 'Review' },
+]
+
+const inLine = (place: number) => (place === 3 ? '3rd in line' : `${place}th in line`)
+
+/*
+ * Up next on a busy machine, in the order its work goes on: first what is
+ * under way and continues, which isn't dragged; then the line, the person's
+ * to order; then what is paused, and a plan on its countdown. Running holds
+ * only what an agent works on now.
+ */
+function BusyUpNext() {
+  const [line, setLine] = useState(LINE)
+  const continuing = 2
+  return (
+    <Board label="Meridian’s work">
+      <BoardColumn lane={BoardLane.Next} count={continuing + line.length + 2}>
+        <BoardList>
+          <NextRow
+            place={1}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            continues="Follow-up"
+            title="Plan usage: every agent, steer work, and prototypes"
+            wait={Wait.Workers}
+            reason={BUSY}
+            onOpen={() => undefined}
+          />
+          <NextRow
+            place={2}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            continues="Implement"
+            title="Fix the failing CI"
+            wait={Wait.Workers}
+            reason={BUSY}
+            onOpen={() => undefined}
+          />
+        </BoardList>
+        <BoardDivider end="Drag to change the order">Starts when an agent is free</BoardDivider>
+        <NextLine
+          rows={line}
+          render={(id, place) => {
+            const row = line.find((one) => one.id === id)
+            return (
+              <NextRow
+                place={continuing + place}
+                task=""
+                text={UNNAMED}
+                {...(row?.kind === undefined ? {} : { kind: row.kind })}
+                title={row?.title ?? ''}
+                wait={Wait.Workers}
+                reason={inLine(continuing + place)}
+                onOpen={() => undefined}
+              />
+            )
+          }}
+          onMove={(id, to) =>
+            setLine((now) => {
+              const it = now.find((one) => one.id === id)
+              if (it === undefined) return now
+              const others = now.filter((one) => one !== it)
+              return [...others.slice(0, to), it, ...others.slice(to)]
+            })
+          }
+        />
+        <BoardDivider>Paused</BoardDivider>
+        <BoardList>
+          <NextRow
+            place={5}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            continues="Review"
+            title="Stop the page jumping after answering a question"
+            wait={Wait.Workers}
+            reason="Codex is out of usage until 13:40"
+            onOpen={() => undefined}
+          />
+        </BoardList>
+        <BoardDivider>Planned</BoardDivider>
+        <BoardList>
+          <NextRow
+            place={6}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            title="Add a retry"
+            wait={Wait.Workers}
+            reason="Starts in 20s"
+            onOpen={() => undefined}
+          />
+        </BoardList>
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Running} count={2}>
+        {[CHANGE_RUNNING, CHANGE_RUNNING_PR].map((card) => (
+          <BoardCard key={card.title} {...card} onOpen={() => undefined} />
+        ))}
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Yours} count={0} />
+      <BoardColumn lane={BoardLane.Settled} count={0} />
+    </Board>
+  )
+}
 
 /* The same board, every card one button with nothing to press, by its task's kind: an afternoon's mix. */
 function Kinds() {
@@ -229,6 +354,36 @@ export const ByKind: Story = {
     // Each card is one button, its title: nothing else on the board's cards is pressed.
     for (const article of c.getAllByRole('article')) await expect(within(article).getAllByRole('button')).toHaveLength(1)
     await expect(c.getByText('Ready to accept')).toBeInTheDocument()
+  },
+}
+
+/**
+ * Up next on a busy machine: what continues first, its rows with no grip,
+ * then the line, which the person drags, then what is paused, and a plan.
+ */
+export const UpNextOnABusyMachine: Story = {
+  render: () => <BusyUpNext />,
+  play: async ({ canvasElement }) => {
+    const next = within(within(canvasElement).getByRole('region', { name: 'Up next' }))
+    await expect(next.getByText('Continues · Follow-up')).toBeInTheDocument()
+    await expect(next.getByText('Continues · Implement')).toBeInTheDocument()
+    await expect(next.getByText('Continues · Review')).toBeInTheDocument()
+    // Only the line's rows have a grip: what continues keeps its order.
+    await expect(next.getAllByRole('button', { name: /^Move .* in the line$/ })).toHaveLength(2)
+    await expect(next.queryByRole('button', { name: /^Move Fix the failing CI/ })).not.toBeInTheDocument()
+    await expect(next.getByText('3rd in line')).toBeInTheDocument()
+  },
+}
+
+/** The board says which lane the pointer is in, so a consumer can keep a card from moving under it. */
+export const PointingAtALane: Story = {
+  args: { onPointerLane: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.hover(within(c.getByRole('region', { name: 'Up next' })).getByRole('heading'))
+    await expect(args.onPointerLane).toHaveBeenLastCalledWith(BoardLane.Next)
+    await userEvent.hover(within(c.getByRole('region', { name: 'Running' })).getByRole('heading'))
+    await expect(args.onPointerLane).toHaveBeenLastCalledWith(BoardLane.Running)
   },
 }
 

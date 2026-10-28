@@ -11,6 +11,8 @@ import type { Allowed, PageWindow } from './screenshots'
  */
 
 let shots: Session | undefined
+/* Windows drawing a shot now: once none is, what the pages kept goes, so no page's storage is kept from one shot to the next. */
+let drawing = 0
 const sessionOf = () => {
   if (shots !== undefined) return shots
   const made = session.fromPartition('althar-screenshots', { cache: false })
@@ -57,6 +59,8 @@ export const pageWindow = (width: number, height: number, allowed: Allowed): Pag
   }
   window.webContents.on('will-frame-navigate', (event) => hold(event, event.url))
   window.webContents.on('will-redirect', (event) => hold(event, event.url))
+  drawing += 1
+  let closed = false
   return {
     load: (url) => Promise.race([window.loadURL(url), refused]),
     run: (script) => Promise.race([window.webContents.executeJavaScript(script, true), refused]),
@@ -66,6 +70,11 @@ export const pageWindow = (width: number, height: number, allowed: Allowed): Pag
     strayed: () => strayed,
     close: () => {
       if (!window.isDestroyed()) window.destroy()
+      if (closed) return
+      closed = true
+      drawing -= 1
+      // Every localhost page shot would otherwise keep its cookies, storage and service workers for as long as Althar runs.
+      if (drawing === 0) void shots?.clearStorageData().catch(() => undefined)
     },
   }
 }

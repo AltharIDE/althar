@@ -17,8 +17,8 @@ import { PermissionCall } from '../task/PermissionCall'
 import { StuckCall } from '../task/StuckCall'
 import { text as boardText, type DockTarget, trackOf } from './BoardView'
 import s from './Board.module.css'
-import { startsWhenFree } from './lanes'
-import type { BoardModel } from './useBoard'
+import { startsWhenFree, waitsUpNext } from './lanes'
+import { type BoardModel, headVersion } from './useBoard'
 
 /*
  * The dock beside the board: what you opened from it, to answer or accept
@@ -51,7 +51,7 @@ export const text = {
 const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
   const { steps, at } = trackOf(task)
   const finished = task.phase === 'ready' || task.phase === 'settled'
-  // A plan that hasn't started has all its steps to come.
+  // A plan that hasn't started has all its steps to come; one under way that waits to go on still has the one it is on.
   const waiting = task.phase === 'planned' || task.phase === 'held' || startsWhenFree(task)
   return steps.map((label, index) => ({
     label,
@@ -60,12 +60,12 @@ const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
 }
 
 /**
- * A task's head as the board stood (`version`): its files, for accepting.
+ * A task's head as the board stood (`headVersion`): its files, for accepting.
  * Read ahead with the board (`useBoard`), so the dock opens with it; until a
  * newer one is read, the last one shows, or the thread as the window last
  * read it.
  */
-export const useHead = (threadId: string | null, version: number) => {
+export const useHead = (threadId: string | null, version: string) => {
   const { client, cache } = useServices()
   const read = useQuery({
     ...reads(client).head(threadId ?? '', version),
@@ -110,7 +110,10 @@ export function DockView({
   const board = model.board
   const call = target.kind === 'call' ? board?.calls.find((candidate) => candidate.id === target.id) : undefined
   const task = target.kind === 'task' ? board?.tasks.find((candidate) => candidate.taskId === target.id) : undefined
-  const head = useHead(task?.phase === 'ready' && task.change?.state === 'open' ? task.threadId : null, board?.cursor ?? 0)
+  const head = useHead(
+    task?.phase === 'ready' && task.change?.state === 'open' ? task.threadId : null,
+    board === null || task === undefined ? '' : headVersion(board, task),
+  )
   useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
@@ -206,7 +209,7 @@ export function DockView({
         ? boardText.startsIn(Math.ceil((new Date(task.plan.startsAt).getTime() - new Date(now).getTime()) / 1000))
         : null
   return (
-    <Dock label={label} name={startsWhenFree(task) ? text.phase.planned : text.phase[task.phase]} sub={sub} onClose={onClose}>
+    <Dock label={label} name={waitsUpNext(task) ? text.phase.planned : text.phase[task.phase]} sub={sub} onClose={onClose}>
       <WorkPeek
         title={task.title}
         {...(waiting !== null
@@ -214,7 +217,7 @@ export function DockView({
           : task.queued !== null
             ? { note: queuedWords(task.queued) }
             : task.waits !== null
-              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until), task.step) }
+              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until), task.step, task.waits.left) }
               : task.reconnects != null
                 ? { note: reconnectsWords(task.reconnects, clock) }
                 : task.summary === null
@@ -225,11 +228,13 @@ export function DockView({
             ? TaskStatus.Yours
             : task.queued !== null
               ? TaskStatus.Queued
-              : task.phase === 'stopped'
-                ? TaskStatus.Stopped
-                : task.phase === 'running'
-                  ? TaskStatus.Running
-                  : TaskStatus.Done
+              : task.waits !== null || task.reconnects != null
+                ? TaskStatus.Paused
+                : task.phase === 'stopped'
+                  ? TaskStatus.Stopped
+                  : task.phase === 'running'
+                    ? TaskStatus.Running
+                    : TaskStatus.Done
         }
         steps={stepsOf(task)}
         lead={lead}

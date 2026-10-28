@@ -415,6 +415,35 @@ describe('the API', () => {
         assert.deepStrictEqual(usage, { _tag: 'Context', threadId: task.threadId, used: 1200, size: 200_000 })
         const full = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (value) => value.session?.context != null)
         assert.deepStrictEqual(full.session?.context, { used: 1200, size: 200_000 })
+        // The plan windows the agent reports with its usage reach the account's usage as the window watches, and each model's room.
+        const watched = yield* Effect.forkChild(
+          Stream.runCollect(
+            Stream.take(
+              Stream.filter(
+                client.Watch({}),
+                (event) => event._tag === 'PlanUsage' && event.usage.accounts.some((account) => account.windows.length > 0),
+              ),
+              1,
+            ),
+          ),
+        )
+        yield* Effect.sleep('50 millis')
+        yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.planUsage, disposition: 'after_current' })
+        const [told] = (yield* Fiber.join(watched)) as ReadonlyArray<WatchEvent>
+        assert.strictEqual(told?._tag, 'PlanUsage')
+        const plan = yield* client.GetPlanUsage({})
+        const windows = plan.accounts.find((account) => account.agentId === 'codex' && account.windows.length > 0)?.windows
+        assert.deepStrictEqual(
+          windows?.map((window) => [window.kind, window.usedPercent]),
+          [
+            ['five_hour', 82],
+            ['weekly', 40],
+          ],
+        )
+        // The account work on a Codex model would start on has 18% of its five hours left, as the pickers show it.
+        const rooms = (yield* client.GetModelRooms({})).filter((room) => room.agentId === 'codex')
+        assert.isAbove(rooms.length, 0)
+        for (const room of rooms) assert.deepStrictEqual([room.kind, room.leftPercent, room.several], ['five_hour', 18, false])
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
         assert.isNull((yield* client.GetThread({ threadId: task.threadId })).session)
@@ -2596,6 +2625,11 @@ describe('words', () => {
     )
     assert.strictEqual(summarize(Cause.fail(unstarted(''))), '')
     assert.strictEqual(summarize(Cause.empty), '')
+    // A host's refusal is said as the person reads it, not as the error is named.
+    assert.strictEqual(
+      summarize(Cause.fail(new ConnectorFailed({ product: 'github', reason: 'unauthorized', message: 'Bad credentials' }))),
+      "GitHub no longer takes Althar's sign-in. Sign in to it again.",
+    )
     // A command the sandbox could not take out to the device says what to put right, not that it is missing.
     assert.include(
       agentSaid(
@@ -2663,7 +2697,7 @@ describe('thread items', () => {
       agentId: 'codex',
       createdAt: '2026-09-29T12:00:00.000Z',
       kind: 'user_message',
-      content: { text: 'Now', links: [], pictures: [] },
+      content: { text: 'Now', links: [], pictures: [], files: [] },
       input: { state: 'queued', interrupting: true },
     })
     const tool = itemOf(

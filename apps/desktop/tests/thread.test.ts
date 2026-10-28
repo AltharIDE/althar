@@ -15,13 +15,30 @@ import {
   verbFor,
   verbs,
 } from '../src/renderer/shared/thread'
-import { sending } from '../src/renderer/shared/items'
+import { sending, settled } from '../src/renderer/shared/items'
 import { card, items, NOW } from './fixtures'
 
 const at = () => 'just now'
 
 /** A thread's items, with its agent idle, in the fixtures' worktree. */
 const source = (thread: ReadonlyArray<ThreadItem>, turnRunning = false) => ({ items: thread, turnRunning, worktree: '/w/meridian' })
+
+describe('an automation’s card in a thread', () => {
+  it('stands as a block of its own, between turns, by its item', () => {
+    const card = items.automation({}, 'ia1')
+    const blocks = blocksOf(source([items.says('Here it is.'), card, items.says('Turn it on when you like.')]), new Map(), at)
+    expect(blocks.map((block) => block.kind)).toEqual(['turn', 'automation', 'turn'])
+    expect(blocks[1]).toMatchObject({ kind: 'automation', id: 'ia1', automation: { automationId: 'auto1', state: 'proposed' } })
+  })
+
+  it('is settled once deleted or its ask answered, and not while it stands for an automation that may still change', () => {
+    expect(settled(items.automation())).toBe(false)
+    expect(settled(items.automation({ state: 'on' }))).toBe(false)
+    expect(settled(items.automation({ ask: { what: 'run', done: false } }))).toBe(false)
+    expect(settled(items.automation({ ask: { what: 'run', done: true } }))).toBe(true)
+    expect(settled(items.automation({ state: 'deleted' }))).toBe(true)
+  })
+})
 
 describe('a thread as blocks', () => {
   it('groups what one agent does in a row into one turn, and marks changes of scene', () => {

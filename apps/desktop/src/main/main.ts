@@ -9,14 +9,16 @@ import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } 
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
 import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { keepingAwake } from './awake'
+import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
+import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
 import { setAppMenu } from './menu'
-import { dockCount, soundOf, tells } from './notify'
+import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
@@ -61,7 +63,15 @@ import {
 } from 'electron'
 
 import { appMenu, PAGE, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable, passwordStore, sealWithPortal, sealsWithPortal, withPortalFeature } from './keyring'
+import {
+  keyringIsSafe,
+  keyringUnavailable,
+  passwordStore,
+  sealFailure,
+  sealWithPortal,
+  sealsWithPortal,
+  withPortalFeature,
+} from './keyring'
 import { skillsCatalog } from './skillsCatalog'
 
 /*
@@ -235,7 +245,7 @@ interface RuntimeMessage {
 }
 
 /* Notifications the person may still click: kept, so they aren't collected before then. */
-const shown = new Set<Notification>()
+const shown = notificationsShown<Notification>()
 
 /* The Mac held awake while work runs, by the app-suspension blocker: the display may still sleep. */
 const awake = keepingAwake({
@@ -435,12 +445,12 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
   if (!tells(event.kind, preferences) || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
   const { threadId } = event
   const notification = new Notification({ title: event.title, body: event.body, ...soundOf(preferences) })
-  shown.add(notification)
   notification.on('click', () => {
-    shown.delete(notification)
+    shown.drop(threadId, notification)
     openThread(threadId)
   })
-  notification.on('close', () => shown.delete(notification))
+  notification.on('close', () => shown.drop(threadId, notification))
+  shown.add(threadId, notification)
   notification.show()
 }
 
@@ -468,7 +478,7 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
           : safeStorage.decryptString(Buffer.from(value, 'base64')),
     })
   } catch (error) {
-    child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })
+    child.postMessage({ type: 'sealed', requestId, ...sealFailure(message.type === 'seal' ? 'seal' : 'open', error) })
   }
 }
 
@@ -728,6 +738,26 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
+// A file or folder added to a message, by the path the preload read from the drop or the picker: measured, and granted where a message may carry it.
+ipcMain.handle('althar:attach', async (_event, path: unknown) => {
+  if (typeof path !== 'string' || path === '') return null
+  return attachedOf(path, allowFolder)
+})
+
+// The files copied in the file manager and pasted into a message, as the clipboard names them: each as one dropped.
+ipcMain.handle('althar:attach-pasted', async () => {
+  const paths = await clipboardPaths(async (format, raw) => {
+    const type = raw ? rawFormat(format) : format
+    for (const item of await clipboard.read()) {
+      if (!item.types.includes(type)) continue
+      const got = await item.getType(type)
+      if (got instanceof Blob) return Buffer.from(await got.arrayBuffer())
+    }
+    return null
+  }, process.platform)
+  return Promise.all(paths.map((path) => pastedOf(path, allowFolder)))
+})
+
 /* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */
 const foundHere = foundIds()
 
@@ -767,6 +797,14 @@ ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
   await writeAppIcon(locations().profile, icon)
 })
 
+/*
+ * Althar opening at login, in the background, as the person's switch says (loginItem.ts): told to the system as it
+ * changes, only from a packaged app, since a development build would open Electron itself at every login.
+ */
+const startAtLogin = (on: boolean) => {
+  if (app.isPackaged && opensAtLogin(process.platform)) app.setLoginItemSettings(loginItemOf(on, process.platform))
+}
+
 // The app's own preferences, as kept; and a change to one, kept, then acted on at once. Anything a key can't hold fails, and the window says so.
 ipcMain.handle('althar:preferences', async () => {
   await preferencesRead
@@ -778,6 +816,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   // Merged into the preferences as they stand once it is kept, so changes made together each stay.
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
+  if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
   awake.wants(preferences)
   if (key === 'appearance') applyAppearance()
   app.setBadgeCount(dockCount(waiting, preferences))
@@ -871,6 +910,8 @@ void ready.then(() => {
     const menu = appMenu(process.platform, !app.isPackaged)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
+  // Opened at login, it starts in the background, with no window: the runtime and its automations run, and a window opens as the person asks.
+  const background = app.isPackaged && openedAtLogin(process.platform, process.argv, app.getLoginItemSettings().wasOpenedAtLogin)
   // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
   // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
   void preferencesRead
@@ -879,7 +920,7 @@ void ready.then(() => {
       process.platform === 'linux' && preferences.appearance === 'system' ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT) : undefined,
     )
     .then(() => {
-      if (windows.size === 0) openWindow()
+      if (!background && windows.size === 0) openWindow()
     })
   startReports({
     profile: () => locations().profile,

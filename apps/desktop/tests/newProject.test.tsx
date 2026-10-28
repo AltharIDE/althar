@@ -96,7 +96,6 @@ describe('a new project', () => {
       await waitFor(() => expect(document.activeElement).toBe(name))
       // Unnamed, no mark yet, and what was found is offered as it is.
       expect(await screen.findByRole('heading', { name: 'On this Mac' })).toBeTruthy()
-      expect(screen.getByText('Closing the tab makes nothing.')).toBeTruthy()
       await userEvent.type(name, 'Northwind')
       expect(screen.getByRole('heading', { name: 'On this Mac, named like Northwind' })).toBeTruthy()
       expect(screen.getByRole('button', { name: /Create Northwind/ })).toBeTruthy()
@@ -108,7 +107,7 @@ describe('a new project', () => {
       expect(within(folders()).getByText('~/code/northwind/app')).toBeTruthy()
       // Added, it isn't offered again; it is what the project is made of.
       expect(screen.queryByRole('button', { name: 'Add app' })).toBeNull()
-      expect(screen.getByText('1 repository')).toBeTruthy()
+      expect(screen.getByText('Made of')).toBeTruthy()
 
       // The rest, behind a link: one in another project says so in place of Add.
       await userEvent.click(screen.getByRole('button', { name: '2 more on this Mac' }))
@@ -170,7 +169,7 @@ describe('a new project', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
       // Ops comes from both folders, and is added once.
       await waitFor(() => expect(within(folders()).getAllByRole('listitem')).toHaveLength(2))
-      expect(screen.getByText('2 repositories')).toBeTruthy()
+      expect(screen.getByText('Made of')).toBeTruthy()
       // The swatch shown is the runtime's pick, beside meridian's teal, until another is chosen.
       expect(screen.getByRole('radio', { name: 'Teal, meridian’s' })).toBeTruthy()
       const pick = inkFor(draft.id, ['teal'])
@@ -217,7 +216,7 @@ describe('a new project', () => {
       expect(await screen.findByText('That folder isn’t there any more.')).toBeTruthy()
       // Nothing chosen adds nothing.
       await userEvent.click(choose)
-      expect(screen.getByText('No folders yet.')).toBeTruthy()
+      expect(screen.queryByRole('list', { name: 'Its folders' })).toBeNull()
 
       const page = view.container.querySelector('section') as Element
       fireEvent.drop(page, { dataTransfer: { types: ['Files'], files: [new File([], 'notes.txt')] } })
@@ -241,7 +240,6 @@ describe('a new project', () => {
     const page = view.container.querySelector('section') as Element
     const folder = new File([], 'ops')
     fireEvent.dragEnter(page, { dataTransfer: { types: ['Files'], files: [folder] } })
-    expect(screen.getByText('Let go to add them.')).toBeTruthy()
     fireEvent.drop(page, { dataTransfer: { types: ['Files'], files: [folder] } })
     await waitFor(() => expect(within(folders()).getByText('ops')).toBeTruthy())
     expect(host.grantDropped).toHaveBeenCalledWith(folder)
@@ -252,7 +250,9 @@ describe('a new project', () => {
     const readFolder = vi.fn(() => new Promise<FolderReading>((resolve) => (finish = resolve)))
     const { drafts, draft, onClose } = opened({ readFolder }, { pickFolders: vi.fn(async () => ['grant_ops']) })
     await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
-    expect(await screen.findByText('Reading it. Nothing in the folder changes.')).toBeTruthy()
+    expect((await within(await screen.findByRole('list', { name: 'Its folders' })).findByRole('listitem')).getAttribute('aria-busy')).toBe(
+      'true',
+    )
     // Create waits while a folder is read.
     expect(screen.getByRole('button', { name: /Create project/ }).getAttribute('aria-busy')).toBe('true')
     await userEvent.keyboard('{Escape}')
@@ -296,9 +296,7 @@ describe('a new project', () => {
       drafts.change(draft.id, (now) => ({
         ...now,
         name: 'Northwind',
-        folders: [
-          { path: OPS.path, grant: 'grant_ops', name: 'ops', where: '~/ops', branch: null, remote: null, project: null, found: null },
-        ],
+        folders: [{ path: OPS.path, grant: 'grant_ops', name: 'ops', where: '~/ops', remote: null, project: null, found: null }],
       })),
     )
     await userEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))

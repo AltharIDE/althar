@@ -3,6 +3,7 @@ import { Layer } from 'effect'
 
 import { Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
+import { Automations } from './Automations'
 import { AccountSignIns } from './AccountSignIns'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
@@ -17,6 +18,7 @@ import { Issues } from './Issues'
 import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
+import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
 import { PermissionJudge } from './PermissionJudge'
@@ -84,7 +86,7 @@ export const layer = (options: RuntimeLayerOptions) => {
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
   const connected = Connectivity.layer.pipe(Layer.provideMerge(base))
-  const able = Layer.mergeAll(Limits.layer, Models.layer).pipe(
+  const able = Layer.mergeAll(Limits.layer, Models.layer, PlanUsage.layer).pipe(
     Layer.provideMerge(
       SignIns.layer.pipe(Layer.provideMerge(Accounts.layer.pipe(Layer.provideMerge(Policies.layer.pipe(Layer.provideMerge(connected)))))),
     ),
@@ -109,8 +111,10 @@ export const layer = (options: RuntimeLayerOptions) => {
   )
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
   const signing = AccountSignIns.layer.pipe(Layer.provideMerge(work))
+  // Work that starts by itself on a schedule, as tasks and reviews like any other (docs/plans/automations.md).
+  const automating = Automations.layer.pipe(Layer.provideMerge(signing))
   // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
-  return Layer.mergeAll(Coordinator.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(signing))
+  return Layer.mergeAll(Coordinator.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(automating))
 }
 
 export { envelope } from './envelope'

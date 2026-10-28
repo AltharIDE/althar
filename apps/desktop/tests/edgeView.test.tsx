@@ -313,7 +313,12 @@ describe('the edge’s reads', () => {
     vi.useFakeTimers()
     try {
       const listeners: Array<(event: WatchEvent) => void> = []
-      const feed: Feed = { listen: (listener) => (listeners.push(listener), () => {}), rewatched: () => () => {}, stop: () => {} }
+      const feed: Feed = {
+        listen: (listener) => (listeners.push(listener), () => {}),
+        rewatched: () => () => {},
+        remembered: () => 0,
+        stop: () => {},
+      }
       const cache = new QueryClient()
       const invalidate = vi.spyOn(cache, 'invalidateQueries')
       followEdge(feed, cache)
