@@ -24,6 +24,19 @@ import { recorded } from './recorded'
  * says so of (`saw files: notes.log (linked, 2 KB): first line …`).
  */
 
+/** The markers in the words of the files a prompt links, after a blank line; nothing where there are none. */
+const cuesIn = (prompt: ReadonlyArray<acp.ContentBlock>): string => {
+  const cues = prompt.flatMap((block) => {
+    if (block.type !== 'resource_link') return []
+    try {
+      return readFileSync(fileURLToPath(block.uri), 'utf8').match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []
+    } catch {
+      return []
+    }
+  })
+  return cues.length === 0 ? '' : `\n\n${cues.join(' ')}`
+}
+
 /** What it makes of a file sent in a prompt: a linked one opened by its path, its first line or a folder's files; one embedded, its words. */
 const sawFile = (block: acp.ContentBlock): string => {
   if (block.type === 'resource') {
@@ -533,7 +546,8 @@ const playStall = async (
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
- * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
+ * until it is stopped, for five seconds at most, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its
+ * second round;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part.
@@ -769,10 +783,11 @@ const playRole = async (
             { severity: 'nit', file: 'README.md', claim: 'A typo.' },
           ],
         })
-      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found.
+      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found: by its absolute
+      // path, a Windows one (`D:\…`) too.
       const looked = session.markers.has('[review:evidence]')
-        ? ` Read: ${[...text.matchAll(/^- [^\n]*: (\/[^\n]+)$/gm)]
-            .map(([, path = '']) => `${path.split('/').at(-1) ?? ''} (${statSync(path).size} bytes)`)
+        ? ` Read: ${[...text.matchAll(/^- [^\n]*: ((?:\/|[A-Za-z]:\\)[^\n]+)$/gm)]
+            .map(([, path = '']) => `${path.split(/[\\/]/).at(-1) ?? ''} (${statSync(path).size} bytes)`)
             .join(', ')}.`
         : ''
       if (text.includes('[review:findings]') && !text.startsWith('Round '))
@@ -1353,7 +1368,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
       const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
-      const text = filled === null ? prompted : prompted.slice(0, filled.index)
+      // The markers in a linked file's words play as a message's do, for what the person sends with no words.
+      const text = `${filled === null ? prompted : prompted.slice(0, filled.index)}${cuesIn(params.prompt)}`
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(

@@ -212,6 +212,18 @@ export const ReadyFactsOnOneLine: Story = {
 }
 /** A conflict its lead couldn't resolve: warm, with a glyph, and why under the title. */
 export const MergeConflict: Story = { args: CHANGE_CONFLICT }
+/** Files by name, three at most; a long unbroken word still wraps inside the card at its narrowest. */
+export const MergeConflictLongNote: Story = {
+  args: {
+    ...CHANGE_CONFLICT,
+    why: 'The lead couldn’t resolve the conflict with main in accounts.test.ts, heldKept.test.ts, packages/runtime/tests/aVeryLongFileNameThatHasNoPlaceToBreakAtAll.test.ts and 3 more. origin/main isn’t merged into the branch.',
+  },
+  decorators: [(Story) => <div style={{ width: 232 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const why = canvasElement.querySelector('[class*="why"]') as HTMLElement
+    await expect(why.scrollWidth).toBeLessThanOrEqual(why.clientWidth)
+  },
+}
 /**
  * A conflict Althar didn't ask its lead to resolve, though its rules say to:
  * why, in one line, and Resolve now, which asks the lead anyway (ADR-030).

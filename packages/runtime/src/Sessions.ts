@@ -72,7 +72,7 @@ import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
-import { filesForTurn, type InputFile, keptId } from './sentFiles'
+import { filesForTurn, type InputFile, keptId, requestFilesForTurn } from './sentFiles'
 import type { InputImage } from './sentImages'
 import { alsoPlanned, siblingsOf } from './siblings'
 import { evidenceForReview } from './evidence'
@@ -517,6 +517,37 @@ export const promptFor = (
   const said = news === null ? parts : [news, ...parts]
   if (brief === undefined) return said.join('\n\n')
   return [brief.text, ...(parts.length === 0 ? [brief.closing] : said)].join('\n\n')
+}
+
+/** What a lead's brief says of the images and files the person sent with what they asked for: that they come with it, or that some couldn't. */
+export const sentWithWords = (sent: {
+  readonly images: ReadonlyArray<unknown>
+  readonly files: ReadonlyArray<unknown>
+  readonly withheld: number
+  readonly gone: number
+}) => {
+  const count = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
+  const given = [
+    ...(sent.images.length === 0 ? [] : [count(sent.images.length, 'an image', 'images')]),
+    ...(sent.files.length === 0 ? [] : [count(sent.files.length, 'a file', 'files')]),
+  ]
+  return [
+    ...(given.length === 0
+      ? []
+      : [
+          `The person sent ${given.join(' and ')} with what they asked for: ${sent.images.length + sent.files.length === 1 ? 'it comes' : 'they come'} with this message.`,
+        ]),
+    ...(sent.withheld === 0
+      ? []
+      : [
+          `(The person sent ${count(sent.withheld, 'an image', 'images')} with what they asked for, which Althar couldn't pass on to you.)`,
+        ]),
+    ...(sent.gone === 0
+      ? []
+      : [
+          `(The person sent ${count(sent.gone, 'a file', 'files')} with what they asked for whose copy isn't there any more. Ask for it if you need it.)`,
+        ]),
+  ].join('\n\n')
 }
 
 const PASSED_ON = 'The coordinator passes this on:\n\n'
@@ -1123,6 +1154,24 @@ export class Sessions extends Context.Service<
         })
 
       /**
+       * The images and files the person sent with what a task was asked for,
+       * in their messages to the coordinator, for the turn that gives its lead
+       * its brief: the images as `imagesFor` reads them, the files copied
+       * where the lead reads; and how many of each it doesn't get.
+       */
+      const sentWithRequest = (thread: TaskThread, takes: boolean) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const ids = (yield* sql<{ userInputId: string }>`
+            SELECT user_input_id FROM task_request_inputs WHERE task_id = ${thread.taskId} ORDER BY position`).map((row) => row.userInputId)
+          const sent = yield* imagesFor(ids, takes)
+          const images = ids.flatMap((id) => sent.images.get(id) ?? [])
+          const withheld = ids.reduce((sum, id) => sum + (sent.withheld.get(id) ?? 0), 0)
+          const { files, gone } = yield* requestFilesForTurn(thread.threadId, thread.taskId)
+          return { images, files, withheld, gone }
+        })
+
+      /**
        * The thread shows what a turn gives the agent where the agent reads it,
        * in the order it reads it: once the turn before has ended, not where
        * it was sent. What the person said moves to the end of the thread,
@@ -1260,7 +1309,17 @@ export class Sessions extends Context.Service<
           const brief = briefOf
           // The lead is told how its worktrees were set up, in its brief.
           const setUp = thread.role === 'task' && brief !== undefined ? yield* setups.told(thread.taskId) : null
-          const briefed = brief === undefined || setUp === null ? brief : { ...brief, text: `${brief.text}\n\n${setUp}` }
+          // And sent the images and files the person sent with what they asked for, with the brief, as with a message of theirs.
+          const asked =
+            thread.role === 'task' && brief !== undefined
+              ? yield* sentWithRequest(thread, running.connection.info.images).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.as(Effect.logWarning('Could not read what the person sent with what they asked for', cause), null),
+                  ),
+                )
+              : null
+          const added = [setUp, asked === null ? null : sentWithWords(asked)].filter((said) => said !== null && said !== '')
+          const briefed = brief === undefined || added.length === 0 ? brief : { ...brief, text: [brief.text, ...added].join('\n\n') }
           // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
           const named =
             thread.role === 'coordinator'
@@ -1373,7 +1432,7 @@ export class Sessions extends Context.Service<
           running.begun = undefined
           if (begun !== undefined) yield* begun
           // Images the agent doesn't get are said in the thread as well as to the agent, so none goes missing unsaid.
-          const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), 0)
+          const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), asked?.withheld ?? 0)
           if (withheld > 0)
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
@@ -1472,7 +1531,12 @@ export class Sessions extends Context.Service<
             )
           })
           // Each input's images, then its files, in the order the inputs are said.
-          const parts = inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])])
+          // What came with the person's request first, with the brief.
+          const parts = [
+            ...(asked?.images ?? []),
+            ...(asked?.files ?? []),
+            ...inputs.flatMap((input) => [...(sent.images.get(input.id) ?? []), ...(linked.files.get(input.id) ?? [])]),
+          ]
           yield* notingListening(running)
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
@@ -2742,7 +2806,7 @@ export class Sessions extends Context.Service<
             // Althar reaches the code host for the task (ADR-011).
             `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request; rerun_check runs a check that may have failed by chance again. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // A lead tracks what is not its task's on the person's trackers, and the person files it (Coordinator.ts, IssueDrafts.ts).
-            "Draft an issue with draft_issue when the person asks you to track something (\"file these follow-ups\"), or when you come across something clearly out of this task's scope, such as a bug or follow-up work you shouldn't take on here: check find_issues first, so you don't draft what is already tracked. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person's one message can start several. When a task covers it, say so in your report instead of drafting. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don't draft for ordinary work of the task, or for something you can fix within it.",
+            'Draft an issue with draft_issue only when the person asks you to track something ("file these follow-ups", "make an issue for that"), never on your own: check find_issues first, so you don\'t draft what is already tracked. Something out of this task\'s scope that you find goes in your report (finish_step or the summary) in a line, so the person or the coordinator can decide; a bug your brief covers is fixed in the task, never handed off as an issue. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person\'s one message can start several. When a task covers it, say so in your report instead of drafting. It files nothing: the person sees each as a card in this thread and files it, changes it or discards it, and you hear its key and link once they file it, to refer to in your summary or the pull request. It goes beside the issue this task came from, unless you name a tracker and container. Don\'t draft for ordinary work of the task, or for something you can fix within it.',
             // A lead keeps its own issue up to date; what changes where the issue stands waits on the person's card (IssueChanges.ts).
             "If this task came from an issue, keep that issue up to date: comment_on_issue comments on it at once, such as what you found or what changed for whoever follows it; link_pull_request links the task's pull request to it where Althar hasn't; and change_issue proposes a change to it, such as its status (In Review), its priority, labels, assignee or title, which waits on the person's card unless the project lets changes through. Only that issue: for any other, tell the person what it needs. Set a drafted issue's priority and labels with draft_issue, never in its description.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.

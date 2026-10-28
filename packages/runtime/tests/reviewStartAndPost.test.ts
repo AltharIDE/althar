@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -121,20 +121,17 @@ describe('a review, at its edges', () => {
     pullRequest(at, github)
     return Effect.gen(function* () {
       const { projectId } = yield* opened(at.working)
-      // The project's folder of worktrees, where the copy would go, as one that can't be written.
+      // A file where the review's folder in the project's folder of worktrees would go, so its copy can't be made there.
       const other = yield* (yield* Projects).createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Other' })
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${other.taskId}`
-      const folder = dirname(dirname(workspace?.path ?? ''))
-      chmodSync(folder, 0o555)
-      const started = yield* (yield* Reviews)
-        .start({
-          envelope: yield* Runtime.envelope('review.start', {}),
-          projectId,
-          pullRequest: '#1',
-          lead: { agentId: 'claude-code', model: null },
-        })
-        .pipe(Effect.ensuring(Effect.sync(() => chmodSync(folder, 0o755))))
+      writeFileSync(join(dirname(dirname(workspace?.path ?? '')), 'review-1-send-back'), '')
+      const started = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+      })
       assert.deepInclude(started, { already: false, leading: false })
       assert.include(
         (yield* notices(started.threadId)).map((notice) => notice.title),

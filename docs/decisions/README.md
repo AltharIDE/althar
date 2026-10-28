@@ -74,3 +74,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [064](064-a-file-sent-with-a-message-is-copied-where-the-agent-reads-and-linked.md) | A file or folder sent with a message is copied into the thread's folder, which git ignores, and linked for the agent to open |
 | [065](065-running-is-what-an-agent-works-on-and-up-next-is-everything-that-waits.md) | Running is what an agent works on now, and Up next is everything that waits, in the order it goes on |
 | [066](066-althar-runs-any-branch-or-pull-request-and-fetches-for-leads.md) | Althar runs any branch or pull request in a copy of its own, fetched with its sign-in, and fetches for leads, which carry none |
+| [067](067-allow-everything-asks-only-before-what-can-t-be-undone.md) | Allow everything asks only before what can't be undone from the task |

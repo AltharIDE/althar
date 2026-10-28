@@ -62,8 +62,8 @@ const recentFirst = (a: BoardTask, b: BoardTask) => (b.settledAt ?? '').localeCo
 
 export const useBoard = (projectId: string): BoardModel => {
   const { client, cache } = useServices()
-  const actions = useWorkActions()
   const read = useQuery(reads(client).board(projectId))
+  const actions = useWorkActions(read.data?.tasks ?? null)
   // Every settled task this project's board has shown, by id: settled work doesn't change, so what was shown stays as the snapshot moves on.
   const kept = useRef<{ projectId: string; tasks: Map<string, BoardTask> }>({ projectId, tasks: new Map() })
   const [loaded, setLoaded] = useState(0)

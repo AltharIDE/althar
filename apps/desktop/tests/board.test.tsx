@@ -16,6 +16,7 @@ import { useClosePullRequests } from '../src/renderer/features/board/useClosePul
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { makeQueryClient } from '../src/renderer/data/reads'
+import { useMerge } from '../src/renderer/data/merges'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
 import { useSettingsOf, withServices } from './render'
@@ -163,6 +164,46 @@ describe('the board’s lanes', () => {
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4', 't5'])
     expect(lanes.settled.map((work) => work.taskId)).toEqual(['t6', 't7'])
     expect(yoursOf(lanes)).toBe(3)
+  })
+
+  describe('a task whose lead stopped, with no agent on it', () => {
+    const NOW = '2026-10-01T10:00:00.000Z'
+    const at = '2026-09-30T14:00:00.000Z'
+    const stopped = (taskId: string, by: 'declined' | 'interrupted' | 'althar' | null, overrides: Partial<BoardTask> = {}) =>
+      task({
+        taskId,
+        threadId: `th-${taskId}`,
+        title: `Stopped ${taskId}`,
+        phase: 'stopped',
+        startedAt: '2026-09-30T13:00:00.000Z',
+        stopped: { by, at },
+        ...overrides,
+      })
+    const working = task({ taskId: 'w', title: 'At work', phase: 'running', step: 'implement', startedAt: '2026-10-01T09:00:00.000Z' })
+    const tasks = [working, stopped('d', 'declined'), stopped('i', 'interrupted'), stopped('n', null)]
+
+    it('is in Needs you, not Running, and Running counts only the work an agent is on', () => {
+      const lanes = lanesOf(board({ tasks, calls: [] }))
+      expect(lanes.running.map((work) => work.taskId)).toEqual(['w'])
+      expect(lanes.atWork).toBe(1)
+      expect(lanes.stopped.map((work) => work.taskId).toSorted()).toEqual(['d', 'i', 'n'])
+      expect(yoursOf(lanes)).toBe(3)
+    })
+
+    it('says what stopped it and when, not a running time, and an automation run still says where it is from', () => {
+      const from = { id: 'a1', name: 'Nightly dependency check' } as unknown as NonNullable<BoardTask['automation']>
+      const lanes = lanesOf(board({ tasks: [...tasks, stopped('r', 'declined', { automation: from })], calls: [] }))
+      withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+      const yours = within(screen.getByRole('region', { name: 'Needs you' }))
+      const card = (title: string) => within(yours.getByRole('button', { name: title }).closest('article') as HTMLElement)
+      expect(card('Stopped d').getByText('Stopped when you declined a command')).toBeTruthy()
+      expect(card('Stopped i').getByText('Stopped when you interrupted it')).toBeTruthy()
+      expect(card('Stopped n').getByText('No agent is working on it')).toBeTruthy()
+      expect(card('Stopped d').getByText('20h ago')).toBeTruthy()
+      expect(card('Stopped d').queryByText('21h')).toBeNull()
+      expect(card('Stopped r').getByText('From Nightly dependency check')).toBeTruthy()
+      expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/^Stopped /)).toBeNull()
+    })
   })
 
   describe('a task started that waits for a free agent, by lane', () => {
@@ -754,10 +795,10 @@ describe('the board', () => {
     const onTask = vi.fn()
     const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
     withServices(<Project onTask={onTask} />, client)
-    // From the conversation, the count opens the call's task: no view changes, and nothing opens beside the board.
+    // From Home, where a project opens, the count opens the call's task: no view changes, and nothing opens beside the board.
     await userEvent.click(await screen.findByRole('button', { name: '3 need you' }))
     expect(onTask).toHaveBeenCalledWith('th3')
-    expect(screen.getByRole('radio', { name: 'Conversation', checked: true })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: 'Home', checked: true })).toBeTruthy()
     expect(screen.queryByRole('complementary', { name: 'Beside the board' })).toBeNull()
     // Pointed at, it says what each is, and each opens its own task.
     await userEvent.hover(screen.getByRole('button', { name: '3 need you' }))
@@ -842,6 +883,111 @@ describe('the board', () => {
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
     // The note is queued first, so the lead reads it in its first turn.
     expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
+  })
+
+  describe('merged anywhere in the window, as in its task before Back', () => {
+    const url = 'https://github.com/meridian/api/pull/12'
+    function Elsewhere() {
+      const merge = useMerge()
+      return (
+        <button type="button" onClick={() => void merge({ taskId: 't4', head: 'abc123', url }).catch(() => undefined)}>
+          Merge there
+        </button>
+      )
+    }
+    const lane = (name: string) => within(screen.getByRole('region', { name }))
+    const settledBoard = () =>
+      board({
+        tasks: board().tasks.map((one) =>
+          one.taskId === 't4'
+            ? { ...one, phase: 'settled', state: 'done', settledAt: '2026-10-01T10:00:00.000Z', change: change({ state: 'merged' }) }
+            : one,
+        ),
+        settledTotal: 3,
+      })
+
+    it('leaves Needs you as Merging the moment it is pressed, and settles as the runtime says, read once', async () => {
+      let merged = () => undefined as void
+      const merge = vi.fn(() => new Promise<void>((resolve) => (merged = resolve)))
+      const getBoard = vi.fn(async () => board())
+      const { client, emit } = fakeClient({ merge, getBoard })
+      withServices(
+        <>
+          <Project />
+          <Elsewhere />
+        </>,
+        client,
+      )
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
+      await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
+      // At once, with nothing read again: at work, merging, and no longer counted as needing the person.
+      expect(await lane('Running').findByText('Merging')).toBeTruthy()
+      expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
+      expect(screen.getByRole('button', { name: '2 need you' })).toBeTruthy()
+      expect(merge).toHaveBeenCalledWith('t4', 'abc123', url)
+      // Merged on its host: merging still, until the board reads it settled, not back in Needs you meanwhile.
+      const reads = getBoard.mock.calls.length
+      getBoard.mockImplementation(async () => settledBoard())
+      await act(async () => merged())
+      expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
+      // The runtime says it settled: read once, and it is in Settled.
+      emit(changed('task', 't4'))
+      expect(await lane('Settled').findByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
+      expect(getBoard).toHaveBeenCalledTimes(reads + 1)
+    })
+
+    it('is the person’s again once its pull request merged and another of its own is open', async () => {
+      const merge = vi.fn(async () => undefined)
+      const next = change({ number: 13, url: 'https://github.com/meridian/api/pull/13', head: 'def456', draft: false })
+      const getBoard = vi.fn(async () => board())
+      const { client, emit } = fakeClient({ merge, getBoard })
+      withServices(
+        <>
+          <Project />
+          <Elsewhere />
+        </>,
+        client,
+      )
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      await lane('Needs you').findByText('Rate-limit refunds')
+      // #12 merged; the task shows #13 now, still open, which nobody is merging.
+      getBoard.mockImplementation(async () =>
+        board({ tasks: board().tasks.map((one) => (one.taskId === 't4' ? { ...one, change: next } : one)) }),
+      )
+      await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
+      await waitFor(() => expect(merge).toHaveBeenCalled())
+      emit(changed('task', 't4'))
+      expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Running').queryByText('Merging')).toBeNull()
+    })
+
+    it('comes back to Needs you with why it didn’t merge, and merges again from its card', async () => {
+      const merge = vi
+        .fn<(taskId: string) => Promise<void>>()
+        .mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub says: Pull Request is not mergeable' }))
+        .mockResolvedValue(undefined)
+      const { client } = fakeClient({ merge, getBoard: vi.fn(async () => board()) })
+      withServices(
+        <>
+          <Project />
+          <Elsewhere />
+        </>,
+        client,
+      )
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      await lane('Needs you').findByText('Rate-limit refunds')
+      await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
+      const card = within((await lane('Needs you').findByRole('button', { name: 'Rate-limit refunds' })).closest('article') as HTMLElement)
+      expect(await card.findByText(/Pull Request is not mergeable/)).toBeTruthy()
+      expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
+      await userEvent.click(card.getByRole('button', { name: /again/i }))
+      await waitFor(() => expect(merge).toHaveBeenCalledTimes(2))
+      expect(merge).toHaveBeenLastCalledWith('t4', 'abc123', url)
+    })
   })
 
   it.each([
@@ -1080,7 +1226,13 @@ describe('every state the board shows', () => {
       task({ taskId: 'a', title: 'Held plan', phase: 'held', plan: { ...card().plan!, startsAt: null } }),
       task({ taskId: 'b', title: 'Starting plan', phase: 'planned', plan: { ...card().plan!, startsAt: '2026-10-01T09:59:59.000Z' } }),
       task({ taskId: 'c', title: 'Counting down', phase: 'planned', plan: { ...card().plan!, startsAt: '2026-10-01T10:00:20.000Z' } }),
-      task({ taskId: 'd', title: 'Stopped work', phase: 'stopped', startedAt: '2026-10-01T07:30:00.000Z' }),
+      task({
+        taskId: 'd',
+        title: 'Stopped work',
+        phase: 'stopped',
+        startedAt: '2026-10-01T07:30:00.000Z',
+        stopped: { by: 'declined', at: '2026-10-01T08:00:00.000Z' },
+      }),
       task({ taskId: 'e', title: 'A conversation', phase: 'running', plan: null, startedAt: '2026-10-01T09:59:30.000Z' }),
       task({
         taskId: 'w',
@@ -1120,8 +1272,12 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
     expect(screen.getByText('Starting')).toBeTruthy()
     expect(screen.getByText('Starts in 20s')).toBeTruthy()
-    expect(screen.getByText('No agent is working on it')).toBeTruthy()
-    expect(screen.getByText('2h 30m')).toBeTruthy()
+    // Stopped, it waits on the person: it says what stopped it and when, not how long it has run.
+    expect(screen.getByText('Stopped when you declined a command')).toBeTruthy()
+    expect(screen.getByText('2h ago')).toBeTruthy()
+    expect(screen.queryByText('2h 30m')).toBeNull()
+    expect(within(screen.getByRole('region', { name: 'Needs you' })).getByText('Stopped work')).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: 'Running' })).queryByText('Stopped work')).toBeNull()
     expect(screen.getByText('Conversation')).toBeTruthy()
     expect(
       screen.getByText(
@@ -1686,6 +1842,31 @@ describe('a ready card’s next step, done from the card', () => {
   }
   const cardOf = async (title: string) => within((await screen.findByRole('button', { name: title })).closest('article') as HTMLElement)
 
+  it('carries a stopped task on from the card: tells its lead to continue, and starts it again', async () => {
+    tasks = [
+      task({
+        taskId: 'sd',
+        threadId: 'th-sd',
+        title: 'Stopped d',
+        phase: 'stopped',
+        stopped: { by: 'declined', at: '2026-09-30T14:00:00.000Z' },
+      }),
+    ]
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const base = snapshot()
+    const getThread = vi.fn(async () =>
+      snapshot({ session: null, task: { ...base.task, lead: { agentId: 'claude-code', model: null, account: null } } }),
+    )
+    const onOpen = vi.fn()
+    withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, getBoard: getBoard() }).client)
+    const card = await cardOf('Stopped d')
+    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th-sd', body: 'Carry on.', disposition: 'after_current' }))
+    await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th-sd', agentId: 'claude-code' }))
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
   it('pushes right there, and does not open the task', async () => {
     const onOpen = vi.fn()
     let finish = () => {}
@@ -1798,7 +1979,7 @@ describe('a ready card’s next step, done from the card', () => {
 
   it('says why a conflict wasn’t asked of its lead, and Resolve now asks it from the card', async () => {
     const why = 'You stopped it, so Althar doesn’t start its lead for a conflict.'
-    // Stopped, it is among the running work, not ready: its card says it there.
+    // Stopped, it is among what waits on the person, not ready: its card says it there.
     tasks = [
       {
         ...ready('s9', 'Stopped in conflict', { conflicts: true, target: 'main' }),

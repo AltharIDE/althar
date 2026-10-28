@@ -21,8 +21,12 @@ export const refused = new ConnectorFailed({
   status: 403,
   message: 'Resource not accessible by integration',
 })
-export const runtimeWith = (services: { readonly github?: FakeService; readonly linear?: FakeService }, file = ':memory:') =>
-  Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors(services), listenEvery: Duration.millis(100) })))
+/** A runtime on fake hosts, listening to its changes as often as `listenEvery` says: a tenth of a second unless said. */
+export const runtimeWith = (
+  services: { readonly github?: FakeService; readonly linear?: FakeService },
+  file = ':memory:',
+  listenEvery: Duration.Duration = Duration.millis(100),
+) => Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors(services), listenEvery })))
 
 export const connect = (product: 'github' | 'linear', webUrl?: string) =>
   Effect.gen(function* () {
