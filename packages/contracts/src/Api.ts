@@ -1279,6 +1279,21 @@ export const StepResultItem = Schema.Struct({
   }),
 })
 
+/** A picture a lead showed in the thread, with what it shows. */
+export const ShownPicture = Schema.Struct({ caption: Schema.String, picture: Picture })
+export type ShownPicture = typeof ShownPicture.Type
+
+/**
+ * Pictures a lead showed the person in its thread, at any time, step or no
+ * step (show_pictures): in order, each with a caption, kept as a step's
+ * screenshots are, so they stay once the worktree is gone.
+ */
+export const PicturesItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('pictures'),
+  content: Schema.Struct({ pictures: Schema.Array(ShownPicture) }),
+})
+
 /** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
 export const CheckLogShown = Schema.Struct({
   name: Schema.String,
@@ -1648,8 +1663,11 @@ export const RunItem = Schema.Struct({
     taskId: Schema.NullOr(Schema.String),
     /** Which of the project's runnables it runs (ADR-044), for running it again; absent on a card from before there were several. */
     runnableId: Schema.optional(Schema.NullOr(Schema.String)),
-    /** Where it runs, in words: the task's title, or the default branch. */
+    /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
     where: Schema.String,
+    /** The branch or pull request it runs a copy of, at a glance, and what was asked for, to run it again (ADR-066); absent or null for the default branch or a task's. */
+    branch: Schema.optional(Schema.NullOr(Schema.String)),
+    ref: Schema.optional(Schema.NullOr(Schema.Struct({ kind: Schema.Literals(['branch', 'pull_request']), which: Schema.String }))),
     command: Schema.String,
     url: Schema.NullOr(Schema.String),
     startedAt: Schema.String,
@@ -1936,6 +1954,7 @@ export const ThreadItem = Schema.Union([
   ReviewDraftItem,
   IssueChangesItem,
   AutomationItem,
+  PicturesItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -1946,15 +1965,18 @@ export type ContextUse = typeof ContextUse.Type
 /**
  * The project as Althar runs it itself, with no agent (docs/decisions/022):
  * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
- * the default branch. It runs until the person stops it, or Althar quits.
+ * the default branch, or of a branch or pull request Althar fetched for it
+ * (ADR-066). It runs until the person stops it, or Althar quits.
  */
 export const Launch = Schema.Struct({
   ...BackgroundCommand.fields,
   taskId: Schema.NullOr(Schema.String),
   /** Which of the project's runnables it runs (ADR-044). */
   runnableId: Schema.NullOr(Schema.String),
-  /** Where it runs, in words: the task's title, or the default branch. */
+  /** Where it runs, in words: the task's title, the default branch, or the branch it runs. */
   where: Schema.String,
+  /** The branch or pull request it runs a copy of, at a glance (feature/x, PR #12 · feature/x); none for the default branch or a task's. */
+  branch: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type Launch = typeof Launch.Type
 
@@ -1980,6 +2002,33 @@ export const Runnable = Schema.Struct({
   from: Schema.Literals(['repository', 'person', 'coordinator', 'agent']),
 })
 export type Runnable = typeof Runnable.Type
+
+/** An open pull request the Run menu offers to run (ADR-066). */
+export const OfferedPullRequest = Schema.Struct({
+  number: Schema.Number,
+  /** As its host writes it: PR #12, MR !12. */
+  name: Schema.String,
+  title: Schema.String,
+  branch: Schema.String,
+  author: Schema.NullOr(Schema.String),
+  draft: Schema.Boolean,
+  /** Its branch is on a fork. */
+  fork: Schema.Boolean,
+})
+export type OfferedPullRequest = typeof OfferedPullRequest.Type
+
+/** What one of a project's repositories offers to run, as its remote has it now: its open pull requests, then its branches. */
+export const OfferedRefs = Schema.Struct({
+  repository: Schema.String,
+  pullRequests: Schema.Array(OfferedPullRequest),
+  /** By name, its default first. */
+  branches: Schema.Array(Schema.String),
+  /** Why it lists less than it might, in words; null where it lists all. */
+  note: Schema.NullOr(Schema.String),
+  /** Its host has more open pull requests than it listed: asked again with words, it searches them there. */
+  more: Schema.Boolean,
+})
+export type OfferedRefs = typeof OfferedRefs.Type
 
 /** A script in one of a project's package.json files, as Althar would run it from its repository's root. */
 export const RepositoryScript = Schema.Struct({
@@ -3455,7 +3504,8 @@ export const Api = RpcGroup.make(
   /**
    * Runs one of the project's runnables with no agent, its default without
    * one: what the task built, in its worktree, or, with no task, a copy of the
-   * default branch. One already running there is the one returned.
+   * default branch, or of the branch or pull request named, which Althar
+   * fetches first (ADR-066). One already running there is the one returned.
    */
   command(
     'RunProject',
@@ -3465,9 +3515,21 @@ export const Api = RpcGroup.make(
       /** The thread it was asked for in, where its card goes; null for none. */
       threadId: Schema.NullOr(Schema.String),
       runnableId: Schema.optional(Schema.String),
+      /** A branch on the repository's remote, by name. */
+      branch: Schema.optional(Schema.String),
+      /** A pull request, by its number or link. */
+      pullRequest: Schema.optional(Schema.String),
+      repository: Schema.optional(Schema.String),
     },
     Launch,
   ),
+  /**
+   * What the project's repositories offer to run besides their default
+   * branch, asked of their remotes now: open pull requests, then branches.
+   * With words, only the open pull requests whose titles have them, searched
+   * on the host, for one past those a first listing had room for.
+   */
+  call('GetRunnableRefs', { projectId: Schema.String, text: Schema.optional(Schema.String) }, Schema.Array(OfferedRefs)),
   /**
    * Keeps something for the project to run (ADR-044): a new one, at the end
    * of the list, or, by id, a change to one. A null command is the
