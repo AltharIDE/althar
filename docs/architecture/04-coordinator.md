@@ -149,7 +149,12 @@ A lead's own tools, beside `finish_step` and its pull request's, do what its
 sandbox would refuse, outside it (ADR-057): `install_dependencies` runs its
 worktree's setup again; `run_project` and `stop_project` run the project in
 its worktree, as the run the person sees; `screenshot`, as above; and
-`rerun_check` runs checks on its pull request again.
+`rerun_check` runs checks on its pull request again. `show_pictures` shows
+the person pictures from its worktree in its thread at any time, a step open
+or none, each with a caption: checked as `finish_step`'s screenshots are
+(inside the worktree, what its name says it is, up to 20 MB), and kept in
+the artifact store as they are, so they stay once the worktree goes. A
+review's lead doesn't have it: its draft is what it hands the person.
 
 The same server serves every session. The read tools are how a lead, a step,
 or an agent that took over a task reads the record its brief left out. Command

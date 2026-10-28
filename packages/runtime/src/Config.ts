@@ -319,20 +319,28 @@ export class Agents extends Context.Service<
   }
 }
 
-/** What an agent's environment adds so it carries none of the person's sign-ins to code hosts. */
+/**
+ * What an agent's environment adds so it carries none of the person's
+ * sign-ins to code hosts. And a branch it makes from a remote's follows
+ * nothing: git would write that to the repository's `.git/config`, which an
+ * agent's sandbox refuses, so `git switch -c x origin/x` failed halfway,
+ * leaving the worktree where it was (ADR-066).
+ */
 export const withoutSignIns = (signedOut: string): Readonly<Record<string, string>> => ({
   GH_CONFIG_DIR: signedOut,
   GLAB_CONFIG_DIR: signedOut,
   // An empty helper resets git's list of them: the person's keychain and stored credentials aren't asked.
-  GIT_CONFIG_COUNT: '1',
+  GIT_CONFIG_COUNT: '2',
   GIT_CONFIG_KEY_0: 'credential.helper',
   GIT_CONFIG_VALUE_0: '',
+  GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',
+  GIT_CONFIG_VALUE_1: 'false',
   GIT_TERMINAL_PROMPT: '0',
 })
 
 /**
  * What the environment of a review's lead adds to `withoutSignIns`' (whose
- * one git setting it keeps), beside its agent's `reviewing.env`. Git reads
+ * git settings it keeps), beside its agent's `reviewing.env`. Git reads
  * none of the person's config or the system's: a filter, diff or merge
  * driver defined there (`python -m nbstripout`, a textconv) would run on the
  * pull request's files as the lead's `git status` or `git diff` reads them,
@@ -346,9 +354,9 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
 export const readingUntrusted: Readonly<Record<string, string>> = {
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_COUNT: '2',
-  GIT_CONFIG_KEY_1: 'safe.bareRepository',
-  GIT_CONFIG_VALUE_1: 'explicit',
+  GIT_CONFIG_COUNT: '3',
+  GIT_CONFIG_KEY_2: 'safe.bareRepository',
+  GIT_CONFIG_VALUE_2: 'explicit',
 }
 
 /** Crypto from the platform's Web Crypto, which Node and Electron both have. */

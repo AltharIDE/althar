@@ -78,6 +78,18 @@ export const whereLine = (conflicts: ReadonlyArray<Conflict>) =>
     ? `${conflicts[0].branch}, in ${list(conflicts[0].files)}`
     : conflicts.map((one) => `${one.name}’s ${one.branch}, in ${list(one.files)}`).join('; ')
 
+const named = (files: ReadonlyArray<string>) => {
+  const names = files.map((file) => file.slice(file.lastIndexOf('/') + 1))
+  const shown = names.slice(0, 3).join(', ')
+  return names.length > 3 ? `${shown} and ${names.length - 3} more` : shown
+}
+
+/** Where it conflicts, short for a card: files by name, three at most: "main in a.ts, b.ts and 3 more". */
+export const shortWhereLine = (conflicts: ReadonlyArray<Conflict>) =>
+  conflicts.length === 1 && conflicts[0] !== undefined
+    ? `${conflicts[0].branch} in ${named(conflicts[0].files)}`
+    : conflicts.map((one) => `${one.name}’s ${one.branch} in ${named(one.files)}`).join('; ')
+
 /**
  * What the lead is asked. Merging here, the note the person sends with
  * "Ask the lead to resolve it" (the desktop's TaskView), in the same words;

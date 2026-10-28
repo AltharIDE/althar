@@ -17,6 +17,7 @@
   font-size: 12px;
   line-height: 1.4;
   color: var(--t-2);
+  overflow-wrap: anywhere;
 }
 /* its pull requests and branch, each a chip (BoardCard's Chips) */
 .prs {
