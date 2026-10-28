@@ -25,7 +25,7 @@ export const PAGE_META = {
     name: 'Althar',
     title: 'Althar · every coding agent you pay for, in one app',
     description:
-      'An open-source desktop app that runs Claude Code, Codex and OpenCode side by side, on the plans you already pay for. Other models review every task.',
+      'An open-source desktop app that runs Claude Code, Codex, GitHub Copilot, OpenCode and more as one crew, on the plans you already pay for.',
     image: '/og/home.png',
     index: true,
   },

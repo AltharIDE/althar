@@ -76,6 +76,11 @@ float noise(vec2 p) {
   return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
 }
 float jitter(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+// Linear light back to the sRGB a picture is stored in, exactly.
+vec3 srgb(vec3 l) {
+  l = clamp(l, 0.0, 1.0);
+  return mix(l * 12.92, 1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, l));
+}
 
 // Along the plasma's own streaks, down to the right.
 const vec2 ALONG = vec2(0.963, 0.27);
@@ -129,8 +134,10 @@ void main() {
   }
 
   c = mix(c, vec3(1.0, 0.95, 0.88) * 2.2, uWhite);
-  c = 1.0 - exp(-c * 1.05);
-  colour = vec4(pow(c, vec3(1.0 / 2.2)), 1.0);
+  // The fire's light is pressed into what a screen shows; once it has gone, under the break's flash, the sky is the picture as it is, so the page can show
+  // the picture itself in its place at rest (Hero.tsx) with nothing changing.
+  vec3 pressed = pow(1.0 - exp(-c * 1.05), vec3(1.0 / 2.2));
+  colour = vec4(mix(pressed, srgb(c), smoothstep(0.6, 1.0, uBroken)), 1.0);
 }`
 
 /**

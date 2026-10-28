@@ -1,7 +1,10 @@
 /* The first screen as a capsule coming in: the fire and the sky on a canvas
    behind, the photograph of the cabin over it with its window cut out, the
    words in the window, the lead under them. Once everything is at rest
-   (data-settled), the layers that moved are let go and the grain stops. */
+   (data-settled), the page's own picture of the sky stands in for the
+   canvas, and what still moves is moved by the browser: the sky easing, the
+   camera floating, now and then an ember; all of it stopped off screen
+   (data-away), and none of it with reduced motion. */
 
 .hero {
   position: relative;
@@ -19,7 +22,6 @@
 
 /* What the camera sees, moved as one: its pivot the window, where the words are. */
 .camera { position: absolute; inset: 0; z-index: -1; transform-origin: 50% 36%; will-change: transform; }
-.hero[data-settled] .camera { will-change: auto; }
 
 /* The fire and the sky, set over the glass by the script. */
 .fire { position: absolute; display: block; }
@@ -35,20 +37,50 @@
   position: absolute; inset: 0;
   --pw: var(--pw-w); --ph: var(--ph-w); --fx: var(--fx-w); --fy: var(--fy-w);
   --wx: var(--wx-w); --wy: var(--wy-w); --ww: var(--ww-w); --wh: var(--wh-w);
-  --sx: var(--sx-w); --sy: var(--sy-w); --sw: var(--sw-w); --sh: var(--sh-w);
+  --sx: var(--sx-w); --sy: var(--sy-w); --sw: var(--sw-w); --sh: var(--sh-w); --sd: var(--sd-w);
   --mask: var(--mask-w);
   --u: max(100cqw / var(--pw), 100cqh / var(--ph));
   --px: clamp(100cqw - var(--pw) * var(--u), 50cqw - var(--fx) * var(--u), 0px);
   --py: clamp(100cqh - var(--ph) * var(--u), 50cqh - var(--fy) * var(--u), 0px);
 }
 /* The sky through the glass, where the fire would draw it, until it does; and without the graphics card, or scripts. */
+/* Where the canvas leaves it at rest, drifted (--sd). */
 .sky {
   position: absolute;
-  left: calc(var(--px) + var(--sx) * var(--u)); top: calc(var(--py) + var(--sy) * var(--u));
+  left: calc(var(--px) + (var(--sx) - var(--sd)) * var(--u)); top: calc(var(--py) + var(--sy) * var(--u));
   width: calc(var(--sw) * var(--u)); height: calc(var(--sh) * var(--u));
   background: #0a1a3a 0 0 / 100% 100% no-repeat;
+  transform-origin: 50% 55%;
 }
 .hero[data-drawn] .sky { display: none; }
+/* At rest, the picture takes the canvas's place, showing just what it last drew. */
+.hero[data-settled] .sky { display: block; }
+.hero[data-settled] .fire { visibility: hidden; }
+
+/* The embers' stage: the window's box, behind the cabin, so its frame hides them. */
+.embers {
+  position: absolute;
+  left: calc(var(--px) + var(--wx) * var(--u)); top: calc(var(--py) + var(--wy) * var(--u));
+  width: calc(var(--ww) * var(--u)); height: calc(var(--wh) * var(--u));
+  overflow: hidden;
+  container-type: size;
+  pointer-events: none;
+}
+/* An ember: a short bright streak, along the fire's own streaks, hot at its head. */
+.embers i {
+  position: absolute;
+  left: 0;
+  top: var(--y);
+  width: var(--w);
+  height: 2px;
+  border-radius: 2px;
+  opacity: 0;
+  background: linear-gradient(90deg, rgba(255, 170, 90, 0), rgba(255, 190, 120, 0.7) 60%, rgb(255, 245, 230));
+  box-shadow: 0 0 8px 1px rgba(255, 140, 60, 0.55);
+}
+.embers i:nth-child(1) { --y: 10cqh; --w: 16cqw; --d: 7s; --delay: 1.6s; }
+.embers i:nth-child(2) { --y: 26cqh; --w: 11cqw; --d: 11s; --delay: 5.2s; height: 1.5px; }
+.embers i:nth-child(3) { --y: -2cqh; --w: 20cqw; --d: 9s; --delay: 8.4s; }
 
 .plate {
   position: absolute;
@@ -75,6 +107,27 @@
 .dim, .firelit, .daylit, .flash { will-change: opacity; }
 .hero[data-settled] :is(.dim, .firelit, .daylit, .flash) { will-change: auto; }
 
+/* What still moves at rest, slowly, by the browser alone: the sky easing on as the capsule sinks, the camera afloat, an ember now and then. */
+@media (prefers-reduced-motion: no-preference) {
+  .hero[data-settled] .sky { animation: sky 40s ease-in-out infinite alternate; }
+  .hero[data-settled] .camera { animation: afloat 17s ease-in-out infinite; }
+  .hero[data-settled] .embers i { animation: ember var(--d) linear var(--delay) infinite; }
+  .hero[data-away] :is(.sky, .camera, .embers i, .grain) { animation-play-state: paused; }
+}
+@keyframes sky { to { transform: translate3d(1.2%, 0, 0) scale(1.045); } }
+@keyframes afloat {
+  0%, 100% { transform: none; }
+  25% { transform: translate3d(3px, -2px, 0) rotate(0.08deg); }
+  50% { transform: translate3d(-1px, -4px, 0) rotate(-0.05deg); }
+  75% { transform: translate3d(-3px, -1px, 0) rotate(0.04deg); }
+}
+/* Across the window in two thirds of a second, along the fire's angle, then gone until the next. */
+@keyframes ember {
+  0% { opacity: 0; transform: translate3d(-25cqw, 0, 0) rotate(15.7deg); }
+  1%, 7% { opacity: 1; }
+  9%, 100% { opacity: 0; transform: translate3d(125cqw, 42cqw, 0) rotate(15.7deg); }
+}
+
 /* The fire breaking: the glass too bright for a moment, and fading. */
 .flash {
   position: absolute;
@@ -93,7 +146,7 @@
 /* Film's grain over the whole, stepping as film does, and the corners and the foot falling dark as a lens has them, the lead on the dark. */
 .grain, .vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .grain { inset: -64px; background-size: 128px 128px; opacity: 0.6; mix-blend-mode: overlay; }
-@media (prefers-reduced-motion: no-preference) { .hero:not([data-settled]) .grain { animation: grain 0.5s steps(6) infinite; } }
+@media (prefers-reduced-motion: no-preference) { .grain { animation: grain 0.5s steps(6) infinite; } }
 @keyframes grain {
   0% { transform: translate(0, 0); }
   20% { transform: translate(-37px, 22px); }
@@ -178,7 +231,7 @@
   .stage {
     --pw: var(--pw-t); --ph: var(--ph-t); --fx: var(--fx-t); --fy: var(--fy-t);
     --wx: var(--wx-t); --wy: var(--wy-t); --ww: var(--ww-t); --wh: var(--wh-t);
-    --sx: var(--sx-t); --sy: var(--sy-t); --sw: var(--sw-t); --sh: var(--sh-t);
+    --sx: var(--sx-t); --sy: var(--sy-t); --sw: var(--sw-t); --sh: var(--sh-t); --sd: var(--sd-t);
     --mask: var(--mask-t);
   }
   /* In the window above the astronauts' heads: the line near its top, the word under it. */

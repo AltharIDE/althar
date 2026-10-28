@@ -85,6 +85,8 @@ const measure = (plate: Plate, end: string) => ({
   [`--sy-${end}`]: plate.sky.y,
   [`--sw-${end}`]: plate.sky.w,
   [`--sh-${end}`]: plate.sky.h,
+  // How far the sky has drifted by the time everything is at rest, in the plate's px: where the page's own picture of it then stands.
+  [`--sd-${end}`]: driftAt(AT.settled) * plate.unit,
   [`--mask-${end}`]: `url(${plate.src})`,
 })
 const STAGE = { ...measure(WIDE, 'w'), ...measure(TALL, 't') } as CSSProperties
@@ -257,12 +259,23 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
     let begun = false
     let settled = false
     const now = () => (performance.now() - start) / 1000
-    // Once at rest, the last frame stays: nothing more is drawn, and the grain and the layers' promotion are let go (data-settled).
+    /*
+     * Once at rest, the graphics card stops: its last frame is the sky picture
+     * just as the page's own copy of it shows it, so that takes its place
+     * (data-settled), and the canvas and its memory are let go. From then on
+     * what moves is the browser's to move: the sky easing, the camera floating
+     * and now and then an ember (Hero.module.css).
+     */
+    const rest = () => {
+      el.dataset.settled = ''
+      fire?.dispose()
+      fire = null
+    }
     const settle = () => {
       settled = true
       cancelAnimationFrame(frame)
       draw(AT.settled)
-      el.dataset.settled = ''
+      rest()
     }
     const tick = () => {
       const t = now()
@@ -284,13 +297,17 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
           run.currentTime = held * 1000
         }
         draw(held)
-        if (held >= AT.settled) el.dataset.settled = ''
+        if (held >= AT.settled) {
+          settled = true
+          rest()
+        }
       } else frame = requestAnimationFrame(tick)
     }
     const waited = window.setTimeout(begin, WAIT)
     void Promise.all([picture(skyUrl), picture(plasmaUrl)]).then(
       ([sky, plasma]) => {
-        if (!live) return
+        // Already at rest (the pictures came late, or it is held there, as with reduced motion), there is nothing for the graphics card to do.
+        if (!live || settled || (held !== null && held >= AT.settled)) return begin()
         // If the graphics card takes the canvas back, the window shows the sky instead.
         fire = makeFire(cv, sky, plasma, () => {
           fire = null
@@ -302,17 +319,19 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
           setDrawn(true)
         }
         begin()
-        if (held !== null || settled) draw(held ?? AT.settled)
+        if (held !== null) draw(held)
       },
       () => begin(),
     )
     place()
 
-    // Off screen it stops, and takes up where it left off when it's back.
+    // Off screen it stops, and takes up where it left off when it's back; at rest, the browser's motion stops with it (data-away).
     const io = new IntersectionObserver(([e]) => {
-      if (held !== null || !begun || settled) return
       const was = seen
       seen = e?.isIntersecting ?? true
+      if (seen) delete el.dataset.away
+      else el.dataset.away = ''
+      if (held !== null || !begun || settled) return
       if (was && !seen) {
         pausedAt = now()
         cancelAnimationFrame(frame)
@@ -339,6 +358,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       live = false
       delete el.dataset.begun
       delete el.dataset.settled
+      delete el.dataset.away
       cancelAnimationFrame(frame)
       clearTimeout(timer)
       clearTimeout(waited)
@@ -359,6 +379,12 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
         <div className={s.stage} style={STAGE}>
           {/* Until the fire is drawn, and without the graphics card or scripts, the sky through the glass. */}
           <div className={s.sky} style={{ backgroundImage: `url(${skyUrl})` }} aria-hidden="true" />
+          {/* Now and then, at rest, an ember of the fire streaks past the glass. */}
+          <div className={s.embers} aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </div>
           <div ref={plate} className={s.plate} aria-hidden="true">
             {/* The tall photograph on a phone, the wide one otherwise: a browser fetches only the one it shows. */}
             <picture>

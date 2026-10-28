@@ -22,7 +22,7 @@ export const WHY = [
 export const DOES = [
   {
     title: 'Every agent, one app.',
-    body: 'Althar runs coding agents through the Agent Client Protocol (ACP): Claude Code on a Claude plan, Codex on a ChatGPT plan, OpenCode with any API key or a local model, and more as adapters land. Any agent’s model and effort from one picker. A new agent takes an adapter, not a rewrite.',
+    body: 'Althar runs coding agents through the Agent Client Protocol (ACP): Claude Code on a Claude plan, Codex on a ChatGPT plan, GitHub Copilot on a Copilot plan, OpenCode with any API key or a local model, and more, such as Junie, Kimi Code and Qwen Code, with others joining as adapters land. Any agent’s model and effort from one picker. A new agent takes an adapter, not a rewrite.',
   },
   {
     title: 'No new account. No new bill.',
