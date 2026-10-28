@@ -481,7 +481,9 @@ export class Tasks extends Context.Service<
                       SELECT parameters FROM task_plans WHERE task_id = ${input.taskId} AND state = 'declined'
                       ORDER BY proposed_at DESC LIMIT 1`
                   : []
-              const state = yield* transition(taskLifecycle, now, declined === undefined ? 'open' : 'draft')
+              // A review is never a draft: it is open from the start, its lead waiting for its plan (Reviews.ts).
+              const reads = declined !== undefined && (JSON.parse(declined.parameters) as { reads?: boolean }).reads === true
+              const state = yield* transition(taskLifecycle, now, declined === undefined || reads ? 'open' : 'draft')
               const revision = yield* change('tasks', input.taskId, { state, settledAt: null })
               yield* fact({
                 projectId: standing.projectId,
@@ -507,6 +509,7 @@ export class Tasks extends Context.Service<
               held: true,
               // A quick task's stays on this Mac, as it was started.
               ...(plan.here === true ? { here: true } : {}),
+              ...(plan.reads === true ? { reads: true } : {}),
             })
           }
           if (restored || back) yield* setups.begin(input.taskId)
