@@ -12,7 +12,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { outFor, repository, runtime, until } from './support'
+import { outUntilSoon, repository, runtime, until } from './support'
 
 /*
  * Steps that waited for a place among the agents at work (Busy.ts), as they
@@ -89,25 +89,15 @@ const waitingStep = (taskId: string) =>
   )
 
 /**
- * The task's review, once it waits for a place behind another task. The task's lead (`[lead:hold]`) keeps the one place
- * while another task's lead is put in line behind it; told to finish, it hands the place to its review, whose reviewer is
- * out of usage: held for its reset, the review leaves the place to the other's lead, and at the reset there is none. Each
- * waits for the one before it, not for the clock. The other task, and the review waiting.
+ * The task's review, once it waits for a place behind another task: its reviewer is out of usage until its reset, another
+ * task's lead takes the one place meanwhile, and at the reset there is none. The other task, and the review waiting.
  */
-const reviewBehind = (projectId: ProjectId, task: { readonly taskId: string; readonly threadId: string }) =>
+const reviewBehind = (projectId: ProjectId, taskId: string) =>
   Effect.gen(function* () {
-    const sessions = yield* Sessions
-    yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
-    const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:hold]', [{ key: 'implement', agentId: 'opencode' }])
-    yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.holdReason === 'machine_busy', Duration.seconds(15))
-    yield* sessions.send({
-      envelope: yield* Runtime.envelope('thread.send', {}),
-      threadId: task.threadId,
-      body: '[lead:finish]',
-      disposition: 'interrupt_and_continue',
-    })
+    yield* until(attempts(taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+    const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
     yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
-    return { other, review: yield* waitingStep(task.taskId) }
+    return { other, review: yield* waitingStep(taskId) }
   })
 
 /** What a step waiting for a place keeps, as an earlier Althar kept it: how it starts, since when it waited. */
@@ -134,18 +124,17 @@ const readyIs = (projectId: string, taskId: string) =>
 
 describe('a step an earlier Althar kept waiting for a place as the person resumed it', () => {
   it.live('starts a review at once on the reviewer it was resumed on, though every place is taken', () => {
-    // Out until three seconds after it first turns the review away, while the other's lead is at work.
-    const out = outFor(3_000)
+    const back = outUntilSoon()
     return Effect.gen(function* () {
       const policies = yield* Policies
       const instance = yield* Instance
       const projectId = yield* opened
       yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
-      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:hold] [review:pass]', [
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      const { other, review } = yield* reviewBehind(projectId, task)
+      const { other, review } = yield* reviewBehind(projectId, task.taskId)
       assert.strictEqual(review.step, 'review')
       yield* keptAs(review.id, review.output, {
         how: 'resume',
@@ -157,7 +146,7 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
       assert.notStrictEqual((yield* attempts(other.taskId)).at(-1)?.state, 'succeeded')
       const [reviewed] = (yield* attempts(task.taskId)).filter((row) => row.step === 'review')
       assert.strictEqual(reviewed?.state, 'succeeded')
-    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: out } } })))
+    }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: back } } })))
   })
 
   it.live("carries a lead's step on at once on the lead it was resumed on, or as answered", () =>
@@ -194,7 +183,7 @@ describe('a step an earlier Althar kept waiting for a place as the person resume
 
 describe('a step whose usage limit resets while every place is taken', () => {
   it.live('waits for a place, then carries on, on the agent it was held for', () => {
-    const back = Date.now() + 3_000
+    const back = outUntilSoon()
     return Effect.gen(function* () {
       const sessions = yield* Sessions
       const policies = yield* Policies
@@ -215,7 +204,7 @@ describe('a step whose usage limit resets while every place is taken', () => {
       const ran = yield* sql<{ agentId: string }>`
         SELECT agent_id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at, rowid`
       assert.deepStrictEqual([...new Set(ran.map((row) => row.agentId))], ['claude-code'])
-    }).pipe(Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: { until: back } } } })))
+    }).pipe(Effect.provide(oneAtOnce({ each: { 'claude-code': { outOfUsage: back } } })))
   })
 })
 
@@ -223,8 +212,7 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
   it.live(
     'goes by the project’s rule, as a review starting at once would: held until the reset, where it waits',
     () => {
-      // Out until three seconds after it first turns the review away, while the other's lead is at work.
-      const out = outFor(3_000)
+      const back = outUntilSoon()
       return Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const sessions = yield* Sessions
@@ -232,12 +220,12 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
         const instance = yield* Instance
         const projectId = yield* opened
         yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
-        const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:hold] [review:pass]', [
+        const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
           { key: 'implement', agentId: 'claude-code' },
           { key: 'review', agentId: 'codex' },
         ])
         // Its review waits for a place behind another task, kept as an earlier Althar kept a review after its lead's.
-        const { other, review } = yield* reviewBehind(projectId, task)
+        const { other, review } = yield* reviewBehind(projectId, task.taskId)
         assert.strictEqual(review.step, 'review')
         yield* keptAs(review.id, review.output, { how: 'next', reviewer: { key: 'review', agentId: 'codex', model: null, skipped: false } })
         // Meanwhile Codex falls to 3%.
@@ -252,12 +240,7 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
           observedAt: new Date().toISOString(),
         })}`
         // The other task finishes: the place frees, and the review is held for Codex's reset, as the project waits.
-        yield* sessions.send({
-          envelope: yield* Runtime.envelope('thread.send', {}),
-          threadId: other.threadId,
-          body: '[lead:finish]',
-          disposition: 'interrupt_and_continue',
-        })
+        yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.threadId, body: '[lead:finish]' })
         const held = (yield* until(
           attempts(task.taskId),
           (rows) =>
@@ -271,7 +254,7 @@ describe('a review that waited for a place while its reviewer fell nearly out', 
           notices.map((row) => row.title),
           `Fake codex has 3% of its five-hour limit left, so the review waits until ${whenWords(resetsAt)}. To carry on now, pick another model on the task.`,
         )
-      }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: out } } })))
+      }).pipe(Effect.provide(oneAtOnce({ each: { codex: { outOfUsage: back } } })))
     },
     40_000,
   )

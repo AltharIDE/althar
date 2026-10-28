@@ -9,8 +9,8 @@ import { TabsFrame } from './features/tabs/TabsFrame'
 
 /*
  * The route every feature's routes hang from, under the window's tabs, with
- * the projects' and tasks' screens the window keeps beside them: a project's
- * or a task's route says which shows. A notification the person clicked
+ * the home's, projects' and tasks' screens the window keeps beside them: the
+ * home's, a project's or a task's route says which shows. A notification the person clicked
  * opens its thread, wherever the window was.
  */
 function Root() {

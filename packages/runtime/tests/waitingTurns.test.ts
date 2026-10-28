@@ -20,7 +20,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { items, outFor, repository, runtime, until } from './support'
+import { items, outUntilSoon, repository, runtime, until } from './support'
 
 /*
  * Work waiting for a place among the agents at work (Busy.ts), where
@@ -366,33 +366,21 @@ describe('an answer kept for a place, as answers once were', () => {
 
 describe('a review that waits for a place of its own', () => {
   it.live('is gone on without when the person skips it, and its reviewer never starts again', () => {
-    // Out until three seconds after it first turns the review away, while the other's lead is at work.
-    const out = outFor(3_000)
+    const back = outUntilSoon()
     return Effect.gen(function* () {
       const runs = yield* Runs
-      const sessions = yield* Sessions
       const sql = yield* SqlClient.SqlClient
       const policies = yield* Policies
       const instance = yield* Instance
       const projectId = yield* opened
       yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
-      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:hold] [review:pass]', [
+      const task = yield* started(projectId, 'Reviewed', 'Do it. [lead:finish] [review:pass]', [
         { key: 'implement', agentId: 'claude-code' },
         { key: 'review', agentId: 'codex' },
       ])
-      // Its lead keeps the one place while another task's lead is put in line behind it.
-      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
-      const other = yield* started(projectId, 'Hold the place', 'Work on it. [lead:hold]', [{ key: 'implement', agentId: 'opencode' }])
-      yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.holdReason === 'machine_busy', Duration.seconds(15))
-      // Told to finish, it hands the place to its review, whose reviewer is out of usage until its reset: the other's lead
-      // takes the place meanwhile.
-      yield* sessions.send({
-        envelope: yield* Runtime.envelope('thread.send', {}),
-        threadId: task.threadId,
-        body: '[lead:finish]',
-        disposition: 'interrupt_and_continue',
-      })
-      yield* until(attempts(other.taskId), (rows) => rows.at(-1)?.state === 'running', Duration.seconds(15))
+      // Its reviewer is out of usage until its reset; meanwhile another task's lead takes the one place.
+      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.holdReason === 'usage_limit', Duration.seconds(15))
+      yield* started(projectId, 'Hold the place', 'Work on it. [lead:wait]', [{ key: 'implement', agentId: 'opencode' }])
       // At the reset there is none: the review waits for a place of its own.
       yield* until(
         attempts(task.taskId),
@@ -413,6 +401,6 @@ describe('a review that waits for a place of its own', () => {
       )
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* reviewers, before)
-    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: out } } })))
+    }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { outOfUsage: back } } })))
   })
 })

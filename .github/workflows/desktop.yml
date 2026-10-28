@@ -51,19 +51,31 @@ jobs:
       - run: bun run test
 
   # Windows, where no one here works day to day: the checks and unit tests of the desktop app and everything it builds
-  # on, in three parts that take about as long as each other, so what breaks there shows on the pull request.
+  # on, in parts that take about as long as each other, so what breaks there shows on the pull request. The runtime's
+  # tests, the longest, are split by file.
   windows:
     name: windows (${{ matrix.part }})
     runs-on: windows-2025
-    timeout-minutes: 35
+    # A few times a part's usual run (seven to ten minutes), so a hang fails here, not at the limit.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
           - part: desktop
             packages: apps/desktop
-          - part: runtime
+          - part: runtime 1/4
             packages: packages/runtime
+            shard: 1/4
+          - part: runtime 2/4
+            packages: packages/runtime
+            shard: 2/4
+          - part: runtime 3/4
+            packages: packages/runtime
+            shard: 3/4
+          - part: runtime 4/4
+            packages: packages/runtime
+            shard: 4/4
           - part: packages
             packages: packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/ui
     defaults:
@@ -100,11 +112,12 @@ jobs:
       # Each package's checks and tests, every one run even when one before it fails, so a run says all that broke.
       - env:
           PACKAGES: ${{ matrix.packages }}
+          SHARD: ${{ matrix.shard }}
         run: |
           failed=''
           for package in $PACKAGES; do
             echo "::group::$package"
-            (cd "$package" && bun run check && bun run test) || failed="$failed $package"
+            (cd "$package" && bun run check && bun run test ${SHARD:+--shard=$SHARD}) || failed="$failed $package"
             echo "::endgroup::"
           done
           if [ -n "$failed" ]; then

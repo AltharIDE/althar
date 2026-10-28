@@ -210,6 +210,9 @@ export const projectReads = (read: Reads, projectId: string): ReadonlyArray<Read
   read.automations(projectId),
 ]
 
+/** Every read the home shows: the projects, the agents, and across the projects what waits, what runs and what the loop did. */
+export const homeReads = (read: Reads): ReadonlyArray<Read> => [read.projects(), read.status(), read.home()]
+
 /** Every read a task's screen shows first: its thread and the agents. */
 export const threadReads = (read: Reads, threadId: string): ReadonlyArray<Read> => [read.thread(threadId), read.status()]
 
