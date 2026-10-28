@@ -14,7 +14,7 @@
 }
 
 /* What the camera sees, moved as one: its pivot the large window, where the words are. */
-.camera { position: absolute; inset: 0; z-index: -1; transform-origin: 62% 32%; will-change: transform; }
+.camera { position: absolute; inset: 0; z-index: -1; transform-origin: 50% 36%; will-change: transform; }
 
 /* The fire and the sky, set over the glass by the script. */
 .fire { position: absolute; display: block; }
@@ -37,7 +37,7 @@
   position: absolute;
   left: var(--px); top: var(--py);
   width: calc(var(--pw) * var(--u)); height: calc(var(--ph) * var(--u));
-  background: #0a1a3a 60% 30% / 115% no-repeat;
+  background: #0a1a3a 50% 30% / 100% no-repeat;
 }
 .hero[data-drawn] .sky { display: none; }
 
@@ -55,11 +55,11 @@
 .dim { background: #000; opacity: 0.4; }
 .firelit {
   mix-blend-mode: screen;
-  background: radial-gradient(ellipse 75% 90% at 75% 28%, rgba(255, 128, 40, 0.75), rgba(255, 90, 30, 0.35) 45%, rgba(255, 70, 20, 0) 80%);
+  background: radial-gradient(ellipse 80% 90% at 50% 30%, rgba(255, 128, 40, 0.75), rgba(255, 90, 30, 0.35) 45%, rgba(255, 70, 20, 0) 80%);
 }
 .daylit {
   mix-blend-mode: soft-light;
-  background: radial-gradient(ellipse 80% 90% at 72% 28%, rgb(170, 205, 255), rgba(150, 190, 255, 0.5) 50%, rgba(140, 180, 255, 0) 85%);
+  background: radial-gradient(ellipse 85% 90% at 50% 30%, rgb(170, 205, 255), rgba(150, 190, 255, 0.5) 50%, rgba(140, 180, 255, 0) 85%);
 }
 
 /* The fire breaking: the glass too bright for a moment, and fading. */
@@ -69,7 +69,7 @@
   z-index: 1;
   opacity: 0;
   pointer-events: none;
-  background: radial-gradient(ellipse 60% 70% at 72% 30%, #fffaf2, rgba(255, 238, 215, 0.6) 30%, rgba(255, 225, 190, 0) 75%);
+  background: radial-gradient(ellipse 65% 70% at 50% 32%, #fffaf2, rgba(255, 238, 215, 0.6) 30%, rgba(255, 225, 190, 0) 75%);
   mix-blend-mode: screen;
 }
 
@@ -91,7 +91,7 @@
 }
 .vignette {
   background:
-    radial-gradient(ellipse 90% 85% at 55% 40%, transparent 55%, rgba(0, 0, 0, 0.5) 100%),
+    radial-gradient(ellipse 90% 85% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.5) 100%),
     linear-gradient(transparent 50%, rgba(4, 2, 1, 0.8));
 }
 
@@ -115,7 +115,7 @@
   right: max(16px, calc(100cqw - var(--px) - (var(--wx) + var(--ww)) * var(--u)));
 }
 .line {
-  top: calc(var(--py) + (var(--wy) + 120) * var(--u));
+  top: calc(var(--py) + (var(--wy) + 150) * var(--u));
   font-size: clamp(26px, 88 * var(--u), 52px);
   font-weight: 500;
   line-height: 1.08;
@@ -124,8 +124,8 @@
   text-shadow: 0 1px 3px rgba(20, 6, 0, 0.5), 0 2px 26px rgba(20, 6, 0, 0.7);
 }
 .fast {
-  top: calc(var(--py) + (var(--wy) + 225) * var(--u));
-  font-size: calc(560 * var(--u));
+  top: calc(var(--py) + (var(--wy) + 265) * var(--u));
+  font-size: calc(640 * var(--u));
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.06em;
