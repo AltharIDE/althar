@@ -214,8 +214,13 @@ describe('a project’s front page', () => {
       [null, true],
       ['MER', undefined],
     ])
-    // Its team's key unread (signed out): the connection alone decides, once.
-    expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list)).toEqual([{ ...learned, bound: true }])
+    // Its team's key unread (signed out, failed, pending): no learned team is taken for it, so another team's issues never become the bound row.
+    expect(
+      trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list).map((tracker) => [tracker.key, tracker.bound]),
+    ).toEqual([
+      [null, true],
+      ['MER', undefined],
+    ])
     // Cards with no team key can't be told to be on the bound board: their own tracker, drafts elsewhere.
     const card = { product: 'trello', at: 'trello.com', key: null, url: 'https://trello.com', connections: ['conn_t'] } as const
     const trello = {
@@ -239,9 +244,33 @@ describe('a project’s front page', () => {
       }) as never
     const both = trackersOf([issue('conn_a', 'a'), issue('conn_b', 'b')], {
       ...list,
-      products: [{ ...githubConnection, product: 'linear', tracker: true, host: false }] as never,
+      products: [{ ...githubConnection, product: 'linear', tracker: true, host: false, workspaces: true }] as never,
     })
     expect(both).toHaveLength(2)
+    // With no connection to say, the link does: two workspaces stay two, and one workspace with and without a connection stays one.
+    const linkOnly = (workspace: string) => {
+      const { connectionId: _, ...rest } = (issue('', workspace) as { issue: Record<string, unknown> }).issue
+      return { taskId: 'x', issue: rest } as never
+    }
+    const workspaced = {
+      ...list,
+      products: [{ ...githubConnection, product: 'linear', tracker: true, host: false, workspaces: true }] as never,
+    }
+    expect(trackersOf([linkOnly('a'), linkOnly('b')], workspaced).map((tracker) => tracker.url)).toHaveLength(2)
+    const mixed = trackersOf([issue('conn_a', 'a'), linkOnly('a')], workspaced)
+    expect(mixed).toHaveLength(1)
+    expect(mixed[0]!.connections).toEqual(['conn_a'])
+    // Bound row's standing is the bound connection's alone, whatever else its issues were read through.
+    const second = { ...conn('conn_a2', 'a'), state: 'reauth_required' as const }
+    const shared = { ...learned, connections: ['conn_a2', 'conn_a'] }
+    expect(
+      trackersWithBinding(
+        [shared],
+        { connectionId: 'conn_a', container: team },
+        { ...list, connections: [...list.connections, second] },
+        'MER',
+      )[0]?.connections,
+    ).toEqual(['conn_a'])
     expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list, 'MER')).toEqual([{ ...learned, bound: true }])
     // Its issues name no connection: the bound keeps its own, and only a link on its workspace is it.
     const bare = { ...learned, key: 'FNT', url: 'https://linear.app/b/team/FNT', connections: [] }

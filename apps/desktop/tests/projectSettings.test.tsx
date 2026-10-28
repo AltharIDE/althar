@@ -676,14 +676,33 @@ describe('a project’s trackers, in its settings', () => {
       expect(trackers.queryByText('No tracker yet')).toBeNull()
     })
 
-    it('bound to a team of a signed-out workspace, with its issues learned, lists it once with the sign-in prompt', async () => {
-      windowAt('/projects/p1', withBoard([taskFrom('FNT-12', 'conn_fnt')], signedOut, binding))
+    it('bound to a signed-out workspace whose team cannot be read, keeps the sign-in prompt and does not take another team for the bound one', async () => {
+      windowAt('/projects/p1', {
+        ...withBoard([taskFrom('MER-12', 'conn_fnt')], signedOut, binding),
+        listContainers: vi.fn(async () => {
+          throw new Error('signed out')
+        }),
+      })
       await openSettings('Code and issues')
       const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
-      expect(await trackers.findByText('Signed out as mate')).toBeTruthy()
-      expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+      expect((await trackers.findAllByText('Signed out as mate')).length).toBeGreaterThan(0)
+      expect(trackers.getAllByRole('button', { name: 'Sign in again' }).length).toBeGreaterThan(0)
+      expect(trackers.getByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('Linear issues')).toBeTruthy()
+      expect(trackers.getAllByText(/Its drafts go to the tracker above/)).toHaveLength(1)
+    })
+
+    it('bound through a ready account of a workspace where another account is signed out, says it is connected', async () => {
+      const other = { ...fnt, id: 'conn_other', state: 'reauth_required' as const, account: { login: 'sam', name: 'Sam' } }
+      windowAt('/projects/p1', {
+        ...withBoard([taskFrom('FNT-12', 'conn_other'), taskFrom('FNT-13', 'conn_fnt')], fnt, binding),
+        listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, fnt, other] })),
+      })
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Connected as mate')).toBeTruthy()
+      expect(trackers.queryByRole('button', { name: 'Sign in again' })).toBeNull()
       expect(trackers.getAllByText(/issues · Linear/)).toHaveLength(1)
-      expect(trackers.queryByText(/drafts go to/)).toBeNull()
     })
 
     it('learned and not bound, lists it as before, with Connect a tracker', async () => {

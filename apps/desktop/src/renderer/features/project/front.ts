@@ -96,6 +96,18 @@ export const trackerUrlOf = (product: Product, key: string | null, issueUrl: str
   }
 }
 
+/** The workspace an issue is in, where its product has them: its connection's, else the first part of its link's path, as Linear's. */
+const workspaceOf = (issue: NonNullable<BoardTask['issue']>, list: ConnectionList | null): string => {
+  if (list?.products.find((product) => product.product === issue.product)?.workspaces !== true) return ''
+  const named = list.connections.find((each) => each.id === issue.connectionId)?.workspace?.key
+  if (named !== undefined) return named
+  try {
+    return new URL(issue.url).pathname.split('/')[1] ?? ''
+  } catch {
+    return ''
+  }
+}
+
 /**
  * The trackers a project's tasks name, the one most of them name first: one
  * a key their issues share, else one a tracker whose issues share none, as
@@ -110,7 +122,7 @@ export const trackersOf = (tasks: ReadonlyArray<BoardTask>, list: ConnectionList
     const key = /^([A-Z][A-Z0-9_]*)-\d+$/.exec(issue.key)?.[1] ?? null
     const at = hostNameOf(issue.url)
     // Another workspace on the same server is another tracker, though a team there shares the key.
-    const workspace = list?.connections.find((each) => each.id === issue.connectionId)?.workspace?.key ?? ''
+    const workspace = workspaceOf(issue, list)
     const id = `${issue.product}:${at ?? ''}:${workspace}:${key ?? ''}`
     const was = counted.get(id)
     const through = was?.through ?? new Map<string, number>()
@@ -269,20 +281,17 @@ export const trackersWithBinding = (
   const space = spaceOf(webUrl, connection?.workspace?.key)
   // The same only where it is the same workspace and, with a team bound, that team: another team's issues on the same connection are another tracker.
   const sameSpace = (tracker: Tracker) =>
-    tracker.connections.length > 0
-      ? tracker.connections.includes(binding.connectionId)
-      : tracker.product === product && tracker.at === at && space !== null && (tracker.url ?? '').startsWith(`${space}/`)
-  // With a team bound: issues with no team key (Trello's cards) can't be told to be on its board, so they stay their own tracker; and where the
-  // team's key can't be read (its connection signed out), the connection alone decides, so the bound one doesn't show twice.
+    tracker.connections.includes(binding.connectionId) ||
+    (tracker.product === product && tracker.at === at && space !== null && (tracker.url ?? '').startsWith(`${space}/`))
+  // With a team bound: only issues on that team's key are it. Those with no key (Trello's cards), or while the key can't be read (pending, failed, or
+  // its connection signed out), can't be told to be on it, so they stay their own tracker, and the drafts' destination is the bound row alone.
   const sameTeam = (tracker: Tracker) =>
-    binding.container === null ||
-    binding.container === undefined ||
-    (tracker.key !== null && (containerKey === null || tracker.key === containerKey))
+    binding.container === null || binding.container === undefined || (containerKey !== null && tracker.key === containerKey)
   const matched = learned.find((tracker) => sameSpace(tracker) && sameTeam(tracker))
-  // Its standing is the bound connection's, whatever else its issues were read through.
+  // Its standing is the bound connection's alone, whatever else its issues were read through.
   const first: Tracker =
     matched !== undefined
-      ? { ...matched, connections: [binding.connectionId, ...matched.connections.filter((id) => id !== binding.connectionId)], bound: true }
+      ? { ...matched, connections: [binding.connectionId], bound: true }
       : { product, at, key: null, url: space, connections: [binding.connectionId], bound: true }
   return [first, ...learned.filter((tracker) => tracker !== matched)]
 }
