@@ -99,10 +99,14 @@
       why and its own Remove.
     - **Clean up:** it takes what nothing holds, whatever its wait, and
       says what it freed: the sizes of what went, measured just before each
-      went. A size is what a folder's files hold that nothing outside it
-      shares: on APFS each file's private size, so the clones bun installs
-      `node_modules` as count nothing, though `du` and Finder count them in
-      full; elsewhere a file hardlinked from outside counts nothing. The disk's free space after is no measure: other
+      went. A size is what a task's folders, its review copies too, hold
+      that nothing outside them shares: on APFS each file's private size,
+      and blocks clones share once where every clone of them is among the
+      folders, so the clones bun installs `node_modules` as count nothing,
+      though `du` and Finder count them in full; elsewhere a file hardlinked
+      from outside counts nothing. A folder part of which can't be read has
+      no size, never what the rest takes; Clean up then says what the disk
+      freed. The disk's free space after is otherwise no measure: other
       writes move it by as much as a worktree frees.
     - **Nothing in Needs you, and no notifications:** it is housekeeping.
 - **Alternatives considered:**

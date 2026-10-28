@@ -61,6 +61,8 @@ export interface TaskFoldersText {
   freed: (bytes: number) => string
   /** The folders' sizes are still being worked out. */
   measuring: string
+  /** What folders take where some couldn't be measured: what those that could take, in bytes. */
+  unknown: (bytes: number) => string
   /** What the legend opens, as a screen reader names it. */
   list: string
   goesHead: string
@@ -100,6 +102,7 @@ export const taskFoldersText: TaskFoldersText = {
   cleanUp: 'Clean up',
   freed: (bytes) => `Freed ${sizeOf(bytes)} just now`,
   measuring: 'Measuring…',
+  unknown: (bytes) => (bytes === 0 ? 'unknown' : `at least ${sizeOf(bytes)}`),
   list: 'Finished tasks’ folders',
   goesHead: 'Goes with Clean up',
   heldHead: 'Held back',
@@ -132,9 +135,12 @@ const WHY_GLYPH: Record<HeldWhy, IconName> = {
 const total = (folders: ReadonlyArray<FinishedFolder>) =>
   folders.reduce<number | null>((sum, one) => (sum === null || one.bytes === null ? null : sum + one.bytes), 0)
 
-/** A total, or, until each of its folders is measured, a placeholder in its place. */
-function Total({ bytes, t }: { bytes: number | null; t: TaskFoldersText }) {
-  return bytes === null ? <span className={s.pending}>{t.measuring}</span> : <>{sizeOf(bytes)}</>
+/** Folders' total; while some are being measured, a placeholder in its place; where some couldn't be, what the rest take, as such. */
+function Total({ folders, measuring, t }: { folders: ReadonlyArray<FinishedFolder>; measuring: boolean; t: TaskFoldersText }) {
+  const bytes = total(folders)
+  if (bytes !== null) return <>{sizeOf(bytes)}</>
+  if (measuring) return <span className={s.pending}>{t.measuring}</span>
+  return <>{t.unknown(folders.reduce((sum, one) => sum + (one.bytes ?? 0), 0))}</>
 }
 
 /** Removing it by hand loses something of the person's: its Remove is red. */
@@ -239,8 +245,9 @@ function FolderList({
   onRemove,
   onOpen,
   busy,
+  measuring,
   t,
-}: Pick<TaskFoldersProps, 'goes' | 'held' | 'onRemove' | 'onOpen' | 'busy'> & { t: TaskFoldersText }) {
+}: Pick<TaskFoldersProps, 'goes' | 'held' | 'onRemove' | 'onOpen' | 'busy'> & { measuring: boolean; t: TaskFoldersText }) {
   const [asking, setAsking] = useState<string | null>(null)
   return (
     <div className={s.list}>
@@ -249,7 +256,7 @@ function FolderList({
           <div className={s.head}>
             <h3 className={s.eyebrow}>{t.goesHead}</h3>
             <span className={s.total}>
-              <Total bytes={total(goes)} t={t} />
+              <Total folders={goes} measuring={measuring} t={t} />
             </span>
           </div>
           <ul className={s.rows}>
@@ -264,7 +271,7 @@ function FolderList({
           <div className={s.head}>
             <h3 className={s.eyebrow}>{t.heldHead}</h3>
             <span className={s.total}>
-              <Total bytes={total(held)} t={t} />
+              <Total folders={held} measuring={measuring} t={t} />
             </span>
           </div>
           <ul className={s.rows}>
@@ -340,7 +347,7 @@ export function TaskFolders({
                           <i className={s.hatch} aria-hidden="true" />
                           {t.canGo}{' '}
                           <b>
-                            <Total bytes={going} t={t} />
+                            <Total folders={goes} measuring={measuring} t={t} />
                           </b>
                         </span>
                       )}
@@ -349,7 +356,7 @@ export function TaskFolders({
                           <i className={s.pale} aria-hidden="true" />
                           {t.held}{' '}
                           <b>
-                            <Total bytes={holding} t={t} />
+                            <Total folders={held} measuring={measuring} t={t} />
                           </b>
                         </span>
                       )}
@@ -357,7 +364,15 @@ export function TaskFolders({
                     </button>
                   }
                 >
-                  <FolderList goes={goes} held={held} onRemove={onRemove} {...(onOpen === undefined ? {} : { onOpen })} busy={busy} t={t} />
+                  <FolderList
+                    goes={goes}
+                    held={held}
+                    onRemove={onRemove}
+                    {...(onOpen === undefined ? {} : { onOpen })}
+                    busy={busy}
+                    measuring={measuring}
+                    t={t}
+                  />
                 </Popover>
               )}
               {measuring && going !== null && holding !== null && <span>{t.measuring}</span>}

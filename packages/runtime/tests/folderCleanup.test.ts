@@ -178,6 +178,8 @@ describe('finished tasks’ folders', () => {
       if (process.platform === 'darwin') execFileSync('cp', ['-c', join(store, 'cloned.node'), join(modules, 'cloned.node')])
       linkSync(join(store, 'linked.node'), join(modules, 'linked.node'))
       writeFileSync(join(modules, 'built.node'), Buffer.alloc(8 * MB, 3))
+      // A clone of it inside the folder: neither holds the blocks they share alone, but removing both frees them.
+      if (process.platform === 'darwin') execFileSync('cp', ['-c', join(modules, 'built.node'), join(modules, 'built-again.node')])
       const listed = yield* measured
       const bytes = listed.folders[0]?.bytes ?? null
       assert.isNotNull(bytes)
@@ -191,6 +193,23 @@ describe('finished tasks’ folders', () => {
       assert.isBelow(freed.freed, bytes! + 5 * MB)
       assert.isFalse(existsSync(task.worktree))
       rmSync(store, { recursive: true, force: true })
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
+  it.live("lists a folder part of which can't be read as of a size not known, not as what the rest takes", () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 1, 'Add a retry', (root) => {
+        writeFileSync(join(root, '.gitignore'), 'cache\n')
+        git(root, 'add', '.')
+        git(root, 'commit', '-q', '-m', 'Ignore')
+      })
+      const locked = join(task.worktree, 'cache')
+      mkdirSync(locked)
+      writeFileSync(join(locked, 'big'), Buffer.alloc(1024 ** 2, 1))
+      chmodSync(locked, 0o000)
+      const listed = yield* measured.pipe(Effect.ensuring(Effect.sync(() => chmodSync(locked, 0o755))))
+      assert.strictEqual(listed.folders.length, 1)
+      assert.isNull(listed.folders[0]?.bytes)
     }).pipe(Effect.provide(withCleanup())),
   )
 
@@ -595,7 +614,7 @@ describe('the words for a folder going', () => {
     assert.strictEqual(goneWords('hand', 7, 300 * 1024), 'You removed its folder · under 1 MB')
   })
 
-  it('counts a file hardlinked from outside a folder as nothing, and one linked only inside it once', async () => {
+  it('counts a file hardlinked from outside folders as nothing, and one linked only inside them once, across them', async () => {
     const MB = 1024 ** 2
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'althar-owned-')))
     const folder = join(root, 'folder')
@@ -604,9 +623,27 @@ describe('the words for a folder going', () => {
     linkSync(join(root, 'outside'), join(folder, 'shared'))
     writeFileSync(join(folder, 'own'), Buffer.alloc(MB, 2))
     linkSync(join(folder, 'own'), join(folder, 'own-again'))
-    const bytes = await ownedBytes(folder)
+    const next = join(root, 'next')
+    mkdirSync(next)
+    linkSync(join(folder, 'own'), join(next, 'own-there'))
+    const bytes = await ownedBytes([folder, next])
     rmSync(root, { recursive: true, force: true })
     assert.isAtLeast(bytes, MB)
     assert.isBelow(bytes, MB + 64 * 1024)
+  })
+
+  it("can't say what a folder holds where part of it can't be read", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'althar-owned-')))
+    const locked = join(root, 'locked')
+    mkdirSync(locked)
+    writeFileSync(join(locked, 'big'), Buffer.alloc(1024 ** 2, 1))
+    chmodSync(locked, 0o000)
+    const failed = await ownedBytes([root]).then(
+      () => false,
+      () => true,
+    )
+    chmodSync(locked, 0o755)
+    rmSync(root, { recursive: true, force: true })
+    assert.isTrue(failed)
   })
 })

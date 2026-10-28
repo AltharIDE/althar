@@ -140,72 +140,92 @@ const holdOf = (running: boolean, lost: FolderHeld | null, opened: boolean): Fol
   running ? { why: 'running', count: null } : (lost ?? (opened ? { why: 'opened', count: null } : null))
 
 /**
- * On APFS, what a folder's files hold that no clone shares, in bytes: each
- * file's private size, by getattrlist (ATTR_CMNEXT_PRIVATESIZE), through the
- * perl every Mac has. bun installs `node_modules` as clones of its cache:
- * `du` and Finder count them in full, but removing them frees next to
- * nothing; what a package built or changed after it was installed, it holds.
- * A file hardlinked from outside the folder counts nothing; one whose links
- * are all inside it, once.
+ * On APFS, what a task's folders hold that nothing outside them shares, in
+ * bytes, by getattrlist through the perl every Mac has. bun installs
+ * `node_modules` as clones of its cache: `du` and Finder count them in full,
+ * but removing them frees next to nothing. A file counts its private size
+ * (ATTR_CMNEXT_PRIVATESIZE), what a package built or changed after it was
+ * installed; the blocks clones share count once where every clone of them
+ * (ATTR_CMNEXT_CLONEID, ATTR_CMNEXT_CLONE_REFCNT) is among the folders. A file
+ * hardlinked from outside them counts nothing; one whose links are all
+ * inside, once. What it can't read fails it: a part is not the whole.
  */
 const PRIVATE = String.raw`
-use strict; use File::Find;
-my $list = pack('SSLLLLL', 5, 0, 0x80000000, 0, 0, 0, 0x8);
-my ($total, %seen) = (0);
+use strict; use warnings; use File::Find;
+my $list = pack('SSLLLLL', 5, 0, 0x80000000, 0, 0, 0, 0x1108);
+my ($total, $failed, %seen, %clones) = (0, 0);
+local $SIG{__WARN__} = sub { $failed = 1 };
 find({ no_chdir => 1, wanted => sub {
-  my @st = lstat $_ or return;
+  my @st = lstat $_;
+  unless (@st) { $failed = 1 unless $!{ENOENT}; return }
   my $own = $st[12] * 512;
   if (-f _) {
-    my $buf = "\0" x 32;
-    $own = unpack('q', substr($buf, 24, 8)) if syscall(220, $_, $list, $buf, 32, 0x21) == 0 && unpack('L', $buf) >= 32;
-    $own = 0 if $st[3] > 1 && ++$seen{"$st[0]:$st[1]"} != $st[3];
+    return if $st[3] > 1 && ++$seen{"$st[0]:$st[1]"} != $st[3];
+    my $buf = "\0" x 64;
+    if (syscall(220, $_, $list, $buf, 64, 0x21) == 0 && unpack('L', $buf) >= 32) {
+      my $private = unpack('q', substr($buf, 24, 8));
+      if (($private < $own) && (unpack('L', substr($buf, 20, 4)) & 0x1100) == 0x1100) {
+        my ($id, $refs) = unpack('Q L', substr($buf, 32, 12));
+        my $group = $clones{$id} ||= [0, 0, $refs];
+        $group->[0]++;
+        $group->[1] = $own - $private if $own - $private > $group->[1];
+      }
+      $own = $private;
+    }
   }
   $total += $own;
-}}, $ARGV[0]);
+}}, @ARGV);
+for (values %clones) { $total += $_->[1] if $_->[0] >= $_->[2] }
+exit 1 if $failed;
 print "$total\n";
 `
 
 /**
- * What a folder's files hold that nothing outside it shares, in bytes: a file
- * hardlinked from outside it, as bun and pnpm install `node_modules` on Linux
- * and Windows, counts nothing; one whose links are all inside it, once. Where
- * the disk says no blocks, a file's length.
+ * What folders' files hold that nothing outside them shares, in bytes: a file
+ * hardlinked from outside them, as bun and pnpm install `node_modules` on
+ * Linux and Windows, counts nothing; one whose links are all inside, once.
+ * Where the disk says no blocks, a file's length. What it can't read throws:
+ * a part is not the whole.
  */
-export const ownedBytes = async (root: string): Promise<number> => {
+export const ownedBytes = async (roots: ReadonlyArray<string>): Promise<number> => {
   let total = 0
   const seen = new Map<string, number>()
-  const walk = async (dir: string): Promise<void> => {
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
-    for (const entry of entries) {
-      const path = join(dir, entry.name)
-      const stats = await lstat(path, { bigint: true }).catch(() => null)
-      if (stats === null) continue
-      if (stats.isDirectory()) await walk(path)
-      const own = Number(stats.blocks > 0n ? stats.blocks * 512n : stats.isFile() ? stats.size : 0n)
-      if (stats.nlink > 1n && stats.isFile()) {
-        const key = `${stats.dev}:${stats.ino}`
-        const count = (seen.get(key) ?? 0) + 1
-        seen.set(key, count)
-        if (BigInt(count) !== stats.nlink) continue
-      }
-      total += own
-    }
+  const gone = (error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return null
   }
-  await walk(root)
+  const walk = async (path: string): Promise<void> => {
+    const stats = await lstat(path, { bigint: true }).catch(gone)
+    if (stats === null) return
+    if (stats.isDirectory()) {
+      for (const name of (await readdir(path).catch(gone)) ?? []) await walk(join(path, name))
+    }
+    if (stats.nlink > 1n && stats.isFile()) {
+      const key = `${stats.dev}:${stats.ino}`
+      const count = (seen.get(key) ?? 0) + 1
+      seen.set(key, count)
+      if (BigInt(count) !== stats.nlink) return
+    }
+    total += Number(stats.blocks > 0n ? stats.blocks * 512n : stats.isFile() ? stats.size : 0n)
+  }
+  for (const root of roots) await walk(root)
   return total
 }
 
-/** What removing a folder frees, in bytes, by what its files hold that nothing outside it shares; null where it can't say. */
-const sizeOf = (path: string) =>
+/** What removing folders together frees, in bytes, by what their files hold that nothing outside them shares; null where it can't say. */
+const sizeOf = (paths: ReadonlyArray<string>) =>
   process.platform !== 'darwin'
-    ? Effect.tryPromise(() => ownedBytes(path)).pipe(Effect.orElseSucceed(() => null))
+    ? Effect.tryPromise(() => ownedBytes(paths)).pipe(Effect.orElseSucceed(() => null))
     : Effect.callback<number | null>((resume) => {
-        execFile('/usr/bin/perl', ['-e', PRIVATE, path], { timeout: 300_000 }, (error, stdout) => {
+        execFile('/usr/bin/perl', ['-e', PRIVATE, ...paths], { timeout: 300_000 }, (error, stdout) => {
           const bytes = /^(\d+)\s*$/.exec(stdout)?.[1]
           resume(
             error === null && bytes !== undefined
               ? Effect.succeed(Number(bytes))
-              : Effect.tryPromise(() => ownedBytes(path)).pipe(Effect.orElseSucceed(() => null)),
+              : // perl ran and couldn't read it all: so can't Node
+                error !== null && typeof error.code === 'number'
+                ? Effect.succeed(null)
+                : Effect.tryPromise(() => ownedBytes(paths)).pipe(Effect.orElseSucceed(() => null)),
           )
         })
       })
@@ -443,19 +463,15 @@ export class FolderCleanup extends Context.Service<
           } satisfies FolderHeld
         })
 
-      /** What removing a task's folders frees, their review copies too; null where it can't say. */
-      const sizeOfAll = (candidate: Candidate) =>
-        Effect.gen(function* () {
-          let bytes = 0
-          for (const workspace of candidate.workspaces) {
-            if (!existsSync(workspace.path)) continue
-            const size = yield* sizeOf(workspace.path)
-            if (size === null) return null
-            const copy = reviewCopyOf(workspace.path)
-            bytes += size + (workspace.access === 'write' && existsSync(copy) ? ((yield* sizeOf(copy)) ?? 0) : 0)
-          }
-          return bytes
-        })
+      /** What removing a task's folders frees, their review copies too, measured together; null where it can't say. */
+      const sizeOfAll = (candidate: Candidate) => {
+        const paths = candidate.workspaces.flatMap((workspace) => [
+          workspace.path,
+          ...(workspace.access === 'write' ? [reviewCopyOf(workspace.path)] : []),
+        ])
+        const present = paths.filter((path) => existsSync(path))
+        return present.length === 0 ? Effect.succeed(0) : sizeOf(present)
+      }
 
       /** A merged change with commits after its pull request: not finished after all. */
       const unshippedOf = (candidate: Candidate) =>

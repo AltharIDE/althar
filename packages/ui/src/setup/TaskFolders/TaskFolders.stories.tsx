@@ -162,6 +162,15 @@ export const MeasuringSome: Story = {
   },
 }
 
+/** Measured, but one folder couldn't be read: what the rest take, as no more than that. */
+export const SomeUnknown: Story = {
+  render: () => <Row goes={GOES.map((one, i) => (i === 0 ? { ...one, bytes: null } : one))} />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: /^Can go now at least [\d.]+ [MG]B\s*Held back/ })).toBeVisible()
+    await expect(within(canvasElement).queryByText('Measuring…')).toBeNull()
+  },
+}
+
 /** Just removed a folder whose own files are small: what it freed, under a megabyte, never rounded up to one. */
 export const FreedLittle: Story = {
   render: () => <Row freed={0.3 * 1024 ** 2} />,
