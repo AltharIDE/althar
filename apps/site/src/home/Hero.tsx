@@ -479,8 +479,14 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
           <div className={cx(s.cell, s.install)}>
             <span className={s.label}>{HERO.install}</span>
             <div className={s.command}>
-              <code>{INSTALL.brew}</code>
-              <CopyButton value={INSTALL.brew} tone="onDark" ghost />
+              <code>
+                <span aria-hidden="true">$ </span>
+                {INSTALL.brew}
+              </code>
+              {/* The kit's button, under the kit's own reset. */}
+              <span className="ch-root">
+                <CopyButton value={INSTALL.brew} tone="onDark" ghost />
+              </span>
             </div>
           </div>
           <div className={cx(s.cell, s.ways)}>

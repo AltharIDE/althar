@@ -262,6 +262,11 @@
 .crew li { display: grid; place-items: center; width: 18px; height: 18px; }
 .command { display: flex; align-items: center; gap: 4px; padding: 3px 3px 3px 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
 .command code { font: 13px/1 var(--mono); color: rgba(255, 248, 240, 0.92); white-space: nowrap; }
+.command code span { color: rgba(255, 248, 240, 0.45); }
+/* The copy button, quiet until pointed at. Once it has copied, its tick takes the glyph's place, light on the dark, and its word is only read out, so the console keeps its width. */
+.command button { width: 26px; padding: 0; justify-content: center; color: rgba(255, 248, 240, 0.6); }
+.command button:hover { color: #fff; }
+.command button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Narrower, the download takes a row of its own under the crew and the install. */
