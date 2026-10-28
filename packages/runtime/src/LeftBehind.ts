@@ -1,4 +1,4 @@
-import type { ProjectId } from '@althar/domain'
+import { now, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Duration, Effect, Layer, Option, Queue, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -177,14 +177,16 @@ export class LeftBehind extends Context.Service<
           return stuck
         })
 
-      const stopTask = (taskId: string) =>
+      /** Stops everything of a task said settled `at`: not what started after, as a run of it reopened. */
+      const stopTask = (taskId: string, at: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const task = yield* settledNow(taskId)
           if (task === undefined) return
           const threads = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} ORDER BY created_at, rowid`
           const stuck = (yield* Effect.forEach(threads, (thread) => stopAgent(taskId, thread.id), { concurrency: 'unbounded' })).flat()
-          yield* launches.stopAll(task.projectId, taskId)
+          // Its runs from before it settled, not if it opened again while its agents' turns ended.
+          if ((yield* settledNow(taskId)) !== undefined) yield* launches.stopAll(task.projectId, taskId, at)
           // Whatever still carries the task, as a server that left its agent's group: not if it opened again meanwhile.
           const work = `task:${taskId}`
           const outlived = (yield* settledNow(taskId)) === undefined ? [] : yield* stopMarked((one) => Effect.succeed(one === work))
@@ -200,11 +202,11 @@ export class LeftBehind extends Context.Service<
           })
         })
 
-      const settle = (taskId: string) =>
+      const settle = (taskId: string, at: string) =>
         Effect.suspend(() => {
           if (stopping.has(taskId)) return Effect.void
           stopping.add(taskId)
-          return stopTask(taskId).pipe(
+          return stopTask(taskId, at).pipe(
             Effect.timeout(WITHIN),
             contained('LeftBehind.stop', () => undefined),
             Effect.ensuring(Effect.sync(() => stopping.delete(taskId))),
@@ -216,9 +218,9 @@ export class LeftBehind extends Context.Service<
        * handed to a fiber of this layer's, which reads it once that is written,
        * and stops it in a fiber of its own, so none waits on another.
        */
-      const asked = yield* Queue.unbounded<string>()
+      const asked = yield* Queue.unbounded<{ readonly taskId: string; readonly at: string }>()
       yield* Effect.forkIn(
-        provide(Effect.forever(Effect.flatMap(Queue.take(asked), (taskId) => Effect.forkIn(provide(settle(taskId)), scope)))),
+        provide(Effect.forever(Effect.flatMap(Queue.take(asked), ({ taskId, at }) => Effect.forkIn(provide(settle(taskId, at)), scope)))),
         scope,
       )
 
@@ -248,7 +250,7 @@ export class LeftBehind extends Context.Service<
           const running = yield* sessions.running(session.threadId)
           const ended = Option.isSome(running) ? running.value.turnEndedAt : null
           if (task === undefined || ended === null || ended > idleBefore || (yield* waitingOn(session.threadId))) continue
-          yield* settle(session.taskId)
+          yield* settle(session.taskId, yield* now)
         }
         const outlived = yield* stopMarked(over)
         if (outlived.length > 0) yield* Effect.logWarning('What settled work left running wouldn’t stop', { outlived })
@@ -272,7 +274,7 @@ export class LeftBehind extends Context.Service<
       )
 
       return LeftBehind.of({
-        settled: (taskId) => Queue.offer(asked, taskId).pipe(Effect.asVoid),
+        settled: (taskId) => Effect.flatMap(now, (at) => Queue.offer(asked, { taskId, at })).pipe(Effect.asVoid),
         sweep: provide(sweep.pipe(contained('LeftBehind.sweep', () => undefined))),
       })
     }),

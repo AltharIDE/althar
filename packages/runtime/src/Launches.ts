@@ -179,7 +179,7 @@ export class Launches extends Context.Service<
      * that ended: the project is removed, or the task settled, and nothing is
      * left to stop them from.
      */
-    stopAll(projectId: string, taskId?: string): Effect.Effect<void>
+    stopAll(projectId: string, taskId?: string, startedBy?: string): Effect.Effect<void>
     /** The project's runs, in the order they started. */
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
     /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
@@ -849,8 +849,11 @@ export class Launches extends Context.Service<
           yield* told(launch.projectId)
         })
 
-      const stopAll = (projectId: string, taskId?: string) => {
-        const ours = (launch: Launch) => launch.projectId === projectId && (taskId === undefined || launch.taskId === taskId)
+      const stopAll = (projectId: string, taskId?: string, startedBy?: string) => {
+        const ours = (launch: Launch) =>
+          launch.projectId === projectId &&
+          (taskId === undefined || launch.taskId === taskId) &&
+          (startedBy === undefined || launch.startedAt <= startedBy)
         const stopping = Effect.suspend(() =>
           Effect.forEach([...launches.values()].filter(ours), (launch) => (launch.ended === null ? stop(launch.id) : clear(launch.id)), {
             discard: true,

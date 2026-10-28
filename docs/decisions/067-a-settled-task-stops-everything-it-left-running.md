@@ -46,13 +46,22 @@
     shell, each of those, and the shell's process group, is asked to stop and
     then killed, as above. A dev server, Storybook or `vp preview` no longer
     outlives its command.
+  - **Marking done no longer waits on, or refuses for, what agents left
+    running**: the task is done at once, and settling stops the rest after,
+    as for a merge; an agent that refuses to stop a command, or never
+    answers, costs ten seconds in the background and one line in the thread.
   - **Reopened, a task's agents start again on demand**, as they did after
-    abandoning.
+    abandoning. Settling stops only the runs started before it was said, and
+    none once the task opened again while its agents' turns ended, so a run
+    the person starts on it since stays.
   - **A settled task's folder is held only by what was started from it after
     it settled**; a run from before goes with the folder, on schedule.
 - **Alternatives considered:**
   - **Stopping only through the agent**, as marking done did: misses the
     server under the shell, and everything once the agent has gone.
+  - **Keeping marking done refused while a command wouldn't stop**: an agent
+    that never answered held Done for good, and the command is killed
+    with its group either way.
   - **Killing by process group alone, after the agent stopped the command**:
     the group's leader is the shell, gone by then, and nothing says which
     group was its. So the shell is found first, by the output file it holds,

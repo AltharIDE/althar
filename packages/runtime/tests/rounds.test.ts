@@ -277,6 +277,13 @@ describe('a task that goes back to work', () => {
         assert.deepStrictEqual(yield* taskRow(task.taskId), before)
         assert.strictEqual((yield* results(task.threadId)).at(-1)?.summary, 'Looked again: nothing to change.')
         assert.lengthOf(yield* runsOf(task.taskId), 3)
+        // Settled again, its lead stops once its turn ends.
+        const sessions = yield* Sessions
+        yield* until(
+          Effect.map(sessions.running(task.threadId), (running) => (Option.isNone(running) ? [true] : [])),
+          (gone) => gone.length === 1,
+          Duration.seconds(20),
+        )
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,

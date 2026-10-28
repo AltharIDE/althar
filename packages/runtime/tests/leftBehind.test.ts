@@ -283,6 +283,50 @@ describe.skipIf(windows)('a task that settles', () => {
   )
 })
 
+describe.skipIf(windows)('a task opened again before settling has stopped it', () => {
+  it.live(
+    'keeps its lead and the run started since',
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* Sessions
+        const launches = yield* Launches
+        const { project, task } = yield* started('Sketch the page [lead:serve-apart] [lead:finish]', { quick: true })
+        // Asked something that takes it a while: its turn runs as the task settles, so settling waits for it.
+        const body = 'And the footer? [lead:slowly]'
+        yield* sessions.send({
+          envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+          threadId: task.threadId,
+          body,
+        })
+        const turn = (running: boolean) =>
+          until(
+            Effect.map(sessions.running(task.threadId), (one) => (Option.exists(one, (on) => on.turnRunning === running) ? [one] : [])),
+            (seen) => seen.length === 1,
+            Duration.seconds(10),
+          )
+        yield* turn(true)
+        assert.isTrue(yield* (yield* Tasks).markDone({ envelope: yield* Runtime.envelope('task.mark_done', {}), taskId: task.taskId }))
+        yield* Effect.sleep(Duration.seconds(1))
+        // Opened again once settling waits on that turn, as by a round the person's words open, and run again.
+        yield* sql`UPDATE tasks SET state = 'open', settled_at = NULL WHERE id = ${task.taskId}`
+        const again = yield* launches.start({ projectId: project.projectId, taskId: task.taskId, threadId: task.threadId })
+        // Its turn ended, and settling had its go: its lead and its new run go on.
+        yield* turn(false)
+        yield* Effect.sleep(Duration.seconds(5))
+        assert.isTrue(Option.isSome(yield* sessions.running(task.threadId)))
+        const runs = yield* launches.ofProject(project.projectId)
+        assert.deepStrictEqual(
+          runs.map((run) => [run.id, run.ended]),
+          [[again.id, null]],
+        )
+        yield* sessions.stop(task.threadId)
+        yield* launches.stopAll(project.projectId)
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    60_000,
+  )
+})
+
 describe.skipIf(windows)('what settled tasks left running that Althar lost track of', () => {
   it.live(
     'goes once Althar looks after it starts again, and nothing else does',
