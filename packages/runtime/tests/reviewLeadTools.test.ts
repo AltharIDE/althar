@@ -170,7 +170,7 @@ describe('a quick task', () => {
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 
-  it.live('isn’t marked done while what its lead left running won’t stop, and says so', () =>
+  it.live('is marked done even where what its lead left running won’t stop, and its thread says so', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
@@ -209,9 +209,16 @@ describe('a quick task', () => {
       }
       assert.strictEqual(
         yield* callTool(lead, 'settle_task', { how: 'done' }),
-        'Althar couldn’t stop what it left running, such as a page, so it isn’t done: it still waits in Needs you. Tell the person, so they can try Done again or keep it for later.',
+        'Marked it done: it is in Settled, and what it left running, such as a page, stops. Say so in a sentence; writing to you again picks it up.',
       )
-      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'open' }])
+      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task?.taskId ?? ''}`, [{ state: 'done' }])
+      // What wouldn't stop is said in its thread, in one line.
+      const said = yield* until(
+        Effect.map(notices(task?.threadId ?? ''), (all) => all.filter((one) => one.title?.startsWith('Couldn’t stop'))),
+        (lines) => lines.length > 0,
+        Duration.seconds(20),
+      )
+      assert.lengthOf(said, 1)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { refusesStop: () => true }))))),
   )
 })
