@@ -26,7 +26,7 @@ describe('what crawlers are given', () => {
     const listed = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])
     expect(listed).toEqual(indexed().map((page) => (page.path === '/' ? `${ORIGIN}/` : `${ORIGIN}${page.path}`)))
     for (const page of HIDDEN) expect(llmsTxt(ORIGIN)).not.toContain(`${ORIGIN}${page.path})`)
-    expect(HIDDEN.map((page) => page.path)).toEqual(['/docs', '/enterprise', '/train', '/orbit', '/reentry'])
+    expect(HIDDEN.map((page) => page.path)).toEqual(['/docs', '/enterprise', '/reentry'])
   })
 
   it('links llms.txt only to the site’s own pages, their Markdown, the sitemap, the repository and ACP', () => {

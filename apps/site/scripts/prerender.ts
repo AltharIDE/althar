@@ -33,8 +33,6 @@ const entry = (await import(pathToFileURL(resolve(ssr, 'entry-server.js')).href)
 const LAZY: Partial<Record<PagePath, string>> = {
   '/thesis': 'src/thesis/Thesis.tsx',
   '/enterprise': 'src/enterprise/Home.tsx',
-  '/train': 'src/train/Train.tsx',
-  '/orbit': 'src/orbit/Orbit.tsx',
   '/reentry': 'src/reentry/Reentry.tsx',
 }
 type Manifest = Record<string, { file: string; css?: string[]; imports?: string[] }>

@@ -1,6 +1,7 @@
 /* The first screen as a capsule coming in: the fire and the sky on a canvas
-   behind, the photograph of the cabin over it with its windows cut out, the
-   words in the large window, the lead under them. */
+   behind, the photograph of the cabin over it with its window cut out, the
+   words in the window, the lead under them. Once everything is at rest
+   (data-settled), the layers that moved are let go and the grain stops. */
 
 .hero {
   position: relative;
@@ -13,8 +14,9 @@
   container-type: size;
 }
 
-/* What the camera sees, moved as one: its pivot the large window, where the words are. */
+/* What the camera sees, moved as one: its pivot the window, where the words are. */
 .camera { position: absolute; inset: 0; z-index: -1; transform-origin: 50% 36%; will-change: transform; }
+.hero[data-settled] .camera { will-change: auto; }
 
 /* The fire and the sky, set over the glass by the script. */
 .fire { position: absolute; display: block; }
@@ -30,17 +32,18 @@
   position: absolute; inset: 0;
   --pw: var(--pw-w); --ph: var(--ph-w); --fx: var(--fx-w); --fy: var(--fy-w);
   --wx: var(--wx-w); --wy: var(--wy-w); --ww: var(--ww-w); --wh: var(--wh-w);
+  --sx: var(--sx-w); --sy: var(--sy-w); --sw: var(--sw-w); --sh: var(--sh-w);
   --mask: var(--mask-w);
   --u: max(100cqw / var(--pw), 100cqh / var(--ph));
   --px: clamp(100cqw - var(--pw) * var(--u), 50cqw - var(--fx) * var(--u), 0px);
   --py: clamp(100cqh - var(--ph) * var(--u), 50cqh - var(--fy) * var(--u), 0px);
 }
-/* The sky through the glass, until the fire is drawn, and without scripts. */
+/* The sky through the glass, where the fire would draw it, until it does; and without the graphics card, or scripts. */
 .sky {
   position: absolute;
-  left: var(--px); top: var(--py);
-  width: calc(var(--pw) * var(--u)); height: calc(var(--ph) * var(--u));
-  background: #0a1a3a 50% 30% / 100% no-repeat;
+  left: calc(var(--px) + var(--sx) * var(--u)); top: calc(var(--py) + var(--sy) * var(--u));
+  width: calc(var(--sw) * var(--u)); height: calc(var(--sh) * var(--u));
+  background: #0a1a3a 0 0 / 100% 100% no-repeat;
 }
 .hero[data-drawn] .sky { display: none; }
 
@@ -50,7 +53,6 @@
   pointer-events: none;
   left: var(--px); top: var(--py);
   width: calc(var(--pw) * var(--u)); height: calc(var(--ph) * var(--u));
-  will-change: transform;
 }
 .plate picture { display: contents; }
 .photo { display: block; width: 100%; height: 100%; }
@@ -65,6 +67,10 @@
   mix-blend-mode: soft-light;
   background: radial-gradient(ellipse 85% 90% at 50% 30%, rgb(170, 205, 255), rgba(150, 190, 255, 0.5) 50%, rgba(140, 180, 255, 0) 85%);
 }
+
+/* The cabin's light and the flash change every frame until it is at rest, so each is given its own layer until then. */
+.dim, .firelit, .daylit, .flash { will-change: opacity; }
+.hero[data-settled] :is(.dim, .firelit, .daylit, .flash) { will-change: auto; }
 
 /* The fire breaking: the glass too bright for a moment, and fading. */
 .flash {
@@ -84,7 +90,7 @@
 /* Film's grain over the whole, stepping as film does, and the corners and the foot falling dark as a lens has them, the lead on the dark. */
 .grain, .vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .grain { inset: -64px; background-size: 128px 128px; opacity: 0.6; mix-blend-mode: overlay; }
-@media (prefers-reduced-motion: no-preference) { .grain { animation: grain 0.5s steps(6) infinite; } }
+@media (prefers-reduced-motion: no-preference) { .hero:not([data-settled]) .grain { animation: grain 0.5s steps(6) infinite; } }
 @keyframes grain {
   0% { transform: translate(0, 0); }
   20% { transform: translate(-37px, 22px); }
@@ -103,7 +109,7 @@
 .words { display: contents; }
 @media (scripting: enabled) { .hero:not([data-begun]) :is(.words, .foot) { visibility: hidden; } }
 
-/* The headline spans the first screen; its line and its last word stand in the large window, by the photograph's measure, kept on the screen when a phone crops it. */
+/* The headline spans the first screen; its line and its last word stand in the window, by the photograph's measure, kept on the screen when a phone crops it. */
 .h1 {
   position: absolute;
   inset: 0;
@@ -169,6 +175,7 @@
   .stage {
     --pw: var(--pw-t); --ph: var(--ph-t); --fx: var(--fx-t); --fy: var(--fy-t);
     --wx: var(--wx-t); --wy: var(--wy-t); --ww: var(--ww-t); --wh: var(--wh-t);
+    --sx: var(--sx-t); --sy: var(--sy-t); --sw: var(--sw-t); --sh: var(--sh-t);
     --mask: var(--mask-t);
   }
   /* In the window above the astronauts' heads: the line near its top, the word under it. */

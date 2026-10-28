@@ -6,10 +6,10 @@ import { Nav, NavSpace } from '../shared/Nav'
 import { ReentryHero } from './ReentryHero'
 
 /*
- * A concept for the developer page's first screen (/reentry): the page as it
- * is, with the first screen inside a capsule coming in from orbit, the fire
- * building past its windows until it breaks into sky. Linked from nowhere,
- * kept out of search, to be looked at beside / and the other concepts.
+ * The developer page (/reentry) with its first screen inside a capsule
+ * coming in from orbit, the fire building past its window until it breaks
+ * into sky. Linked from nowhere and kept out of search for now, to be looked
+ * at beside /.
  */
 
 export function Reentry() {

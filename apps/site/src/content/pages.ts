@@ -72,32 +72,13 @@ export const PAGE_META = {
     image: '/og/home.png',
     index: false,
   },
-  /** A concept for the developer page's first screen, seen from a train: linked from nowhere, and kept out of search. */
-  '/train': {
-    path: '/train',
-    name: 'Althar, by train',
-    title: 'Althar · building software has never felt so fast',
-    description: 'A concept for Althar’s first screen: the view from a train that pulls away slowly and gathers speed.',
-    image: '/og/home.png',
-    index: false,
-  },
-  /** Another, seen from a space station as the sun comes up: linked from nowhere, and kept out of search. */
-  '/orbit': {
-    path: '/orbit',
-    name: 'Althar, from orbit',
-    title: 'Althar · building software, from orbit',
-    description:
-      'A concept for Althar’s first screen: the Earth from a space station, the view running into a time-lapse until the sun comes up.',
-    image: '/og/home.png',
-    index: false,
-  },
-  /** And another, inside a capsule coming in from orbit: linked from nowhere, and kept out of search. */
+  /** The developer page with its first screen inside a capsule coming in from orbit: linked from nowhere, and kept out of search. */
   '/reentry': {
     path: '/reentry',
     name: 'Althar, coming in',
     title: 'Althar · building software, at re-entry speed',
     description:
-      'A concept for Althar’s first screen: inside a capsule coming in, the fire building past its windows until it breaks into sky.',
+      'Althar’s developer page, its first screen inside a capsule coming in from orbit, the fire building past the window until it breaks into sky.',
     image: '/og/home.png',
     index: false,
   },

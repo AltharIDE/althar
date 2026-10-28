@@ -2,14 +2,14 @@ import { drawGrain } from '@althar/ui/opening'
 import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { preload } from 'react-dom'
 
-import { TRAIN as WORDS } from '../content/train'
+import { REENTRY } from '../content/reentry'
 import { addDisplay } from '../home/display'
 import { useHydrated } from '../lib/browser'
 import { Get } from '../shared/Close'
-import { flare, inOut, knocked, wobble } from '../train/motion'
-import { clamp, seeded, smooth } from '../train/paint'
+import { seeded } from '../shared/footer/random'
 import { type Fire, makeFire } from './fire'
-import { AT, brokenAt, flowAt, heatAt, shakeAt, speedAt } from './journey'
+import { AT, brokenAt, driftAt, flowAt, heatAt, shakeAt, speedAt, swayAt } from './journey'
+import { clamp, flare, inOut, ring, smooth, wobble } from './motion'
 import { PHONE, type Plate, TALL, WIDE } from './plate'
 import plasmaUrl from './plate/plasma.webp'
 import skyUrl from './plate/sky.webp'
@@ -17,35 +17,38 @@ import s from './ReentryHero.module.css'
 
 /*
  * The first screen, coming in from orbit: the capsule's cabin comes up out
- * of the dark, two astronauts strapped in, a faint glow at the windows. The
+ * of the dark, two astronauts strapped in, a faint glow at the window. The
  * headline comes in; the glow catches and builds into fire streaming past
  * the glass, faster and faster, sparks shooting by, the capsule shaking
- * harder and pressed down, the cabin lit by it; at its height the windows go
- * white; and then it breaks, torn away, and there is the sky and the cloud
- * far below, and the headline's last word, forged in it and cooling: "fast."
+ * harder and pressed down, the cabin lit by it; at its height the headline's
+ * last word is forged in it, "fast."; and then the fire breaks, torn away,
+ * the glass flashing white, and there is the sky and the cloud far below,
+ * the word cooling to white. Then everything comes to rest, and from then on
+ * nothing is drawn.
  *
- * The cabin is a photograph with its windows keyed out (plate.ts), laid over
- * the page to cover it. Behind it, the fire and the sky are drawn on the
- * graphics card (fire.ts) by the photograph's measure, by the clock
- * (journey.ts). The words are the page's own, set in the large window.
+ * The cabin is a photograph with its window keyed out (plate.ts), wide, or
+ * tall on a phone, laid over the page to cover it. Behind it, the fire and
+ * the sky are drawn on the graphics card (fire.ts) by the photograph's
+ * measure, by the clock (journey.ts). The words are the page's own, set in
+ * the window.
  *
- * With reduced motion it is one frame, after the fire; `?t=` in the address
- * holds it at that second.
+ * With reduced motion it is the last frame, at rest; `?t=` in the address
+ * holds it at that second. Without the graphics card, or without scripts,
+ * the window shows the sky.
  */
 
 addDisplay()
 
-/** The frame shown with reduced motion: the fire gone, the sky. */
-const STILL_AT = 8
 /** The most pixels the fire is drawn in, so a large screen keeps its frame rate. */
-const MOST_PIXELS = 2.2e6
+const MOST_PIXELS = 1.6e6
 /** How long the capsule waits for its photographs before setting off without them. */
 const WAIT = 1800
 
+/** The second to hold at, if any: `?t=`, or the last frame with reduced motion. */
 const heldAt = () => {
   const t = Number(new URLSearchParams(window.location.search).get('t') ?? Number.NaN)
   if (Number.isFinite(t)) return t
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? STILL_AT : null
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? AT.settled : null
 }
 
 /** A photograph, decoded. */
@@ -62,7 +65,11 @@ const picture = (src: string) =>
     img.src = src
   })
 
-/** Each photograph's measure, for the stylesheet, which takes the tall one's on a phone: its size, the point it keeps in view, the window, and the photograph itself as the mask for the cabin's light. */
+/**
+ * Each photograph's measure, for the stylesheet, which takes the tall one's
+ * on a phone: its size, the point it keeps in view, the window, the sky
+ * behind it, and the photograph itself as the mask for the cabin's light.
+ */
 const measure = (plate: Plate, end: string) => ({
   [`--pw-${end}`]: plate.width,
   [`--ph-${end}`]: plate.height,
@@ -72,6 +79,10 @@ const measure = (plate: Plate, end: string) => ({
   [`--wy-${end}`]: plate.window.y,
   [`--ww-${end}`]: plate.window.w,
   [`--wh-${end}`]: plate.window.h,
+  [`--sx-${end}`]: plate.sky.x,
+  [`--sy-${end}`]: plate.sky.y,
+  [`--sw-${end}`]: plate.sky.w,
+  [`--sh-${end}`]: plate.sky.h,
   [`--mask-${end}`]: `url(${plate.src})`,
 })
 const STAGE = { ...measure(WIDE, 'w'), ...measure(TALL, 't') } as CSSProperties
@@ -118,6 +129,11 @@ const arrive = (within: HTMLElement) => {
       ]
     }),
   ]
+}
+
+/** Writes a style only when it changes: the frame runs sixty times a second. */
+const put = (el: HTMLElement | null, name: string, value: string) => {
+  if (el && el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value)
 }
 
 /** The first screen, coming in from orbit. */
@@ -173,7 +189,7 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
       const next = `${w}x${h}@${left},${top},${scale.toFixed(4)},${shown.width}`
       if (next === size || w < 10 || h < 10 || scale <= 0) return false
       size = next
-      // Over all the glass that is on the screen, and a good way round it for the shaking.
+      // Over the glass that is on the screen, and a good way round it for the shaking.
       const glass = shown.window
       const x = Math.max(0, Math.floor(left + glass.x * scale - 40))
       const y = Math.max(0, Math.floor(top + glass.y * scale - 40))
@@ -184,48 +200,51 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
       return true
     }
 
-    const draw = (t: number) => {
-      // Up out of the dark as it sets off, fire or not.
-      el.style.setProperty('--dark', (1 - smooth(AT.open, AT.opened, t)).toFixed(3))
+    /** Everything for second `t`; after the last frame, the last frame. */
+    const draw = (at: number) => {
+      const t = Math.min(at, AT.settled)
       const heat = heatAt(t)
       const broken = brokenAt(t)
-      // The break's flash: the glass white for a moment as the fire tears away.
-      const white = clamp(0.5 * flare(t, AT.break, 4))
-      if (fire)
-        fire.draw({ t, heat, flow: flowAt(t), speed: speedAt(t), broken, white, drift: 34 * shown.unit * Math.max(0, t - AT.break) })
+      // Up out of the dark as it sets off, fire or not.
+      put(el, '--dark', (1 - smooth(AT.open, AT.opened, t)).toFixed(3))
+      fire?.draw({ t, heat, flow: flowAt(t), speed: speedAt(t), broken, white: 0.5 * flare(t, AT.break, 4), drift: driftAt(t) })
       // The cabin: dark, then lit by the fire, flickering; then the cool light of the sky.
       const flicker = 0.78 + 0.22 * (wobble(t * 9, 4) * 0.6 + wobble(t * 23, 8) * 0.4)
-      if (dim.current) dim.current.style.opacity = (0.55 * (1 - heat) * (1 - broken) + 0.08).toFixed(3)
-      if (firelit.current) firelit.current.style.opacity = clamp(heat * flicker * 1.1).toFixed(3)
-      if (daylit.current) daylit.current.style.opacity = (0.75 * broken).toFixed(3)
-      // "fast.", forged in the fire at its height, glowing, then cooling as it breaks.
-      const forged = smooth(AT.peak + 0.1, AT.peak + 0.4, t)
-      const cool = smooth(AT.break, AT.broken + 0.7, t)
-      word.style.opacity = forged.toFixed(3)
-      word.style.setProperty('--cool', cool.toFixed(3))
-      word.style.setProperty('--punch', (1 - smooth(AT.peak + 0.1, AT.peak + 0.55, t)).toFixed(3))
+      put(dim.current, 'opacity', (0.55 * (1 - heat) * (1 - broken) + 0.08).toFixed(3))
+      put(firelit.current, 'opacity', clamp(heat * flicker * 1.1).toFixed(3))
+      put(daylit.current, 'opacity', (0.75 * broken).toFixed(3))
+      put(flash.current, 'opacity', clamp(0.9 * flare(t, AT.break - 0.02, 2.6)).toFixed(3))
+      // "fast.", forged in the fire at its height, glowing and slammed in, then cooling as it breaks.
+      put(word, 'opacity', smooth(AT.peak + 0.1, AT.peak + 0.4, t).toFixed(3))
+      put(word, '--cool', smooth(AT.break, AT.broken + 0.7, t).toFixed(3))
+      put(word, '--punch', (1 - smooth(AT.peak + 0.1, AT.peak + 0.55, t)).toFixed(3))
       direct(t, heat, broken)
     }
 
     /*
      * The camera, strapped in: drawing back from the window as the cabin comes
-     * up, then shaking with the heat, harder and faster the hotter, pressed
-     * down as the capsule slows; thrown as the fire breaks, then settling into
-     * a slow sway under the sky.
+     * up, swaying a little, shaking with the heat, harder and faster the
+     * hotter, pressed down as the capsule slows; thrown as the fire breaks,
+     * then coming to rest under the sky.
      */
     const direct = (t: number, heat: number, broken: number) => {
       const shake = shakeAt(t) * 9
-      const dolly = 0.06 * (1 - inOut(t / 2.6))
-      const base = {
-        x: wobble(t * 0.3, 3) * 4 + (wobble(t * 23, 1) * 0.6 + wobble(t * 41, 2) * 0.4) * shake,
-        y: wobble(t * 0.25, 7) * 3 + (wobble(t * 29, 4) * 0.6 + wobble(t * 47, 5) * 0.4) * shake + 6 * heat,
-        turn: wobble(t * 0.2, 9) * 0.25 + wobble(t * 19, 6) * 0.04 * shake,
-        zoom: 1 + dolly + 0.035 * heat * (1 - broken),
-      }
-      const cam = knocked(t, base, [{ at: AT.break, x: 12, y: -7, zoom: -0.03, freq: 8, decay: 2.4 }])
-      if (camera.current)
-        camera.current.style.transform = `translate3d(${cam.x.toFixed(2)}px, ${cam.y.toFixed(2)}px, 0) rotate(${cam.turn.toFixed(3)}deg) scale(${cam.zoom.toFixed(4)})`
-      if (flash.current) flash.current.style.opacity = clamp(0.9 * flare(t, AT.break - 0.02, 2.6)).toFixed(3)
+      const sway = swayAt(t)
+      const x = wobble(t * 0.3, 3) * 4 * sway + (wobble(t * 23, 1) * 0.6 + wobble(t * 41, 2) * 0.4) * shake + 12 * ring(t, AT.break, 8, 2.4)
+      const y =
+        wobble(t * 0.25, 7) * 3 * sway +
+        (wobble(t * 29, 4) * 0.6 + wobble(t * 47, 5) * 0.4) * shake +
+        6 * heat -
+        7 * ring(t, AT.break, 6.6, 2.4)
+      const turn = wobble(t * 0.2, 9) * 0.25 * sway + wobble(t * 19, 6) * 0.04 * shake + 0.3 * ring(t, AT.break, 5.6, 2.4)
+      const zoom = 1 + 0.06 * (1 - inOut(t / 2.6)) + 0.035 * heat * (1 - broken) - 0.03 * flare(t, AT.break, 2.2)
+      put(
+        camera.current,
+        'transform',
+        t >= AT.settled
+          ? 'none'
+          : `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) rotate(${turn.toFixed(3)}deg) scale(${zoom.toFixed(4)})`,
+      )
     }
 
     let frame = 0
@@ -234,9 +253,19 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
     let seen = true
     let runs: Animation[] = []
     let begun = false
+    let settled = false
     const now = () => (performance.now() - start) / 1000
+    // Once at rest, the last frame stays: nothing more is drawn, and the grain and the layers' promotion are let go (data-settled).
+    const settle = () => {
+      settled = true
+      cancelAnimationFrame(frame)
+      draw(AT.settled)
+      el.dataset.settled = ''
+    }
     const tick = () => {
-      draw(now())
+      const t = now()
+      if (t >= AT.settled) return settle()
+      draw(t)
       frame = requestAnimationFrame(tick)
     }
 
@@ -253,20 +282,25 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
           run.currentTime = held * 1000
         }
         draw(held)
+        if (held >= AT.settled) el.dataset.settled = ''
       } else frame = requestAnimationFrame(tick)
     }
     const waited = window.setTimeout(begin, WAIT)
     void Promise.all([picture(skyUrl), picture(plasmaUrl)]).then(
       ([sky, plasma]) => {
         if (!live) return
-        fire = makeFire(cv, sky, plasma)
+        // If the graphics card takes the canvas back, the window shows the sky instead.
+        fire = makeFire(cv, sky, plasma, () => {
+          fire = null
+          setDrawn(false)
+        })
         if (fire) {
           size = ''
           place()
           setDrawn(true)
         }
         begin()
-        if (held !== null) draw(held)
+        if (held !== null || settled) draw(held ?? AT.settled)
       },
       () => begin(),
     )
@@ -274,7 +308,7 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
 
     // Off screen it stops, and takes up where it left off when it's back.
     const io = new IntersectionObserver(([e]) => {
-      if (held !== null || !begun) return
+      if (held !== null || !begun || settled) return
       const was = seen
       seen = e?.isIntersecting ?? true
       if (was && !seen) {
@@ -294,7 +328,7 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
     const ro = new ResizeObserver(() => {
       clearTimeout(timer)
       timer = window.setTimeout(() => {
-        if (place()) draw(held ?? now())
+        if (place()) draw(held ?? (settled ? AT.settled : now()))
       }, 120)
     })
     ro.observe(el)
@@ -302,12 +336,14 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
     return () => {
       live = false
       delete el.dataset.begun
+      delete el.dataset.settled
       cancelAnimationFrame(frame)
       clearTimeout(timer)
       clearTimeout(waited)
       io.disconnect()
       ro.disconnect()
       runs.forEach((run) => run.cancel())
+      fire?.dispose()
     }
   }, [])
 
@@ -317,7 +353,7 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
       <div ref={camera} className={s.camera}>
         <canvas ref={canvas} className={s.fire} aria-hidden="true" />
         <div className={s.stage} style={STAGE}>
-          {/* Until the fire is drawn, and without scripts, the sky through the glass. */}
+          {/* Until the fire is drawn, and without the graphics card or scripts, the sky through the glass. */}
           <div className={s.sky} style={{ backgroundImage: `url(${skyUrl})` }} aria-hidden="true" />
           <div ref={plate} className={s.plate} aria-hidden="true">
             {/* The tall photograph on a phone, the wide one otherwise: a browser fetches only the one it shows. */}
@@ -344,10 +380,10 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
           <div className={s.words}>
             <h1 className={s.h1}>
               <span className={s.line}>
-                <Words text={WORDS.title} />
+                <Words text={REENTRY.title} />
               </span>{' '}
               <span ref={fast} className={s.fast}>
-                {WORDS.last}
+                {REENTRY.last}
               </span>
             </h1>
           </div>
@@ -356,7 +392,7 @@ export function ReentryHero({ nav }: { nav?: ReactNode } = {}) {
       {/* In front of the camera, so its shaking leaves them be: the lead and the ways in. */}
       <footer className={s.foot}>
         <p className={s.lead} data-arrive={0}>
-          {WORDS.lead}
+          {REENTRY.lead}
         </p>
         <div className={s.ways} data-arrive={120}>
           <Get tone="blue" />
