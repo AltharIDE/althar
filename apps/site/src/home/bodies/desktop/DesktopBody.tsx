@@ -5,10 +5,10 @@ import { Get } from '../../../shared/Close'
 import { LightUnder } from '../../../shared/lightUnder'
 import { EdgeTour } from '../kit/EdgeTour'
 import t from '../kit/type.module.css'
+import { AskOnce } from './AskOnce'
 import { CrewAtWork } from './CrewAtWork'
 import s from './DesktopBody.module.css'
 import { Flow } from './Flow'
-import { Lift } from './Lift'
 import { Trio } from './Trio'
 
 /*
@@ -72,7 +72,20 @@ export function DesktopBody() {
         <CrewAtWork />
       </Scene>
 
-      <Lift />
+      <Scene
+        id="coordinator"
+        kicker="The coordinator"
+        title={
+          <>
+            Say it once.
+            <br />
+            <b>It plans the rest.</b>
+          </>
+        }
+        lead="Every project has a coordinator that knows its repositories and your rules. Ask it in a sentence: it drafts the issue, splits the work into tasks and gives each step the model that suits it."
+      >
+        <AskOnce />
+      </Scene>
 
       <Trio />
 

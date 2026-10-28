@@ -5,33 +5,25 @@ import {
   BoardLane,
   BoardList,
   CallCard,
-  ChromeButton,
-  Composer,
   EdgeSheet,
   Island,
   type IslandSaying,
   NextRow,
-  ProjectHead,
   ProjectTabs,
   Review,
-  Room,
-  RoomSwitch,
   SettledRow,
   TaskLaunch,
   type LaunchStep,
-  Turn,
   Verdict,
   FindingState,
   WorkCard,
   type WorkCardProps,
-  WorkStatus,
-  You,
   ModelPick,
 } from '@althar/ui'
-import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 
 // Prototype: the kit's demo world, read from its source. Ported, the site would keep its own copy.
-import { CALLS, NEXT, READY_TWO_REPOS, RUNNING as BOARD_RUNNING, SETTLED } from '../../../../../../packages/ui/src/fixtures/board'
+import { CALLS, NEXT, READY_TWO_REPOS, SETTLED } from '../../../../../../packages/ui/src/fixtures/board'
 import { FROM_231, PLAN_432 } from '../../../../../../packages/ui/src/fixtures/coordinator'
 import { EDGE_NEEDS, EDGE_WORK, edgeLineOf, NOTCH } from '../../../../../../packages/ui/src/fixtures/edge'
 import { MARKED } from '../../../../../../packages/ui/src/fixtures/marks'
@@ -58,24 +50,6 @@ export function Tabs({ current, only = false, end }: { current: string | null; o
 }
 
 /* ---- the lead's plan for task 432: its team, step by step ---- */
-
-/** The plan, put together a step at a time when `assemble` is set, as the lead does it. */
-export function useAssembling(assemble: boolean, plan: readonly LaunchStep[] = PLAN_432) {
-  const [shown, setShown] = useState(assemble ? 0 : plan.length)
-  useEffect(() => {
-    // With motion reduced, the plan is simply there.
-    if (!assemble || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return setShown(plan.length)
-    setShown(0)
-    let n = 0
-    const timer = window.setInterval(() => {
-      n += 1
-      setShown(n)
-      if (n >= plan.length) window.clearInterval(timer)
-    }, 520)
-    return () => window.clearInterval(timer)
-  }, [assemble, plan])
-  return plan.slice(0, shown)
-}
 
 export function Launch({
   steps,
@@ -132,111 +106,6 @@ export function Growing({ children, whole }: { children: ReactNode; whole: React
       <div aria-hidden="true">{whole}</div>
       {children}
     </div>
-  )
-}
-
-/* ---- a project, its conversation beside its board, as Both shows it ---- */
-
-const ASK = 'Backfill idempotency keys on the refunds made before PR 1184. MER-231 has the details.'
-
-export function ProjectWindow({
-  conversation,
-  thread,
-  talkOnly = false,
-  centered = false,
-  meta = 'Payments API · 3 repositories',
-  className,
-  style,
-}: {
-  /** What the conversation shows under your ask; by default, the lead's plan. */
-  conversation?: ReactNode
-  /** The whole conversation, in place of your ask, the reply and `conversation`. */
-  thread?: ReactNode
-  /** Only the conversation, as on a narrow window. */
-  talkOnly?: boolean
-  /** Only the conversation, in a column down the middle of a wide window. */
-  centered?: boolean
-  meta?: string
-  className?: string
-  style?: CSSProperties
-}) {
-  return (
-    <div className={`${s.window} ${talkOnly ? s.talkOnly : ''} ${centered ? s.centered : ''} ${className ?? ''}`} style={style}>
-      <Tabs
-        current="meridian"
-        only={talkOnly}
-        end={
-          talkOnly ? (
-            <ChromeButton icon="plus" label="New task" />
-          ) : (
-            <>
-              <RoomSwitch value={centered ? Room.Talk : Room.Both} onChange={none} text={{ key: () => '' }} />
-              <WorkStatus yours={2} />
-              <ChromeButton icon="more" label="More for this project" compact />
-              <ChromeButton icon="plus" label="New task" />
-            </>
-          )
-        }
-      />
-      <div className={s.rooms}>
-        <div className={s.talk}>
-          <ProjectHead title="Meridian" meta={meta} side={!centered} />
-          <div className={s.thread}>
-            {thread ?? (
-              <>
-                <You at="11:01">{ASK}</You>
-                <Turn voice="Meridian’s coordinator" at="11:01">
-                  <p className={s.said}>One task. It writes to money records, so your security review applies, and a second lab reviews.</p>
-                </Turn>
-                {conversation ?? <Launch />}
-              </>
-            )}
-          </div>
-          <div className={s.composer}>
-            <Composer value="" onChange={none} onSubmit={none} placeholder="Tell Meridian what you want done" hint="⌘L" />
-          </div>
-        </div>
-        {!talkOnly && !centered && (
-          <div className={s.board}>
-            <MeridianBoard />
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/* ---- Meridian's board ---- */
-
-export function MeridianBoard() {
-  return (
-    <Board label="Meridian’s work">
-      <BoardColumn lane={BoardLane.Next} count={NEXT.length}>
-        <BoardList>
-          {NEXT.map((x, i) => (
-            <NextRow key={x.task} {...x} place={i + 1} />
-          ))}
-        </BoardList>
-      </BoardColumn>
-      <BoardColumn lane={BoardLane.Running} count={BOARD_RUNNING.length}>
-        {BOARD_RUNNING.map((x) => (
-          <WorkCard key={x.task} {...x} />
-        ))}
-      </BoardColumn>
-      <BoardColumn lane={BoardLane.Yours} count={CALLS.length}>
-        <AcceptCard {...READY_TWO_REPOS} />
-        {CALLS.slice(0, 2).map((x) => (
-          <CallCard key={x.title} {...x} />
-        ))}
-      </BoardColumn>
-      <BoardColumn lane={BoardLane.Settled} count={SETTLED.length}>
-        <BoardList>
-          {SETTLED.map((x) => (
-            <SettledRow key={x.task} {...x} />
-          ))}
-        </BoardList>
-      </BoardColumn>
-    </Board>
   )
 }
 
@@ -357,12 +226,6 @@ export function TwoLabReview() {
     />
   )
 }
-
-/** The docs task the coordinator hands out beside 432: small, Codex writes, Sonnet reads it over. */
-export const DOCS_PLAN: LaunchStep[] = [
-  { id: 'impl', label: 'Implement', agents: [CODEX], why: 'a docs change; Codex has room', fixed: 'the lead' },
-  { id: 'review', label: 'Review', agents: [SONNET], why: 'a different lab from the lead', optional: true },
-]
 
 /* ---- the island, round the notch, and what drops from it ---- */
 
