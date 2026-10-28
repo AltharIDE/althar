@@ -16,13 +16,6 @@
 
 .lead { margin: 0; max-width: 560px; font-size: 18px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
 
-.kicker {
-  display: inline-flex; align-items: center; gap: 9px; margin: 0;
-  font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3);
-}
-.kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
-.kicker b { color: var(--live); font-weight: 500; }
-
 
 @media (max-width: 640px) {
   .lead { font-size: 16.5px; }

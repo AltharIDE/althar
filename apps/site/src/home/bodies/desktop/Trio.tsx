@@ -23,7 +23,6 @@ import s from './Trio.module.css'
 interface Step {
   id: string
   label: string
-  kicker: string
   title: ReactNode
   lead: string
   /** The lead as a phone says it. */
@@ -37,7 +36,6 @@ const STEPS: Step[] = [
   {
     id: 'plans',
     label: 'Your plans',
-    kicker: 'Your plans',
     title: (
       <>
         Every plan you pay for. <b>All at once.</b>
@@ -51,7 +49,6 @@ const STEPS: Step[] = [
   {
     id: 'limits',
     label: 'Limits',
-    kicker: 'Limits',
     title: (
       <>
         Out of usage? <b>It carries on.</b>
@@ -65,7 +62,6 @@ const STEPS: Step[] = [
   {
     id: 'review',
     label: 'Review',
-    kicker: 'Review',
     title: (
       <>
         Written by one lab. <b>Reviewed by another.</b>
@@ -197,10 +193,6 @@ export function Trio() {
         {STEPS.map((step) => (
           <div key={step.id} id={step.id} className={s.stackedStep}>
             <div className={s.head}>
-              <p className={t.kicker}>
-                <i aria-hidden="true" />
-                {step.kicker}
-              </p>
               <h2 className={cx(t.title, s.title)}>{step.title}</h2>
               <p className={t.lead}>
                 <span className={s.long}>{step.lead}</span>
@@ -228,10 +220,6 @@ export function Trio() {
             {STEPS.map((step, i) => (
               <div key={step.id} className={cx(s.step, i < at && s.past, i === at && s.now, i > at && s.next)} aria-hidden={i !== at}>
                 <div className={s.head}>
-                  <p className={t.kicker}>
-                    <i aria-hidden="true" />
-                    {step.kicker}
-                  </p>
                   <h2 className={cx(t.title, s.title)}>{step.title}</h2>
                   <p className={cx(t.lead, s.lead)}>{step.lead}</p>
                 </div>

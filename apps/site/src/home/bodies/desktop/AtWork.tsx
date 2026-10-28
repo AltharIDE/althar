@@ -8,11 +8,11 @@ import app from '../kit/app.module.css'
 import s from './AtWork.module.css'
 
 /*
- * Tally's board at night, four tasks running at once, each led by
- * another lab. While it is watched the work goes on: a beat every couple of
- * seconds, a minute on each task's clock and, at its own pace, a step on.
- * Still with motion reduced or a moment held (`?t=`); on a phone, the
- * running column alone.
+ * Tally's board, in Althar's light on the dark of the panel: four tasks
+ * running at once, each led by another lab. While it is watched the work
+ * goes on: a beat every couple of seconds, a minute on each task's clock
+ * and, at its own pace, a step on. Still with motion reduced or a moment
+ * held (`?t=`); on a phone, the running column alone.
  */
 
 const none = () => {}
@@ -39,7 +39,7 @@ export function AtWork() {
         label="Tally’s board: four tasks running at once, led by Opus, Codex, Gemini and Qwen, beside what is next, what needs you and what has settled"
         frame={s.frame}
       >
-        <div className={`${app.window} ${s.window}`} data-theme="dark">
+        <div className={app.window}>
           <Tabs
             current="tally"
             end={

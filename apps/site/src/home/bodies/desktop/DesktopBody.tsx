@@ -24,14 +24,12 @@ import { Trio } from './Trio'
 
 function Scene({
   id,
-  kicker,
   title,
   lead,
   children,
   tone,
 }: {
   id: string
-  kicker: string
   title: ReactNode
   lead: ReactNode
   children: ReactNode
@@ -43,10 +41,6 @@ function Scene({
       {/* Dark under the nav: it turns to smoked glass with white words over it. */}
       {tone && <LightUnder tone="ink" className={s.under} />}
       <div className={s.head}>
-        <p className={t.kicker}>
-          <i aria-hidden="true" />
-          {kicker}
-        </p>
         <h2 id={`${id}-h`} className={t.title}>
           {title}
         </h2>
@@ -63,7 +57,6 @@ export function DesktopBody() {
       <Scene
         id="independent"
         tone="cabin"
-        kicker="Independent of the labs"
         title={
           <>
             Usage gets cut.
@@ -80,7 +73,6 @@ export function DesktopBody() {
 
       <Scene
         id="coordinator"
-        kicker="The coordinator"
         title={
           <>
             Say it once.
@@ -98,7 +90,6 @@ export function DesktopBody() {
       <Scene
         id="edge"
         tone="ink"
-        kicker="At the edge of your screen"
         title={
           <>
             Wherever you are, <b>still in reach.</b>
@@ -111,7 +102,6 @@ export function DesktopBody() {
 
       <Scene
         id="connections"
-        kicker="Connections"
         title={
           <>
             From your tracker. <b>To your host.</b>

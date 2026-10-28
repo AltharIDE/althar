@@ -1,10 +1,7 @@
 /* Dark — the same paper and ink at night: warm browns rather than a grey,
    so it is still Althar. The root's `data-theme="dark"` switches to it;
    the desktop app sets that from the window's scheme, which Electron's
-   nativeTheme follows from Settings › Appearance. Any element's switches
-   what is inside it, for a part of a light page that is dark (the site's
-   pictures of the app at night); what draws on a canvas still follows the
-   root (lib/theme.ts).
+   nativeTheme follows from Settings › Appearance.
 
    Every colour token in tokens.css is set again here, in the same order,
    except the few that are the same in every theme (tests/tokens.test.ts
@@ -18,8 +15,7 @@
    fill so they stay white. The ink that fills (a primary button, a switch
    that is on) turns a soft light with dark words on it. */
 
-:root[data-theme='dark'],
-[data-theme='dark'] {
+:root[data-theme='dark'] {
   color-scheme: dark;
 
   /* ---- Surfaces: darkest first, the desk, the window's bars, the page, raised ---- */
