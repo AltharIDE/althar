@@ -1,5 +1,6 @@
 import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
 
+import { asMerging } from '../../data/merges'
 import { readyOf, standingCalls } from '../../shared/calls'
 
 /*
@@ -154,10 +155,12 @@ const laid = (tasks: ReadonlyArray<BoardTask>, plans: ReadonlyArray<BoardTask>, 
 
 const plansOf = (lanes: Lanes) => lanes.next.slice(lanes.continuing + lanes.free + lanes.paused)
 
-export const lanesOf = (board: BoardSnapshot): Lanes => {
-  const of = (...phases: ReadonlyArray<BoardTask['phase']>) => board.tasks.filter((task) => phases.includes(task.phase))
+/** The lanes, with each ready task in `merging` at work, merging, until it settles. */
+export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new Set()): Lanes => {
+  const tasks = asMerging(board.tasks, merging)
+  const of = (...phases: ReadonlyArray<BoardTask['phase']>) => tasks.filter((task) => phases.includes(task.phase))
   // A waiting task's calls are one, its oldest (`standingCalls`, as the home counts them too).
-  const standing = standingCalls(board.tasks, board.calls)
+  const standing = standingCalls(tasks, board.calls)
   const waiting = of('waiting').map((task) => ({ task, call: standing.find((call) => call.taskId === task.taskId) ?? null }))
   const folded = new Set(waiting.map(({ task }) => task.taskId))
   return {

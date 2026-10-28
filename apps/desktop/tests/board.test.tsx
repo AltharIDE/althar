@@ -16,6 +16,7 @@ import { useClosePullRequests } from '../src/renderer/features/board/useClosePul
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { makeQueryClient } from '../src/renderer/data/reads'
+import { useMerge } from '../src/renderer/data/merges'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
 import { useSettingsOf, withServices } from './render'
@@ -842,6 +843,86 @@ describe('the board', () => {
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
     // The note is queued first, so the lead reads it in its first turn.
     expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
+  })
+
+  describe('merged anywhere in the window, as in its task before Back', () => {
+    const url = 'https://github.com/meridian/api/pull/12'
+    function Elsewhere() {
+      const merge = useMerge()
+      return (
+        <button type="button" onClick={() => void merge({ taskId: 't4', head: 'abc123', url }).catch(() => undefined)}>
+          Merge there
+        </button>
+      )
+    }
+    const lane = (name: string) => within(screen.getByRole('region', { name }))
+    const settledBoard = () =>
+      board({
+        tasks: board().tasks.map((one) =>
+          one.taskId === 't4'
+            ? { ...one, phase: 'settled', state: 'done', settledAt: '2026-10-01T10:00:00.000Z', change: change({ state: 'merged' }) }
+            : one,
+        ),
+        settledTotal: 3,
+      })
+
+    it('leaves Needs you as Merging the moment it is pressed, and settles as the runtime says, read once', async () => {
+      let merged = () => undefined as void
+      const merge = vi.fn(() => new Promise<void>((resolve) => (merged = resolve)))
+      const getBoard = vi.fn(async () => board())
+      const { client, emit } = fakeClient({ merge, getBoard })
+      withServices(
+        <>
+          <Project />
+          <Elsewhere />
+        </>,
+        client,
+      )
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
+      await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
+      // At once, with nothing read again: at work, merging, and no longer counted as needing the person.
+      expect(await lane('Running').findByText('Merging')).toBeTruthy()
+      expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
+      expect(screen.getByRole('button', { name: '2 need you' })).toBeTruthy()
+      expect(merge).toHaveBeenCalledWith('t4', 'abc123', url)
+      // Merged on its host: merging still, until the board reads it settled, not back in Needs you meanwhile.
+      const reads = getBoard.mock.calls.length
+      getBoard.mockImplementation(async () => settledBoard())
+      await act(async () => merged())
+      expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
+      // The runtime says it settled: read once, and it is in Settled.
+      emit(changed('task', 't4'))
+      expect(await lane('Settled').findByText('Rate-limit refunds')).toBeTruthy()
+      expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
+      expect(getBoard).toHaveBeenCalledTimes(reads + 1)
+    })
+
+    it('comes back to Needs you with why it didn’t merge, and merges again from its card', async () => {
+      const merge = vi
+        .fn<(taskId: string) => Promise<void>>()
+        .mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub says: Pull Request is not mergeable' }))
+        .mockResolvedValue(undefined)
+      const { client } = fakeClient({ merge, getBoard: vi.fn(async () => board()) })
+      withServices(
+        <>
+          <Project />
+          <Elsewhere />
+        </>,
+        client,
+      )
+      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      await lane('Needs you').findByText('Rate-limit refunds')
+      await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
+      const card = within((await lane('Needs you').findByRole('button', { name: 'Rate-limit refunds' })).closest('article') as HTMLElement)
+      expect(await card.findByText(/Pull Request is not mergeable/)).toBeTruthy()
+      expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
+      await userEvent.click(card.getByRole('button', { name: /again/i }))
+      await waitFor(() => expect(merge).toHaveBeenCalledTimes(2))
+      expect(merge).toHaveBeenLastCalledWith('t4', 'abc123', url)
+    })
   })
 
   it.each([
