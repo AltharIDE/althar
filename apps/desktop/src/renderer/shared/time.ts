@@ -53,8 +53,14 @@ export const useNow = (ticking: boolean, every = 1000): string => {
   const [now, setNow] = useState(() => new Date().toISOString())
   useEffect(() => {
     if (!ticking) return
-    const id = setInterval(() => setNow(new Date().toISOString()), every)
-    return () => clearInterval(id)
+    const tick = () => setNow(new Date().toISOString())
+    // A screen kept hidden a while (`KeptScreens`) says how long ago from now as it shows again, not from when it hid.
+    const again = setTimeout(tick, 0)
+    const id = setInterval(tick, every)
+    return () => {
+      clearTimeout(again)
+      clearInterval(id)
+    }
   }, [ticking, every])
   return now
 }

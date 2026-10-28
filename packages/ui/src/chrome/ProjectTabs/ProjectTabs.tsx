@@ -110,8 +110,8 @@ export type ProjectTabsProps = RootProps<
     current: string | null
     /** A tab was pressed: a project's id, or null for the home. */
     onSelect: (id: string | null) => void
-    /** A project's tab was pointed at or reached by keyboard, before it is pressed: what it shows can be read ahead. */
-    onPreview?: (id: string) => void
+    /** A tab was pointed at or reached by keyboard, before it is pressed, a project's or (null) the home's: what it shows can be read ahead. */
+    onPreview?: (id: string | null) => void
     onClose: (id: string) => void
     /** A project's tab was moved: `id` goes before `beforeId`, or to the end where that is null. The home's tab and the settings' stay first. Without it, tabs stay where they are. */
     onReorder?: (id: string, beforeId: string | null) => void
@@ -248,7 +248,14 @@ export function ProjectTabs({
       <nav className={s.nav} aria-label={t.label}>
         <ul className={s.pinned}>
           <li className={cx(s.tab, s.home, current === null && s.current)}>
-            <button type="button" className={s.select} aria-current={current === null ? 'page' : undefined} onClick={() => onSelect(null)}>
+            <button
+              type="button"
+              className={s.select}
+              aria-current={current === null ? 'page' : undefined}
+              onClick={() => onSelect(null)}
+              onPointerEnter={() => onPreview?.(null)}
+              onFocus={() => onPreview?.(null)}
+            >
               <Logo size={15} className={s.logo} />
               <span className={s.name}>{t.home}</span>
               <Yours n={yours} text={t} />
