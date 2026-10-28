@@ -366,6 +366,10 @@ export const STUCK_AFTER = Duration.minutes(45)
 /** How long a check run again may take to show it runs before a failure is taken as its result (ADR-041). */
 const RERUN_SHOWS = Duration.minutes(3)
 
+/** How often, and how many times, a merge its host took but hasn't landed yet is asked about: for a minute. */
+const LANDING_EVERY = Duration.seconds(2)
+const LANDING_TURNS = 30
+
 /** How long `push_tag` waits for the person before it returns, and the lead is told later: well within what agents wait for a tool. */
 export const TAG_ANSWERED_WITHIN = Duration.seconds(30)
 
@@ -2118,7 +2122,9 @@ export class Changes extends Context.Service<
        * Merges the task's pull request at the head the person saw, as they
        * asked: a draft is marked ready first. If it has moved on since, by a
        * push now or while the host merges, it isn't merged, and the person
-       * looks again. Read back at once, merged, its task settles.
+       * looks again. Merged, as the host's answer to the merge says, its task
+       * settles then: reading it back can still say open for a moment, and
+       * what was said on it last is listened to after, not before.
        */
       const merge = (taskId: string, head: string, url?: string) =>
         Effect.gen(function* () {
@@ -2128,7 +2134,7 @@ export class Changes extends Context.Service<
           if (read.state === 'open') {
             if (read.headSha !== head) return yield* new ChangedSinceSeen({ taskId })
             if (read.draft) yield* markReady(taskId)
-            yield* outward({
+            const merged = yield* outward({
               projectId: link.projectId,
               subject: { type: 'external_link', id: link.id },
               target: `${host.product}:${snapshot.repository.join('/')}`,
@@ -2147,10 +2153,35 @@ export class Changes extends Context.Service<
               encode: (answer) => answer,
               decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
             })
+            if (merged.state === 'merged') {
+              yield* seenNow(link, snapshot, merged)
+              const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === link.id)
+              if (now !== undefined)
+                yield* Effect.forkIn(
+                  locked(taskId)(poll(now)).pipe(
+                    Effect.catchCause((cause) => Effect.logWarning('Could not listen to a merged pull request', cause)),
+                  ),
+                  scope,
+                )
+              return
+            }
+            // Taken but not landed yet (Bitbucket answers 202 to one that takes long): asked about again soon, until it has.
+            if (merged.state === 'open') yield* Effect.forkIn(landing(taskId, link.id), scope)
           }
           const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === link.id)
           if (now !== undefined) yield* poll(now)
         })
+
+      /** A merge its host took but hasn't landed yet, asked about every few seconds for a while, so its task settles once it has. */
+      const landing = (taskId: string, linkId: string) =>
+        Effect.gen(function* () {
+          for (let turn = 0; turn < LANDING_TURNS; turn++) {
+            yield* Effect.sleep(LANDING_EVERY)
+            const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === linkId)
+            if (now === undefined || (yield* decodeSnapshot(now.snapshot)).state !== 'open') return
+            yield* locked(taskId)(poll(now))
+          }
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hear whether a merge landed', cause)))
 
       /**
        * A change as its host has it now, kept: said in the task's thread where
@@ -2944,7 +2975,9 @@ export class Changes extends Context.Service<
           const account = adapters.info.account
           const before = yield* decodeSnapshot(link.snapshot)
           const repository: Repository = yield* host.repository(before.repository)
-          const read = yield* host.change(repository, before.number)
+          const answer = yield* host.change(repository, before.number)
+          // Merged, it stays so: for a moment after a merge, a host can still answer it as it was.
+          const read: ChangeRequest = before.state === 'merged' ? { ...answer, state: 'merged' } : answer
           const now = { ...read, headSha: yield* caughtUp(link, read, host, repository) }
           const name = nameOf(before)
           const forLead: Array<string> = []
