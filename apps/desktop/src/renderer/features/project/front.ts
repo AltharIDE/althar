@@ -1,4 +1,12 @@
-import type { BoardTask, ConnectionList, CoordinatorSnapshot, Product, ProjectRepository, ProjectRulesView } from '@althar/contracts'
+import type {
+  BoardTask,
+  ConnectionList,
+  CoordinatorSnapshot,
+  Product,
+  ProjectRepository,
+  ProjectRulesView,
+  ProjectTracker,
+} from '@althar/contracts'
 import { type MarkGlance, PermissionPolicy, permissionPolicyText, type ProjectPart, RuleKind } from '@althar/ui'
 import { projectRulesText } from '@althar/ui/screens'
 
@@ -67,6 +75,8 @@ export interface Tracker {
   readonly url: string | null
   /** The connections its issues are read and moved through, the one most of them use first: Althar's standing there is theirs. */
   readonly connections: ReadonlyArray<string>
+  /** Whether it is the one the project is bound to: where its drafts go. */
+  readonly bound?: true
 }
 
 /** A key's space on the web, from the link of one of its issues: linear.app/acme/team/MER, acme.atlassian.net/browse/MER. */
@@ -225,4 +235,46 @@ export const rulesLineOf = (rules: ProjectRulesView): { readonly policy: string;
         ? text.nothingAsks
         : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
   }
+}
+
+/**
+ * The trackers a project is on, as the person sees them: the one it is bound
+ * to first, by hand or learned, then those its tasks' issues are on that
+ * differ. The binding is the learned tracker on its connection, when its
+ * issues are on one; otherwise a tracker of its own, from its connection (or,
+ * disconnected since, the one it was bound to, which Althar can't reach).
+ */
+/** A tracker's page on the web: its server's, or the workspace's on it where the connection reaches one. */
+const spaceOf = (webUrl: string | null, workspace: string | undefined): string | null => {
+  if (webUrl === null) return null
+  const origin = trackerUrlOf('trello', null, webUrl)
+  return origin === null || workspace === undefined ? origin : `${origin}/${workspace}`
+}
+
+export const trackersWithBinding = (
+  learned: ReadonlyArray<Tracker>,
+  binding: Pick<ProjectTracker, 'connectionId' | 'gone'> | null,
+  list: ConnectionList | null,
+): Tracker[] => {
+  if (binding === null) return [...learned]
+  const connection = list?.connections.find((each) => each.id === binding.connectionId)
+  const product = connection?.product ?? (binding.gone?.product as Product | undefined)
+  const webUrl = connection?.webUrl ?? binding.gone?.webUrl ?? null
+  if (product === undefined) return [...learned]
+  const at = hostNameOf(webUrl)
+  const same = (tracker: Tracker) =>
+    tracker.connections.length > 0 ? tracker.connections.includes(binding.connectionId) : tracker.product === product && tracker.at === at
+  const matched = learned.find(same)
+  const first: Tracker =
+    matched !== undefined
+      ? { ...matched, bound: true }
+      : {
+          product,
+          at,
+          key: null,
+          url: spaceOf(webUrl, connection?.workspace?.key),
+          connections: [binding.connectionId],
+          bound: true,
+        }
+  return [first, ...learned.filter((tracker) => tracker !== matched)]
 }

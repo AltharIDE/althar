@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
 import {
@@ -20,6 +21,7 @@ import {
 import { contextMeter } from '../../shared/ContextMeter'
 import { platform } from '../../shared/device'
 import { useModels } from '../../data/models'
+import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
@@ -56,7 +58,7 @@ import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
-import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
+import { lastSettledOf, partsOf, tasksOf, trackersOf, trackersWithBinding } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
@@ -434,7 +436,8 @@ export function ProjectView({
   // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings.model
-  const trackers = lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list)
+  const binding = useQuery(reads(useServices().client).projectTracker(projectId)).data ?? null
+  const trackers = trackersWithBinding(lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list), binding, connections.list)
   const settingsNeedYou = connectionsNeedYou(model.repositories, trackers, connections.list)
   // Its automations: a dot on their view where one paused itself; and what its cards in the conversation do.
   const automations = useAutomations(projectId)

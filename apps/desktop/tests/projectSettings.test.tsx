@@ -634,6 +634,72 @@ describe('a project’s trackers, in its settings', () => {
     await waitFor(() => expect(goTo.textContent).toContain('Where its issues are'))
   })
 
+  describe('with a tracker bound', () => {
+    const fnt = { ...linear('ready', 'conn_fnt', 'mate'), workspace: { key: 'fnt', name: 'Blushh' } }
+    const binding: ProjectTracker = { connectionId: 'conn_fnt', container: { id: 'team-f', name: 'Blushh Core' } }
+    const withBoard = (tasks: ReadonlyArray<BoardTask>, connection: ConnectionSummary, bound: ProjectTracker | null) => ({
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks, calls: [], settledTotal: tasks.length })),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, connection] })),
+      getProjectTracker: vi.fn(async () => bound),
+      listContainers: vi.fn(async () => [{ id: 'team-f', key: 'FNT', name: 'Blushh Core' }]),
+    })
+
+    it('bound by hand with no issue yet, never says there is no tracker, and shows who it is connected as and a link', async () => {
+      const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+      windowAt('/projects/p1', withBoard([], fnt, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Connected as mate')).toBeTruthy()
+      expect(trackers.queryByText('No tracker yet')).toBeNull()
+      expect(trackers.queryByRole('button', { name: 'Connect a tracker' })).toBeNull()
+      expect(trackers.getByRole('button', { name: 'Connect another' })).toBeTruthy()
+      await userEvent.click(trackers.getByRole('button', { name: 'Open on Linear' }))
+      expect(opened).toHaveBeenCalledWith('https://linear.app/fnt', '_blank')
+      opened.mockRestore()
+    })
+
+    it('asks to sign in again where the bound connection is not ready', async () => {
+      windowAt('/projects/p1', withBoard([], { ...fnt, state: 'reauth_required' }, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Signed out as mate')).toBeTruthy()
+      expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+      expect(trackers.queryByText('No tracker yet')).toBeNull()
+    })
+
+    it('learned and not bound, lists it as before, with Connect a tracker', async () => {
+      windowAt('/projects/p1', withBoard([taskFrom('MER-12', 'conn_fnt')], fnt, null))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByRole('button', { name: 'Connect a tracker' })).toBeTruthy()
+      expect(trackers.queryByText(/drafts go to/)).toBeNull()
+    })
+
+    it('learned and bound to the same, lists it once', async () => {
+      windowAt('/projects/p1', withBoard([taskFrom('MER-12', 'conn_fnt')], fnt, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getAllByText(/issues/).filter((one) => one.textContent === 'MER issues · Linear')).toHaveLength(1)
+      expect(trackers.queryByText(/drafts go to/)).toBeNull()
+      expect(trackers.queryByText('No tracker yet')).toBeNull()
+    })
+
+    it('learned on one workspace and bound to another, lists both and says where drafts do not go', async () => {
+      const althar = { ...linear('ready', 'conn_althar', 'mate'), workspace: { key: 'althar', name: 'althar' } }
+      windowAt('/projects/p1', {
+        ...withBoard([taskFrom('MER-12', 'conn_althar')], fnt, binding),
+        listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, fnt, althar] })),
+      })
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
+      expect(trackers.getByText('Linear issues')).toBeTruthy()
+      expect(trackers.getAllByText(/Its drafts go to the tracker above/)).toHaveLength(1)
+    })
+  })
+
   it('says none has been named yet, offers to connect one, and leads to Althar’s own connections', async () => {
     const { router } = windowAt('/projects/p1')
     await openSettings('Code and issues')

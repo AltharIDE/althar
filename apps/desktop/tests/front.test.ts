@@ -11,6 +11,7 @@ import {
   partsOf,
   rulesLineOf,
   trackersOf,
+  trackersWithBinding,
   trackerUrlOf,
 } from '../src/renderer/features/project/front'
 import { card, change, connectionList, githubConnection, projectRules } from './fixtures'
@@ -174,6 +175,36 @@ describe('a project’s front page', () => {
         connectionList,
       ).map((tracker) => tracker.connections),
     ).toEqual([['conn_b', 'conn_a']])
+  })
+
+  it('puts the tracker a project is bound to first, once, and keeps what its issues name', () => {
+    const learned = { product: 'linear', at: 'linear.app', key: 'MER', url: null, connections: ['conn_a'] } as const
+    const conn = (id: string, key: string) => ({
+      ...githubConnection,
+      id,
+      product: 'linear' as const,
+      webUrl: 'https://linear.app',
+      workspace: { key, name: key },
+    })
+    const list = { ...connectionList, connections: [conn('conn_a', 'a'), conn('conn_b', 'b')] }
+    // Nothing bound: as learned. Nothing at all: nothing.
+    expect(trackersWithBinding([learned], null, list)).toEqual([learned])
+    expect(trackersWithBinding([], null, list)).toEqual([])
+    // Bound, nothing learned: its own, on its workspace.
+    expect(trackersWithBinding([], { connectionId: 'conn_b' }, list)).toEqual([
+      { product: 'linear', at: 'linear.app', key: null, url: 'https://linear.app/b', connections: ['conn_b'], bound: true },
+    ])
+    // Bound to the one its issues are on: once.
+    expect(trackersWithBinding([learned], { connectionId: 'conn_a' }, list)).toEqual([{ ...learned, bound: true }])
+    // Bound to another: the bound first, the learned after, unbound.
+    expect(trackersWithBinding([learned], { connectionId: 'conn_b' }, list).map((tracker) => [tracker.key, tracker.bound])).toEqual([
+      [null, true],
+      ['MER', undefined],
+    ])
+    // Disconnected since: still there, for Althar can't reach it.
+    expect(
+      trackersWithBinding([], { connectionId: 'gone', gone: { product: 'linear', webUrl: 'https://linear.app', workspace: 'FNT' } }, list),
+    ).toEqual([{ product: 'linear', at: 'linear.app', key: null, url: 'https://linear.app', connections: ['gone'], bound: true }])
   })
 
   it('names a tracker whose issues share no key once, by its name: Trello’s cards', () => {

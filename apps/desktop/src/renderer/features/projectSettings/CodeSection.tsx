@@ -26,6 +26,10 @@ import { useProjectTracker } from './useProjectTracker'
 export const text = {
   trackers: 'Trackers',
   connectTracker: 'Connect a tracker',
+  /** Beside a tracker already there: connecting another is still valid, and no call to action. */
+  connectAnother: 'Connect another',
+  /** On a tracker its issues are on, where another is the one drafts go to. */
+  draftsElsewhere: 'Its drafts go to the tracker above',
   none: 'No tracker yet',
   noneNote: 'Connect one, and the coordinator can start tasks from its issues.',
   /** MER issues · Linear; a tracker whose issues share no key by its name alone: Trello cards. */
@@ -59,9 +63,12 @@ function TrackerRow({
   tracker,
   list,
   onConnect,
+  elsewhere,
 }: {
   tracker: Tracker
   list: ConnectionList | null
+  /** Another tracker is the one bound: drafts don't go to this one. */
+  elsewhere: boolean
   onConnect: (opening: Opening) => void
 }) {
   const standing = standingOf(list, tracker)
@@ -74,7 +81,12 @@ function TrackerRow({
   return (
     <SettingRow
       title={text.issues(tracker)}
-      note={<StandingLine standing={standing} />}
+      note={
+        <>
+          <StandingLine standing={standing} />
+          {elsewhere && <> · {text.draftsElsewhere}</>}
+        </>
+      }
       mark={<BrandMark brand={productBrand(tracker.product)} size={18} />}
     >
       {() =>
@@ -99,7 +111,7 @@ export function CodeSection({
   onManage,
 }: {
   projectId: string
-  /** The trackers its tasks' issues are on, the one most of them name first. */
+  /** The trackers it is on: the one it is bound to first, then those its tasks' issues are on. */
   trackers: ReadonlyArray<Tracker>
   /** The code hosts and trackers connected, and those Althar knows. */
   list: ConnectionList | null
@@ -110,6 +122,8 @@ export function CodeSection({
 }) {
   const repositories = useRepositories(projectId)
   const bound = useProjectTracker(projectId, list)
+  // Once one is bound, drafts go there alone: the rest are only where its issues are.
+  const binding = trackers.some((tracker) => tracker.bound === true)
   return (
     <>
       <Repositories model={repositories} connections={list} onConnect={onConnect} />
@@ -117,9 +131,13 @@ export function CodeSection({
         title={text.trackers}
         headingLevel={HEADING.part}
         action={
-          <Button size="small" icon="plug" onClick={() => onConnect('all')}>
-            {text.connectTracker}
-          </Button>
+          !binding ? (
+            <Button size="small" icon="plug" onClick={() => onConnect('all')}>
+              {text.connectTracker}
+            </Button>
+          ) : (
+            <LinkButton onClick={() => onConnect('all')}>{text.connectAnother}</LinkButton>
+          )
         }
       >
         <SettingList>
@@ -150,6 +168,7 @@ export function CodeSection({
                 tracker={tracker}
                 list={list}
                 onConnect={onConnect}
+                elsewhere={binding && tracker.bound !== true}
               />
             ))
           )}
