@@ -209,7 +209,7 @@ export function ProjectView({
   const both = useBothWidth()
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
-  const lanes = board.board === null ? null : lanesOf(board.board)
+  const lanes = board.board === null ? null : lanesOf(board.board, board.merging)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()

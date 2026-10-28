@@ -48,6 +48,7 @@ import { statements as planUsage } from './0043_plan_usage'
 import { statements as lookupIndexes } from './0044_lookup_indexes'
 import { statements as inputFiles } from './0045_input_files'
 import { statements as shownPictures } from './0046_shown_pictures'
+import { statements as taskRequestInputs } from './0047_task_request_inputs'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -113,6 +114,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0044_lookup_indexes', statements: lookupIndexes },
   { key: '0045_input_files', statements: inputFiles },
   { key: '0046_shown_pictures', statements: shownPictures },
+  { key: '0047_task_request_inputs', statements: taskRequestInputs },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

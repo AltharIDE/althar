@@ -1,4 +1,4 @@
-# ADR-067: A settled task stops everything it left running, and what Althar lost track of is found by its mark
+# ADR-068: A settled task stops everything it left running, and what Althar lost track of is found by its mark
 
 - **Status:** Accepted
 - **Date:** 2026-10-28

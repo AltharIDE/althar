@@ -468,11 +468,18 @@ describe('a removed folder set up again', () => {
       const launches = yield* Launches
       const setups = yield* Setups
       const sql = yield* SqlClient.SqlClient
+      // Its first setup, begun as it was made, done before the one kept below: one reading it late would wait in the
+      // folder, which Windows won't remove while a process works in it.
+      yield* setups.ready(task.taskId)
       // Its setup waits until the test says.
       const go = join(realpathSync(mkdtempSync(join(tmpdir(), 'althar-go-'))), 'go')
       yield* launches.keep({
         projectId: task.projectId,
-        run: { command: LONG, setup: `while [ ! -f '${go}' ]; do sleep 0.05; done` },
+        // In Node, which both a POSIX shell and cmd.exe run, and by a path with /, which Node takes on Windows too.
+        run: {
+          command: LONG,
+          setup: `node -e "const fs = require('fs'); const wait = () => fs.existsSync('${go.replaceAll('\\', '/')}') || setTimeout(wait, 50); wait()"`,
+        },
         actorId: yield* person,
       })
       yield* cleanup.sweep

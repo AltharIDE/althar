@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
 
 import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
@@ -74,6 +74,8 @@ export interface FakeServiceOptions {
   readonly saysHead?: boolean
   /** What of an issue it updates: as its product's adapter does, unless a test says. */
   readonly changes?: ReadonlyArray<IssueField>
+  /** How long each call takes, in milliseconds, by method, as a host far away answers: at once unless said. */
+  readonly latency?: (method: string) => number
 }
 
 /** What each product's adapter changes of an issue, as the fake takes them. */
@@ -146,6 +148,15 @@ export interface FakeControls {
   reopen(number: number): void
   /** Someone marks a draft ready on the host itself. */
   readyByHand(number: number): void
+  /**
+   * Reading a change answers it as it stands now, until `catchUp`, whatever
+   * happens to it meanwhile: as a host's replicas can, for a moment after it
+   * merged one.
+   */
+  lagReads(): void
+  catchUp(): void
+  /** Merges are taken but left open, as Bitbucket answers one that takes long, until `mergeByHand` lands it. */
+  landLater(): void
   /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Althar's included. */
@@ -246,10 +257,20 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   let ids = 0
   const nextId = () => String((ids += 1))
 
-  /** Records a call, and fails it if a test asked. */
+  /** Changes as reading them answers while reads lag: as they stood when they began to. */
+  let lagged: ReadonlyArray<ChangeRequest> | null = null
+  /** Whether a merge is taken but not landed yet. */
+  let landsLater = false
+
+  /** Records a call, taking as long as the test said, and fails it if a test asked. */
   const called = (method: string) =>
     Effect.suspend(() => {
       calls.push(method)
+      const takes = options.latency?.(method) ?? 0
+      return takes > 0 ? Effect.andThen(Effect.sleep(Duration.millis(takes)), failing(method)) : failing(method)
+    })
+  const failing = (method: string) =>
+    Effect.suspend(() => {
       const failure = failures.get(method)
       if (failure === undefined) return Effect.void
       failures.delete(method)
@@ -350,7 +371,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       }),
     change: (_repository, number) =>
       Effect.andThen(called('change'), () => {
-        const found = changes.find((change) => change.number === number)
+        const found = (lagged ?? changes).find((change) => change.number === number)
         if (found === undefined) return Effect.fail(missing(`change ${number}`))
         const head = options.headOf?.(number) ?? null
         const conflicts = found.state === 'open' ? options.conflictsOf?.(number) : undefined
@@ -437,7 +458,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           )
         if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
           return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
-        update(change.number, { state: 'merged' })
+        if (!landsLater) update(change.number, { state: 'merged' })
         return Effect.succeed(changeNumbered(change.number))
       }),
     closeChange: (_repository, change) =>
@@ -785,6 +806,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     close: (number) => update(number, { state: 'closed' }),
     reopen: (number) => update(number, { state: 'open' }),
     readyByHand: (number) => update(number, { draft: false }),
+    lagReads: () => void (lagged = [...changes]),
+    catchUp: () => void (lagged = null),
+    landLater: () => void (landsLater = true),
     failNext: (method, reason, retryAt, status) =>
       void failures.set(method, {
         reason,

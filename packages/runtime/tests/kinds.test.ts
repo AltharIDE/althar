@@ -471,54 +471,60 @@ describe('settling a task that isn’t a change', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('ends a round after Done, or after Keep for later, in Needs you, never straight back in Settled', () =>
-    Effect.gen(function* () {
-      const tasks = yield* Tasks
-      const sessions = yield* Sessions
-      const sql = yield* SqlClient.SqlClient
-      const project = yield* open
-      const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
-      yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
-      // What the window does as the person writes to it: with no agent on the thread, as once the task is done, it starts its lead.
-      const write = (body: string) =>
-        Effect.gen(function* () {
-          yield* tasks.bringBack(question.taskId)
-          const held = Option.isSome(yield* sessions.running(question.threadId))
-          yield* sessions.send({
-            envelope: yield* Runtime.envelope('thread.send', { threadId: question.threadId, body }),
-            threadId: question.threadId,
-            body,
+  it.live(
+    'ends a round after Done, or after Keep for later, in Needs you, never straight back in Settled',
+    () =>
+      Effect.gen(function* () {
+        const tasks = yield* Tasks
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const project = yield* open
+        const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
+        yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+        // What the window does as the person writes to it: with no agent on the thread, as once the task is done, it starts its lead.
+        const write = (body: string) =>
+          Effect.gen(function* () {
+            yield* tasks.bringBack(question.taskId)
+            const held = Option.isSome(yield* sessions.running(question.threadId))
+            yield* sessions.send({
+              envelope: yield* Runtime.envelope('thread.send', { threadId: question.threadId, body }),
+              threadId: question.threadId,
+              body,
+            })
+            if (!held) yield* sessions.startLast(question.threadId)
           })
-          if (!held) yield* sessions.startLast(question.threadId)
-        })
-      const roundsEnded = (n: number) =>
-        until(
-          sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${question.taskId} AND plan_id IS NULL AND state <> 'running'`,
-          (rows) => (rows[0]?.n ?? 0) === n,
-          Duration.seconds(30),
+        const roundsEnded = (n: number) =>
+          until(
+            sql<{
+              n: number
+            }>`SELECT count(*) AS n FROM runs WHERE task_id = ${question.taskId} AND plan_id IS NULL AND state <> 'running'`,
+            (rows) => (rows[0]?.n ?? 0) === n,
+            Duration.seconds(30),
+          )
+
+        // Done, then written to: it goes back to work as a round, which makes nothing, and it waits in Needs you.
+        assert.isTrue(yield* markDone(question.taskId))
+        // Settled, its lead stops.
+        yield* until(
+          Effect.map(sessions.running(question.threadId), (running) => (Option.isNone(running) ? [true] : [])),
+          (gone) => gone.length === 1,
+          Duration.seconds(10),
         )
+        yield* write('And the v2 ones? [lead:slowly]')
+        yield* roundsEnded(1)
+        yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+        assert.deepInclude(yield* row(question.taskId), { state: 'open', settledAt: null })
 
-      // Done, then written to: it goes back to work as a round, which makes nothing, and it waits in Needs you.
-      assert.isTrue(yield* markDone(question.taskId))
-      // Settled, its lead stops.
-      yield* until(
-        Effect.map(sessions.running(question.threadId), (running) => (Option.isNone(running) ? [true] : [])),
-        (gone) => gone.length === 1,
-        Duration.seconds(10),
-      )
-      yield* write('And the v2 ones? [lead:slowly]')
-      yield* roundsEnded(1)
-      yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
-      assert.deepInclude(yield* row(question.taskId), { state: 'open', settledAt: null })
-
-      // Kept for later, then written to: it is back, and its round ends in Needs you too.
-      assert.isTrue(yield* keep(question.taskId))
-      yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
-      yield* write('And the v3 ones? [lead:slowly]')
-      yield* roundsEnded(2)
-      const back = yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
-      assert.isUndefined(back.keptAt)
-      assert.strictEqual((yield* row(question.taskId)).state, 'open')
-    }).pipe(Effect.provide(withQueries())),
+        // Kept for later, then written to: it is back, and its round ends in Needs you too.
+        assert.isTrue(yield* keep(question.taskId))
+        yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
+        yield* write('And the v3 ones? [lead:slowly]')
+        yield* roundsEnded(2)
+        const back = yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+        assert.isUndefined(back.keptAt)
+        assert.strictEqual((yield* row(question.taskId)).state, 'open')
+      }).pipe(Effect.provide(withQueries())),
+    // The suite's 20 s for what any test here does, and its two rounds' leads, which each take 6 s by design.
+    32_000,
   )
 })

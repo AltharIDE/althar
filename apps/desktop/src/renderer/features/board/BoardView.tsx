@@ -98,6 +98,16 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
+  /** Why a stopped task's lead stopped, in a card's words. */
+  stoppedBy: {
+    declined: 'Stopped when you declined a command',
+    interrupted: 'Stopped when you interrupted it',
+    althar: 'Stopped by Althar',
+  },
+  carryOn: 'Carry on',
+  carryingOn: 'Telling the lead',
+  /** What the lead is told to carry on. */
+  carryOnNote: 'Carry on.',
   /** Settles a finished task that isn't a change, from its kept row. */
   done: 'Done',
   /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
@@ -344,6 +354,40 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   }
 }
 
+/**
+ * A task whose lead stopped with no agent on it: the person's to carry on or abandon. When it stopped, not a running time, and why
+ * in plain words, with its branch and what changed in it, and Carry on, which tells the lead to go on.
+ */
+export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardActions): Card => {
+  const card = runningCard(work, '', () => '')
+  const sendBack = actions?.sendBack
+  const { at: _, ...rest } = card
+  return {
+    ...rest,
+    status: TaskStatus.Stopped,
+    word: text.status[TaskStatus.Stopped],
+    why: work.stopped?.by == null ? text.stopped : text.stoppedBy[work.stopped.by],
+    ...(work.stopped == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
+    ...(sendBack === undefined
+      ? {}
+      : {
+          foot: (
+            <>
+              {work.conflictUnsent != null && unsentFoot(work, work.conflictUnsent, actions)}
+              <NextStep
+                signal
+                busy={actions?.sending?.has(work.taskId) ?? false}
+                doing={text.carryingOn}
+                onPress={() => void sendBack(work, text.carryOnNote)}
+              >
+                {text.carryOn}
+              </NextStep>
+            </>
+          ),
+        }),
+  }
+}
+
 /** A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that. */
 export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(task), title: task.title, ...fromOf(task) }
@@ -467,7 +511,7 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
 
 /** What a ready card does without opening its task: push, and merge, mark done or keep for later, and how they stand. */
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
-  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving'>>
+  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving' | 'sendBack' | 'sending'>>
 
 /** A conflict that is the person's, handed back or not asked of its lead: why, in one line, and Resolve now, which asks the lead anyway. */
 const unsentFoot = (work: BoardTask, why: string, actions: CardActions | undefined): ReactNode => {
@@ -712,7 +756,7 @@ export function BoardView({
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Yours} count={asks.length + lanes.ready.length}>
+      <BoardColumn lane={BoardLane.Yours} count={asks.length + lanes.stopped.length + lanes.ready.length}>
         {asks.map((ask) =>
           ask.waiting !== null ? (
             <BoardCard
@@ -724,6 +768,9 @@ export function BoardView({
             <CallCard key={ask.call.id} {...callCardOf(ask.call, name)} onOpen={() => onOpen(ask.call.threadId)} />
           ),
         )}
+        {lanes.stopped.map((work) => (
+          <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} onOpen={() => onOpen(work.threadId)} />
+        ))}
         {lanes.ready.map((work) => (
           <BoardCard key={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
         ))}
