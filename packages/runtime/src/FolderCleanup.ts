@@ -139,10 +139,29 @@ const GRAVITY: ReadonlyArray<FolderHeld['why']> = ['uncommitted', 'unreadable', 
 const holdOf = (running: boolean, lost: FolderHeld | null, opened: boolean): FolderHeld | null =>
   running ? { why: 'running', count: null } : (lost ?? (opened ? { why: 'opened', count: null } : null))
 
-/** A folder's size on the disk, as `du` counts it, in bytes; null where it can't say. */
+/** Lockfiles of package managers that install `node_modules` from a store of their own, by hardlink or clonefile. */
+const STORED = ['bun.lock', 'bun.lockb', 'pnpm-lock.yaml']
+
+/**
+ * Whether a checkout's `node_modules` share their blocks with a package
+ * manager's store: bun clones its cache's files on macOS and hardlinks them
+ * on Linux, pnpm hardlinks them. `du` and Finder count them in full, but
+ * removing them frees next to nothing: a worktree `du` puts at 2 GB frees
+ * 50 MB, its own files.
+ */
+const sharesInstalls = (path: string) =>
+  STORED.some((lock) => existsSync(join(path, lock))) ||
+  existsSync(join(path, 'node_modules', '.bun')) ||
+  existsSync(join(path, 'node_modules', '.pnpm'))
+
+/**
+ * What removing a folder frees, in bytes, as `du` counts it, but for
+ * `node_modules` installed from a store, which stays; null where it can't say.
+ */
 const sizeOf = (path: string) =>
   Effect.callback<number | null>((resume) => {
-    execFile('du', ['-sk', path], { timeout: 120_000 }, (error, stdout) => {
+    const skip = !sharesInstalls(path) ? [] : process.platform === 'darwin' ? ['-I', 'node_modules'] : ['--exclude=node_modules']
+    execFile('du', ['-sk', ...skip, path], { timeout: 120_000 }, (error, stdout) => {
       const kb = /^(\d+)/.exec(stdout)?.[1]
       resume(Effect.succeed(error !== null && kb === undefined ? null : kb === undefined ? null : Number(kb) * 1024))
     })
@@ -161,10 +180,11 @@ export const diskOf = (path: string) =>
     ),
   )
 
-/** A size for the thread: 2.3 GB, 14 GB, 640 MB. */
+/** A size for the thread: 2.3 GB, 14 GB, 640 MB, under 1 MB. */
 export const sizeWords = (bytes: number) => {
   const gb = bytes / 1024 ** 3
-  if (gb < 1) return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
+  if (bytes < 1024 ** 2) return bytes === 0 ? '0 MB' : 'under 1 MB'
+  if (gb < 1) return `${Math.round(bytes / 1024 ** 2)} MB`
   return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`
 }
 
@@ -380,7 +400,7 @@ export class FolderCleanup extends Context.Service<
           } satisfies FolderHeld
         })
 
-      /** What a task's folders take on the disk, as `du` counts them, their review copies too; null where it can't say. */
+      /** What removing a task's folders frees, their review copies too; null where it can't say. */
       const sizeOfAll = (candidate: Candidate) =>
         Effect.gen(function* () {
           let bytes = 0
@@ -523,9 +543,9 @@ export class FolderCleanup extends Context.Service<
        * open them or start running from them: by itself, one held stays; by
        * hand, one something runs from is refused, as is one where more would
        * be lost than the person was told. An idle lead held on it stops
-       * first. What went, in bytes as `du` counted it; null where nothing
-       * did, as when the task went back to work meanwhile; the refusal, by
-       * hand.
+       * first. What went, its size as measured, null where it couldn't be;
+       * null where nothing did, as when the task went back to work meanwhile;
+       * the refusal, by hand.
        */
       const removeTask = ({ candidate, why, days, seen = null }: Chosen, actorId: ActorId) =>
         Effect.gen(function* () {
@@ -558,7 +578,7 @@ export class FolderCleanup extends Context.Service<
                   description: null,
                   role: 'folder',
                 })
-              return bytes ?? 0
+              return { bytes }
             }),
           )
           // Nothing starts on the task's thread while its folders go.
@@ -566,14 +586,18 @@ export class FolderCleanup extends Context.Service<
         })
 
       /**
-       * Removes what it is given, one by one, by what the disk says it freed;
-       * how many couldn't go, as a folder that stays. A refusal, by hand, is
-       * said instead.
+       * Removes what it is given, one by one; what it freed, the sizes of
+       * what went as they were measured, and how many couldn't go, as a
+       * folder that stays. The disk's free space says what it freed only
+       * where a size couldn't be measured: other writes move it by as much as
+       * a worktree frees. A refusal, by hand, is said instead.
        */
       const removeAll = (chosen: ReadonlyArray<Chosen>, actorId: ActorId, enough?: () => Effect.Effect<boolean>) =>
         Effect.gen(function* () {
           const before = yield* diskAt(config.worktreeRoot)
           let failed = 0
+          let measured = 0
+          let unknown = false
           for (const one of chosen) {
             if (enough !== undefined && (yield* enough())) break
             const went = yield* removeTask(one, actorId).pipe(
@@ -584,10 +608,15 @@ export class FolderCleanup extends Context.Service<
             )
             if (went === 'failed') failed += 1
             else if (went instanceof TaskRefused || went instanceof ChangedSinceSeen) return yield* went
+            else if (went !== null) {
+              if (went.bytes === null) unknown = true
+              else measured += went.bytes
+            }
           }
+          if (!unknown) return { freed: measured, failed } satisfies FoldersFreed
           const after = yield* diskAt(config.worktreeRoot)
-          const freed = before === null || after === null ? 0 : Math.max(0, after.free - before.free)
-          return { freed, failed } satisfies FoldersFreed
+          const onDisk = before === null || after === null ? 0 : Math.max(0, after.free - before.free)
+          return { freed: Math.max(measured, onDisk), failed } satisfies FoldersFreed
         })
 
       const sweep = one.withPermits(1)(

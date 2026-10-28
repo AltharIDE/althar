@@ -152,6 +152,24 @@ export const Measuring: Story = {
   },
 }
 
+/** Some measured, some not: a group's figure waits, in its place, until each of its folders is measured, and its part of the bar with it. */
+export const MeasuringSome: Story = {
+  render: () => <Row goes={GOES.map((one, i) => (i === 0 ? { ...one, bytes: 0.4 * 1024 ** 2 } : { ...one, bytes: null }))} measuring />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: /^Can go now Measuring…\s*Held back 7\.0 GB/ })).toBeVisible()
+    await expect(c.queryByText(/MB/)).toBeNull()
+  },
+}
+
+/** Just removed a folder whose own files are small: what it freed, under a megabyte, never rounded up to one. */
+export const FreedLittle: Story = {
+  render: () => <Row freed={0.3 * 1024 ** 2} />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Freed under 1 MB just now')).toBeVisible()
+  },
+}
+
 /** Only when the person cleans up: nothing goes by itself, and Clean up takes every finished task's folder. */
 export const OnlyWhenICleanUp: Story = {
   render: () => <Row wait="never" />,

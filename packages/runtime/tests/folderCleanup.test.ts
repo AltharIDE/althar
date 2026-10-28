@@ -161,6 +161,29 @@ describe('finished tasks’ folders', () => {
     }).pipe(Effect.provide(withCleanup())),
   )
 
+  it.live('measures what removing a folder frees, not the installs it shares with bun’s store, and says it freed that', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 1, 'Add a retry', (root) => {
+        writeFileSync(join(root, '.gitignore'), 'node_modules\n')
+        writeFileSync(join(root, 'bun.lock'), '{}\n')
+        git(root, 'add', '.')
+        git(root, 'commit', '-q', '-m', 'Install with bun')
+      })
+      // What bun installs, clones or hardlinks of its store: removing them frees next to nothing.
+      mkdirSync(join(task.worktree, 'node_modules', '.bun'), { recursive: true })
+      writeFileSync(join(task.worktree, 'node_modules', '.bun', 'big.node'), Buffer.alloc(8 * 1024 ** 2, 1))
+      const listed = yield* measured
+      const bytes = listed.folders[0]?.bytes ?? null
+      assert.isNotNull(bytes)
+      assert.isAbove(bytes!, 0)
+      assert.isBelow(bytes!, 1024 ** 2)
+      // The disk this runtime reads never moves: what it freed is what was measured of what went.
+      const freed = yield* (yield* FolderCleanup).cleanUp(yield* person)
+      assert.deepStrictEqual(freed, { freed: bytes!, failed: 0 })
+      assert.isFalse(existsSync(task.worktree))
+    }).pipe(Effect.provide(withCleanup())),
+  )
+
   it.live('holds back a folder with changes not committed, which goes by hand', () =>
     Effect.gen(function* () {
       const task = yield* finished('done', 10)
@@ -557,5 +580,8 @@ describe('the words for a folder going', () => {
     assert.strictEqual(goneWords('wait', 3, 640 * 1024 ** 2), 'Folder removed 3 days after the task finished · 640 MB')
     assert.strictEqual(goneWords('low', 7, null), 'Folder removed when this computer ran low on space')
     assert.strictEqual(sizeWords(10 * 1024 ** 3), '10 GB')
+    assert.strictEqual(sizeWords(300 * 1024), 'under 1 MB')
+    assert.strictEqual(sizeWords(0), '0 MB')
+    assert.strictEqual(goneWords('hand', 7, 300 * 1024), 'You removed its folder · under 1 MB')
   })
 })

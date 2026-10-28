@@ -98,8 +98,11 @@
       Clean up takes, then, below a hairline, what is held back, each with
       why and its own Remove.
     - **Clean up:** it takes what nothing holds, whatever its wait, and
-      says what it freed, measured on the disk after (`du` overstates
-      folders whose installs share blocks).
+      says what it freed: the sizes of what went, as they were measured. A
+      size leaves out `node_modules` installed from bun's or pnpm's store,
+      clones or hardlinks of it that `du` and Finder count in full but that
+      free next to nothing. The disk's free space after is no measure: other
+      writes move it by as much as a worktree frees.
     - **Nothing in Needs you, and no notifications:** it is housekeeping.
 - **Alternatives considered:**
   - **Right away, as a task settles:** a merged task is often run,
