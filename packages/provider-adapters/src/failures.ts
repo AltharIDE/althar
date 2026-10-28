@@ -4,12 +4,16 @@ import { Predicate } from 'effect'
  * What went wrong with a request to an agent, in the classes of
  * docs/architecture/03's failure table. Each class leads somewhere different:
  * a usage limit pauses every session on the account and moves the work; a
- * short rate limit or an overloaded service is retried after a pause; a full
- * context starts a new session from a brief (docs/architecture/05).
+ * lost connection, a short rate limit or a failing service is transient: its
+ * step is waited out while the computer is offline, and retried after a
+ * growing pause while it is online (ADR-060); a full context starts a new
+ * session from a brief (docs/architecture/05).
  *
- * Claude Code reports failures in structured form when asked (see
- * `structuredFailure`); for every other agent, and as a fallback, the error
- * text is read here.
+ * Claude Code and Codex report failures in structured form when asked (see
+ * `structuredFailure`), on a `session_info_update` or on the prompt's
+ * response; for every other agent, and as a fallback, the error text is read
+ * here. The texts below are what the agents said, as recorded against an API
+ * host that refused, dropped or failed them (tests/failures.test.ts).
  */
 
 export type FailureClass = 'usage_limit' | 'context_full' | 'auth_required' | 'invalid_request' | 'transient' | 'unknown'
@@ -32,7 +36,8 @@ const contextFull =
   /context (window|length)|too (many|long).{0,20}tokens|prompt is too long|context.{0,20}(exceeded|full|exhausted)|maximum context/i
 const authRequired =
   /auth(entication)? required|not (logged|signed) in|please (log|sign) ?in|(log|sign) ?in to continue|unauthori[sz]ed|\b401\b|invalid api key/i
-const transient = /rate.?limit|too many requests|\b429\b|timed? ?out|econnreset|econnrefused|temporar|overloaded|\b50[234]\b|network/i
+const transient =
+  /rate.?limit|too many requests|\b429\b|timed? ?out|econn(reset|refused|aborted)|enotfound|eai_again|etimedout|socket hang up|fetch failed|can'?t reach|(cannot|unable to) connect|connection (refused|dropped|error|lost|reset)|temporar|overloaded|high demand|internal server error|\b50[0234]\b|\b529\b|network/i
 
 const messageOf = (error: unknown): { readonly code?: number; readonly message: string; readonly data?: unknown } => {
   if (Predicate.isObject(error)) {
@@ -135,5 +140,8 @@ export const structuredFailure = (meta: unknown, now: Date): StructuredFailure |
     .filter((part) => part !== '')
     .join(' ')
   const severity = textField(failure, 'severity') === 'warning' ? 'warning' : 'error'
-  return { severity, classified: withReset(kindOf(textField(failure, 'category'), actions), message, message, now) }
+  const kind = kindOf(textField(failure, 'category'), actions)
+  // A warning that the agent is trying again by itself is a short limit, though it names no action, as Claude Code's at a 429.
+  const read = severity === 'warning' && kind === 'usage_limit' && /\b(retrying|reconnecting)\b/i.test(message) ? 'transient' : kind
+  return { severity, classified: withReset(read, message, message, now) }
 }

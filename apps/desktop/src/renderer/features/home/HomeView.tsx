@@ -173,7 +173,8 @@ export function HomeView({
   const runs: ReadonlyArray<HomeRun> = working.flatMap((task) => {
     const project = refs.get(task.projectId)
     // Waiting for a free agent, or held for a reset, it stands still though its phase is running.
-    const status = task.queued !== null ? TaskStatus.Queued : task.waits !== null ? TaskStatus.Paused : statusOf(task.phase)
+    const status =
+      task.queued !== null ? TaskStatus.Queued : task.waits !== null || task.reconnects != null ? TaskStatus.Paused : statusOf(task.phase)
     return project === undefined ? [] : [{ id: task.taskId, project, title: task.title, status }]
   })
   // What waiting tasks wait for is this computer's, the same for each: its project says it, with how many wait there.

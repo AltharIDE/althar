@@ -910,7 +910,7 @@ What is built so far is narrower than this section: one store on the
 computer, a curated default catalog and each lead's set fixed and recorded
 for its session ([ADR-062](../decisions/062-skills-one-store-a-curated-catalog.md)),
 and skill and OpenSpec files held off the repository unless the project says
-so ([ADR-060](../decisions/060-skill-and-openspec-files-stay-off-the-repository.md)).
+so ([ADR-063](../decisions/063-skill-and-openspec-files-stay-off-the-repository.md)).
 Bindings by scope, precedence and conflicts are not built; every lead gets
 the same active set, and the catalog's skills are off until the person turns
 them on. [The plan](../plans/skills-across-harnesses.md#implementation-status)

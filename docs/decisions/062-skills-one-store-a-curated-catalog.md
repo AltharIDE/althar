@@ -84,7 +84,7 @@
     default behaviour change.
   - **Skill text is not a boundary.** The catalog's patches keep its skills
     from telling an agent to push, but a person's own install may; the push
-    guard ([ADR-060](060-skill-and-openspec-files-stay-off-the-repository.md))
+    guard ([ADR-063](063-skill-and-openspec-files-stay-off-the-repository.md))
     and the project's rules are what hold.
   - **A catalog update needs an app release** until `althar-skills` and its
     update channel exist.

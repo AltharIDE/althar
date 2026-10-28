@@ -1,4 +1,4 @@
-# ADR-060: Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them
+# ADR-063: Skill and OpenSpec files stay off the repository unless the project says so, and a push is held back for them
 
 - **Status:** Accepted
 - **Date:** 2026-10-18

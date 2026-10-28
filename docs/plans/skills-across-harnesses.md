@@ -1,6 +1,6 @@
 # Skills across harnesses: shared defaults, installs, and repository boundaries
 
-**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-062](../decisions/062-skills-one-store-a-curated-catalog.md), [ADR-060](../decisions/060-skill-and-openspec-files-stay-off-the-repository.md)
+**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-062](../decisions/062-skills-one-store-a-curated-catalog.md), [ADR-063](../decisions/063-skill-and-openspec-files-stay-off-the-repository.md)
 **Research checked:** 2026-10-14
 **Upstream baseline:** `upstream/main` at `818df85e35ce4aa704334ffd846878750a30702c`
 
@@ -658,7 +658,7 @@ checks and the harness permission rules remain the enforcement.
   that are off for what it held back.
 - **ADRs (2026-10-18).** [ADR-062](../decisions/062-skills-one-store-a-curated-catalog.md)
   (the store, the catalog, delivery per session) and
-  [ADR-060](../decisions/060-skill-and-openspec-files-stay-off-the-repository.md)
+  [ADR-063](../decisions/063-skill-and-openspec-files-stay-off-the-repository.md)
   (the repository boundary, amending ADR-013 and ADR-016).
 
 **Not yet:**
