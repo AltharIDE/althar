@@ -109,7 +109,9 @@ export const trackersOf = (tasks: ReadonlyArray<BoardTask>, list: ConnectionList
     if (issue === null || !trackers.has(issue.product)) continue
     const key = /^([A-Z][A-Z0-9_]*)-\d+$/.exec(issue.key)?.[1] ?? null
     const at = hostNameOf(issue.url)
-    const id = `${issue.product}:${at ?? ''}:${key ?? ''}`
+    // Another workspace on the same server is another tracker, though a team there shares the key.
+    const workspace = list?.connections.find((each) => each.id === issue.connectionId)?.workspace?.key ?? ''
+    const id = `${issue.product}:${at ?? ''}:${workspace}:${key ?? ''}`
     const was = counted.get(id)
     const through = was?.through ?? new Map<string, number>()
     if (issue.connectionId !== undefined) through.set(issue.connectionId, (through.get(issue.connectionId) ?? 0) + 1)
@@ -270,11 +272,12 @@ export const trackersWithBinding = (
     tracker.connections.length > 0
       ? tracker.connections.includes(binding.connectionId)
       : tracker.product === product && tracker.at === at && space !== null && (tracker.url ?? '').startsWith(`${space}/`)
+  // With a team bound: issues with no team key (Trello's cards) can't be told to be on its board, so they stay their own tracker; and where the
+  // team's key can't be read (its connection signed out), the connection alone decides, so the bound one doesn't show twice.
   const sameTeam = (tracker: Tracker) =>
     binding.container === null ||
     binding.container === undefined ||
-    tracker.key === null ||
-    (containerKey !== null && tracker.key === containerKey)
+    (tracker.key !== null && (containerKey === null || tracker.key === containerKey))
   const matched = learned.find((tracker) => sameSpace(tracker) && sameTeam(tracker))
   // Its standing is the bound connection's, whatever else its issues were read through.
   const first: Tracker =

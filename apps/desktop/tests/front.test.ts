@@ -214,7 +214,34 @@ describe('a project’s front page', () => {
       [null, true],
       ['MER', undefined],
     ])
-    expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list)).toHaveLength(2)
+    // Its team's key unread (signed out): the connection alone decides, once.
+    expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list)).toEqual([{ ...learned, bound: true }])
+    // Cards with no team key can't be told to be on the bound board: their own tracker, drafts elsewhere.
+    const card = { product: 'trello', at: 'trello.com', key: null, url: 'https://trello.com', connections: ['conn_t'] } as const
+    const trello = {
+      ...list,
+      connections: [...list.connections, { ...conn('conn_t', 't'), product: 'trello' as const, webUrl: 'https://trello.com' }],
+    }
+    expect(
+      trackersWithBinding([card], { connectionId: 'conn_t', container: { id: 'list', name: 'Doing' } }, trello).map((tracker) => [
+        tracker.connections,
+        tracker.bound,
+      ]),
+    ).toEqual([
+      [['conn_t'], true],
+      [['conn_t'], undefined],
+    ])
+    // Two workspaces with the same team key are two trackers, and the bound link is its own.
+    const issue = (connectionId: string, workspace: string) =>
+      ({
+        taskId: 'x',
+        issue: { product: 'linear', key: 'FNT-1', title: 't', url: `https://linear.app/${workspace}/issue/FNT-1/a`, connectionId },
+      }) as never
+    const both = trackersOf([issue('conn_a', 'a'), issue('conn_b', 'b')], {
+      ...list,
+      products: [{ ...githubConnection, product: 'linear', tracker: true, host: false }] as never,
+    })
+    expect(both).toHaveLength(2)
     expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list, 'MER')).toEqual([{ ...learned, bound: true }])
     // Its issues name no connection: the bound keeps its own, and only a link on its workspace is it.
     const bare = { ...learned, key: 'FNT', url: 'https://linear.app/b/team/FNT', connections: [] }

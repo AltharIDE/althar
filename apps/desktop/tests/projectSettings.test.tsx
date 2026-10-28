@@ -676,6 +676,16 @@ describe('a project’s trackers, in its settings', () => {
       expect(trackers.queryByText('No tracker yet')).toBeNull()
     })
 
+    it('bound to a team of a signed-out workspace, with its issues learned, lists it once with the sign-in prompt', async () => {
+      windowAt('/projects/p1', withBoard([taskFrom('FNT-12', 'conn_fnt')], signedOut, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Signed out as mate')).toBeTruthy()
+      expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+      expect(trackers.getAllByText(/issues · Linear/)).toHaveLength(1)
+      expect(trackers.queryByText(/drafts go to/)).toBeNull()
+    })
+
     it('learned and not bound, lists it as before, with Connect a tracker', async () => {
       windowAt('/projects/p1', withBoard([taskFrom('MER-12', 'conn_fnt')], fnt, null))
       await openSettings('Code and issues')
