@@ -331,17 +331,15 @@ describe('Settings opened to sign an agent in again, from its error', () => {
   it('opens that agent, its signed-out account’s sign-in started and focused, once', async () => {
     const out = usual('acc_out', 'signed_out')
     const { client } = fakeClient({ status: vi.fn(async () => codexWith(['browser'], usualCodex, out)) })
-    const onSignInStarted = vi.fn()
     function Asked() {
       const [section, setSection] = useState<Section>('agents')
-      return <SettingsPage start={useStart()} section={section} onSection={setSection} signIn="codex" onSignInStarted={onSignInStarted} />
+      return <SettingsPage start={useStart()} section={section} onSection={setSection} signIn="codex" />
     }
     withServices(<Asked />, client)
     // The ways to sign in again, in the line of the account that is signed out, with focus in them.
     const again = await screen.findByRole('button', { name: 'Sign in again' })
     await waitFor(() => expect(document.activeElement?.contains(again)).toBe(true))
     expect(screen.getByRole('tab', { name: /Codex/, selected: true })).toBeTruthy()
-    expect(onSignInStarted).toHaveBeenCalledOnce()
     expect(client.addAccount).not.toHaveBeenCalled()
   })
 })

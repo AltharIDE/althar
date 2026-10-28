@@ -459,7 +459,8 @@ const playStall = async (
     return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' } satisfies acp.PromptResponse
   }
   if (session.markers.has('[lead:refuse]')) return { stopReason: 'refusal' }
-  if (session.markers.has('[lead:signed-out]')) throw acp.RequestError.authRequired()
+  // The coordinator that plans it only passes the marker on.
+  if (session.markers.has('[lead:signed-out]') && !session.coordinator) throw acp.RequestError.authRequired()
   if (once('[lead:long-once]')) return { stopReason: 'max_tokens' }
   if (session.markers.has('[lead:wedge-once]') && !wedgedIn.has(session.cwd)) {
     wedgedIn.add(session.cwd)
@@ -1367,6 +1368,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
       // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
       // nothing. Cancelled, it stops.
+      // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
+      if (text.includes('[signed-out]')) throw acp.RequestError.authRequired()
       const slowly = /\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/.exec(text)
       if (slowly?.[2] !== undefined) {
         const waitOut = async (ms: number) => {

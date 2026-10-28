@@ -165,6 +165,8 @@ function StuckCard({
   const others = agents.filter((candidate) => stuck.agentId === null || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
   const out = stuck.why === 'usage_limit'
+  // Signed out, its lead can't be told anything until it is signed in again.
+  const signedOut = stuck.why === 'signed_out'
   // Gone quiet, long at it, or stopped by restarts, a lead's agent starts again, or carries on, in its own words; any other tries again.
   const again =
     !review && (stuck.why === 'stalled' || stuck.why === 'over_budget' || stuck.why === 'restarted') ? text.again[stuck.why] : undefined
@@ -191,7 +193,7 @@ function StuckCard({
       tried={tried}
       {...(stuck.why === 'transient' ? { tries: text.waited.tries } : {})}
       agents={others.filter((candidate) => !out || candidate.id !== stuck.agentId).map((candidate) => ({ model: named(candidate.id) }))}
-      {...(review || out ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
+      {...(review || out || signedOut ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
       {...(stuck.agentId !== null ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) } : {})}
       againFirst={againFirst}
       {...(stuck.why === 'signed_out' && stuck.agentId !== null && onSignIn !== undefined

@@ -26,8 +26,6 @@ function Settings() {
       start={start}
       section={isSection(section) ? section : FIRST_SECTION}
       {...(signIn === undefined ? {} : { signIn })}
-      // Its sign-in started, the address forgets it, so coming back to the tab doesn't start another.
-      onSignInStarted={() => void navigate({ to: '/settings/$section', params: { section: 'agents' }, replace: true })}
       onSection={(next) => void navigate({ to: '/settings/$section', params: { section: next } })}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
     />

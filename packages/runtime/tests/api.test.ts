@@ -2706,6 +2706,11 @@ describe('thread items', () => {
       title: 'Hm',
       description: null,
     })
+    // A failed turn's notice keeps why, for the thread's way out.
+    assert.deepInclude(
+      itemOf(row('notice', { source: 'agent', severity: 'error', title: 'Codex is signed out.', failure: 'auth_required' }))?.content,
+      { failure: 'auth_required' },
+    )
     assert.deepStrictEqual(itemOf({ ...row('agent_message', null), content: 'not json' })?.content, { text: '', pictures: [], files: [] })
     assert.isUndefined(itemOf(row('something_new', {})))
     assert.deepStrictEqual(

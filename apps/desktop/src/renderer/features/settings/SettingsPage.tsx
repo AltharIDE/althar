@@ -89,13 +89,14 @@ export interface SettingsPageProps {
   onSection: (section: Section) => void
   /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
   onTask?: (threadId: string) => void
-  /** An agent to sign in again, by its id, as a signed-out agent's error asks: its tab opens, with its sign-in started. */
+  /**
+   * An agent to sign in again, by its id, as a signed-out agent's error asks:
+   * its tab opens, with its sign-in started, once while the page shows.
+   */
   signIn?: string
-  /** The sign-in `signIn` asked for started. */
-  onSignInStarted?: () => void
 }
 
-export function SettingsPage({ start, section, onSection, onTask, signIn, onSignInStarted }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, onTask, signIn }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -107,7 +108,9 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, onSign
   // Asked to sign an agent in again: its tab opens with its signed-out account's sign-in started, which takes focus. Once.
   const [asked, setAsked] = useState(signIn)
   if (signIn !== undefined && signIn !== asked) setAsked(signIn)
-  const wanted = agents.find((agent) => agent.id === signIn)
+  // Started once the agents are read again as the page opens: a read already under way would take a Terminal sign-in as done.
+  const [openedAt] = useState(start.checkedAt)
+  const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
   useEffect(() => {
     if (wanted === undefined) return
     if (wanted.installed && wanted.problem === null) {
@@ -115,8 +118,7 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, onSign
       if (account === undefined) accounts.add(wanted.id)
       else accounts.again(wanted.id, account.id)
     }
-    onSignInStarted?.()
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent asked about, as it is read; the address then forgets it
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent asked about, as it is read
   }, [wanted?.id])
   // A section where something waits on the person has a dot: an account to sign in again.
   const yours: Partial<Record<Section, boolean>> = {
