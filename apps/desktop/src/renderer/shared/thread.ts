@@ -1,4 +1,4 @@
-import type { AllowedBy, AttachedFile, FileMention, Picture, ThreadItem, Unfurl } from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, Unfurl } from '@althar/contracts'
 import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -66,6 +66,8 @@ export type Part =
       readonly failure?: string
       readonly detail?: string
     }
+  /** Pictures the agent showed the person, in order, each with its caption: open under its work, where it showed them. */
+  | { readonly kind: 'pictures'; readonly id: string; readonly pictures: ReadonlyArray<ShownPicture> }
 
 export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
@@ -293,7 +295,7 @@ export interface Streamed {
 const noticeText = (content: NoticeContent) => (content.description === null ? content.title : `${content.title} ${content.description}`)
 
 const partOf = (
-  item: Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'notice' }>,
+  item: Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'notice' | 'pictures' }>,
   streaming: ReadonlyMap<string, Streamed>,
   turnRunning: boolean,
   worktree: string | null,
@@ -355,6 +357,8 @@ const partOf = (
         }
       return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: severity }
     }
+    case 'pictures':
+      return { kind: 'pictures', id: item.id, pictures: item.content.pictures }
   }
 }
 
@@ -395,15 +399,19 @@ const partHanded = (part: Part): PartHanded => {
   }
 }
 
-/** A turn's work and what it said: all but its last message folds, and all of it before a step's result. */
+/**
+ * A turn's work and what it said: all but its last message folds, and all of it before a step's result. Pictures it showed
+ * the person never fold.
+ */
 const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean) => {
   // A turn an error ended says so in the open: there's no answer to come.
   const ending = parts.at(-1)
   const failed = ending?.kind === 'notice' && ending.tone === 'error' ? parts.length - 1 : -1
   const last = beforeStep ? -1 : parts.findLastIndex((part) => part.kind === 'message')
+  const open = (part: Part, index: number) => index === last || index === failed || part.kind === 'pictures'
   return {
-    work: parts.filter((_, index) => index !== last && index !== failed),
-    said: parts.filter((_, index) => index === last || index === failed),
+    work: parts.filter((part, index) => !open(part, index)),
+    said: parts.filter(open),
   }
 }
 

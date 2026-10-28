@@ -125,7 +125,7 @@ function BusyUpNext() {
             onOpen={() => undefined}
           />
         </BoardList>
-        <BoardDivider end="Drag to change the order">Starts when an agent is free</BoardDivider>
+        <BoardDivider end={<button type="button">Back to oldest first</button>}>Starts when an agent is free</BoardDivider>
         <NextLine
           rows={line}
           render={(id, place) => {

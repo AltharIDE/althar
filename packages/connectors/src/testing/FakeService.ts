@@ -52,6 +52,8 @@ export interface FakeServiceOptions {
   readonly account?: Account
   /** Where a push to a repository goes. Without it, a push target that fails. */
   readonly pushUrl?: (path: ReadonlyArray<string>) => string
+  /** The header that signs a push or a fetch there in, as a host's sign-in does; none unless said. */
+  readonly pushHeader?: string
   /** The commit a change's branch is at on the host, as the host reads it now; without it, a name of the fake's own. */
   readonly headOf?: (number: number) => string | null
   /** Whether a change conflicts with its target, as the host works it out now; without it, the host doesn't say. */
@@ -544,7 +546,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       Effect.andThen(called('pushTarget'), () =>
         options.pushUrl === undefined
           ? Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', message: 'The fake takes no pushes' }))
-          : Effect.succeed({ url: options.pushUrl(repository.path), header: null }),
+          : Effect.succeed({ url: options.pushUrl(repository.path), header: options.pushHeader ?? null }),
       ),
     issue: (ref) =>
       Effect.andThen(called('issue'), () => {

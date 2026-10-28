@@ -1,5 +1,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
+import type { ThreadItem } from '@althar/contracts'
+
 import {
   Composer,
   DictationTray,
@@ -154,6 +156,13 @@ export interface ProjectSettingsActions {
   readonly onConnections: () => void
 }
 
+/** The thread of the newest task card waiting for a free agent, if any. */
+const newestWaiting = (items: ReadonlyArray<ThreadItem>): string | null => {
+  const waiting = items.filter((item) => item.kind === 'task' && item.content.queued !== null)
+  const newest = waiting.at(-1)
+  return newest?.kind === 'task' ? newest.content.threadId : null
+}
+
 export function ProjectView({
   model,
   board,
@@ -292,6 +301,8 @@ export function ProjectView({
     onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
     onOpen: onTask,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
+    // Every waiting card has the same holders, so only the newest says them.
+    holdersOn: newestWaiting(coordinator?.items ?? []),
   }
   const draftActions: DraftActions = {
     onFile: (draftId) => void model.fileIssueDraft(draftId),
@@ -485,6 +496,7 @@ export function ProjectView({
                 now={now}
                 onRun={(id) => void model.runProject(null, id)}
                 onStop={(id) => void model.stopLaunch(id)}
+                onRunBranch={model.runBranch}
               />
             ),
           })}
@@ -594,7 +606,7 @@ export function ProjectView({
                             run={run}
                             now={now}
                             onStop={(id) => void model.stopLaunch(id)}
-                            onRunAgain={(taskId, runnableId) => void model.runProject(taskId, runnableId)}
+                            onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
                           />
                         )}
                         queued={text.queued}

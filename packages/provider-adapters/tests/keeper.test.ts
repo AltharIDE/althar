@@ -36,10 +36,14 @@ const withCompiler = async <A>(body: string, run: (folder: string) => Promise<A>
   }
 }
 
+// The stand-ins are shell scripts, which Windows can't run as a program; there the real compiler builds the keeper
+// and the real keeper runs, in processTrees.test.ts.
+const scripted = it.skipIf(process.platform === 'win32')
+
 const BUILDS = 'for arg in "$@"; do case "$arg" in /out:*) printf MZ > "${arg#/out:}";; esac; done'
 
 describe('the keeper', () => {
-  it('is built once with the compiler Windows has, kept by its name, and found there after', async () => {
+  scripted('is built once with the compiler Windows has, kept by its name, and found there after', async () => {
     await withCompiler(BUILDS, async (folder) => {
       const path = await Effect.runPromise(keeper(folder))
       assert.strictEqual(path, join(folder, keeperName))
@@ -54,7 +58,7 @@ describe('the keeper', () => {
     assert.strictEqual(await Effect.runPromise(keeper(folder)), join(folder, keeperName))
   })
 
-  it('says why it couldn’t be built: the compiler’s own words, or what went wrong, and keeps nothing', async () => {
+  scripted('says why it couldn’t be built: the compiler’s own words, or what went wrong, and keeps nothing', async () => {
     const failure = async (body: string) =>
       withCompiler(body, async (folder) => {
         const exit = await Effect.runPromiseExit(keeper(folder))
@@ -78,7 +82,7 @@ describe('the keeper', () => {
     }
   })
 
-  it('reads when a process started from what the keeper says, and nothing where it says nothing it can read', async () => {
+  scripted('reads when a process started from what the keeper says, and nothing where it says nothing it can read', async () => {
     const folder = mkdtempSync(join(tmpdir(), 'althar-keeper-'))
     const saying = (name: string, body: string) => script(join(folder, name), body)
     assert.strictEqual(

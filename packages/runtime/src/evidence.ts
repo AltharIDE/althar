@@ -1,12 +1,13 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
-import type { Evidence } from '@althar/contracts'
+import type { Evidence, ShownPicture } from '@althar/contracts'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Artifacts } from './Artifacts'
 import { inside, keepPicture, type HandedPlace, type KeptPicture, PICTURE_KEPT, picturesOf } from './handed'
+import { pictureType } from './pictures'
 import { ToolRefused } from './ToolServer'
 
 /*
@@ -144,6 +145,87 @@ export const readEvidence = (given: ReadonlyArray<EvidenceGiven>, worktrees: Rea
     return read
   })
 
+/*
+ * Pictures a lead shows in the thread at any time, step or no step
+ * (show_pictures): each from the task's worktree, with a caption, read as a
+ * screenshot handed as evidence is, and kept in the artifact store the same
+ * way, so they stay when the worktree goes. Only what can be shown is: a
+ * picture too large, or one that isn't what its name says, is refused.
+ */
+
+/** How many pictures one show keeps. */
+export const SHOWN_MOST = EVIDENCE_MOST
+
+export const PictureGiven = Schema.Struct({ path: Schema.String, caption: Schema.String })
+export type PictureGiven = typeof PictureGiven.Type
+
+/** What a picture's name says it is, by its end. */
+const NAMED_TYPE: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\.png$/i, 'image/png'],
+  [/\.jpe?g$/i, 'image/jpeg'],
+  [/\.gif$/i, 'image/gif'],
+  [/\.webp$/i, 'image/webp'],
+]
+
+const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+
+/** Reads the pictures a lead shows, in order, refusing the whole show with why where one can't be shown. */
+export const readShown = (given: ReadonlyArray<PictureGiven>, worktrees: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    if (given.length === 0) return yield* refuse('Name the pictures to show, each with its path in the worktree and a caption.')
+    if (given.length > SHOWN_MOST)
+      return yield* refuse(
+        `That's ${given.length} pictures; Althar shows up to ${SHOWN_MOST} at once. Show what matters most, or show them in turns.`,
+      )
+    const read: Array<{ readonly caption: string; readonly found: Found & { readonly bytes: Uint8Array } }> = []
+    for (const [index, piece] of given.entries()) {
+      const which = `Picture ${index + 1}`
+      if (piece.caption.trim() === '') return yield* refuse(`${which} needs a caption: a line on what it shows.`)
+      if (piece.path.trim() === '') return yield* refuse(`${which} needs its path in the worktree, in \`path\`.`)
+      const path = piece.path.trim()
+      const found = yield* findPicture(path, worktrees)
+      if (found.bytes === null)
+        return yield* refuse(
+          `${path} is ${megabytes(found.size)}; Althar shows pictures up to ${PICTURE_KEPT / (1024 * 1024)} MB. Take it smaller, or of only the part that matters.`,
+        )
+      const named = NAMED_TYPE.find(([pattern]) => pattern.test(found.name))?.[1]
+      if (pictureType(found.bytes) !== named)
+        return yield* refuse(
+          `${path} isn’t the picture its name says: its contents aren’t a ${named?.slice('image/'.length).toUpperCase()}.`,
+        )
+      read.push({ caption: piece.caption.trim(), found: { ...found, bytes: found.bytes } })
+    }
+    return read
+  })
+
+/** A picture shown in the thread, as its item keeps it: by its place in the store, and where it was, so it needn't be committed. */
+export interface KeptShown {
+  readonly caption: string
+  readonly picture: KeptPicture
+  readonly path: string
+  readonly worktree: string
+}
+
+/** Keeps the pictures read, in the artifact store, for the item that shows them. */
+export const keepShown = (place: HandedPlace, read: Effect.Success<ReturnType<typeof readShown>>) =>
+  Effect.forEach(read, ({ caption, found }) =>
+    Effect.map(keepPicture(place, found.bytes, '', found.name), (picture): KeptShown => ({
+      caption,
+      picture,
+      path: found.file,
+      worktree: found.worktree,
+    })),
+  )
+
+/** The pictures an item shows, as a screen shows them. */
+export const shownOf = (value: unknown): ReadonlyArray<ShownPicture> =>
+  (Array.isArray(value) ? value : []).flatMap((entry) => {
+    const piece = recordIn(entry)
+    const caption = stringOrNull(piece.caption)
+    const [picture] = picturesOf(piece.picture === null || piece.picture === undefined ? [] : [piece.picture])
+    return caption === null || picture === undefined ? [] : [{ caption, picture }]
+  })
+
 /** The files evidence names, by worktree: left out of what must be committed. */
 export const evidenceFiles = (read: ReadonlyArray<{ readonly found: Found | null }>) =>
   read.flatMap((piece) => (piece.found === null ? [] : [{ worktree: piece.found.worktree, file: piece.found.file }]))
@@ -156,10 +238,12 @@ export const evidenceFiles = (read: ReadonlyArray<{ readonly found: Found | null
 export const evidencePaths = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    // And those it showed in the thread along the way.
     const rows = yield* sql<{ path: string; worktree: string | null }>`
       SELECT DISTINCT json_extract(e.value, '$.path') AS path, json_extract(e.value, '$.worktree') AS worktree
-      FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task', json_each(i.content, '$.evidence') e
-      WHERE t.task_id = ${taskId} AND i.kind = 'step_result' AND json_extract(e.value, '$.path') IS NOT NULL`
+      FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task',
+        json_each(i.content, CASE i.kind WHEN 'pictures' THEN '$.pictures' ELSE '$.evidence' END) e
+      WHERE t.task_id = ${taskId} AND i.kind IN ('step_result', 'pictures') AND json_extract(e.value, '$.path') IS NOT NULL`
     /** Whether a file, by its path in a worktree, is a picture handed as evidence from that worktree. */
     return (worktree: string, file: string) => rows.some((row) => row.path === file && (row.worktree === null || row.worktree === worktree))
   })

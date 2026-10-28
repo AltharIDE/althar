@@ -69,7 +69,7 @@ fi
 set -- "$codex" "$@"
 # What the account and Althar set for the agent, by name, whether or not the value is empty:
 # an empty GIT_CONFIG_VALUE_0 is what unsets git's credential helper.
-for name in CODEX_HOME CODEX_CONFIG GH_CONFIG_DIR GLAB_CONFIG_DIR GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_TERMINAL_PROMPT; do
+for name in CODEX_HOME CODEX_CONFIG GH_CONFIG_DIR GLAB_CONFIG_DIR GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1 GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2 GIT_TERMINAL_PROMPT; do
   if value="$(printenv "$name" 2>/dev/null)"; then set -- "--env=$name=$value" "$@"; fi
 done
 if [ -n "$git_dir" ]; then

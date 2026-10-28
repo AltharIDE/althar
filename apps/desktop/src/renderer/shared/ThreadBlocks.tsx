@@ -5,6 +5,7 @@ import {
   Arrived,
   CodeBlock,
   FailedLogs,
+  Gallery,
   Issue,
   IssueRef,
   LinkButton,
@@ -25,6 +26,7 @@ import {
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { shotsOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
 import { fileAttachments } from './files'
@@ -217,6 +219,8 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
           {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
         </>
       )
+    case 'pictures':
+      return <Gallery shots={shotsOf(part.id, part.pictures)} />
   }
 }
 

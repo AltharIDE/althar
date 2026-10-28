@@ -1,0 +1,204 @@
+/* the finder's dialog (Finder.module.css), for what there is to run */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  background: var(--scrim);
+  animation: fade var(--fast) var(--ease);
+}
+.dialog {
+  position: fixed;
+  z-index: var(--z-dialog);
+  top: 14vh;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(560px, 72vh);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--lift-dialog);
+  color: var(--t-1);
+  animation: in var(--base) var(--ease);
+}
+.dialog:focus {
+  outline: none;
+}
+@keyframes in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .dialog {
+    animation: none;
+  }
+}
+
+.search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--t-3);
+}
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 14.5px;
+  color: var(--t-1);
+}
+.search input::placeholder {
+  color: var(--t-3);
+}
+.search:focus-within {
+  box-shadow: inset 0 -1.5px 0 var(--signal);
+}
+.said {
+  display: contents;
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 8px 8px;
+}
+.label {
+  padding: 8px 10px 4px;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+
+/* one to run: what it is, and quieter, its branch, author and the like */
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: default;
+}
+.row[aria-selected='true'] {
+  background: var(--hover-paper);
+}
+.row[aria-selected='true'] .meta,
+.row[aria-selected='true'] .number {
+  color: var(--t-2);
+}
+.row:active {
+  background: var(--pressed-paper);
+}
+.row[aria-disabled='true'] {
+  opacity: 0.5;
+}
+.glyph {
+  flex: none;
+  margin-top: 2px;
+  color: var(--t-3);
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 0.94em;
+}
+.number {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.starting {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--live);
+}
+.meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.quiet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 20px 10px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+
+.note,
+.error {
+  flex: none;
+  margin: 0;
+  padding: 9px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--t-2);
+}
+.error {
+  color: var(--danger);
+}
+
+.foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--n-3);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.foot > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

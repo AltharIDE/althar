@@ -16,8 +16,7 @@ import { useNow } from './time'
 export const text = {
   /** The pill, naming the servers that keep a place. */
   holding: 'Keeping a place',
-  heldBy: (holders: ReadonlyArray<Pick<Holder, 'title' | 'kept'>>) =>
-    `Held by ${holders.map((holder) => (holder.kept ? `${holder.title} (a server it left running)` : holder.title)).join(', ')}`,
+  heldBy: (holders: ReadonlyArray<Pick<Holder, 'title'>>) => `Held by ${holders.map((holder) => holder.title).join(', ')}`,
   front: 'Move to the front of the line',
 }
 
@@ -33,22 +32,26 @@ export function Holders({
   readonly onFront?: () => void
 }) {
   const now = useNow(false)
-  const held = (holders ?? []).length > 0
-  if (!held && onFront === undefined) return null
   // Each command with the thread it is on, under an id of its own: two tasks may each have left a `bg-1`.
   const left = (holders ?? []).flatMap(({ threadId, title, running }) =>
     threadId === null
       ? []
       : running.map((command) => ({ ...command, id: `${threadId} ${command.id}`, where: title, threadId, left: command.id })),
   )
+  // The pill names the tasks whose commands it lists; the sentence only those it doesn't.
+  const unlisted = (holders ?? []).filter((holder) => !left.some((command) => command.threadId === holder.threadId))
+  const held = unlisted.length > 0
+  if (!held && left.length === 0 && onFront === undefined) return null
   const find = (id: string) => left.find((command) => command.id === id)
   return (
     <div className={s.holders}>
-      <p className={s.held}>
-        {held && text.heldBy(holders ?? [])}
-        {held && onFront !== undefined && ' '}
-        {onFront !== undefined && <LinkButton onClick={onFront}>{text.front}</LinkButton>}
-      </p>
+      {(held || onFront !== undefined) && (
+        <p className={s.held}>
+          {held && text.heldBy(unlisted)}
+          {held && onFront !== undefined && ' '}
+          {onFront !== undefined && <LinkButton onClick={onFront}>{text.front}</LinkButton>}
+        </p>
+      )}
       {left.length > 0 && (
         <Running
           processes={runningOf(left, now, { where: true })}

@@ -299,6 +299,29 @@ describe('a task’s thread in rounds', () => {
     expect(shorter('Conflicts, in one/file.ts. Asked.')).toBe('Conflicts, in one/file.ts. Asked.')
   })
 
+  it('keeps pictures the lead showed open in its round, where it showed them, never in its work', () => {
+    const light = { caption: 'Settings, light', picture: picture('a'.repeat(64), 'light.png') }
+    const dark = { caption: 'Settings, dark', picture: picture('b'.repeat(64), 'dark.png') }
+    // With no step open, after its plan: shown, then said.
+    const before = roundOf(
+      read([
+        when(items.you('Can I see more screenshots?'), 0),
+        when(items.tool({ title: 'npx playwright test', toolKind: 'execute' }), 1),
+        when(items.tool({ title: 'show_pictures', toolKind: 'other' }), 2),
+        when(items.shows([light, dark]), 2),
+        when(items.says('Those are the six states.'), 3),
+      ]),
+    )
+    expect(before?.shown.before.map((shown) => shown.pictures.map((one) => one.caption))).toEqual([['Settings, light', 'Settings, dark']])
+    expect(before?.shown.after).toEqual([])
+    expect(before?.work?.steps.map((step) => step.kind)).toEqual(['tool', 'tool'])
+    // Said, then shown: after what it said.
+    const after = roundOf(read([when(items.you('Show me'), 0), when(items.says('Here they are:'), 1), when(items.shows([light]), 2)]))
+    expect(after?.result?.text).toBe('Here they are:')
+    expect(after?.shown.before).toEqual([])
+    expect(after?.shown.after.map((shown) => shown.pictures.length)).toEqual([1])
+  })
+
   it('drops a table of the shots shown under a message, with the line that brings it in, and keeps any other table', () => {
     const listed = [
       'Here it is.',
@@ -420,6 +443,27 @@ describe('a task’s thread in rounds, on its screen', () => {
     expect(screen.getByText(/It also retook/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'View A1 · Quiet, from the switcher full size' }).textContent).toBe('A1')
     expect(screen.queryByRole('columnheader', { name: 'Caption' })).toBeNull()
+  })
+
+  it('shows pictures the lead showed with no step open, captioned, in order, each opening in the lightbox with the set a key away', async () => {
+    const user = userEvent.setup()
+    show([
+      items.you('Can I see more screenshots?'),
+      items.tool({ title: 'show_pictures', toolKind: 'other' }),
+      items.shows([
+        { caption: 'Settings, light', picture: picture('a'.repeat(64), 'light.png') },
+        { caption: 'Settings, dark', picture: picture('b'.repeat(64), 'dark.png') },
+      ]),
+      items.says('Those are both themes.'),
+    ])
+    const light = await screen.findByRole('button', { name: 'View Settings, light full size' })
+    const captions = screen.getAllByRole('figure').map((figure) => within(figure).getByText(/^Settings/).textContent)
+    expect(captions).toEqual(['Settings, light', 'Settings, dark'])
+    await user.click(light)
+    const dialog = await screen.findByRole('dialog', { name: 'light.png' })
+    expect(within(dialog).getByRole('img', { name: 'Settings, light' }).getAttribute('src')).toBe(`althar-picture://shot/${'a'.repeat(64)}`)
+    await user.keyboard('{ArrowRight}')
+    expect(await screen.findByRole('dialog', { name: 'dark.png' })).toBeTruthy()
   })
 
   it('says Althar’s news by name, a pull request it opened, and an error a round ended with', async () => {

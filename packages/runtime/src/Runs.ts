@@ -50,7 +50,11 @@ import {
   evidenceForReview,
   evidencePaths,
   keepEvidence,
+  keepShown,
+  PictureGiven,
   readEvidence,
+  readShown,
+  SHOWN_MOST,
   unverifiedOf,
 } from './evidence'
 import { Sessions } from './Sessions'
@@ -182,6 +186,7 @@ const Finished = Schema.Struct({
     ),
   ),
 })
+const Shown = Schema.Struct({ pictures: Schema.Array(PictureGiven) })
 const Reviewed = Schema.Struct({
   verdict: Schema.Literals(['pass', 'changes_requested']),
   summary: Schema.String,
@@ -3073,6 +3078,38 @@ export class Runs extends Context.Service<
           return 'Althar has your summary. The task is ready for the person.'
         })
 
+      /**
+       * The lead shows the person pictures in its thread, at any time, with a
+       * step open or none: kept in the artifact store as a step's screenshots
+       * are, so they stay once the worktree goes; in the lead's turn, where it
+       * showed them.
+       */
+      const showPictures = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          if (access.taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead.' })
+          const sql = yield* SqlClient.SqlClient
+          const { pictures: given } = yield* read(Shown, input)
+          const worktrees = yield* worktreesOf(access.taskId)
+          const shown = yield* readShown(
+            given,
+            worktrees.map((worktree) => worktree.path),
+          )
+          const itemId = yield* newId(Ids.threadItem)
+          const pictures = yield* keepShown({ projectId: access.projectId as ProjectId, itemId, folders: [] }, shown)
+          const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE id = ${access.sessionId}`
+          yield* addItem(
+            {
+              projectId: access.projectId as ProjectId,
+              threadId: access.threadId,
+              ...(session === undefined ? {} : { sessionId: session.id }),
+            },
+            'pictures',
+            { pictures },
+            { id: itemId },
+          )
+          return `Althar shows ${pictures.length === 1 ? 'it' : `the ${pictures.length}`} in the thread now, each with its caption, and keeps ${pictures.length === 1 ? 'it' : 'them'}: don't list ${pictures.length === 1 ? 'it' : 'them'} again in what you say.`
+        })
+
       /** Records what the lead did about each of the run's open findings it names: fixed, or set aside with its reason. */
       const settleFindings = (
         run: RunRow,
@@ -3254,6 +3291,28 @@ export class Runs extends Context.Service<
             required: ['summary'],
           },
           finishStep,
+        ),
+        tool(
+          'show_pictures',
+          `Shows the person pictures in the task's thread, at any time, with a step open or none: when they ask to see something, show it this way rather than naming the files. Each is a PNG, JPEG, GIF or WebP file in the worktree (its scratch folder too), by its path, with a caption saying what it shows; up to ${SHOWN_MOST} at once, in the order given, each up to 20 MB. Althar keeps a copy, so they stay once the worktree is gone; the files needn't be committed. What shows your step's work still goes in finish_step's evidence when you finish it.`,
+          {
+            type: 'object',
+            properties: {
+              pictures: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    path: { type: 'string', description: 'The picture, from the worktree.' },
+                    caption: { type: 'string', description: 'What it shows, in a line: "The settings page in the dark theme".' },
+                  },
+                  required: ['path', 'caption'],
+                },
+              },
+            },
+            required: ['pictures'],
+          },
+          showPictures,
         ),
       ])
       yield* toolServer.serve('reviewer', [

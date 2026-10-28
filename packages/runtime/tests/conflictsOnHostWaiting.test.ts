@@ -270,7 +270,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
       assert.strictEqual(card.phase, 'ready')
       assert.strictEqual(
         card.handedBack,
-        "The lead couldn’t resolve the conflict with main, in change.txt. origin/main isn't merged into the branch.",
+        "The lead couldn’t resolve the conflict with main in change.txt. origin/main isn't merged into the branch.",
       )
       // The thread header says so as well, from the same card.
       const queries = yield* Queries

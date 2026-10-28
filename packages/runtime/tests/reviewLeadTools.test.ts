@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -101,19 +101,18 @@ describe('the coordinator’s review_pull_request', () => {
     const github = githubWithPull(at)
     return Effect.gen(function* () {
       const { projectId, coordinator } = yield* opened(at)
-      // The project's folder of worktrees, where the copy would go, as one that can't be written.
+      // A file where the review's folder in the project's folder of worktrees would go, so its copy can't be made there.
       const other = yield* (yield* Projects).createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Other' })
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${other.taskId}`
-      const folder = dirname(dirname(workspace?.path ?? ''))
-      chmodSync(folder, 0o555)
+      writeFileSync(join(dirname(dirname(workspace?.path ?? '')), 'review-1-send-back'), '')
       // The person asked for Claude Code's large model, thinking hard.
       const models = yield* Models
       yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
       const said = yield* callTool(coordinator, 'review_pull_request', {
         pull_request: '#1',
         lead: { agent: 'claude-code', model: 'large', effort: 'high' },
-      }).pipe(Effect.ensuring(Effect.sync(() => chmodSync(folder, 0o755))))
+      })
       assert.match(
         said,
         /^Started review-1-send-back to review ninemate's pull request #1, "Send back", but its lead couldn't start: its thread says why, and the person starts another there\. Tell them\.$/,

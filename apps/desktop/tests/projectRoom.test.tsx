@@ -204,10 +204,43 @@ describe('a task’s card in the Talk room', () => {
       },
     ]
     const client = await talking(card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4, holders } }))
-    expect(await screen.findByText('Held by Run the suite (a server it left running)')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /^Keeping a place/ })).toBeTruthy()
+    expect(screen.queryByText(/^Held by/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /^Keeping a place/ }))
     const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
     await userEvent.click(list.getByRole('button', { name: 'Stop bun test --watch' }))
+    await waitFor(() => expect(client.stopBackground).toHaveBeenCalledWith('th9', 'bg1'))
+  })
+
+  it('names who holds the places once, under the newest of several waiting tasks', async () => {
+    const holders = [
+      {
+        taskId: 't9',
+        title: 'Start the dev server',
+        threadId: 'th9',
+        kept: true,
+        running: [{ id: 'bg1', command: 'bun dev', url: null, startedAt: '2026-10-01T09:00:00.000Z', ended: null }],
+      },
+    ]
+    const waiting = (n: number) =>
+      card({
+        taskId: `w${n}`,
+        threadId: `thw${n}`,
+        slug: `waits-${n}`,
+        phase: 'running',
+        step: 'implement',
+        queued: { busy: 4, atOnce: 4, holders },
+      })
+    const client = await talking(waiting(1), waiting(2), waiting(3))
+    expect(await screen.findAllByText('Waiting: 4 of 4 agents busy on this Mac')).toHaveLength(3)
+    const pills = screen.getAllByRole('button', { name: /^Keeping a place/ })
+    expect(pills).toHaveLength(1)
+    // It sits under the lowest card.
+    const last = screen.getAllByText('Waiting: 4 of 4 agents busy on this Mac').at(-1)!
+    expect(last.compareDocumentPosition(pills[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await userEvent.click(pills[0]!)
+    const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
+    await userEvent.click(list.getByRole('button', { name: 'Stop bun dev' }))
     await waitFor(() => expect(client.stopBackground).toHaveBeenCalledWith('th9', 'bg1'))
   })
 

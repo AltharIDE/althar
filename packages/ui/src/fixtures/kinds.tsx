@@ -64,7 +64,7 @@ export const CHANGE_CONFLICT: Card = {
   kind: TaskKind.Change,
   at: '12m',
   title: 'Migrate billing webhooks to the v2 endpoint',
-  why: 'The lead couldn’t resolve the conflict with main, in README.md and src/webhooks/sign.ts.',
+  why: 'The lead couldn’t resolve the conflict with main in README.md and sign.ts.',
   object: <PullChip host={GITHUB} repo="meridian-api" number={1189} add={998} del={77} />,
   foot: (
     <Fact icon="branch" tone="warm">
