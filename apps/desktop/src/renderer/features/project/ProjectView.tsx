@@ -436,8 +436,19 @@ export function ProjectView({
   // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings.model
-  const binding = useQuery(reads(useServices().client).projectTracker(projectId)).data ?? null
-  const trackers = trackersWithBinding(lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list), binding, connections.list)
+  const read = reads(useServices().client)
+  const binding = useQuery(read.projectTracker(projectId)).data ?? null
+  const teams = useQuery({
+    ...read.containers(binding?.connectionId ?? ''),
+    enabled: binding?.container != null && binding.gone == null,
+  }).data
+  const containerKey = teams?.find((team) => team.id === binding?.container?.id)?.key ?? null
+  const trackers = trackersWithBinding(
+    lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list),
+    binding,
+    connections.list,
+    containerKey,
+  )
   const settingsNeedYou = connectionsNeedYou(model.repositories, trackers, connections.list)
   // Its automations: a dot on their view where one paused itself; and what its cards in the conversation do.
   const automations = useAutomations(projectId)

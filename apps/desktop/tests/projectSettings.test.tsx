@@ -636,6 +636,7 @@ describe('a project’s trackers, in its settings', () => {
 
   describe('with a tracker bound', () => {
     const fnt = { ...linear('ready', 'conn_fnt', 'mate'), workspace: { key: 'fnt', name: 'Blushh' } }
+    const signedOut: ConnectionSummary = { ...fnt, state: 'reauth_required' }
     const binding: ProjectTracker = { connectionId: 'conn_fnt', container: { id: 'team-f', name: 'Blushh Core' } }
     const withBoard = (tasks: ReadonlyArray<BoardTask>, connection: ConnectionSummary, bound: ProjectTracker | null) => ({
       getBoard: vi.fn(async () => ({ cursor: 1, tasks, calls: [], settledTotal: tasks.length })),
@@ -658,8 +659,16 @@ describe('a project’s trackers, in its settings', () => {
       opened.mockRestore()
     })
 
+    it('shows the bound tracker in the project’s header, opening its workspace', async () => {
+      const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+      windowAt('/projects/p1', withBoard([], fnt, binding))
+      await userEvent.click(await screen.findByRole('button', { name: /Linear issues/ }))
+      expect(opened).toHaveBeenCalledWith('https://linear.app/fnt', '_blank')
+      opened.mockRestore()
+    })
+
     it('asks to sign in again where the bound connection is not ready', async () => {
-      windowAt('/projects/p1', withBoard([], { ...fnt, state: 'reauth_required' }, binding))
+      windowAt('/projects/p1', withBoard([], signedOut, binding))
       await openSettings('Code and issues')
       const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
       expect(await trackers.findByText('Signed out as mate')).toBeTruthy()
@@ -676,14 +685,39 @@ describe('a project’s trackers, in its settings', () => {
       expect(trackers.queryByText(/drafts go to/)).toBeNull()
     })
 
-    it('learned and bound to the same, lists it once', async () => {
+    it('learned and bound to the same team, lists it once', async () => {
+      windowAt('/projects/p1', withBoard([taskFrom('FNT-12', 'conn_fnt')], fnt, binding))
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('FNT issues · Linear')).toBeTruthy()
+      expect(trackers.getAllByText(/issues · Linear/)).toHaveLength(1)
+      expect(trackers.queryByText(/drafts go to/)).toBeNull()
+      expect(trackers.queryByText('No tracker yet')).toBeNull()
+    })
+
+    it('learned on another team of the bound workspace, lists both, the bound first, and says drafts go to the bound one', async () => {
       windowAt('/projects/p1', withBoard([taskFrom('MER-12', 'conn_fnt')], fnt, binding))
       await openSettings('Code and issues')
       const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
       expect(await trackers.findByText('MER issues · Linear')).toBeTruthy()
-      expect(trackers.getAllByText(/issues/).filter((one) => one.textContent === 'MER issues · Linear')).toHaveLength(1)
-      expect(trackers.queryByText(/drafts go to/)).toBeNull()
-      expect(trackers.queryByText('No tracker yet')).toBeNull()
+      expect(trackers.getByText('Linear issues')).toBeTruthy()
+      expect(trackers.getAllByText(/Its drafts go to the tracker above/)).toHaveLength(1)
+    })
+
+    it('bound to a workspace that needs signing in, keeps that sign-in prompt where another workspace has an issue with no connection', async () => {
+      const other = { ...linear('ready', 'conn_other', 'sam'), workspace: { key: 'other', name: 'other' } }
+      windowAt('/projects/p1', {
+        ...withBoard([taskFrom('MER-12')], signedOut, binding),
+        listConnections: vi.fn(async () => ({
+          ...connectionList,
+          connections: [githubConnection, signedOut, other],
+        })),
+      })
+      await openSettings('Code and issues')
+      const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+      expect(await trackers.findByText('Signed out as mate')).toBeTruthy()
+      expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+      expect(trackers.getByText('MER issues · Linear')).toBeTruthy()
     })
 
     it('learned on one workspace and bound to another, lists both and says where drafts do not go', async () => {

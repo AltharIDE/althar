@@ -191,19 +191,50 @@ describe('a project’s front page', () => {
     expect(trackersWithBinding([learned], null, list)).toEqual([learned])
     expect(trackersWithBinding([], null, list)).toEqual([])
     // Bound, nothing learned: its own, on its workspace.
-    expect(trackersWithBinding([], { connectionId: 'conn_b' }, list)).toEqual([
+    expect(trackersWithBinding([], { connectionId: 'conn_b', container: null }, list)).toEqual([
       { product: 'linear', at: 'linear.app', key: null, url: 'https://linear.app/b', connections: ['conn_b'], bound: true },
     ])
     // Bound to the one its issues are on: once.
-    expect(trackersWithBinding([learned], { connectionId: 'conn_a' }, list)).toEqual([{ ...learned, bound: true }])
+    expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: null }, list)).toEqual([{ ...learned, bound: true }])
     // Bound to another: the bound first, the learned after, unbound.
-    expect(trackersWithBinding([learned], { connectionId: 'conn_b' }, list).map((tracker) => [tracker.key, tracker.bound])).toEqual([
+    expect(
+      trackersWithBinding([learned], { connectionId: 'conn_b', container: null }, list).map((tracker) => [tracker.key, tracker.bound]),
+    ).toEqual([
       [null, true],
       ['MER', undefined],
     ])
+    // Bound to a team: only that team's issues on its connection are it; another team's are not, and the bound is still first.
+    const team = { id: 't', name: 'Blushh Core' }
+    expect(
+      trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list, 'FNT').map((tracker) => [
+        tracker.key,
+        tracker.bound,
+      ]),
+    ).toEqual([
+      [null, true],
+      ['MER', undefined],
+    ])
+    expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list)).toHaveLength(2)
+    expect(trackersWithBinding([learned], { connectionId: 'conn_a', container: team }, list, 'MER')).toEqual([{ ...learned, bound: true }])
+    // Its issues name no connection: the bound keeps its own, and only a link on its workspace is it.
+    const bare = { ...learned, key: 'FNT', url: 'https://linear.app/b/team/FNT', connections: [] }
+    expect(trackersWithBinding([bare], { connectionId: 'conn_b', container: null }, list)).toEqual([
+      { ...bare, connections: ['conn_b'], bound: true },
+    ])
+    const elsewhere = { ...bare, url: 'https://linear.app/a/team/FNT' }
+    expect(
+      trackersWithBinding([elsewhere], { connectionId: 'conn_b', container: null }, list).map((tracker) => [tracker.url, tracker.bound]),
+    ).toEqual([
+      ['https://linear.app/b', true],
+      ['https://linear.app/a/team/FNT', undefined],
+    ])
     // Disconnected since: still there, for Althar can't reach it.
     expect(
-      trackersWithBinding([], { connectionId: 'gone', gone: { product: 'linear', webUrl: 'https://linear.app', workspace: 'FNT' } }, list),
+      trackersWithBinding(
+        [],
+        { connectionId: 'gone', container: null, gone: { product: 'linear', webUrl: 'https://linear.app', workspace: 'FNT' } },
+        list,
+      ),
     ).toEqual([{ product: 'linear', at: 'linear.app', key: null, url: 'https://linear.app', connections: ['gone'], bound: true }])
   })
 

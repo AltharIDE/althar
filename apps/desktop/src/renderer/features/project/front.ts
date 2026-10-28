@@ -253,8 +253,10 @@ const spaceOf = (webUrl: string | null, workspace: string | undefined): string |
 
 export const trackersWithBinding = (
   learned: ReadonlyArray<Tracker>,
-  binding: Pick<ProjectTracker, 'connectionId' | 'gone'> | null,
+  binding: Pick<ProjectTracker, 'connectionId' | 'container' | 'gone'> | null,
   list: ConnectionList | null,
+  /** The key of the team the binding files to, where it is read: a team's name alone can't be matched to the key its issues carry. */
+  containerKey: string | null = null,
 ): Tracker[] => {
   if (binding === null) return [...learned]
   const connection = list?.connections.find((each) => each.id === binding.connectionId)
@@ -262,19 +264,22 @@ export const trackersWithBinding = (
   const webUrl = connection?.webUrl ?? binding.gone?.webUrl ?? null
   if (product === undefined) return [...learned]
   const at = hostNameOf(webUrl)
-  const same = (tracker: Tracker) =>
-    tracker.connections.length > 0 ? tracker.connections.includes(binding.connectionId) : tracker.product === product && tracker.at === at
-  const matched = learned.find(same)
+  const space = spaceOf(webUrl, connection?.workspace?.key)
+  // The same only where it is the same workspace and, with a team bound, that team: another team's issues on the same connection are another tracker.
+  const sameSpace = (tracker: Tracker) =>
+    tracker.connections.length > 0
+      ? tracker.connections.includes(binding.connectionId)
+      : tracker.product === product && tracker.at === at && space !== null && (tracker.url ?? '').startsWith(`${space}/`)
+  const sameTeam = (tracker: Tracker) =>
+    binding.container === null ||
+    binding.container === undefined ||
+    tracker.key === null ||
+    (containerKey !== null && tracker.key === containerKey)
+  const matched = learned.find((tracker) => sameSpace(tracker) && sameTeam(tracker))
+  // Its standing is the bound connection's, whatever else its issues were read through.
   const first: Tracker =
     matched !== undefined
-      ? { ...matched, bound: true }
-      : {
-          product,
-          at,
-          key: null,
-          url: spaceOf(webUrl, connection?.workspace?.key),
-          connections: [binding.connectionId],
-          bound: true,
-        }
+      ? { ...matched, connections: [binding.connectionId, ...matched.connections.filter((id) => id !== binding.connectionId)], bound: true }
+      : { product, at, key: null, url: space, connections: [binding.connectionId], bound: true }
   return [first, ...learned.filter((tracker) => tracker !== matched)]
 }
