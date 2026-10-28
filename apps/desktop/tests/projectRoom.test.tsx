@@ -1,6 +1,6 @@
 import { act, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { ReactNode } from 'react'
+import { Activity, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type CoordinatorSnapshot, type WatchEvent } from '@althar/contracts'
@@ -104,6 +104,29 @@ describe('the Talk room’s model, once the thread is read', () => {
     const model = modelOf(client)
     return { client, emit, ...model }
   }
+
+  it('reads what it hears once its screen shows again, though it was hidden with a read gathered (`KeptScreens`)', async () => {
+    const { client, emit } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    const services = servicesFor(client)
+    let mode: 'visible' | 'hidden' = 'visible'
+    const { result, rerender } = renderHook(() => useProject('p1'), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <ServicesProvider value={services}>
+          <Activity mode={mode}>{children}</Activity>
+        </ServicesProvider>
+      ),
+    })
+    await waitFor(() => expect(result.current.coordinator).not.toBeNull())
+    // The coordinator's thread changes, and the person goes to a task before its head is read again.
+    act(() => emit(changed('session', 's1', 'thc', 'p1')))
+    mode = 'hidden'
+    rerender()
+    mode = 'visible'
+    rerender()
+    vi.mocked(client.getCoordinator).mockClear()
+    act(() => emit(changed('session', 's1', 'thc', 'p1')))
+    await waitFor(() => expect(client.getCoordinator).toHaveBeenCalledWith('p1', { limit: 0 }))
+  })
 
   it('compacts the coordinator’s context', async () => {
     const { client, result } = read({ session })
