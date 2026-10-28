@@ -253,7 +253,7 @@ describe('coordinator permission judgments', () => {
       // In this disposable test worktree only, emulate another actor switching HEAD to main.
       execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: context.rules.context.worktree })
       respond?.('{"decision":"allow","reason":"Push the task branch."}')
-      assert.include(yield* answerPerson, 'A push to main always asks.')
+      assert.include(yield* answerPerson, 'A push to main always asks:')
       assert.strictEqual((yield* Fiber.join(pending)).decision, 'reject')
     }).pipe(
       Effect.provide(

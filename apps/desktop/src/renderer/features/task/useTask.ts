@@ -15,6 +15,7 @@ import {
 } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
+import { useMerge } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
@@ -217,6 +218,8 @@ export interface TaskModel {
 
 export const useTask = (threadId: string): TaskModel => {
   const { client, cache } = useServices()
+  // Kept by the window: back on the board meanwhile, its card says Merging, and why it didn't, if it doesn't.
+  const merge = useMerge()
   const read = reads(client)
   const thread = useQuery(read.thread(threadId))
   const snapshot = thread.data ?? null
@@ -644,7 +647,7 @@ export const useTask = (threadId: string): TaskModel => {
     accept: (changes) =>
       act(async () => {
         if (snapshot === null) return
-        for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
+        for (const change of changes) await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
       }, doing.accept),
     push: (head, url) =>
       act(

@@ -1,6 +1,7 @@
 import type { HomeSnapshot, ProjectSummary } from '@althar/contracts'
 import type { ProjectInk, ProjectRef } from '@althar/ui'
 
+import { asMerging } from '../../data/merges'
 import { readyOf, standingCalls } from '../../shared/calls'
 import type { EdgeGlance } from '../settings/EdgePicture'
 import { type AnsweredCall, type Need, needsOf, workOf } from './needs'
@@ -30,17 +31,20 @@ export const homeGlanceOf = (
   home: HomeSnapshot | null,
   {
     answered = [],
+    merging = new Set(),
     agentName,
     modelName,
   }: {
     /** Calls answered here, which stay their lines until the person leaves. */
     readonly answered?: ReadonlyArray<AnsweredCall>
+    /** Tasks being merged, which are in progress, not waiting on the person, until they settle. */
+    readonly merging?: ReadonlySet<string>
     readonly agentName: (id: string | null) => string
     readonly modelName: (agentId: string, model: string | null) => string
   },
 ): HomeGlance => {
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
-  const tasks = home?.tasks ?? []
+  const tasks = asMerging(home?.tasks ?? [], merging)
   // In progress is every task not ready for the person; one kept for later waits on its board, not here.
   const ready = readyOf(tasks)
   // A task that waits on several calls is one thing to answer, as on its board (`standingCalls`).

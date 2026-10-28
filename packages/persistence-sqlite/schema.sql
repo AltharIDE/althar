@@ -1300,3 +1300,13 @@ CREATE TABLE user_input_files (
   PRIMARY KEY (user_input_id, position),
   FOREIGN KEY (user_input_id, project_id) REFERENCES user_inputs (id, project_id)
 ) STRICT;
+
+CREATE TABLE task_request_inputs (
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  task_id TEXT NOT NULL,
+  position INTEGER NOT NULL CHECK (position >= 1),
+  user_input_id TEXT NOT NULL,
+  PRIMARY KEY (task_id, position),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
+  FOREIGN KEY (user_input_id, project_id) REFERENCES user_inputs (id, project_id)
+) STRICT;

@@ -170,3 +170,50 @@ export const filesForTurn = (inputIds: ReadonlyArray<string>) =>
     }
     return { files, gone }
   })
+
+/**
+ * The files the person sent with what a task was asked for, in their
+ * messages to the coordinator, for its lead's turn that delivers its brief:
+ * each copied from the coordinator's folder into the task's, under
+ * `.althar/attachments/request`, where its lead reads, once, then linked
+ * there; and how many can't be, their copy gone or the task's folder not
+ * here.
+ */
+export const requestFilesForTurn = (threadId: string, taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ name: string; kind: string; mediaType: string | null; bytes: number; path: string }>`
+      SELECT f.name, f.kind, f.media_type, f.bytes, f.path FROM task_request_inputs r
+      JOIN user_input_files f ON f.user_input_id = r.user_input_id
+      WHERE r.task_id = ${taskId} ORDER BY r.position, f.position`
+    const files: Array<PromptFile> = []
+    if (rows.length === 0) return { files, gone: 0 }
+    const { folder: root } = yield* folderOf(threadId)
+    if (root === null) return { files, gone: rows.length }
+    const own = join(attachmentsIn(root), 'request')
+    const taken = new Set<string>()
+    let gone = 0
+    for (const row of rows) {
+      const target = join(own, freeName(row.name, taken))
+      if (!existsSync(target)) {
+        const copied = existsSync(row.path)
+          ? yield* Effect.promise(() => copyTo(row.path, target).catch(() => ({ ok: false }) as const))
+          : ({ ok: false } as const)
+        if (!copied.ok) {
+          gone += 1
+          continue
+        }
+      }
+      const folder = row.kind === 'folder'
+      const words = folder ? null : wordsOf(target, row.bytes)
+      files.push({
+        path: target,
+        name: row.name,
+        mimeType: row.mediaType,
+        bytes: row.bytes,
+        folder,
+        ...(words === null ? {} : { text: words }),
+      })
+    }
+    return { files, gone }
+  })
