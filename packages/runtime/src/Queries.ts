@@ -1969,6 +1969,14 @@ export class Queries extends Context.Service<
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
+                    // A review's lead only reads: only an agent its session holds to that may take it (Reviews.canLead).
+                    ...(field(parameters, 'reads') === true
+                      ? {
+                          agents: (yield* Agents).list
+                            .filter((entry) => entry.definition.reviewing?.outside === true)
+                            .map((entry) => entry.definition.id),
+                        }
+                      : {}),
                   },
             issue:
               issue === null

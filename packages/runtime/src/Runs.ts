@@ -159,6 +159,13 @@ export const PlanParameters = Schema.Struct({
    * (make_it_a_change), which the person asked to end in a pull request.
    */
   publishes: Schema.optional(Schema.Boolean),
+  /**
+   * A review of someone else's pull request (`review_pull_request`): its one
+   * step is the review's lead, which reads a read-only copy, so only an
+   * agent its session holds to reading may take it. It has no run: started,
+   * its lead starts in the task's thread (Reviews.lead).
+   */
+  reads: Schema.optional(Schema.Boolean),
 })
 export type PlanParameters = typeof PlanParameters.Type
 

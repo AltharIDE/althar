@@ -96,7 +96,7 @@ describe('a review’s lead', () => {
 })
 
 describe('the coordinator’s review_pull_request', () => {
-  it.live('says the review started but its lead couldn’t, where Althar couldn’t make the copy it reads', () => {
+  it.live('says the review was made but its lead can’t start, where Althar couldn’t make the copy it reads', () => {
     const at = hosted()
     const github = githubWithPull(at)
     return Effect.gen(function* () {
@@ -115,7 +115,7 @@ describe('the coordinator’s review_pull_request', () => {
       })
       assert.match(
         said,
-        /^Started review-1-send-back to review ninemate's pull request #1, "Send back", but its lead couldn't start: its thread says why, and the person starts another there\. Tell them\.$/,
+        /^Made review-1-send-back to review ninemate's pull request #1, "Send back", but Althar couldn't make a copy of its code to read: its thread says so\. Tell the person\.$/,
       )
       const [task] = yield* sql<{ threadId: string }>`
         SELECT t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.slug = 'review-1-send-back'`
