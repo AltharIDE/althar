@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { Wait, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
+import type { RootProps } from '../../lib/props'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
 import s from './NextRow.module.css'
@@ -41,33 +42,50 @@ export const nextRowText: NextRowText = {
   continues: (step) => (step === undefined || step === '' ? 'Continues' : `Continues · ${step}`),
 }
 
-export interface NextRowProps {
-  /** Its place in line, from 1. */
-  place: number
-  task: string
-  /** What kind of work, in a word. */
-  kind?: string
-  /**
-   * It is under way and goes on, rather than starts: the step it goes on
-   * with (Review, Follow-up), or an empty string for none worth naming.
-   */
-  continues?: string
-  title: string
-  wait: Wait
-  /** What it waits for, in a line: Starts when 419 merges. */
-  reason: string
-  current?: boolean
-  /** One fact, at its foot, as on a card. */
-  foot?: ReactNode
-  onOpen?: () => void
-  text?: Partial<NextRowText>
-}
+export type NextRowProps = RootProps<
+  'article',
+  {
+    /** Its place in line, from 1. */
+    place: number
+    task: string
+    /** What kind of work, in a word. */
+    kind?: string
+    /**
+     * It is under way and goes on, rather than starts: the step it goes on
+     * with (Review, Follow-up), or an empty string for none worth naming.
+     */
+    continues?: string
+    title: string
+    wait: Wait
+    /** What it waits for, in a line: Starts when 419 merges. */
+    reason: string
+    current?: boolean
+    /** One fact, at its foot, as on a card. */
+    foot?: ReactNode
+    onOpen?: () => void
+    text?: Partial<NextRowText>
+  }
+>
 
 /** One row of the queue up next. Put it in a BoardList. */
-export function NextRow({ place, task, kind, continues, title, wait, reason, current, foot, onOpen, text }: NextRowProps) {
+export function NextRow({
+  place,
+  task,
+  kind,
+  continues,
+  title,
+  wait,
+  reason,
+  current,
+  foot,
+  onOpen,
+  text,
+  className,
+  ...rest
+}: NextRowProps) {
   const t = { ...nextRowText, ...text }
   return (
-    <article className={cx(b.row, s.next)} aria-current={current || undefined}>
+    <article className={cx(b.row, s.next, className)} aria-current={current || undefined} {...rest}>
       <div className={b.top}>
         <span className={s.place}>{t.place(place)}</span>
         <span className={b.ref}>{t.task(task)}</span>

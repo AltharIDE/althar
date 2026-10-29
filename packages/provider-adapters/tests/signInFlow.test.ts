@@ -208,7 +208,9 @@ describe('signing in inside Althar', () => {
     ])
   })
 
-  it('ends, rather than taking Althar down, when Codex stops reading mid-way', async () => {
+  // Not on Windows: there a Node stand-in closing its own end of a pipe (fd 0) doesn't close it for Althar while it runs,
+  // as the Windows checks on #342 showed, so no write breaks; how Althar takes a broken one is the same code there.
+  it.skipIf(process.platform === 'win32')('ends, rather than taking Althar down, when Codex stops reading mid-way', async () => {
     const deaf: AgentDefinition = {
       ...agents.codex,
       signIn: {

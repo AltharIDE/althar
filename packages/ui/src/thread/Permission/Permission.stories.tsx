@@ -26,6 +26,21 @@ export const LongScript: Story = {
   args: { what: 'Prototype: tasks waiting for a free agent', cmd: SCRIPT },
 }
 
+/** With everything allowed, only what can't be undone asks (ADR-067): it says why in one line, and offers no always allow. */
+export const EverythingAllowed: Story = {
+  args: {
+    id: 'push-main',
+    step: 'Implement',
+    agent: OPUS,
+    what: 'Push to main',
+    cmd: 'git push origin main',
+    why: "A push to main asks even with everything allowed: once others have it, it can't be taken back.",
+    prefix: undefined,
+    kind: undefined,
+    offers: [Decision.AllowOnce, Decision.Deny, Decision.DenyAlways],
+  },
+}
+
 /** Keys pick an option; Enter answers. A yes beats once in violet and folds to a line with Undo. */
 export const AllowOnce: Story = {
   play: async ({ args, canvasElement }) => {

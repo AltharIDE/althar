@@ -85,7 +85,7 @@ const ranOnCodex = (projectId?: string) =>
       (lines) => lines.some((line) => line.includes('Did the task.')),
       Duration.seconds(20),
     )
-    return { projectId: project, threadId: task.threadId, said: said.join('\n') }
+    return { projectId: project, taskId: task.taskId, threadId: task.threadId, said: said.join('\n') }
   })
 
 /** The fake agents, with one that signs in only inside Althar: no command of its own to run in a terminal. */
@@ -535,10 +535,11 @@ describe('accounts', () => {
         ['codex', usual?.id],
         ['codex', work.id],
       ])
-      assert.deepInclude(
-        launches.map(({ agentId, env }) => ({ agentId, env })),
-        { agentId: 'codex', env: { FAKE_HOME: workFolder } },
-      )
+      // Codex's last launch, its second account's session, is in that account's home, with whose work it is beside it.
+      assert.deepStrictEqual(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env, {
+        FAKE_HOME: workFolder,
+        ALTHAR_WORK: `task:${ran.taskId}`,
+      })
       // The usual account is out until its reset; the agent isn't, while work can run.
       assert.isTrue((yield* limits.out('codex', project.projectId))._tag === 'None')
 

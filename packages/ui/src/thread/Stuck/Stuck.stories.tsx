@@ -54,6 +54,32 @@ export const ServiceKeptFailing: Story = {
   },
 }
 
+/**
+ * Its agent is signed out: signing in again, in Settings, puts it right, so
+ * it is the card's own button, first. It doesn't answer the card; Try again
+ * does, once the agent is signed in.
+ */
+export const SignedOut: Story = {
+  args: {
+    step: 'Implement',
+    what: 'Claude Code is signed out. Sign in again, then try again, or hand the step to another agent.',
+    tried: [],
+    read: undefined,
+    output: undefined,
+    onAgain: fn(),
+    fix: { label: 'Sign in again', onFix: fn() },
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const [first] = c.getAllByRole('button')
+    await expect(first).toHaveAccessibleName('Sign in again')
+    await userEvent.click(c.getByRole('button', { name: 'Sign in again' }))
+    await expect(args.fix?.onFix).toHaveBeenCalled()
+    // Still waiting on the person: signing in elsewhere answers nothing, and Try again stays.
+    await expect(c.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  },
+}
+
 export const TryingAgain: Story = {
   args: ServiceKeptFailing.args,
   play: async ({ args, canvasElement }) => {

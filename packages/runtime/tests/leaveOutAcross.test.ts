@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -16,6 +16,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { fakeConnectors, HOST, notices, runtime, until } from './support'
 
@@ -103,10 +104,20 @@ describe('a done task of two repositories with commits after in each', () => {
         commitIn(api?.path ?? '', 'retry.txt', 'More for api')
         commitIn(web?.path ?? '', 'retry.txt', 'More for web')
         yield* until(Effect.orDie(card), (all) => all[0]?.unshipped?.commits === 2)
+        // Its lead, stopped as it merged, started again since, as by the person writing to it.
+        const sessions = yield* Sessions
+        yield* sessions.startLast(task.threadId)
+        assert.isTrue(Option.isSome(yield* sessions.running(task.threadId)))
         yield* (yield* Tasks).leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
         assert.include(
           (yield* notices(task.threadId)).map((notice) => notice.title),
           'Abandoned 1 commit after PR #1 in api, 1 commit after where its branch started in web.',
+        )
+        // Settled again without them, its lead stops.
+        yield* until(
+          Effect.map(sessions.running(task.threadId), (running) => (Option.isNone(running) ? [true] : [])),
+          (gone) => gone.length === 1,
+          Duration.seconds(10),
         )
       }).pipe(
         Effect.provide(

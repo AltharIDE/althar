@@ -42,18 +42,18 @@ test('names the task whose server keeps a place, and stops it from the plan that
     await startTask(page, 'Add a retry to checkout', '[lead:finish]')
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/).first()).toBeVisible()
 
-    // Its plan card, not started, says who holds the place, and the server that keeps it.
-    await expect(page.getByText('Held by Serve the prototype (a server it left running)')).toBeVisible()
+    // Its plan card, not started, says who holds the place: the server that keeps it, with the task it is from.
     const pill = page.getByRole('button', { name: /^Keeping a place/ })
     await expect(pill).toBeVisible()
     await pill.click()
+    await expect(page.getByRole('dialog', { name: 'Keeping a place' })).toContainText('Serve the prototype')
     await page.waitForTimeout(400)
     await page.screenshot({ path: 'test-results/places-waiting.png', fullPage: true })
 
     // Stopped from here, the place frees and the waiting task starts on its own.
     await page.getByRole('dialog', { name: 'Keeping a place' }).getByRole('button', { name: /^Stop/ }).click()
     await expect(page.getByText(/^Waiting: /)).toHaveCount(0)
-    await expect(page.getByText('Held by Serve the prototype (a server it left running)')).toHaveCount(0)
+    await expect(pill).toHaveCount(0)
     await expect(page.getByText('Ready', { exact: true })).toHaveCount(2)
     await page.waitForTimeout(400)
     await page.screenshot({ path: 'test-results/places-started.png', fullPage: true })

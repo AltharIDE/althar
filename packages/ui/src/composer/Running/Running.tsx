@@ -36,6 +36,8 @@ export interface RunningProcess {
   since?: string
   /** Where it runs, where several places run things: a task, the default branch. */
   where?: string
+  /** The branch or pull request it runs a copy of: named on the pill and its row, beside what runs. */
+  branch?: string
   /** It exited on its own, with this code; null where the code isn't known. */
   exited?: number | null
   /** Its output can be shown (`onOutput`); false for one whose output isn't kept anywhere to read. */
@@ -131,6 +133,11 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
             ) : (
               <span className={s.name}>{t.count(live ? running.length : processes.length)}</span>
             )}
+            {one?.branch !== undefined && (
+              <span className={cx(s.what, s.branch)} title={one.branch}>
+                · {one.branch}
+              </span>
+            )}
             {one?.url && <span className={s.what}>· {one.url}</span>}
             {one?.exited !== undefined && <span className={cx(s.what, bad(one.exited) && s.bad)}>· {t.exited(one.exited)}</span>}
             {live && ended > 0 && <span className={s.what}>· {t.someExited(ended)}</span>}
@@ -193,10 +200,17 @@ export function RunningList({ processes, onStop, onDismiss, onOutput, onOpenUrl,
                     {p.label ?? p.command}
                   </code>
                 ),
-                p.where !== undefined && (
-                  <span key="where" className={s.where}>
-                    {p.where}
+                p.branch !== undefined ? (
+                  <span key="branch" className={cx(s.where, s.branch)} title={p.branch}>
+                    <Icon name="branch" size={10} className={s.branchGlyph} />
+                    {p.branch}
                   </span>
+                ) : (
+                  p.where !== undefined && (
+                    <span key="where" className={s.where}>
+                      {p.where}
+                    </span>
+                  )
                 ),
                 p.exited !== undefined && (
                   <span key="exited" className={cx(bad(p.exited) && s.bad)}>

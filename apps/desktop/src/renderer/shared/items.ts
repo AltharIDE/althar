@@ -86,8 +86,8 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
  * task settled, a question answered or withdrawn, a run or a setup ended, an issue
  * draft filed or discarded, changes to issues applied or discarded, a review draft posted or discarded, a push the lead
  * asked for pushed, asked again or closed, an automation deleted or its ask answered. What an agent
- * said, a notice, a step's result and what arrived from outside are settled
- * once written.
+ * said, a notice, a step's result, pictures shown and what arrived from outside
+ * are settled once written.
  */
 export const settled = (item: ThreadItem): boolean => {
   switch (item.kind) {
@@ -119,6 +119,7 @@ export const settled = (item: ThreadItem): boolean => {
     case 'notice':
     case 'step_result':
     case 'arrival':
+    case 'pictures':
       return true
   }
 }

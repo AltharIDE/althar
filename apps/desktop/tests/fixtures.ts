@@ -424,6 +424,13 @@ export const items = {
       ...content,
     },
   }),
+  /** Pictures the lead showed the person (show_pictures), each with its caption. */
+  shows: (pictures: Extract<ThreadItem, { kind: 'pictures' }>['content']['pictures'], agentId = 'claude-code'): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'pictures',
+    content: { pictures },
+  }),
   plan: (entries: ReadonlyArray<{ content: string; status: string }>, agentId = 'claude-code'): ThreadItem => ({
     ...next(),
     agentId,
@@ -1172,6 +1179,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     dropRunnable: vi.fn(async () => {}),
     orderRunnables: vi.fn(async () => {}),
     getRepositoryScripts: vi.fn(async () => scripts),
+    getRunnableRefs: vi.fn(async () => []),
     watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)

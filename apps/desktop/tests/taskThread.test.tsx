@@ -43,6 +43,7 @@ const round = (id: string, text: string, files: ReadonlyArray<HandedFile> = []):
   report: null,
   failed: null,
   handed: NOTHING_HANDED,
+  shown: { before: [], after: [] },
   live: false,
   parts: [],
 })

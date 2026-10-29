@@ -290,3 +290,31 @@
   flex: 1;
   min-width: 0;
 }
+
+/* a total until each of its folders is measured, replaced in place by it */
+.pending {
+  font-weight: 400;
+  background: linear-gradient(90deg, var(--t-3) 0%, var(--t-3) 40%, var(--t-1) 50%, var(--t-3) 60%, var(--t-3) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.2s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 125% 0;
+  }
+  to {
+    background-position: -125% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending {
+    animation: none;
+    color: var(--t-3);
+    background: none;
+  }
+}

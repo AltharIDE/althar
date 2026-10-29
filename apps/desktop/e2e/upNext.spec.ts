@@ -43,8 +43,9 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(3)
     // A plan the person holds, and one counting down, are not started either.
     await planTask(page, 'Hold this plan')
-    await page.getByRole('button', { name: 'Hold' }).last().click()
-    await expect(page.getByText('Held. Starts when you say')).toBeVisible()
+    // Exactly: the plan up next on the board beside is named for it.
+    await page.getByRole('button', { name: 'Hold', exact: true }).last().click()
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText('Held. Starts when you say')).toBeVisible()
     await planTask(page, 'Plan the release')
 
     await page.getByRole('radio', { name: /^Board/ }).click()

@@ -1,4 +1,4 @@
-import { type DragEvent, useState } from 'react'
+import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
 import { type IconName, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
@@ -12,6 +12,7 @@ import { ago, clock, useNow } from '../../shared/time'
 import { useNewTab } from '../tabs/TabsFrame'
 import type { StartModel } from '../start/useStart'
 import { readyOf } from '../../shared/calls'
+import { asMerging } from '../../data/merges'
 import { homeGlanceOf, refOf } from './glance'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
@@ -119,16 +120,20 @@ export function HomeView({
   const now = useNow(true)
   // Calls answered here: each stays its line, quiet, where it was, until the person leaves.
   const [answered, setAnswered] = useState<ReadonlyArray<AnsweredCall>>([])
+  // The home's screen is kept while the person is elsewhere: leaving is when those lines go.
+  useEffect(() => () => setAnswered([]), [])
   const agents = start.status?.agents ?? []
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
 
   const projects = home?.projects ?? []
-  const tasks = home?.tasks ?? []
+  // One being merged is in progress, not waiting on the person, until it settles.
+  const tasks = asMerging(home?.tasks ?? [], model.merging)
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
   // Only tasks with an agent on them, or held for a reset, are running; one kept for later waits on its board.
   const { calls, working, waiting, needs } = homeGlanceOf(home, {
     answered,
+    merging: model.merging,
     agentName: name,
     modelName: (agentId, model) => named(agentId, model).name,
   })

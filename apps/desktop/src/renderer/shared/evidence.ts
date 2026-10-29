@@ -1,5 +1,5 @@
-import type { Evidence } from '@althar/contracts'
-import { type EvidencePiece, EvidenceKind, unreachable } from '@althar/ui'
+import type { Evidence, ShownPicture } from '@althar/contracts'
+import { type EvidencePiece, EvidenceKind, type GalleryShot, unreachable } from '@althar/ui'
 
 import { pictureUrl } from '../../main/pictureAddress'
 import { bytesText, linesOf, text as handedText } from './handed'
@@ -74,3 +74,13 @@ export const pieceOf = (evidence: Evidence, id: string): EvidencePiece => {
 /** A step result's evidence, as the kit draws it. */
 export const piecesOf = (itemId: string, evidence: ReadonlyArray<Evidence>): EvidencePiece[] =>
   evidence.map((piece, index) => pieceOf(piece, `${itemId}:${index}`))
+
+/** Pictures an agent showed the person (show_pictures), as the kit's Gallery draws them: as a step's screenshots are. */
+export const shotsOf = (itemId: string, pictures: ReadonlyArray<ShownPicture>): GalleryShot[] =>
+  pictures.flatMap((shown, index) => {
+    const piece = pieceOf(
+      { kind: 'screenshot', caption: shown.caption, picture: shown.picture, command: null, exit: null, text: null, dropped: 0 },
+      `${itemId}:${index}`,
+    )
+    return piece.form === 'picture' ? [{ ...piece.shot, id: piece.id, caption: piece.caption }] : []
+  })
