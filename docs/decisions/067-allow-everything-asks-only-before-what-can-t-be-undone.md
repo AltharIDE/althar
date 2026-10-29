@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-28
 - **Amends:** [ADR-043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md)
+- **Amended:** 2026-10-29 ([ADR-071](071-the-sandbox-is-the-boundary-anything-inside-it-runs.md)): only what crosses a lead's sandbox meets these kinds; what it holds runs, and git's guard stops a push to the default branch, a force push and deleting another branch wherever they come from.
 - **Owner:** Repository maintainers
 - **Context:** ADR-043's amendment (DEV-69) kept everything that could lose
   work or a secret asking with everything allowed: the floor. The floor
