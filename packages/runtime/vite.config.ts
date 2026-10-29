@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 export default defineConfig({
   test: {
+    ...testing,
     // The fake agents only, so it runs in CI; the real ones run with `bun run test:agents`.
     include: ['tests/*.test.ts'],
     environment: 'node',

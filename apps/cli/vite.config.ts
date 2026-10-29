@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 /*
  * The CLI runs on Node, which has the `node:sqlite` the store uses; Bun
@@ -14,6 +15,7 @@ export default defineConfig({
   },
   ssr: { noExternal: true, target: 'node' },
   test: {
+    ...testing,
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     coverage: {

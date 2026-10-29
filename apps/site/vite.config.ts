@@ -3,6 +3,7 @@ import { basename, resolve } from 'node:path'
 
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 /*
  * Each page is rendered to its own HTML after the build, by
@@ -53,6 +54,7 @@ export default defineConfig(({ mode }) => ({
   /* The manifest tells the prerender which stylesheets a lazy page needs up front. */
   build: { target: 'baseline-widely-available', manifest: true },
   test: {
+    ...testing,
     include: ['tests/**/*.test.{ts,tsx}'],
     environment: 'node',
   },

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 /*
  * The Worker's tests run on Node, whose Request, FormData, File and fetch
@@ -7,6 +8,7 @@ import { defineConfig } from 'vite-plus'
  */
 export default defineConfig({
   test: {
+    ...testing,
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     coverage: {

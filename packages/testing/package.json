@@ -1,0 +1,30 @@
+{
+  "name": "@althar/testing",
+  "version": "0.0.0",
+  "private": true,
+  "description": "How Althar's tests run in CI: a test that fails runs once more, and one that passes only then is reported as flaky.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./vitest": "./src/vitest.ts",
+    "./reporter": "./src/reporter.ts",
+    "./playwright": "./src/playwright.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp test run",
+    "verify": "bun run check && bun run test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+    "vite-plus": "1.0.0-rc.0",
+    "vitest": "5.0.1"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}

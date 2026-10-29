@@ -2,6 +2,7 @@ import { join } from 'node:path'
 
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite-plus'
+import { testing } from '@althar/testing/vitest'
 
 const pages = join(import.meta.dirname, 'src/renderer')
 
@@ -27,6 +28,7 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: { input: { index: join(pages, 'index.html'), edge: join(pages, 'edge.html') } },
   },
   test: {
+    ...testing,
     root: '.',
     include: ['tests/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
