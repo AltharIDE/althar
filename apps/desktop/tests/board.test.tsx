@@ -628,10 +628,10 @@ describe('the board', () => {
     // Ready on its branch, with no pull request: the branch, and how big its change is.
     expect(within(work).getByText('althar/tidy-the-docs')).toBeTruthy()
     expect(within(work).getByText('PR #7 merged')).toBeTruthy()
-    // On the front page: three things that need you, one in progress, and what settled last; nothing says what runs.
-    expect(screen.getByRole('button', { name: '3 need you' })).toBeTruthy()
-    const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
-    expect(front?.textContent).toMatch(/3 need you·1 in progress·PR 7 merged \S/)
+    // In the header, where it stands is one chip: three things that need you, a way into them; what runs isn't said beside it.
+    const header = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header') as HTMLElement
+    expect(within(header).getByRole('button', { name: '3 need you' })).toBeTruthy()
+    expect(header.textContent).not.toMatch(/in progress|running|merged/)
     expect(screen.queryByText(/running/)).toBeNull()
   })
 
