@@ -3,7 +3,7 @@ import { cpSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import type { AgentDefinition, AgentId, SessionOptions } from '@althar/provider-adapters'
+import type { AgentDefinition, AgentId, LaunchSpec, SessionOptions } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@althar/provider-adapters/testing'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -95,7 +95,7 @@ export const definition = (
   oneAccount: ReadonlyArray<string> = [],
   /** Agents whose status can't tell a plan from a key, as Mistral Vibe's can't. */
   unsure: ReadonlyArray<string> = [],
-  agentVersions: Readonly<Record<string, string>> = {},
+  agentVersions: Readonly<Record<string, string | LaunchSpec>> = {},
 ): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
@@ -108,10 +108,12 @@ export const definition = (
   ...(id === 'codex' ? { service: { name: 'OpenAI', url: 'https://api.openai.test' } } : {}),
   ...(id === 'codex'
     ? {
-        version: () => ({
-          command: process.execPath,
-          args: ['-e', `process.stdout.write(${JSON.stringify(agentVersions.codex ?? '0.164.0')})`],
-        }),
+        version: () => {
+          const version = agentVersions.codex ?? '0.164.0'
+          return typeof version === 'string'
+            ? { command: process.execPath, args: ['-e', `process.stdout.write(${JSON.stringify(version)})`] }
+            : version
+        },
       }
     : {}),
   // Its status says the home it ran in: signed out, or paid per use, where the test names the agent or that home.
@@ -189,7 +191,7 @@ export const fakeAgents = (
   perUse: ReadonlyArray<string> = [],
   oneAccount: ReadonlyArray<string> = [],
   unsure: ReadonlyArray<string> = [],
-  agentVersions: Readonly<Record<string, string>> = {},
+  agentVersions: Readonly<Record<string, string | LaunchSpec>> = {},
 ) => {
   const entry = (agentId: string): AgentEntry => ({
     definition: definition(agentId, signedOut, perUse, oneAccount, unsure, agentVersions),
@@ -317,7 +319,7 @@ export const runtime = (
     /** The skills store and local catalog; no run has Althar-selected skills without it. */
     readonly skills?: RuntimeOptions['skills']
     /** Fake versions printed by agents in tests that exercise external-version capability gates. */
-    readonly agentVersions?: Readonly<Record<string, string>>
+    readonly agentVersions?: Readonly<Record<string, string | LaunchSpec>>
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
     /** The keychain, kept across runtimes given the same one; else each its own. */

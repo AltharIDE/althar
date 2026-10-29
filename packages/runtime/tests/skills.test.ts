@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { installLocalCatalog, setActive } from '@althar/skills'
 import { writeCatalog } from '../../skills/tests/support'
-import { Effect, Layer, Stream } from 'effect'
+import { Cause, Duration, Effect, Fiber, Exit, Layer, Stream } from 'effect'
 import type { RuntimeOptions } from '../src/Config'
 import { SqlClient } from 'effect/sql'
 
@@ -210,6 +210,46 @@ describe('skills for a task’s lead', () => {
         }),
     ),
   )
+
+  it.live('keeps session startup interrupted while checking the host Codex version', () => {
+    const marker = join(mkdtempSync(join(tmpdir(), 'althar-codex-version-')), 'started')
+    const slowVersion = {
+      command: process.execPath,
+      args: [
+        '-e',
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started'); setTimeout(() => process.stdout.write('0.164.0'), 1000)`,
+      ],
+    }
+    return Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.FLATPAK_ID
+        process.env.FLATPAK_ID = 'dev.althar.app.test'
+        return previous
+      }),
+      () =>
+        Effect.provide(
+          Effect.gen(function* () {
+            const sessions = yield* Sessions
+            const { task: created } = yield* task()
+            const launchedBefore = launches.length
+            const starting = yield* Effect.forkScoped(sessions.start({ threadId: created.threadId, agentId: 'codex' }))
+            for (let attempt = 0; attempt < 100 && !existsSync(marker); attempt += 1) yield* Effect.sleep(Duration.millis(10))
+            assert.isTrue(existsSync(marker), 'the host Codex version probe started')
+            yield* Fiber.interrupt(starting)
+            const interrupted = yield* Fiber.await(starting)
+            if (Exit.isFailure(interrupted)) assert.isTrue(Cause.hasInterruptsOnly(interrupted.cause))
+            else assert.fail('the interrupted session startup must fail')
+            assert.strictEqual(launches.length, launchedBefore, 'cancelled startup never connects the agent')
+          }),
+          runtime(':memory:', {}, { agentVersions: { codex: slowVersion } }),
+        ),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.FLATPAK_ID
+          else process.env.FLATPAK_ID = previous
+        }),
+    )
+  })
 
   it.live('gives an OpenCode lead the same skills through its environment', () =>
     withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>

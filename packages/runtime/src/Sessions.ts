@@ -1993,7 +1993,9 @@ export class Sessions extends Context.Service<
           const externalSkillsRuntime = process.env.FLATPAK_ID !== undefined
           const externalSkillVersion =
             externalSkillsRuntime && definition.skills?.externalMinimumVersion !== undefined
-              ? yield* agentVersion(definition).pipe(Effect.catchCause(() => Effect.succeed(null)))
+              ? yield* agentVersion(definition).pipe(
+                  Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(null))),
+                )
               : null
           const capabilities = skillsCapabilities(definition, externalSkillVersion, externalSkillsRuntime)
           // Skills Althar selected, for a task's lead only (never a reader, a reviewer or a review's lead), on any agent its registry
