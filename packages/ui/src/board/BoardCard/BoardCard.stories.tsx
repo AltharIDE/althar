@@ -31,6 +31,24 @@ import { GITHUB } from '../../fixtures/outputs'
 
 const resolveNow = fn()
 
+/**
+ * The placement contract of a card's main action: at most one violet button, and, where there is layout to measure (a
+ * browser, not jsdom), its row under every fact, starting where the facts do.
+ */
+const mainActionPlace = async (canvasElement: HTMLElement) => {
+  const violet = within(canvasElement)
+    .queryAllByRole('button')
+    .filter((button) => /signal/.test(button.className))
+  await expect(violet.length).toBeLessThanOrEqual(1)
+  const button = violet[0]
+  const fact = canvasElement.querySelector('[class*="fact"]')
+  if (button === undefined || fact === null || button.getBoundingClientRect().width === 0) return
+  const at = button.getBoundingClientRect()
+  const facts = canvasElement.querySelectorAll('[class*="factLinePart"], [class*="fact"]')
+  for (const one of facts) await expect(at.top).toBeGreaterThanOrEqual(one.getBoundingClientRect().bottom - 1)
+  await expect(Math.abs(at.left - fact.getBoundingClientRect().left)).toBeLessThanOrEqual(14)
+}
+
 const meta = {
   title: 'Board/BoardCard',
   component: BoardCard,
@@ -391,6 +409,10 @@ export const StoppedWithAConflict: Story = {
     const resolve = card.getByRole('button', { name: 'Resolve now' })
     const carry = card.getByRole('button', { name: 'Carry on' })
     await expect(resolve.compareDocumentPosition(carry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // One violet button: Resolve now; Carry on is the quiet one.
+    await expect(resolve.className).toMatch(/signal/)
+    await expect(carry.className).not.toMatch(/signal/)
+    await mainActionPlace(canvasElement)
   },
 }
 /** A failed check and Push: the check above, the button on its own row below, never beside it. */
