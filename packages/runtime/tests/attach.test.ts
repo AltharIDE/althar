@@ -9,6 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Policies } from '../src/Policies'
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
@@ -213,6 +214,8 @@ describe('a task attached to a pull request it didn’t open', () => {
     const { bare, github, pull, working } = forked()
     return Effect.gen(function* () {
       const { projectId, task, personId } = yield* project(working)
+      // Pushes are the person's here, as before a lead's commits went up on their own (ADR-071).
+      yield* (yield* Policies).set(projectId, { pushCommits: false }, personId)
       const changes = yield* Changes
       yield* changes.attach({ taskId: task.taskId, pullRequest: linkTo(pull.number), start: true, actorId: personId })
       const lead: ToolAccess = { role: 'lead', projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }

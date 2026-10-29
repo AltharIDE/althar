@@ -10,7 +10,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
-import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals } from './changesSupport'
+import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, pushByHand } from './changesSupport'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -287,6 +287,7 @@ describe('a change whose checks Althar sees through', () => {
       const projectId = yield* ask(
         working,
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+        pushByHand,
       )
       const [running] = yield* until(cards(projectId), (all) => all[0]?.step === 'checks_running', Duration.seconds(20))
       const threadId = running?.threadId ?? ''

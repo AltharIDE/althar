@@ -17,7 +17,7 @@ import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
-import { runtimeWith, connect, ask, cards, tipOf, git } from './changesSupport'
+import { runtimeWith, connect, ask, cards, tipOf, git, pushByHand } from './changesSupport'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -47,7 +47,12 @@ describe('the Push button', () => {
     git(working, 'config', 'user.email', 'fake@althar.test')
     const opened = Effect.gen(function* () {
       yield* connect('github', HOST)
-      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      // Pushes are the person's here: what the lead commits waits for their press.
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]',
+        pushByHand,
+      )
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
       const taskId = ready?.taskId ?? ''
       const [workspace] = yield* (yield* SqlClient.SqlClient)<{
@@ -257,6 +262,7 @@ describe('a push the lead asks the person for', () => {
       const projectId = yield* ask(
         working,
         'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:push]',
+        pushByHand,
       )
       const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       const sql = yield* SqlClient.SqlClient
@@ -597,3 +603,102 @@ describe('what an earlier launch was doing outside', () => {
  * alone, started again if it must be, and each fix pushed as the lead asks,
  * for FIX_ROUNDS fixes; then the change is the person's.
  */
+
+describe('what a lead commits after the person has looked', () => {
+  /** A task whose lead opened a pull request, under `rules`, and commits when the person says "tidy pls" or "push pls". */
+  const opened = (working: string, rules?: typeof pushByHand) =>
+    Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:commit] [lead:push]',
+        rules,
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const [workspace] = yield* (yield* SqlClient.SqlClient)<{
+        path: string
+        branch: string
+      }>`SELECT path, branch FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+      return { projectId, threadId: ready?.threadId ?? '', path: workspace?.path ?? '', branch: workspace?.branch ?? '' }
+    })
+
+  /** What the person says on the task: speaking on it, the change is theirs (ADR-040). */
+  const say = (threadId: string, body: string) =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
+    })
+
+  const pushRequests = (threadId: string) => Effect.map(items(threadId), (all) => all.filter((item) => item.kind === 'push_request'))
+  const notices = (threadId: string) =>
+    Effect.map(items(threadId), (all) => all.flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : [])))
+
+  it.live('go up by themselves as its turn ends, where the project says so, as it does unless told otherwise', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      yield* say(task.threadId, 'tidy pls')
+      yield* until(
+        Effect.sync(() => git(bare, 'log', '--format=%s', task.branch).split('\n')),
+        (log) => log.includes('Tidy up'),
+        Duration.seconds(20),
+      )
+      // Up, as the lead made it: nothing is asked of the person, and the card has no Push for it.
+      assert.strictEqual(git(bare, 'rev-parse', task.branch), git(task.path, 'rev-parse', 'HEAD'))
+      assert.lengthOf(yield* pushRequests(task.threadId), 0)
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 0)
+      assert.deepStrictEqual(card?.change?.pushing, { held: null })
+      assert.include(yield* notices(task.threadId), "Pushed 1 commit to PR #1 as the lead's turn ended.")
+
+      // Asked to push before its turn ends, the lead's tool pushes at once rather than asking the person.
+      yield* say(task.threadId, 'push pls')
+      yield* until(
+        Effect.sync(() => git(bare, 'log', '--format=%s', task.branch).split('\n')),
+        (log) => log.includes('Tidy up before pushing'),
+        Duration.seconds(20),
+      )
+      assert.lengthOf(yield* pushRequests(task.threadId), 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('wait for the person’s push where the project leaves every push to them, as before', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* opened(working, pushByHand)
+      yield* say(task.threadId, 'tidy pls')
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
+      // Well past the lead's turn: still only here, and the card's Push is the person's, with nothing to say why.
+      yield* Effect.sleep(Duration.seconds(2))
+      assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'Tidy up')
+      assert.isUndefined(card?.change?.pushing)
+      assert.strictEqual((yield* cards(task.projectId))[0]?.change?.unpushed, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('wait for the person, saying why, where someone pushed to the pull request outside Althar', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      // The person commits in the task's folder and pushes it there themselves: a push Althar didn't make.
+      git(task.path, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '--allow-empty', '-m', 'My own')
+      git(task.path, 'push', '-q', bare, `HEAD:refs/heads/${task.branch}`)
+      const theirs = git(task.path, 'rev-parse', 'HEAD')
+      yield* say(task.threadId, 'tidy pls')
+      const [card] = yield* until(
+        cards(task.projectId),
+        (all) => all[0]?.change?.pushing?.held != null && all[0]?.change?.unpushed === 1,
+        Duration.seconds(20),
+      )
+      // What they pushed stays the pull request's head; the lead's commit waits for their Push, and the card says why.
+      assert.strictEqual(git(bare, 'rev-parse', task.branch), theirs)
+      assert.strictEqual(card?.change?.pushing?.held, 'Someone else pushed to PR #1')
+      assert.lengthOf(yield* pushRequests(task.threadId), 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
