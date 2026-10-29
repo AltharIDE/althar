@@ -108,8 +108,8 @@ export const bodyOf = (input: {
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
   if (input.automation !== undefined && input.automation !== null)
-    parts.push(`<sub>Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.</sub>`)
-  else if (input.credit !== false) parts.push('<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>')
+    parts.push(`Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.`)
+  else if (input.credit !== false) parts.push('Opened by [Althar](https://github.com/AltharIDE/althar).')
   return parts.join('\n\n')
 }
 

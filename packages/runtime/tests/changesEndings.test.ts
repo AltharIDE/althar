@@ -336,7 +336,7 @@ describe('a task that ends in a pull request', () => {
       const [workspace] = yield* sql<{ branch: string }>`SELECT branch FROM workspaces`
       assert.deepStrictEqual(git(bare, 'ls-tree', '--name-only', workspace?.branch ?? '').split('\n'), ['README.md', 'change.txt'])
       // The evidence is the person's, in Althar: the pull request is described as the lead wrote it, with none of it.
-      assert.strictEqual(github.changes[0]?.body, `${DESCRIBED}\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`)
+      assert.strictEqual(github.changes[0]?.body, `${DESCRIBED}\n\nOpened by [Althar](https://github.com/AltharIDE/althar).`)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
